@@ -7,6 +7,7 @@ export interface PresenceSession {
   session_id: string
   label?: string
   project_path?: string
+  tmux_pane?: string
   status: 'active' | 'idle' | 'error' | 'stopped'
   status_text?: string
   last_narrative?: string

@@ -4,15 +4,17 @@ import { Badge } from '@/components/ui/badge'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import type { CCSession } from './types'
+import type { AttentionKind } from './attention'
 
 interface SessionCardProps {
   session: CCSession
   gridPosition: number | null
   onClick: () => void
   onKill: (session: CCSession) => void
+  attention?: AttentionKind | null
 }
 
-export function SessionCard({ session, gridPosition, onClick, onKill }: SessionCardProps) {
+export function SessionCard({ session, gridPosition, onClick, onKill, attention }: SessionCardProps) {
   const projectName = session.cwd.split('/').pop() || session.cwd
   const isActive = gridPosition !== null
 
@@ -34,7 +36,18 @@ export function SessionCard({ session, gridPosition, onClick, onKill }: SessionC
     >
       <CardContent className="p-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium truncate">{session.session_name}</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            {attention && (
+              <span
+                className={cn(
+                  'h-2 w-2 rounded-full shrink-0',
+                  attention === 'error' ? 'bg-red-500' : 'bg-yellow-500'
+                )}
+                title={attention === 'error' ? 'Command failed' : 'Waiting for input'}
+              />
+            )}
+            <span className="text-sm font-medium truncate">{session.session_name}</span>
+          </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive transition-colors"

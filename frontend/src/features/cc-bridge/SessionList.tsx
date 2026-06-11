@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { SessionCard } from './SessionCard'
 import type { CCSession } from './types'
+import type { AttentionKind } from './attention'
 import type { AgentProviderId } from '@/types/providers'
 
 type ProviderFilter = 'all' | AgentProviderId
@@ -19,6 +20,7 @@ interface SessionListProps {
   providerFilter: ProviderFilter
   canCreateSession: boolean
   createDisabledReason: string | null
+  attentionByPane: Map<string, AttentionKind>
 }
 
 export function SessionList({
@@ -33,6 +35,7 @@ export function SessionList({
   providerFilter,
   canCreateSession,
   createDisabledReason,
+  attentionByPane,
 }: SessionListProps) {
   const emptyName = providerFilter === 'all'
     ? 'agent'
@@ -93,6 +96,7 @@ export function SessionList({
               gridPosition={pos === -1 ? null : pos}
               onClick={() => onToggleTarget(session.tmux_target)}
               onKill={onKillSession}
+              attention={session.pane_id ? attentionByPane.get(session.pane_id) ?? null : null}
             />
           )
         })}

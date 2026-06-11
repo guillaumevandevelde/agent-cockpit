@@ -75,14 +75,20 @@ export function useAttentionNotifications() {
   const active = enabled && permission === 'granted'
 
   const fire = useCallback(
-    (sessionId: string, event: AttentionEvent) => {
+    (session: PresenceSession, event: AttentionEvent) => {
       const notification = new Notification(event.title, {
         body: event.body,
         tag: event.tag,
       })
       notification.onclick = () => {
         window.focus()
-        navigate(`/presence?session=${encodeURIComponent(sessionId)}`)
+        // Prefer the Agent Bridge, attaching the exact pane; fall back to
+        // Presence when the session isn't running under tmux.
+        if (session.tmux_pane) {
+          navigate(`/cc-bridge?attach=${encodeURIComponent(session.tmux_pane)}`)
+        } else {
+          navigate(`/presence?session=${encodeURIComponent(session.session_id)}`)
+        }
         notification.close()
       }
     },
@@ -101,7 +107,7 @@ export function useAttentionNotifications() {
       // seed state without notifying so we don't fire for pre-existing states.
       if (prev) {
         for (const event of detectAttention(prev, session)) {
-          fire(session.session_id, event)
+          fire(session, event)
         }
       }
 

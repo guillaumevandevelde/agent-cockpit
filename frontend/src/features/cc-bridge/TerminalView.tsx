@@ -3,15 +3,17 @@ import { Monitor, Maximize2, Minimize2, X } from 'lucide-react'
 import { useTerminal } from './useTerminal'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import type { AttentionKind } from './attention'
 
 interface TerminalViewProps {
   target: string | null
   fullscreen?: boolean
   onToggleFullscreen?: () => void
   onClose?: () => void
+  attention?: AttentionKind | null
 }
 
-export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose }: TerminalViewProps) {
+export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, attention }: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const { connected, readOnly, setReadOnly, attach, detach } = useTerminal(containerRef, wrapperRef)
@@ -45,6 +47,15 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose }
       {target && (
         <div className="flex items-center justify-between px-3 py-2 border-t bg-background">
           <div className="flex items-center gap-3">
+            {attention && (
+              <span
+                className={cn(
+                  'h-2 w-2 rounded-full shrink-0',
+                  attention === 'error' ? 'bg-red-500' : 'bg-yellow-500'
+                )}
+                title={attention === 'error' ? 'Command failed' : 'Waiting for input'}
+              />
+            )}
             <div className="flex items-center gap-2 text-sm">
               <button
                 className={cn(

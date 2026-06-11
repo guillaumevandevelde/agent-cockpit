@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { MonitorPlay, Monitor } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useCCSessions } from './useCCSessions'
@@ -6,6 +7,7 @@ import { SessionList } from './SessionList'
 import { TerminalView } from './TerminalView'
 import { NewSessionDialog } from './NewSessionDialog'
 import { KillSessionDialog } from './KillSessionDialog'
+import { useAttentionByPane } from './useAttentionByPane'
 import type { CCSession } from './types'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
@@ -29,6 +31,8 @@ export function CCBridgePage() {
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>('all')
   const { providers, selectedProviderId } = useProviderContext()
   const { sessions, loading, error, refresh } = useCCSessions()
+  const attentionByPane = useAttentionByPane()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [activeTargets, setActiveTargets] = useState<string[]>([])
   const [fullscreenTarget, setFullscreenTarget] = useState<string | null>(null)
   const [focusedTarget, setFocusedTarget] = useState<string | null>(null)
@@ -93,6 +97,42 @@ export function CCBridgePage() {
     setActiveTargets((prev) => prev.filter((t) => t !== target))
     setFullscreenTarget((cur) => (cur === target ? null : cur))
   }, [])
+
+  // Attach even when the grid is full (drop the oldest) — used for the
+  // notification deep-link so it always lands on the requested pane.
+  const attachTarget = useCallback((target: string) => {
+    setActiveTargets((prev) => {
+      if (prev.includes(target)) return prev
+      if (prev.length >= MAX_GRID_PANES) return [...prev.slice(1), target]
+      return [...prev, target]
+    })
+    setFocusedTarget(target)
+  }, [])
+
+  // Resolve ?attach=<pane_id> to a discovered session's tmux_target, attach it,
+  // then clear the param. If the pane isn't discovered yet, refresh and retry.
+  useEffect(() => {
+    const pane = searchParams.get('attach')
+    if (!pane) return
+    const match = sessions.find((s) => s.pane_id === pane)
+    if (match) {
+      attachTarget(match.tmux_target)
+      const next = new URLSearchParams(searchParams)
+      next.delete('attach')
+      setSearchParams(next, { replace: true })
+    } else {
+      refresh()
+    }
+  }, [searchParams, sessions, attachTarget, refresh, setSearchParams])
+
+  // tmux_target -> pane_id, to look up per-pane attention for attached panes.
+  const paneByTarget = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of sessions) {
+      if (s.pane_id) map.set(s.tmux_target, s.pane_id)
+    }
+    return map
+  }, [sessions])
 
   const handleSpawned = (tmuxTarget: string) => {
     refresh()
@@ -160,6 +200,7 @@ export function CCBridgePage() {
               providerFilter={providerFilter}
               canCreateSession={canCreateSession}
               createDisabledReason={canCreateSession ? null : createDisabledReason}
+              attentionByPane={attentionByPane}
             />
           </div>
         )}
@@ -202,6 +243,10 @@ export function CCBridgePage() {
                           setFullscreenTarget(isThisFullscreen ? null : target)
                         }
                         onClose={() => removeTarget(target)}
+                        attention={(() => {
+                          const pane = paneByTarget.get(target)
+                          return pane ? attentionByPane.get(pane) ?? null : null
+                        })()}
                       />
                     </div>
                   </div>
