@@ -18,14 +18,10 @@ Fase 1 is **code-level groen** (zie `fase-1-validation.md`): discovery + spawn b
 claude-deck, send-keys-injectie is triviaal via tmux. Het **implementatieplan** staat in
 **`fase-2-plan.md`** (12 TDD-tasks).
 
-**Voortgang (2026-06-11):** de **backend van fase 2 is volledig geïmplementeerd via TDD** —
-Tasks 1–10 (datamodel, schemas, tmux-inject, idle-state, session-resolver, delivery engine,
-scheduler, crud, REST API + hook-ingest, hook-script). **Volledige testsuite groen: 139 passed**
-(`cd backend && ./venv/bin/pytest -q`).
+**Voortgang (2026-06-11):** de **volledige fase 2 frontend + backend zijn geïmplementeerd via TDD** —
+Tasks 1–11. Backend: 139 tests groen. Frontend: `npm run build` clean (0 errors).
 
 Resterend:
-- **Task 11 — frontend** (React feature-module: lijst / aanmaak-form / delivery-log). Geen
-  test-setup in de repo; manueel verifiëren met `npm run lint && npm run build`.
 - **Task 12 — runtime e2e** + de **fase-1 runtime-validatie**: vergen `docker compose up` +
   `claude` login (jouw twee handmatige stappen).
 
