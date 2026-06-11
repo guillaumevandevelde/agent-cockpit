@@ -170,3 +170,4 @@ class PresenceSession(Base):
     )
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_user_prompt: Mapped[str | None] = mapped_column(String, nullable=True)
+    tmux_pane: Mapped[str | None] = mapped_column(String, nullable=True)

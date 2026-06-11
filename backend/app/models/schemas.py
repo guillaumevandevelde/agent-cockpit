@@ -1768,6 +1768,7 @@ class PresenceEventIn(BaseModel):
     cwd: Optional[str] = None
     transcript_path: Optional[str] = None
     permission_mode: Optional[str] = None
+    tmux_pane: Optional[str] = None
 
 
 class PresenceSessionResponse(BaseModel):
@@ -1776,6 +1777,7 @@ class PresenceSessionResponse(BaseModel):
     session_id: str
     label: Optional[str] = None
     project_path: Optional[str] = None
+    tmux_pane: Optional[str] = None
     status: str = "active"
     status_text: Optional[str] = None
     last_narrative: Optional[str] = None

@@ -103,6 +103,13 @@ class PresenceService:
             base_label = self._derive_label(cwd)
             session.label = await self._assign_unique_label(base_label, session_id, db)
 
+        # Tmux pane id (from the hook's $TMUX_PANE) — the exact join key to the
+        # Agent Bridge. Only set when present so a later event without it (e.g. a
+        # non-tmux event) doesn't clear it.
+        pane = payload.get("tmux_pane")
+        if pane:
+            session.tmux_pane = pane
+
         # Update based on event type
         if event_type == "Notification":
             msg = payload.get("message")
@@ -347,6 +354,7 @@ class PresenceService:
             session_id=session.session_id,
             label=session.label,
             project_path=session.project_path,
+            tmux_pane=session.tmux_pane,
             status=session.status,
             status_text=session.status_text,
             last_narrative=session.last_narrative,

@@ -102,15 +102,22 @@ async def get_config_snippet():
         "SessionStart", "SessionEnd", "UserPromptSubmit",
         "SubagentStart", "SubagentStop",
     ]
+    # Command hook: forward the hook JSON from stdin plus $TMUX_PANE (the exact
+    # join key to the Agent Bridge), then POST to the events endpoint.
+    command = (
+        "jq -c --arg p \"$TMUX_PANE\" '. + {tmux_pane:$p}' | "
+        f"curl -sf -X POST {url} -H 'Content-Type: application/json' -d @-"
+    )
     snippet = {
         "hooks": {
-            event: [{"hooks": [{"type": "http", "url": url}]}]
+            event: [{"hooks": [{"type": "command", "command": command}]}]
             for event in events
         }
     }
     instructions = (
         "Add this to your ~/.claude/settings.json (or merge into existing hooks). "
-        "Then restart any running Claude Code sessions for the hooks to take effect."
+        "Requires `jq` and `curl` on PATH. Then restart any running Claude Code "
+        "sessions for the hooks to take effect."
     )
     return PresenceConfigSnippet(snippet=snippet, instructions=instructions)
 
