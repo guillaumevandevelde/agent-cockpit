@@ -1,13 +1,11 @@
 import { Terminal, Radio, AlertCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Badge } from "@/components/ui/badge";
-import { useTheme } from "@/contexts/ThemeContext";
 import { useSystemStatus } from "@/hooks/useSystemStatus";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { cn } from "@/lib/utils";
 
 export function Header() {
-  const { theme } = useTheme();
   const status = useSystemStatus();
   const { providers, selectedProviderId, selectedProvider } = useProviderContext();
   const providerStatuses = providers
@@ -23,13 +21,13 @@ export function Header() {
       <div className="flex h-16 items-center justify-between px-6">
         <div className="flex items-center gap-3">
           <img
-            src={theme === "light" ? "/logo-light.png" : "/logo-dark.png"}
-            alt="Claude Deck"
+            src="/claude-cockpit-logo.svg"
+            alt="Claude Cockpit"
             className="h-10 w-10"
           />
           <div>
-            <h1 className="text-2xl font-bold text-primary leading-tight">Claude Deck</h1>
-            <p className="text-xs text-muted-foreground">Your local agent command centre</p>
+            <h1 className="text-2xl font-bold text-primary leading-tight">Claude Cockpit</h1>
+            <p className="text-xs text-muted-foreground">Mission control for your local agents</p>
           </div>
         </div>
         <div className="flex items-center gap-2">

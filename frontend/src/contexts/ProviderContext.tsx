@@ -13,7 +13,7 @@ interface ProviderContextValue {
 }
 
 const DEFAULT_PROVIDER: AgentProviderId = 'claude-code'
-const STORAGE_KEY = 'claude-deck:selected-provider'
+const STORAGE_KEY = 'claude-cockpit:selected-provider'
 
 const ProviderContext = createContext<ProviderContextValue | undefined>(undefined)
 
