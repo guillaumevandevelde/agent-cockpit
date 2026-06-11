@@ -1,20 +1,23 @@
-# Claude Deck
+# Claude Cockpit
 
-**Website**: [claudedeck.org](https://claudedeck.org)
 
 A self-hosted web application for visualizing and managing local AI coding agents. Provides a unified interface for Claude Code configuration, Codex CLI configuration, MCP servers, plugins, slash commands, hooks, agents, permissions, usage tracking, session transcripts, Agent Bridge, and other local agent extensions.
+
+## Credits — Forked from claude-deck
+
+Claude Cockpit is a fork of [**claude-deck**](https://github.com/adrirubio/claude-deck) by Adrian Rubio-Punal and Juan A. Rubio, used under the MIT License. Their original copyright and license are retained in [`LICENSE`](./LICENSE). Claude Cockpit adds a scheduled-messages feature (timer/cron → tmux injection) on top of their work.
 
 ## Why This Exists
 
 Claude Code starts simple, then slowly sprawls across config files and directories: `~/.claude.json`, `~/.claude/settings.json`, `.mcp.json`, slash commands, agents, skills, project settings, transcripts, and usage data. That works fine at small scale, but once your setup gets serious it becomes hard to see the whole picture, change things confidently, or understand what is actually configured.
 
-Claude Deck gives you one local interface for that sprawl. It also has provider-aware Codex CLI support for tmux sessions, safe TOML configuration, feature flags, diagnostics, MCP/plugin inventory and supported CLI-backed mutations, and redacted export-only backups.
+Claude Cockpit gives you one local interface for that sprawl. It also has provider-aware Codex CLI support for tmux sessions, safe TOML configuration, feature flags, diagnostics, MCP/plugin inventory and supported CLI-backed mutations, and redacted export-only backups.
 
 ## Best For
 
-Claude Deck is best for people running multiple Claude Code or Codex CLI sessions, MCP servers, custom commands, hooks, agents, or tracking Claude Code usage across sessions.
+Claude Cockpit is best for people running multiple Claude Code or Codex CLI sessions, MCP servers, custom commands, hooks, agents, or tracking Claude Code usage across sessions.
 
-If you only use Claude Code casually with mostly default config, Claude Deck may be overkill.
+If you only use Claude Code casually with mostly default config, Claude Cockpit may be overkill.
 
 ## Trust Model
 
@@ -24,7 +27,7 @@ If you only use Claude Code casually with mostly default config, Claude Deck may
 - **Works with your real files** — reads and writes existing Claude Code and Codex config files
 
 > [!WARNING]
-> Claude Deck reads and writes your real local agent configuration files. Changes made in the UI affect the files Claude Code and Codex CLI actually use. Review changes carefully, and create a backup before major edits.
+> Claude Cockpit reads and writes your real local agent configuration files. Changes made in the UI affect the files Claude Code and Codex CLI actually use. Review changes carefully, and create a backup before major edits.
 
 ## Features
 
@@ -97,10 +100,10 @@ cd claude-deck
 docker compose up
 ```
 
-This builds and starts Claude Deck at http://localhost:8000, mounting your `~/.claude` directory and `~/.claude.json` configuration file. Codex support reads `$CODEX_HOME`, defaulting to `~/.codex`, when available in the runtime environment.
+This builds and starts Claude Cockpit at http://localhost:8000, mounting your `~/.claude` directory and `~/.claude.json` configuration file. Codex support reads `$CODEX_HOME`, defaulting to `~/.codex`, when available in the runtime environment.
 
 > [!WARNING]
-> Claude Deck is not a mock viewer. It works with your real local agent files, so changes made in the UI can change your working setup.
+> Claude Cockpit is not a mock viewer. It works with your real local agent files, so changes made in the UI can change your working setup.
 
 > [!NOTE]
 > The container mounts your home directory's Claude Code configuration. The container runs as root to access these files; adjust permissions if running as a non-root user.
@@ -145,7 +148,7 @@ For a release check, `./scripts/build.sh` builds both the app frontend and the d
 
 ## Configuration Files
 
-Claude Deck reads and writes these Claude Code configuration files:
+Claude Cockpit reads and writes these Claude Code configuration files:
 
 | File/Directory | Scope | Description |
 |---------------|-------|-------------|
@@ -192,7 +195,7 @@ The usage tracking feature ports algorithms from [ccusage](https://github.com/ry
 
 ## Disclaimer
 
-Claude Deck is a community project and is not affiliated with or endorsed by Anthropic.
+Claude Cockpit is a community project and is not affiliated with or endorsed by Anthropic.
 
 ## License
 
