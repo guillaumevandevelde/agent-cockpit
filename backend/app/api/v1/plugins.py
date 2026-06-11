@@ -1,5 +1,5 @@
 """
-Plugin API endpoints for Claude Deck
+Plugin API endpoints for Claude Cockpit
 """
 
 from typing import Optional

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     )
 
     # Application settings
-    app_name: str = "Claude Deck"
+    app_name: str = "Claude Cockpit"
     app_version: str = "0.1.0"
     debug: bool = False
 

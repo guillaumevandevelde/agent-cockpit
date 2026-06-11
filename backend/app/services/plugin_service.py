@@ -1,5 +1,5 @@
 """
-Plugin Service for Claude Deck
+Plugin Service for Claude Cockpit
 
 Manages plugin listing, installation, and marketplace operations.
 """

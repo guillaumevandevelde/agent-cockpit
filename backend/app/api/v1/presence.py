@@ -14,6 +14,7 @@ from app.models.schemas import (
     PresenceSessionUpdate,
 )
 from app.services.presence_service import PresenceService, manager
+from app.services.scheduling.idle_state import idle_state
 
 router = APIRouter()
 service = PresenceService()
@@ -27,6 +28,11 @@ async def receive_event(
     """Webhook receiver for Claude Code HTTP hooks. Always returns {} with 200."""
     dumped = payload.model_dump()
     updated_session = await service.process_event(dumped, db)
+
+    # Feed the scheduled-messages idle detector from the same hook stream, so we
+    # don't need a separate hook install. cwd identifies the project to deliver to.
+    if payload.cwd:
+        idle_state.record(payload.hook_event_name, cwd=payload.cwd, session_id=payload.session_id)
 
     # Broadcast to WebSocket clients
     msg = json.dumps({"type": "session_update", "session": updated_session.model_dump()})
