@@ -6,8 +6,8 @@ Thanks for your interest in contributing! We welcome pull requests and issues fr
 
 1. Fork the repo and clone it:
    ```bash
-   git clone https://github.com/<your-username>/claude-cockpit.git
-   cd claude-cockpit
+   git clone https://github.com/<your-username>/claude-deck.git
+   cd claude-deck
    ```
 
 2. Run the install script (requires Python 3.11+ and Node.js 18+):

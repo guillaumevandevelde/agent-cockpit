@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: Claude Deck
+  name: Claude Cockpit
   text: Documentation
   tagline: Visual configuration, live session control, and safe Codex CLI management
   actions:
@@ -39,6 +39,6 @@ features:
 
 ## Release Focus: Codex Support
 
-The next release makes Codex CLI a stable provider in Claude Deck. Codex sessions can live next to Claude Code sessions in Agent Bridge, and the Config page now includes a Codex-specific editor for safe TOML settings, profile diagnostics, MCP/plugin inventory, and feature flags from `codex features list`.
+The next release makes Codex CLI a stable provider in Claude Cockpit. Codex sessions can live next to Claude Code sessions in Agent Bridge, and the Config page now includes a Codex-specific editor for safe TOML settings, profile diagnostics, MCP/plugin inventory, and feature flags from `codex features list`.
 
-Claude Deck still keeps provider boundaries explicit. Codex usage metrics, context charts, and transcript browsing are not shown as if they were Claude Code data. Codex backups are redacted exports and automatic restore is refused until Codex exposes a safe restore contract.
+Claude Cockpit still keeps provider boundaries explicit. Codex usage metrics, context charts, and transcript browsing are not shown as if they were Claude Code data. Codex backups are redacted exports and automatic restore is refused until Codex exposes a safe restore contract.

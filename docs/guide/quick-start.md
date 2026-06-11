@@ -1,6 +1,6 @@
 # Quick Start
 
-Get Claude Deck running and explore the dashboard in under 5 minutes.
+Get Claude Cockpit running and explore the dashboard in under 5 minutes.
 
 ## Start the Dev Servers
 
@@ -33,7 +33,7 @@ Data is cached between page navigations and updates when you click the refresh b
 
 Use the project selector in the sidebar to switch between projects. Many features show project-scoped data — MCP servers, commands, hooks, and permissions can differ between projects.
 
-Use **Discover Projects** when you want Claude Deck to find projects from local agent state, or add a path manually with the directory browser.
+Use **Discover Projects** when you want Claude Cockpit to find projects from local agent state, or add a path manually with the directory browser.
 
 ## Switch Providers
 

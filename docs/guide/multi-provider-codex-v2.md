@@ -1,6 +1,6 @@
 # Multi-Provider and Codex CLI
 
-Claude Deck has moved from a Claude Code-only control surface to a provider-aware local agent dashboard. Claude Code remains the most complete provider. Codex CLI support is stable for sessions, safe configuration, diagnostics, MCP/plugin inventory, supported CLI-backed mutations, feature flags, and redacted exports. The UI is explicit about what is diagnostics-only and what is intentionally unavailable.
+Claude Cockpit has moved from a Claude Code-only control surface to a provider-aware local agent dashboard. Claude Code remains the most complete provider. Codex CLI support is stable for sessions, safe configuration, diagnostics, MCP/plugin inventory, supported CLI-backed mutations, feature flags, and redacted exports. The UI is explicit about what is diagnostics-only and what is intentionally unavailable.
 
 ## Provider Model
 
@@ -53,7 +53,7 @@ Some local Codex files are useful for support diagnostics but are not stable pro
 
 History and model cache diagnostics may report file existence, size, parse status, root keys, row counts, and whether metric-like key names appear. They must not return prompt text, session ids, raw history rows, model ids, raw model cache payloads, auth data, or SQLite contents.
 
-Usage and context parity are not supported for Codex. Claude Deck should not present Codex token usage, cost, billing block, or context-window metrics until Codex exposes a stable source that can be read without sensitive prompt or cache data.
+Usage and context parity are not supported for Codex. Claude Cockpit should not present Codex token usage, cost, billing block, or context-window metrics until Codex exposes a stable source that can be read without sensitive prompt or cache data.
 
 ## Backup and Restore Policy
 

@@ -4,7 +4,7 @@ The dashboard provides an at-a-glance overview of your entire Claude Code config
 
 ## Overview
 
-When you open Claude Deck, the dashboard aggregates data from 12 API endpoints in parallel and displays:
+When you open Claude Cockpit, the dashboard aggregates data from 12 API endpoints in parallel and displays:
 
 - **Projects** — number of tracked project directories
 - **MCP Servers** — configured server count

@@ -1,10 +1,10 @@
 # Introduction
 
-Claude Deck is a self-hosted web application for visualizing and managing local AI coding agents. It started with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) configuration and now includes stable Codex CLI support for tmux sessions, safe TOML settings, feature flags, diagnostics, MCP/plugin inventory, and redacted config exports.
+Claude Cockpit is a self-hosted web application for visualizing and managing local AI coding agents. It started with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) configuration and now includes stable Codex CLI support for tmux sessions, safe TOML settings, feature flags, diagnostics, MCP/plugin inventory, and redacted config exports.
 
-## Why Claude Deck?
+## Why Claude Cockpit?
 
-Claude Code stores configuration across multiple JSON files and directories (`~/.claude.json`, `~/.claude/settings.json`, `.claude/settings.json`, `.mcp.json`, and more). Managing these files manually is tedious and error-prone. Claude Deck gives you a visual dashboard to:
+Claude Code stores configuration across multiple JSON files and directories (`~/.claude.json`, `~/.claude/settings.json`, `.claude/settings.json`, `.mcp.json`, and more). Managing these files manually is tedious and error-prone. Claude Cockpit gives you a visual dashboard to:
 
 - **See everything at a glance** — dashboard with counts, session activity, and context window usage
 - **Edit configuration visually** — no more hand-editing JSON files
@@ -17,7 +17,7 @@ Claude Code stores configuration across multiple JSON files and directories (`~/
 
 ## Features
 
-Claude Deck covers Claude Code configuration and the shared local-agent operations layer:
+Claude Cockpit covers Claude Code configuration and the shared local-agent operations layer:
 
 | Category | Features |
 |----------|----------|
@@ -29,7 +29,7 @@ Claude Deck covers Claude Code configuration and the shared local-agent operatio
 
 ## Provider Support
 
-Claude Deck exposes provider capabilities and status through the Providers API. Claude Code remains the full-featured provider for usage, context, transcripts, plugins, hooks, agents, skills, memory, backup, and restore. Codex CLI support focuses on mixed tmux sessions, safe TOML configuration, feature flags, diagnostics, MCP/plugin inventory and safe CLI-backed mutations, and redacted export-only backups.
+Claude Cockpit exposes provider capabilities and status through the Providers API. Claude Code remains the full-featured provider for usage, context, transcripts, plugins, hooks, agents, skills, memory, backup, and restore. Codex CLI support focuses on mixed tmux sessions, safe TOML configuration, feature flags, diagnostics, MCP/plugin inventory and safe CLI-backed mutations, and redacted export-only backups.
 
 See [Multi-Provider and Codex CLI](/guide/multi-provider-codex-v2) for the supported, diagnostics-only, and unsupported Codex surfaces.
 
@@ -45,6 +45,6 @@ See [Multi-Provider and Codex CLI](/guide/multi-provider-codex-v2) for the suppo
 
 ## Next Steps
 
-- [Installation](/guide/installation) — get Claude Deck running locally
+- [Installation](/guide/installation) — get Claude Cockpit running locally
 - [Quick Start](/guide/quick-start) — explore the dashboard in 5 minutes
 - [Architecture](/guide/architecture) — understand how the app is built
