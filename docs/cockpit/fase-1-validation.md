@@ -42,15 +42,44 @@ claude                                       # binnen de tmux-sessie
 
 ## Bevindingen
 
-Noteer per punt wat werkt / niet werkt. Bij ❌ op 3 of 4: beschrijf precies wat misgaat
-(bv. tmux-pane-mapping, verkeerde target, send-keys timing). Dat stuurt het fase-2-ontwerp —
-mogelijk hebben we een eigen dunne injectie/spawn-laag nodig i.p.v. claude-deck's bestaande.
+### Code-level validatie (autonoom — 2026-06-11)
 
-- Punt 1:
-- Punt 2:
-- Punt 3 ⭐:
-- Punt 4 ⭐:
-- Punt 5:
-- Punt 6:
+Statische analyse van de bestaande bridge-code. Relevante bestanden:
+- `backend/app/services/agent_bridge/discovery.py` — `discover_agent_sessions()`
+- `backend/app/services/cc_bridge/spawn.py` — `spawn_session()` / `kill_session()`
+- `backend/app/services/cc_bridge/pty_relay.py` — `PtyRelay` (live terminal)
+- `backend/app/api/v1/cc_bridge/router.py` — endpoints
 
-**Gate-conclusie:** ⬜ groen (door naar fase 2 / writing-plans) · ⬜ aanpassing nodig
+| # | Code-level conclusie |
+|---|---|
+| 1 | n.v.t. (runtime) |
+| 2 | ✅ Discovery = `tmux list-panes -a -F …` → per pane `tmux_target` (`sess:win.pane`), **cwd** (`pane_current_path`), pid, command; provider-match via `is_process_match`. Levert exact de **project(cwd)↔tmux_target**-mapping die fase 2 nodig heeft. |
+| 3 ⭐ | ✅ **Haalbaar.** Live terminal gebruikt een PTY-relay (`tmux attach-session` over `pty.openpty`, schrijft naar master-fd) — overkill voor geplande injectie. Fase 2 gebruikt simpelweg **`tmux send-keys -t <target> -l "<msg>"`** + `Enter`. Geen WebSocket/pty nodig. Alles is tmux, dus dit werkt. |
+| 4 ⭐ | ✅ **Al geïmplementeerd:** `spawn_session(directory, mode, …, skip_permissions)` → `tmux new-session -d -s <naam> -c <dir> '<claude …>'`, returnt `tmux_target=name:0.0`. Onze Spawner = dunne wrapper. **Aandachtspunt:** vandaag enkel `skip_permissions` (bool → `--dangerously-skip-permissions`); fase 2 moet `permission_mode` (`safe`/`accept-edits`/`autonomous`) mappen op de juiste `claude --permission-mode …`-flags. |
+| 5 | ✅ `spawn.py:_resolve_project_directory` leest `~/.claude/projects/<folder>/<id>.jsonl` via `Path.home()` → transcript/cwd-resolutie werkt met WSL-paden. |
+| 6 | n.v.t. (runtime) — hooks zijn net-nieuw; zie gat hieronder. |
+
+**Belangrijk gat (stuurt fase 2):** discovery zet `status` **altijd op `ACTIVE`** (geen idle/busy/waiting).
+Er is dus **geen** bruikbare status-bron in claude-deck. Onze **Idle Detector via CC-hooks** is
+daarmee bevestigd als net-nieuw en noodzakelijk. (`capture_pane_preview` = `tmux capture-pane -p`
+bestaat wel, maar pane-tekst parsen is fragiel; hooks zijn de nette bron.)
+
+**WSL-fit:** alle mechanismen zijn puur Linux/tmux/subprocess/pty → native in WSL. De Windows-pijn
+(worktrees/tmux) is door de WSL-keuze volledig omzeild.
+
+**Reuse-kaart voor fase 2:**
+- Hergebruik `discover_agent_sessions()` voor de Session Registry (project↔target via cwd).
+- Hergebruik `spawn_session()` voor de Spawner (+ permission-mode-mapping toevoegen).
+- Nieuw: dunne `send_keys(target, text)`-helper (`tmux send-keys`), Idle Detector (hooks), Scheduler, Delivery Engine, datamodel, UI.
+
+### Runtime-validatie (nog te doen — vergt Docker-integratie + `claude` login)
+
+- Punt 1 (draait & bereikbaar):
+- Punt 2 (discovery toont live sessie):
+- Punt 3 ⭐ (send-keys bereikt sessie):
+- Punt 4 ⭐ (spawn maakt tmux+claude):
+- Punt 5 (transcript/usage):
+- Punt 6 (hook bereikt backend):
+
+**Gate-conclusie:** ✅ **code-level groen** (spawn ✅ aanwezig, send-keys ✅ triviaal, discovery ✅) —
+fase 2 mag ontworpen/gepland worden. ⬜ runtime-validatie nog te bevestigen vóór release.

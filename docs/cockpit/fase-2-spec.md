@@ -1,8 +1,27 @@
 # Fase 2 — Spec: Scheduled messages
 
-> Bouw dit pas nadat **fase 1** groen is (zie `fase-1-validation.md`). De integratiepunten
-> met claude-deck (CC Bridge: discovery, spawn, send-keys) worden in fase 1 geverifieerd; zet
-> ze achter een dunne interface zodat dit ontwerp robuust blijft tegen de echte API.
+> Bouw dit pas nadat **fase 1** groen is (zie `fase-1-validation.md`). Fase 1 is **code-level
+> groen** (2026-06-11); runtime-validatie nog te bevestigen vóór release.
+
+## Bevestigde integratiepunten (code-level, 2026-06-11)
+
+Uit de bestaande claude-deck-code (zie `fase-1-validation.md` voor details):
+
+- **Discovery** — `app/services/agent_bridge/discovery.py::discover_agent_sessions()` →
+  lijst van `{tmux_target, session_name, cwd, pid, status}`. Gebruik dit voor de Session
+  Registry: map **project (cwd) → tmux_target**.
+- **Spawn** — `app/services/cc_bridge/spawn.py::spawn_session(directory, mode, …, skip_permissions)`
+  → `tmux new-session -d -s <naam> -c <dir> 'claude …'`. Wrap dit in de Spawner; **breid uit**
+  zodat `permission_mode` mapt op `claude --permission-mode <…>` (nu enkel `skip_permissions`
+  → `--dangerously-skip-permissions`).
+- **Injectie (send-keys)** — *nieuw, dun*: `tmux send-keys -t <tmux_target> -l "<msg>"` gevolgd
+  door `tmux send-keys -t <tmux_target> Enter`. (De bestaande `PtyRelay` is voor de live
+  browser-terminal en is hier niet nodig.)
+- **Status/idle** — claude-deck levert dit **niet** (discovery zet `status` altijd op `ACTIVE`).
+  De Idle Detector (CC-hooks) is daarom net-nieuw en draagt de "wacht-tot-idle"-logica.
+- **Patronen** — backend: services + `api/v1/<feature>/router.py`; SQLite/SQLAlchemy in
+  `app/models/`; geen migraties (schema via `create_all`). Frontend: feature-module onder
+  `frontend/src/features/`.
 
 ## Architectuur & componenten (nieuw, bovenop claude-deck)
 
