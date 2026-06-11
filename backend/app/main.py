@@ -20,8 +20,24 @@ async def lifespan(app: FastAPI):
     # Clean up any orphaned relay processes from previous runs
     from app.services.cc_bridge.pty_relay import close_all_relays, cleanup_orphaned_relays
     cleanup_orphaned_relays()
+    # Start the scheduler and reschedule persisted, enabled jobs
+    from app.services.scheduling.scheduler import scheduler_service
+    from app.database import AsyncSessionLocal
+    from sqlalchemy import select
+    from app.models.scheduled_message import ScheduledMessage
+    scheduler_service.start()
+    async with AsyncSessionLocal() as s:
+        rows = (await s.execute(
+            select(ScheduledMessage).where(ScheduledMessage.enabled == True)  # noqa: E712
+        )).scalars().all()
+        for m in rows:
+            if m.trigger_type == "once" and m.fire_at:
+                scheduler_service.schedule_once(m.id, m.fire_at)
+            elif m.trigger_type == "cron" and m.cron_expr:
+                scheduler_service.schedule_cron(m.id, m.cron_expr, m.timezone)
     yield
     # Shutdown: Cleanup
+    scheduler_service.shutdown()
     await close_all_relays()
 
 
