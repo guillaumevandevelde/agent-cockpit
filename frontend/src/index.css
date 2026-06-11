@@ -14,8 +14,8 @@
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 9%;
 
-    /* Primary - Matrix green (deeper for light mode contrast) */
-    --primary: 142 60% 35%;
+    /* Primary - Claude orange (deeper for light mode contrast) */
+    --primary: 15 63% 46%;
     --primary-foreground: 0 0% 100%;
 
     /* Secondary - Neutral gray */
@@ -26,8 +26,8 @@
     --muted: 0 0% 96%;
     --muted-foreground: 0 0% 45%;
 
-    /* Accent - Matching green */
-    --accent: 142 60% 35%;
+    /* Accent - Claude orange */
+    --accent: 15 63% 46%;
     --accent-foreground: 0 0% 100%;
 
     /* Destructive */
@@ -45,12 +45,12 @@
     /* Borders & Inputs */
     --border: 0 0% 88%;
     --input: 0 0% 88%;
-    --ring: 142 60% 35%;
+    --ring: 15 63% 46%;
 
     --radius: 0.5rem;
 
     /* Chart Colors - distinguishable palette */
-    --chart-1: 142 60% 40%;
+    --chart-1: 15 63% 50%;
     --chart-2: 180 50% 40%;
     --chart-3: 45 70% 45%;
     --chart-4: 200 50% 45%;
@@ -68,9 +68,9 @@
     --popover: 0 0% 9%;
     --popover-foreground: 0 0% 90%;
 
-    /* Primary - Matrix green (bright for dark mode) */
-    --primary: 142 70% 45%;
-    --primary-foreground: 0 0% 6%;
+    /* Primary - Claude orange (bright for dark mode) */
+    --primary: 15 63% 60%;
+    --primary-foreground: 0 0% 10%;
 
     /* Secondary */
     --secondary: 0 0% 12%;
@@ -80,8 +80,8 @@
     --muted: 0 0% 14%;
     --muted-foreground: 0 0% 55%;
 
-    /* Accent - Matching green */
-    --accent: 142 70% 45%;
+    /* Accent - Claude orange */
+    --accent: 15 63% 60%;
     --accent-foreground: 0 0% 6%;
 
     /* Destructive */
@@ -99,10 +99,10 @@
     /* Borders & Inputs */
     --border: 0 0% 18%;
     --input: 0 0% 18%;
-    --ring: 142 70% 45%;
+    --ring: 15 63% 60%;
 
     /* Chart Colors - brighter for dark mode */
-    --chart-1: 142 70% 50%;
+    --chart-1: 15 63% 60%;
     --chart-2: 180 50% 50%;
     --chart-3: 45 80% 55%;
     --chart-4: 200 60% 55%;
