@@ -12,14 +12,20 @@ wacht op mijn input" grotendeels. De **net-nieuwe** uitbreiding die we bouwen is
 terugkerende **cron**, die op het geplande moment in een Claude Code-sessie worden
 geïnjecteerd (via tmux `send-keys`).
 
-## Huidige fase: FASE 1 — VALIDATIE
+## Huidige fase: FASE 2 — IMPLEMENTATIE (offline TDD)
 
-**Bouw nog NIETS van fase 2.** Eerst bevestigen dat claude-deck correct werkt onder WSL,
-in het bijzonder de CC Bridge. Zie **`fase-1-validation.md`**.
+Fase 1 is **code-level groen** (zie `fase-1-validation.md`): discovery + spawn bestaan al in
+claude-deck, send-keys-injectie is triviaal via tmux. Het **implementatieplan** staat in
+**`fase-2-plan.md`** (12 TDD-tasks).
 
-**Gate:** pas door naar fase 2 als **send-keys injectie** (punt 3) én **spawn** (punt 4)
-werken. Werken die niet, dan passen we het injectie/spawn-mechanisme aan vóór we tijd in
-fase 2 steken.
+- **Nu bouwbaar (offline, geen Docker/login):** Tasks 1–6 + 10 — datamodel, schemas,
+  tmux-inject, idle-state, session-resolver, hook-script. Bouw via TDD, commit per task.
+- **Vergt runtime (`docker compose up` + `claude` login):** Tasks 7–9 (delivery e2e) + 12
+  (e2e-validatie), plus de **runtime-validatie** van fase 1.
+- **Open punt voor review:** `permission_mode` = `default|acceptEdits|bypass` (afgestemd op
+  echte `claude`-flags i.p.v. de spec-labels safe/accept-edits/autonomous).
+
+**Backend-tests draaien:** `cd backend && ./venv/bin/pytest -q` (venv door env-bootstrap gezet).
 
 ## Omgeving
 

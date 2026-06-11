@@ -9,6 +9,7 @@ from app.api.v1.router import router as api_v1_router
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
+import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
 
 
 @asynccontextmanager
