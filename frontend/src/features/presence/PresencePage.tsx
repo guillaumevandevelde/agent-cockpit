@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Radio, Plug, Unplug, Trash2 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,8 @@ export function PresencePage() {
   const [connectOpen, setConnectOpen] = useState(false)
   const [hooksConnected, setHooksConnected] = useState(false)
   const { activeProject } = useProjectContext()
+  const [searchParams] = useSearchParams()
+  const highlightedSessionId = searchParams.get('session')
 
   const checkHooksStatus = useCallback(async () => {
     try {
@@ -216,7 +219,12 @@ export function PresencePage() {
       {sortedSessions.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {sortedSessions.map((s) => (
-            <PresenceCard key={s.session_id} session={s} onRemove={handleRemove} />
+            <PresenceCard
+              key={s.session_id}
+              session={s}
+              onRemove={handleRemove}
+              highlighted={s.session_id === highlightedSessionId}
+            />
           ))}
         </div>
       ) : (

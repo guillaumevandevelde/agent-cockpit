@@ -4,9 +4,11 @@ import { Header } from './Header'
 import { Sidebar } from './Sidebar'
 import { Footer } from './Footer'
 import { SidebarContext } from '@/contexts/SidebarContext'
+import { useAttentionNotifications } from '@/hooks/useAttentionNotifications'
 
 export function MainLayout() {
   const [collapsed, setCollapsed] = useState(false)
+  useAttentionNotifications()
 
   return (
     <SidebarContext.Provider value={{ collapsed, setCollapsed }}>

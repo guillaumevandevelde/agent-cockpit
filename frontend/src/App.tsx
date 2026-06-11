@@ -3,6 +3,7 @@ import { Toaster } from 'sonner'
 import { ProjectProvider } from './contexts/ProjectContext'
 import { DashboardProvider } from './contexts/DashboardContext'
 import { ProviderProvider } from './contexts/ProviderContext'
+import { AttentionProvider } from './contexts/AttentionContext'
 import { MainLayout } from './components/layout/MainLayout'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { ConfigViewerPage } from './features/config/ConfigViewerPage'
@@ -33,6 +34,7 @@ function App() {
     <ProjectProvider>
       <ProviderProvider>
         <DashboardProvider>
+          <AttentionProvider>
           <BrowserRouter>
             <Toaster richColors position="top-right" />
             <Routes>
@@ -64,6 +66,7 @@ function App() {
               </Route>
             </Routes>
           </BrowserRouter>
+          </AttentionProvider>
         </DashboardProvider>
       </ProviderProvider>
     </ProjectProvider>

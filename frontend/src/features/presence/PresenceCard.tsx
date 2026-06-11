@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { CLICKABLE_CARD } from '@/lib/constants'
@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button'
 interface PresenceCardProps {
   session: PresenceSession
   onRemove: (sessionId: string) => void
+  /** When true, ring the card and scroll it into view (e.g. opened from a notification). */
+  highlighted?: boolean
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -71,9 +73,16 @@ const FILE_OP_COLORS: Record<string, string> = {
   modified: '',
 }
 
-export function PresenceCard({ session, onRemove }: PresenceCardProps) {
+export function PresenceCard({ session, onRemove, highlighted }: PresenceCardProps) {
   const [duration, setDuration] = useState(() => formatDuration(session.started_at))
   const [lastEventAgo, setLastEventAgo] = useState(() => formatRelativeTime(session.last_event_at))
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (highlighted) {
+      cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [highlighted])
 
   useEffect(() => {
     const interval = session.status === 'stopped' ? 30000 : 1000
@@ -91,10 +100,12 @@ export function PresenceCard({ session, onRemove }: PresenceCardProps) {
 
   return (
     <Card
+      ref={cardRef}
       className={cn(
         CLICKABLE_CARD,
         'relative overflow-hidden border-t-2',
-        STATUS_BORDER_TOP[session.status] || 'border-t-muted'
+        STATUS_BORDER_TOP[session.status] || 'border-t-muted',
+        highlighted && 'ring-2 ring-primary'
       )}
       tabIndex={0}
       role="article"
