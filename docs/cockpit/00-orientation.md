@@ -18,14 +18,19 @@ Fase 1 is **code-level groen** (zie `fase-1-validation.md`): discovery + spawn b
 claude-deck, send-keys-injectie is triviaal via tmux. Het **implementatieplan** staat in
 **`fase-2-plan.md`** (12 TDD-tasks).
 
-- **Nu bouwbaar (offline, geen Docker/login):** Tasks 1–6 + 10 — datamodel, schemas,
-  tmux-inject, idle-state, session-resolver, hook-script. Bouw via TDD, commit per task.
-- **Vergt runtime (`docker compose up` + `claude` login):** Tasks 7–9 (delivery e2e) + 12
-  (e2e-validatie), plus de **runtime-validatie** van fase 1.
-- **Open punt voor review:** `permission_mode` = `default|acceptEdits|bypass` (afgestemd op
-  echte `claude`-flags i.p.v. de spec-labels safe/accept-edits/autonomous).
+**Voortgang (2026-06-11):** de **backend van fase 2 is volledig geïmplementeerd via TDD** —
+Tasks 1–10 (datamodel, schemas, tmux-inject, idle-state, session-resolver, delivery engine,
+scheduler, crud, REST API + hook-ingest, hook-script). **Volledige testsuite groen: 139 passed**
+(`cd backend && ./venv/bin/pytest -q`).
 
-**Backend-tests draaien:** `cd backend && ./venv/bin/pytest -q` (venv door env-bootstrap gezet).
+Resterend:
+- **Task 11 — frontend** (React feature-module: lijst / aanmaak-form / delivery-log). Geen
+  test-setup in de repo; manueel verifiëren met `npm run lint && npm run build`.
+- **Task 12 — runtime e2e** + de **fase-1 runtime-validatie**: vergen `docker compose up` +
+  `claude` login (jouw twee handmatige stappen).
+
+**Open punt voor review:** `permission_mode` = `default|acceptEdits|bypass` (afgestemd op echte
+`claude`-flags i.p.v. de spec-labels safe/accept-edits/autonomous).
 
 ## Omgeving
 
