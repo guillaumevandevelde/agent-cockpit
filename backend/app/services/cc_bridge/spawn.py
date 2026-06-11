@@ -61,6 +61,7 @@ def spawn_session(
     session_id: str | None = None,
     project_folder: str | None = None,
     skip_permissions: bool = False,
+    extra_args: list[str] | None = None,
 ) -> dict:
     """Spawn a new Claude Code session inside a tmux session.
 
@@ -117,6 +118,9 @@ def spawn_session(
 
     if skip_permissions:
         command.append("--dangerously-skip-permissions")
+
+    if extra_args:
+        command += extra_args
 
     # Spawn tmux session — tmux passes shell_command to $SHELL -c, so quote args
     shell_command = " ".join(shlex.quote(part) for part in command)
