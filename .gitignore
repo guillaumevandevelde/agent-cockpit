@@ -54,7 +54,7 @@ htmlcov/
 *.bak
 *.backup
 
-# Claude Deck specific
+# Claude Cockpit specific
 ~/.claude-registry/
 
 # Git worktrees

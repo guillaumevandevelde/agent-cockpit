@@ -41,9 +41,9 @@ jobs:
       - name: Create release archive
         run: |
           cd frontend/dist
-          zip -r ../../claude-deck-frontend-v${{ inputs.version }}.zip .
+          zip -r ../../claude-cockpit-frontend-v${{ inputs.version }}.zip .
           cd ../..
-          tar -czvf claude-deck-frontend-v${{ inputs.version }}.tar.gz -C frontend/dist .
+          tar -czvf claude-cockpit-frontend-v${{ inputs.version }}.tar.gz -C frontend/dist .
 
       - name: Extract changelog for version
         id: changelog
@@ -63,13 +63,13 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ inputs.version }}
-          name: Claude Deck v${{ inputs.version }}
+          name: Claude Cockpit v${{ inputs.version }}
           body: ${{ steps.changelog.outputs.content }}
           draft: false
           prerelease: ${{ contains(inputs.version, '-') }}
           files: |
-            claude-deck-frontend-v${{ inputs.version }}.zip
-            claude-deck-frontend-v${{ inputs.version }}.tar.gz
+            claude-cockpit-frontend-v${{ inputs.version }}.zip
+            claude-cockpit-frontend-v${{ inputs.version }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -80,5 +80,5 @@ jobs:
           echo "**Version:** v${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Artifacts:**" >> $GITHUB_STEP_SUMMARY
-          echo "- claude-deck-frontend-v${{ inputs.version }}.zip" >> $GITHUB_STEP_SUMMARY
-          echo "- claude-deck-frontend-v${{ inputs.version }}.tar.gz" >> $GITHUB_STEP_SUMMARY
+          echo "- claude-cockpit-frontend-v${{ inputs.version }}.zip" >> $GITHUB_STEP_SUMMARY
+          echo "- claude-cockpit-frontend-v${{ inputs.version }}.tar.gz" >> $GITHUB_STEP_SUMMARY

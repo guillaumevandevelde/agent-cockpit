@@ -1,5 +1,5 @@
 services:
-  claude-deck:
+  claude-cockpit:
     build: .
     ports:
       - "8000:8000"
