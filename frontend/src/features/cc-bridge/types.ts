@@ -33,6 +33,7 @@ export interface CCTokenResponse {
 export interface SpawnSessionRequest {
   provider?: AgentProviderId
   directory: string
+  session_name?: string
   mode: 'plain' | 'worktree' | 'resume' | 'fork'
   worktree_name?: string
   session_id?: string
@@ -62,4 +63,10 @@ export interface SpawnSessionResponse {
 export interface KillSessionResponse {
   killed: boolean
   error?: string
+}
+
+export interface RenameSessionResponse {
+  renamed: boolean
+  session_name: string
+  tmux_target: string
 }

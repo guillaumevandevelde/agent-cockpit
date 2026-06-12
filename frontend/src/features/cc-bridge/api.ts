@@ -1,6 +1,6 @@
 import { apiClient, buildEndpoint } from '@/lib/api'
 import type { AgentProviderId } from '@/types/providers'
-import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse } from './types'
+import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse } from './types'
 
 const BASE = 'agent-bridge'
 
@@ -33,5 +33,12 @@ export async function killSession(target: string, cleanupWorktree: boolean = fal
   const params = cleanupWorktree ? '?cleanup_worktree=true' : ''
   return apiClient<KillSessionResponse>(`${BASE}/sessions/${encodeURIComponent(target)}${params}`, {
     method: 'DELETE',
+  })
+}
+
+export async function renameSession(sessionName: string, name: string): Promise<RenameSessionResponse> {
+  return apiClient<RenameSessionResponse>(`${BASE}/sessions/${encodeURIComponent(sessionName)}/rename`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
   })
 }
