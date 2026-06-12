@@ -41,6 +41,14 @@ export interface SessionSummary {
   total_tool_calls: number
 }
 
+export interface ResumableSession extends SessionSummary {
+  worktree_label: string
+}
+
+export interface ResumableSessionListResponse {
+  sessions: ResumableSession[]
+}
+
 export interface SessionDetail {
   id: string
   project_folder: string
