@@ -15,8 +15,8 @@ from app.services.session_service import SessionService
 def _encode_project_folder(path: str) -> str:
     """Encode an absolute path to Claude's project folder name.
 
-    Mirrors the frontend's claudeProjectFolderFromPath: '/' and '.' both map to
-    '-'. Order matters ('/' first), so '/a/.claude' -> '-a--claude'.
+    Mirrors the frontend's claudeProjectFolderFromPath in frontend/src/lib/utils.ts:
+    '/' and '.' both map to '-'. Order matters ('/' first), so '/a/.claude' -> '-a--claude'.
     """
     return path.rstrip("/").replace("/", "-").replace(".", "-")
 
@@ -74,6 +74,7 @@ async def list_resumable_sessions(
                 ResumableSession(**summary.model_dump(), worktree_label=label)
             )
 
-    # ISO-8601 timestamps sort lexicographically in chronological order.
+    # ISO-8601 timestamps sort lexicographically in chronological order
+    # (assuming the offset-free local timestamps SessionService emits are monotonic).
     aggregated.sort(key=lambda s: s.modified_at, reverse=True)
     return aggregated[:limit]

@@ -110,3 +110,42 @@ async def test_non_git_directory_returns_only_its_own_sessions(monkeypatch, tmp_
 
     assert [s.id for s in sessions] == ["only-sess"]
     assert sessions[0].worktree_label == "main"
+
+
+def test_list_worktrees_parses_porcelain_output(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.agent_bridge import resumable
+
+    porcelain = (
+        "worktree /home/g/repo\n"
+        "HEAD abc123\n"
+        "branch refs/heads/master\n"
+        "\n"
+        "worktree /home/g/repo/.claude/worktrees/feat\n"
+        "HEAD def456\n"
+        "branch refs/heads/worktree-feat\n"
+    )
+    monkeypatch.setattr(
+        resumable.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=porcelain, stderr=""),
+    )
+
+    result = resumable._list_worktrees("/home/g/repo")
+
+    assert result == [
+        ("/home/g/repo", True),
+        ("/home/g/repo/.claude/worktrees/feat", False),
+    ]
+
+
+def test_list_worktrees_falls_back_when_git_missing(monkeypatch):
+    from app.services.agent_bridge import resumable
+
+    def boom(*a, **k):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(resumable.subprocess, "run", boom)
+
+    assert resumable._list_worktrees("/some/dir") == [("/some/dir", True)]
