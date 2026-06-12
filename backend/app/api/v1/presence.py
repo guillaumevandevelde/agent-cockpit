@@ -103,9 +103,18 @@ async def get_config_snippet():
         "SubagentStart", "SubagentStop",
     ]
     # Command hook: forward the hook JSON from stdin plus $TMUX_PANE (the exact
-    # join key to the Agent Bridge), then POST to the events endpoint.
+    # join key to the Agent Bridge), then POST to the events endpoint. We also
+    # normalise Claude Code's field names to what the events endpoint expects:
+    # CC sends `tool_response`/`prompt`, while PresenceEventIn reads
+    # `tool_result`/`user_prompt` — without this the error badge and prompt
+    # capture stay empty.
+    jq_filter = (
+        ". + {tmux_pane:$p, "
+        "tool_result:(.tool_response // .tool_result), "
+        "user_prompt:(.prompt // .user_prompt)}"
+    )
     command = (
-        "jq -c --arg p \"$TMUX_PANE\" '. + {tmux_pane:$p}' | "
+        f"jq -c --arg p \"$TMUX_PANE\" '{jq_filter}' | "
         f"curl -sf -X POST {url} -H 'Content-Type: application/json' -d @-"
     )
     snippet = {

@@ -66,3 +66,29 @@ async def test_config_snippet_is_command_hook_with_tmux_pane():
     assert "$TMUX_PANE" in stop_hook["command"]
     assert "tmux_pane" in stop_hook["command"]
     assert "/api/v1/presence/events" in stop_hook["command"]
+    # Normalises Claude Code's field names to what PresenceEventIn expects.
+    assert ".tool_response" in stop_hook["command"]
+    assert ".prompt" in stop_hook["command"]
+
+
+@pytest.mark.asyncio
+async def test_failed_tool_result_marks_session_error():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    service = PresenceService()
+    async with AsyncSessionLocal() as db:
+        resp = await service.process_event(
+            {
+                "session_id": "sess-err-1",
+                "hook_event_name": "PostToolUse",
+                "cwd": "/home/guillaume/dev/z",
+                "tool_name": "Bash",
+                "tool_input": {"command": "false"},
+                # After the command hook's normalisation this is the CC
+                # `tool_response` surfaced as `tool_result`.
+                "tool_result": {"exit_code": 1},
+            },
+            db,
+        )
+        await db.commit()
+    assert resp.status == "error"
