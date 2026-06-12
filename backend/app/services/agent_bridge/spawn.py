@@ -152,5 +152,37 @@ def kill_session(session_name: str, cleanup_worktree: bool = False) -> dict:
     return {"killed": True}
 
 
+def rename_session(old_name: str, new_name: str) -> dict:
+    """Rename a tmux session, keeping spawn metadata under the new key."""
+    sanitized = _sanitize_session_name(new_name)
+    if not sanitized:
+        raise ValueError("Session name must contain a letter, number, '_' or '-'")
+    if sanitized == old_name:
+        return {"renamed": True, "session_name": old_name, "tmux_target": f"{old_name}:0.0"}
+    if sanitized in _running_session_names():
+        raise ValueError(f"A session named '{sanitized}' already exists")
+
+    try:
+        result = subprocess.run(
+            ["tmux", "rename-session", "-t", old_name, sanitized],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"tmux rename-session failed: {result.stderr.strip()}")
+    except FileNotFoundError:
+        raise ValueError("tmux is not installed or not in PATH")
+    except subprocess.TimeoutExpired:
+        raise ValueError("tmux rename-session timed out")
+
+    metadata = _spawned_sessions.pop(old_name, None)
+    if metadata is not None:
+        _spawned_sessions[sanitized] = metadata
+
+    logger.info("Renamed session %s -> %s", old_name, sanitized)
+    return {"renamed": True, "session_name": sanitized, "tmux_target": f"{sanitized}:0.0"}
+
+
 def get_spawned_sessions() -> dict[str, dict]:
     return _spawned_sessions
