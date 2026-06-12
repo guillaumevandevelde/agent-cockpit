@@ -18,5 +18,16 @@ check "LOG_DIR under root"      '[ "$LOG_DIR" = "$PROJECT_ROOT/logs" ]'
 check "cmd_status is a function" 'declare -F cmd_status >/dev/null'
 
 echo ""
+echo "Task 2: prune_logs"
+TMP_LOGS="$(mktemp -d)"
+mkdir -p "$TMP_LOGS/backend"
+touch "$TMP_LOGS/backend/run-old.log"  && touch -d "8 days ago" "$TMP_LOGS/backend/run-old.log"
+touch "$TMP_LOGS/backend/run-new.log"
+LOG_DIR="$TMP_LOGS" prune_logs
+check "old run-log pruned"   '[ ! -f "$TMP_LOGS/backend/run-old.log" ]'
+check "fresh run-log kept"   '[ -f "$TMP_LOGS/backend/run-new.log" ]'
+rm -rf "$TMP_LOGS"
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
