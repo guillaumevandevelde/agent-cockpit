@@ -95,7 +95,7 @@ Codex support is explicit about provider boundaries: usage/context parity and se
 ## Quick Start with Docker
 
 ```bash
-git clone https://github.com/adrirubio/claude-deck.git
+git clone git@github.com:guillaumevandevelde/claude-deck.git
 cd claude-deck
 docker compose up
 ```
@@ -113,7 +113,7 @@ This builds and starts Claude Cockpit at http://localhost:8000, mounting your `~
 **Prerequisites**: Python 3.11+, Node.js 18+
 
 ```bash
-git clone https://github.com/adrirubio/claude-deck.git
+git clone git@github.com:guillaumevandevelde/claude-deck.git
 cd claude-deck
 ./scripts/install.sh
 ```
