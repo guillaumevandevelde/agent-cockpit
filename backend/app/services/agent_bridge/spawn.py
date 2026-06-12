@@ -29,13 +29,37 @@ def _validate_directory(directory: str) -> str:
     return str(dir_path)
 
 
-def _session_name_for(directory: str) -> str:
+def _sanitize_session_name(raw: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", raw).strip("-")[:20]
+
+
+def _running_session_names() -> set[str]:
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return set()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _session_name_for(directory: str, preferred: str | None = None) -> str:
+    if preferred:
+        base = _sanitize_session_name(preferred)
+        if base and base not in _running_session_names():
+            return base
+        return f"{base or 'session'}-{uuid.uuid4().hex[:4]}"
     basename = Path(directory).name or "project"
-    safe_basename = re.sub(r"[^a-zA-Z0-9_-]", "-", basename)[:20]
+    safe_basename = _sanitize_session_name(basename) or "project"
     return f"{safe_basename}-{uuid.uuid4().hex[:4]}"
 
 
-def spawn_session(provider_id: str, options: SpawnCommandOptions) -> dict:
+def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: str | None = None) -> dict:
     """Spawn a new provider CLI session inside tmux."""
     provider = get_provider(provider_id)
     if isinstance(provider, ClaudeCodeProvider):
@@ -44,7 +68,8 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions) -> dict:
 
     directory = _validate_directory(options.directory)
     options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})
-    name = _session_name_for(directory)
+    preferred = session_name or (options.worktree_name if options.mode == "worktree" else None)
+    name = _session_name_for(directory, preferred) if preferred else _session_name_for(directory)
     if provider.id == "claude-code" and options.mode == "worktree" and not options.worktree_name:
         options = SpawnCommandOptions(**{**options.__dict__, "worktree_name": name})
     command = provider.build_spawn_command(options)
