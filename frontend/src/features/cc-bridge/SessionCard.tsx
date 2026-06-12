@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Pencil, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -25,14 +25,19 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
   const [value, setValue] = useState(session.session_name)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Set when Escape cancels, so the input's onBlur (which fires as the input
+  // unmounts) skips the commit it would otherwise trigger.
+  const cancelledRef = useRef(false)
 
   function startEdit() {
+    cancelledRef.current = false
     setValue(session.session_name)
     setError(null)
     setEditing(true)
   }
 
   function cancelEdit() {
+    cancelledRef.current = true
     setEditing(false)
     setError(null)
   }
@@ -94,7 +99,7 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
                   if (e.key === 'Escape') { e.preventDefault(); cancelEdit() }
                 }}
                 onChange={(e) => setValue(e.target.value)}
-                onBlur={() => { if (!saving) void commitEdit() }}
+                onBlur={() => { if (!saving && !cancelledRef.current) void commitEdit() }}
               />
             ) : (
               <span className="text-sm font-medium truncate">{session.session_name}</span>
@@ -103,6 +108,8 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
           {!editing && (
             <div className="flex items-center gap-1.5 shrink-0">
               <button
+                type="button"
+                aria-label="Rename session"
                 className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground transition-colors"
                 onClick={(e) => { e.stopPropagation(); startEdit() }}
                 onKeyDown={(e) => e.stopPropagation()}
@@ -111,6 +118,8 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
                 <Pencil className="h-3 w-3" />
               </button>
               <button
+                type="button"
+                aria-label="Kill session"
                 className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive transition-colors"
                 onClick={(e) => { e.stopPropagation(); onKill(session) }}
                 onKeyDown={(e) => e.stopPropagation()}
