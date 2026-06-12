@@ -75,7 +75,10 @@ class ClaudeCodeProvider(AgentProvider):
         return command
 
     def resolve_directory(self, options: SpawnCommandOptions) -> str:
-        if options.mode == "resume" and not options.directory.strip() and options.project_folder:
+        # For resume, the launch directory is fully determined by the session's
+        # recorded cwd — never the directory the picker was browsing. This also
+        # makes worktree sessions resume in their own worktree.
+        if options.mode == "resume" and options.project_folder:
             return _resolve_project_directory(options.project_folder, options.session_id)
         return options.directory
 
