@@ -29,13 +29,37 @@ def _validate_directory(directory: str) -> str:
     return str(dir_path)
 
 
-def _session_name_for(directory: str) -> str:
+def _sanitize_session_name(raw: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", raw)[:20].strip("-")
+
+
+def _running_session_names() -> set[str]:
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return set()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return set()
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def _session_name_for(directory: str, preferred: str | None = None) -> str:
+    if preferred:
+        base = _sanitize_session_name(preferred)
+        if base and base not in _running_session_names():
+            return base
+        return f"{base or 'session'}-{uuid.uuid4().hex[:4]}"
     basename = Path(directory).name or "project"
-    safe_basename = re.sub(r"[^a-zA-Z0-9_-]", "-", basename)[:20]
+    safe_basename = _sanitize_session_name(basename) or "project"
     return f"{safe_basename}-{uuid.uuid4().hex[:4]}"
 
 
-def spawn_session(provider_id: str, options: SpawnCommandOptions) -> dict:
+def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: str | None = None) -> dict:
     """Spawn a new provider CLI session inside tmux."""
     provider = get_provider(provider_id)
     if isinstance(provider, ClaudeCodeProvider):
@@ -44,7 +68,8 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions) -> dict:
 
     directory = _validate_directory(options.directory)
     options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})
-    name = _session_name_for(directory)
+    preferred = session_name or (options.worktree_name if options.mode == "worktree" else None)
+    name = _session_name_for(directory, preferred)
     if provider.id == "claude-code" and options.mode == "worktree" and not options.worktree_name:
         options = SpawnCommandOptions(**{**options.__dict__, "worktree_name": name})
     command = provider.build_spawn_command(options)
@@ -125,6 +150,38 @@ def kill_session(session_name: str, cleanup_worktree: bool = False) -> dict:
     _spawned_sessions.pop(session_name, None)
     logger.info("Killed session %s", session_name)
     return {"killed": True}
+
+
+def rename_session(old_name: str, new_name: str) -> dict:
+    """Rename a tmux session, keeping spawn metadata under the new key."""
+    sanitized = _sanitize_session_name(new_name)
+    if not sanitized:
+        raise ValueError("Session name must contain a letter, number, '_' or '-'")
+    if sanitized == old_name:
+        return {"renamed": True, "session_name": old_name, "tmux_target": f"{old_name}:0.0"}
+    if sanitized in _running_session_names():
+        raise ValueError(f"A session named '{sanitized}' already exists")
+
+    try:
+        result = subprocess.run(
+            ["tmux", "rename-session", "-t", old_name, sanitized],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"tmux rename-session failed: {result.stderr.strip()}")
+    except FileNotFoundError:
+        raise ValueError("tmux is not installed or not in PATH")
+    except subprocess.TimeoutExpired:
+        raise ValueError("tmux rename-session timed out")
+
+    metadata = _spawned_sessions.pop(old_name, None)
+    if metadata is not None:
+        _spawned_sessions[sanitized] = metadata
+
+    logger.info("Renamed session %s -> %s", old_name, sanitized)
+    return {"renamed": True, "session_name": sanitized, "tmux_target": f"{sanitized}:0.0"}
 
 
 def get_spawned_sessions() -> dict[str, dict]:

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
 from app.services.agent_bridge.pty_relay import PtyRelay
-from app.services.agent_bridge.spawn import kill_session, spawn_session
+from app.services.agent_bridge.spawn import kill_session, rename_session, spawn_session
 from app.services.providers import get_provider
 from app.services.providers.base import SpawnCommandOptions
 
@@ -26,6 +26,7 @@ _TOKEN_TTL = 30
 
 class SpawnRequest(BaseModel):
     provider: str = "claude-code"
+    session_name: str | None = None
     directory: str
     mode: Literal["plain", "worktree", "resume", "fork"] = "plain"
     worktree_name: str | None = None
@@ -142,7 +143,7 @@ def spawn_session_endpoint(request: SpawnRequest):
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
         )
-        return spawn_session(request.provider, options)
+        return spawn_session(request.provider, options, session_name=request.session_name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -150,4 +151,16 @@ def spawn_session_endpoint(request: SpawnRequest):
 @router.delete("/sessions/{target}")
 def kill_session_endpoint(target: str, cleanup_worktree: bool = False):
     return kill_session(session_name=target, cleanup_worktree=cleanup_worktree)
+
+
+class RenameRequest(BaseModel):
+    name: str
+
+
+@router.post("/sessions/{target}/rename")
+def rename_session_endpoint(target: str, request: RenameRequest):
+    try:
+        return rename_session(old_name=target, new_name=request.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 

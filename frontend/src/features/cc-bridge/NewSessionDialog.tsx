@@ -87,6 +87,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [directory, setDirectory] = useState('')
   const [mode, setMode] = useState<Mode>('plain')
   const [worktreeName, setWorktreeName] = useState('')
+  const [sessionName, setSessionName] = useState('')
   const [skipPermissions, setSkipPermissions] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState('')
@@ -167,6 +168,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setProvider(defaultProvider)
       setMode('plain')
       setWorktreeName('')
+      setSessionName('')
       setSkipPermissions(false)
       setPrompt('')
       setModel('')
@@ -217,6 +219,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
         provider,
         directory: directory.trim(),
         mode,
+        ...(sessionName.trim() && { session_name: sessionName.trim() }),
         ...(provider === 'claude-code' && mode === 'worktree' && worktreeName.trim() && { worktree_name: worktreeName.trim() }),
         ...(provider === 'claude-code' && mode === 'resume' && selectedSession && {
           session_id: selectedSession.id,
@@ -310,6 +313,21 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Optional explicit session name */}
+          <div className="space-y-1.5">
+            <Label htmlFor="session-name">Session name</Label>
+            <Input
+              id="session-name"
+              value={sessionName}
+              onChange={(e) => setSessionName(e.target.value)}
+              placeholder="auto"
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional. Defaults to the worktree name, or an auto-generated name.
+            </p>
           </div>
 
           {/* Directory input */}

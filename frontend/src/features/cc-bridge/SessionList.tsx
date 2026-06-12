@@ -17,6 +17,7 @@ interface SessionListProps {
   onRefresh: () => void
   onNewSession: () => void
   onKillSession: (session: CCSession) => void
+  onRename: (session: CCSession, newName: string) => Promise<void>
   providerFilter: ProviderFilter
   canCreateSession: boolean
   createDisabledReason: string | null
@@ -32,6 +33,7 @@ export function SessionList({
   onRefresh,
   onNewSession,
   onKillSession,
+  onRename,
   providerFilter,
   canCreateSession,
   createDisabledReason,
@@ -96,6 +98,7 @@ export function SessionList({
               gridPosition={pos === -1 ? null : pos}
               onClick={() => onToggleTarget(session.tmux_target)}
               onKill={onKillSession}
+              onRename={onRename}
               attention={session.pane_id ? attentionByPane.get(session.pane_id) ?? null : null}
             />
           )

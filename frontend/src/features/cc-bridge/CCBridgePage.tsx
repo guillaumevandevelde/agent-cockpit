@@ -8,6 +8,7 @@ import { TerminalView } from './TerminalView'
 import { NewSessionDialog } from './NewSessionDialog'
 import { KillSessionDialog } from './KillSessionDialog'
 import { useAttentionByPane } from './useAttentionByPane'
+import { renameSession } from './api'
 import type { CCSession } from './types'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
@@ -139,6 +140,16 @@ export function CCBridgePage() {
     setActiveTargets((prev) => addTarget(prev, tmuxTarget))
   }
 
+  const handleRename = useCallback(async (session: CCSession, newName: string) => {
+    const res = await renameSession(session.session_name, newName)
+    const oldTarget = session.tmux_target
+    const newTarget = res.tmux_target
+    setActiveTargets((prev) => prev.map((t) => (t === oldTarget ? newTarget : t)))
+    setFocusedTarget((cur) => (cur === oldTarget ? newTarget : cur))
+    setFullscreenTarget((cur) => (cur === oldTarget ? newTarget : cur))
+    refresh()
+  }, [refresh])
+
   const handleKilled = () => {
     if (killSession) {
       removeTarget(killSession.tmux_target)
@@ -197,6 +208,7 @@ export function CCBridgePage() {
               onRefresh={refresh}
               onNewSession={() => setNewSessionOpen(true)}
               onKillSession={setKillSession}
+              onRename={handleRename}
               providerFilter={providerFilter}
               canCreateSession={canCreateSession}
               createDisabledReason={canCreateSession ? null : createDisabledReason}

@@ -1,6 +1,8 @@
-import { Trash2 } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Pencil, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import type { CCSession } from './types'
@@ -11,27 +13,65 @@ interface SessionCardProps {
   gridPosition: number | null
   onClick: () => void
   onKill: (session: CCSession) => void
+  onRename: (session: CCSession, newName: string) => Promise<void>
   attention?: AttentionKind | null
 }
 
-export function SessionCard({ session, gridPosition, onClick, onKill, attention }: SessionCardProps) {
+export function SessionCard({ session, gridPosition, onClick, onKill, onRename, attention }: SessionCardProps) {
   const projectName = session.cwd.split('/').pop() || session.cwd
   const isActive = gridPosition !== null
 
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(session.session_name)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Set when Escape cancels, so the input's onBlur (which fires as the input
+  // unmounts) skips the commit it would otherwise trigger.
+  const cancelledRef = useRef(false)
+
+  function startEdit() {
+    cancelledRef.current = false
+    setValue(session.session_name)
+    setError(null)
+    setEditing(true)
+  }
+
+  function cancelEdit() {
+    cancelledRef.current = true
+    setEditing(false)
+    setError(null)
+  }
+
+  async function commitEdit() {
+    const next = value.trim()
+    if (!next || next === session.session_name) {
+      cancelEdit()
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await onRename(session, next)
+      setEditing(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Rename failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <Card
-      className={cn(
-        CLICKABLE_CARD,
-        isActive && 'border-primary bg-primary/5'
-      )}
-      onClick={onClick}
+      className={cn(CLICKABLE_CARD, isActive && 'border-primary bg-primary/5')}
+      onClick={editing ? undefined : onClick}
       onKeyDown={(e) => {
+        if (editing) return
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onClick()
         }
       }}
-      tabIndex={0}
+      tabIndex={editing ? -1 : 0}
       role="button"
     >
       <CardContent className="p-3">
@@ -46,26 +86,60 @@ export function SessionCard({ session, gridPosition, onClick, onKill, attention 
                 title={attention === 'error' ? 'Command failed' : 'Waiting for input'}
               />
             )}
-            <span className="text-sm font-medium truncate">{session.session_name}</span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive transition-colors"
-              onClick={(e) => { e.stopPropagation(); onKill(session) }}
-              onKeyDown={(e) => e.stopPropagation()}
-              title="Kill session"
-            >
-              <Trash2 className="h-3 w-3" />
-            </button>
-            {isActive ? (
-              <span className="h-5 w-5 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                {gridPosition + 1}
-              </span>
+            {editing ? (
+              <Input
+                autoFocus
+                value={value}
+                disabled={saving}
+                className="h-6 text-sm py-0"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation()
+                  if (e.key === 'Enter') { e.preventDefault(); void commitEdit() }
+                  if (e.key === 'Escape') { e.preventDefault(); cancelEdit() }
+                }}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={() => { if (!saving && !cancelledRef.current) void commitEdit() }}
+              />
             ) : (
-              <span className="h-2 w-2 rounded-full bg-green-500" />
+              <span className="text-sm font-medium truncate">{session.session_name}</span>
             )}
           </div>
+          {!editing && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                aria-label="Rename session"
+                className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground transition-colors"
+                onClick={(e) => { e.stopPropagation(); startEdit() }}
+                onKeyDown={(e) => e.stopPropagation()}
+                title="Rename session"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                aria-label="Kill session"
+                className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive transition-colors"
+                onClick={(e) => { e.stopPropagation(); onKill(session) }}
+                onKeyDown={(e) => e.stopPropagation()}
+                title="Kill session"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+              {isActive ? (
+                <span className="h-5 w-5 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-bold">
+                  {gridPosition + 1}
+                </span>
+              ) : (
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+              )}
+            </div>
+          )}
         </div>
+        {error && (
+          <p className="text-xs text-destructive mt-1">{error}</p>
+        )}
         <Badge variant="outline" className="mt-2 max-w-full truncate">
           {session.provider_display_name}
         </Badge>
