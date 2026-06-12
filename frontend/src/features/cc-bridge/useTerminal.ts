@@ -14,8 +14,8 @@ export function useTerminal(
   const fitAddonRef = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const [connected, setConnected] = useState(false)
-  const [readOnly, setReadOnly] = useState(true)
-  const readOnlyRef = useRef(true)
+  const [readOnly, setReadOnly] = useState(false)
+  const readOnlyRef = useRef(false)
 
   useEffect(() => {
     readOnlyRef.current = readOnly
