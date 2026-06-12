@@ -30,7 +30,7 @@ def _validate_directory(directory: str) -> str:
 
 
 def _sanitize_session_name(raw: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9_-]", "-", raw).strip("-")[:20]
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", raw)[:20].strip("-")
 
 
 def _running_session_names() -> set[str]:
@@ -69,7 +69,7 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: 
     directory = _validate_directory(options.directory)
     options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})
     preferred = session_name or (options.worktree_name if options.mode == "worktree" else None)
-    name = _session_name_for(directory, preferred) if preferred else _session_name_for(directory)
+    name = _session_name_for(directory, preferred)
     if provider.id == "claude-code" and options.mode == "worktree" and not options.worktree_name:
         options = SpawnCommandOptions(**{**options.__dict__, "worktree_name": name})
     command = provider.build_spawn_command(options)

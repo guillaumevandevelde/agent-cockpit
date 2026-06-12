@@ -13,7 +13,7 @@ def test_claude_worktree_uses_generated_session_name_when_blank(monkeypatch, tmp
         calls.append(args)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(spawn, "_session_name_for", lambda directory: "repo-abcd")
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
     monkeypatch.setattr(spawn.subprocess, "run", fake_run)
     spawn.get_spawned_sessions().clear()
 
@@ -49,7 +49,7 @@ def test_claude_resume_resolves_directory_from_transcript_cwd(monkeypatch, tmp_p
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(claude_spawn.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(spawn, "_session_name_for", lambda directory: "claude-deck-abcd")
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "claude-deck-abcd")
     monkeypatch.setattr(spawn.subprocess, "run", fake_run)
     spawn.get_spawned_sessions().clear()
 
@@ -78,7 +78,7 @@ def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
         calls.append(args)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(spawn, "_session_name_for", lambda directory: "repo-abcd")
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
     monkeypatch.setattr(spawn.subprocess, "run", fake_run)
     spawn.get_spawned_sessions().clear()
 
@@ -114,7 +114,7 @@ def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
         calls.append(args)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(spawn, "_session_name_for", lambda directory: "repo-abcd")
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
     monkeypatch.setattr(spawn.subprocess, "run", fake_run)
     spawn.get_spawned_sessions().clear()
 
@@ -136,6 +136,7 @@ def test_sanitize_session_name_strips_invalid_chars():
     assert spawn._sanitize_session_name("My Feature!") == "My-Feature"
     assert spawn._sanitize_session_name("---") == ""
     assert spawn._sanitize_session_name("a" * 40) == "a" * 20
+    assert spawn._sanitize_session_name("a" * 19 + "!" + "aaaa") == "a" * 19
 
 
 def test_session_name_for_uses_preferred_when_free(monkeypatch):
