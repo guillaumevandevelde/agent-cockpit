@@ -7,11 +7,16 @@ import time
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
 from pydantic import BaseModel
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_db
+from app.models.schemas import ResumableSessionListResponse
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
 from app.services.agent_bridge.pty_relay import PtyRelay
+from app.services.agent_bridge.resumable import list_resumable_sessions
 from app.services.agent_bridge.spawn import kill_session, rename_session, spawn_session
 from app.services.providers import get_provider
 from app.services.providers.base import SpawnCommandOptions
@@ -56,6 +61,19 @@ def list_sessions(provider: str | None = Query(default=None)):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.get("/resumable-sessions", response_model=ResumableSessionListResponse)
+async def list_resumable_sessions_endpoint(
+    directory: str = Query(...),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        sessions = await list_resumable_sessions(directory, limit, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return ResumableSessionListResponse(sessions=sessions)
 
 
 @router.get("/sessions/{target:path}/preview")
