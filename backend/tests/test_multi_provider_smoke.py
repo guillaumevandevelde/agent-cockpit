@@ -51,7 +51,7 @@ def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_spawn(provider_id, options):
+    def fake_spawn(provider_id, options, session_name=None):
         captured["provider_id"] = provider_id
         captured["options"] = options
         return {
