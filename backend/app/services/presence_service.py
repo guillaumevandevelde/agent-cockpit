@@ -110,6 +110,8 @@ class PresenceService:
         if pane:
             session.tmux_pane = pane
 
+        turn_duration_s: Optional[float] = None
+
         # Update based on event type
         if event_type == "Notification":
             msg = payload.get("message")
@@ -169,6 +171,7 @@ class PresenceService:
         elif event_type == "Stop":
             session.status = SessionStatus.STOPPED
             session.status_text = "Waiting for input"
+            turn_duration_s = await self._compute_turn_duration(session_id, now, db)
 
         elif event_type == "SessionEnd":
             session.status = SessionStatus.STOPPED
@@ -207,7 +210,7 @@ class PresenceService:
         # Throttled maintenance (idle check + event pruning)
         await self._maybe_run_maintenance(db, now)
 
-        return self._to_response(session)
+        return self._to_response(session, turn_duration_s)
 
     async def get_all_sessions(self, db: AsyncSession) -> List[PresenceSessionResponse]:
         now = datetime.now(timezone.utc)
@@ -349,7 +352,27 @@ class PresenceService:
             return 1
         return 0
 
-    def _to_response(self, session: PresenceSession) -> PresenceSessionResponse:
+    async def _compute_turn_duration(self, session_id: str, now: datetime, db: AsyncSession) -> Optional[float]:
+        """Seconds between the most recent UserPromptSubmit for this session and `now`.
+
+        Reads the timestamps already stored in presence_events, so no schema change
+        is needed. Returns None when no prompt is on record (the turn can't be timed).
+        """
+        result = await db.execute(
+            select(func.max(PresenceEvent.timestamp)).where(
+                PresenceEvent.session_id == session_id,
+                PresenceEvent.event_type == "UserPromptSubmit",
+            )
+        )
+        prompt_time = result.scalar_one_or_none()
+        if prompt_time is None:
+            return None
+        # SQLite may return naive datetimes; treat them as UTC like elsewhere here.
+        if prompt_time.tzinfo is None:
+            prompt_time = prompt_time.replace(tzinfo=timezone.utc)
+        return (now - prompt_time).total_seconds()
+
+    def _to_response(self, session: PresenceSession, turn_duration_s: Optional[float] = None) -> PresenceSessionResponse:
         return PresenceSessionResponse(
             session_id=session.session_id,
             label=session.label,
@@ -369,4 +392,5 @@ class PresenceService:
             started_at=session.started_at.isoformat() if session.started_at else datetime.now(timezone.utc).isoformat(),
             last_event_at=session.last_event_at.isoformat() if session.last_event_at else datetime.now(timezone.utc).isoformat(),
             ended_at=session.ended_at.isoformat() if session.ended_at else None,
+            last_turn_duration_s=turn_duration_s,
         )

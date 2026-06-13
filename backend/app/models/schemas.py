@@ -1792,6 +1792,7 @@ class PresenceSessionResponse(BaseModel):
     started_at: str
     last_event_at: str
     ended_at: Optional[str] = None
+    last_turn_duration_s: Optional[float] = None
 
 
 class PresenceSessionListResponse(BaseModel):
