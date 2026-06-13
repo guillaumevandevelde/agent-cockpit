@@ -1103,6 +1103,18 @@ class SessionSummary(BaseModel):
     total_tool_calls: int
 
 
+class ResumableSession(SessionSummary):
+    """A session summary tagged with the worktree it belongs to, for the resume picker."""
+
+    worktree_label: str
+
+
+class ResumableSessionListResponse(BaseModel):
+    """Aggregated resumable sessions across a project and its worktrees."""
+
+    sessions: List[ResumableSession]
+
+
 class SessionDetail(BaseModel):
     """Full session data with conversations."""
 

@@ -1,11 +1,21 @@
 import { apiClient, buildEndpoint } from '@/lib/api'
 import type { AgentProviderId } from '@/types/providers'
 import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse } from './types'
+import type { ResumableSessionListResponse } from '@/types/sessions'
 
 const BASE = 'agent-bridge'
 
 export async function fetchCCSessions(provider?: AgentProviderId): Promise<CCSessionsResponse> {
   return apiClient<CCSessionsResponse>(buildEndpoint(BASE + '/sessions', { provider }))
+}
+
+export async function fetchResumableSessions(
+  directory: string,
+  limit = 20,
+): Promise<ResumableSessionListResponse> {
+  return apiClient<ResumableSessionListResponse>(
+    buildEndpoint(BASE + '/resumable-sessions', { directory, limit }),
+  )
 }
 
 export async function fetchSessionPreview(target: string): Promise<CCPreviewResponse> {

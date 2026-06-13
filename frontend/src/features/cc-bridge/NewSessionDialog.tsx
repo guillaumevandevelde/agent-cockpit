@@ -19,15 +19,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { MODAL_SIZES } from '@/lib/constants'
-import { claudeProjectFolderFromPath, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
-import { spawnSession } from './api'
-import { useSessionsApi } from '@/hooks/useSessionsApi'
+import { spawnSession, fetchResumableSessions } from './api'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgentProviderId } from '@/types/providers'
 import type { SpawnSessionRequest } from './types'
-import type { SessionSummary } from '@/types/sessions'
+import type { ResumableSession } from '@/types/sessions'
 
 type Mode = 'plain' | 'worktree' | 'resume' | 'fork'
 
@@ -106,21 +105,16 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [recentSessions, setRecentSessions] = useState<SessionSummary[]>([])
-  const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null)
+  const [recentSessions, setRecentSessions] = useState<ResumableSession[]>([])
+  const [selectedSession, setSelectedSession] = useState<ResumableSession | null>(null)
   const [loadingSessions, setLoadingSessions] = useState(false)
 
-  const { listSessions } = useSessionsApi()
   const { projects, activeProject } = useProjectContext()
   const isCodex = provider === 'codex-cli'
   const modeOptions = isCodex ? CODEX_MODE_OPTIONS : MODE_OPTIONS
   const selectedProjectPath = projects.some((project) => project.path === directory.trim())
     ? directory.trim()
     : CUSTOM_PROJECT_VALUE
-  const resumeProjectPath = directory.trim()
-  const resumeProjectFolder = resumeProjectPath
-    ? claudeProjectFolderFromPath(resumeProjectPath)
-    : undefined
 
   useEffect(() => {
     if (open && !directory.trim() && activeProject?.path) {
@@ -138,28 +132,24 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     setBedrockModel(remembered.bedrock_model)
   }, [open])
 
-  // Fetch sessions when switching to resume mode
+  // Fetch sessions for the selected project AND its git worktrees in resume mode.
   useEffect(() => {
     if (mode !== 'resume' || isCodex) return
     let cancelled = false
     setSelectedSession(null)
     setRecentSessions([])
-    if (!resumeProjectFolder) {
+    const dir = directory.trim()
+    if (!dir) {
       setLoadingSessions(false)
       return () => { cancelled = true }
     }
     setLoadingSessions(true)
-    listSessions({
-      project_folder: resumeProjectFolder,
-      limit: 20,
-      sort_by: 'date',
-      sort_order: 'desc',
-    })
+    fetchResumableSessions(dir, 20)
       .then((data) => { if (!cancelled) setRecentSessions(data.sessions) })
       .catch(() => { if (!cancelled) setRecentSessions([]) })
       .finally(() => { if (!cancelled) setLoadingSessions(false) })
     return () => { cancelled = true }
-  }, [mode, isCodex, listSessions, resumeProjectFolder])
+  }, [mode, isCodex, directory])
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -418,8 +408,13 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                       onClick={() => setSelectedSession(session)}
                     >
                       <div className="flex items-center justify-between gap-2 min-w-0">
-                        <span className="text-sm font-medium truncate min-w-0">
-                          {session.project_name}
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-sm font-medium truncate min-w-0">
+                            {session.project_name}
+                          </span>
+                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {session.worktree_label}
+                          </span>
                         </span>
                         <span className="text-xs text-muted-foreground shrink-0">
                           {formatTimestamp(session.modified_at)}
