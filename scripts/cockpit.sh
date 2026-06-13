@@ -216,11 +216,9 @@ main() {
     esac
 }
 
-# Source-guard: when sourced (e.g. by tests) only define functions.
-# When executed directly (BASH_SOURCE[0] == $0), always run main regardless of
-# COCKPIT_NO_MAIN — that var only prevents execution when sourced.
+# Source-guard: run main only when executed directly. When the script is
+# sourced (e.g. by tests) BASH_SOURCE[0] != $0, so only the functions get
+# defined — sourcing is always side-effect free.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-elif [[ "${COCKPIT_NO_MAIN:-0}" != "1" ]]; then
     main "$@"
 fi
