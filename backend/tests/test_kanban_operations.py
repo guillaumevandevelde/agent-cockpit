@@ -27,3 +27,32 @@ async def test_can_persist_an_op_row():
         rows = (await s.execute(select(models.KanbanOp))).scalars().all()
         assert len(rows) == 1
         assert rows[0].payload["title"] == "x"
+
+
+from app.kanban.operations import apply_operation, get_device_id
+from app.kanban.models import KanbanCard
+
+
+@pytest.mark.asyncio
+async def test_create_card_materializes_a_card_row():
+    async with KanbanSessionLocal() as s:
+        card_id = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "First", "description": "d", "column": "Backlog"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, card_id)
+        assert card is not None
+        assert card.title == "First"
+        assert card.column == "Backlog"
+        assert card.title_hlc is not None
+
+
+@pytest.mark.asyncio
+async def test_device_id_is_stable():
+    async with KanbanSessionLocal() as s:
+        a = await get_device_id(s)
+        b = await get_device_id(s)
+        await s.commit()
+        assert a == b and len(a) > 0
