@@ -29,5 +29,17 @@ check "fresh run-log kept"   '[ -f "$TMP_LOGS/backend/run-new.log" ]'
 rm -rf "$TMP_LOGS"
 
 echo ""
+echo "Task 3: pid helpers"
+TMP_RUN="$(mktemp -d)"
+PIDF="$TMP_RUN/x.pid"
+check "is_running false when no pidfile" '! is_running "$PIDF"'
+sleep 30 & SLEEP_PID=$!
+echo "$SLEEP_PID" > "$PIDF"
+check "is_running true for live pid"     'is_running "$PIDF"'
+kill_tree "$SLEEP_PID"
+check "is_running false after kill_tree"  '! kill -0 "$SLEEP_PID" 2>/dev/null'
+rm -rf "$TMP_RUN"
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

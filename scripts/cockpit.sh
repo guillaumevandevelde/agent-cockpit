@@ -14,6 +14,30 @@ prune_logs() {
     find "$LOG_DIR" -type f -name 'run-*.log' -mtime +7 -delete 2>/dev/null || true
 }
 
+# True when the pid file exists and names a live process.
+is_running() {
+    local pidf="$1" pid
+    [ -f "$pidf" ] || return 1
+    pid="$(cat "$pidf" 2>/dev/null)"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+# Kill a process and its entire descendant tree (ported from dev.sh).
+kill_tree() {
+    local pid="$1"
+    [ -z "$pid" ] && return 0
+    local pids="$pid" frontier="$pid" next
+    while [ -n "$frontier" ]; do
+        next="$(pgrep -P $frontier 2>/dev/null | tr '\n' ' ')"
+        [ -z "$next" ] && break
+        pids="$pids $next"
+        frontier="$next"
+    done
+    kill -TERM $pids 2>/dev/null || true
+    sleep 1
+    kill -KILL $pids 2>/dev/null || true
+}
+
 cmd_status() { echo "status: not yet implemented"; }
 
 main() { echo "main: not yet implemented"; }
