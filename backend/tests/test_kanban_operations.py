@@ -56,3 +56,47 @@ async def test_device_id_is_stable():
         b = await get_device_id(s)
         await s.commit()
         assert a == b and len(a) > 0
+
+
+@pytest.mark.asyncio
+async def test_move_updates_column_with_lww():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None,
+            payload={"title": "t", "column": "Backlog"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "Doing"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "Doing"
+
+
+@pytest.mark.asyncio
+async def test_stale_move_is_ignored_by_lww():
+    # An op with an older HLC than the field's current HLC must not win.
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t"})
+        card = await s.get(KanbanCard, cid)
+        card.column = "Review"
+        card.column_hlc = "9999999999999:00000:dev-z"  # far-future HLC
+        await s.flush()
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "Done"})
+        await s.commit()
+        refreshed = await s.get(KanbanCard, cid)
+        assert refreshed.column == "Review"  # stale move rejected
+
+
+@pytest.mark.asyncio
+async def test_update_title_and_description():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "old"})
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="p", entity_id=cid,
+            payload={"title": "new", "description": "desc"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.title == "new"
+        assert card.description == "desc"

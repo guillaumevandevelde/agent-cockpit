@@ -72,6 +72,15 @@ async def apply_operation(
     return entity_id
 
 
+def _lww_set(card, field: str, value, hlc: str) -> None:
+    """Apply value to card.<field> only if hlc beats the field's current hlc."""
+    hlc_attr = f"{field}_hlc"
+    current = getattr(card, hlc_attr)
+    if hlc_max(current, hlc) == hlc and hlc != current:
+        setattr(card, field, value)
+        setattr(card, hlc_attr, hlc)
+
+
 async def _materialize(session, *, op_type, entity_type, project_key,
                        entity_id, payload, hlc) -> None:
     if entity_type == "card" and op_type == "create":
@@ -88,4 +97,23 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             ))
             await session.flush()
         return
-    # other op types added in Tasks E2-E4
+    if entity_type == "card" and op_type in ("move", "update"):
+        card = await session.get(KanbanCard, entity_id)
+        if card is None:
+            return
+        if op_type == "move":
+            if "column" in payload:
+                _lww_set(card, "column", payload["column"], hlc)
+            if payload.get("rank") is not None:
+                _lww_set(card, "rank", payload["rank"], hlc)
+        else:  # update
+            for f in ("title", "description"):
+                if f in payload and payload[f] is not None:
+                    _lww_set(card, f, payload[f], hlc)
+            for f in ("priority", "labels"):  # non-LWW scalar attrs
+                if f in payload:
+                    setattr(card, f, payload[f])
+        card.updated_at = _utcnow()
+        await session.flush()
+        return
+    # claim/release/comment/attach added in Tasks E3-E4
