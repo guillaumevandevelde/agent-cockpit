@@ -4,8 +4,8 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-LOG_DIR="$PROJECT_ROOT/logs"
-RUN_DIR="$LOG_DIR/.run"
+: "${LOG_DIR:="$PROJECT_ROOT/logs"}"
+: "${RUN_DIR:="$LOG_DIR/.run"}"
 
 # Delete per-run logs older than 7 days. Only touches run-*.log so PID files
 # and supervisor.log are never removed.
@@ -91,11 +91,136 @@ watch_service() {
     done
 }
 
-cmd_status() { echo "status: not yet implemented"; }
+# --- default service commands (overridable via env for tests) ---
+default_backend_cmd() {
+    echo "cd '$PROJECT_ROOT/backend' && source venv/bin/activate && exec uvicorn app.main:app --reload --port 8000 ${HOST:+--host $HOST}"
+}
+default_frontend_cmd() {
+    echo "cd '$PROJECT_ROOT/frontend' && exec npm run dev ${HOST:+-- --host $HOST}"
+}
 
-main() { echo "main: not yet implemented"; }
+# --- supervisor entrypoint (run detached by cmd_start) ---
+supervisor_main() {
+    mkdir -p "$RUN_DIR"
+    echo "$$" > "$RUN_DIR/supervisor.pid"
+    local backend_cmd frontend_cmd
+    backend_cmd="${COCKPIT_BACKEND_CMD:-}"
+    [ -z "$backend_cmd" ] && backend_cmd="$(default_backend_cmd)"
+    frontend_cmd="${COCKPIT_FRONTEND_CMD:-}"
+    [ -z "$frontend_cmd" ] && frontend_cmd="$(default_frontend_cmd)"
+    local children=()
+    trap 'for c in "${children[@]}"; do kill_tree "$c"; done; rm -f "$RUN_DIR"/*.pid; exit 0' TERM INT
+    sup_log "supervisor started (pid $$)"
+    watch_service backend  "$backend_cmd"  & children+=("$!")
+    watch_service frontend "$frontend_cmd" & children+=("$!")
+    wait
+}
+
+cmd_start() {
+    if is_running "$RUN_DIR/supervisor.pid"; then
+        echo "Cockpit draait al (supervisor pid $(cat "$RUN_DIR/supervisor.pid")). Gebruik 'restart' of 'status'."
+        return 1
+    fi
+    mkdir -p "$RUN_DIR"
+    prune_logs
+    # Detach: survive terminal close. Pass HOST + injected cmds through.
+    COCKPIT_BACKEND_CMD="${COCKPIT_BACKEND_CMD:-}" \
+    COCKPIT_FRONTEND_CMD="${COCKPIT_FRONTEND_CMD:-}" \
+    HOST="${HOST:-}" \
+    setsid bash "$SCRIPT_DIR/cockpit.sh" __supervisor </dev/null >>"$LOG_DIR/supervisor.log" 2>&1 &
+    disown 2>/dev/null || true
+    sleep 1
+    if is_running "$RUN_DIR/supervisor.pid"; then
+        echo "Cockpit gestart (supervisor pid $(cat "$RUN_DIR/supervisor.pid"))."
+        echo "Logs: ./scripts/cockpit.sh logs backend"
+    else
+        echo "Supervisor startte niet — zie $LOG_DIR/supervisor.log"
+        return 1
+    fi
+}
+
+cmd_stop() {
+    if is_running "$RUN_DIR/supervisor.pid"; then
+        local sup; sup="$(cat "$RUN_DIR/supervisor.pid")"
+        kill -TERM "$sup" 2>/dev/null || true
+        sleep 1
+        kill_tree "$sup"
+        echo "Cockpit gestopt."
+    else
+        echo "Cockpit draaide niet."
+    fi
+    rm -f "$RUN_DIR"/*.pid 2>/dev/null || true
+}
+
+cmd_restart() { cmd_stop; sleep 1; cmd_start; }
+
+cmd_status() {
+    local s b f
+    is_running "$RUN_DIR/supervisor.pid" && s="running (pid $(cat "$RUN_DIR/supervisor.pid"))" || s="stopped"
+    is_running "$RUN_DIR/backend.pid"    && b="running (pid $(cat "$RUN_DIR/backend.pid"))"    || b="stopped"
+    is_running "$RUN_DIR/frontend.pid"   && f="running (pid $(cat "$RUN_DIR/frontend.pid"))"   || f="stopped"
+    echo "supervisor: $s"
+    echo "backend:    $b"
+    echo "frontend:   $f"
+}
+
+cmd_logs() {
+    local svc="${1:-backend}"
+    local latest="$LOG_DIR/$svc/latest.log"
+    if [ -L "$latest" ] || [ -f "$latest" ]; then
+        tail -f "$latest"
+    else
+        echo "Geen log voor '$svc' (nog niet gestart?). Verwacht: $latest"
+        return 1
+    fi
+}
+
+usage() {
+    cat <<EOF
+Usage: $0 <command> [--host <host>]
+
+Commands:
+  start          Start de zelfhelende supervisor (gedetacheerd)
+  stop           Stop supervisor + processen
+  restart        Stop, dan start
+  status         Toon status van supervisor/backend/frontend
+  logs [svc]     Volg logs (svc = backend|frontend, default backend)
+
+Options:
+  --host <host>  Bind backend+frontend aan host (bv. 0.0.0.0)
+EOF
+}
+
+main() {
+    HOST=""
+    local cmd="${1:-}"; shift || true
+    # parse --host from remaining args
+    local rest=() svc_arg=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --host) HOST="${2:-}"; shift 2 ;;
+            --host=*) HOST="${1#*=}"; shift ;;
+            *) rest+=("$1"); shift ;;
+        esac
+    done
+    [ "${#rest[@]}" -gt 0 ] && svc_arg="${rest[0]}"
+    case "$cmd" in
+        start)      cmd_start ;;
+        stop)       cmd_stop ;;
+        restart)    cmd_restart ;;
+        status)     cmd_status ;;
+        logs)       cmd_logs "$svc_arg" ;;
+        __supervisor) supervisor_main ;;
+        -h|--help|"") usage ;;
+        *) echo "Onbekend commando: $cmd"; usage; return 1 ;;
+    esac
+}
 
 # Source-guard: when sourced (e.g. by tests) only define functions.
-if [[ "${COCKPIT_NO_MAIN:-0}" != "1" && "${BASH_SOURCE[0]}" == "${0}" ]]; then
+# When executed directly (BASH_SOURCE[0] == $0), always run main regardless of
+# COCKPIT_NO_MAIN — that var only prevents execution when sourced.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+elif [[ "${COCKPIT_NO_MAIN:-0}" != "1" ]]; then
     main "$@"
 fi

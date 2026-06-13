@@ -91,5 +91,31 @@ pkill -f "sleep 60" 2>/dev/null || true
 rm -rf "$TMP_W3"
 
 echo ""
+echo "Task 5: start/status/stop lifecycle (injected commands)"
+TMP_L="$(mktemp -d)"
+export COCKPIT_BACKEND_CMD="sleep 1000"
+export COCKPIT_FRONTEND_CMD="sleep 1000"
+# Run the real CLI in a subshell with isolated dirs.
+run_cli() { LOG_DIR="$TMP_L" RUN_DIR="$TMP_L/.run" bash "$SCRIPT_DIR/cockpit.sh" "$@"; }
+
+run_cli start >/dev/null 2>&1
+sleep 2
+SUP_PID="$(cat "$TMP_L/.run/supervisor.pid" 2>/dev/null)"
+check "supervisor pid recorded"   '[ -n "$SUP_PID" ] && kill -0 "$SUP_PID" 2>/dev/null'
+check "status reports running"    'run_cli status 2>&1 | grep -qi "running"'
+# Kill backend child -> supervisor must respawn it.
+BK_PID="$(cat "$TMP_L/.run/backend.pid" 2>/dev/null)"
+kill "$BK_PID" 2>/dev/null
+sleep 3
+BK_PID2="$(cat "$TMP_L/.run/backend.pid" 2>/dev/null)"
+check "backend respawned (new pid)" '[ -n "$BK_PID2" ] && [ "$BK_PID2" != "$BK_PID" ] && kill -0 "$BK_PID2" 2>/dev/null'
+run_cli stop >/dev/null 2>&1
+sleep 1
+check "supervisor gone after stop" '! kill -0 "$SUP_PID" 2>/dev/null'
+check "stop is idempotent"          'run_cli stop >/dev/null 2>&1'
+unset COCKPIT_BACKEND_CMD COCKPIT_FRONTEND_CMD
+rm -rf "$TMP_L"
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
