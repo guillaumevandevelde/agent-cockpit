@@ -133,9 +133,10 @@ method). For `target_kind == "session"`:
    `when_busy="wait_until_idle"`, `registry.wait_until_idle(session_id,
    timeout_s)`; then `send_text(target, message)`.
 3. **Exited** (`target` None) → `target = resume_spawn_for(...)`,
-   `action="resumed"`. The session_id survives `--resume`, so its
-   `SessionStart`→`Stop` hooks repopulate the registry; wait on
-   `registry.wait_until_idle(session_id, timeout_s)`, then inject.
+   `action="resumed"`. A freshly `--resume`d session loads the conversation and
+   waits for input — it does **not** fire a `Stop` hook — so we do **not**
+   wait-until-idle here. Instead sleep `resume_settle_s` (default 3s) to let the
+   TUI load, then inject.
 4. Timeout (default 1800s) and failure handling mirror the existing path.
 
 `DeliveryResult.action` gains a new value: `resumed`.
