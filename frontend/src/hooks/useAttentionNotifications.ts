@@ -4,6 +4,9 @@ import { useAttention } from '@/contexts/AttentionContext'
 import { usePresenceWebSocket } from '@/hooks/usePresenceWebSocket'
 import type { PresenceSession } from '@/types/presence'
 
+/** Only notify on a completed turn when it took at least this long (seconds). */
+const LONG_TURN_THRESHOLD_S = 5
+
 /** The slice of session state we diff against to detect attention-worthy transitions. */
 interface TrackedState {
   status: PresenceSession['status']
@@ -29,11 +32,17 @@ function detectAttention(prev: TrackedState, next: PresenceSession): AttentionEv
   const events: AttentionEvent[] = []
   const label = sessionLabel(next)
 
-  // Waiting for input: just stopped.
-  if (next.status === 'stopped' && prev.status !== 'stopped') {
+  // Answer ready: just stopped, and the turn took long enough that attention
+  // likely drifted. Quick turns (< threshold) and turns we can't time stay silent.
+  if (
+    next.status === 'stopped' &&
+    prev.status !== 'stopped' &&
+    next.last_turn_duration_s != null &&
+    next.last_turn_duration_s >= LONG_TURN_THRESHOLD_S
+  ) {
     events.push({
       title: `🟡 ${label} wacht op je input`,
-      body: next.status_text || 'Waiting for input',
+      body: `Antwoord klaar na ${Math.round(next.last_turn_duration_s)}s`,
       tag: `${next.session_id}:input`,
     })
   }

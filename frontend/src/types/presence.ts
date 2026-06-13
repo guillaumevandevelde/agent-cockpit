@@ -16,6 +16,7 @@ export interface PresenceSession {
   last_user_prompt?: string
   last_command?: string
   last_command_exit?: number | null
+  last_turn_duration_s?: number
   activity_buckets?: number[]
   total_events: number
   error_count: number
