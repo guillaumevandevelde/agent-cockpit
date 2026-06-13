@@ -53,8 +53,10 @@ watch_service() {
     local base="${COCKPIT_BACKOFF_BASE:-1}"
     local window="${COCKPIT_WINDOW:-30}"
     local max_fails=5
-    local fails=0 restart=0
+    local fails=0 restart=0 child=""
     mkdir -p "$svc_dir" "$RUN_DIR"
+    # On shutdown: reap the current child and stop — do not respawn.
+    trap 'kill_tree "$child" 2>/dev/null; rm -f "$pidf"; trap - TERM INT; exit 0' TERM INT
 
     while true; do
         local ts logf started ended ran
@@ -63,8 +65,9 @@ watch_service() {
         ln -sfn "$logf" "$svc_dir/latest.log"
         started=$(date +%s)
         # Run in its own session so kill_tree can reap the whole subtree.
+        # NOTE: cmd is executed as a shell string (not an argv array).
         setsid bash -c "$cmd" >>"$logf" 2>&1 &
-        local child=$!
+        child=$!
         echo "$child" > "$pidf"
         wait "$child"; local code=$?
         ended=$(date +%s); ran=$((ended - started))

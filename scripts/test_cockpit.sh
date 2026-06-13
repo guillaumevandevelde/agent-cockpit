@@ -73,5 +73,23 @@ check "slow-crash guard tripped"              '[ "$GUARD2" -ge 1 ]'
 rm -rf "$TMP_W2"
 
 echo ""
+echo "Task 4c: watch_service stops cleanly on TERM (no orphan/respawn)"
+TMP_W3="$(mktemp -d)"
+( export COCKPIT_NO_MAIN=1
+  source "$SCRIPT_DIR/cockpit.sh"
+  LOG_DIR="$TMP_W3" RUN_DIR="$TMP_W3/.run" watch_service longrun "sleep 60" ) &
+WATCHER=$!
+sleep 2
+CHILD_BEFORE="$(cat "$TMP_W3/.run/longrun.pid" 2>/dev/null)"
+kill -TERM "$WATCHER" 2>/dev/null
+sleep 3
+check "watcher exited on TERM"        '! kill -0 "$WATCHER" 2>/dev/null'
+check "child reaped (not running)"    '[ -n "$CHILD_BEFORE" ] && ! kill -0 "$CHILD_BEFORE" 2>/dev/null'
+check "pidfile removed on shutdown"   '[ ! -f "$TMP_W3/.run/longrun.pid" ]'
+# Make sure no stray sleep 60 from this test lingers
+pkill -f "sleep 60" 2>/dev/null || true
+rm -rf "$TMP_W3"
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
