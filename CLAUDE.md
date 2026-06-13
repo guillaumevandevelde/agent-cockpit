@@ -24,9 +24,17 @@ Web app for managing Claude Code configurations, MCP servers, commands, plugins,
 ./scripts/install.sh             # Setup venv, install deps, create dirs (requires Python 3.11+, Node 18+)
 
 # Development
-./scripts/dev.sh                 # Start both backend + frontend servers
+./scripts/dev.sh                 # Start both backend + frontend servers (attached, Ctrl+C to stop)
 cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000  # Backend only
 cd frontend && npm run dev       # Frontend only (port 5173)
+
+# Self-healing dev stack (detached supervisor: auto-restart on crash, logs to logs/, survives terminal close)
+./scripts/cockpit.sh start       # Start backend+frontend supervised in the background
+./scripts/cockpit.sh status      # Show supervisor/backend/frontend status
+./scripts/cockpit.sh logs backend  # Follow backend logs (or: logs frontend)
+./scripts/cockpit.sh restart     # Stop, then start
+./scripts/cockpit.sh stop        # Stop supervisor + all processes
+bash scripts/test_cockpit.sh     # Test the supervisor (bash harness)
 
 # Build
 ./scripts/build.sh               # Production frontend build → frontend/dist
