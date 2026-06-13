@@ -55,5 +55,23 @@ check "a run-log was written"             'ls "$TMP_W"/flap/run-*.log >/dev/null
 rm -rf "$TMP_W"
 
 echo ""
+echo "Task 4b: crash-loop guard with slow-ish crashes (regression)"
+TMP_W2="$(mktemp -d)"
+# Each run takes ~0.4s then fails. With window=1, none count as healthy,
+# so 5 consecutive crashes must trip the guard. The OLD code looped forever
+# here; timeout guarantees a hang shows up as a failure instead of blocking.
+timeout 15 bash -c '
+    export COCKPIT_NO_MAIN=1
+    source "'"$SCRIPT_DIR"'/cockpit.sh"
+    COCKPIT_BACKOFF_BASE=0 COCKPIT_WINDOW=1 LOG_DIR="'"$TMP_W2"'" \
+        watch_service slowflap "sleep 0.4; exit 1"
+' >/dev/null 2>&1
+RC=$?
+GUARD2="$(grep -c 'crash-loop' "$TMP_W2/supervisor.log" 2>/dev/null || echo 0)"
+check "slow-crash guard terminated (no hang)" '[ "$RC" -ne 124 ]'
+check "slow-crash guard tripped"              '[ "$GUARD2" -ge 1 ]'
+rm -rf "$TMP_W2"
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

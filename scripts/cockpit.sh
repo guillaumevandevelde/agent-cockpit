@@ -45,16 +45,16 @@ sup_log() {
 }
 
 # Supervise one service: run cmd, restart on exit with backoff, give up on
-# crash-loop (>= MAX_FAILS exits within WINDOW seconds).
+# crash-loop (MAX_FAILS consecutive fast crashes with no healthy run between).
 watch_service() {
     local name="$1" cmd="$2"
     local svc_dir="$LOG_DIR/$name"
     local pidf="$RUN_DIR/$name.pid"
     local base="${COCKPIT_BACKOFF_BASE:-1}"
-    local max_fails=5 window=30
-    local fails=0 window_start restart=0
+    local window="${COCKPIT_WINDOW:-30}"
+    local max_fails=5
+    local fails=0 restart=0
     mkdir -p "$svc_dir" "$RUN_DIR"
-    window_start=$(date +%s)
 
     while true; do
         local ts logf started ended ran
@@ -71,13 +71,14 @@ watch_service() {
         restart=$((restart + 1))
         sup_log "$name exited code=$code (ran ${ran}s, restart #$restart)"
 
-        # Reset the crash-loop window if the run was healthy.
+        # A run that stayed up past the health threshold counts as recovery.
         if [ "$ran" -gt "$window" ]; then
-            fails=0; window_start=$ended
+            fails=0
+        else
+            fails=$((fails + 1))
         fi
-        fails=$((fails + 1))
-        if [ $((ended - window_start)) -le "$window" ] && [ "$fails" -ge "$max_fails" ]; then
-            sup_log "$name crash-loop ($fails exits in <= ${window}s) — gestopt met herstarten, kijk in $svc_dir/latest.log"
+        if [ "$fails" -ge "$max_fails" ]; then
+            sup_log "$name crash-loop ($fails opeenvolgende snelle crashes) — gestopt met herstarten, kijk in $svc_dir/latest.log"
             rm -f "$pidf"
             return 0
         fi
