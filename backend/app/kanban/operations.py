@@ -159,3 +159,26 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         await session.flush()
         return
     # comment ops are pure log entries; nothing to materialize.
+
+
+async def rematerialize(session) -> None:
+    """Rebuild materialized tables by replaying the op-log in HLC order.
+    Safe to run anytime; also the basis for sync replay. ClaimRejected is
+    swallowed here so an already-owned card keeps its first claimant.
+    """
+    from sqlalchemy import delete
+    await session.execute(delete(KanbanDeliverable))
+    await session.execute(delete(KanbanCard))
+    await session.flush()
+    ops = (await session.execute(
+        select(KanbanOp).order_by(KanbanOp.hlc.asc())
+    )).scalars().all()
+    for op in ops:
+        try:
+            await _materialize(
+                session, op_type=op.op_type, entity_type=op.entity_type,
+                project_key=op.project_key, entity_id=op.entity_id,
+                payload=op.payload, hlc=op.hlc,
+            )
+        except ClaimRejected:
+            pass
