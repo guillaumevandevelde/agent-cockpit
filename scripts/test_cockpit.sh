@@ -41,5 +41,19 @@ check "is_running false after kill_tree"  '! kill -0 "$SLEEP_PID" 2>/dev/null'
 rm -rf "$TMP_RUN"
 
 echo ""
+echo "Task 4: watch_service crash-loop guard"
+TMP_W="$(mktemp -d)"
+mkdir -p "$TMP_W"
+# A command that always fails instantly -> must trip the crash-loop guard fast.
+COCKPIT_BACKOFF_BASE=0 LOG_DIR="$TMP_W" \
+    watch_service flap "exit 1" >/dev/null 2>&1
+GUARD_HITS="$(grep -c 'crash-loop' "$TMP_W/supervisor.log" 2>/dev/null || echo 0)"
+EXIT_LINES="$(grep -c 'flap exited' "$TMP_W/supervisor.log" 2>/dev/null || echo 0)"
+check "crash-loop guard tripped"          '[ "$GUARD_HITS" -ge 1 ]'
+check "logged ~5 exits before giving up"  '[ "$EXIT_LINES" -ge 5 ] && [ "$EXIT_LINES" -le 7 ]'
+check "a run-log was written"             'ls "$TMP_W"/flap/run-*.log >/dev/null 2>&1'
+rm -rf "$TMP_W"
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
