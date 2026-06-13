@@ -13,6 +13,13 @@ from sqlalchemy import select, func
 from app.kanban.hlc import HLC, hlc_max
 from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanMeta, KanbanOp
 
+class ClaimRejected(Exception):
+    """Raised when a claim loses to an existing earlier claim."""
+    def __init__(self, current_owner: str):
+        self.current_owner = current_owner
+        super().__init__(f"already claimed by {current_owner}")
+
+
 # One in-process clock per backend. node_id is bound lazily to the device_id.
 _clock: Optional[HLC] = None
 
@@ -116,4 +123,32 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         card.updated_at = _utcnow()
         await session.flush()
         return
-    # claim/release/comment/attach added in Tasks E3-E4
+    if entity_type == "card" and op_type == "claim":
+        card = await session.get(KanbanCard, entity_id)
+        if card is None:
+            return
+        # Conditional: a live claim with an equal/earlier claim_hlc wins.
+        if card.claimed_by is not None and hlc_max(card.claim_hlc, hlc) != hlc:
+            raise ClaimRejected(card.claimed_by)
+        if card.claimed_by is not None and card.claim_hlc and card.claim_hlc < hlc:
+            # An earlier claim already holds it; later claim is rejected.
+            raise ClaimRejected(card.claimed_by)
+        card.claimed_by = payload["claimed_by"]
+        card.claimed_at = _utcnow()
+        card.claim_hlc = hlc
+        card.updated_at = _utcnow()
+        await session.flush()
+        return
+
+    if entity_type == "card" and op_type == "release":
+        card = await session.get(KanbanCard, entity_id)
+        if card is None:
+            return
+        if hlc_max(card.claim_hlc, hlc) == hlc:  # release must be newer than the claim
+            card.claimed_by = None
+            card.claimed_at = None
+            card.claim_hlc = hlc
+            card.updated_at = _utcnow()
+            await session.flush()
+        return
+    # comment/attach added in Task E4

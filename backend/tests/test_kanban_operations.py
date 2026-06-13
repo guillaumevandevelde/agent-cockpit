@@ -100,3 +100,47 @@ async def test_update_title_and_description():
         card = await s.get(KanbanCard, cid)
         assert card.title == "new"
         assert card.description == "desc"
+
+
+from app.kanban.operations import ClaimRejected
+
+
+@pytest.mark.asyncio
+async def test_claim_sets_owner():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t"})
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "sess1@devA"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.claimed_by == "sess1@devA"
+
+
+@pytest.mark.asyncio
+async def test_second_claim_is_rejected():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t"})
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "first@devA"})
+        with pytest.raises(ClaimRejected):
+            await apply_operation(s, op_type="claim", entity_type="card",
+                project_key="p", entity_id=cid, payload={"claimed_by": "second@devB"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.claimed_by == "first@devA"
+
+
+@pytest.mark.asyncio
+async def test_release_clears_owner():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t"})
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "a@d"})
+        await apply_operation(s, op_type="release", entity_type="card",
+            project_key="p", entity_id=cid, payload={})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.claimed_by is None
