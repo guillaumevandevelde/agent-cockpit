@@ -144,3 +144,35 @@ async def test_release_clears_owner():
         await s.commit()
         card = await s.get(KanbanCard, cid)
         assert card.claimed_by is None
+
+
+from app.kanban.models import KanbanDeliverable, KanbanOp
+from sqlalchemy import select as _select
+
+
+@pytest.mark.asyncio
+async def test_attach_deliverable_creates_row():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t"})
+        await apply_operation(s, op_type="attach", entity_type="deliverable",
+            project_key="p", entity_id=cid,
+            payload={"kind": "pr", "ref": "https://github.com/u/r/pull/7"})
+        await s.commit()
+        rows = (await s.execute(_select(KanbanDeliverable))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].kind == "pr"
+        assert rows[0].card_id == cid
+
+
+@pytest.mark.asyncio
+async def test_comment_op_is_recorded_in_log():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t"})
+        await apply_operation(s, op_type="comment", entity_type="comment",
+            project_key="p", entity_id=cid, payload={"text": "looks good"})
+        await s.commit()
+        ops = (await s.execute(
+            _select(KanbanOp).where(KanbanOp.op_type == "comment"))).scalars().all()
+        assert ops[0].payload["text"] == "looks good"

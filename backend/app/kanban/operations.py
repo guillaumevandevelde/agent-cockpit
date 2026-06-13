@@ -151,4 +151,11 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             card.updated_at = _utcnow()
             await session.flush()
         return
-    # comment/attach added in Task E4
+    if entity_type == "deliverable" and op_type == "attach":
+        session.add(KanbanDeliverable(
+            id=uuid.uuid4().hex, card_id=entity_id,
+            kind=payload["kind"], ref=payload["ref"],
+        ))
+        await session.flush()
+        return
+    # comment ops are pure log entries; nothing to materialize.
