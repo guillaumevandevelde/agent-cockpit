@@ -7,6 +7,10 @@ from app.database import Base
 from app.models.constants import SessionStatus
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class Project(Base):
     """Project model for tracking Claude Code project directories."""
 
@@ -17,10 +21,10 @@ class Project(Base):
     path: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_accessed: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
 
 
@@ -38,7 +42,7 @@ class Backup(Base):
         Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -53,7 +57,7 @@ class Marketplace(Base):
     url: Mapped[str] = mapped_column(String, nullable=False)
     last_synced: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
 
 
@@ -72,7 +76,7 @@ class SessionCache(Base):
     total_messages: Mapped[int] = mapped_column(Integer, nullable=False)
     total_tool_calls: Mapped[int] = mapped_column(Integer, nullable=False)
     cached_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     file_hash: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -88,7 +92,7 @@ class UsageCache(Base):
     project_path: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
     data: Mapped[dict] = mapped_column(JSON, nullable=False)  # Aggregated usage data
     cached_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
     file_hash: Mapped[str | None] = mapped_column(String, nullable=True)  # For cache invalidation
 
@@ -113,7 +117,9 @@ class MCPServerCache(Base):
     resource_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     prompt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     capabilities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    cached_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    cached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
     config_hash: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (

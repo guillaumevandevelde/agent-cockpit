@@ -128,13 +128,13 @@ This starts:
 - Backend at http://localhost:8000 (API docs at http://localhost:8000/docs)
 - Frontend at http://localhost:5173
 
-To make the dev environment reachable from another machine on your LAN or tailnet (e.g. to monitor tmux sessions via Agent Bridge from a different host), pass `--host`:
+To make the dev environment reachable from another machine on your LAN or tailnet, set an API token and pass `--host`:
 
 ```bash
-./scripts/dev.sh --host 0.0.0.0
+API_TOKEN='replace-with-a-long-random-value' ./scripts/dev.sh --host 0.0.0.0
 ```
 
-Both servers will then bind to all interfaces.
+Both servers will then bind to all interfaces. The browser asks for the API token on its first protected request and keeps it in session storage. Configure `CORS_ORIGINS` explicitly when using a reverse proxy or a different frontend origin.
 
 To preview the documentation site:
 

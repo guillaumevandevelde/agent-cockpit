@@ -16,6 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Download, Search, Store, AlertCircle, Trash2, Package, ExternalLink, Loader2, Terminal, Bot, Puzzle, Server } from "lucide-react";
 import { CLICKABLE_CARD, MODAL_SIZES } from "@/lib/constants";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
+import { apiClient } from "@/lib/api";
 
 interface MarketplaceBrowserProps {
   marketplaces: MarketplaceResponse[];
@@ -78,13 +79,9 @@ export function MarketplaceBrowser({ marketplaces, installedPlugins, onInstall, 
     setLoading(true);
     setError(null);
 
-    fetch(`/api/v1/plugins/marketplace/${selectedMarketplace}/browse`)
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error("Failed to load marketplace");
-        }
-        return res.json();
-      })
+    apiClient<{ plugins: MarketplacePlugin[] }>(
+      `/api/v1/plugins/marketplace/${selectedMarketplace}/browse`
+    )
       .then((data) => {
         setPlugins(data.plugins || []);
         setFilteredPlugins(data.plugins || []);
@@ -104,13 +101,10 @@ export function MarketplaceBrowser({ marketplaces, installedPlugins, onInstall, 
     setPreviewDetails(null);
     
     try {
-      const response = await fetch(
+      const details = await apiClient<PluginDetails>(
         `/api/v1/plugins/marketplace/${selectedMarketplace}/plugin/${plugin.name}`
       );
-      if (response.ok) {
-        const details = await response.json();
-        setPreviewDetails(details);
-      }
+      setPreviewDetails(details);
     } catch {
       // Silently fail - we still show basic info
     } finally {

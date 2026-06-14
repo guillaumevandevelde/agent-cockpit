@@ -39,6 +39,21 @@ interface MemoryEditorProps {
   onSaveSuccess: () => void;
 }
 
+function getTemplate(scope: string): string {
+  switch (scope) {
+    case "user":
+      return "# User Preferences\n\nThese instructions apply to all projects.\n\n## General Preferences\n\n- \n\n## Code Style\n\n- \n";
+    case "project":
+      return "# Project Instructions\n\nThese instructions apply to this project.\n\n## Overview\n\nBrief description of the project.\n\n## Guidelines\n\n- \n\n## Important Files\n\n- \n";
+    case "local":
+      return "# Local Preferences\n\nPersonal preferences for this project (not committed to git).\n\n## Notes\n\n-\n";
+    case "auto":
+      return "# Memory Notes\n\n";
+    default:
+      return "";
+  }
+}
+
 export function MemoryEditor({
   open,
   onClose,
@@ -145,56 +160,6 @@ export function MemoryEditor({
       }
     } else {
       onClose();
-    }
-  };
-
-  const getTemplate = (scope: string): string => {
-    switch (scope) {
-      case "user":
-        return `# User Preferences
-
-These instructions apply to all projects.
-
-## General Preferences
-
-- 
-
-## Code Style
-
-- 
-`;
-      case "project":
-        return `# Project Instructions
-
-These instructions apply to this project.
-
-## Overview
-
-Brief description of the project.
-
-## Guidelines
-
-- 
-
-## Important Files
-
-- 
-`;
-      case "local":
-        return `# Local Preferences
-
-Personal preferences for this project (not committed to git).
-
-## Notes
-
--
-`;
-      case "auto":
-        return `# Memory Notes
-
-`;
-      default:
-        return "";
     }
   };
 

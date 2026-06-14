@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { API_BASE_URL } from '@/lib/constants'
-import { buildEndpoint } from '@/lib/api'
+import { apiFetch, buildEndpoint } from '@/lib/api'
 
 type Dataset = 'summary' | 'daily' | 'sessions' | 'monthly' | 'blocks'
 type Format = 'json' | 'csv'
@@ -25,20 +25,23 @@ export function ExportCard({ projectPath }: ExportCardProps) {
   const [dataset, setDataset] = useState<Dataset>('daily')
   const [format, setFormat] = useState<Format>('csv')
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     const endpoint = buildEndpoint('usage/export', {
       dataset,
       format,
       project_path: projectPath ?? undefined,
     })
-    // Trigger a real download so the browser honors Content-Disposition
     const url = `${API_BASE_URL}${endpoint}`
+    const response = await apiFetch(url)
+    if (!response.ok) throw new Error(`Export failed: HTTP ${response.status}`)
+    const blobUrl = URL.createObjectURL(await response.blob())
     const a = document.createElement('a')
-    a.href = url
+    a.href = blobUrl
     a.rel = 'noopener'
     document.body.appendChild(a)
     a.click()
     a.remove()
+    URL.revokeObjectURL(blobUrl)
   }
 
   return (

@@ -1,6 +1,6 @@
 """Project management service for discovering and managing Claude Code projects."""
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 from sqlalchemy import select
@@ -52,7 +52,7 @@ class ProjectService:
         if existing:
             # Update existing project
             existing.name = project_data.name
-            existing.last_accessed = datetime.utcnow()
+            existing.last_accessed = datetime.now(timezone.utc)
             await self.db.commit()
             await self.db.refresh(existing)
 
@@ -70,8 +70,8 @@ class ProjectService:
             name=project_data.name,
             path=project_data.path,
             is_active=False,
-            last_accessed=datetime.utcnow(),
-            created_at=datetime.utcnow(),
+            last_accessed=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
         )
 
         self.db.add(new_project)
@@ -196,7 +196,7 @@ class ProjectService:
             return None
 
         project.is_active = True
-        project.last_accessed = datetime.utcnow()
+        project.last_accessed = datetime.now(timezone.utc)
 
         await self.db.commit()
         await self.db.refresh(project)

@@ -1,14 +1,15 @@
 """FastAPI application entry point."""
+import os
+import secrets
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.config import settings
 from app.database import init_db
 from app.api.v1.router import router as api_v1_router
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-import os
 import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
 
 
@@ -48,15 +49,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_UNPROTECTED_PATHS = {"/health", f"{settings.api_v1_prefix}/health"}
+
+
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    """Require a bearer token when remote-access protection is configured."""
+    is_protected_api = request.url.path.startswith(settings.api_v1_prefix)
+    if settings.api_token and is_protected_api and request.url.path not in _UNPROTECTED_PATHS:
+        authorization = request.headers.get("authorization", "")
+        token = authorization.removeprefix("Bearer ").strip()
+        if not secrets.compare_digest(token, settings.api_token):
+            return JSONResponse(status_code=401, content={"detail": "Invalid API token"})
+    return await call_next(request)
+
+
 # Configure CORS
-# Accept any origin reaching the dev (5173) or prod (8000) ports — this lets
-# the UI load over localhost, LAN, or tailnet without requiring env config.
-# allow_credentials must be False when using a wildcard regex (browsers reject
-# "*"-style wildcards with credentials); our API does not rely on cookies.
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://[^/]+(:\d+)?$",
-    allow_credentials=False,
+    allow_origins=settings.cors_origins,
+    allow_credentials=settings.cors_credentials,
     allow_methods=settings.cors_methods,
     allow_headers=settings.cors_headers,
 )

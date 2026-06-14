@@ -372,7 +372,7 @@ class CommandService:
             ValueError: If command already exists or invalid scope
         """
         if command.scope == "user":
-            base_dir = get_user_commands_dir()
+            base_dir = get_claude_user_commands_dir()
         elif command.scope == "project":
             base_dir = get_project_commands_dir(project_path)
         else:

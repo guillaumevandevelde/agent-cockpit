@@ -3,9 +3,10 @@ import json
 import os
 import platform
 import re
+import shlex
 import subprocess
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -473,7 +474,7 @@ class BackupService:
                         contents.commands.append(cmd_file.stem)
 
         manifest = BackupManifest(
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             claude_code_version=None if scope == "codex" else _get_claude_code_version(),
             platform=_get_current_platform(),
             scope=scope,
@@ -896,9 +897,11 @@ class BackupService:
             return False, f"No install command for plugin {plugin_info.name}"
 
         try:
+            command = shlex.split(plugin_info.install_command)
+            if not command:
+                return False, f"Invalid install command for plugin {plugin_info.name}"
             result = subprocess.run(
-                plugin_info.install_command,
-                shell=True,
+                command,
                 capture_output=True,
                 text=True,
                 timeout=300,

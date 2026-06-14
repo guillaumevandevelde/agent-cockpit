@@ -1,6 +1,6 @@
 """Pydantic schemas for API models."""
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConfigFile(BaseModel):
@@ -69,8 +69,7 @@ class ProjectResponse(ProjectBase):
     last_accessed: str
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProjectListResponse(BaseModel):
@@ -582,9 +581,7 @@ class Hook(BaseModel):
     allowedEnvVars: Optional[List[str]] = None  # Env vars for http-type hooks
     scope: str  # "user" or "project"
 
-    class Config:
-        # Map async_ to "async" in JSON
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class HookCreate(BaseModel):
@@ -913,8 +910,7 @@ class BackupResponse(BackupBase):
     created_at: str
     size_bytes: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BackupListResponse(BaseModel):

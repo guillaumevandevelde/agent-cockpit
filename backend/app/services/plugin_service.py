@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import httpx
@@ -656,7 +656,7 @@ class PluginService:
                 stderr=str(e),
             )
 
-    def uninstall_plugin(
+    async def uninstall_plugin(
         self, name: str, project_path: Optional[str] = None
     ) -> bool:
         """
@@ -725,7 +725,7 @@ class PluginService:
                     del enabled_plugins[key]
 
                 if keys_to_remove:
-                    write_json_file(settings_file, settings_data)
+                    await write_json_file(settings_file, settings_data)
                     removed_any = True
             except Exception as e:
                 print(f"Error updating settings.json: {e}")
@@ -911,7 +911,7 @@ class PluginService:
             name=marketplace.name,
             url=marketplace.url,
             last_synced=None,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         self.db.add(new_marketplace)
@@ -1006,7 +1006,7 @@ class PluginService:
             self._marketplace_cache[name] = plugins
 
             # Update last_synced timestamp
-            marketplace.last_synced = datetime.utcnow()
+            marketplace.last_synced = datetime.now(timezone.utc)
             await self.db.commit()
 
             return True
@@ -1143,7 +1143,7 @@ class PluginService:
         data = read_json_file(settings_file) or {}
         return data.get("auto_update", {})
 
-    def set_marketplace_auto_update(self, name: str, enabled: bool) -> bool:
+    async def set_marketplace_auto_update(self, name: str, enabled: bool) -> bool:
         """
         Set auto-update preference for a marketplace.
 
@@ -1162,7 +1162,7 @@ class PluginService:
             data["auto_update"] = {}
         data["auto_update"][name] = enabled
 
-        return write_json_file(settings_file, data)
+        return await write_json_file(settings_file, data)
 
     def browse_marketplace_from_files(self, name: str) -> List[dict]:
         """

@@ -42,7 +42,10 @@ echo "Activating virtual environment..."
 source venv/bin/activate
 
 echo "Installing Python dependencies..."
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
+
+echo "Applying database migrations..."
+alembic upgrade head
 
 # Initialize database (handled on first run by FastAPI lifespan)
 echo "Backend setup complete!"

@@ -3,7 +3,7 @@ import asyncio
 import hashlib
 import json
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -282,7 +282,7 @@ class MCPService:
         resources_list = test_result.get("resources") or []
         prompts_list = test_result.get("prompts") or []
         is_success = test_result.get("success", False)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Prepare common cache data
         cache_data = {

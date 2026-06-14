@@ -27,6 +27,7 @@ import {
   Folder,
   HardDrive,
 } from "lucide-react";
+import { apiClient } from "@/lib/api";
 
 interface PluginInstallWizardProps {
   plugin: MarketplacePlugin | null;
@@ -76,9 +77,8 @@ export function PluginInstallWizard({
     setStep("installing");
 
     try {
-      const response = await fetch("/api/v1/plugins/install", {
+      const data = await apiClient<PluginInstallResponse>("/api/v1/plugins/install", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: plugin.name,
           marketplace_name: marketplaceName,
@@ -86,7 +86,6 @@ export function PluginInstallWizard({
         }),
       });
 
-      const data = await response.json();
       setInstallResult(data);
       setStep("result");
     } catch (error) {

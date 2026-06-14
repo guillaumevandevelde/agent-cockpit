@@ -181,7 +181,7 @@ def update_marketplace(name: str):
 
 
 @router.put("/plugins/marketplace/{name}/auto-update", status_code=200)
-def set_marketplace_auto_update(name: str, request: dict):
+async def set_marketplace_auto_update(name: str, request: dict):
     """
     Set auto-update preference for a marketplace.
 
@@ -192,7 +192,7 @@ def set_marketplace_auto_update(name: str, request: dict):
     try:
         enabled = request.get("enabled", False)
         service = PluginService()
-        success = service.set_marketplace_auto_update(name, enabled)
+        success = await service.set_marketplace_auto_update(name, enabled)
 
         if not success:
             raise HTTPException(
@@ -358,7 +358,7 @@ def get_plugin(
 
 
 @router.delete("/plugins/{name}", status_code=204)
-def uninstall_plugin(
+async def uninstall_plugin(
     name: str,
     project_path: Optional[str] = Query(None, description="Optional project path")
 ):
@@ -369,7 +369,7 @@ def uninstall_plugin(
     """
     try:
         service = PluginService()
-        success = service.uninstall_plugin(name, project_path=project_path)
+        success = await service.uninstall_plugin(name, project_path=project_path)
 
         if not success:
             raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")

@@ -1,10 +1,12 @@
 """API endpoints for Presence Dashboard — webhook receiver, REST, and WebSocket."""
 import json
+import secrets
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.config import settings
 from app.models.constants import SessionStatus
 from app.models.schemas import (
     PresenceConfigSnippet,
@@ -113,9 +115,15 @@ async def get_config_snippet():
         "tool_result:(.tool_response // .tool_result), "
         "user_prompt:(.prompt // .user_prompt)}"
     )
+    auth_header = (
+        f" -H 'Authorization: Bearer {settings.api_token}'"
+        if settings.api_token
+        else ""
+    )
     command = (
         f"jq -c --arg p \"$TMUX_PANE\" '{jq_filter}' | "
-        f"curl -sf -X POST {url} -H 'Content-Type: application/json' -d @-"
+        f"curl -sf -X POST {url} -H 'Content-Type: application/json'"
+        f"{auth_header} -d @-"
     )
     snippet = {
         "hooks": {
@@ -137,6 +145,11 @@ async def presence_websocket(
     db: AsyncSession = Depends(get_db),
 ):
     """WebSocket for live presence updates. On connect, sends all current sessions."""
+    if settings.api_token:
+        supplied_token = ws.query_params.get("api_token", "")
+        if not secrets.compare_digest(supplied_token, settings.api_token):
+            await ws.close(code=4401, reason="Invalid API token")
+            return
     await manager.connect(ws)
     try:
         # Send initial state

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Store, Plus, Trash2, RefreshCw, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import { apiClient } from "@/lib/api";
 
 interface MarketplaceManagerProps {
   marketplaces: MarketplaceResponse[];
@@ -26,18 +27,10 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     setSubmitting(true);
 
     try {
-      const response = await fetch("/api/v1/plugins/marketplaces", {
+      const result = await apiClient<{ name: string }>("/api/v1/plugins/marketplaces", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input: marketplaceInput }),
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Failed to add marketplace");
-      }
-
-      const result = await response.json();
       toast.success(`Marketplace "${result.name}" added successfully`);
       setMarketplaceInput("");
       setShowAddForm(false);
@@ -55,13 +48,9 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     }
 
     try {
-      const response = await fetch(`/api/v1/plugins/marketplaces/${name}`, {
+      await apiClient(`/api/v1/plugins/marketplaces/${name}`, {
         method: "DELETE",
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to remove marketplace");
-      }
 
       toast.success(`Marketplace "${name}" removed`);
       onRefresh();
@@ -74,14 +63,9 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     setUpdating(name);
 
     try {
-      const response = await fetch(`/api/v1/plugins/marketplace/${name}/update`, {
+      await apiClient(`/api/v1/plugins/marketplace/${name}/update`, {
         method: "POST",
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Failed to update marketplace");
-      }
 
       toast.success(`Marketplace "${name}" updated successfully`);
       onRefresh();
@@ -96,16 +80,10 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     setTogglingAutoUpdate(name);
 
     try {
-      const response = await fetch(`/api/v1/plugins/marketplace/${name}/auto-update`, {
+      await apiClient(`/api/v1/plugins/marketplace/${name}/auto-update`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Failed to toggle auto-update");
-      }
 
       toast.success(
         `Auto-update ${enabled ? "enabled" : "disabled"} for "${name}"`

@@ -105,6 +105,7 @@ FRONTEND_HOST_ARGS=()
 if [ -n "$HOST" ]; then
     BACKEND_HOST_ARGS=(--host "$HOST")
     FRONTEND_HOST_ARGS=(-- --host "$HOST")
+    export CORS_ORIGINS="${CORS_ORIGINS:-[\"http://${HOST}:5173\"]}"
     echo "Binding servers to host: $HOST"
 fi
 
@@ -113,6 +114,7 @@ BACKEND_DISPLAY_HOST="${HOST:-localhost}"
 echo "Starting backend server on http://${BACKEND_DISPLAY_HOST}:8000..."
 cd "$PROJECT_ROOT/backend"
 source venv/bin/activate
+alembic upgrade head
 uvicorn app.main:app --reload --port 8000 "${BACKEND_HOST_ARGS[@]}" &
 BACKEND_PID=$!
 

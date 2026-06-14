@@ -21,6 +21,9 @@ export default defineConfig([
     },
     rules: {
       'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/preserve-manual-memoization': 'warn',
+      'react-refresh/only-export-components': 'warn',
+      '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
 ])

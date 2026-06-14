@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Package, Download, Search, CheckCircle, Loader2 } from "lucide-react";
 import { CLICKABLE_CARD } from "@/lib/constants";
+import { apiClient } from "@/lib/api";
 
 interface AllAvailablePluginsProps {
   installedPlugins: Plugin[];
@@ -37,11 +38,9 @@ export function AllAvailablePlugins({
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch("/api/v1/plugins/available");
-        if (!response.ok) {
-          throw new Error("Failed to fetch available plugins");
-        }
-        const data = await response.json();
+        const data = await apiClient<{ plugins: MarketplacePlugin[] }>(
+          "/api/v1/plugins/available"
+        );
         setPlugins(data.plugins || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load plugins");

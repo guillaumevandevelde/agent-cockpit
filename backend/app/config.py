@@ -1,5 +1,16 @@
 """Application configuration using pydantic-settings."""
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _read_version() -> str:
+    try:
+        return (PROJECT_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0.1.0"
 
 
 class Settings(BaseSettings):
@@ -13,7 +24,7 @@ class Settings(BaseSettings):
 
     # Application settings
     app_name: str = "Claude Cockpit"
-    app_version: str = "0.1.0"
+    app_version: str = _read_version()
     debug: bool = False
 
     # API settings
@@ -29,8 +40,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./claude_registry.db"
 
     # Server settings
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
+    api_token: str | None = None
 
 
 # Global settings instance

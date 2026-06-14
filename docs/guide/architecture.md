@@ -52,7 +52,7 @@ Codex diagnostics are intentionally privacy-conservative. History, model cache, 
 
 ### Database
 
-SQLite at `backend/claude_registry.db`, auto-created on first run via `create_all()`. No migration system — schema changes require deleting the database.
+SQLite at `backend/claude_registry.db`. Alembic migrations are applied by the install/dev scripts and container entrypoint before startup.
 
 ## Frontend
 

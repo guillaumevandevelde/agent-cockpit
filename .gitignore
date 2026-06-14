@@ -59,5 +59,9 @@ htmlcov/
 # Claude Cockpit specific
 ~/.claude-registry/
 
+# Tooling artifacts
+.claude/worktrees/
+.playwright-mcp/
+
 # Git worktrees
 .worktrees/

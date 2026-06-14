@@ -1,6 +1,8 @@
 """File utilities for reading and writing JSON files."""
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any, Optional
 
 
@@ -41,8 +43,8 @@ async def write_json_file(file_path: Path, data: dict[str, Any]) -> bool:
         # Ensure parent directory exists
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+        _atomic_write(file_path, content)
         return True
     except Exception:
         return False
@@ -83,8 +85,7 @@ async def write_text_file(file_path: Path, content: str) -> bool:
         # Ensure parent directory exists
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        _atomic_write(file_path, content)
         return True
     except Exception:
         return False
@@ -114,3 +115,29 @@ def directory_exists(dir_path: Path) -> bool:
         True if directory exists, False otherwise
     """
     return dir_path.exists() and dir_path.is_dir()
+
+
+def _atomic_write(file_path: Path, content: str) -> None:
+    """Write a UTF-8 file atomically, preserving its existing mode."""
+    existing_mode = file_path.stat().st_mode if file_path.exists() else None
+    temp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=file_path.parent,
+            prefix=f".{file_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temp_file:
+            temp_file.write(content)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_path = Path(temp_file.name)
+
+        if existing_mode is not None:
+            os.chmod(temp_path, existing_mode)
+        os.replace(temp_path, file_path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
