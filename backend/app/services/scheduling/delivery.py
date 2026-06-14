@@ -1,10 +1,14 @@
 """Resolve target -> spawn if needed -> wait until idle -> inject."""
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
 
 from app.services.scheduling.idle_state import IdleState, idle_state as default_idle
-from app.services.scheduling.session_resolver import resolve_target, spawn_for
+from app.services.scheduling.session_registry import SessionRegistry, session_registry
+from app.services.scheduling.session_resolver import (
+    resolve_target, spawn_for, resolve_session_target, resume_spawn_for, AMBIGUOUS,
+)
 from app.services.scheduling.tmux_inject import send_text
 
 logger = logging.getLogger(__name__)
@@ -20,14 +24,26 @@ class DeliveryResult:
 
 
 class DeliveryEngine:
-    def __init__(self, idle_state: IdleState | None = None):
+    def __init__(self, idle_state: IdleState | None = None,
+                 registry: SessionRegistry | None = None):
         self.idle = idle_state or default_idle
+        self.registry = registry or session_registry
 
     async def deliver(self, *, project_dir: str, message: str,
                       permission_mode: str = "acceptEdits",
                       on_missing_session: str = "spawn",
                       when_busy: str = "wait_until_idle",
-                      timeout_s: float = 1800) -> DeliveryResult:
+                      timeout_s: float = 1800,
+                      target_kind: str = "project",
+                      target_session_id: str | None = None,
+                      project_folder: str | None = None,
+                      resume_settle_s: float = 3.0) -> DeliveryResult:
+        if target_kind == "session":
+            return await self._deliver_session(
+                session_id=target_session_id, project_folder=project_folder,
+                cwd=project_dir, message=message, permission_mode=permission_mode,
+                when_busy=when_busy, timeout_s=timeout_s, resume_settle_s=resume_settle_s,
+            )
         target = resolve_target(project_dir)
         action = "used_existing"
         if target is None:
@@ -46,6 +62,44 @@ class DeliveryEngine:
                 return DeliveryResult(outcome="timeout", action=action,
                                       resolved_session=target,
                                       wait_duration_s=int(time.monotonic() - wait_start))
+
+        ok = send_text(target, message)
+        waited = int(time.monotonic() - wait_start)
+        if ok:
+            return DeliveryResult(outcome="success", action=action,
+                                  resolved_session=target, wait_duration_s=waited)
+        return DeliveryResult(outcome="failed", action=action, resolved_session=target,
+                              wait_duration_s=waited, error="send-keys failed")
+
+    async def _deliver_session(self, *, session_id: str, project_folder: str | None,
+                               cwd: str, message: str, permission_mode: str,
+                               when_busy: str, timeout_s: float,
+                               resume_settle_s: float) -> DeliveryResult:
+        target = resolve_session_target(session_id, cwd)
+        if target is AMBIGUOUS:
+            return DeliveryResult(
+                outcome="failed",
+                error="ambiguous live sessions in cwd; cannot safely resume",
+            )
+
+        wait_start = time.monotonic()
+        if target is not None:
+            action = "used_existing"
+            if when_busy == "wait_until_idle" and not self.registry.is_idle(session_id):
+                became_idle = await self.registry.wait_until_idle(session_id, timeout_s)
+                if not became_idle:
+                    return DeliveryResult(
+                        outcome="timeout", action=action, resolved_session=target,
+                        wait_duration_s=int(time.monotonic() - wait_start),
+                    )
+        else:
+            try:
+                target = resume_spawn_for(session_id, project_folder, cwd, permission_mode)
+            except Exception as e:  # resume spawn raises ValueError
+                return DeliveryResult(outcome="failed", error=f"resume spawn failed: {e}")
+            action = "resumed"
+            if resume_settle_s:
+                await asyncio.sleep(resume_settle_s)
 
         ok = send_text(target, message)
         waited = int(time.monotonic() - wait_start)
