@@ -15,6 +15,15 @@ from app.kanban.schemas import (
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
 
+
+def _write_json_atomic(target: Path, data: dict) -> None:
+    """Write JSON via a temp file + os.replace so a crash mid-write can't
+    corrupt an existing .mcp.json."""
+    import os
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, target)
+
 router = APIRouter(prefix="/kanban", tags=["Kanban"])
 
 
@@ -135,7 +144,7 @@ async def enable(payload: EnableRequest):
     data.setdefault("mcpServers", {})["cockpit-kanban"] = {
         "type": "sse", "url": MCP_SSE_URL,
     }
-    mcp_file.write_text(json.dumps(data, indent=2))
+    _write_json_atomic(mcp_file, data)
     return {"project_key": key, "enabled": True}
 
 
@@ -147,7 +156,7 @@ async def disable(payload: EnableRequest):
         try:
             data = json.loads(mcp_file.read_text())
             data.get("mcpServers", {}).pop("cockpit-kanban", None)
-            mcp_file.write_text(json.dumps(data, indent=2))
+            _write_json_atomic(mcp_file, data)
         except json.JSONDecodeError:
             pass
     return {"enabled": False}

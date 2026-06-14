@@ -4,6 +4,7 @@ apply_operation(): assign HLC -> append KanbanOp -> update materialized state.
 All writes (REST and MCP) go through here. rematerialize() rebuilds the
 materialized tables from the op-log (added in Task E5).
 """
+import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -21,7 +22,10 @@ class ClaimRejected(Exception):
 
 
 # One in-process clock per backend. node_id is bound lazily to the device_id.
+# The lock serializes clock acquisition + tick so concurrent requests (UI + an
+# MCP agent, or two agents) get distinct, monotonic HLCs.
 _clock: Optional[HLC] = None
+_clock_lock = asyncio.Lock()
 
 
 def _utcnow() -> datetime:
@@ -61,14 +65,22 @@ async def apply_operation(
     entity_id: Optional[str], payload: dict,
 ) -> str:
     """Append an op and fold it into materialized state. Returns entity_id."""
-    clock = await _clock_for(session)
-    device_id = await get_device_id(session)
-    hlc = clock.tick()
+    async with _clock_lock:
+        clock = await _clock_for(session)
+        device_id = await get_device_id(session)
+        hlc = clock.tick()
     entity_id = entity_id or uuid.uuid4().hex
+    # Mutations arrive with an empty project_key (callers don't know it); stamp
+    # the op with the owning card's key so the op-log stays self-describing and
+    # per-project sync/filtering works. Creates carry their own project_key.
+    if not project_key:
+        owner = await session.get(KanbanCard, entity_id)
+        if owner is not None:
+            project_key = owner.project_key
     seq = await _next_seq(session, device_id)
 
     session.add(KanbanOp(
-        op_id=f"{device_id}:{seq}", device_id=device_id, seq=seq, hlc=hlc,
+        op_id=uuid.uuid4().hex, device_id=device_id, seq=seq, hlc=hlc,
         project_key=project_key, entity_type=entity_type, entity_id=entity_id,
         op_type=op_type, payload=payload,
     ))

@@ -176,3 +176,31 @@ async def test_comment_op_is_recorded_in_log():
         ops = (await s.execute(
             _select(KanbanOp).where(KanbanOp.op_type == "comment"))).scalars().all()
         assert ops[0].payload["text"] == "looks good"
+
+
+@pytest.mark.asyncio
+async def test_mutation_ops_inherit_card_project_key():
+    # Callers pass project_key="" on move/claim/etc; the op-log must still
+    # record the owning card's key (needed for per-project sync/filtering).
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="git:proj-a", entity_id=None, payload={"title": "t"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="", entity_id=cid, payload={"column": "Doing"})
+        await apply_operation(s, op_type="attach", entity_type="deliverable",
+            project_key="", entity_id=cid, payload={"kind": "note", "ref": "x"})
+        await s.commit()
+        ops = (await s.execute(_select(KanbanOp))).scalars().all()
+        assert {o.project_key for o in ops} == {"git:proj-a"}
+
+
+@pytest.mark.asyncio
+async def test_op_ids_are_unique_across_many_ops():
+    async with KanbanSessionLocal() as s:
+        for i in range(25):
+            await apply_operation(s, op_type="create", entity_type="card",
+                project_key="p", entity_id=None, payload={"title": f"c{i}"})
+        await s.commit()
+        op_ids = [o.op_id for o in (await s.execute(_select(KanbanOp))).scalars().all()]
+        assert len(op_ids) == 25
+        assert len(set(op_ids)) == 25  # no collisions
