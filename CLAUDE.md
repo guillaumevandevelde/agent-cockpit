@@ -1,13 +1,14 @@
 # ⚠️ Fork: Claude Cockpit — lees dit eerst
 
-Dit is een **fork** van claude-deck, hernoemd naar **Claude Cockpit**. We bouwen er een
-**scheduled-messages** feature bovenop (timer/cron → injectie in CC-sessies via tmux).
+Dit is een **fork** van claude-deck, hernoemd naar **Claude Cockpit**, met daarbovenop een
+**scheduled-messages** feature (timer/cron → injectie in CC-sessies via tmux) en een
+per-project **kanban**-board met agent self-service via MCP. Beide zijn gebouwd en gemerged.
 
-- **Volledige oriëntatie + huidige taak:** `docs/cockpit/00-orientation.md`
-- **NU bezig — FASE 1 VALIDATIE:** `docs/cockpit/fase-1-validation.md`
-  (bevestigen dat claude-deck's CC Bridge werkt onder WSL; **bouw nog niets van fase 2**).
-- **Fase 2-ontwerp (na validatie):** `docs/cockpit/fase-2-spec.md`
-- **Omgeving:** WSL Ubuntu, user `guillaume`, Docker (`docker compose up -d` → :8000), tmux, claude CLI.
+- **Volledige oriëntatie:** `docs/cockpit/00-orientation.md`
+- **Ontwerp-/planningsdocs:** `docs/cockpit/` (fase-1/2, kanban, pane-attention).
+- **Kanban follow-ups (post-v1 backlog):** `docs/cockpit/kanban-followups.md`
+- **Omgeving:** WSL Ubuntu, user `guillaume`. De dev-stack draait **direct in WSL**
+  (uvicorn `:8000` + Vite `:5173`), niet in Docker. Verder: tmux, claude CLI.
 
 Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur etc.).
 
@@ -58,17 +59,18 @@ backend/                  # FastAPI + async SQLAlchemy + aiosqlite
 ├── app/
 │   ├── main.py          # FastAPI app, CORS, lifespan
 │   ├── config.py        # pydantic-settings (defaults in code, no .env required)
-│   ├── database.py      # Async SQLAlchemy engine + session
-│   ├── api/v1/          # 17 route modules (router.py aggregates all)
+│   ├── database.py      # Async SQLAlchemy engine + session (device-local store)
+│   ├── kanban/          # Kanban domain: separate SQLite store, ops log, MCP server
+│   ├── api/v1/          # ~25 route groups (router.py aggregates all)
 │   ├── models/          # database.py (ORM), schemas.py (Pydantic)
-│   ├── services/        # 18 service files (business logic)
+│   ├── services/        # ~45 service files across services/ and its subpackages
 │   └── utils/           # path_utils, file_utils
 
 frontend/                 # React 19 + Vite + TypeScript + shadcn/ui
 ├── src/
-│   ├── App.tsx          # Routes (17 pages)
-│   ├── features/        # Feature modules (16 dirs, each with page + components + API + types)
-│   ├── components/      # layout/, shared/, ui/ (19 shadcn components)
+│   ├── App.tsx          # Routes (~26 pages)
+│   ├── features/        # Feature modules (22 dirs, each with page + components + API + types)
+│   ├── components/      # layout/, shared/, ui/ (20 shadcn components)
 │   ├── hooks/           # useApi, useProjects, useSessionsApi, useUsageApi
 │   ├── contexts/        # ProjectContext, ThemeContext
 │   ├── types/           # Shared TypeScript types (15 files)
@@ -77,19 +79,22 @@ frontend/                 # React 19 + Vite + TypeScript + shadcn/ui
 
 ### Features
 
-Config, MCP Servers, Commands, Plugins, Hooks, Permissions, Agents, Skills, Memory, Projects, Backup, Output Styles, Status Line, Sessions, CC Bridge, Usage, Dashboard
+Config, MCP Servers, Commands, Plugins, Hooks, Permissions, Agents, Skills, Memory, Projects, Backup, Output Styles, Status Line, Sessions, CC Bridge, Usage, Dashboard, Scheduled Messages, Kanban, Presence, Plans, Context
 
 ### API Routes
 
-All under `/api/v1/`: health, config, projects, cli, mcp, commands, plugins, hooks, permissions, agents, backup, output-styles, statusline, sessions, cc-bridge, usage, memory
+All under `/api/v1/`: health, config, projects, cli, mcp, commands, plugins, hooks, permissions, agents, backup, output-styles, statusline, sessions, cc-bridge, agent-bridge, usage, memory, context, plans, presence, providers, codex-config, status, scheduled-messages, kanban.
+
+The kanban MCP (SSE) server is mounted separately at `/kanban-mcp` (outside `/api/v1`); agents point their `.mcp.json` at `http://localhost:8000/kanban-mcp/sse`.
 
 ## Key Decisions
 
 - **Backend**: FastAPI + async SQLAlchemy + aiosqlite + SQLite
 - **Frontend**: React 19 + Vite 7 + TypeScript + TailwindCSS + shadcn/ui
-- **Database**: SQLite at `backend/claude_registry.db` (auto-created via `create_all`, no migrations)
+- **Database**: two SQLite stores, both auto-created via `create_all` (no migration tool — see Gotchas): `backend/claude_registry.db` (device-local data) and `backend/kanban.db` (portable, sync-able kanban domain)
 - **API**: RESTful `/api/v1/`, Vite proxies `/api` → `http://localhost:8000`
 - **CORS**: `localhost:5173`
+- **Auth**: optional bearer token (`api_token` in config, unset by default = open/local-only). When set, `require_api_token` (`main.py`) protects `/api/v1/*` **and** the `/kanban-mcp` mount; WebSocket endpoints carry their own token checks.
 
 ## Code Style
 
@@ -112,7 +117,7 @@ GitHub Actions workflows in `.github/workflows/`:
 ## Gotchas
 
 - No `.env` file needed — all config has defaults in `backend/app/config.py`
-- Database lives at `backend/claude_registry.db`, created automatically on first run
-- No database migration system — schema changes require deleting the db
-- Frontend tests not yet set up
+- Databases live at `backend/claude_registry.db` and `backend/kanban.db`, created automatically on first run
+- No database migration system — tables are created with `create_all`; schema changes require deleting the db (the kanban materialized tables can also be rebuilt via `rematerialize()` from its ops log). Migrations are intentionally deferred to post-v1; do not reintroduce Alembic without wiring it into startup.
+- Frontend tests are minimal (Vitest is configured; only `src/lib/api.test.ts` exists so far)
 - Backups stored in `~/.claude-registry/backups/`

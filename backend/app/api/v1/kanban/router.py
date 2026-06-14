@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from app.config import settings
 from app.kanban.db import KanbanSessionLocal
 from app.kanban import service
 from app.kanban.operations import apply_operation, ClaimRejected
@@ -141,9 +142,12 @@ async def enable(payload: EnableRequest):
             data = json.loads(mcp_file.read_text())
         except json.JSONDecodeError:
             data = {}
-    data.setdefault("mcpServers", {})["cockpit-kanban"] = {
-        "type": "sse", "url": MCP_SSE_URL,
-    }
+    server: dict = {"type": "sse", "url": MCP_SSE_URL}
+    # When remote-access protection is on, the MCP mount requires the bearer
+    # token too (see require_api_token in main.py), so agents must send it.
+    if settings.api_token:
+        server["headers"] = {"Authorization": f"Bearer {settings.api_token}"}
+    data.setdefault("mcpServers", {})["cockpit-kanban"] = server
     _write_json_atomic(mcp_file, data)
     return {"project_key": key, "enabled": True}
 

@@ -6,11 +6,14 @@ These came out of the final code review (2026-06-14). The merge-blockers were fi
 ## Should fix before activating sync / multi-project hardening
 
 - **I4b — `.mcp.json` write path allowlisting.** `enable`/`disable` write `.mcp.json`
-  into any directory the backend user can write, reachable via the unauthenticated,
-  `0.0.0.0`-bound, open-CORS API. The atomic-write corruption risk is fixed; the
-  *write-anywhere* surface is not. This matches the whole app's existing
-  unauthenticated-local posture, so it's deferred — but before exposing Cockpit beyond
-  localhost, validate `project_path` against the known/registered projects list.
+  into any directory the backend user can write. The atomic-write corruption risk is
+  fixed; the *write-anywhere* surface is not — before exposing Cockpit beyond localhost,
+  validate `project_path` against the known/registered projects list.
+  - _Update (2026-06-14):_ the auth posture this item assumed is partly addressed.
+    An optional bearer token (`api_token`) now guards `/api/v1/*` **and** the
+    `/kanban-mcp` mount, and the server binds to `127.0.0.1` (not `0.0.0.0`) by default
+    (commit `60c28a3`). `enable` now also embeds the token in the generated `.mcp.json`
+    when set. The remaining gap is purely the `project_path` allowlisting above.
 
 ## UX / polish
 

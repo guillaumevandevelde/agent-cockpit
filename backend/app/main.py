@@ -52,13 +52,18 @@ app = FastAPI(
 )
 
 _UNPROTECTED_PATHS = {"/health", f"{settings.api_v1_prefix}/health"}
+# Paths that must require the bearer token when protection is configured. The
+# kanban MCP server is mounted at /kanban-mcp (outside /api/v1), so it would
+# otherwise bypass the middleware and stay open to agents on the network.
+_PROTECTED_PREFIXES = (settings.api_v1_prefix, "/kanban-mcp")
 
 
 @app.middleware("http")
 async def require_api_token(request: Request, call_next):
     """Require a bearer token when remote-access protection is configured."""
-    is_protected_api = request.url.path.startswith(settings.api_v1_prefix)
-    if settings.api_token and is_protected_api and request.url.path not in _UNPROTECTED_PATHS:
+    path = request.url.path
+    is_protected = path.startswith(_PROTECTED_PREFIXES)
+    if settings.api_token and is_protected and path not in _UNPROTECTED_PATHS:
         authorization = request.headers.get("authorization", "")
         token = authorization.removeprefix("Bearer ").strip()
         if not secrets.compare_digest(token, settings.api_token):

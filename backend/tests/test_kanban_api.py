@@ -57,3 +57,18 @@ async def test_enable_writes_mcp_entry(tmp_path):
         mcp_file = tmp_path / ".mcp.json"
         assert mcp_file.exists()
         assert "cockpit-kanban" in mcp_file.read_text()
+
+
+@pytest.mark.asyncio
+async def test_enable_embeds_auth_header_when_token_set(tmp_path, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "api_token", "test-secret")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/enable",
+            json={"project_path": str(tmp_path)},
+            headers={"Authorization": "Bearer test-secret"})
+        assert r.status_code == 200, r.text
+    import json
+    server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["cockpit-kanban"]
+    assert server["headers"]["Authorization"] == "Bearer test-secret"
