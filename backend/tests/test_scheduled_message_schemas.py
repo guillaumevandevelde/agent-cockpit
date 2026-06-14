@@ -29,3 +29,29 @@ def test_valid_cron():
         cron_expr="0 9 * * 1-5",
     )
     assert m.cron_expr == "0 9 * * 1-5"
+
+
+def test_session_target_requires_session_id_and_folder():
+    with pytest.raises(ValidationError):
+        ScheduledMessageCreate(
+            target_project="/proj", message="hi", trigger_type="once",
+            fire_at="2026-01-01T00:00:00", target_kind="session",
+        )
+
+
+def test_session_target_valid():
+    m = ScheduledMessageCreate(
+        target_project="/proj", message="hi", trigger_type="once",
+        fire_at="2026-01-01T00:00:00", target_kind="session",
+        target_session_id="abc-123", project_folder="-home-guillaume-proj",
+    )
+    assert m.target_kind == "session"
+    assert m.target_session_id == "abc-123"
+
+
+def test_project_target_defaults():
+    m = ScheduledMessageCreate(
+        target_project="/proj", message="hi", trigger_type="once",
+        fire_at="2026-01-01T00:00:00",
+    )
+    assert m.target_kind == "project"

@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 TriggerType = Literal["once", "cron"]
 PermissionMode = Literal["default", "acceptEdits", "bypass"]
 Status = Literal["scheduled", "pending_delivery", "delivered", "failed", "cancelled"]
+TargetKind = Literal["project", "session"]
 
 
 class ScheduledMessageCreate(BaseModel):
@@ -18,6 +19,10 @@ class ScheduledMessageCreate(BaseModel):
     permission_mode: PermissionMode = "acceptEdits"
     on_missing_session: Literal["spawn", "skip"] = "spawn"
     when_busy: Literal["wait_until_idle", "send_now"] = "wait_until_idle"
+    target_kind: TargetKind = "project"
+    target_session_id: Optional[str] = None
+    project_folder: Optional[str] = None
+    session_preview: Optional[str] = None
 
     @model_validator(mode="after")
     def _check_trigger(self):
@@ -25,6 +30,12 @@ class ScheduledMessageCreate(BaseModel):
             raise ValueError("fire_at is required for trigger_type=once")
         if self.trigger_type == "cron" and not self.cron_expr:
             raise ValueError("cron_expr is required for trigger_type=cron")
+        if self.target_kind == "session" and (
+            not self.target_session_id or not self.project_folder
+        ):
+            raise ValueError(
+                "target_session_id and project_folder are required for target_kind=session"
+            )
         return self
 
 
@@ -62,6 +73,10 @@ class ScheduledMessageResponse(BaseModel):
     permission_mode: PermissionMode
     enabled: bool
     status: Status
+    target_kind: TargetKind = "project"
+    target_session_id: Optional[str] = None
+    project_folder: Optional[str] = None
+    session_preview: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     last_fired_at: Optional[datetime] = None
