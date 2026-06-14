@@ -6,8 +6,11 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
+
+_KANBAN_DISPATCH_JOB_ID = "kanban-dispatch"
 
 
 def _job_id(message_id: int) -> str:
@@ -57,6 +60,22 @@ class SchedulerService:
             await run_scheduled_delivery(message_id)
         except Exception:
             logger.exception("delivery failed for message %s", message_id)
+
+    def schedule_kanban_dispatch(self, interval_seconds: int = 10) -> None:
+        """Poll the kanban board for unclaimed Todo cards on enabled projects."""
+        self._sched.add_job(
+            self._run_kanban_dispatch,
+            trigger=IntervalTrigger(seconds=interval_seconds),
+            id=_KANBAN_DISPATCH_JOB_ID, replace_existing=True,
+            coalesce=True, max_instances=1, misfire_grace_time=interval_seconds,
+        )
+
+    async def _run_kanban_dispatch(self) -> None:
+        from app.kanban.dispatch import run_dispatch_tick
+        try:
+            await run_dispatch_tick()
+        except Exception:
+            logger.exception("kanban dispatch tick failed")
 
 
 # Module-level singleton

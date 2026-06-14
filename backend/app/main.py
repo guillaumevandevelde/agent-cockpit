@@ -37,6 +37,8 @@ async def lifespan(app: FastAPI):
                 scheduler_service.schedule_once(m.id, m.fire_at)
             elif m.trigger_type == "cron" and m.cron_expr:
                 scheduler_service.schedule_cron(m.id, m.cron_expr, m.timezone)
+    # Poll the kanban board for unclaimed Todo cards on auto-dispatch projects.
+    scheduler_service.schedule_kanban_dispatch()
     yield
     # Shutdown: Cleanup
     scheduler_service.shutdown()
