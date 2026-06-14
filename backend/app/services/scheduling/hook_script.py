@@ -11,7 +11,7 @@ import json
 def render_hook_command(event: str, port: int = 8000) -> str:
     url = f"http://localhost:{port}/api/v1/scheduled-messages/hook-event"
     return (
-        "jq -c --arg ev %s '{event:$ev, session_id:.session_id, cwd:.cwd}' "
+        "jq -c --arg ev %s '{event:$ev, session_id:.session_id, cwd:.cwd, tmux_pane:env.TMUX_PANE}' "
         "| curl -s -X POST -H 'Content-Type: application/json' -d @- %s >/dev/null 2>&1 || true"
     ) % (json.dumps(event), url)
 

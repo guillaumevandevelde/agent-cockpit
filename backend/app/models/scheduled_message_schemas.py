@@ -87,3 +87,4 @@ class HookEvent(BaseModel):
     event: Literal["UserPromptSubmit", "Stop", "Notification", "SessionStart"]
     session_id: str
     cwd: str
+    tmux_pane: Optional[str] = None
