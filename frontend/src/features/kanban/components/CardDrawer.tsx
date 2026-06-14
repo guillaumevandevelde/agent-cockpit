@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -27,8 +28,14 @@ export function CardDrawer({
   }, [card.id]);
 
   const act = async (fn: () => Promise<unknown>) => {
-    await fn();
-    onChanged();
+    try {
+      await fn();
+      onChanged();
+    } catch {
+      // e.g. a 409 when the card was already claimed elsewhere
+      toast.error("Action failed — the card may have changed; reloading");
+      onChanged();
+    }
   };
 
   return (

@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { kanbanApi } from "../api";
 
@@ -14,8 +15,13 @@ export function EnableKanbanToggle({
         size="sm"
         variant="outline"
         onClick={async () => {
-          await kanbanApi.enable(projectPath);
-          onChanged();
+          try {
+            await kanbanApi.enable(projectPath);
+            toast.success("Kanban enabled (MCP registered)");
+            onChanged();
+          } catch {
+            toast.error("Failed to enable kanban");
+          }
         }}
       >
         Enable kanban (register MCP)
@@ -24,8 +30,13 @@ export function EnableKanbanToggle({
         size="sm"
         variant="ghost"
         onClick={async () => {
-          await kanbanApi.disable(projectPath);
-          onChanged();
+          try {
+            await kanbanApi.disable(projectPath);
+            toast.success("Kanban disabled");
+            onChanged();
+          } catch {
+            toast.error("Failed to disable kanban");
+          }
         }}
       >
         Disable

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { Button } from "@/components/ui/button";
 import { Board } from "./components/Board";
@@ -18,11 +19,15 @@ export default function KanbanPage() {
 
   const reload = useCallback(async () => {
     if (!projectKey) return;
-    const { items } = await kanbanApi.listCards(projectKey);
-    setCards(items);
-    setOpen((prev) =>
-      prev ? (items.find((c) => c.id === prev.id) ?? null) : null
-    );
+    try {
+      const { items } = await kanbanApi.listCards(projectKey);
+      setCards(items);
+      setOpen((prev) =>
+        prev ? (items.find((c) => c.id === prev.id) ?? null) : null
+      );
+    } catch {
+      toast.error("Failed to load board");
+    }
   }, [projectKey]);
 
   useEffect(() => {
@@ -36,8 +41,13 @@ export default function KanbanPage() {
 
   const onMove = async (cardId: string, column: Col) => {
     setCards((cs) => cs.map((c) => (c.id === cardId ? { ...c, column } : c)));
-    await kanbanApi.move(cardId, column);
-    void reload();
+    try {
+      await kanbanApi.move(cardId, column);
+    } catch {
+      toast.error("Failed to move card");
+    } finally {
+      void reload(); // reconcile optimistic state with the server
+    }
   };
 
   if (!projectPath) return <div className="p-6">Select a project first.</div>;
@@ -67,9 +77,13 @@ export default function KanbanPage() {
           open
           onClose={() => setCreating(false)}
           onSubmit={async ({ title, description }) => {
-            await kanbanApi.createCard({ project_key: projectKey, title, description });
-            setCreating(false);
-            void reload();
+            try {
+              await kanbanApi.createCard({ project_key: projectKey, title, description });
+              setCreating(false);
+              void reload();
+            } catch {
+              toast.error("Failed to create card");
+            }
           }}
         />
       )}
