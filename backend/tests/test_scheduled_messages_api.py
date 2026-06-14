@@ -55,3 +55,15 @@ async def test_hook_event_updates_idle_state():
                           json={"event": "Stop", "session_id": "s1", "cwd": "/tmp/idletest"})
         assert r.status_code == 200
     assert idle_state.is_idle("/tmp/idletest") is True
+
+
+@pytest.mark.asyncio
+async def test_hook_event_populates_session_registry():
+    from app.services.scheduling.session_registry import session_registry
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/scheduled-messages/hook-event",
+                          json={"event": "SessionStart", "session_id": "sX",
+                                "cwd": "/proj", "tmux_pane": "%7"})
+        assert r.status_code == 200
+    assert session_registry.pane_for("sX") == "%7"
