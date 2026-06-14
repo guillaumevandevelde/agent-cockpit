@@ -117,6 +117,7 @@ GitHub Actions workflows in `.github/workflows/`:
 ## Gotchas
 
 - No `.env` file needed — all config has defaults in `backend/app/config.py`
+- Backend deps live in two places that must stay in sync: `backend/requirements.txt` (runtime; what `install.sh` + CI install via `requirements-dev.txt`) and `backend/pyproject.toml` `[project.dependencies]`. Add a runtime dep to both; dev-only tools go in `requirements-dev.txt` + `[project.optional-dependencies].dev`.
 - Databases live at `backend/claude_registry.db` and `backend/kanban.db`, created automatically on first run
 - No database migration system — tables are created with `create_all`; schema changes require deleting the db (the kanban materialized tables can also be rebuilt via `rematerialize()` from its ops log). Migrations are intentionally deferred to post-v1; do not reintroduce Alembic without wiring it into startup.
 - Frontend tests are minimal (Vitest is configured; only `src/lib/api.test.ts` exists so far)
