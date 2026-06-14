@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch
-from app.services.scheduling.delivery import DeliveryEngine
+from app.database import Base, engine, AsyncSessionLocal
+from app.services.scheduling.delivery import DeliveryEngine, DeliveryResult
 from app.services.scheduling.session_resolver import AMBIGUOUS
 from app.services.scheduling.session_registry import SessionRegistry
 
@@ -79,3 +80,35 @@ async def test_resume_spawn_failure_marks_failed():
     assert res.outcome == "failed"
     assert "boom" in (res.error or "")
     send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_crud_passes_session_fields_to_engine():
+    from app.models.scheduled_message import ScheduledMessage
+    from app.services.scheduling import crud
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with AsyncSessionLocal() as s:
+        msg = ScheduledMessage(
+            target_project="/proj", message="go", trigger_type="once",
+            fire_at="2026-01-01T00:00:00", target_kind="session",
+            target_session_id="s1", project_folder="-home-guillaume-proj",
+        )
+        s.add(msg)
+        await s.commit()
+        await s.refresh(msg)
+        mid = msg.id
+
+    captured = {}
+
+    async def fake_deliver(**kwargs):
+        captured.update(kwargs)
+        return DeliveryResult(outcome="success", action="resumed", resolved_session="new:0.0")
+
+    with patch.object(crud._engine, "deliver", side_effect=fake_deliver):
+        await crud.run_scheduled_delivery(mid)
+
+    assert captured["target_kind"] == "session"
+    assert captured["target_session_id"] == "s1"
+    assert captured["project_folder"] == "-home-guillaume-proj"
