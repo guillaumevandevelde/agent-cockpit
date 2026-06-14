@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 
     # Database settings
     database_url: str = "sqlite+aiosqlite:///./claude_registry.db"
+    # Separate store for the kanban board domain (portable, sync-able).
+    # Kept apart from database_url, which holds device-local data.
+    kanban_database_url: str = "sqlite+aiosqlite:///./kanban.db"
 
     # Server settings
     host: str = "127.0.0.1"

@@ -29,6 +29,7 @@ const PlanDetailPage = lazy(() => import('./features/plans/PlanDetailPage').then
 const CCBridgePage = lazy(() => import('./features/cc-bridge/CCBridgePage').then((m) => ({ default: m.CCBridgePage })))
 const PresencePage = lazy(() => import('./features/presence/PresencePage').then((m) => ({ default: m.PresencePage })))
 const ScheduledMessagesPage = lazy(() => import('./features/scheduled-messages/ScheduledMessagesPage').then((m) => ({ default: m.ScheduledMessagesPage })))
+const KanbanPage = lazy(() => import('./features/kanban/KanbanPage'))
 
 function App() {
   return (
@@ -65,6 +66,7 @@ function App() {
                 <Route path="plans" element={<PlansPage />} />
                 <Route path="context" element={<ContextPage />} />
                 <Route path="usage" element={<UsagePage />} />
+                <Route path="kanban" element={<KanbanPage />} />
               </Route>
             </Routes>
             </Suspense>

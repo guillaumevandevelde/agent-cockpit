@@ -33,6 +33,7 @@ import {
   MonitorPlay,
   Radio,
   CalendarClock,
+  KanbanSquare,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -64,6 +65,7 @@ const commonNavigation: NavGroup[] = [
     items: [
       { name: 'Presence', href: '/presence', icon: Radio },
       { name: 'Scheduled Messages', href: '/scheduled-messages', icon: CalendarClock },
+      { name: 'Kanban', href: '/kanban', icon: KanbanSquare },
       { name: 'Plans', href: '/plans', icon: ClipboardList },
       { name: 'Backup', href: '/backup', icon: Archive, capability: 'backup' },
     ],

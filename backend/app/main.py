@@ -18,6 +18,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup: Initialize database
     await init_db()
+    from app.kanban.db import init_kanban_db
+    await init_kanban_db()
     # Clean up any orphaned relay processes from previous runs
     from app.services.cc_bridge.pty_relay import close_all_relays, cleanup_orphaned_relays
     cleanup_orphaned_relays()
@@ -75,6 +77,11 @@ app.add_middleware(
 
 # Include API routers
 app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
+
+# Mount the kanban MCP server (SSE) at /kanban-mcp. Agents point their
+# .mcp.json at http://localhost:8000/kanban-mcp/sse.
+from app.kanban.mcp_server import mcp as kanban_mcp  # noqa: E402
+app.mount("/kanban-mcp", kanban_mcp.sse_app())
 
 
 @app.get("/health")

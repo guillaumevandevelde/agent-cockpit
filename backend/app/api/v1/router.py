@@ -24,6 +24,7 @@ from .providers import router as providers_router
 from .codex_config import router as codex_config_router
 from .status import router as status_router
 from .scheduled_messages.router import router as scheduled_messages_router
+from .kanban.router import router as kanban_router
 
 router = APIRouter()
 
@@ -64,3 +65,4 @@ router.include_router(providers_router, tags=["Providers"])
 router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)
+router.include_router(kanban_router)
