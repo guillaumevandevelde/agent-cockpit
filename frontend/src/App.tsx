@@ -28,6 +28,7 @@ import { PlanDetailPage } from './features/plans/PlanDetailPage'
 import { CCBridgePage } from './features/cc-bridge/CCBridgePage'
 import { PresencePage } from './features/presence/PresencePage'
 import { ScheduledMessagesPage } from './features/scheduled-messages/ScheduledMessagesPage'
+import KanbanPage from './features/kanban/KanbanPage'
 
 function App() {
   return (
@@ -63,6 +64,7 @@ function App() {
                 <Route path="plans" element={<PlansPage />} />
                 <Route path="context" element={<ContextPage />} />
                 <Route path="usage" element={<UsagePage />} />
+                <Route path="kanban" element={<KanbanPage />} />
               </Route>
             </Routes>
           </BrowserRouter>
