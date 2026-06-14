@@ -79,3 +79,8 @@ class ActivityEntry(BaseModel):
 class EnableRequest(BaseModel):
     project_path: str
     slug: Optional[str] = None  # override when no git remote
+
+
+class AutodispatchRequest(BaseModel):
+    project_key: str
+    enabled: bool

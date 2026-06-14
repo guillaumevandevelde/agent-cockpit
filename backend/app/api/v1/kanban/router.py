@@ -11,6 +11,7 @@ from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
     CommentRequest, AttachRequest, ActivityEntry, COLUMNS, EnableRequest,
+    AutodispatchRequest,
 )
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
@@ -165,3 +166,20 @@ async def disable(payload: EnableRequest):
 @router.get("/project-key")
 async def project_key(project_path: str = Query(...)):
     return {"project_key": resolve_project_key(project_path)}
+
+
+@router.get("/autodispatch")
+async def get_autodispatch(project_key: str = Query(...)):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {"project_key": project_key,
+                "enabled": await dispatch.is_autodispatch_enabled(s, project_key)}
+
+
+@router.post("/autodispatch")
+async def set_autodispatch(payload: AutodispatchRequest):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_autodispatch(s, payload.project_key, payload.enabled)
+        await s.commit()
+    return {"project_key": payload.project_key, "enabled": payload.enabled}
