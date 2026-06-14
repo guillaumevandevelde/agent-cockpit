@@ -44,3 +44,16 @@ async def test_claim_conflict_returns_409():
         r2 = await ac.post(f"/api/v1/kanban/cards/{cid}/claim",
             json={"claimed_by": "second@d"})
         assert r2.status_code == 409, r2.text
+
+
+@pytest.mark.asyncio
+async def test_enable_writes_mcp_entry(tmp_path):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/enable",
+            json={"project_path": str(tmp_path)})
+        assert r.status_code == 200, r.text
+        assert r.json()["project_key"]
+        mcp_file = tmp_path / ".mcp.json"
+        assert mcp_file.exists()
+        assert "cockpit-kanban" in mcp_file.read_text()

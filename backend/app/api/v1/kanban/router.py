@@ -1,13 +1,19 @@
 """REST API for the kanban board. All mutations go through apply_operation."""
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Query, status
 
 from app.kanban.db import KanbanSessionLocal
 from app.kanban import service
 from app.kanban.operations import apply_operation, ClaimRejected
+from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
-    CommentRequest, AttachRequest, ActivityEntry, COLUMNS,
+    CommentRequest, AttachRequest, ActivityEntry, COLUMNS, EnableRequest,
 )
+
+MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
 
 router = APIRouter(prefix="/kanban", tags=["Kanban"])
 
@@ -111,3 +117,42 @@ async def attach(cid: str, payload: AttachRequest):
             project_key="", entity_id=cid, payload=payload.model_dump())
         await s.commit()
         return await _reload(s, cid)
+
+
+@router.post("/enable")
+async def enable(payload: EnableRequest):
+    path = Path(payload.project_path)
+    if not path.is_dir():
+        raise HTTPException(422, "project_path is not a directory")
+    key = f"slug:{payload.slug}" if payload.slug else resolve_project_key(str(path))
+    mcp_file = path / ".mcp.json"
+    data = {}
+    if mcp_file.exists():
+        try:
+            data = json.loads(mcp_file.read_text())
+        except json.JSONDecodeError:
+            data = {}
+    data.setdefault("mcpServers", {})["cockpit-kanban"] = {
+        "type": "sse", "url": MCP_SSE_URL,
+    }
+    mcp_file.write_text(json.dumps(data, indent=2))
+    return {"project_key": key, "enabled": True}
+
+
+@router.post("/disable")
+async def disable(payload: EnableRequest):
+    path = Path(payload.project_path)
+    mcp_file = path / ".mcp.json"
+    if mcp_file.exists():
+        try:
+            data = json.loads(mcp_file.read_text())
+            data.get("mcpServers", {}).pop("cockpit-kanban", None)
+            mcp_file.write_text(json.dumps(data, indent=2))
+        except json.JSONDecodeError:
+            pass
+    return {"enabled": False}
+
+
+@router.get("/project-key")
+async def project_key(project_path: str = Query(...)):
+    return {"project_key": resolve_project_key(project_path)}

@@ -74,3 +74,8 @@ class ActivityEntry(BaseModel):
     entity_type: str
     payload: dict
     created_at: datetime
+
+
+class EnableRequest(BaseModel):
+    project_path: str
+    slug: Optional[str] = None  # override when no git remote
