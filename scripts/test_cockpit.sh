@@ -41,6 +41,54 @@ check "is_running false after kill_tree"  '! kill -0 "$SLEEP_PID" 2>/dev/null'
 rm -rf "$TMP_RUN"
 
 echo ""
+echo "Task 3b: is_running identity check (PID-reuse safety)"
+TMP_ID="$(mktemp -d)"
+PIDF2="$TMP_ID/sup.pid"
+sleep 60 & FOREIGN=$!
+echo "$FOREIGN" > "$PIDF2"
+check "is_running true without pattern"          'is_running "$PIDF2"'
+check "is_running false for foreign cmdline"     '! is_running "$PIDF2" "cockpit.sh __supervisor"'
+check "is_running true for matching cmdline"     'is_running "$PIDF2" "sleep 60"'
+kill "$FOREIGN" 2>/dev/null
+rm -rf "$TMP_ID"
+
+echo ""
+echo "Task 3c: ensure_fresh_boot wipes pid files from a previous boot"
+TMP_B="$(mktemp -d)"
+mkdir -p "$TMP_B/.run"
+echo 99999 > "$TMP_B/.run/supervisor.pid"
+echo "old-boot-id-from-before" > "$TMP_B/.run/boot_id"
+( RUN_DIR="$TMP_B/.run" LOG_DIR="$TMP_B"; ensure_fresh_boot )
+check "stale pid file removed on boot change"  '[ ! -f "$TMP_B/.run/supervisor.pid" ]'
+check "boot_id refreshed"                      '[ "$(cat "$TMP_B/.run/boot_id")" != "old-boot-id-from-before" ]'
+# Same boot id => pid files are left untouched.
+echo 12345 > "$TMP_B/.run/frontend.pid"
+( RUN_DIR="$TMP_B/.run" LOG_DIR="$TMP_B"; ensure_fresh_boot )
+check "pid file kept when boot id unchanged"   '[ -f "$TMP_B/.run/frontend.pid" ]'
+rm -rf "$TMP_B"
+
+echo ""
+echo "Task 3d: kill_tree reaps deep descendants (multi-child pgrep fix)"
+TMP_K="$(mktemp -d)"
+# Tree: root bash -> (sleep, inner bash) ; inner bash -> grandchild sleep.
+# The old space-separated pgrep -P missed the grandchild.
+setsid bash -c '
+  sleep 300 &
+  bash -c "sleep 300 & echo \$! > '"$TMP_K"'/gc.pid; wait" &
+  wait
+' >/dev/null 2>&1 &
+ROOT=$!
+sleep 1
+GC="$(cat "$TMP_K/gc.pid" 2>/dev/null)"
+check "grandchild was spawned"          '[ -n "$GC" ] && kill -0 "$GC" 2>/dev/null'
+kill_tree "$ROOT"
+sleep 1
+check "kill_tree reaped grandchild"     '[ -n "$GC" ] && ! kill -0 "$GC" 2>/dev/null'
+check "kill_tree reaped root"           '! kill -0 "$ROOT" 2>/dev/null'
+pkill -f "sleep 300" 2>/dev/null || true
+rm -rf "$TMP_K"
+
+echo ""
 echo "Task 4: watch_service crash-loop guard"
 TMP_W="$(mktemp -d)"
 mkdir -p "$TMP_W"

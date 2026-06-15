@@ -14,12 +14,66 @@ prune_logs() {
     find "$LOG_DIR" -type f -name 'run-*.log' -mtime +7 -delete 2>/dev/null || true
 }
 
-# True when the pid file exists and names a live process.
+# Read a process's argv as a space-joined string ("" if the process is gone).
+proc_cmdline() {
+    local pid="$1"
+    [ -r "/proc/$pid/cmdline" ] || return 0
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null
+}
+
+# True when the pid file names a live process. With a second arg, ALSO require
+# that process's argv to contain that substring. PIDs are recycled (especially
+# from low numbers right after a reboot), so a leftover pid file can name a
+# completely unrelated process — e.g. a tmux or claude session. Without this
+# check, stop/restart would TERM/KILL that foreign tree. The pattern makes us
+# act only on a process we can prove is ours.
 is_running() {
-    local pidf="$1" pid
+    local pidf="$1" pattern="${2:-}" pid
     [ -f "$pidf" ] || return 1
     pid="$(cat "$pidf" 2>/dev/null)"
-    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    if [ -n "$pattern" ]; then
+        case "$(proc_cmdline "$pid")" in
+            *"$pattern"*) : ;;
+            *) return 1 ;;
+        esac
+    fi
+    return 0
+}
+
+# Marker that uniquely identifies our supervisor process in /proc/<pid>/cmdline.
+SUPERVISOR_MARKER="cockpit.sh __supervisor"
+
+# $RUN_DIR lives on disk and survives reboots, but PIDs do not. Stamp the dir
+# with the kernel boot id; when it changes, every pid file is from a previous
+# boot and its number may now belong to something else — so wipe them before we
+# read (let alone kill) anything. This is the primary guard against the
+# "restart killed my claude session, had to reboot" failure.
+current_boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown; }
+
+ensure_fresh_boot() {
+    mkdir -p "$RUN_DIR"
+    local idf="$RUN_DIR/boot_id" now stored
+    now="$(current_boot_id)"
+    stored="$(cat "$idf" 2>/dev/null || true)"
+    if [ "$stored" != "$now" ]; then
+        [ -n "$stored" ] && sup_log "boot id gewijzigd — stale pid-bestanden uit vorige boot verwijderd"
+        rm -f "$RUN_DIR"/*.pid 2>/dev/null || true
+        printf '%s\n' "$now" > "$idf"
+    fi
+}
+
+# True when something is already listening on the given local TCP port.
+port_in_use() {
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnH 2>/dev/null | grep -qE "[:.]${port}([^0-9]|$)"
+    elif command -v lsof >/dev/null 2>&1; then
+        lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    else
+        return 1
+    fi
 }
 
 # Kill a process and its entire descendant tree (ported from dev.sh).
@@ -28,7 +82,12 @@ kill_tree() {
     [ -z "$pid" ] && return 0
     local pids="$pid" frontier="$pid" next
     while [ -n "$frontier" ]; do
-        next="$(pgrep -P $frontier 2>/dev/null | tr '\n' ' ')"
+        # pgrep -P wants a COMMA-separated ppid list. Passing space-separated
+        # pids makes it read the 2nd+ as a name regex, so it silently misses
+        # grandchildren (orphaning vite/esbuild/uvicorn children that keep the
+        # ports bound). Convert the frontier to a comma list.
+        next="$(pgrep -P "${frontier// /,}" 2>/dev/null | tr '\n' ' ')"
+        next="${next% }"
         [ -z "$next" ] && break
         pids="$pids $next"
         frontier="$next"
@@ -117,9 +176,21 @@ supervisor_main() {
 }
 
 cmd_start() {
-    if is_running "$RUN_DIR/supervisor.pid"; then
+    if is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER"; then
         echo "Cockpit draait al (supervisor pid $(cat "$RUN_DIR/supervisor.pid")). Gebruik 'restart' of 'status'."
         return 1
+    fi
+    # Preflight: don't crash-loop fighting another stack for the ports. Skipped
+    # when commands are injected (tests use fake services on no ports).
+    if [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ]; then
+        local busy=""
+        port_in_use 8000 && busy="8000"
+        port_in_use 5173 && busy="${busy:+$busy + }5173"
+        if [ -n "$busy" ]; then
+            echo "Poort(en) al in gebruik: $busy — waarschijnlijk een losse 'dev.sh' stack of een oude orphan."
+            echo "Stop die eerst (./scripts/cockpit.sh stop, of beëindig de dev.sh-stack). Cockpit niet gestart."
+            return 1
+        fi
     fi
     mkdir -p "$RUN_DIR"
     prune_logs
@@ -140,14 +211,16 @@ cmd_start() {
 }
 
 cmd_stop() {
-    if is_running "$RUN_DIR/supervisor.pid"; then
+    # Only kill a pid we can prove is our supervisor. A stale/foreign pid file
+    # (after a reboot, PID reuse) must never reach kill_tree.
+    if is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER"; then
         local sup; sup="$(cat "$RUN_DIR/supervisor.pid")"
         kill -TERM "$sup" 2>/dev/null || true
         sleep 1
         kill_tree "$sup"
         echo "Cockpit gestopt."
     else
-        echo "Cockpit draaide niet."
+        echo "Cockpit draaide niet (of het pid-bestand was verouderd)."
     fi
     rm -f "$RUN_DIR"/*.pid 2>/dev/null || true
 }
@@ -156,7 +229,7 @@ cmd_restart() { cmd_stop; sleep 1; cmd_start; }
 
 cmd_status() {
     local s b f
-    is_running "$RUN_DIR/supervisor.pid" && s="running (pid $(cat "$RUN_DIR/supervisor.pid"))" || s="stopped"
+    is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER" && s="running (pid $(cat "$RUN_DIR/supervisor.pid"))" || s="stopped"
     is_running "$RUN_DIR/backend.pid"    && b="running (pid $(cat "$RUN_DIR/backend.pid"))"    || b="stopped"
     is_running "$RUN_DIR/frontend.pid"   && f="running (pid $(cat "$RUN_DIR/frontend.pid"))"   || f="stopped"
     echo "supervisor: $s"
@@ -204,6 +277,11 @@ main() {
         esac
     done
     [ "${#rest[@]}" -gt 0 ] && svc_arg="${rest[0]}"
+    # Wipe pid files left over from a previous boot before any command reads or
+    # acts on them. (Not for the detached supervisor — it writes its own pid.)
+    case "$cmd" in
+        start|stop|restart|status) ensure_fresh_boot ;;
+    esac
     case "$cmd" in
         start)      cmd_start ;;
         stop)       cmd_stop ;;
