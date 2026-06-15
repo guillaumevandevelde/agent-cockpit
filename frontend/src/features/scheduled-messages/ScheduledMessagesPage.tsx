@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { CalendarClock, Plus, Trash2, ToggleLeft, ToggleRight, ChevronDown, ChevronRight } from 'lucide-react'
+import { CalendarClock, Plus, Trash2, ToggleLeft, ToggleRight, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -67,6 +67,15 @@ function MessageRow({ msg, onToggle, onDelete }: RowProps) {
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
             <StatusBadge status={msg.status} />
+            {msg.target_kind === 'session' && (
+              <Badge
+                variant="outline"
+                className="gap-1"
+                title={msg.session_preview ?? msg.target_session_id ?? undefined}
+              >
+                <RotateCcw className="h-3 w-3" />resume
+              </Badge>
+            )}
             <span className="text-xs text-muted-foreground font-mono">{shortPath(msg.target_project)}</span>
             {!msg.enabled && <Badge variant="outline">disabled</Badge>}
           </div>

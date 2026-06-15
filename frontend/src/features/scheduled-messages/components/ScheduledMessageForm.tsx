@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useProjectContext } from '@/contexts/ProjectContext'
-import { createScheduledMessage } from '../api'
-import type { ScheduledMessageCreate, TriggerType, PermissionMode } from '../types'
+import { createScheduledMessage, listResumableSessions } from '../api'
+import type {
+  ScheduledMessageCreate, TriggerType, PermissionMode, TargetKind, ResumableSession,
+} from '../types'
 
 interface Props {
   onCreated: () => void
@@ -17,6 +19,11 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
   const { projects } = useProjectContext()
 
   const [targetProject, setTargetProject] = useState('')
+  const [targetKind, setTargetKind] = useState<TargetKind>('project')
+  const [sessions, setSessions] = useState<ResumableSession[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [sessionsError, setSessionsError] = useState<string | null>(null)
+  const [selectedSessionId, setSelectedSessionId] = useState('')
   const [message, setMessage] = useState('')
   const [triggerType, setTriggerType] = useState<TriggerType>('once')
   const [fireAt, setFireAt] = useState('')
@@ -28,11 +35,33 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Load resumable sessions for the chosen project when targeting a session.
+  useEffect(() => {
+    if (targetKind !== 'session' || !targetProject) {
+      setSessions([])
+      return
+    }
+    let cancelled = false
+    setSessionsLoading(true)
+    setSessionsError(null)
+    listResumableSessions(targetProject)
+      .then((rows) => { if (!cancelled) setSessions(rows) })
+      .catch((err) => {
+        if (!cancelled) setSessionsError(err instanceof Error ? err.message : 'Failed to load sessions')
+      })
+      .finally(() => { if (!cancelled) setSessionsLoading(false) })
+    return () => { cancelled = true }
+  }, [targetKind, targetProject])
+
+  // A session selected for one project must not leak into another.
+  useEffect(() => { setSelectedSessionId('') }, [targetProject, targetKind])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     if (!targetProject) { setError('Select a project'); return }
     if (!message.trim()) { setError('Message is required'); return }
+    if (targetKind === 'session' && !selectedSessionId) { setError('Select a session to resume'); return }
     if (triggerType === 'once' && !fireAt) { setError('Set a fire date/time'); return }
     if (triggerType === 'cron' && !cronExpr.trim()) { setError('Cron expression is required'); return }
 
@@ -44,6 +73,13 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
       permission_mode: permissionMode,
       on_missing_session: onMissing,
       when_busy: whenBusy,
+      target_kind: targetKind,
+    }
+    if (targetKind === 'session') {
+      const sel = sessions.find((s) => s.id === selectedSessionId)
+      payload.target_session_id = selectedSessionId
+      payload.project_folder = sel?.project_folder
+      payload.session_preview = sel?.summary
     }
     if (triggerType === 'once') payload.fire_at = new Date(fireAt).toISOString()
     if (triggerType === 'cron') payload.cron_expr = cronExpr.trim()
@@ -82,6 +118,66 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
           />
         )}
       </div>
+
+      <div className="space-y-1.5">
+        <Label>Target</Label>
+        <div className="flex gap-4">
+          {([
+            ['project', 'Project session'],
+            ['session', 'Resume a specific session'],
+          ] as const).map(([k, lbl]) => (
+            <label key={k} className="flex items-center gap-2 cursor-pointer text-sm">
+              <input
+                type="radio"
+                name="targetKind"
+                value={k}
+                checked={targetKind === k}
+                onChange={() => setTargetKind(k)}
+              />
+              {lbl}
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {targetKind === 'project'
+            ? 'Use the project’s live session, or spawn one if none is running.'
+            : 'Resume one specific past session (relaunched with --resume if it has exited).'}
+        </p>
+      </div>
+
+      {targetKind === 'session' && (
+        <div className="space-y-1.5">
+          <Label>Session to resume</Label>
+          {!targetProject ? (
+            <p className="text-sm text-muted-foreground">Select a project first.</p>
+          ) : sessionsLoading ? (
+            <p className="text-sm text-muted-foreground">Loading sessions…</p>
+          ) : sessionsError ? (
+            <p className="text-sm text-destructive">{sessionsError}</p>
+          ) : sessions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No resumable sessions found for this project.</p>
+          ) : (
+            <Select value={selectedSessionId} onValueChange={setSelectedSessionId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a session…" />
+              </SelectTrigger>
+              <SelectContent>
+                {sessions.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    <span className="block max-w-[26rem] truncate">
+                      {s.summary || s.id.slice(0, 8)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {s.worktree_label ? `${s.worktree_label} · ` : ''}
+                      {new Date(s.modified_at).toLocaleString()}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
 
       <div className="space-y-1.5">
         <Label>Message</Label>
@@ -156,16 +252,18 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label>No session</Label>
-          <Select value={onMissing} onValueChange={(v) => setOnMissing(v as 'spawn' | 'skip')}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="spawn">Spawn one</SelectItem>
-              <SelectItem value="skip">Skip</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {targetKind === 'project' && (
+          <div className="space-y-1.5">
+            <Label>No session</Label>
+            <Select value={onMissing} onValueChange={(v) => setOnMissing(v as 'spawn' | 'skip')}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="spawn">Spawn one</SelectItem>
+                <SelectItem value="skip">Skip</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="space-y-1.5">
           <Label>Busy session</Label>
           <Select value={whenBusy} onValueChange={(v) => setWhenBusy(v as 'wait_until_idle' | 'send_now')}>
