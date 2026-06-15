@@ -1,4 +1,5 @@
 export type TriggerType = 'once' | 'cron'
+export type TargetKind = 'project' | 'session'
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypass'
 export type MessageStatus = 'scheduled' | 'pending_delivery' | 'delivered' | 'failed' | 'cancelled'
 export type DeliveryOutcome = 'success' | 'failed' | 'timeout'
@@ -16,6 +17,10 @@ export interface ScheduledMessage {
   status: MessageStatus
   on_missing_session: 'spawn' | 'skip'
   when_busy: 'wait_until_idle' | 'send_now'
+  target_kind: TargetKind
+  target_session_id: string | null
+  project_folder: string | null
+  session_preview: string | null
   created_at: string
   updated_at: string
   last_fired_at: string | null
@@ -46,6 +51,19 @@ export interface ScheduledMessageCreate {
   permission_mode?: PermissionMode
   on_missing_session?: 'spawn' | 'skip'
   when_busy?: 'wait_until_idle' | 'send_now'
+  target_kind?: TargetKind
+  target_session_id?: string
+  project_folder?: string
+  session_preview?: string
+}
+
+export interface ResumableSession {
+  id: string
+  project_folder: string
+  project_name: string
+  summary: string
+  modified_at: string
+  worktree_label: string
 }
 
 export interface ScheduledMessageUpdate {
