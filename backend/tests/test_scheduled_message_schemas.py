@@ -1,6 +1,29 @@
+from datetime import datetime, timezone
+
 import pytest
 from pydantic import ValidationError
-from app.models.scheduled_message_schemas import ScheduledMessageCreate
+from app.models.scheduled_message_schemas import (
+    ScheduledMessageCreate, DeliveryAttemptResponse,
+)
+
+
+def test_naive_utc_timestamps_serialize_with_offset():
+    # Stored timestamps are naive but represent UTC; the API must tag them so
+    # the browser doesn't read them as local time and shift the displayed hour.
+    resp = DeliveryAttemptResponse(
+        id=1, fired_at=datetime(2026, 6, 14, 22, 50, 0),
+        delivered_at=datetime(2026, 6, 14, 22, 50, 1),
+    )
+    dumped = resp.model_dump(mode="json")
+    assert dumped["fired_at"] == "2026-06-14T22:50:00+00:00"
+    assert dumped["delivered_at"] == "2026-06-14T22:50:01+00:00"
+
+
+def test_aware_utc_timestamp_preserved():
+    resp = DeliveryAttemptResponse(
+        id=1, fired_at=datetime(2026, 6, 14, 22, 50, tzinfo=timezone.utc),
+    )
+    assert resp.model_dump(mode="json")["fired_at"] == "2026-06-14T22:50:00+00:00"
 
 
 def test_once_requires_fire_at():
