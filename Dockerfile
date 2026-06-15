@@ -33,4 +33,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Start the application
-CMD ["sh", "-c", "cd /app/backend && alembic upgrade head && exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "cd /app/backend && exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]

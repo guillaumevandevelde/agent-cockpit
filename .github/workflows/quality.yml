@@ -22,10 +22,6 @@ jobs:
         working-directory: backend
       - run: pytest -q
         working-directory: backend
-      - run: alembic upgrade head
-        working-directory: backend
-        env:
-          DATABASE_URL: sqlite+aiosqlite:///./quality.db
 
   frontend:
     runs-on: ubuntu-latest

@@ -114,7 +114,6 @@ BACKEND_DISPLAY_HOST="${HOST:-localhost}"
 echo "Starting backend server on http://${BACKEND_DISPLAY_HOST}:8000..."
 cd "$PROJECT_ROOT/backend"
 source venv/bin/activate
-alembic upgrade head
 uvicorn app.main:app --reload --port 8000 "${BACKEND_HOST_ARGS[@]}" &
 BACKEND_PID=$!
 
