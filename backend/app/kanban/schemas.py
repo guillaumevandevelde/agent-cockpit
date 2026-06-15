@@ -84,3 +84,8 @@ class EnableRequest(BaseModel):
 class AutodispatchRequest(BaseModel):
     project_key: str
     enabled: bool
+
+
+class ShipModeRequest(BaseModel):
+    project_key: str
+    mode: str

@@ -1,9 +1,11 @@
 # backend/tests/test_kanban_shipmode.py
 import pytest
 import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
 from app.kanban.db import KanbanBase, kanban_engine, KanbanSessionLocal
 from app.kanban import dispatch
+from app.main import app
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,3 +49,29 @@ async def test_set_ship_mode_rejects_unknown():
     async with KanbanSessionLocal() as s:
         with pytest.raises(ValueError):
             await dispatch.set_ship_mode(s, PK, "yolo")
+
+
+async def _client():
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+async def test_get_shipmode_endpoint_defaults():
+    async with await _client() as c:
+        r = await c.get("/api/v1/kanban/shipmode", params={"project_key": PK})
+    assert r.status_code == 200
+    assert r.json() == {"project_key": PK, "mode": "pull-request"}
+
+
+async def test_post_shipmode_endpoint_sets_value():
+    async with await _client() as c:
+        r = await c.post("/api/v1/kanban/shipmode", json={"project_key": PK, "mode": "direct"})
+        assert r.status_code == 200
+        assert r.json() == {"project_key": PK, "mode": "direct"}
+        r2 = await c.get("/api/v1/kanban/shipmode", params={"project_key": PK})
+    assert r2.json()["mode"] == "direct"
+
+
+async def test_post_shipmode_rejects_unknown():
+    async with await _client() as c:
+        r = await c.post("/api/v1/kanban/shipmode", json={"project_key": PK, "mode": "yolo"})
+    assert r.status_code == 422

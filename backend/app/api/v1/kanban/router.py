@@ -11,7 +11,7 @@ from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
     CommentRequest, AttachRequest, ActivityEntry, COLUMNS, EnableRequest,
-    AutodispatchRequest,
+    AutodispatchRequest, ShipModeRequest,
 )
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
@@ -183,3 +183,23 @@ async def set_autodispatch(payload: AutodispatchRequest):
         await dispatch.set_autodispatch(s, payload.project_key, payload.enabled)
         await s.commit()
     return {"project_key": payload.project_key, "enabled": payload.enabled}
+
+
+@router.get("/shipmode")
+async def get_shipmode(project_key: str = Query(...)):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {"project_key": project_key,
+                "mode": await dispatch.get_ship_mode(s, project_key)}
+
+
+@router.post("/shipmode")
+async def set_shipmode(payload: ShipModeRequest):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            await dispatch.set_ship_mode(s, payload.project_key, payload.mode)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        await s.commit()
+    return {"project_key": payload.project_key, "mode": payload.mode}
