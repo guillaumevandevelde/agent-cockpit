@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 META_PREFIX = "autodispatch:"
 CLAIMANT_PREFIX = "agent:"
+SHIPMODE_PREFIX = "shipmode:"
+SHIP_MODES = ("pull-request", "direct")
+DEFAULT_SHIP_MODE = "pull-request"
 
 
 # ---- enablement: device-local, stored in KanbanMeta (not part of the op-log) ----
@@ -49,6 +52,25 @@ async def list_autodispatch_projects(session) -> list[str]:
         for r in rows
         if r.key.startswith(META_PREFIX) and r.value == "1"
     ]
+
+
+async def get_ship_mode(session, project_key: str) -> str:
+    row = await session.get(KanbanMeta, SHIPMODE_PREFIX + project_key)
+    if row and row.value in SHIP_MODES:
+        return row.value
+    return DEFAULT_SHIP_MODE
+
+
+async def set_ship_mode(session, project_key: str, mode: str) -> None:
+    if mode not in SHIP_MODES:
+        raise ValueError(f"unknown ship mode: {mode}")
+    key = SHIPMODE_PREFIX + project_key
+    row = await session.get(KanbanMeta, key)
+    if row is None:
+        session.add(KanbanMeta(key=key, value=mode))
+    else:
+        row.value = mode
+    await session.flush()
 
 
 # ---- prompt ----------------------------------------------------------------
