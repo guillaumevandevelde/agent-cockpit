@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 from app.database import Base, engine, AsyncSessionLocal
 from app.services.scheduling.delivery import DeliveryEngine, DeliveryResult
 from app.services.scheduling.session_resolver import AMBIGUOUS
@@ -14,7 +14,7 @@ async def _deliver(eng, **kw):
     base = dict(
         project_dir="/proj", message="go", permission_mode="acceptEdits",
         target_kind="session", target_session_id="s1",
-        project_folder="-home-guillaume-proj", resume_settle_s=0,
+        project_folder="-home-guillaume-proj",
     )
     base.update(kw)
     return await eng.deliver(**base)
@@ -38,11 +38,14 @@ async def test_exited_session_is_resume_spawned_then_injected():
     eng = _engine(reg)
     with patch("app.services.scheduling.delivery.resolve_session_target", return_value=None), \
          patch("app.services.scheduling.delivery.resume_spawn_for", return_value="new:0.0") as spawn, \
+         patch("app.services.scheduling.delivery.wait_for_pane_ready",
+               new=AsyncMock(return_value=True)) as ready, \
          patch("app.services.scheduling.delivery.send_text", return_value=True) as send:
         res = await _deliver(eng)
     assert res.outcome == "success"
     assert res.action == "resumed"
     spawn.assert_called_once_with("s1", "-home-guillaume-proj", "/proj", "acceptEdits")
+    ready.assert_awaited_once()  # wait for the resumed TUI before injecting
     send.assert_called_once_with("new:0.0", "go")
 
 
