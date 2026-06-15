@@ -1,10 +1,11 @@
-import { apiClient } from '@/lib/api'
+import { apiClient, buildEndpoint } from '@/lib/api'
 import type {
   ScheduledMessage,
   ScheduledMessageCreate,
   ScheduledMessageUpdate,
   ScheduledMessageListResponse,
   DeliveryAttempt,
+  ResumableSession,
 } from './types'
 
 const BASE = 'scheduled-messages'
@@ -33,4 +34,11 @@ export async function deleteScheduledMessage(id: number): Promise<void> {
 
 export async function listDeliveryAttempts(id: number): Promise<DeliveryAttempt[]> {
   return apiClient<DeliveryAttempt[]>(`${BASE}/${id}/attempts`)
+}
+
+export async function listResumableSessions(directory: string): Promise<ResumableSession[]> {
+  const res = await apiClient<{ sessions: ResumableSession[] }>(
+    buildEndpoint('agent-bridge/resumable-sessions', { directory, limit: 20 }),
+  )
+  return res.sessions
 }

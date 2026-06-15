@@ -9,6 +9,7 @@ from app.models.scheduled_message_schemas import (
     DeliveryAttemptResponse, HookEvent,
 )
 from app.services.scheduling.idle_state import idle_state
+from app.services.scheduling.session_registry import session_registry
 from app.services.scheduling.scheduler import scheduler_service
 
 router = APIRouter(prefix="/scheduled-messages", tags=["Scheduled Messages"])
@@ -84,4 +85,6 @@ async def delete(mid: int):
 @router.post("/hook-event")
 async def hook_event(ev: HookEvent):
     idle_state.record(ev.event, cwd=ev.cwd, session_id=ev.session_id)
+    session_registry.record(ev.event, session_id=ev.session_id, cwd=ev.cwd,
+                            tmux_pane=ev.tmux_pane)
     return {"ok": True}

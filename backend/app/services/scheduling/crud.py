@@ -28,6 +28,9 @@ async def run_scheduled_delivery(message_id: int) -> None:
             project_dir=msg.target_project, message=msg.message,
             permission_mode=msg.permission_mode,
             on_missing_session=msg.on_missing_session, when_busy=msg.when_busy,
+            target_kind=msg.target_kind or "project",
+            target_session_id=msg.target_session_id,
+            project_folder=msg.project_folder,
         )
 
         attempt.outcome = res.outcome

@@ -20,6 +20,9 @@ async def lifespan(app: FastAPI):
     await init_db()
     from app.kanban.db import init_kanban_db
     await init_kanban_db()
+    from app.services.scheduling.schema_guard import ensure_scheduled_message_columns
+    from app.database import engine
+    await ensure_scheduled_message_columns(engine)
     # Clean up any orphaned relay processes from previous runs
     from app.services.cc_bridge.pty_relay import close_all_relays, cleanup_orphaned_relays
     cleanup_orphaned_relays()
