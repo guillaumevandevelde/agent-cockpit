@@ -3,7 +3,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from app.kanban.db import KanbanBase, kanban_engine, KanbanSessionLocal
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card
 from app.kanban import dispatch
@@ -13,12 +13,12 @@ pytestmark = pytest.mark.asyncio
 
 PK = "git:example.com/me/repo"
 
+KanbanSessionLocal = TestSessionLocal()
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def _tables():
-    async with kanban_engine.begin() as conn:
-        await conn.run_sync(KanbanBase.metadata.drop_all)
-        await conn.run_sync(KanbanBase.metadata.create_all)
+    await reset_test_tables()
     yield
 
 

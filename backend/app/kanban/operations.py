@@ -95,7 +95,7 @@ def _lww_set(card, field: str, value, hlc: str) -> None:
     """Apply value to card.<field> only if hlc beats the field's current hlc."""
     hlc_attr = f"{field}_hlc"
     current = getattr(card, hlc_attr)
-    if hlc_max(current, hlc) == hlc and hlc != current:
+    if hlc_max(current, hlc) == hlc:
         setattr(card, field, value)
         setattr(card, hlc_attr, hlc)
 

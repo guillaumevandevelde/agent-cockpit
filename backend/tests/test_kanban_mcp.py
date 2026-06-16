@@ -2,15 +2,13 @@
 import pytest
 import pytest_asyncio
 
-from app.kanban.db import KanbanBase, kanban_engine
+from tests.kanban_test_db import reset_test_tables
 from app.kanban import mcp_server as m
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _tables():
-    async with kanban_engine.begin() as conn:
-        await conn.run_sync(KanbanBase.metadata.drop_all)
-        await conn.run_sync(KanbanBase.metadata.create_all)
+    await reset_test_tables()
     yield
 
 
