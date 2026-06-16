@@ -16,7 +16,7 @@ from typing import Callable, Iterable, Optional, Protocol
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
-from app.kanban.service import list_cards
+from app.kanban.service import get_card, list_cards
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +98,24 @@ def _read_persona(project_path: str, column: str) -> Optional[str]:
     filename = _persona_filename(column)
     if not filename:
         return None
+    return _read_persona_file(project_path, filename)
+
+
+def _read_persona_file(project_path: str, filename: str) -> Optional[str]:
     path = Path(project_path) / ".claude" / "agents" / filename
     try:
         return _strip_frontmatter(path.read_text()).strip()
     except OSError:
         return None
+
+
+def _persona_for_card(project_path: str, card, column: str) -> Optional[str]:
+    """An explicit per-card agent overrides the column default. `column` is passed
+    explicitly because the card may already have been moved to "Doing" by the caller."""
+    agent = getattr(card, "agent", None)
+    if agent:
+        return _read_persona_file(project_path, f"{agent}.md")
+    return _read_persona(project_path, column)
 
 
 # ---- prompt ----------------------------------------------------------------
@@ -193,20 +206,12 @@ def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
 
 # ---- core ------------------------------------------------------------------
 
-async def dispatch_project(
-    session, *, project_key: str, project_path: str, transport: SpawnTransport,
+async def _run_card(
+    session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
 ) -> Optional[dict]:
-    """Claim+move+spawn the next Analysis/Todo card for one project. Returns a result
-    dict or None when there is nothing to do (no candidate card, or project is busy)."""
-    cards = await list_cards(session, project_key)
-    if _project_is_busy(cards):
-        return None
-
-    card = _next_card(cards)
-    if card is None:
-        return None
+    """Claim+move-to-Doing+spawn one specific card. Returns a result dict, or None if
+    the claim was lost. The persona honours an explicit per-card agent over the column."""
     source_column = card.column
-
     name = _mint_session_name(project_path)
     claimant = CLAIMANT_PREFIX + name
 
@@ -223,7 +228,7 @@ async def dispatch_project(
         entity_id=card.id, payload={"column": "Doing"},
     )
 
-    persona = _read_persona(project_path, source_column)
+    persona = _persona_for_card(project_path, card, source_column)
     ship_mode = await get_ship_mode(session, project_key)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode)
     try:
@@ -243,6 +248,40 @@ async def dispatch_project(
     logger.info("dispatched card %s (%s) -> session %s", card.id, source_column, name)
     return {"card_id": card.id, "session_name": name, "claimant": claimant,
             "source_column": source_column, "spawned": spawned}
+
+
+async def dispatch_project(
+    session, *, project_key: str, project_path: str, transport: SpawnTransport,
+) -> Optional[dict]:
+    """Claim+move+spawn the next Analysis/Todo card for one project. Returns a result
+    dict or None when there is nothing to do (no candidate card, or project is busy)."""
+    cards = await list_cards(session, project_key)
+    if _project_is_busy(cards):
+        return None
+
+    card = _next_card(cards)
+    if card is None:
+        return None
+    return await _run_card(
+        session, card=card, project_key=project_key,
+        project_path=project_path, transport=transport,
+    )
+
+
+async def dispatch_card(
+    session, *, card_id: str, project_path: str,
+    transport: SpawnTransport = worktree_transport,
+) -> Optional[dict]:
+    """Manually dispatch one specific card now, regardless of the auto-pick toggle or
+    the busy cap. Returns the result dict, or None if the card is missing or its claim
+    was lost."""
+    card = await get_card(session, card_id)
+    if card is None:
+        return None
+    return await _run_card(
+        session, card=card, project_key=card.project_key,
+        project_path=project_path, transport=transport,
+    )
 
 
 # ---- project_key -> local path --------------------------------------------

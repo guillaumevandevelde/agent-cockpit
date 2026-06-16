@@ -11,7 +11,7 @@ from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
     CommentRequest, AttachRequest, ActivityEntry, COLUMNS, EnableRequest,
-    AutodispatchRequest, ShipModeRequest,
+    AutodispatchRequest, ShipModeRequest, DispatchRequest,
 )
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
@@ -203,3 +203,37 @@ async def set_shipmode(payload: ShipModeRequest):
             raise HTTPException(422, str(e))
         await s.commit()
     return {"project_key": payload.project_key, "mode": payload.mode}
+
+
+@router.delete("/cards/{cid}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_card(cid: str):
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="delete", entity_type="card",
+            project_key="", entity_id=cid, payload={})
+        await s.commit()
+
+
+@router.get("/agents")
+async def list_agents(project_path: str = Query(...)):
+    """Agent personas available to this project (\"<name>\" of each
+    .claude/agents/<name>.md), for the per-card agent selector."""
+    agents_dir = Path(project_path) / ".claude" / "agents"
+    names = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+    return {"agents": names}
+
+
+@router.post("/cards/{cid}/dispatch")
+async def dispatch_now(cid: str, payload: DispatchRequest):
+    """Manually run the chosen agent on one card now, regardless of auto-pick."""
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            res = await dispatch.dispatch_card(s, card_id=cid,
+                project_path=payload.project_path)
+        except Exception as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
+        await s.commit()
+    if res is None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+            "could not dispatch (card missing or already claimed)")
+    return res

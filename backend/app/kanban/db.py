@@ -41,3 +41,14 @@ async def init_kanban_db() -> None:
     from app.kanban import models  # noqa: F401
     async with kanban_engine.begin() as conn:
         await conn.run_sync(KanbanBase.metadata.create_all)
+        if settings.kanban_database_url.startswith("sqlite"):
+            await _ensure_card_columns(conn)
+
+
+async def _ensure_card_columns(conn) -> None:
+    """Additive, idempotent migration for columns introduced after a DB was first
+    created (no migration framework here). create_all never alters existing tables."""
+    rows = (await conn.exec_driver_sql("PRAGMA table_info(kanban_cards)")).fetchall()
+    cols = {r[1] for r in rows}
+    if "agent" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN agent VARCHAR(64)")

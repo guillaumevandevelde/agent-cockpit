@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 
 from app.kanban.hlc import HLC, hlc_max
 from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanMeta, KanbanOp
@@ -112,6 +112,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 column=payload.get("column", "Backlog"),
                 rank=payload.get("rank", hlc),
                 priority=payload.get("priority"), labels=payload.get("labels"),
+                agent=payload.get("agent"),
                 title_hlc=hlc, description_hlc=hlc, column_hlc=hlc, rank_hlc=hlc,
             ))
             await session.flush()
@@ -129,7 +130,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             for f in ("title", "description"):
                 if f in payload and payload[f] is not None:
                     _lww_set(card, f, payload[f], hlc)
-            for f in ("priority", "labels"):  # non-LWW scalar attrs
+            for f in ("priority", "labels", "agent"):  # non-LWW scalar attrs
                 if f in payload:
                     setattr(card, f, payload[f])
         card.updated_at = _utcnow()
@@ -152,6 +153,15 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         await session.flush()
         return
 
+    if entity_type == "card" and op_type == "delete":
+        card = await session.get(KanbanCard, entity_id)
+        if card is not None:
+            await session.execute(
+                delete(KanbanDeliverable).where(KanbanDeliverable.card_id == entity_id)
+            )
+            await session.delete(card)
+            await session.flush()
+        return
     if entity_type == "card" and op_type == "release":
         card = await session.get(KanbanCard, entity_id)
         if card is None:

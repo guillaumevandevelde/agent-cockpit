@@ -26,6 +26,7 @@ class CardResponse(BaseModel):
     rank: str
     priority: Optional[str] = None
     labels: Optional[list] = None
+    agent: Optional[str] = None
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
     created_at: datetime
@@ -40,6 +41,7 @@ class CardCreate(BaseModel):
     column: str = "Backlog"
     priority: Optional[str] = None
     labels: Optional[list] = None
+    agent: Optional[str] = None
 
 
 class CardUpdate(BaseModel):
@@ -47,6 +49,7 @@ class CardUpdate(BaseModel):
     description: Optional[str] = None
     priority: Optional[str] = None
     labels: Optional[list] = None
+    agent: Optional[str] = None
 
 
 class MoveRequest(BaseModel):
@@ -89,3 +92,7 @@ class AutodispatchRequest(BaseModel):
 class ShipModeRequest(BaseModel):
     project_key: str
     mode: str
+
+
+class DispatchRequest(BaseModel):
+    project_path: str
