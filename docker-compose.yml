@@ -12,6 +12,7 @@ services:
       - ~/.codex:/root/.codex
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/claude_registry.db
+      - KANBAN_DATABASE_URL=sqlite+aiosqlite:///./data/kanban.db
     restart: unless-stopped
 
 volumes:
