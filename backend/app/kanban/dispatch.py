@@ -1,4 +1,4 @@
-"""Auto-dispatch: spawn a Claude session for unclaimed Todo cards.
+"""Auto-dispatch: spawn a Claude session for unclaimed Analysis/Todo cards.
 
 The dispatcher claims a card *as the session that will work it* (claim-before-spawn,
 so racing ticks/devices produce exactly one winner), moves it to Doing, then spawns
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Protocol
@@ -21,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 META_PREFIX = "autodispatch:"
 CLAIMANT_PREFIX = "agent:"
+SHIPMODE_PREFIX = "shipmode:"
+SHIP_MODES = ("pull-request", "direct")
+DEFAULT_SHIP_MODE = "pull-request"
 
 
 # ---- enablement: device-local, stored in KanbanMeta (not part of the op-log) ----
@@ -51,17 +55,72 @@ async def list_autodispatch_projects(session) -> list[str]:
     ]
 
 
+async def get_ship_mode(session, project_key: str) -> str:
+    row = await session.get(KanbanMeta, SHIPMODE_PREFIX + project_key)
+    if row and row.value in SHIP_MODES:
+        return row.value
+    return DEFAULT_SHIP_MODE
+
+
+async def set_ship_mode(session, project_key: str, mode: str) -> None:
+    if mode not in SHIP_MODES:
+        raise ValueError(f"unknown ship mode: {mode}")
+    key = SHIPMODE_PREFIX + project_key
+    row = await session.get(KanbanMeta, key)
+    if row is None:
+        session.add(KanbanMeta(key=key, value=mode))
+    else:
+        row.value = mode
+    await session.flush()
+
+
+# ---- persona helpers -------------------------------------------------------
+
+_PERSONA_BY_COLUMN = {
+    "Analysis": "kanban-analyst.md",
+    "Todo": "kanban-developer.md",
+}
+
+
+def _persona_filename(column: str) -> Optional[str]:
+    return _PERSONA_BY_COLUMN.get(column)
+
+
+def _strip_frontmatter(text: str) -> str:
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            return text[end + len("\n---\n"):]
+    return text
+
+
+def _read_persona(project_path: str, column: str) -> Optional[str]:
+    filename = _persona_filename(column)
+    if not filename:
+        return None
+    path = Path(project_path) / ".claude" / "agents" / filename
+    try:
+        return _strip_frontmatter(path.read_text()).strip()
+    except OSError:
+        return None
+
+
 # ---- prompt ----------------------------------------------------------------
 
-def build_card_prompt(card: KanbanCard) -> str:
+def build_card_prompt(card, *, persona: Optional[str], ship_mode: str) -> str:
+    preamble = (persona.strip() + "\n\n") if persona else ""
     return (
-        "You are an agent picking up a Kanban card from the Claude Cockpit board.\n"
-        "The card is already claimed by you and moved to \"Doing\".\n\n"
+        f"{preamble}"
+        "You are picking up a Kanban card from the Claude Cockpit board. "
+        'It is already claimed by you and moved to "Doing".\n\n'
         f"# {card.title}\n"
-        f"{card.description or ''}\n\n"
-        "When finished: use the `cockpit-kanban` MCP tools to move the card to "
-        '"Review" (`move_card`) and attach your result (`attach_deliverable`, e.g. a '
-        "branch or PR URL). If you cannot complete it, leave a `comment` explaining why."
+        f"{getattr(card, 'description', '') or ''}\n\n"
+        f"Ship mode: {ship_mode}\n\n"
+        "Work autonomously to completion, following your role instructions above. "
+        "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
+        "`comment`) to update the card exactly as those instructions direct. If you are "
+        "blocked or your tests fail, `comment` explaining why and leave the card in "
+        '"Doing".'
     )
 
 
@@ -71,16 +130,33 @@ class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str) -> dict: ...
 
 
-def tmux_transport(*, directory: str, prompt: str, session_name: str) -> dict:
-    """Default transport: spawn a Claude Code worktree session in tmux."""
+def worktree_transport(*, directory: str, prompt: str, session_name: str) -> dict:
+    """Default transport: create a worktree off origin/master, then spawn an
+    autonomous (permission-skipping) Claude Code session in it."""
     from app.services.agent_bridge.spawn import spawn_session
     from app.services.providers.base import SpawnCommandOptions
 
+    repo = directory
+    worktree_path = str(Path(repo) / ".claude" / "worktrees" / session_name)
+
+    subprocess.run(["git", "-C", repo, "fetch", "origin"],
+                   capture_output=True, text=True, timeout=60, check=True)
+    subprocess.run(
+        ["git", "-C", repo, "worktree", "add", "-b", session_name,
+         worktree_path, "origin/master"],
+        capture_output=True, text=True, timeout=60, check=True)
+
     options = SpawnCommandOptions(
-        directory=directory, mode="worktree", worktree_name=session_name,
-        prompt=prompt, skip_permissions=False,
+        directory=worktree_path, mode="plain", prompt=prompt,
+        skip_permissions=True, worktree_path=worktree_path, repo_path=repo,
     )
-    return spawn_session("claude-code", options, session_name=session_name)
+    try:
+        return spawn_session("claude-code", options, session_name=session_name)
+    except Exception:
+        # the worktree exists but no session owns it; remove it so it isn't orphaned
+        subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
+                       capture_output=True, text=True, timeout=30)
+        raise
 
 
 def _slug(name: str) -> str:
@@ -89,7 +165,11 @@ def _slug(name: str) -> str:
 
 
 def _mint_session_name(project_path: str) -> str:
-    return f"k-{_slug(Path(project_path).name)}-{uuid.uuid4().hex[:4]}"
+    # Keep the whole name <= 20 chars so the tmux-bridge sanitizer never truncates
+    # it: a truncated session name would diverge from the claimant label and the
+    # worktree branch, breaking cleanup. "k-" + slug(<=13) + "-" + 4 hex = <=20.
+    slug = (_slug(Path(project_path).name)[:13].rstrip("-")) or "project"
+    return f"k-{slug}-{uuid.uuid4().hex[:4]}"
 
 
 def _project_is_busy(cards: Iterable[KanbanCard]) -> bool:
@@ -99,21 +179,33 @@ def _project_is_busy(cards: Iterable[KanbanCard]) -> bool:
     )
 
 
+_DISPATCH_COLUMNS = ("Todo", "Analysis")  # Todo drains first, then Analysis
+
+
+def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
+    cards = list(cards)
+    for col in _DISPATCH_COLUMNS:
+        col_cards = [c for c in cards if c.column == col and not c.claimed_by]
+        if col_cards:
+            return col_cards[0]  # list_cards is ordered by rank
+    return None
+
+
 # ---- core ------------------------------------------------------------------
 
 async def dispatch_project(
     session, *, project_key: str, project_path: str, transport: SpawnTransport,
 ) -> Optional[dict]:
-    """Claim+move+spawn the next Todo card for one project. Returns a result dict
-    or None when there is nothing to do (no Todo card, or the project is busy)."""
+    """Claim+move+spawn the next Analysis/Todo card for one project. Returns a result
+    dict or None when there is nothing to do (no candidate card, or project is busy)."""
     cards = await list_cards(session, project_key)
     if _project_is_busy(cards):
         return None
 
-    todo = [c for c in cards if c.column == "Todo" and not c.claimed_by]
-    if not todo:
+    card = _next_card(cards)
+    if card is None:
         return None
-    card = todo[0]  # list_cards is ordered by rank
+    source_column = card.column
 
     name = _mint_session_name(project_path)
     claimant = CLAIMANT_PREFIX + name
@@ -131,24 +223,26 @@ async def dispatch_project(
         entity_id=card.id, payload={"column": "Doing"},
     )
 
-    prompt = build_card_prompt(card)
+    persona = _read_persona(project_path, source_column)
+    ship_mode = await get_ship_mode(session, project_key)
+    prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode)
     try:
         spawned = transport(directory=project_path, prompt=prompt, session_name=name)
     except Exception:
-        # compensate: release the claim and return the card to Todo so it is reusable
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
             entity_id=card.id, payload={},
         )
         await apply_operation(
             session, op_type="move", entity_type="card", project_key=project_key,
-            entity_id=card.id, payload={"column": "Todo"},
+            entity_id=card.id, payload={"column": source_column},
         )
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
         raise
 
-    logger.info("dispatched card %s -> session %s", card.id, name)
-    return {"card_id": card.id, "session_name": name, "claimant": claimant, "spawned": spawned}
+    logger.info("dispatched card %s (%s) -> session %s", card.id, source_column, name)
+    return {"card_id": card.id, "session_name": name, "claimant": claimant,
+            "source_column": source_column, "spawned": spawned}
 
 
 # ---- project_key -> local path --------------------------------------------
@@ -172,9 +266,9 @@ def match_project_paths(
     return out
 
 
-async def run_dispatch_tick(*, transport: SpawnTransport = tmux_transport) -> None:
-    """One poll cycle: dispatch the next Todo card for every enabled project that
-    maps to a local path on this device."""
+async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -> None:
+    """One poll cycle: dispatch the next Analysis/Todo card for every enabled project
+    that maps to a local path on this device."""
     from app.kanban.db import KanbanSessionLocal
 
     async with KanbanSessionLocal() as ks:
