@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Protocol
@@ -131,14 +132,25 @@ class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str) -> dict: ...
 
 
-def tmux_transport(*, directory: str, prompt: str, session_name: str) -> dict:
-    """Default transport: spawn a Claude Code worktree session in tmux."""
+def worktree_transport(*, directory: str, prompt: str, session_name: str) -> dict:
+    """Default transport: create a worktree off origin/master, then spawn an
+    autonomous (permission-skipping) Claude Code session in it."""
     from app.services.agent_bridge.spawn import spawn_session
     from app.services.providers.base import SpawnCommandOptions
 
+    repo = directory
+    worktree_path = str(Path(repo) / ".claude" / "worktrees" / session_name)
+
+    subprocess.run(["git", "-C", repo, "fetch", "origin"],
+                   capture_output=True, text=True, timeout=60, check=True)
+    subprocess.run(
+        ["git", "-C", repo, "worktree", "add", "-b", session_name,
+         worktree_path, "origin/master"],
+        capture_output=True, text=True, timeout=60, check=True)
+
     options = SpawnCommandOptions(
-        directory=directory, mode="worktree", worktree_name=session_name,
-        prompt=prompt, skip_permissions=False,
+        directory=worktree_path, mode="plain", prompt=prompt,
+        skip_permissions=True, worktree_path=worktree_path, repo_path=repo,
     )
     return spawn_session("claude-code", options, session_name=session_name)
 
@@ -246,7 +258,7 @@ def match_project_paths(
     return out
 
 
-async def run_dispatch_tick(*, transport: SpawnTransport = tmux_transport) -> None:
+async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -> None:
     """One poll cycle: dispatch the next Todo card for every enabled project that
     maps to a local path on this device."""
     from app.kanban.db import KanbanSessionLocal

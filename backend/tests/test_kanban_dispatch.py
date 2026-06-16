@@ -250,3 +250,41 @@ async def test_dispatch_injects_ship_mode(tmp_path):
             s, project_key=PK, project_path=str(tmp_path), transport=t)
         await s.commit()
     assert "Ship mode: direct" in t.calls[0]["prompt"]
+
+
+def test_worktree_transport_creates_from_origin_master(monkeypatch, tmp_path):
+    ran = []
+
+    def fake_run(cmd, *a, **k):
+        ran.append(cmd)
+        class R:
+            returncode = 0
+            stderr = ""
+        return R()
+
+    captured = {}
+
+    def fake_spawn(provider_id, options, session_name=None):
+        captured["provider"] = provider_id
+        captured["options"] = options
+        captured["session_name"] = session_name
+        return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
+
+    import app.kanban.dispatch as d
+    monkeypatch.setattr(d.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        "app.services.agent_bridge.spawn.spawn_session", fake_spawn)
+
+    res = d.worktree_transport(
+        directory=str(tmp_path), prompt="hi", session_name="k-proj-abcd")
+
+    fetches = [c for c in ran if "fetch" in c]
+    adds = [c for c in ran if "worktree" in c and "add" in c]
+    assert fetches and adds
+    assert "origin/master" in adds[0]
+    opts = captured["options"]
+    assert opts.mode == "plain"
+    assert opts.skip_permissions is True
+    assert opts.repo_path == str(tmp_path)
+    assert opts.worktree_path == opts.directory
+    assert res["session_name"] == "k-proj-abcd"
