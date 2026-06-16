@@ -33,8 +33,9 @@ echo ""
 echo "Setting up backend..."
 cd "$PROJECT_ROOT/backend"
 
-if [ ! -d "venv" ]; then
+if [ ! -f "venv/bin/activate" ]; then
     echo "Creating Python virtual environment..."
+    rm -rf venv
     $PYTHON_CMD -m venv venv
 fi
 
