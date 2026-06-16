@@ -204,3 +204,49 @@ def test_match_project_paths_maps_enabled_keys_to_local_paths():
     fake_key_of = {"/x/a": "git:h/a", "/x/b": "git:h/b", "/x/c": "git:h/c"}.get
     out = dispatch.match_project_paths(keys, paths, key_of=fake_key_of)
     assert out == {"git:h/a": "/x/a", "git:h/b": "/x/b"}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_picks_analysis_with_analyst_persona(tmp_path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "kanban-analyst.md").write_text("You are the Analyst.")
+    t = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="Investigate", column="Analysis")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        res = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=str(tmp_path), transport=t)
+        await s.commit()
+    assert res is not None
+    assert "You are the Analyst." in t.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_prefers_todo_over_analysis(tmp_path):
+    t = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="A-card", column="Analysis")
+        await _make_card(s, title="T-card", column="Todo")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        res = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=str(tmp_path), transport=t)
+        await s.commit()
+    assert res is not None
+    assert "T-card" in t.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_injects_ship_mode(tmp_path):
+    t = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_ship_mode(s, PK, "direct")
+        await _make_card(s, title="T-card", column="Todo")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path=str(tmp_path), transport=t)
+        await s.commit()
+    assert "Ship mode: direct" in t.calls[0]["prompt"]

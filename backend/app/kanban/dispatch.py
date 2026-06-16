@@ -159,21 +159,33 @@ def _project_is_busy(cards: Iterable[KanbanCard]) -> bool:
     )
 
 
+_DISPATCH_COLUMNS = ("Todo", "Analysis")  # Todo drains first, then Analysis
+
+
+def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
+    cards = list(cards)
+    for col in _DISPATCH_COLUMNS:
+        col_cards = [c for c in cards if c.column == col and not c.claimed_by]
+        if col_cards:
+            return col_cards[0]  # list_cards is ordered by rank
+    return None
+
+
 # ---- core ------------------------------------------------------------------
 
 async def dispatch_project(
     session, *, project_key: str, project_path: str, transport: SpawnTransport,
 ) -> Optional[dict]:
-    """Claim+move+spawn the next Todo card for one project. Returns a result dict
-    or None when there is nothing to do (no Todo card, or the project is busy)."""
+    """Claim+move+spawn the next Analysis/Todo card for one project. Returns a result
+    dict or None when there is nothing to do (no candidate card, or project is busy)."""
     cards = await list_cards(session, project_key)
     if _project_is_busy(cards):
         return None
 
-    todo = [c for c in cards if c.column == "Todo" and not c.claimed_by]
-    if not todo:
+    card = _next_card(cards)
+    if card is None:
         return None
-    card = todo[0]  # list_cards is ordered by rank
+    source_column = card.column
 
     name = _mint_session_name(project_path)
     claimant = CLAIMANT_PREFIX + name
@@ -191,24 +203,26 @@ async def dispatch_project(
         entity_id=card.id, payload={"column": "Doing"},
     )
 
-    prompt = build_card_prompt(card)
+    persona = _read_persona(project_path, source_column)
+    ship_mode = await get_ship_mode(session, project_key)
+    prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode)
     try:
         spawned = transport(directory=project_path, prompt=prompt, session_name=name)
     except Exception:
-        # compensate: release the claim and return the card to Todo so it is reusable
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
             entity_id=card.id, payload={},
         )
         await apply_operation(
             session, op_type="move", entity_type="card", project_key=project_key,
-            entity_id=card.id, payload={"column": "Todo"},
+            entity_id=card.id, payload={"column": source_column},
         )
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
         raise
 
-    logger.info("dispatched card %s -> session %s", card.id, name)
-    return {"card_id": card.id, "session_name": name, "claimant": claimant, "spawned": spawned}
+    logger.info("dispatched card %s (%s) -> session %s", card.id, source_column, name)
+    return {"card_id": card.id, "session_name": name, "claimant": claimant,
+            "source_column": source_column, "spawned": spawned}
 
 
 # ---- project_key -> local path --------------------------------------------
