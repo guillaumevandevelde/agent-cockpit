@@ -42,7 +42,7 @@ interface BackupWizardProps {
   onOpenChange: (open: boolean) => void;
   onCreate: (backup: BackupCreate) => Promise<Backup>;
   currentProjectPath?: string;
-  providerId?: "claude-code" | "codex-cli";
+  providerId?: "claude-code" | "codex-cli" | "mimo-code";
 }
 
 const STEPS = [

@@ -112,6 +112,16 @@ const providerNavigation: Record<AgentProviderId, NavGroup[]> = {
       ],
     },
   ],
+  'mimo-code': [
+    {
+      name: 'MiMoCode',
+      items: [
+        { name: 'Config', href: '/config', icon: Settings, capability: 'config' },
+        { name: 'Skills', href: '/skills', icon: Sparkles, capability: 'skills' },
+        { name: 'Memory', href: '/memory', icon: Brain, capability: 'memory' },
+      ],
+    },
+  ],
 }
 
 function getNavigation(providerId: AgentProviderId): NavGroup[] {
