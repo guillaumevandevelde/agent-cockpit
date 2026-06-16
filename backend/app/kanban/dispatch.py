@@ -173,15 +173,16 @@ def worktree_transport(*, directory: str, prompt: str, session_name: str) -> dic
 
 
 def _slug(name: str) -> str:
-    s = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()
-    return s or "project"
+    return re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()
 
 
-def _mint_session_name(project_path: str) -> str:
-    # Keep the whole name <= 20 chars so the tmux-bridge sanitizer never truncates
-    # it: a truncated session name would diverge from the claimant label and the
-    # worktree branch, breaking cleanup. "k-" + slug(<=13) + "-" + 4 hex = <=20.
-    slug = (_slug(Path(project_path).name)[:13].rstrip("-")) or "project"
+def _mint_session_name(card_title: str) -> str:
+    # Derive the name from the card title so a glance at tmux/worktrees shows which
+    # ticket is running. Keep the whole name <= 20 chars so the tmux-bridge sanitizer
+    # never truncates it: a truncated session name would diverge from the claimant
+    # label and the worktree branch, breaking cleanup. "k-" + slug(<=13) + "-" + 4 hex
+    # = <=20.
+    slug = _slug(card_title)[:13].rstrip("-") or "card"
     return f"k-{slug}-{uuid.uuid4().hex[:4]}"
 
 
@@ -212,7 +213,7 @@ async def _run_card(
     """Claim+move-to-Doing+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column."""
     source_column = card.column
-    name = _mint_session_name(project_path)
+    name = _mint_session_name(card.title)
     claimant = CLAIMANT_PREFIX + name
 
     try:

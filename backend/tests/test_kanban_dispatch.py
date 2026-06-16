@@ -114,6 +114,19 @@ async def test_dispatch_claims_moves_to_doing_and_spawns():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_session_name_derives_from_card_title():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="Retry error")
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/home/me/repo", transport=transport,
+        )
+        await s.commit()
+    assert transport.calls[0]["session_name"].startswith("k-retry-error-")
+
+
+@pytest.mark.asyncio
 async def test_dispatch_picks_first_todo_by_rank():
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -315,11 +328,25 @@ def test_worktree_transport_removes_worktree_when_spawn_fails(monkeypatch, tmp_p
 
 
 def test_mint_session_name_fits_tmux_sanitizer_limit():
-    # a long project name must still yield a <=20-char session name, otherwise the
+    # a long card title must still yield a <=20-char session name, otherwise the
     # tmux-bridge sanitizer truncates it and cleanup/claimant labels diverge.
-    name = dispatch._mint_session_name("/home/me/a-very-long-repository-name-here")
+    name = dispatch._mint_session_name("A very long card title that goes on and on")
     assert len(name) <= 20
     assert name.startswith("k-")
+
+
+def test_mint_session_name_derives_slug_from_card_title():
+    # the session name should reflect the ticket title so a glance at tmux/worktrees
+    # shows which card is running.
+    name = dispatch._mint_session_name("Retry error")
+    assert name.startswith("k-retry-error-")
+
+
+def test_mint_session_name_falls_back_for_empty_title():
+    # a title with no usable characters still yields a valid session name.
+    name = dispatch._mint_session_name("!!!")
+    assert name.startswith("k-card-")
+    assert len(name) <= 20
 
 
 @pytest.mark.asyncio
