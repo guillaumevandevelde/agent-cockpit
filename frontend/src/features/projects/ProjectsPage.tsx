@@ -2,10 +2,11 @@
  * Projects management page
  */
 import { useState } from 'react';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, FolderPlus } from 'lucide-react';
 import { useProjectContext } from '@/contexts/ProjectContext';
 import { ProjectList } from './ProjectList';
 import { ProjectDiscovery } from './ProjectDiscovery';
+import { AddProjectDialog } from './AddProjectDialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/shared/RefreshButton';
@@ -13,6 +14,7 @@ import { RefreshButton } from '@/components/shared/RefreshButton';
 export function ProjectsPage() {
   const { projects, loading, error, fetchProjects } = useProjectContext();
   const [showDiscovery, setShowDiscovery] = useState(false);
+  const [showAddFolder, setShowAddFolder] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -28,6 +30,10 @@ export function ProjectsPage() {
         </div>
         <div className="flex gap-2">
           <RefreshButton onClick={fetchProjects} loading={loading} />
+          <Button variant="outline" onClick={() => setShowAddFolder(true)}>
+            <FolderPlus className="h-4 w-4" />
+            Add Folder
+          </Button>
           <Button onClick={() => setShowDiscovery(!showDiscovery)}>
             {showDiscovery ? 'Hide Discovery' : 'Discover Projects'}
           </Button>
@@ -39,6 +45,8 @@ export function ProjectsPage() {
           setShowDiscovery(false);
         }} />
       )}
+
+      <AddProjectDialog open={showAddFolder} onOpenChange={setShowAddFolder} />
 
       {error && (
         <Card className="border-destructive">
