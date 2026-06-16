@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 from app.services.providers.base import (
@@ -15,6 +18,18 @@ from app.services.providers.base import (
 def get_mimo_home() -> Path:
     """Return MIMO_HOME, defaulting to ~/.mimocode."""
     return Path(os.environ.get("MIMO_HOME", Path.home() / ".mimocode")).expanduser()
+
+
+def _find_mimo_binary() -> str | None:
+    """Find mimo binary, checking PATH and MIMO_HOME/bin."""
+    binary_path = shutil.which("mimo")
+    if binary_path:
+        return binary_path
+    mimo_home = get_mimo_home()
+    local_bin = mimo_home / "bin" / "mimo"
+    if local_bin.is_file():
+        return str(local_bin)
+    return None
 
 
 class MiMoCodeProvider(AgentProvider):
@@ -88,3 +103,37 @@ class MiMoCodeProvider(AgentProvider):
 
     def get_allowed_cli_commands(self) -> list[str]:
         return ["config", "memory", "skills"]
+
+    def get_version(self) -> str | None:
+        binary_path = _find_mimo_binary()
+        if not binary_path:
+            return None
+        try:
+            result = subprocess.run(
+                [binary_path, *self.version_args],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        output = f"{result.stdout}\n{result.stderr}"
+        match = re.search(r"(\d+\.\d+\.\d+(?:[-+][\w.]+)?)", output)
+        return match.group(1) if match else output.strip().splitlines()[0] if output.strip() else None
+
+    def get_status(self) -> dict:
+        binary_path = _find_mimo_binary()
+        version = self.get_version() if binary_path else None
+        return {
+            "id": self.id,
+            "display_name": self.display_name,
+            "binary_name": self.binary_name,
+            "installed": binary_path is not None,
+            "binary_path": binary_path,
+            "version": version,
+            "capabilities": self.get_capabilities(),
+            "capability_matrix": self.get_capability_matrix(),
+            "capability_details": self.get_capability_details(),
+            "config_paths": self.get_config_paths(),
+            "backup_policy": self.get_backup_policy(),
+        }
