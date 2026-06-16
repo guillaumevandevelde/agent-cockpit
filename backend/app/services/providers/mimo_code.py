@@ -86,7 +86,8 @@ class MiMoCodeProvider(AgentProvider):
         return False
 
     def build_spawn_command(self, options: SpawnCommandOptions) -> list[str]:
-        command = ["mimo"]
+        binary = _find_mimo_binary() or "mimo"
+        command = [binary]
 
         if options.mode == "plain":
             pass
