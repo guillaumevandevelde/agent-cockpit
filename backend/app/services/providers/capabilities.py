@@ -82,6 +82,28 @@ PROVIDER_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "backup": capability("read_only", "Backup", "Codex export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic Codex restore is refused without a stable provider-owned restore API."),
     },
+    "mimo-code": {
+        "config": capability("write_capable", "Configuration", "MiMoCode configuration files can be viewed and edited."),
+        "sessions": capability("read_only", "Session History", "MiMoCode session history is available."),
+        "spawn": capability("write_capable", "Spawn Sessions", "Agent Bridge can launch MiMoCode sessions."),
+        "resume": capability("write_capable", "Resume Sessions", "MiMoCode resume is available."),
+        "fork": capability("unsupported", "Fork Sessions", "MiMoCode fork mode is not exposed."),
+        "mcp": capability("unsupported", "MCP Servers", "MiMoCode does not expose MCP server management."),
+        "plugins": capability("unsupported", "Plugins", "MiMoCode does not expose plugin management."),
+        "permissions": capability("unsupported", "Permissions", "MiMoCode uses different permission semantics."),
+        "commands": capability("unsupported", "Commands", "MiMoCode does not expose slash commands."),
+        "agents": capability("unsupported", "Agents", "MiMoCode does not expose agent management."),
+        "skills": capability("write_capable", "Skills", "MiMoCode skills can be managed."),
+        "hooks": capability("unsupported", "Hooks", "MiMoCode does not expose hook management."),
+        "memory": capability("write_capable", "Memory", "MiMoCode memory files can be viewed and edited."),
+        "output_styles": capability("unsupported", "Output Styles", "MiMoCode does not expose output style management."),
+        "statusline": capability("unsupported", "Status Line", "MiMoCode does not expose status line settings."),
+        "usage": capability("unsupported", "Usage", "MiMoCode usage data is not available."),
+        "context": capability("unsupported", "Context", "MiMoCode context diagnostics are not available."),
+        "doctor": capability("unsupported", "Doctor", "MiMoCode does not expose provider doctor diagnostics."),
+        "backup": capability("read_only", "Backup", "MiMoCode export-only backups are available."),
+        "restore": capability("unsupported", "Restore", "Automatic MiMoCode restore is refused without a stable provider-owned restore API."),
+    },
 }
 
 

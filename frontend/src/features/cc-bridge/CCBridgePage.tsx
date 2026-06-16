@@ -20,6 +20,7 @@ const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
   { value: 'all', label: 'All agents' },
   { value: 'claude-code', label: 'Claude Code' },
   { value: 'codex-cli', label: 'Codex' },
+  { value: 'mimo-code', label: 'MiMoCode' },
 ]
 
 function addTarget(prev: string[], target: string): string[] {
@@ -74,6 +75,7 @@ export function CCBridgePage() {
     all: sessions.length,
     'claude-code': sessions.filter((session) => session.provider === 'claude-code').length,
     'codex-cli': sessions.filter((session) => session.provider === 'codex-cli').length,
+    'mimo-code': sessions.filter((session) => session.provider === 'mimo-code').length,
   }
 
   const initialDialogProvider = providerFilter === 'all' ? selectedProviderId : providerFilter
