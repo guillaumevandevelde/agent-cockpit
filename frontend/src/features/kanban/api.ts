@@ -90,4 +90,15 @@ export const kanbanApi = {
       method: "POST",
       body: JSON.stringify({ project_key: projectKey, enabled }),
     }),
+
+  getShipMode: (projectKey: string): Promise<{ mode: string }> =>
+    apiClient<{ mode: string }>(
+      `${BASE}/shipmode?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
+  setShipMode: (projectKey: string, mode: string): Promise<{ mode: string }> =>
+    apiClient<{ mode: string }>(`${BASE}/shipmode`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, mode }),
+    }),
 };

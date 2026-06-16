@@ -7,6 +7,7 @@ import { CardDrawer } from "./components/CardDrawer";
 import { CardEditDialog } from "./components/CardEditDialog";
 import { EnableKanbanToggle } from "./components/EnableKanbanToggle";
 import { AutodispatchToggle } from "./components/AutodispatchToggle";
+import { ShipModeToggle } from "./components/ShipModeToggle";
 import { kanbanApi } from "./api";
 import type { Card, Column as Col } from "./types";
 
@@ -63,6 +64,7 @@ export default function KanbanPage() {
         <div className="flex gap-2">
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />
           <AutodispatchToggle projectKey={projectKey} />
+          <ShipModeToggle projectKey={projectKey} />
           <Button size="sm" onClick={() => setCreating(true)}>
             New card
           </Button>
