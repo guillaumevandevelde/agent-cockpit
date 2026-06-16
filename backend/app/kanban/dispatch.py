@@ -1,4 +1,4 @@
-"""Auto-dispatch: spawn a Claude session for unclaimed Todo cards.
+"""Auto-dispatch: spawn a Claude session for unclaimed Analysis/Todo cards.
 
 The dispatcher claims a card *as the session that will work it* (claim-before-spawn,
 so racing ticks/devices produce exactly one winner), moves it to Doing, then spawns
@@ -116,13 +116,11 @@ def build_card_prompt(card, *, persona: Optional[str], ship_mode: str) -> str:
         f"# {card.title}\n"
         f"{getattr(card, 'description', '') or ''}\n\n"
         f"Ship mode: {ship_mode}\n\n"
-        "Work autonomously to completion. When the code is ready, invoke the "
-        "`git-ship` skill, which runs the tests and — only if they pass — ships per "
-        "the ship mode above (direct merge to master, or a draft pull request).\n"
-        "Then use the `cockpit-kanban` MCP tools to move the card to \"Review\" "
-        "(`move_card`) and attach your result with `attach_deliverable` (branch or PR "
-        "URL). If you cannot finish or the tests fail, leave a `comment` explaining why "
-        "and leave the card in \"Doing\"."
+        "Work autonomously to completion, following your role instructions above. "
+        "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
+        "`comment`) to update the card exactly as those instructions direct. If you are "
+        "blocked or your tests fail, `comment` explaining why and leave the card in "
+        '"Doing".'
     )
 
 
@@ -152,7 +150,13 @@ def worktree_transport(*, directory: str, prompt: str, session_name: str) -> dic
         directory=worktree_path, mode="plain", prompt=prompt,
         skip_permissions=True, worktree_path=worktree_path, repo_path=repo,
     )
-    return spawn_session("claude-code", options, session_name=session_name)
+    try:
+        return spawn_session("claude-code", options, session_name=session_name)
+    except Exception:
+        # the worktree exists but no session owns it; remove it so it isn't orphaned
+        subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
+                       capture_output=True, text=True, timeout=30)
+        raise
 
 
 def _slug(name: str) -> str:
@@ -161,7 +165,11 @@ def _slug(name: str) -> str:
 
 
 def _mint_session_name(project_path: str) -> str:
-    return f"k-{_slug(Path(project_path).name)}-{uuid.uuid4().hex[:4]}"
+    # Keep the whole name <= 20 chars so the tmux-bridge sanitizer never truncates
+    # it: a truncated session name would diverge from the claimant label and the
+    # worktree branch, breaking cleanup. "k-" + slug(<=13) + "-" + 4 hex = <=20.
+    slug = (_slug(Path(project_path).name)[:13].rstrip("-")) or "project"
+    return f"k-{slug}-{uuid.uuid4().hex[:4]}"
 
 
 def _project_is_busy(cards: Iterable[KanbanCard]) -> bool:
@@ -259,8 +267,8 @@ def match_project_paths(
 
 
 async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -> None:
-    """One poll cycle: dispatch the next Todo card for every enabled project that
-    maps to a local path on this device."""
+    """One poll cycle: dispatch the next Analysis/Todo card for every enabled project
+    that maps to a local path on this device."""
     from app.kanban.db import KanbanSessionLocal
 
     async with KanbanSessionLocal() as ks:

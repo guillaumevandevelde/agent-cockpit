@@ -79,7 +79,6 @@ async def test_card_prompt_includes_persona_card_and_shipmode():
     assert "Build widget" in prompt
     assert "Make it blue" in prompt
     assert "Ship mode: direct" in prompt
-    assert "git-ship" in prompt
     assert "cockpit-kanban" in prompt
 
 
@@ -288,3 +287,52 @@ def test_worktree_transport_creates_from_origin_master(monkeypatch, tmp_path):
     assert opts.repo_path == str(tmp_path)
     assert opts.worktree_path == opts.directory
     assert res["session_name"] == "k-proj-abcd"
+
+
+def test_worktree_transport_removes_worktree_when_spawn_fails(monkeypatch, tmp_path):
+    ran = []
+
+    def fake_run(cmd, *a, **k):
+        ran.append(cmd)
+        class R:
+            returncode = 0
+            stderr = ""
+        return R()
+
+    def fake_spawn(provider_id, options, session_name=None):
+        raise RuntimeError("tmux exploded")
+
+    import app.kanban.dispatch as d
+    monkeypatch.setattr(d.subprocess, "run", fake_run)
+    monkeypatch.setattr("app.services.agent_bridge.spawn.spawn_session", fake_spawn)
+
+    with pytest.raises(RuntimeError):
+        d.worktree_transport(
+            directory=str(tmp_path), prompt="hi", session_name="k-proj-abcd")
+
+    removes = [c for c in ran if "worktree" in c and "remove" in c]
+    assert removes, "expected the orphaned worktree to be removed on spawn failure"
+
+
+def test_mint_session_name_fits_tmux_sanitizer_limit():
+    # a long project name must still yield a <=20-char session name, otherwise the
+    # tmux-bridge sanitizer truncates it and cleanup/claimant labels diverge.
+    name = dispatch._mint_session_name("/home/me/a-very-long-repository-name-here")
+    assert len(name) <= 20
+    assert name.startswith("k-")
+
+
+@pytest.mark.asyncio
+async def test_spawn_failure_returns_analysis_card_to_analysis():
+    transport = RecordingTransport(fail=True)
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="Investigate", column="Analysis")
+        await s.commit()
+        with pytest.raises(RuntimeError):
+            await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p", transport=transport,
+            )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.column == "Analysis"      # compensated back to its source column
+    assert card.claimed_by is None

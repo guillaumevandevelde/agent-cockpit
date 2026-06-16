@@ -17,9 +17,13 @@ git fetch origin
 
 ## 2. Run the tests — they gate everything
 
-- Backend: activate the project's Python venv (in this repo it lives in the **main checkout**
-  at `backend/venv`), then from the worktree's own backend dir:
-  `pytest tests/`
+- Backend: activate the project's Python venv. In this repo it lives in the **main
+  checkout** (not your worktree). Find the main checkout and activate it:
+  ```bash
+  MAIN=$(git rev-parse --git-common-dir | xargs dirname)
+  source "$MAIN/backend/venv/bin/activate"
+  ```
+  then run the tests from the worktree's own backend dir: `cd backend && pytest tests/`
 - Frontend (if frontend files changed): `cd frontend && npm run lint && npm run build`
 
 If anything fails: **stop**. Do not merge, do not open a PR. `comment` on the card with the
