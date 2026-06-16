@@ -22,6 +22,8 @@ class SpawnCommandOptions:
     directory: str
     mode: str = "plain"
     worktree_name: str | None = None
+    worktree_path: str | None = None
+    repo_path: str | None = None
     session_id: str | None = None
     project_folder: str | None = None
     skip_permissions: bool = False

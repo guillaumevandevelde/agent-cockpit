@@ -104,6 +104,8 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: 
         "mode": options.mode,
         "directory": directory,
         "worktree_name": options.worktree_name or (name if options.mode == "worktree" else None),
+        "worktree_path": options.worktree_path,
+        "repo_path": options.repo_path,
         "platform": options.platform,
     }
 
@@ -146,6 +148,22 @@ def kill_session(session_name: str, cleanup_worktree: bool = False) -> dict:
                 )
             except Exception:
                 logger.warning("Failed to remove worktree %s in %s", worktree_name, directory)
+
+    if (
+        cleanup_worktree
+        and metadata
+        and metadata.get("worktree_path")
+        and metadata.get("repo_path")
+    ):
+        try:
+            subprocess.run(
+                ["git", "-C", metadata["repo_path"], "worktree", "remove",
+                 metadata["worktree_path"], "--force"],
+                capture_output=True, text=True, timeout=10,
+            )
+        except Exception:
+            logger.warning("Failed to remove dispatcher worktree %s",
+                           metadata["worktree_path"])
 
     _spawned_sessions.pop(session_name, None)
     logger.info("Killed session %s", session_name)
