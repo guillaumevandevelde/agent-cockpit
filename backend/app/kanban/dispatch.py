@@ -73,6 +73,37 @@ async def set_ship_mode(session, project_key: str, mode: str) -> None:
     await session.flush()
 
 
+# ---- persona helpers -------------------------------------------------------
+
+_PERSONA_BY_COLUMN = {
+    "Analysis": "kanban-analyst.md",
+    "Todo": "kanban-developer.md",
+}
+
+
+def _persona_filename(column: str) -> Optional[str]:
+    return _PERSONA_BY_COLUMN.get(column)
+
+
+def _strip_frontmatter(text: str) -> str:
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            return text[end + len("\n---\n"):]
+    return text
+
+
+def _read_persona(project_path: str, column: str) -> Optional[str]:
+    filename = _persona_filename(column)
+    if not filename:
+        return None
+    path = Path(project_path) / ".claude" / "agents" / filename
+    try:
+        return _strip_frontmatter(path.read_text()).strip()
+    except OSError:
+        return None
+
+
 # ---- prompt ----------------------------------------------------------------
 
 def build_card_prompt(card: KanbanCard) -> str:
