@@ -74,7 +74,12 @@ export default function KanbanPage() {
       <Board cards={cards} onOpen={setOpen} onMove={onMove} />
 
       {open && (
-        <CardDrawer card={open} onClose={() => setOpen(null)} onChanged={reload} />
+        <CardDrawer
+          card={open}
+          projectPath={projectPath}
+          onClose={() => setOpen(null)}
+          onChanged={reload}
+        />
       )}
       {creating && (
         <CardEditDialog

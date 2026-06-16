@@ -17,6 +17,7 @@ export interface Card {
   rank: string;
   priority?: string | null;
   labels?: string[] | null;
+  agent?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
   created_at: string;

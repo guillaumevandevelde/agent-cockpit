@@ -27,10 +27,27 @@ export const kanbanApi = {
       body: JSON.stringify(body),
     }),
 
-  updateCard: (id: string, body: { title?: string; description?: string }): Promise<Card> =>
+  updateCard: (
+    id: string,
+    body: { title?: string; description?: string; agent?: string | null }
+  ): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),
+    }),
+
+  deleteCard: (id: string): Promise<void> =>
+    apiClient<void>(`${BASE}/cards/${id}`, { method: "DELETE" }),
+
+  agents: (projectPath: string): Promise<{ agents: string[] }> =>
+    apiClient<{ agents: string[] }>(
+      `${BASE}/agents?project_path=${encodeURIComponent(projectPath)}`
+    ),
+
+  dispatchNow: (id: string, projectPath: string): Promise<{ session_name: string }> =>
+    apiClient<{ session_name: string }>(`${BASE}/cards/${id}/dispatch`, {
+      method: "POST",
+      body: JSON.stringify({ project_path: projectPath }),
     }),
 
   move: (id: string, column: string): Promise<Card> =>
