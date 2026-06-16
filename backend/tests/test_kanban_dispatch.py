@@ -4,7 +4,7 @@ import pytest_asyncio
 
 from app.kanban.db import KanbanBase, kanban_engine, KanbanSessionLocal
 from app.kanban.operations import apply_operation
-from app.kanban.service import get_card, list_cards
+from app.kanban.service import get_card
 from app.kanban import dispatch
 
 
@@ -65,14 +65,31 @@ async def test_set_and_list_autodispatch():
 # ---- prompt ----------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_card_prompt_includes_title_description_and_mcp_hint():
+async def test_card_prompt_includes_persona_card_and_shipmode():
     async with KanbanSessionLocal() as s:
-        cid = await _make_card(s, title="Fix the parser")
+        cid = await _make_card(s, title="Build widget")
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid, payload={"description": "Make it blue"})
+        await s.flush()
         card = await get_card(s, cid)
-    prompt = dispatch.build_card_prompt(card)
-    assert "Fix the parser" in prompt
-    assert "Review" in prompt        # tells the agent how to report back
-    assert "move_card" in prompt
+    prompt = dispatch.build_card_prompt(
+        card, persona="You are the Developer agent.", ship_mode="direct",
+    )
+    assert "You are the Developer agent." in prompt
+    assert "Build widget" in prompt
+    assert "Make it blue" in prompt
+    assert "Ship mode: direct" in prompt
+    assert "git-ship" in prompt
+    assert "cockpit-kanban" in prompt
+
+
+def test_card_prompt_without_persona_still_works():
+    class _C:
+        title = "T"
+        description = ""
+    prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="pull-request")
+    assert "Ship mode: pull-request" in prompt
+    assert "# T" in prompt
 
 
 # ---- dispatch_project: the core ------------------------------------------

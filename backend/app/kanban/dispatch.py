@@ -106,15 +106,22 @@ def _read_persona(project_path: str, column: str) -> Optional[str]:
 
 # ---- prompt ----------------------------------------------------------------
 
-def build_card_prompt(card: KanbanCard) -> str:
+def build_card_prompt(card, *, persona: Optional[str], ship_mode: str) -> str:
+    preamble = (persona.strip() + "\n\n") if persona else ""
     return (
-        "You are an agent picking up a Kanban card from the Claude Cockpit board.\n"
-        "The card is already claimed by you and moved to \"Doing\".\n\n"
+        f"{preamble}"
+        "You are picking up a Kanban card from the Claude Cockpit board. "
+        'It is already claimed by you and moved to "Doing".\n\n'
         f"# {card.title}\n"
-        f"{card.description or ''}\n\n"
-        "When finished: use the `cockpit-kanban` MCP tools to move the card to "
-        '"Review" (`move_card`) and attach your result (`attach_deliverable`, e.g. a '
-        "branch or PR URL). If you cannot complete it, leave a `comment` explaining why."
+        f"{getattr(card, 'description', '') or ''}\n\n"
+        f"Ship mode: {ship_mode}\n\n"
+        "Work autonomously to completion. When the code is ready, invoke the "
+        "`git-ship` skill, which runs the tests and — only if they pass — ships per "
+        "the ship mode above (direct merge to master, or a draft pull request).\n"
+        "Then use the `cockpit-kanban` MCP tools to move the card to \"Review\" "
+        "(`move_card`) and attach your result with `attach_deliverable` (branch or PR "
+        "URL). If you cannot finish or the tests fail, leave a `comment` explaining why "
+        "and leave the card in \"Doing\"."
     )
 
 
