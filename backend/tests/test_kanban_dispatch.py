@@ -4,7 +4,7 @@ import pytest_asyncio
 
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban.operations import apply_operation
-from app.kanban.service import get_card
+from app.kanban.service import get_card, list_cards
 from app.kanban import dispatch
 
 KanbanSessionLocal = TestSessionLocal()
@@ -193,6 +193,141 @@ async def test_spawn_failure_releases_and_returns_card_to_todo():
     assert card.column == "Todo"          # compensated back
     assert card.claimed_by is None        # claim released
     assert len(transport.calls) == 1
+
+
+# ---- stale-claim reaping (tmux-liveness) ----------------------------------
+
+@pytest.mark.asyncio
+async def test_reaps_dead_agent_claim_in_doing_and_dispatches_next():
+    # A session died without moving its card out of Doing. With no matching live
+    # tmux session, the stale claim is released so the next Todo card dispatches.
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        dead = await _make_card(s, title="orphaned", column="Doing")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=dead, payload={"claimed_by": "agent:k-dead-0001"},
+        )
+        waiting = await _make_card(s, title="waiting", column="Todo")
+        await s.commit()
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+            live_sessions=set(),  # no live sessions -> the agent claim is stale
+        )
+        await s.commit()
+        dead_card = await get_card(s, dead)
+        waiting_card = await get_card(s, waiting)
+    assert dead_card.claimed_by is None       # stale claim reaped
+    assert dead_card.column == "Doing"        # orphan left for a human to re-rank
+    assert result is not None                 # cap freed -> next card dispatched
+    assert waiting_card.column == "Doing"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_live_agent_claim_in_doing_still_blocks():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        busy = await _make_card(s, title="busy", column="Doing")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy, payload={"claimed_by": "agent:k-alive-0001"},
+        )
+        await _make_card(s, title="waiting", column="Todo")
+        await s.commit()
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+            live_sessions={"k-alive-0001"},  # session is still alive
+        )
+        await s.commit()
+        busy_card = await get_card(s, busy)
+    assert result is None                          # still busy
+    assert busy_card.claimed_by == "agent:k-alive-0001"
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_reaper_ignores_human_ui_claims():
+    # A human-claimed (me@ui) Doing card is never reaped, even with no live sessions.
+    async with KanbanSessionLocal() as s:
+        human = await _make_card(s, title="human WIP", column="Doing")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=human, payload={"claimed_by": "me@ui"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK), live_sessions=set())
+        await s.commit()
+        card = await get_card(s, human)
+    assert reaped == 0
+    assert card.claimed_by == "me@ui"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_without_live_sessions_does_not_reap():
+    # The default (live_sessions=None) preserves the old behavior: an agent claim
+    # blocks the cap, because we never reap without a liveness snapshot.
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        busy = await _make_card(s, title="busy", column="Doing")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
+        )
+        await _make_card(s, title="waiting", column="Todo")
+        await s.commit()
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport)
+        await s.commit()
+        busy_card = await get_card(s, busy)
+    assert result is None
+    assert busy_card.claimed_by == "agent:k-x-0001"
+    assert transport.calls == []
+
+
+def test_live_sessions_parses_names(monkeypatch):
+    import app.kanban.dispatch as d
+
+    class R:
+        returncode = 0
+        stdout = "k-a-1\nk-b-2\n"
+        stderr = ""
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **k: R())
+    assert d._live_sessions() == {"k-a-1", "k-b-2"}
+
+
+def test_live_sessions_empty_set_when_no_server(monkeypatch):
+    import app.kanban.dispatch as d
+
+    class R:
+        returncode = 1
+        stdout = ""
+        stderr = "no server running on /tmp/tmux-1000/default"
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **k: R())
+    assert d._live_sessions() == set()
+
+
+def test_live_sessions_none_on_ambiguous_tmux_error(monkeypatch):
+    # An ambiguous failure must yield None (skip reaping), never an empty set,
+    # so a transient tmux hiccup can't release live claims.
+    import app.kanban.dispatch as d
+
+    class R:
+        returncode = 2
+        stdout = ""
+        stderr = "tmux: unexpected error talking to server"
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **k: R())
+    assert d._live_sessions() is None
+
+
+def test_live_sessions_none_when_tmux_missing(monkeypatch):
+    import app.kanban.dispatch as d
+
+    def boom(*a, **k):
+        raise FileNotFoundError("tmux")
+    monkeypatch.setattr(d.subprocess, "run", boom)
+    assert d._live_sessions() is None
 
 
 # ---- project_key -> local path matching -----------------------------------

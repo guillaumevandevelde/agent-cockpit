@@ -192,6 +192,35 @@ def _project_is_busy(cards: Iterable[KanbanCard]) -> bool:
     )
 
 
+def _claimant_session(card: KanbanCard) -> Optional[str]:
+    """The tmux session name behind an `agent:` claim, or None for unclaimed cards
+    and human (`me@ui`) claims — those are never reaped."""
+    claimant = card.claimed_by or ""
+    if claimant.startswith(CLAIMANT_PREFIX):
+        return claimant[len(CLAIMANT_PREFIX):]
+    return None
+
+
+def _live_sessions() -> Optional[set[str]]:
+    """Names of tmux sessions alive on this device, or None when tmux cannot be
+    queried. Returning None (not an empty set) on an *ambiguous* failure is the
+    whole point: the reaper must never mistake a transient `tmux` hiccup for "every
+    session is dead" and release live claims. A clean "no server running" maps to
+    an empty set, since that genuinely means zero live sessions."""
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", "#{session_name}"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        if "no server running" in (result.stderr or "").lower():
+            return set()
+        return None
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 _DISPATCH_COLUMNS = ("Todo", "Analysis")  # Todo drains first, then Analysis
 
 
@@ -250,12 +279,50 @@ async def _run_card(
             "source_column": source_column, "spawned": spawned}
 
 
+async def reap_stale_claims(
+    session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
+) -> int:
+    """Release `agent:` claims on Doing cards whose tmux session is gone.
+
+    A dispatched session that dies (crash, manual close, reboot) without moving its
+    card out of Doing would otherwise keep `_project_is_busy` True forever, silently
+    wedging auto-dispatch for the whole project — the "auto-pick stopped working"
+    symptom. Releasing the dead claim frees the per-project cap so the next card is
+    picked up; the orphaned card is left in Doing (now unclaimed) for a human to
+    re-rank. Human (`me@ui`) claims are never touched. Returns the number reaped."""
+    reaped = 0
+    for card in cards:
+        if card.column != "Doing":
+            continue
+        name = _claimant_session(card)
+        if name is None or name in live_sessions:
+            continue
+        await apply_operation(
+            session, op_type="release", entity_type="card",
+            project_key=project_key, entity_id=card.id, payload={},
+        )
+        logger.info("reaped stale claim on card %s (dead session %s)", card.id, name)
+        reaped += 1
+    return reaped
+
+
 async def dispatch_project(
     session, *, project_key: str, project_path: str, transport: SpawnTransport,
+    live_sessions: Optional[set[str]] = None,
 ) -> Optional[dict]:
     """Claim+move+spawn the next Analysis/Todo card for one project. Returns a result
-    dict or None when there is nothing to do (no candidate card, or project is busy)."""
+    dict or None when there is nothing to do (no candidate card, or project is busy).
+
+    When `live_sessions` is provided, stale `agent:` claims on Doing cards whose
+    session is no longer alive are reaped first, so a dead session can never wedge
+    the busy cap. Passing None skips reaping (used by unit tests that exercise the
+    cap directly)."""
     cards = await list_cards(session, project_key)
+    if live_sessions is not None:
+        if await reap_stale_claims(
+            session, project_key=project_key, cards=cards, live_sessions=live_sessions,
+        ):
+            cards = await list_cards(session, project_key)
     if _project_is_busy(cards):
         return None
 
@@ -317,13 +384,17 @@ async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -
 
     paths = await _registered_project_paths()
     mapping = match_project_paths(enabled, paths)
+    if not mapping:
+        return
+
+    live_sessions = _live_sessions()  # one tmux query per tick, shared across projects
 
     for project_key, project_path in mapping.items():
         async with KanbanSessionLocal() as ks:
             try:
                 await dispatch_project(
                     ks, project_key=project_key, project_path=project_path,
-                    transport=transport,
+                    transport=transport, live_sessions=live_sessions,
                 )
                 await ks.commit()
             except Exception:
