@@ -103,6 +103,51 @@ dispatch; **E** is de lange-termijn-transportupgrade (al een eigen spoor).
 
 ---
 
+## 4b. Stap 1 — kant-en-klare implementatiekaarten
+
+Project: `git:github.com/guillaumevandevelde/claude-cockpit`, kolom `Todo`. Twee onafhankelijk
+shipbare eenheden. *(Konden niet op het bord gezet worden: de `cockpit-kanban` MCP gaf
+`-32602` op alle calls — stale-server; zie [[kanban-mcp-writes-fail]]. Staan hier klaar om
+1-op-1 als kaart aangemaakt te worden zodra de server gezond is.)*
+
+### Kaart 1A — Canoniek absoluut pad voor de kanban-DB + adoptie bestaand bord
+Neemt grondoorzaak **R1** weg; lost het "verdwijnende kaart"-gedrag op. Onafhankelijk shipbaar.
+
+- **Scope** — IN: de kanban-DB op één vaste, CWD-onafhankelijke locatie zodat elke
+  backend/worktree/CLI hetzelfde bestand opent; bij eerste boot het bestaande bord adopteren.
+  `claude_registry.db` (device-lokaal) blijft buiten scope. OUT: single-writer-guard (1C);
+  testisolatie van de op-log (stap 2); wijzigingen aan het event-sourced model.
+- **Approach** — `backend/app/config.py`: `kanban_database_url` default van relatief
+  `sqlite+aiosqlite:///./kanban.db` naar een absoluut pad in de bestaande app-data-conventie
+  (bv. `~/.claude-registry/kanban.db`, zelfde familie als `~/.claude-registry/backups/`),
+  via `Path.home()`/`expanduser`; env-override blijft. Dir aanmaken vóór engine-gebruik
+  (let op: engine wordt bij import in `app/kanban/db.py` gemaakt — padresolutie moet vóór
+  `create_async_engine`). **Adoptie:** bestaat het canonieke bestand nog niet maar wél een
+  legacy `./kanban.db`, kopieer die één keer (kopie, niet move; logregel). Geen merge van
+  uiteengelopen DBs — main-checkout-DB als bron. Documenteer in CLAUDE.md "Gotchas".
+- **Acceptance** — backend vanuit een willekeurige CWD leest/schrijft hetzelfde canonieke
+  bestand; een kaart uit worktree-context is zichtbaar via de `:8000`-MCP/REST; eerste boot
+  adopteert een legacy-bord met logregel; backend-tests groen (vanuit worktree-backend);
+  env-override werkt nog.
+
+### Kaart 1C — Single-writer guard (invariant + startup-check)
+Bouwt op 1A. Pragmatische "één schrijver"-garantie i.p.v. een volledige netwerk-proxy (past bij
+local-first/laag volume; echte proxy uitgesteld tot er aantoonbare schrijf-contentie is).
+
+- **Scope** — IN: voorkomen dat het bord stil op een afwijkend/relatief pad belandt; bevestigen
+  dat WAL het lage-volume multi-writer-geval dekt; zichtbaar maken welk DB-bestand actief is.
+  OUT: een RPC/REST-proxy waarbij niet-primaire backends de DB nooit openen; leases/heartbeats
+  (stap 4).
+- **Approach** — startup-check in `app/kanban/db.py`/`init_kanban_db`: resolved pad relatief of
+  ≠ canoniek (1A) → luide WARNING (of fail-fast achter een setting). Expose het **absolute**
+  actieve DB-pad via health/diagnostics ("welk bord draai ik?"). Test met twee gelijktijdige
+  schrijvers tegen één DB zonder "database is locked" (WAL + `busy_timeout` zijn al gezet).
+- **Acceptance** — relatief/niet-canoniek pad → duidelijke WARNING (of weigering) i.p.v. stille
+  divergentie; actief absoluut DB-pad opvraagbaar via health/diagnostics; concurrent-writers-test
+  slaagt zonder lock-fouten; bestaande backend-tests groen.
+
+---
+
 ## 5. Bewust niet doen
 - De huidige draaiende instantie patchen of de `-32602` "fixen" — dat is herstel, geen
   betrouwbaarheid; de bovenstaande herarchitectuur maakt die klasse fouten overbodig.
