@@ -84,10 +84,16 @@ export default function KanbanPage() {
       {creating && (
         <CardEditDialog
           open
+          projectPath={projectPath}
           onClose={() => setCreating(false)}
-          onSubmit={async ({ title, description }) => {
+          onSubmit={async ({ title, description, agent }) => {
             try {
-              await kanbanApi.createCard({ project_key: projectKey, title, description });
+              await kanbanApi.createCard({
+                project_key: projectKey,
+                title,
+                description,
+                agent,
+              });
               setCreating(false);
               void reload();
             } catch {
