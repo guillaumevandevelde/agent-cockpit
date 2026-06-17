@@ -196,11 +196,21 @@ export function CardDrawer({
         {editing && (
           <CardEditDialog
             open
-            initial={{ title: card.title, description: card.description }}
+            initial={{
+              title: card.title,
+              description: card.description,
+              priority: card.priority,
+              labels: card.labels,
+            }}
             onClose={() => setEditing(false)}
-            onSubmit={async ({ title, description }) => {
+            onSubmit={async ({ title, description, priority, labels }) => {
               try {
-                await kanbanApi.updateCard(card.id, { title, description });
+                await kanbanApi.updateCard(card.id, {
+                  title,
+                  description,
+                  priority,
+                  labels: labels.length ? labels : null,
+                });
                 setEditing(false);
                 onChanged();
               } catch {
