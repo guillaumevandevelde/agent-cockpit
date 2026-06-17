@@ -15,6 +15,7 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      actions: read   # private repos: CodeQL reads the workflow run via the Actions API
 
     strategy:
       fail-fast: false
