@@ -1,6 +1,9 @@
 export const COLUMNS = ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"] as const;
 export type Column = (typeof COLUMNS)[number];
 
+export const PRIORITIES = ["none", "low", "medium", "high"] as const;
+export type Priority = (typeof PRIORITIES)[number];
+
 export interface Deliverable {
   id: string;
   kind: "pr" | "branch" | "commit" | "link" | "note";

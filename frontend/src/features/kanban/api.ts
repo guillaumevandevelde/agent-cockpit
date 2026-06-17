@@ -21,6 +21,8 @@ export const kanbanApi = {
     title: string;
     description?: string;
     column?: string;
+    priority?: string | null;
+    labels?: string[] | null;
   }): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards`, {
       method: "POST",
@@ -29,7 +31,13 @@ export const kanbanApi = {
 
   updateCard: (
     id: string,
-    body: { title?: string; description?: string; agent?: string | null }
+    body: {
+      title?: string;
+      description?: string;
+      agent?: string | null;
+      priority?: string | null;
+      labels?: string[] | null;
+    }
   ): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}`, {
       method: "PATCH",
