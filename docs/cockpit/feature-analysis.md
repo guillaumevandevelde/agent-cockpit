@@ -143,14 +143,20 @@ groot/strategisch) · **Overslaan** (buiten niche of al gedekt).
 
 ## 4. Aanbeveling — eerste tranche
 
-Bouw in deze volgorde (elk een aparte, afgebakende Todo-kaart):
+**Eerst het fundament robuust maken, dan features.** De auto-pickup/bord-problemen zijn geen
+losse bugs om te herstellen maar een topologie-kwestie; de robuuste doelarchitectuur staat in
+**`robust-board-dispatch.md`** (absoluut bord-pad + één schrijver → heilige op-log → MCP
+health/version → lease-gebaseerde dispatch). Dat spoor vervangt het oude "A5 auto-pickup
+hardenen" als fundament.
 
-1. **A5** auto-pickup hardenen *(bestaande kaart)* — fundament.
-2. **A2** live pane-streaming — direct dagelijks nut.
-3. **A1** in-app diff-review — sluit de bord-lus.
-4. **B1** OS-notificaties — goedkope hefboom op bestaande attentie-laag.
-5. **A3** instelbare concurrency-cap — ontsluit parallel-agents.
-6. **C1** config-profielen — verdiept de unieke niche.
+Daarna, als feature-laag (elk een aparte, afgebakende Todo-kaart):
+
+1. **A2** live pane-streaming — direct dagelijks nut.
+2. **A1** in-app diff-review — sluit de bord-lus.
+3. **B1** OS-notificaties — goedkope hefboom op bestaande attentie-laag.
+4. **A3** instelbare concurrency-cap — ontsluit parallel-agents (bouwt op leases uit het
+   robuustheidsspoor).
+5. **C1** config-profielen — verdiept de unieke niche.
 
 De "Overwegen"-items zijn bewust **niet** als kaart aangemaakt: ze vergen eerst een
 gebruikersbeslissing of een groter ontwerp, en kaarten ervan zou requirements verzinnen.
