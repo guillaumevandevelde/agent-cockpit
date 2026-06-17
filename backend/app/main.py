@@ -86,7 +86,11 @@ app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 # Mount the kanban MCP server (SSE) at /kanban-mcp. Agents point their
 # .mcp.json at http://localhost:8000/kanban-mcp/sse.
 from app.kanban.mcp_server import mcp as kanban_mcp  # noqa: E402
-app.mount("/kanban-mcp", kanban_mcp.sse_app())
+# Pass mount_path so the SSE transport advertises its message endpoint as
+# /kanban-mcp/messages/ (matching the mount). Without it FastMCP advertises a
+# bare /messages/, which Starlette routes to the StaticFiles frontend, so every
+# agent tool call silently misses the MCP server.
+app.mount("/kanban-mcp", kanban_mcp.sse_app(mount_path="/kanban-mcp"))
 
 
 @app.get("/health")
