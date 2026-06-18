@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
+import { useProviderContext } from "@/contexts/ProviderContext";
 import { Button } from "@/components/ui/button";
 import { Board } from "./components/Board";
 import { CardDrawer } from "./components/CardDrawer";
@@ -13,6 +14,7 @@ import type { Card, Column as Col } from "./types";
 
 export default function KanbanPage() {
   const { activeProject } = useProjectContext();
+  const { selectedProviderId } = useProviderContext();
   const projectPath = activeProject?.path ?? "";
   const [projectKey, setProjectKey] = useState<string>("");
   const [cards, setCards] = useState<Card[]>([]);
@@ -84,8 +86,9 @@ export default function KanbanPage() {
       {creating && (
         <CardEditDialog
           open
+          defaultAgent={selectedProviderId}
           onClose={() => setCreating(false)}
-          onSubmit={async ({ title, description, column, priority, labels }) => {
+          onSubmit={async ({ title, description, column, priority, labels, agent }) => {
             try {
               await kanbanApi.createCard({
                 project_key: projectKey,
@@ -94,6 +97,7 @@ export default function KanbanPage() {
                 column,
                 priority,
                 labels: labels.length ? labels : null,
+                agent,
               });
               setCreating(false);
               void reload();

@@ -23,6 +23,7 @@ export const kanbanApi = {
     column?: string;
     priority?: string | null;
     labels?: string[] | null;
+    agent?: string | null;
   }): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards`, {
       method: "POST",

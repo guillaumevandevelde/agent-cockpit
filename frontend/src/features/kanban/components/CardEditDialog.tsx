@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -14,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownPreviewToggle } from "@/components/shared/MarkdownPreviewToggle";
@@ -30,6 +32,7 @@ function parseLabels(raw: string): string[] {
 export function CardEditDialog({
   open,
   initial,
+  defaultAgent,
   onClose,
   onSubmit,
 }: {
@@ -40,6 +43,7 @@ export function CardEditDialog({
     priority?: string | null;
     labels?: string[] | null;
   };
+  defaultAgent?: string | null;
   onClose: () => void;
   onSubmit: (data: {
     title: string;
@@ -47,12 +51,11 @@ export function CardEditDialog({
     column: Column;
     priority: string | null;
     labels: string[];
+    agent: string | null;
   }) => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  // Column is only chosen when creating a card; existing cards change column
-  // via drag/move, so the select is hidden in edit mode.
   const [column, setColumn] = useState<Column>("Backlog");
   const [priority, setPriority] = useState<Priority>(
     (initial?.priority as Priority) ?? "none"
@@ -60,6 +63,7 @@ export function CardEditDialog({
   const [labelsInput, setLabelsInput] = useState(
     (initial?.labels ?? []).join(", ")
   );
+  const [agent, setAgent] = useState<string>(defaultAgent ?? "");
 
   const labels = parseLabels(labelsInput);
 
@@ -68,65 +72,93 @@ export function CardEditDialog({
       <DialogContent className={MODAL_SIZES.MD}>
         <DialogHeader>
           <DialogTitle>{initial ? "Edit card" : "New card"}</DialogTitle>
+          <DialogDescription>
+            {initial ? "Update the card details below." : "Create a new card for your kanban board."}
+          </DialogDescription>
         </DialogHeader>
-        <Input
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <MarkdownPreviewToggle value={description} onChange={setDescription} />
-        {!initial && (
-          <Select value={column} onValueChange={(v) => setColumn(v as Column)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Column" />
-            </SelectTrigger>
-            <SelectContent>
-              {COLUMNS.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground w-16">
-            Priority
-          </span>
-          <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-            <SelectTrigger className="h-8 w-[160px]">
-              <SelectValue placeholder="Priority" />
-            </SelectTrigger>
-            <SelectContent>
-              {PRIORITIES.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {p}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground w-16">
-              Labels
-            </span>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="card-title">Title</Label>
             <Input
+              id="card-title"
+              placeholder="Enter card title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <MarkdownPreviewToggle value={description} onChange={setDescription} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {!initial && (
+              <div className="space-y-2">
+                <Label>Column</Label>
+                <Select value={column} onValueChange={(v) => setColumn(v as Column)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select column" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COLUMNS.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Priority</Label>
+              <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRIORITIES.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="card-agent">Agent</Label>
+            <Input
+              id="card-agent"
+              placeholder="Agent name (optional)"
+              value={agent}
+              onChange={(e) => setAgent(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="card-labels">Labels</Label>
+            <Input
+              id="card-labels"
               placeholder="comma, separated, labels"
               value={labelsInput}
               onChange={(e) => setLabelsInput(e.target.value)}
             />
+            {labels.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {labels.map((l) => (
+                  <Badge key={l} variant="outline" className="text-[10px] font-normal">
+                    {l}
+                  </Badge>
+                ))}
+              </div>
+            )}
           </div>
-          {labels.length > 0 && (
-            <div className="flex flex-wrap gap-1 pl-[4.5rem]">
-              {labels.map((l) => (
-                <Badge key={l} variant="outline" className="text-[10px] font-normal">
-                  {l}
-                </Badge>
-              ))}
-            </div>
-          )}
         </div>
+
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -140,10 +172,11 @@ export function CardEditDialog({
                 column,
                 priority: priority === "none" ? null : priority,
                 labels,
+                agent: agent.trim() || null,
               })
             }
           >
-            Save
+            {initial ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>

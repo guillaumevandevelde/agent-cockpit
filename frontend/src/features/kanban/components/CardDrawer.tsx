@@ -202,14 +202,16 @@ export function CardDrawer({
               priority: card.priority,
               labels: card.labels,
             }}
+            defaultAgent={card.agent}
             onClose={() => setEditing(false)}
-            onSubmit={async ({ title, description, priority, labels }) => {
+            onSubmit={async ({ title, description, priority, labels, agent }) => {
               try {
                 await kanbanApi.updateCard(card.id, {
                   title,
                   description,
                   priority,
                   labels: labels.length ? labels : null,
+                  agent,
                 });
                 setEditing(false);
                 onChanged();
