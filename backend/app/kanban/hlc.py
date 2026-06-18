@@ -2,6 +2,12 @@
 despite wall-clock drift. Tick strings sort lexicographically by causal order.
 
 Format: "<physical_ms:013d>:<logical:05d>:<node_id>".
+
+DORMANT (single-device). The multi-device sync seam was pruned; see
+docs/cockpit/sync-hlc-freeze-vs-prune.md. The HLC is *retained* — not dead — because
+it still does real work with one clock: it is the total-ordering key for the op-log,
+the replay order for rematerialize(), and a card's default rank. `update()` only matters
+once a second clock exists again, so it is frozen, not removed.
 """
 import time
 from typing import Callable, Optional

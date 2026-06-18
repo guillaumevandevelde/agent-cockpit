@@ -1,7 +1,7 @@
 """Kanban ORM models. Two layers:
 - KanbanOp: append-only operation log (source of truth + activity feed).
 - KanbanCard / KanbanDeliverable: materialized, derived state for fast reads.
-- KanbanMeta: small key/value store (device_id, sync cursors).
+- KanbanMeta: small key/value store (device_id, per-project flags).
 """
 from datetime import datetime, timezone
 
@@ -46,7 +46,10 @@ class KanbanCard(KanbanBase):
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    # Per-field HLCs powering last-write-wins.
+    # Per-field HLCs powering last-write-wins. DORMANT with one device: these guards
+    # never reject a live write (every new tick dominates) and only do work under
+    # HLC-ordered replay. Kept as cheap multi-device insurance, not removed.
+    # See docs/cockpit/sync-hlc-freeze-vs-prune.md.
     title_hlc: Mapped[str | None] = mapped_column(String(48), nullable=True)
     description_hlc: Mapped[str | None] = mapped_column(String(48), nullable=True)
     column_hlc: Mapped[str | None] = mapped_column(String(48), nullable=True)
