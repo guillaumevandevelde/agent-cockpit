@@ -3,6 +3,12 @@
 apply_operation(): assign HLC -> append KanbanOp -> update materialized state.
 All writes (REST and MCP) go through here. rematerialize() rebuilds the
 materialized tables from the op-log (added in Task E5).
+
+The per-field LWW (_lww_set) and claim/release HLC conditionals below are the
+*dormant* CRDT core. With one in-process clock + the lock, every tick dominates,
+so the guards never reject a live write; they only matter under HLC-ordered replay
+and, eventually, multi-device sync. Frozen on purpose — the sync seam (sync.py) was
+pruned. See docs/cockpit/sync-hlc-freeze-vs-prune.md.
 """
 import asyncio
 import uuid

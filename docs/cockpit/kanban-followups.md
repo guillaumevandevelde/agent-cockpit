@@ -25,10 +25,17 @@ These came out of the final code review (2026-06-14). The merge-blockers were fi
 - **M2 — empty `update` ops.** A no-field PATCH / `update_card(id)` still appends an op and
   bumps `updated_at`, polluting the activity feed. Short-circuit when the payload is empty.
 
-## Sync milestone (Phase K is only scaffolding today)
+## Sync milestone — FROZEN (scaffolding pruned 2026-06-18)
+
+Decision: **prune the dead sync seam, freeze the HLC/op-log/LWW core.** See the trade-off
+in `sync-hlc-freeze-vs-prune.md`. `sync.py` (`ops_since` / `ingest_ops` / `SyncTransport` /
+`LocalNoopTransport`) and its tests are removed; the HLC, op-log and per-field LWW stay as
+a documented dormant core (they still power the activity feed, replay ordering and claim
+arbitration). To revive sync when a 2nd device is real:
 
 - Implement a real `SyncTransport` (Turso/libSQL embedded replica or `sqld`, or a REST
-  push/pull) and wire `ops_since` / `ingest_ops` on a schedule.
+  push/pull). Re-add `ops_since` / `ingest_ops` (git history has the pruned version) and
+  wire them on a schedule.
 - Introduce Alembic migrations for the kanban store before a non-wipeable remote primary
   exists (deferred from v1 per the plan; materialized tables remain rebuildable via
   `rematerialize()`).
