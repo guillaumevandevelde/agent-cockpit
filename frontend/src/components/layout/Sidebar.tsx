@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { ProjectSwitcher } from '@/features/projects/ProjectSwitcher'
 import { useSidebar } from '@/contexts/SidebarContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
+import { AutonomyModeToggle } from '@/features/autonomy/components/AutonomyModeToggle'
 import {
   Select,
   SelectContent,
@@ -34,6 +35,7 @@ import {
   Radio,
   CalendarClock,
   KanbanSquare,
+  Workflow,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -67,6 +69,8 @@ const commonNavigation: NavGroup[] = [
       { name: 'Scheduled Messages', href: '/scheduled-messages', icon: CalendarClock },
       { name: 'Kanban', href: '/kanban', icon: KanbanSquare },
       { name: 'Plans', href: '/plans', icon: ClipboardList },
+      { name: 'Autonomy', href: '/autonomy', icon: Shield },
+      { name: 'Templates', href: '/automation-templates', icon: Workflow },
       { name: 'Backup', href: '/backup', icon: Archive, capability: 'backup' },
     ],
   },
@@ -206,6 +210,9 @@ export function Sidebar() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="px-4">
+            <AutonomyModeToggle />
           </div>
         </div>
       )}

@@ -5,6 +5,7 @@ import { ProjectProvider } from './contexts/ProjectContext'
 import { DashboardProvider } from './contexts/DashboardContext'
 import { ProviderProvider } from './contexts/ProviderContext'
 import { AttentionProvider } from './contexts/AttentionContext'
+import { AutonomyProvider } from './contexts/AutonomyContext'
 import { MainLayout } from './components/layout/MainLayout'
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const ConfigViewerPage = lazy(() => import('./features/config/ConfigViewerPage').then((m) => ({ default: m.ConfigViewerPage })))
@@ -30,6 +31,8 @@ const CCBridgePage = lazy(() => import('./features/cc-bridge/CCBridgePage').then
 const PresencePage = lazy(() => import('./features/presence/PresencePage').then((m) => ({ default: m.PresencePage })))
 const ScheduledMessagesPage = lazy(() => import('./features/scheduled-messages/ScheduledMessagesPage').then((m) => ({ default: m.ScheduledMessagesPage })))
 const KanbanPage = lazy(() => import('./features/kanban/KanbanPage'))
+const AutonomyPage = lazy(() => import('./features/autonomy/AutonomyPage').then((m) => ({ default: m.AutonomyPage })))
+const AutomationTemplatesPage = lazy(() => import('./features/autonomy/AutomationTemplatesPage').then((m) => ({ default: m.AutomationTemplatesPage })))
 
 function App() {
   return (
@@ -37,6 +40,7 @@ function App() {
       <ProviderProvider>
         <DashboardProvider>
           <AttentionProvider>
+          <AutonomyProvider>
           <BrowserRouter>
             <Toaster richColors position="top-right" />
             <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading...</div>}>
@@ -67,10 +71,13 @@ function App() {
                 <Route path="context" element={<ContextPage />} />
                 <Route path="usage" element={<UsagePage />} />
                 <Route path="kanban" element={<KanbanPage />} />
+                <Route path="autonomy" element={<AutonomyPage />} />
+                <Route path="automation-templates" element={<AutomationTemplatesPage />} />
               </Route>
             </Routes>
             </Suspense>
           </BrowserRouter>
+          </AutonomyProvider>
           </AttentionProvider>
         </DashboardProvider>
       </ProviderProvider>
