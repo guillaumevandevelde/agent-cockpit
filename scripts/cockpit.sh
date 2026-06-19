@@ -53,6 +53,9 @@ SUPERVISOR_MARKER="cockpit.sh __supervisor"
 current_boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown; }
 
 ensure_fresh_boot() {
+    # On WSL2/NTFS, mkdir -p fails to create nested dirs when the parent doesn't
+    # exist yet — split into two explicit steps to work around the WSL bug.
+    mkdir -p "$LOG_DIR"
     mkdir -p "$RUN_DIR"
     local idf="$RUN_DIR/boot_id" now stored
     now="$(current_boot_id)"
@@ -160,6 +163,7 @@ default_frontend_cmd() {
 
 # --- supervisor entrypoint (run detached by cmd_start) ---
 supervisor_main() {
+    mkdir -p "$LOG_DIR"
     mkdir -p "$RUN_DIR"
     echo "$$" > "$RUN_DIR/supervisor.pid"
     local backend_cmd frontend_cmd
@@ -192,6 +196,7 @@ cmd_start() {
             return 1
         fi
     fi
+    mkdir -p "$LOG_DIR"
     mkdir -p "$RUN_DIR"
     prune_logs
     # Detach: survive terminal close. Pass HOST + injected cmds through.

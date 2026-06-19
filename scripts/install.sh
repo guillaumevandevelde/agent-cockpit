@@ -9,15 +9,31 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 echo "Setting up Claude Cockpit..."
 
-# Check Python version
-PYTHON_CMD="python3"
-if ! command -v $PYTHON_CMD &> /dev/null; then
-    echo "Error: Python 3 not found. Please install Python 3.11+."
+# Check Python version — require 3.11+ (StrEnum, match-statement, etc.)
+PYTHON_CMD=""
+for candidate in python3.13 python3.12 python3.11; do
+    if command -v "$candidate" &>/dev/null; then
+        PYTHON_CMD="$candidate"
+        break
+    fi
+done
+if [ -z "$PYTHON_CMD" ]; then
+    echo "Error: Python 3.11+ not found. Please install Python 3.11 or newer."
     exit 1
 fi
 
-PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
-echo "Found Python $PYTHON_VERSION"
+PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}')
+echo "Found Python $PYTHON_VERSION (using $PYTHON_CMD)"
+
+# Reject a venv built with the wrong Python (e.g. system python3 = 3.10).
+if [ -f "backend/venv/bin/python" ]; then
+    VENV_VER=$("$PROJECT_ROOT/backend/venv/bin/python" --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+    REQ_VER=$($PYTHON_CMD --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
+    if [ "$VENV_VER" != "$REQ_VER" ]; then
+        echo "Existing venv uses Python $VENV_VER but we need $REQ_VER — recreating."
+        $PYTHON_CMD -m venv --clear "$PROJECT_ROOT/backend/venv"
+    fi
+fi
 
 # Check Node.js
 if ! command -v node &> /dev/null; then
@@ -73,6 +89,9 @@ echo "Documentation setup complete!"
 echo ""
 echo "Creating required directories..."
 mkdir -p ~/.claude-registry/backups
+# cockpit.sh writes supervisor.log here; create it now so WSL's mkdir -p on
+# /mnt/c doesn't have to create the parent and child in a single call (WSL bug).
+mkdir -p "$PROJECT_ROOT/logs"
 
 echo ""
 echo "Setup complete!"
