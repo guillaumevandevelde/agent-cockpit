@@ -6,6 +6,7 @@ import type {
   ScheduledMessageListResponse,
   DeliveryAttempt,
   ResumableSession,
+  AutoResumeStatus,
 } from './types'
 
 const BASE = 'scheduled-messages'
@@ -41,4 +42,20 @@ export async function listResumableSessions(directory: string): Promise<Resumabl
     buildEndpoint('agent-bridge/resumable-sessions', { directory, limit: 20 }),
   )
   return res.sessions
+}
+
+export async function getAutoResume(cwd: string): Promise<AutoResumeStatus> {
+  return apiClient<AutoResumeStatus>(`${BASE}/auto-resume/${encodeURIComponent(cwd)}`)
+}
+
+export async function setAutoResume(cwd: string, enabled: boolean): Promise<AutoResumeStatus> {
+  return apiClient<AutoResumeStatus>(`${BASE}/auto-resume/${encodeURIComponent(cwd)}?enabled=${enabled}`, {
+    method: 'POST',
+  })
+}
+
+export async function cancelAutoResume(cwd: string): Promise<{ cwd: string; cancelled: boolean }> {
+  return apiClient<{ cwd: string; cancelled: boolean }>(`${BASE}/auto-resume/${encodeURIComponent(cwd)}`, {
+    method: 'DELETE',
+  })
 }

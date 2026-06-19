@@ -110,3 +110,4 @@ class HookEvent(BaseModel):
     session_id: str
     cwd: str
     tmux_pane: Optional[str] = None
+    message: Optional[str] = None

@@ -26,3 +26,24 @@ def test_hook_event_accepts_optional_pane():
     assert ev.tmux_pane is None
     ev2 = HookEvent(event="Stop", session_id="s1", cwd="/proj", tmux_pane="%3")
     assert ev2.tmux_pane == "%3"
+
+
+def test_notification_hook_includes_message():
+    cmd = render_hook_command("Notification", port=8000)
+    assert "message" in cmd
+    assert ".message" in cmd
+
+
+def test_non_notification_hook_excludes_message():
+    cmd = render_hook_command("Stop", port=8000)
+    assert ".message" not in cmd
+
+
+def test_hook_event_accepts_message():
+    ev = HookEvent(
+        event="Notification",
+        session_id="s1",
+        cwd="/proj",
+        message="You've hit your session limit",
+    )
+    assert ev.message == "You've hit your session limit"

@@ -8,6 +8,7 @@ from app.models.scheduled_message_schemas import (
     ScheduledMessageCreate, ScheduledMessageUpdate, ScheduledMessageResponse,
     DeliveryAttemptResponse, HookEvent,
 )
+from app.services.scheduling.auto_resume import auto_resume_service
 from app.services.scheduling.idle_state import idle_state
 from app.services.scheduling.session_registry import session_registry
 from app.services.scheduling.scheduler import scheduler_service
@@ -82,9 +83,51 @@ async def delete(mid: int):
         return {"deleted": True}
 
 
+# --- Auto-resume endpoints ---
+
+@router.get("/auto-resume/{cwd:path}")
+async def get_auto_resume(cwd: str):
+    """Check if auto-resume is enabled for a project."""
+    return {
+        "cwd": cwd,
+        "enabled": auto_resume_service.is_enabled(cwd),
+    }
+
+
+@router.post("/auto-resume/{cwd:path}")
+async def set_auto_resume(cwd: str, enabled: bool = True):
+    """Enable or disable auto-resume for a project."""
+    auto_resume_service.set_enabled(cwd, enabled)
+    return {
+        "cwd": cwd,
+        "enabled": enabled,
+    }
+
+
+@router.delete("/auto-resume/{cwd:path}")
+async def cancel_auto_resume(cwd: str):
+    """Cancel a pending auto-resume for a project."""
+    cancelled = auto_resume_service.cancel(cwd)
+    return {"cwd": cwd, "cancelled": cancelled}
+
+
 @router.post("/hook-event")
 async def hook_event(ev: HookEvent):
     idle_state.record(ev.event, cwd=ev.cwd, session_id=ev.session_id)
     session_registry.record(ev.event, session_id=ev.session_id, cwd=ev.cwd,
                             tmux_pane=ev.tmux_pane)
+
+    # Auto-resume: detect session limit notifications and schedule resume
+    if ev.event == "Notification" and auto_resume_service.is_enabled(ev.cwd):
+        if auto_resume_service.is_limit_notification(ev.message):
+            parsed = auto_resume_service.parse_reset_time(ev.message)
+            if parsed:
+                reset_time, tz_name = parsed
+                auto_resume_service.schedule_resume(
+                    cwd=ev.cwd,
+                    reset_time=reset_time,
+                    tz_name=tz_name,
+                    session_id=ev.session_id,
+                )
+
     return {"ok": True}

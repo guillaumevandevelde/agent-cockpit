@@ -73,3 +73,8 @@ export interface ScheduledMessageUpdate {
   permission_mode?: PermissionMode
   enabled?: boolean
 }
+
+export interface AutoResumeStatus {
+  cwd: string
+  enabled: boolean
+}
