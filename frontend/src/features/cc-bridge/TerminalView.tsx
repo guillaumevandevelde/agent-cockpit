@@ -1,8 +1,9 @@
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect } from 'react'
 import { Monitor, Maximize2, Minimize2, X } from 'lucide-react'
 import { useTerminal } from './useTerminal'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { FileBrowserPopover } from './FileBrowserPopover'
 import type { AttentionKind } from './attention'
 
 interface TerminalViewProps {
@@ -17,19 +18,6 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const { connected, readOnly, setReadOnly, attach, detach, sendText } = useTerminal(containerRef, wrapperRef)
-  const [dropPath, setDropPath] = useState<string | null>(null)
-  const pathInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (dropPath !== null) pathInputRef.current?.focus()
-  }, [dropPath])
-
-  const commitPath = useCallback(() => {
-    if (dropPath !== null) {
-      sendText(dropPath)
-      setDropPath(null)
-    }
-  }, [dropPath, sendText])
 
   useEffect(() => {
     if (target) {
@@ -41,16 +29,7 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
 
   return (
     <div className="flex flex-col h-full">
-      <div
-        ref={wrapperRef}
-        className="flex-1 relative overflow-hidden"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault()
-          const file = e.dataTransfer.files[0]
-          if (file) setDropPath(file.name)
-        }}
-      >
+      <div ref={wrapperRef} className="flex-1 relative overflow-hidden">
         {!target && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground bg-background">
             <Monitor className="h-12 w-12 mb-3" />
@@ -65,25 +44,6 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
           )}
         />
       </div>
-
-      {dropPath !== null && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-t bg-muted text-sm">
-          <span className="text-muted-foreground shrink-0">Pad:</span>
-          <input
-            ref={pathInputRef}
-            className="flex-1 bg-transparent outline-none font-mono text-xs"
-            value={dropPath}
-            onChange={(e) => setDropPath(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitPath()
-              if (e.key === 'Escape') setDropPath(null)
-            }}
-            placeholder="volledig pad..."
-          />
-          <button className="text-muted-foreground hover:text-foreground" onClick={commitPath}>↵</button>
-          <button className="text-muted-foreground hover:text-foreground" onClick={() => setDropPath(null)}><X className="h-3 w-3" /></button>
-        </div>
-      )}
 
       {target && (
         <div className="flex items-center justify-between px-3 py-2 border-t bg-background">
@@ -129,6 +89,7 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <FileBrowserPopover onSelect={sendText} />
             {onToggleFullscreen && (
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onToggleFullscreen} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
                 {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
