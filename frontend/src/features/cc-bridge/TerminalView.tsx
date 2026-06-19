@@ -16,7 +16,7 @@ interface TerminalViewProps {
 export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, attention }: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const { connected, readOnly, setReadOnly, attach, detach } = useTerminal(containerRef, wrapperRef)
+  const { connected, readOnly, setReadOnly, attach, detach, sendText } = useTerminal(containerRef, wrapperRef)
 
   useEffect(() => {
     if (target) {
@@ -28,7 +28,16 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
 
   return (
     <div className="flex flex-col h-full">
-      <div ref={wrapperRef} className="flex-1 relative overflow-hidden">
+      <div
+        ref={wrapperRef}
+        className="flex-1 relative overflow-hidden"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          const file = e.dataTransfer.files[0]
+          if (file) sendText(file.name)
+        }}
+      >
         {!target && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground bg-background">
             <Monitor className="h-12 w-12 mb-3" />

@@ -177,5 +177,11 @@ export function useTerminal(
     }
   }, [])
 
-  return { connected, readOnly, setReadOnly, attach, detach }
+  const sendText = useCallback((text: string) => {
+    if (!readOnlyRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(text)
+    }
+  }, [])
+
+  return { connected, readOnly, setReadOnly, attach, detach, sendText }
 }
