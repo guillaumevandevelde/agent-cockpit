@@ -4,11 +4,13 @@ import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.constants import SessionStatus
 from app.models.schemas import SystemStatusResponse
+from app.services.memory_monitor import get_memory_status_cached, get_dynamic_limits
 from app.services.presence_service import PresenceService
 from app.services.providers import get_provider, get_providers
 
@@ -64,4 +66,43 @@ async def get_system_status(db: AsyncSession = Depends(get_db)):
         claude_code_version=version,
         active_sessions=active_count,
         providers=provider_statuses,
+    )
+
+
+class SystemResourcesResponse(BaseModel):
+    """System resource status with hardware-aware limits."""
+    memory_total_gb: float
+    memory_available_gb: float
+    memory_usage_percent: float
+    memory_status: str  # "comfortable", "warning", "critical"
+    max_active_sessions: int
+    max_cached_sessions: int
+    max_presence_events: int
+    event_retention_hours: int
+    estimated_bytes_per_session: int
+
+
+@router.get("/system-resources", response_model=SystemResourcesResponse)
+async def get_system_resources():
+    """Return system resource status and dynamic limits."""
+    status = get_memory_status_cached()
+    limits = get_dynamic_limits()
+
+    if status.is_critical:
+        memory_status = "critical"
+    elif status.is_warning:
+        memory_status = "warning"
+    else:
+        memory_status = "comfortable"
+
+    return SystemResourcesResponse(
+        memory_total_gb=round(status.total_bytes / (1024**3), 2),
+        memory_available_gb=round(status.available_bytes / (1024**3), 2),
+        memory_usage_percent=round(status.usage_percent * 100, 1),
+        memory_status=memory_status,
+        max_active_sessions=limits.max_active_sessions,
+        max_cached_sessions=limits.max_cached_sessions,
+        max_presence_events=limits.max_presence_events,
+        event_retention_hours=limits.event_retention_hours,
+        estimated_bytes_per_session=100 * 1024 * 1024,  # 100MB
     )

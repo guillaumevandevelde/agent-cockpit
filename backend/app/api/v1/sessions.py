@@ -66,3 +66,40 @@ async def get_session_detail(
         raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
+
+
+from pydantic import BaseModel
+from typing import List
+
+
+class PendingCardResponse(BaseModel):
+    """A card waiting in the retry queue."""
+    card_id: str
+    project_key: str
+    retry_count: int
+    queued_seconds_ago: int
+
+
+class PendingQueueResponse(BaseModel):
+    """Status of the pending retry queue."""
+    size: int
+    cards: List[PendingCardResponse]
+
+
+@router.get("/sessions/pending-queue", response_model=PendingQueueResponse)
+async def get_pending_queue():
+    """Get status of cards queued for retry due to memory limits."""
+    from app.services.scheduling.pending_queue import pending_queue
+    status = pending_queue.get_status()
+    return PendingQueueResponse(
+        size=status["size"],
+        cards=[
+            PendingCardResponse(
+                card_id=c["card_id"],
+                project_key=c["project_key"],
+                retry_count=c["retry_count"],
+                queued_seconds_ago=c["queued_seconds_ago"],
+            )
+            for c in status["cards"]
+        ],
+    )

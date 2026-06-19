@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete, func
 import aiofiles
 
 from app.models.database import SessionCache
@@ -84,7 +84,10 @@ class SessionService:
         )
 
     async def save_to_cache(self, summary: SessionSummary, filepath: Path):
-        """Save session summary to cache."""
+        """Save session summary to cache.
+        
+        Enforces hardware-aware cache size limits.
+        """
         if not self.db:
             return
 
@@ -109,6 +112,28 @@ class SessionService:
             cache_entry.cached_at = datetime.now(timezone.utc)
             cache_entry.file_hash = file_hash
         else:
+            # Check cache size limit before adding
+            from app.services.memory_monitor import get_dynamic_limits
+            limits = get_dynamic_limits()
+            
+            result = await self.db.execute(
+                select(func.count()).select_from(SessionCache)
+            )
+            cache_count = result.scalar() or 0
+            
+            if cache_count >= limits.max_cached_sessions:
+                # Evict oldest entries (by cached_at) to make room
+                excess = cache_count - limits.max_cached_sessions + 10  # Evict 10 extra
+                subq = (
+                    select(SessionCache.id)
+                    .order_by(SessionCache.cached_at.asc())
+                    .limit(excess)
+                    .scalar_subquery()
+                )
+                await self.db.execute(
+                    delete(SessionCache).where(SessionCache.id.in_(subq))
+                )
+
             cache_entry = SessionCache(
                 session_id=summary.id,
                 project_folder=summary.project_folder,
@@ -118,6 +143,7 @@ class SessionService:
                 size_bytes=summary.size_bytes,
                 total_messages=summary.total_messages,
                 total_tool_calls=summary.total_tool_calls,
+                cached_at=datetime.now(timezone.utc),
                 file_hash=file_hash,
             )
             self.db.add(cache_entry)

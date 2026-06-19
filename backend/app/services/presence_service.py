@@ -1,5 +1,9 @@
-"""Service for Presence Dashboard — event processing and session aggregation."""
+"""Service for Presence Dashboard — event processing and session aggregation.
+
+Uses hardware-aware limits via memory_monitor for dynamic resource management.
+"""
 import asyncio
+import logging
 import os
 import re
 import time
@@ -13,17 +17,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.constants import SessionStatus
 from app.models.database import PresenceEvent, PresenceSession
 from app.models.schemas import PresenceSessionResponse
+from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
     """Manages WebSocket connections for live presence updates."""
 
-    def __init__(self):
+    def __init__(self, max_connections: int = 50):
         self.active_connections: list[WebSocket] = []
+        self._max_connections = max_connections
 
-    async def connect(self, ws: WebSocket):
+    @property
+    def effective_max_connections(self) -> int:
+        """Dynamic max based on memory status."""
+        status = get_memory_status_cached()
+        if status.is_critical:
+            return max(5, self._max_connections // 4)
+        elif status.is_warning:
+            return max(10, self._max_connections // 2)
+        return self._max_connections
+
+    async def connect(self, ws: WebSocket) -> bool:
+        """Connect a WebSocket. Returns False if limit reached."""
+        if len(self.active_connections) >= self.effective_max_connections:
+            return False
         await ws.accept()
         self.active_connections.append(ws)
+        return True
 
     def disconnect(self, ws: WebSocket):
         if ws in self.active_connections:
@@ -61,6 +83,61 @@ class PresenceService:
         now = datetime.now(timezone.utc)
         session_id = payload["session_id"]
         event_type = payload.get("hook_event_name", "Unknown")
+
+        # Check session limit for new sessions
+        result = await db.execute(
+            select(func.count()).select_from(PresenceSession)
+        )
+        session_count = result.scalar() or 0
+        limits = get_dynamic_limits()
+
+        # Check if this is a new session
+        existing = await db.execute(
+            select(PresenceSession).where(PresenceSession.session_id == session_id)
+        )
+        is_new = existing.scalar_one_or_none() is None
+
+        if is_new and session_count >= limits.max_active_sessions:
+            # Memory pressure: reject new session, log warning
+            status = get_memory_status_cached()
+            logger.warning(
+                f"Presence session limit reached ({session_count}/{limits.max_active_sessions}). "
+                f"Memory: {status.usage_percent:.0%} used. "
+                f"Rejecting new session {session_id[:8]}..."
+            )
+            # Still store the event for audit trail, but don't create session
+            db.add(PresenceEvent(
+                session_id=session_id,
+                event_type=event_type,
+                tool_name=payload.get("tool_name"),
+                tool_input=payload.get("tool_input"),
+                tool_result=payload.get("tool_result"),
+                message=payload.get("message"),
+                cwd=payload.get("cwd"),
+                timestamp=now,
+                received_at=now,
+            ))
+            # Return a minimal response
+            return PresenceSessionResponse(
+                session_id=session_id,
+                label=None,
+                project_path=payload.get("cwd"),
+                tmux_pane=payload.get("tmux_pane"),
+                status=SessionStatus.ACTIVE,
+                status_text="Rejected: session limit",
+                last_narrative=None,
+                last_narrative_at=None,
+                modified_files=[],
+                last_user_prompt=None,
+                last_command=None,
+                last_command_exit=None,
+                activity_buckets=[0] * BUCKET_COUNT,
+                total_events=0,
+                error_count=0,
+                started_at=now.isoformat(),
+                last_event_at=now.isoformat(),
+                ended_at=None,
+            )
 
         # Store raw event in the same transaction as the session update
         db.add(PresenceEvent(
@@ -278,11 +355,34 @@ class PresenceService:
             session.status_text = None
 
     async def _prune_old_events(self, db: AsyncSession, now: datetime):
-        """Delete presence events older than retention period."""
-        cutoff = now - timedelta(days=EVENT_RETENTION_DAYS)
+        """Delete presence events older than retention period.
+        
+        Retention is dynamically adjusted based on memory status.
+        """
+        limits = get_dynamic_limits()
+        cutoff = now - timedelta(hours=limits.event_retention_hours)
         await db.execute(
             delete(PresenceEvent).where(PresenceEvent.timestamp < cutoff)
         )
+
+        # Also enforce max event count
+        result = await db.execute(
+            select(func.count()).select_from(PresenceEvent)
+        )
+        event_count = result.scalar() or 0
+        if event_count > limits.max_presence_events:
+            # Delete oldest events beyond the limit
+            excess = event_count - limits.max_presence_events
+            subq = (
+                select(PresenceEvent.id)
+                .order_by(PresenceEvent.timestamp.asc())
+                .limit(excess)
+                .scalar_subquery()
+            )
+            await db.execute(
+                delete(PresenceEvent).where(PresenceEvent.id.in_(subq))
+            )
+
         await db.flush()
 
     def _update_activity_buckets(self, session: PresenceSession, now: datetime):

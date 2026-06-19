@@ -3,6 +3,9 @@
 The dispatcher claims a card *as the session that will work it* (claim-before-spawn,
 so racing ticks/devices produce exactly one winner), moves it to Doing, then spawns
 via a pluggable transport (tmux today, podman later). See docs/cockpit/kanban-dispatch-spec.md.
+
+When hardware-aware memory limits are reached, cards are queued in PendingQueue
+and retried automatically when resources become available.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
 from app.kanban.service import get_card, list_cards
+from app.services.memory_monitor import get_memory_status_cached
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +189,21 @@ class SpawnTransport(Protocol):
 
 def worktree_transport(*, directory: str, prompt: str, session_name: str) -> dict:
     """Default transport: create a worktree off origin/master, then spawn an
-    autonomous (permission-skipping) Claude Code session in it."""
+    autonomous (permission-skipping) Claude Code session in it.
+    
+    Raises MemoryLimitExceeded if hardware memory limits are reached.
+    """
     from app.services.agent_bridge.spawn import spawn_session
     from app.services.providers.base import SpawnCommandOptions
+    from app.services.scheduling.session_registry import session_registry
+
+    # Check memory limits before spawning
+    if not session_registry.can_add_session():
+        status = get_memory_status_cached()
+        raise MemoryLimitExceeded(
+            f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
+            f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
+        )
 
     repo = directory
     worktree_path = str(Path(repo) / ".claude" / "worktrees" / session_name)
@@ -217,11 +233,13 @@ def _slug(name: str) -> str:
     return s or "project"
 
 
-def _mint_session_name(project_path: str) -> str:
+def _mint_session_name(project_path: str, card_title: str = "") -> str:
     # Keep the whole name <= 20 chars so the tmux-bridge sanitizer never truncates
     # it: a truncated session name would diverge from the claimant label and the
     # worktree branch, breaking cleanup. "k-" + slug(<=13) + "-" + 4 hex = <=20.
-    slug = (_slug(Path(project_path).name)[:13].rstrip("-")) or "project"
+    # Prefer card title over project path for clarity.
+    source = card_title if card_title else Path(project_path).name
+    slug = (_slug(source)[:13].rstrip("-")) or "card"
     return f"k-{slug}-{uuid.uuid4().hex[:4]}"
 
 
@@ -285,7 +303,7 @@ async def _run_card(
     """Claim+move-to-agent-column+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column."""
     source_column = card.column
-    name = _mint_session_name(project_path)
+    name = _mint_session_name(project_path, card.title)
     claimant = CLAIMANT_PREFIX + name
 
     try:
@@ -477,8 +495,15 @@ def match_project_paths(
 
 async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -> None:
     """One poll cycle: dispatch the next Analysis/Todo card for every enabled project
-    that maps to a local path on this device."""
+    that maps to a local path on this device.
+    
+    Also retries queued cards that were rejected due to memory limits.
+    """
     from app.kanban.db import KanbanSessionLocal
+    from app.services.scheduling.pending_queue import pending_queue
+
+    # First, try to retry queued cards if memory is available
+    await _retry_queued_cards(transport)
 
     async with KanbanSessionLocal() as ks:
         enabled = set(await list_autodispatch_projects(ks))
@@ -495,13 +520,116 @@ async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -
     for project_key, project_path in mapping.items():
         async with KanbanSessionLocal() as ks:
             try:
-                await dispatch_project(
+                result = await dispatch_project(
                     ks, project_key=project_key, project_path=project_path,
                     transport=transport, live_sessions=live_sessions,
                 )
                 await ks.commit()
+                
+                # If dispatch failed due to memory, queue the card for retry
+                if result is None:
+                    await _maybe_queue_next_card(
+                        ks, project_key=project_key, project_path=project_path,
+                    )
+            except MemoryLimitExceeded as e:
+                logger.warning(f"Memory limit reached for {project_key}: {e}")
+                await _queue_card_on_memory_limit(
+                    ks, project_key=project_key, project_path=project_path,
+                )
             except Exception:
                 logger.exception("dispatch tick failed for %s", project_key)
+
+
+class MemoryLimitExceeded(Exception):
+    """Raised when a spawn is rejected due to memory limits."""
+    pass
+
+
+async def _retry_queued_cards(transport: SpawnTransport) -> None:
+    """Attempt to dispatch queued cards when memory is available."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.services.scheduling.pending_queue import pending_queue
+
+    status = get_memory_status_cached()
+    if status.is_critical:
+        return  # Still under memory pressure
+
+    retryable = pending_queue.get_retryable_cards()
+    if not retryable:
+        return
+
+    logger.info(f"Memory available ({status.usage_percent:.0%} used), retrying {len(retryable)} queued cards")
+
+    for card in retryable:
+        try:
+            async with KanbanSessionLocal() as ks:
+                card_data = await get_card(ks, card.card_id)
+                if card_data is None:
+                    logger.info(f"Card {card.card_id} no longer exists, removing from queue")
+                    pending_queue.dequeue(card.card_id)
+                    continue
+
+                # Check if card is still in a dispatchable state
+                if card_data.column not in ("Backlog",) or card_data.claimed_by:
+                    logger.info(f"Card {card.card_id} is no longer dispatchable, removing from queue")
+                    pending_queue.dequeue(card.card_id)
+                    continue
+
+                result = await _run_card(
+                    ks, card=card_data, project_key=card.project_key,
+                    project_path=card.project_path, transport=transport,
+                    agent_override=card.agent_override,
+                    impediment_question=card.impediment_question,
+                )
+                await ks.commit()
+
+                if result is not None:
+                    pending_queue.dequeue(card.card_id)
+                    logger.info(f"Successfully dispatched queued card {card.card_id}")
+                else:
+                    pending_queue.mark_retry(card.card_id)
+        except Exception as e:
+            logger.exception(f"Retry failed for card {card.card_id}: {e}")
+            pending_queue.mark_retry(card.card_id)
+
+
+async def _maybe_queue_next_card(
+    session, *, project_key: str, project_path: str,
+) -> None:
+    """Check if we should queue the next card for this project."""
+    status = get_memory_status_cached()
+    if not status.is_warning:
+        return  # Memory is fine, no need to queue
+
+    # Get the next card that would have been dispatched
+    cards = await list_cards(session, project_key)
+    next_card = _next_card(cards)
+    if next_card is None:
+        return
+
+    from app.services.scheduling.pending_queue import pending_queue
+    pending_queue.enqueue(
+        card_id=next_card.id,
+        project_key=project_key,
+        project_path=project_path,
+    )
+
+
+async def _queue_card_on_memory_limit(
+    session, *, project_key: str, project_path: str,
+) -> None:
+    """Queue the next card when memory limit is reached."""
+    cards = await list_cards(session, project_key)
+    next_card = _next_card(cards)
+    if next_card is None:
+        return
+
+    from app.services.scheduling.pending_queue import pending_queue
+    pending_queue.enqueue(
+        card_id=next_card.id,
+        project_key=project_key,
+        project_path=project_path,
+    )
 
 
 async def _registered_project_paths() -> list[str]:
