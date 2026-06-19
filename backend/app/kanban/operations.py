@@ -128,10 +128,16 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         if card is None:
             return
         if op_type == "move":
+            old_column = card.column
             if "column" in payload:
                 _lww_set(card, "column", payload["column"], hlc)
             if payload.get("rank") is not None:
                 _lww_set(card, "rank", payload["rank"], hlc)
+            # When card moves to Done, schedule session cleanup
+            new_column = payload.get("column")
+            if new_column == "Done" and old_column != "Done":
+                from app.kanban.session_cleanup import on_card_moved_to_done
+                on_card_moved_to_done(entity_id, project_key)
         else:  # update
             for f in ("title", "description"):
                 if f in payload and payload[f] is not None:
