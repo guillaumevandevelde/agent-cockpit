@@ -203,14 +203,35 @@ async def enable(payload: EnableRequest):
         existing = await service.list_columns(s, key)
         existing_names = {c.name for c in existing}
         
+        # Get agents from .claude/agents directory
+        agents_dir = path / ".claude" / "agents"
+        agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+        valid_names = set(COLUMNS) | set(agents)
+        
+        # Move cards from orphaned columns to Backlog before removing columns
+        orphaned = [c.name for c in existing if c.name not in valid_names]
+        if orphaned:
+            from app.kanban.models import KanbanCard
+            from sqlalchemy import select, update
+            for col_name in orphaned:
+                await s.execute(
+                    update(KanbanCard)
+                    .where(KanbanCard.project_key == key)
+                    .where(KanbanCard.column == col_name)
+                    .values(column="Backlog")
+                )
+        
+        # Remove orphaned columns
+        for col in existing:
+            if col.name not in valid_names:
+                await service.delete_column(s, col.id)
+        
         # Create missing fixed columns
         for i, col_name in enumerate(COLUMNS):
             if col_name not in existing_names:
                 await service.create_column(s, key, name=col_name, rank=f"{i:04d}")
         
-        # Sync agent columns from .claude/agents directory
-        agents_dir = path / ".claude" / "agents"
-        agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+        # Sync agent columns
         await service.sync_agent_columns(s, key, agents)
         
         await s.commit()
