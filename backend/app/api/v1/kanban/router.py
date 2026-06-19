@@ -13,7 +13,7 @@ from app.kanban.schemas import (
     CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
     AutodispatchRequest, ShipModeRequest, DispatchRequest,
     ColumnResponse, ColumnCreate, ColumnUpdate,
-    WorkflowTriggerRequest, WorkflowTriggerResponse,
+    WorkflowTriggerRequest, WorkflowTriggerResponse, ImpedimentResolveRequest,
 )
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
@@ -351,6 +351,12 @@ async def trigger_workflow(cid: str, payload: WorkflowTriggerRequest):
                     project_key=card.project_key, entity_id=cid,
                     payload={"agent": result["next_agent"]})
             
+            # Store impediment question if present
+            if result["impediment_question"]:
+                await apply_operation(s, op_type="comment", entity_type="comment",
+                    project_key=card.project_key, entity_id=cid,
+                    payload={"text": f"**Impediment:** {result['impediment_question']}"})
+            
             await s.commit()
             return WorkflowTriggerResponse(
                 should_move=True,
@@ -364,3 +370,52 @@ async def trigger_workflow(cid: str, payload: WorkflowTriggerRequest):
             next_column=result.get("next_column"),
             next_agent=result.get("next_agent"),
         )
+
+
+@router.post("/cards/{cid}/resolve-impediment", response_model=CardResponse)
+async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
+    """Resolve an impediment by dispatching to a specific agent."""
+    from app.kanban import dispatch
+    
+    async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is None:
+            raise HTTPException(404, "card not found")
+        
+        if card.column != "Impediment":
+            raise HTTPException(422, "card is not in Impediment column")
+        
+        # Get impediment question from activity
+        activity = await service.card_activity(s, cid)
+        impediment_question = None
+        for entry in reversed(activity):
+            if entry.op_type == "comment" and "Impediment:" in entry.payload.get("text", ""):
+                impediment_question = entry.payload["text"].replace("**Impediment:** ", "")
+                break
+        
+        if not impediment_question:
+            impediment_question = "No impediment question found"
+        
+        # Determine target agent based on workflow rules or override
+        target_agent = payload.target_agent
+        if not target_agent:
+            from app.kanban.workflow import load_flows
+            flows = load_flows()
+            impediment_agents = flows.get("impediment_agents", {})
+            current_agent = card.agent or "developer"
+            possible_agents = impediment_agents.get(current_agent, ["developer"])
+            target_agent = possible_agents[0] if possible_agents else "developer"
+        
+        try:
+            res = await dispatch.dispatch_impediment_card(
+                s, card_id=cid, project_path=payload.project_path,
+                target_agent=target_agent, impediment_question=impediment_question,
+            )
+        except Exception as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
+        await s.commit()
+    
+    if res is None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+            "could not dispatch impediment (card missing or already claimed)")
+    return await _reload(s, cid)

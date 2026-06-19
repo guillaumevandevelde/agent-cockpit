@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
-COLUMNS = ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"]
+COLUMNS = ["Backlog", "Analysis", "Todo", "Doing", "Review", "Impediment", "Done"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
 
 
@@ -139,3 +139,10 @@ class WorkflowTriggerResponse(BaseModel):
     next_agent: Optional[str] = None
     card_moved: bool = False
     error: Optional[str] = None
+    impediment_question: Optional[str] = None
+
+
+class ImpedimentResolveRequest(BaseModel):
+    """Request to resolve an impediment."""
+    project_path: str
+    target_agent: Optional[str] = None  # override auto-detection

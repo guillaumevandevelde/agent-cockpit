@@ -47,9 +47,10 @@ Je MOET je output eindigen met een gestructureerd blok dat door het workflowsyst
 
 ```yaml
 ---
-status: success|fail
+status: success|fail|impediment|needs_fix|needs_clarification
 summary: "Korte samenvatting van het testresultaat"
-next_agent: "code-review|developer|null"
+next_agent: "code-review|developer|analyst|null"
+question: "Vraag bij impediment (alleen bij status: impediment)"
 tests_passed: true|false
 test_count: 42
 failed_tests:
@@ -63,11 +64,20 @@ lint_passed: true|false|null
 ### Status Uitleg
 - **success**: Alle tests zijn gepasseerd
 - **fail**: Tests falen
+- **impediment**: Je bent vastgelopen en hebt hulp nodig van een andere agent
+- **needs_fix**: Tests falen en moeten door de developer gefixed worden
+- **needs_clarification**: Je hebt verduidelijking nodig van de analyst
 
 ### Next Agent
 - **code-review**: Stuur door naar code review (tests zijn groen)
 - **developer**: Stuur terug naar developer (tests falen, moeten gefixed worden)
+- **analyst**: Stuur terug naar analyst voor verduidelijking
 - **null**: Geen volgende stap (blokkerend issue)
+
+### Question (bij impediment)
+- **Verplicht** bij status: impediment
+- Wees specifiek: wat heb je nodig? Van wie? Waarom ben je vastgelopen?
+- Voorbeeld: "De tests falen vanwege een ontbrekende mock. Kan de developer de mocking toevoegen?"
 
 ### Test Count
 - Aantal uitgevoerde tests

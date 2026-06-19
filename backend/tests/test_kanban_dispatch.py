@@ -344,7 +344,7 @@ def test_match_project_paths_maps_enabled_keys_to_local_paths():
 async def test_dispatch_picks_analysis_with_analyst_persona(tmp_path):
     agents = tmp_path / ".claude" / "agents"
     agents.mkdir(parents=True)
-    (agents / "kanban-analyst.md").write_text("You are the Analyst.")
+    (agents / "analyst.md").write_text("You are the Analyst.")
     t = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await _make_card(s, title="Investigate", column="Analysis")

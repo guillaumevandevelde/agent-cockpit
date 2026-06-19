@@ -77,8 +77,10 @@ async def set_ship_mode(session, project_key: str, mode: str) -> None:
 # ---- persona helpers -------------------------------------------------------
 
 _PERSONA_BY_COLUMN = {
-    "Analysis": "kanban-analyst.md",
-    "Todo": "kanban-developer.md",
+    "Analysis": "analyst.md",
+    "Todo": "developer.md",
+    "Doing": "developer.md",
+    "Review": "testing.md",
 }
 
 
@@ -120,20 +122,29 @@ def _persona_for_card(project_path: str, card, column: str) -> Optional[str]:
 
 # ---- prompt ----------------------------------------------------------------
 
-def build_card_prompt(card, *, persona: Optional[str], ship_mode: str) -> str:
+def build_card_prompt(card, *, persona: Optional[str], ship_mode: str, impediment_question: Optional[str] = None) -> str:
     preamble = (persona.strip() + "\n\n") if persona else ""
+    impediment_section = ""
+    if impediment_question:
+        impediment_section = (
+            "\n\n## IMPEDIMENT\n"
+            "A previous agent was blocked on this card. Their question:\n"
+            f"> {impediment_question}\n\n"
+            "Please address this question or clarify what's needed before proceeding.\n"
+        )
     return (
         f"{preamble}"
         "You are picking up a Kanban card from the Claude Cockpit board. "
         'It is already claimed by you and moved to "Doing".\n\n'
         f"# {card.title}\n"
-        f"{getattr(card, 'description', '') or ''}\n\n"
+        f"{getattr(card, 'description', '') or ''}\n"
+        f"{impediment_section}\n"
         f"Ship mode: {ship_mode}\n\n"
         "Work autonomously to completion, following your role instructions above. "
         "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
         "`comment`) to update the card exactly as those instructions direct. If you are "
-        "blocked or your tests fail, `comment` explaining why and leave the card in "
-        '"Doing".'
+        "blocked or need clarification from another agent, use `status: impediment` with a "
+        "clear `question` field explaining what you need."
     )
 
 
@@ -237,6 +248,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
 
 async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
+    impediment_question: Optional[str] = None,
 ) -> Optional[dict]:
     """Claim+move-to-Doing+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column."""
@@ -259,7 +271,7 @@ async def _run_card(
 
     persona = _persona_for_card(project_path, card, source_column)
     ship_mode = await get_ship_mode(session, project_key)
-    prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode)
+    prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode, impediment_question=impediment_question)
     try:
         spawned = transport(directory=project_path, prompt=prompt, session_name=name)
     except Exception:
@@ -348,6 +360,44 @@ async def dispatch_card(
     return await _run_card(
         session, card=card, project_key=card.project_key,
         project_path=project_path, transport=transport,
+    )
+
+
+async def dispatch_impediment_card(
+    session, *, card_id: str, project_path: str, target_agent: str,
+    impediment_question: str,
+    transport: SpawnTransport = worktree_transport,
+) -> Optional[dict]:
+    """Dispatch an impediment card to a specific agent for resolution.
+    
+    Args:
+        card_id: The ID of the impediment card
+        project_path: Path to the project
+        target_agent: The agent to dispatch to (analyst, developer, testing, code-review)
+        impediment_question: The question that needs to be answered
+        transport: The spawn transport to use
+    
+    Returns:
+        Result dict or None if dispatch failed
+    """
+    card = await get_card(session, card_id)
+    if card is None:
+        return None
+    
+    if card.column != "Impediment":
+        logger.warning("Card %s is not in Impediment column, cannot dispatch as impediment", card_id)
+        return None
+    
+    # Move card to Doing for the target agent
+    await apply_operation(
+        session, op_type="move", entity_type="card", project_key=card.project_key,
+        entity_id=card.id, payload={"column": "Doing"},
+    )
+    
+    return await _run_card(
+        session, card=card, project_key=card.project_key,
+        project_path=project_path, transport=transport,
+        impediment_question=impediment_question,
     )
 
 

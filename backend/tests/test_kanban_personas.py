@@ -12,15 +12,15 @@ def test_strip_frontmatter_passthrough_when_absent():
 
 
 def test_persona_filename_for_column():
-    assert dispatch._persona_filename("Analysis") == "kanban-analyst.md"
-    assert dispatch._persona_filename("Todo") == "kanban-developer.md"
+    assert dispatch._persona_filename("Analysis") == "analyst.md"
+    assert dispatch._persona_filename("Todo") == "developer.md"
     assert dispatch._persona_filename("Backlog") is None
 
 
 def test_read_persona_returns_body(tmp_path):
     agents = tmp_path / ".claude" / "agents"
     agents.mkdir(parents=True)
-    (agents / "kanban-developer.md").write_text("---\nname: dev\n---\nBe a developer.\n")
+    (agents / "developer.md").write_text("---\nname: dev\n---\nBe a developer.\n")
     assert dispatch._read_persona(str(tmp_path), "Todo") == "Be a developer."
 
 

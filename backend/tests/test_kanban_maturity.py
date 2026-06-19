@@ -113,7 +113,7 @@ async def test_list_agents_missing_dir_is_empty(tmp_path):
 async def test_persona_for_card_prefers_explicit_agent(tmp_path):
     agents = tmp_path / ".claude" / "agents"
     agents.mkdir(parents=True)
-    (agents / "kanban-analyst.md").write_text("ANALYST BODY")
+    (agents / "analyst.md").write_text("ANALYST BODY")
     (agents / "custom.md").write_text("CUSTOM BODY")
 
     class _Card:

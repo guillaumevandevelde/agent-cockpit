@@ -31,9 +31,10 @@ Je MOET je output eindigen met een gestructureerd blok dat door het workflowsyst
 
 ```yaml
 ---
-status: success|fail
+status: success|fail|impediment
 summary: "Korte samenvatting van het resultaat"
 next_agent: "developer|null"
+question: "Vraag bij impediment (alleen bij status: impediment)"
 reason: "Waarom deze status (optioneel bij success)"
 ---
 ```
@@ -41,10 +42,16 @@ reason: "Waarom deze status (optioneel bij success)"
 ### Status Uitleg
 - **success**: Analyse is voltooid, plan is klaar voor implementatie
 - **fail**: Analyse kon niet voltooid worden (onvolledige info, onduidelijke requirements, etc.)
+- **impediment**: Je bent vastgelopen en hebt hulp nodig van een andere agent
 
 ### Next Agent
 - **developer**: Stuur door naar de developer voor implementatie
 - **null**: Geen volgende stap (blokkerend issue)
+
+### Question (bij impediment)
+- **Verplicht** bij status: impediment
+- Wees specifiek: wat heb je nodig? Van wie? Waarom ben je vastgelopen?
+- Voorbeeld: "Ik kan de requirements niet verduidelijken zonder input van de developer over de technische mogelijkheden."
 
 ## Richtlijnen
 

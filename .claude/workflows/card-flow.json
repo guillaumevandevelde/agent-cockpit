@@ -1,33 +1,51 @@
 {
   "name": "card-flow",
-  "description": "Automatische kaartbeweging gebaseerd op agent-output",
-  "columns": ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"],
+  "description": "Automatische kaartbeweging gebaseerd op agent-output met impediment-handling",
+  "columns": ["Backlog", "Analysis", "Todo", "Doing", "Review", "Impediment", "Done"],
   "flows": {
     "analyst": {
       "success": "Todo",
-      "fail": "Analysis"
+      "fail": "Analysis",
+      "impediment": "Impediment"
     },
     "developer": {
       "success": "Review",
-      "fail": "Todo"
+      "fail": "Doing",
+      "needs_review": "Review",
+      "needs_analysis": "Analysis",
+      "impediment": "Impediment"
     },
-    "testing": {
-      "success": "Review",
-      "fail": "Todo"
+    "tester": {
+      "success": "Done",
+      "fail": "Doing",
+      "needs_fix": "Doing",
+      "needs_clarification": "Analysis",
+      "impediment": "Impediment"
     },
     "code-review": {
       "success": "Done",
-      "fail": "Todo"
+      "fail": "Doing",
+      "needs_changes": "Doing",
+      "impediment": "Impediment"
     }
   },
   "agent_by_column": {
+    "Backlog": null,
     "Analysis": "analyst",
     "Todo": "developer",
     "Doing": "developer",
-    "Review": "code-review"
+    "Review": "code-review",
+    "Impediment": null,
+    "Done": null
+  },
+  "impediment_agents": {
+    "developer": ["analyst", "tester", "code-review"],
+    "tester": ["developer", "analyst"],
+    "analyst": ["developer"],
+    "code-review": ["developer"]
   },
   "manual_override": {
     "allowed": true,
-    "columns": ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"]
+    "columns": ["Backlog", "Analysis", "Todo", "Doing", "Review", "Impediment", "Done"]
   }
 }

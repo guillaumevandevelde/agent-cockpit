@@ -80,8 +80,8 @@ def get_next_column(current_agent: str, status: str, flows: dict) -> Optional[st
     """Determine the next column based on agent and status.
     
     Args:
-        current_agent: The agent that produced the output (analyst, developer, testing, code-review)
-        status: The status from the agent output (success or fail)
+        current_agent: The agent that produced the output (analyst, developer, tester, code-review)
+        status: The status from the agent output (success, fail, impediment, needs_review, etc.)
         flows: The flows definition from card-flow.json
     
     Returns:
@@ -127,6 +127,7 @@ def process_agent_output(
         - next_agent: str or None
         - parsed_output: dict or None
         - error: str or None
+        - impediment_question: str or None (for impediment status)
     """
     if flows is None:
         flows = load_flows()
@@ -138,6 +139,7 @@ def process_agent_output(
             "next_agent": None,
             "parsed_output": None,
             "error": "No workflow definition found",
+            "impediment_question": None,
         }
     
     # Parse the agent output
@@ -149,21 +151,29 @@ def process_agent_output(
             "next_agent": None,
             "parsed_output": None,
             "error": "Could not parse agent output",
+            "impediment_question": None,
         }
     
     status = parsed.get("status")
-    if status not in ("success", "fail"):
+    valid_statuses = ("success", "fail", "impediment", "needs_review", "needs_analysis",
+                      "needs_fix", "needs_clarification", "needs_changes")
+    if status not in valid_statuses:
         return {
             "should_move": False,
             "next_column": None,
             "next_agent": None,
             "parsed_output": parsed,
             "error": f"Invalid status: {status}",
+            "impediment_question": None,
         }
     
     # Determine the current agent from the column
     agent_by_column = flows.get("agent_by_column", {})
     current_agent = agent_by_column.get(current_column)
+    
+    impediment_question = None
+    if status == "impediment":
+        impediment_question = parsed.get("question", parsed.get("summary", "No question provided"))
     
     # If the output specifies a next_agent, use that
     explicit_next_agent = parsed.get("next_agent")
@@ -177,6 +187,7 @@ def process_agent_output(
                     "next_agent": explicit_next_agent,
                     "parsed_output": parsed,
                     "error": None,
+                    "impediment_question": impediment_question,
                 }
     
     # Otherwise, use the flow rules
@@ -190,6 +201,7 @@ def process_agent_output(
             "next_agent": next_agent,
             "parsed_output": parsed,
             "error": None,
+            "impediment_question": impediment_question,
         }
     
     return {
@@ -198,4 +210,5 @@ def process_agent_output(
         "next_agent": None,
         "parsed_output": parsed,
         "error": f"No flow defined for agent={current_agent}, status={status}",
+        "impediment_question": impediment_question,
     }

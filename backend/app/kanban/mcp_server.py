@@ -110,3 +110,29 @@ async def release_card(card_id: str) -> dict:
             project_key="", entity_id=card_id, payload={})
         await s.commit()
         return _card_dict(await service.get_card(s, card_id))
+
+
+@mcp.tool()
+async def report_impediment(card_id: str, question: str) -> dict:
+    """Report an impediment on a card. Moves it to Impediment column with a clear question.
+    
+    Use this when you're stuck and need help from another agent (e.g., analyst for clarification,
+    tester for test failures, developer for code issues). The question should be specific and
+    actionable so the other agent can help you resolve the blocker.
+    """
+    async with KanbanSessionLocal() as s:
+        # Move card to Impediment column
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="", entity_id=card_id, payload={"column": "Impediment"})
+        
+        # Add the impediment question as a comment
+        await apply_operation(s, op_type="comment", entity_type="comment",
+            project_key="", entity_id=card_id,
+            payload={"text": f"**Impediment:** {question}"})
+        
+        # Release the claim so another agent can pick it up
+        await apply_operation(s, op_type="release", entity_type="card",
+            project_key="", entity_id=card_id, payload={})
+        
+        await s.commit()
+        return _card_dict(await service.get_card(s, card_id))

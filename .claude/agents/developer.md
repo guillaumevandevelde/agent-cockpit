@@ -31,9 +31,10 @@ Je MOET je output eindigen met een gestructureerd blok dat door het workflowsyst
 
 ```yaml
 ---
-status: success|fail
+status: success|fail|impediment|needs_analysis|needs_review
 summary: "Korte samenvatting van het resultaat"
-next_agent: "testing|null"
+next_agent: "testing|analyst|code-review|null"
+question: "Vraag bij impediment (alleen bij status: impediment)"
 tests_passed: true|false|null
 lint_passed: true|false|null
 files_changed:
@@ -46,10 +47,20 @@ reason: "Waarom deze status (optioneel bij success)"
 ### Status Uitleg
 - **success**: Implementatie is voltooid, tests zijn groen
 - **fail**: Implementatie mislukt (tests falen, lint errors, etc.)
+- **impediment**: Je bent vastgelopen en hebt hulp nodig van een andere agent
+- **needs_analysis**: Je hebt verduidelijking nodig van de analyst
+- **needs_review**: Je wilt dat code-review je werk beoordeelt
 
 ### Next Agent
 - **testing**: Stuur door naar testing voor uitgebreide tests
+- **analyst**: Stuur terug naar analyst voor verduidelijking
+- **code-review**: Stuur door naar code review
 - **null**: Geen volgende stap (blokkerend issue)
+
+### Question (bij impediment)
+- **Verplicht** bij status: impediment
+- Wees specifiek: wat heb je nodig? Van wie? Waarom ben je vastgelopen?
+- Voorbeeld: "Ik begrijp niet hoe de auth-flow werkt. Kan de analyst uitleggen welke stappen er zijn?"
 
 ### Tests/Lint Passed
 - **true**: Tests/lint zijn gepasseerd
