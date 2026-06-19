@@ -83,7 +83,37 @@ export default function KanbanPage() {
         </div>
       </div>
 
-      <Board columns={columns} cards={cards} onOpen={setOpen} onMove={onMove} />
+      <Board
+        columns={columns}
+        cards={cards}
+        onOpen={setOpen}
+        onMove={onMove}
+        onReorderColumns={async (sourceId, targetId) => {
+          const source = columns.find((c) => c.id === sourceId);
+          const target = columns.find((c) => c.id === targetId);
+          if (!source || !target) return;
+
+          const newColumns = [...columns];
+          const sourceIdx = newColumns.findIndex((c) => c.id === sourceId);
+          const targetIdx = newColumns.findIndex((c) => c.id === targetId);
+
+          const [moved] = newColumns.splice(sourceIdx, 1);
+          newColumns.splice(targetIdx, 0, moved);
+
+          setColumns(newColumns);
+
+          try {
+            for (let i = 0; i < newColumns.length; i++) {
+              await kanbanApi.updateColumn(newColumns[i].id, {
+                rank: String(i).padStart(4, "0"),
+              });
+            }
+          } catch {
+            toast.error("Failed to reorder columns");
+            void reload();
+          }
+        }}
+      />
 
       {open && (
         <CardDrawer
