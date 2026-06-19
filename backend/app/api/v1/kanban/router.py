@@ -340,7 +340,7 @@ async def dispatch_now(cid: str, payload: DispatchRequest):
     async with KanbanSessionLocal() as s:
         try:
             res = await dispatch.dispatch_card(s, card_id=cid,
-                project_path=payload.project_path)
+                project_path=payload.project_path, agent_override=payload.agent)
         except Exception as e:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
         await s.commit()

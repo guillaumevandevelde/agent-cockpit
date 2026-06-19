@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
 import { MODAL_SIZES } from "@/lib/constants";
+import { useProviderContext } from "@/contexts/ProviderContext";
 import { kanbanApi } from "../api";
 import { CardEditDialog } from "./CardEditDialog";
 import type { Card, ActivityEntry, KanbanColumn } from "../types";
@@ -46,6 +47,7 @@ export function CardDrawer({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const { selectedProviderId } = useProviderContext();
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
@@ -85,7 +87,8 @@ export function CardDrawer({
 
   const dispatchNow = async () => {
     try {
-      const r = await kanbanApi.dispatchNow(card.id, projectPath);
+      const agent = card.agent || selectedProviderId;
+      const r = await kanbanApi.dispatchNow(card.id, projectPath, agent);
       toast.success(`Dispatched — session ${r.session_name}`);
       onChanged();
     } catch {

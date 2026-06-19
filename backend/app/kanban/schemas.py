@@ -96,6 +96,7 @@ class ShipModeRequest(BaseModel):
 
 class DispatchRequest(BaseModel):
     project_path: str
+    agent: Optional[str] = None  # override: use this agent instead of card's agent
 
 
 # Column management schemas

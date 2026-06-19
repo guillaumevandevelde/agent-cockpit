@@ -82,10 +82,10 @@ export const kanbanApi = {
       `${BASE}/agents?project_path=${encodeURIComponent(projectPath)}`
     ),
 
-  dispatchNow: (id: string, projectPath: string): Promise<{ session_name: string }> =>
+  dispatchNow: (id: string, projectPath: string, agent?: string): Promise<{ session_name: string }> =>
     apiClient<{ session_name: string }>(`${BASE}/cards/${id}/dispatch`, {
       method: "POST",
-      body: JSON.stringify({ project_path: projectPath }),
+      body: JSON.stringify({ project_path: projectPath, agent }),
     }),
 
   move: (id: string, column: string): Promise<Card> =>

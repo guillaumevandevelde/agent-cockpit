@@ -258,6 +258,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
 async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
     impediment_question: Optional[str] = None,
+    agent_override: Optional[str] = None,
 ) -> Optional[dict]:
     """Claim+move-to-agent-column+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column."""
@@ -273,15 +274,20 @@ async def _run_card(
     except ClaimRejected:
         return None  # lost the race; another tick/device took it
 
-    # Determine target agent column from persona or card's explicit agent
-    persona = _persona_for_card(project_path, card, source_column)
-    target_agent = getattr(card, "agent", None) or _resolve_agent_from_persona(persona) or "developer"
+    # Determine target agent column: agent_override > card.agent > persona fallback
+    if agent_override:
+        target_agent = agent_override
+    else:
+        persona = _persona_for_card(project_path, card, source_column)
+        target_agent = getattr(card, "agent", None) or _resolve_agent_from_persona(persona) or "developer"
     
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=project_key,
         entity_id=card.id, payload={"column": target_agent},
     )
 
+    # Load persona for the target agent
+    persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode, impediment_question=impediment_question)
     try:
@@ -363,16 +369,18 @@ async def dispatch_project(
 async def dispatch_card(
     session, *, card_id: str, project_path: str,
     transport: SpawnTransport = worktree_transport,
+    agent_override: Optional[str] = None,
 ) -> Optional[dict]:
     """Manually dispatch one specific card now, regardless of the auto-pick toggle or
     the busy cap. Returns the result dict, or None if the card is missing or its claim
-    was lost."""
+    was lost. If agent_override is provided, use that agent instead of the card's agent."""
     card = await get_card(session, card_id)
     if card is None:
         return None
     return await _run_card(
         session, card=card, project_key=card.project_key,
         project_path=project_path, transport=transport,
+        agent_override=agent_override,
     )
 
 
