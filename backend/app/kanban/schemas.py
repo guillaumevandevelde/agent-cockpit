@@ -123,3 +123,19 @@ class ColumnUpdate(BaseModel):
     name: Optional[str] = None
     rank: Optional[str] = None
     default_agent: Optional[str] = None
+
+
+class WorkflowTriggerRequest(BaseModel):
+    """Request to trigger workflow based on agent output."""
+    card_id: str
+    agent_output: str
+    manual_override: bool = False
+
+
+class WorkflowTriggerResponse(BaseModel):
+    """Response from workflow trigger."""
+    should_move: bool
+    next_column: Optional[str] = None
+    next_agent: Optional[str] = None
+    card_moved: bool = False
+    error: Optional[str] = None

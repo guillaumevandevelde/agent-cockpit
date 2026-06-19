@@ -13,6 +13,7 @@ from app.kanban.schemas import (
     CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
     AutodispatchRequest, ShipModeRequest, DispatchRequest,
     ColumnResponse, ColumnCreate, ColumnUpdate,
+    WorkflowTriggerRequest, WorkflowTriggerResponse,
 )
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
@@ -285,3 +286,73 @@ async def dispatch_now(cid: str, payload: DispatchRequest):
         raise HTTPException(status.HTTP_409_CONFLICT,
             "could not dispatch (card missing or already claimed)")
     return res
+
+
+@router.post("/cards/{cid}/workflow", response_model=WorkflowTriggerResponse)
+async def trigger_workflow(cid: str, payload: WorkflowTriggerRequest):
+    """Trigger workflow based on agent output. Moves card to next column if status indicates."""
+    from app.kanban.workflow import process_agent_output, load_flows
+    
+    async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is None:
+            raise HTTPException(404, "card not found")
+        
+        # Manual override: skip workflow and move to specified column
+        if payload.manual_override:
+            # For manual override, the agent_output should contain the target column
+            from app.kanban.workflow import parse_agent_output
+            parsed = parse_agent_output(payload.agent_output)
+            target_column = parsed.get("next_column") if parsed else None
+            if target_column:
+                await apply_operation(s, op_type="move", entity_type="card",
+                    project_key=card.project_key, entity_id=cid,
+                    payload={"column": target_column})
+                await s.commit()
+                return WorkflowTriggerResponse(
+                    should_move=True,
+                    next_column=target_column,
+                    card_moved=True,
+                )
+            else:
+                raise HTTPException(422, "manual override requires next_column in agent output")
+        
+        # Process agent output through workflow engine
+        flows = load_flows()
+        result = process_agent_output(
+            card_id=cid,
+            current_column=card.column,
+            agent_output=payload.agent_output,
+            flows=flows,
+        )
+        
+        if result["error"]:
+            return WorkflowTriggerResponse(
+                should_move=False,
+                error=result["error"],
+            )
+        
+        if result["should_move"] and result["next_column"]:
+            await apply_operation(s, op_type="move", entity_type="card",
+                project_key=card.project_key, entity_id=cid,
+                payload={"column": result["next_column"]})
+            
+            # Update agent if next_agent is specified
+            if result["next_agent"]:
+                await apply_operation(s, op_type="update", entity_type="card",
+                    project_key=card.project_key, entity_id=cid,
+                    payload={"agent": result["next_agent"]})
+            
+            await s.commit()
+            return WorkflowTriggerResponse(
+                should_move=True,
+                next_column=result["next_column"],
+                next_agent=result["next_agent"],
+                card_moved=True,
+            )
+        
+        return WorkflowTriggerResponse(
+            should_move=False,
+            next_column=result.get("next_column"),
+            next_agent=result.get("next_agent"),
+        )

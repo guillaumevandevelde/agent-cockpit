@@ -1,0 +1,33 @@
+{
+  "name": "card-flow",
+  "description": "Automatische kaartbeweging gebaseerd op agent-output",
+  "columns": ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"],
+  "flows": {
+    "analyst": {
+      "success": "Todo",
+      "fail": "Analysis"
+    },
+    "developer": {
+      "success": "Review",
+      "fail": "Todo"
+    },
+    "testing": {
+      "success": "Review",
+      "fail": "Todo"
+    },
+    "code-review": {
+      "success": "Done",
+      "fail": "Todo"
+    }
+  },
+  "agent_by_column": {
+    "Analysis": "analyst",
+    "Todo": "developer",
+    "Doing": "developer",
+    "Review": "code-review"
+  },
+  "manual_override": {
+    "allowed": true,
+    "columns": ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"]
+  }
+}
