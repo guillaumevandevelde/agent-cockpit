@@ -1,0 +1,24 @@
+lockfile_version: '1'
+generated_at: '2026-06-18T19:34:01.916827+00:00'
+apm_version: 0.20.0
+dependencies:
+- repo_url: github/awesome-copilot
+  host: github.com
+  resolved_commit: 16ad744860577c0e5db9ca471e1c3bb483d5aa8d
+  virtual_path: plugins/context-engineering
+  is_virtual: true
+  package_type: marketplace_plugin
+  deployed_files:
+  - .claude/agents/context-architect.md
+  - .claude/skills/context-map
+  - .claude/skills/context-map/SKILL.md
+  - .claude/skills/refactor-plan
+  - .claude/skills/refactor-plan/SKILL.md
+  - .claude/skills/what-context-needed
+  - .claude/skills/what-context-needed/SKILL.md
+  deployed_file_hashes:
+    .claude/agents/context-architect.md: sha256:6da7a854a670d2810fc61b173eea2500a2af644d8292f58e3d440ac2d120ee0d
+    .claude/skills/context-map/SKILL.md: sha256:af0037b06a0b56a5014e16a32538ac419725638659428b7e229ed5bbb9087a37
+    .claude/skills/refactor-plan/SKILL.md: sha256:93741df0042a15c01ae8589e72014dcf53c557c11ca1df69c29737534c312c29
+    .claude/skills/what-context-needed/SKILL.md: sha256:65ed7445bf561a5e5199ac77478d2691c05019e0dc32fdddc23db9e45bd9d135
+  content_hash: sha256:6d5ed9518d725ff8ff634939759a4b1069b1b89ef9a885bfedd6df569722d473

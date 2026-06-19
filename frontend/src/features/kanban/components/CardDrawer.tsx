@@ -29,18 +29,20 @@ import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
 import { CardEditDialog } from "./CardEditDialog";
-import type { Card, ActivityEntry } from "../types";
+import type { Card, ActivityEntry, KanbanColumn } from "../types";
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
 
 export function CardDrawer({
   card,
   projectPath,
+  columns,
   onClose,
   onChanged,
 }: {
   card: Card;
   projectPath: string;
+  columns: KanbanColumn[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -202,6 +204,7 @@ export function CardDrawer({
               priority: card.priority,
               labels: card.labels,
             }}
+            columns={columns.map((c) => c.name)}
             defaultAgent={card.agent}
             onClose={() => setEditing(false)}
             onSubmit={async ({ title, description, priority, labels, agent }) => {

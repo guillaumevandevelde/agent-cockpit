@@ -6,28 +6,35 @@ import { Button } from "@/components/ui/button";
 import { Board } from "./components/Board";
 import { CardDrawer } from "./components/CardDrawer";
 import { CardEditDialog } from "./components/CardEditDialog";
+import { ColumnSettingsDialog } from "./components/ColumnSettingsDialog";
 import { EnableKanbanToggle } from "./components/EnableKanbanToggle";
 import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { ShipModeToggle } from "./components/ShipModeToggle";
 import { kanbanApi } from "./api";
-import type { Card, Column as Col } from "./types";
+import type { Card, KanbanColumn } from "./types";
 
 export default function KanbanPage() {
   const { activeProject } = useProjectContext();
   const { selectedProviderId } = useProviderContext();
   const projectPath = activeProject?.path ?? "";
   const [projectKey, setProjectKey] = useState<string>("");
+  const [columns, setColumns] = useState<KanbanColumn[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [open, setOpen] = useState<Card | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editingColumns, setEditingColumns] = useState(false);
 
   const reload = useCallback(async () => {
     if (!projectKey) return;
     try {
-      const { items } = await kanbanApi.listCards(projectKey);
-      setCards(items);
+      const [colRes, cardRes] = await Promise.all([
+        kanbanApi.listColumns(projectKey),
+        kanbanApi.listCards(projectKey),
+      ]);
+      setColumns(colRes.columns);
+      setCards(cardRes.items);
       setOpen((prev) =>
-        prev ? (items.find((c) => c.id === prev.id) ?? null) : null
+        prev ? (cardRes.items.find((c) => c.id === prev.id) ?? null) : null
       );
     } catch {
       toast.error("Failed to load board");
@@ -43,14 +50,14 @@ export default function KanbanPage() {
     void reload();
   }, [reload]);
 
-  const onMove = async (cardId: string, column: Col) => {
+  const onMove = async (cardId: string, column: string) => {
     setCards((cs) => cs.map((c) => (c.id === cardId ? { ...c, column } : c)));
     try {
       await kanbanApi.move(cardId, column);
     } catch {
       toast.error("Failed to move card");
     } finally {
-      void reload(); // reconcile optimistic state with the server
+      void reload();
     }
   };
 
@@ -67,18 +74,22 @@ export default function KanbanPage() {
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />
           <AutodispatchToggle projectKey={projectKey} />
           <ShipModeToggle projectKey={projectKey} />
+          <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
+            Columns
+          </Button>
           <Button size="sm" onClick={() => setCreating(true)}>
             New card
           </Button>
         </div>
       </div>
 
-      <Board cards={cards} onOpen={setOpen} onMove={onMove} />
+      <Board columns={columns} cards={cards} onOpen={setOpen} onMove={onMove} />
 
       {open && (
         <CardDrawer
           card={open}
           projectPath={projectPath}
+          columns={columns}
           onClose={() => setOpen(null)}
           onChanged={reload}
         />
@@ -86,6 +97,7 @@ export default function KanbanPage() {
       {creating && (
         <CardEditDialog
           open
+          columns={columns.map((c) => c.name)}
           defaultAgent={selectedProviderId}
           onClose={() => setCreating(false)}
           onSubmit={async ({ title, description, column, priority, labels, agent }) => {
@@ -105,6 +117,15 @@ export default function KanbanPage() {
               toast.error("Failed to create card");
             }
           }}
+        />
+      )}
+      {editingColumns && (
+        <ColumnSettingsDialog
+          open
+          projectKey={projectKey}
+          columns={columns}
+          onClose={() => setEditingColumns(false)}
+          onChanged={reload}
         />
       )}
     </div>

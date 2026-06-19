@@ -89,6 +89,7 @@ async def init_kanban_db() -> None:
         await conn.run_sync(KanbanBase.metadata.create_all)
         if settings.kanban_database_url.startswith("sqlite"):
             await _ensure_card_columns(conn)
+            await _ensure_column_table(conn)
 
 
 async def _ensure_card_columns(conn) -> None:
@@ -98,3 +99,22 @@ async def _ensure_card_columns(conn) -> None:
     cols = {r[1] for r in rows}
     if "agent" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN agent VARCHAR(64)")
+
+
+async def _ensure_column_table(conn) -> None:
+    """Create kanban_columns table if it doesn't exist."""
+    tables = (await conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+    table_names = {r[0] for r in tables}
+    if "kanban_columns" not in table_names:
+        await conn.exec_driver_sql("""
+            CREATE TABLE kanban_columns (
+                id VARCHAR(64) PRIMARY KEY,
+                project_key VARCHAR(512) NOT NULL,
+                name VARCHAR(128) NOT NULL,
+                rank VARCHAR(64) DEFAULT '',
+                default_agent VARCHAR(64),
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+        """)
+        await conn.exec_driver_sql("CREATE INDEX ix_kanban_columns_project_key ON kanban_columns (project_key)")

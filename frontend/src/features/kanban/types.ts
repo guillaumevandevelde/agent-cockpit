@@ -1,8 +1,18 @@
-export const COLUMNS = ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"] as const;
-export type Column = (typeof COLUMNS)[number];
+export const DEFAULT_COLUMNS = ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"] as const;
+export type Column = string;
 
 export const PRIORITIES = ["none", "low", "medium", "high"] as const;
 export type Priority = (typeof PRIORITIES)[number];
+
+export interface KanbanColumn {
+  id: string;
+  project_key: string;
+  name: string;
+  rank: string;
+  default_agent: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface Deliverable {
   id: string;

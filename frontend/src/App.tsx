@@ -33,6 +33,7 @@ const ScheduledMessagesPage = lazy(() => import('./features/scheduled-messages/S
 const KanbanPage = lazy(() => import('./features/kanban/KanbanPage'))
 const AutonomyPage = lazy(() => import('./features/autonomy/AutonomyPage').then((m) => ({ default: m.AutonomyPage })))
 const AutomationTemplatesPage = lazy(() => import('./features/autonomy/AutomationTemplatesPage').then((m) => ({ default: m.AutomationTemplatesPage })))
+const ApmPage = lazy(() => import('./features/apm/ApmPage').then((m) => ({ default: m.ApmPage })))
 
 function App() {
   return (
@@ -73,6 +74,7 @@ function App() {
                 <Route path="kanban" element={<KanbanPage />} />
                 <Route path="autonomy" element={<AutonomyPage />} />
                 <Route path="automation-templates" element={<AutomationTemplatesPage />} />
+                <Route path="apm" element={<ApmPage />} />
               </Route>
             </Routes>
             </Suspense>

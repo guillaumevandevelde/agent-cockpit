@@ -1,9 +1,38 @@
 import { apiClient } from "@/lib/api";
-import type { Card, ActivityEntry } from "./types";
+import type { Card, ActivityEntry, KanbanColumn } from "./types";
 
 const BASE = "kanban";
 
 export const kanbanApi = {
+  listColumns: (projectKey: string): Promise<{ columns: KanbanColumn[] }> => {
+    return apiClient<{ columns: KanbanColumn[] }>(
+      `${BASE}/columns?project_key=${encodeURIComponent(projectKey)}`
+    );
+  },
+
+  createColumn: (body: {
+    project_key: string;
+    name: string;
+    rank?: string;
+    default_agent?: string | null;
+  }): Promise<KanbanColumn> =>
+    apiClient<KanbanColumn>(`${BASE}/columns`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateColumn: (
+    id: string,
+    body: { name?: string; rank?: string; default_agent?: string | null }
+  ): Promise<KanbanColumn> =>
+    apiClient<KanbanColumn>(`${BASE}/columns/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  deleteColumn: (id: string): Promise<void> =>
+    apiClient<void>(`${BASE}/columns/${id}`, { method: "DELETE" }),
+
   listCards: (projectKey: string, column?: string): Promise<{ items: Card[] }> => {
     const params = new URLSearchParams({ project_key: projectKey });
     if (column) params.append("column", column);

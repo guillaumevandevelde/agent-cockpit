@@ -10,8 +10,9 @@ from app.kanban.operations import apply_operation, ClaimRejected
 from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
-    CommentRequest, AttachRequest, ActivityEntry, COLUMNS, EnableRequest,
+    CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
     AutodispatchRequest, ShipModeRequest, DispatchRequest,
+    ColumnResponse, ColumnCreate, ColumnUpdate,
 )
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
@@ -29,8 +30,43 @@ router = APIRouter(prefix="/kanban", tags=["Kanban"])
 
 
 @router.get("/columns")
-async def columns():
-    return {"columns": COLUMNS}
+async def columns(project_key: str = Query(...)):
+    async with KanbanSessionLocal() as s:
+        cols = await service.list_columns(s, project_key)
+        return {"columns": [ColumnResponse.model_validate(c) for c in cols]}
+
+
+@router.post("/columns", response_model=ColumnResponse, status_code=status.HTTP_201_CREATED)
+async def create_column(payload: ColumnCreate):
+    async with KanbanSessionLocal() as s:
+        col = await service.create_column(
+            s, project_key=payload.project_key, name=payload.name,
+            rank=payload.rank, default_agent=payload.default_agent,
+        )
+        await s.commit()
+        return ColumnResponse.model_validate(col)
+
+
+@router.patch("/columns/{column_id}", response_model=ColumnResponse)
+async def update_column(column_id: str, payload: ColumnUpdate):
+    async with KanbanSessionLocal() as s:
+        col = await service.update_column(
+            s, column_id,
+            name=payload.name, rank=payload.rank,
+            default_agent=payload.default_agent,
+        )
+        if col is None:
+            raise HTTPException(404, "column not found")
+        await s.commit()
+        return ColumnResponse.model_validate(col)
+
+
+@router.delete("/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_column(column_id: str):
+    async with KanbanSessionLocal() as s:
+        if not await service.delete_column(s, column_id):
+            raise HTTPException(404, "column not found")
+        await s.commit()
 
 
 @router.get("/cards")
@@ -81,9 +117,21 @@ async def update_card(cid: str, payload: CardUpdate):
 
 @router.post("/cards/{cid}/move", response_model=CardResponse)
 async def move_card(cid: str, payload: MoveRequest):
-    if payload.column not in COLUMNS:
-        raise HTTPException(422, f"unknown column: {payload.column}")
     async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is None:
+            raise HTTPException(404, "card not found")
+
+        # Auto-assign agent from column default if card has no explicit agent
+        if card.agent is None:
+            default_agent = await service.get_column_default_agent(
+                s, card.project_key, payload.column
+            )
+            if default_agent:
+                await apply_operation(s, op_type="update", entity_type="card",
+                    project_key=card.project_key, entity_id=cid,
+                    payload={"agent": default_agent})
+
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=cid, payload=payload.model_dump())
         await s.commit()

@@ -96,3 +96,30 @@ class ShipModeRequest(BaseModel):
 
 class DispatchRequest(BaseModel):
     project_path: str
+
+
+# Column management schemas
+
+
+class ColumnResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_key: str
+    name: str
+    rank: str
+    default_agent: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ColumnCreate(BaseModel):
+    project_key: str
+    name: str
+    rank: Optional[str] = None
+    default_agent: Optional[str] = None
+
+
+class ColumnUpdate(BaseModel):
+    name: Optional[str] = None
+    rank: Optional[str] = None
+    default_agent: Optional[str] = None

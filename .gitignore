@@ -65,3 +65,7 @@ htmlcov/
 
 # Git worktrees
 .worktrees/
+
+
+# APM dependencies
+apm_modules/

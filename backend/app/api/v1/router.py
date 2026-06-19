@@ -28,6 +28,7 @@ from .kanban.router import router as kanban_router
 from .autonomy import router as autonomy_router
 from .agent_activity import router as agent_activity_router
 from .automation_templates import router as automation_templates_router
+from .apm import router as apm_router
 
 router = APIRouter()
 
@@ -72,3 +73,4 @@ router.include_router(kanban_router)
 router.include_router(autonomy_router)
 router.include_router(agent_activity_router)
 router.include_router(automation_templates_router)
+router.include_router(apm_router)

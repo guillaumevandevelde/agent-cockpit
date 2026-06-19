@@ -36,6 +36,7 @@ import {
   CalendarClock,
   KanbanSquare,
   Workflow,
+  Boxes,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -65,6 +66,7 @@ const commonNavigation: NavGroup[] = [
   {
     name: 'Operations',
     items: [
+      { name: 'APM', href: '/apm', icon: Boxes },
       { name: 'Presence', href: '/presence', icon: Radio },
       { name: 'Scheduled Messages', href: '/scheduled-messages', icon: CalendarClock },
       { name: 'Kanban', href: '/kanban', icon: KanbanSquare },

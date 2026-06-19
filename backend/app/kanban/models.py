@@ -73,6 +73,18 @@ class KanbanDeliverable(KanbanBase):
     card: Mapped["KanbanCard"] = relationship(back_populates="deliverables")
 
 
+class KanbanColumn(KanbanBase):
+    __tablename__ = "kanban_columns"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_key: Mapped[str] = mapped_column(String(512), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    rank: Mapped[str] = mapped_column(String(64), default="")
+    default_agent: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class KanbanMeta(KanbanBase):
     __tablename__ = "kanban_meta"
 

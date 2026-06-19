@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownPreviewToggle } from "@/components/shared/MarkdownPreviewToggle";
 import { MODAL_SIZES } from "@/lib/constants";
-import { COLUMNS, PRIORITIES, type Column, type Priority } from "../types";
+import { PRIORITIES, type Priority } from "../types";
 
 function parseLabels(raw: string): string[] {
   return raw
@@ -32,6 +32,7 @@ function parseLabels(raw: string): string[] {
 export function CardEditDialog({
   open,
   initial,
+  columns,
   defaultAgent,
   onClose,
   onSubmit,
@@ -43,12 +44,13 @@ export function CardEditDialog({
     priority?: string | null;
     labels?: string[] | null;
   };
+  columns: string[];
   defaultAgent?: string | null;
   onClose: () => void;
   onSubmit: (data: {
     title: string;
     description: string;
-    column: Column;
+    column: string;
     priority: string | null;
     labels: string[];
     agent: string | null;
@@ -56,7 +58,7 @@ export function CardEditDialog({
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [column, setColumn] = useState<Column>("Backlog");
+  const [column, setColumn] = useState(columns[0] ?? "Backlog");
   const [priority, setPriority] = useState<Priority>(
     (initial?.priority as Priority) ?? "none"
   );
@@ -97,12 +99,12 @@ export function CardEditDialog({
             {!initial && (
               <div className="space-y-2">
                 <Label>Column</Label>
-                <Select value={column} onValueChange={(v) => setColumn(v as Column)}>
+                <Select value={column} onValueChange={setColumn}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select column" />
                   </SelectTrigger>
                   <SelectContent>
-                    {COLUMNS.map((c) => (
+                    {columns.map((c) => (
                       <SelectItem key={c} value={c}>
                         {c}
                       </SelectItem>
