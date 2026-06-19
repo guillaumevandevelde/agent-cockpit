@@ -196,12 +196,15 @@ async def enable(payload: EnableRequest):
     }
     _write_json_atomic(mcp_file, data)
 
-    # Ensure the Backlog column exists for this project
+    # Ensure all default columns exist for this project
+    from app.kanban.schemas import COLUMNS
     async with KanbanSessionLocal() as s:
         existing = await service.list_columns(s, key)
-        if not any(c.name == "Backlog" for c in existing):
-            await service.create_column(s, key, name="Backlog", rank="0000")
-            await s.commit()
+        existing_names = {c.name for c in existing}
+        for i, col_name in enumerate(COLUMNS):
+            if col_name not in existing_names:
+                await service.create_column(s, key, name=col_name, rank=f"{i:04d}")
+        await s.commit()
 
     return {"project_key": key, "enabled": True}
 
