@@ -459,6 +459,21 @@ def test_mint_session_name_fits_tmux_sanitizer_limit():
     assert name.startswith("k-")
 
 
+def test_mint_session_name_uses_card_title():
+    # Card title should be used for clarity when available.
+    name = dispatch._mint_session_name("/home/me/project", card_title="Fix login bug")
+    assert len(name) <= 20
+    assert name.startswith("k-")
+    assert "fix-login" in name
+
+
+def test_mint_session_name_falls_back_to_project_path():
+    # When no card title, project path should be used as before.
+    name = dispatch._mint_session_name("/home/me/my-project")
+    assert len(name) <= 20
+    assert "my-project" in name
+
+
 @pytest.mark.asyncio
 async def test_spawn_failure_returns_analysis_card_to_analysis():
     transport = RecordingTransport(fail=True)
