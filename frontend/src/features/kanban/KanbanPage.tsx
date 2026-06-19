@@ -123,6 +123,7 @@ export default function KanbanPage() {
         <ColumnSettingsDialog
           open
           projectKey={projectKey}
+          projectPath={projectPath}
           columns={columns}
           onClose={() => setEditingColumns(false)}
           onChanged={reload}

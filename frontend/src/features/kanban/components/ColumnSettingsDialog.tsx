@@ -8,52 +8,68 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
 import type { KanbanColumn } from "../types";
 
+const BACKLOG_COLUMN = "Backlog";
+
 export function ColumnSettingsDialog({
   open,
   projectKey,
+  projectPath,
   columns,
   onClose,
   onChanged,
 }: {
   open: boolean;
   projectKey: string;
+  projectPath: string;
   columns: KanbanColumn[];
   onClose: () => void;
   onChanged: () => void;
 }) {
   const [items, setItems] = useState<KanbanColumn[]>(columns);
-  const [newName, setNewName] = useState("");
-  const [newAgent, setNewAgent] = useState("");
+  const [availableAgents, setAvailableAgents] = useState<string[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editAgent, setEditAgent] = useState("");
+  const [editAgent, setEditAgent] = useState<string>("");
 
   useEffect(() => {
     setItems(columns);
   }, [columns]);
 
+  useEffect(() => {
+    if (!projectPath) return;
+    kanbanApi.agents(projectPath).then((r) => setAvailableAgents(r.agents));
+  }, [projectPath]);
+
   const handleCreate = async () => {
-    const name = newName.trim();
-    if (!name) return;
+    if (!selectedAgent) {
+      toast.error("Select an agent first");
+      return;
+    }
+    const name = selectedAgent;
     if (items.some((c) => c.name === name)) {
-      toast.error("Column name already exists");
+      toast.error("Column for this agent already exists");
       return;
     }
     try {
       const col = await kanbanApi.createColumn({
         project_key: projectKey,
         name,
-        default_agent: newAgent.trim() || null,
+        default_agent: name,
       });
       setItems((prev) => [...prev, col]);
-      setNewName("");
-      setNewAgent("");
+      setSelectedAgent("");
       onChanged();
     } catch {
       toast.error("Failed to create column");
@@ -61,12 +77,10 @@ export function ColumnSettingsDialog({
   };
 
   const handleUpdate = async (id: string) => {
-    const name = editName.trim();
-    if (!name) return;
+    const agent = editAgent.trim() || null;
     try {
       const col = await kanbanApi.updateColumn(id, {
-        name,
-        default_agent: editAgent.trim() || null,
+        default_agent: agent,
       });
       setItems((prev) => prev.map((c) => (c.id === id ? col : c)));
       setEditingId(null);
@@ -76,7 +90,11 @@ export function ColumnSettingsDialog({
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, name: string) => {
+    if (name === BACKLOG_COLUMN) {
+      toast.error("Cannot delete the Backlog column");
+      return;
+    }
     try {
       await kanbanApi.deleteColumn(id);
       setItems((prev) => prev.filter((c) => c.id !== id));
@@ -86,13 +104,17 @@ export function ColumnSettingsDialog({
     }
   };
 
+  const isBacklog = (name: string) => name === BACKLOG_COLUMN;
+  const usedAgents = items.map((c) => c.default_agent).filter(Boolean);
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className={MODAL_SIZES.MD}>
         <DialogHeader>
           <DialogTitle>Column Settings</DialogTitle>
           <DialogDescription>
-            Manage kanban columns and their default agent assignments.
+            The Backlog column is always present. Add columns by selecting an
+            agent from the dropdown — the column will take the agent's name.
           </DialogDescription>
         </DialogHeader>
 
@@ -104,17 +126,25 @@ export function ColumnSettingsDialog({
             >
               {editingId === col.id ? (
                 <>
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Input
+                  <div className="flex-1">
+                    <div className="text-sm font-medium">{col.name}</div>
+                  </div>
+                  <Select
                     value={editAgent}
-                    onChange={(e) => setEditAgent(e.target.value)}
-                    placeholder="Default agent"
-                    className="w-40"
-                  />
+                    onValueChange={setEditAgent}
+                  >
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Default agent" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      {availableAgents.map((a) => (
+                        <SelectItem key={a} value={a}>
+                          {a}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button size="sm" onClick={() => handleUpdate(col.id)}>
                     Save
                   </Button>
@@ -132,25 +162,28 @@ export function ColumnSettingsDialog({
                       </div>
                     )}
                   </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setEditingId(col.id);
-                      setEditName(col.name);
-                      setEditAgent(col.default_agent ?? "");
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive"
-                    onClick={() => handleDelete(col.id)}
-                  >
-                    Delete
-                  </Button>
+                  {!isBacklog(col.name) && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setEditingId(col.id);
+                          setEditAgent(col.default_agent ?? "");
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive"
+                        onClick={() => handleDelete(col.id, col.name)}
+                      >
+                        Delete
+                      </Button>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -158,20 +191,22 @@ export function ColumnSettingsDialog({
         </div>
 
         <div className="flex gap-2 pt-2 border-t">
-          <Input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="Column name"
-            className="flex-1"
-          />
-          <Input
-            value={newAgent}
-            onChange={(e) => setNewAgent(e.target.value)}
-            placeholder="Default agent (optional)"
-            className="w-48"
-          />
-          <Button onClick={handleCreate} disabled={!newName.trim()}>
-            Add
+          <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+            <SelectTrigger className="flex-1">
+              <SelectValue placeholder="Select agent to add column" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableAgents
+                .filter((a) => !usedAgents.includes(a))
+                .map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {a}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={handleCreate} disabled={!selectedAgent}>
+            Add Column
           </Button>
         </div>
 

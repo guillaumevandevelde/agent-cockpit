@@ -195,6 +195,14 @@ async def enable(payload: EnableRequest):
         "type": "sse", "url": MCP_SSE_URL,
     }
     _write_json_atomic(mcp_file, data)
+
+    # Ensure the Backlog column exists for this project
+    async with KanbanSessionLocal() as s:
+        existing = await service.list_columns(s, key)
+        if not any(c.name == "Backlog" for c in existing):
+            await service.create_column(s, key, name="Backlog", rank="0000")
+            await s.commit()
+
     return {"project_key": key, "enabled": True}
 
 
