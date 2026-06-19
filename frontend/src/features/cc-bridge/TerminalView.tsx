@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import { Monitor, Maximize2, Minimize2, X } from 'lucide-react'
 import { useTerminal } from './useTerminal'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,19 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const { connected, readOnly, setReadOnly, attach, detach, sendText } = useTerminal(containerRef, wrapperRef)
+  const [dropPath, setDropPath] = useState<string | null>(null)
+  const pathInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (dropPath !== null) pathInputRef.current?.focus()
+  }, [dropPath])
+
+  const commitPath = useCallback(() => {
+    if (dropPath !== null) {
+      sendText(dropPath)
+      setDropPath(null)
+    }
+  }, [dropPath, sendText])
 
   useEffect(() => {
     if (target) {
@@ -35,7 +48,7 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
         onDrop={(e) => {
           e.preventDefault()
           const file = e.dataTransfer.files[0]
-          if (file) sendText(file.name)
+          if (file) setDropPath(file.name)
         }}
       >
         {!target && (
@@ -52,6 +65,25 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
           )}
         />
       </div>
+
+      {dropPath !== null && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t bg-muted text-sm">
+          <span className="text-muted-foreground shrink-0">Pad:</span>
+          <input
+            ref={pathInputRef}
+            className="flex-1 bg-transparent outline-none font-mono text-xs"
+            value={dropPath}
+            onChange={(e) => setDropPath(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitPath()
+              if (e.key === 'Escape') setDropPath(null)
+            }}
+            placeholder="volledig pad..."
+          />
+          <button className="text-muted-foreground hover:text-foreground" onClick={commitPath}>↵</button>
+          <button className="text-muted-foreground hover:text-foreground" onClick={() => setDropPath(null)}><X className="h-3 w-3" /></button>
+        </div>
+      )}
 
       {target && (
         <div className="flex items-center justify-between px-3 py-2 border-t bg-background">
