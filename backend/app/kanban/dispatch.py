@@ -129,7 +129,28 @@ def _persona_for_card(project_path: str, card, column: str) -> Optional[str]:
 
 # ---- prompt ----------------------------------------------------------------
 
-def build_card_prompt(card, *, persona: Optional[str], ship_mode: str, impediment_question: Optional[str] = None) -> str:
+def _mail_section(handle: Optional[str], pending_mail: Optional[Iterable]) -> str:
+    if not handle:
+        return ""
+    lines = [
+        "\n\n# Agent Mail",
+        f"Je durable handle in dit project is `{handle}`. Check je inbox met "
+        "`check_inbox`; vraag gericht context met `request_context`; draag werk over "
+        "met `handoff`.",
+    ]
+    pending = list(pending_mail or [])
+    if pending:
+        lines.append("\nOpenstaande berichten voor jou op deze card (al gemarkeerd als gelezen):")
+        for m in pending:
+            label = "Handoff" if m.kind == "handoff" else "Context request"
+            lines.append(f"\n**{label} van `{m.from_handle}` — {m.subject}**\n{m.body}")
+    return "\n".join(lines)
+
+
+def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
+                      impediment_question: Optional[str] = None,
+                      handle: Optional[str] = None,
+                      pending_mail: Optional[Iterable] = None) -> str:
     preamble = (persona.strip() + "\n\n") if persona else ""
     impediment_section = ""
     if impediment_question:
@@ -152,6 +173,7 @@ def build_card_prompt(card, *, persona: Optional[str], ship_mode: str, impedimen
         "`comment`) to update the card exactly as those instructions direct. If you are "
         "blocked or need clarification from another agent, use `status: impediment` with a "
         "clear `question` field explaining what you need."
+        f"{_mail_section(handle, pending_mail)}"
     )
 
 
@@ -286,10 +308,20 @@ async def _run_card(
         entity_id=card.id, payload={"column": target_agent},
     )
 
+    # Register the durable mail identity for this role + its live session, then
+    # collect any pending handoff/context mail to warm-start the prompt.
+    from app.kanban import mail
+    await mail.ensure_identity(session, project_key, target_agent, agent_session=name)
+    pending_mail = await mail.pending_for_card(session, project_key, card.id, target_agent)
+    for m in pending_mail:
+        await mail.mark_read(session, m.id, target_agent)
+
     # Load persona for the target agent
     persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
-    prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode, impediment_question=impediment_question)
+    prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
+        impediment_question=impediment_question, handle=target_agent,
+        pending_mail=pending_mail)
     try:
         spawned = transport(directory=project_path, prompt=prompt, session_name=name)
     except Exception:

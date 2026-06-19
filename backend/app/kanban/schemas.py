@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict
 COLUMNS = ["Backlog", "Impediment", "Done"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
 
+# Agent Mail
+MESSAGE_KINDS = ["context_request", "context_response", "handoff", "note"]
+MESSAGE_STATUSES = ["unread", "read", "answered"]
+
 
 class DeliverableResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -147,3 +151,55 @@ class ImpedimentResolveRequest(BaseModel):
     """Request to resolve an impediment."""
     project_path: str
     target_agent: Optional[str] = None  # override auto-detection
+
+
+# Agent Mail schemas
+
+
+class IdentityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_key: str
+    handle: str
+    display_name: Optional[str] = None
+    last_session: Optional[str] = None
+    created_at: datetime
+    last_seen_at: Optional[datetime] = None
+
+
+class MessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_key: str
+    from_handle: str
+    to_handle: Optional[str] = None
+    kind: str
+    subject: str
+    body: str
+    card_id: Optional[str] = None
+    in_reply_to: Optional[str] = None
+    status: str
+    created_at: datetime
+    read_at: Optional[datetime] = None
+
+
+class SendMessageRequest(BaseModel):
+    project_key: str
+    from_handle: str
+    to_handle: Optional[str] = None
+    kind: str = "note"
+    subject: str = ""
+    body: str = ""
+    card_id: Optional[str] = None
+    in_reply_to: Optional[str] = None
+
+
+class MarkReadRequest(BaseModel):
+    reader_handle: str
+
+
+class EnsureIdentityRequest(BaseModel):
+    project_key: str
+    handle: str
+    display_name: Optional[str] = None
+    session: Optional[str] = None
