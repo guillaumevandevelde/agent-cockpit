@@ -7,15 +7,29 @@ dicts (JSON-serializable) for the MCP layer.
 from mcp.server.fastmcp import FastMCP
 
 from app.kanban.db import KanbanSessionLocal
-from app.kanban import service
+from app.kanban import mail, service
 from app.kanban.operations import apply_operation, ClaimRejected
-from app.kanban.schemas import CardResponse
+from app.kanban.schemas import CardResponse, MessageResponse
 
 mcp = FastMCP("cockpit-kanban")
 
 
 def _card_dict(card) -> dict:
     return CardResponse.model_validate(card).model_dump(mode="json")
+
+
+def _msg_dict(msg) -> dict:
+    return MessageResponse.model_validate(msg).model_dump(mode="json")
+
+
+def _msg_summary(msg) -> dict:
+    """Compact inbox row — full body fetched via read_mail."""
+    return {
+        "id": msg.id, "from": msg.from_handle, "to": msg.to_handle,
+        "kind": msg.kind, "subject": msg.subject, "card_id": msg.card_id,
+        "in_reply_to": msg.in_reply_to, "status": msg.status,
+        "created_at": msg.created_at.isoformat(),
+    }
 
 
 @mcp.tool()
@@ -133,6 +147,93 @@ async def report_impediment(card_id: str, question: str) -> dict:
         # Release the claim so another agent can pick it up
         await apply_operation(s, op_type="release", entity_type="card",
             project_key="", entity_id=card_id, payload={})
-        
+
         await s.commit()
         return _card_dict(await service.get_card(s, card_id))
+
+
+# --- Agent Mail -------------------------------------------------------------
+# Identity is passed explicitly (MCP/SSE is stateless — the server can't tell who
+# is calling, same as claim_card(claimed_by)). Spoofable, acceptable in the local
+# single-user trust model.
+
+
+@mcp.tool()
+async def send_mail(project: str, from_handle: str, to_handle: str | None,
+                    kind: str, subject: str, body: str,
+                    card_id: str | None = None) -> dict:
+    """Send a message to another agent (or broadcast with to_handle=None).
+
+    kind is one of: context_request, context_response, handoff, note. Prefer the
+    dedicated request_context/respond_context/handoff tools for those flows."""
+    async with KanbanSessionLocal() as s:
+        try:
+            msg = await mail.send_message(s, project, from_handle, to_handle,
+                kind, subject, body, card_id=card_id)
+        except ValueError as e:
+            return {"error": str(e)}
+        await mail.ensure_identity(s, project, from_handle)
+        await s.commit()
+        return _msg_dict(msg)
+
+
+@mcp.tool()
+async def request_context(project: str, from_handle: str, to_handle: str,
+                          subject: str, body: str,
+                          card_id: str | None = None) -> dict:
+    """Ask another agent for specific context. They reply with respond_context."""
+    async with KanbanSessionLocal() as s:
+        msg = await mail.send_message(s, project, from_handle, to_handle,
+            "context_request", subject, body, card_id=card_id)
+        await mail.ensure_identity(s, project, from_handle)
+        await s.commit()
+        return _msg_dict(msg)
+
+
+@mcp.tool()
+async def respond_context(project: str, from_handle: str, in_reply_to: str,
+                          body: str) -> dict:
+    """Answer a context_request. Marks the original request as answered."""
+    async with KanbanSessionLocal() as s:
+        parent = await mail.get_message(s, in_reply_to)
+        if parent is None:
+            return {"error": "not_found", "in_reply_to": in_reply_to}
+        msg = await mail.send_message(s, project, from_handle, parent.from_handle,
+            "context_response", f"Re: {parent.subject}", body,
+            card_id=parent.card_id, in_reply_to=in_reply_to)
+        await mail.ensure_identity(s, project, from_handle)
+        await s.commit()
+        return _msg_dict(msg)
+
+
+@mcp.tool()
+async def handoff(project: str, from_handle: str, to_handle: str,
+                  subject: str, body: str, card_id: str) -> dict:
+    """Hand work + context off to another agent. The next agent picking up the
+    card sees this inline in their prompt (warm start)."""
+    async with KanbanSessionLocal() as s:
+        msg = await mail.send_message(s, project, from_handle, to_handle,
+            "handoff", subject, body, card_id=card_id)
+        await mail.ensure_identity(s, project, from_handle)
+        await s.commit()
+        return _msg_dict(msg)
+
+
+@mcp.tool()
+async def check_inbox(project: str, handle: str, unread_only: bool = True) -> list[dict]:
+    """List your inbox (messages addressed to you + broadcasts). Read full bodies
+    with read_mail."""
+    async with KanbanSessionLocal() as s:
+        rows = await mail.list_inbox(s, project, handle, unread_only=unread_only)
+        return [_msg_summary(m) for m in rows]
+
+
+@mcp.tool()
+async def read_mail(message_id: str, reader_handle: str) -> dict:
+    """Read a message in full and mark it read (if you are the recipient)."""
+    async with KanbanSessionLocal() as s:
+        msg = await mail.mark_read(s, message_id, reader_handle)
+        if msg is None:
+            return {"error": "not_found", "message_id": message_id}
+        await s.commit()
+        return _msg_dict(msg)

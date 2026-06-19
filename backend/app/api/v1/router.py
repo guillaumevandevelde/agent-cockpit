@@ -25,6 +25,7 @@ from .codex_config import router as codex_config_router
 from .status import router as status_router
 from .scheduled_messages.router import router as scheduled_messages_router
 from .kanban.router import router as kanban_router
+from .kanban.mail_router import router as kanban_mail_router
 from .autonomy import router as autonomy_router
 from .agent_activity import router as agent_activity_router
 from .automation_templates import router as automation_templates_router
@@ -71,6 +72,7 @@ router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)
 router.include_router(kanban_router)
+router.include_router(kanban_mail_router)
 router.include_router(autonomy_router)
 router.include_router(agent_activity_router)
 router.include_router(automation_templates_router)

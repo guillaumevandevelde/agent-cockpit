@@ -32,6 +32,10 @@ def _patch_kanban_db():
     originals[(_router, "KanbanSessionLocal")] = _router.KanbanSessionLocal
     _router.KanbanSessionLocal = _test_sf
 
+    import app.api.v1.kanban.mail_router as _mail_router
+    originals[(_mail_router, "KanbanSessionLocal")] = _mail_router.KanbanSessionLocal
+    _mail_router.KanbanSessionLocal = _test_sf
+
     import app.kanban.mcp_server as _mcp
     originals[(_mcp, "KanbanSessionLocal")] = _mcp.KanbanSessionLocal
     _mcp.KanbanSessionLocal = _test_sf
