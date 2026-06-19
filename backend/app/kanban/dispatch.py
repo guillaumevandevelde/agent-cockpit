@@ -76,16 +76,23 @@ async def set_ship_mode(session, project_key: str, mode: str) -> None:
 
 # ---- persona helpers -------------------------------------------------------
 
-_PERSONA_BY_COLUMN = {
-    "Analysis": "analyst.md",
-    "Todo": "developer.md",
-    "Doing": "developer.md",
-    "Review": "testing.md",
-}
+_PERSONA_BY_COLUMN = {}  # Dynamic - loaded from project agents
 
 
 def _persona_filename(column: str) -> Optional[str]:
-    return _PERSONA_BY_COLUMN.get(column)
+    """Get the persona filename for a column. For agent columns, the column name IS the agent name."""
+    # Fixed columns don't have personas
+    if column in ("Backlog", "Impediment", "Done"):
+        return None
+    # Agent columns: column name matches agent filename
+    return f"{column}.md"
+
+
+def _resolve_agent_from_persona(persona: Optional[str]) -> Optional[str]:
+    """Extract agent name from persona filename (e.g., 'developer.md' -> 'developer')."""
+    if persona and persona.endswith(".md"):
+        return persona[:-3]
+    return None
 
 
 def _strip_frontmatter(text: str) -> str:
@@ -197,8 +204,10 @@ def _mint_session_name(project_path: str) -> str:
 
 
 def _project_is_busy(cards: Iterable[KanbanCard]) -> bool:
+    """Check if project has any cards in agent columns (not Backlog, Impediment, or Done)."""
+    from app.kanban.schemas import COLUMNS
     return any(
-        c.column == "Doing" and (c.claimed_by or "").startswith(CLAIMANT_PREFIX)
+        c.column not in COLUMNS and (c.claimed_by or "").startswith(CLAIMANT_PREFIX)
         for c in cards
     )
 
@@ -232,7 +241,7 @@ def _live_sessions() -> Optional[set[str]]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-_DISPATCH_COLUMNS = ("Todo", "Analysis")  # Todo drains first, then Analysis
+_DISPATCH_COLUMNS = ("Backlog",)  # Dispatch from Backlog; agent columns are for in-progress work
 
 
 def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
@@ -250,7 +259,7 @@ async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
     impediment_question: Optional[str] = None,
 ) -> Optional[dict]:
-    """Claim+move-to-Doing+spawn one specific card. Returns a result dict, or None if
+    """Claim+move-to-agent-column+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column."""
     source_column = card.column
     name = _mint_session_name(project_path)
@@ -264,12 +273,15 @@ async def _run_card(
     except ClaimRejected:
         return None  # lost the race; another tick/device took it
 
+    # Determine target agent column from persona or card's explicit agent
+    persona = _persona_for_card(project_path, card, source_column)
+    target_agent = getattr(card, "agent", None) or _resolve_agent_from_persona(persona) or "developer"
+    
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=project_key,
-        entity_id=card.id, payload={"column": "Doing"},
+        entity_id=card.id, payload={"column": target_agent},
     )
 
-    persona = _persona_for_card(project_path, card, source_column)
     ship_mode = await get_ship_mode(session, project_key)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode, impediment_question=impediment_question)
     try:
@@ -294,17 +306,18 @@ async def _run_card(
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
 ) -> int:
-    """Release `agent:` claims on Doing cards whose tmux session is gone.
+    """Release `agent:` claims on cards in agent columns whose tmux session is gone.
 
     A dispatched session that dies (crash, manual close, reboot) without moving its
-    card out of Doing would otherwise keep `_project_is_busy` True forever, silently
+    card out of an agent column would otherwise keep `_project_is_busy` True forever, silently
     wedging auto-dispatch for the whole project — the "auto-pick stopped working"
     symptom. Releasing the dead claim frees the per-project cap so the next card is
-    picked up; the orphaned card is left in Doing (now unclaimed) for a human to
+    picked up; the orphaned card is left in its agent column (now unclaimed) for a human to
     re-rank. Human (`me@ui`) claims are never touched. Returns the number reaped."""
+    from app.kanban.schemas import COLUMNS
     reaped = 0
     for card in cards:
-        if card.column != "Doing":
+        if card.column in COLUMNS:  # Skip fixed columns (Backlog, Impediment, Done)
             continue
         name = _claimant_session(card)
         if name is None or name in live_sessions:

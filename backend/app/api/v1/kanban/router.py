@@ -196,14 +196,23 @@ async def enable(payload: EnableRequest):
     }
     _write_json_atomic(mcp_file, data)
 
-    # Ensure all default columns exist for this project
+    # Ensure fixed columns exist for this project (Backlog, Impediment, Done)
+    # Agent columns are created dynamically based on project agents
     from app.kanban.schemas import COLUMNS
     async with KanbanSessionLocal() as s:
         existing = await service.list_columns(s, key)
         existing_names = {c.name for c in existing}
+        
+        # Create missing fixed columns
         for i, col_name in enumerate(COLUMNS):
             if col_name not in existing_names:
                 await service.create_column(s, key, name=col_name, rank=f"{i:04d}")
+        
+        # Sync agent columns from .claude/agents directory
+        agents_dir = path / ".claude" / "agents"
+        agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+        await service.sync_agent_columns(s, key, agents)
+        
         await s.commit()
 
     return {"project_key": key, "enabled": True}
@@ -280,6 +289,27 @@ async def list_agents(project_path: str = Query(...)):
     agents_dir = Path(project_path) / ".claude" / "agents"
     names = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
     return {"agents": names}
+
+
+@router.post("/sync-agent-columns")
+async def sync_agent_columns_endpoint(payload: EnableRequest):
+    """Sync agent columns with the agents configured for this project."""
+    path = Path(payload.project_path)
+    if not path.is_dir():
+        raise HTTPException(422, "project_path is not a directory")
+    
+    # Get project key
+    key = f"slug:{payload.slug}" if payload.slug else resolve_project_key(str(path))
+    
+    # Get agents from .claude/agents directory
+    agents_dir = path / ".claude" / "agents"
+    agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+    
+    async with KanbanSessionLocal() as s:
+        await service.sync_agent_columns(s, key, agents)
+        await s.commit()
+    
+    return {"project_key": key, "agents": agents, "synced": True}
 
 
 @router.post("/cards/{cid}/dispatch")

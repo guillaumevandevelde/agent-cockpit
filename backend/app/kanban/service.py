@@ -98,3 +98,32 @@ async def get_column_default_agent(session, project_key: str, column_name: str) 
     )
     col = (await session.execute(stmt)).scalar_one_or_none()
     return col.default_agent if col else None
+
+
+async def sync_agent_columns(session, project_key: str, agents: list[str]) -> None:
+    """Sync agent columns with the list of agents for a project.
+    
+    Creates columns for agents that don't have one yet.
+    Does not remove columns for agents that are no longer in the list
+    (to preserve card references).
+    """
+    from app.kanban.schemas import COLUMNS
+    
+    existing = await list_columns(session, project_key)
+    existing_names = {c.name for c in existing}
+    
+    # Find the rank of "Done" column to insert agent columns before it
+    done_rank = "9999"
+    for col in existing:
+        if col.name == "Done":
+            done_rank = col.rank
+            break
+    
+    # Create columns for agents that don't have one yet
+    for i, agent_name in enumerate(agents):
+        if agent_name not in existing_names:
+            # Insert before Done: rank between last fixed column and Done
+            rank = f"{int(done_rank) - len(agents) + i:04d}" if done_rank != "9999" else f"0{len(COLUMNS) + i:03d}"
+            await create_column(session, project_key, name=agent_name, rank=rank, default_agent=agent_name)
+    
+    await session.flush()

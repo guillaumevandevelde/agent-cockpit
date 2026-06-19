@@ -119,11 +119,11 @@ async def test_persona_for_card_prefers_explicit_agent(tmp_path):
     class _Card:
         agent = "custom"
     # column default would be the developer persona, but the explicit agent wins
-    assert dispatch._persona_for_card(str(tmp_path), _Card(), "Todo") == "CUSTOM BODY"
+    assert dispatch._persona_for_card(str(tmp_path), _Card(), "developer") == "CUSTOM BODY"
 
     class _NoAgent:
         agent = None
-    assert dispatch._persona_for_card(str(tmp_path), _NoAgent(), "Analysis") == "ANALYST BODY"
+    assert dispatch._persona_for_card(str(tmp_path), _NoAgent(), "analyst") == "ANALYST BODY"
 
 
 # ---- B: manual dispatch ----------------------------------------------------
@@ -142,7 +142,7 @@ async def test_dispatch_card_uses_per_card_agent_and_spawns(tmp_path):
         await s.commit()
         card = await get_card(s, cid)
     assert res is not None
-    assert card.column == "Doing"
+    assert card.column == "custom"
     assert card.claimed_by.startswith("agent:")
     assert "You are the Custom agent." in t.calls[0]["prompt"]
 
