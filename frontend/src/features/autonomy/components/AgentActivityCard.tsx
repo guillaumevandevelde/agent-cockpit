@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Terminal, RefreshCw, Eye } from 'lucide-react'
 import { CLICKABLE_CARD } from '@/lib/constants'
+import { cn } from '@/lib/utils'
+import type { AgentProviderId } from '@/types/providers'
 
 interface AgentSession {
   tmux_target: string
@@ -34,11 +36,32 @@ const STATUS_LABELS: Record<string, string> = {
   error: 'Error',
 }
 
+type ProviderFilter = 'all' | AgentProviderId
+
+const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'claude-code', label: 'Claude Code' },
+  { value: 'codex-cli', label: 'Codex' },
+  { value: 'mimo-code', label: 'MiMoCode' },
+]
+
 export function AgentActivityCard() {
   const [agents, setAgents] = useState<AgentSession[]>([])
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [providerFilter, setProviderFilter] = useState<ProviderFilter>('all')
   const navigate = useNavigate()
+
+  const filteredAgents = providerFilter === 'all'
+    ? agents
+    : agents.filter((agent) => agent.provider === providerFilter)
+
+  const filterCounts: Record<ProviderFilter, number> = {
+    all: agents.length,
+    'claude-code': agents.filter((a) => a.provider === 'claude-code').length,
+    'codex-cli': agents.filter((a) => a.provider === 'codex-cli').length,
+    'mimo-code': agents.filter((a) => a.provider === 'mimo-code').length,
+  }
 
   const fetchAgents = async () => {
     setLoading(true)
@@ -72,7 +95,23 @@ export function AgentActivityCard() {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant="outline">{agents.length} active</Badge>
+            <div className="flex rounded-md bg-background border p-0.5">
+              {PROVIDER_FILTERS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={cn(
+                    'px-2 py-1 text-xs rounded-sm transition-colors',
+                    providerFilter === value
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                  onClick={() => setProviderFilter(value)}
+                >
+                  {label} <span className="opacity-70">({filterCounts[value]})</span>
+                </button>
+              ))}
+            </div>
             <Button
               variant="ghost"
               size="sm"
@@ -85,13 +124,15 @@ export function AgentActivityCard() {
         </div>
       </CardHeader>
       <CardContent>
-        {agents.length === 0 ? (
+        {filteredAgents.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
-            No active agent sessions. Start one from the Agent Bridge.
+            {agents.length === 0
+              ? 'No active agent sessions. Start one from the Agent Bridge.'
+              : `No ${providerFilter === 'all' ? '' : providerFilter + ' '}sessions found.`}
           </p>
         ) : (
           <div className="space-y-2">
-            {agents.map((agent) => (
+            {filteredAgents.map((agent) => (
               <div
                 key={agent.tmux_target}
                 className={CLICKABLE_CARD + ' rounded-lg border p-3'}
