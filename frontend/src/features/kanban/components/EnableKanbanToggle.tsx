@@ -24,7 +24,7 @@ export function EnableKanbanToggle({
           }
         }}
       >
-        Enable kanban (register MCP)
+        Enable MCP
       </Button>
       <Button
         size="sm"

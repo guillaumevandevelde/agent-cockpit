@@ -70,7 +70,7 @@ export default function KanbanPage() {
           <h1 className="text-xl font-semibold">Kanban</h1>
           <div className="text-xs text-muted-foreground">{projectKey || "…"}</div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />
           <AutodispatchToggle projectKey={projectKey} />
           <ShipModeToggle projectKey={projectKey} />

@@ -135,7 +135,7 @@ export function CardDrawer({
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Select value={card.agent ?? AUTO} onValueChange={setAgent}>
-            <SelectTrigger className="h-8 w-[200px]">
+            <SelectTrigger className="h-8 w-[140px]">
               <SelectValue placeholder="Agent" />
             </SelectTrigger>
             <SelectContent>
@@ -148,7 +148,7 @@ export function CardDrawer({
             </SelectContent>
           </Select>
           <Button size="sm" variant="outline" onClick={dispatchNow}>
-            Dispatch now
+            Dispatch
           </Button>
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
             Edit
