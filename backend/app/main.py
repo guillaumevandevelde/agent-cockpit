@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
 import app.models.autonomy  # noqa: F401  (register tables for create_all)
 import app.models.automation_template  # noqa: F401  (register tables for create_all)
+import app.models.mcp_token  # noqa: F401  (register tables for create_all)
 
 
 @asynccontextmanager
@@ -58,7 +59,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_UNPROTECTED_PATHS = {"/health", f"{settings.api_v1_prefix}/health"}
+_UNPROTECTED_PATHS = {
+    "/health",
+    f"{settings.api_v1_prefix}/health",
+    f"{settings.api_v1_prefix}/mcp-server",
+}
 
 
 @app.middleware("http")

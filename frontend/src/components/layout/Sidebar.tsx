@@ -40,6 +40,7 @@ import {
   Boxes,
   PanelLeftClose,
   PanelLeftOpen,
+  Network,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -75,6 +76,7 @@ const commonNavigation: NavGroup[] = [
       { name: 'Plans', href: '/plans', icon: ClipboardList },
       { name: 'Autonomy', href: '/autonomy', icon: Shield },
       { name: 'Templates', href: '/automation-templates', icon: Workflow },
+      { name: 'MCP Server', href: '/mcp-server', icon: Network },
       { name: 'Backup', href: '/backup', icon: Archive, capability: 'backup' },
     ],
   },

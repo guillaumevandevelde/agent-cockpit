@@ -31,6 +31,7 @@ from .agent_activity import router as agent_activity_router
 from .automation_templates import router as automation_templates_router
 from .apm import router as apm_router
 from .files import router as files_router
+from .mcp_server import router as mcp_server_router
 
 router = APIRouter()
 
@@ -78,3 +79,4 @@ router.include_router(agent_activity_router)
 router.include_router(automation_templates_router)
 router.include_router(apm_router)
 router.include_router(files_router)
+router.include_router(mcp_server_router, tags=["MCP Server"])
