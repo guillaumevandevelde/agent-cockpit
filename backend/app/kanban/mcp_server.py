@@ -127,6 +127,39 @@ async def release_card(card_id: str) -> dict:
 
 
 @mcp.tool()
+async def dispatch_to_agent(card_id: str, target_agent: str, project_path: str) -> dict:
+    """Route a card to a specific agent and spawn a session for it.
+    
+    Use this when you are the dispatch agent and need to route a card to the
+    appropriate agent. The card will be moved to the target agent's column and
+    a new Claude session will be spawned to work on it.
+    
+    Args:
+        card_id: The ID of the card to dispatch
+        target_agent: The agent to dispatch to (e.g., developer, testing, code-review)
+        project_path: The project path for spawning the session
+    """
+    from app.kanban import dispatch as dispatch_mod
+    
+    async with KanbanSessionLocal() as s:
+        result = await dispatch_mod.dispatch_card(
+            s, card_id=card_id, project_path=project_path,
+            agent_override=target_agent,
+        )
+        await s.commit()
+        
+        if result is None:
+            return {"error": "dispatch_failed", "card_id": card_id}
+        
+        return {
+            "ok": True,
+            "card_id": card_id,
+            "target_agent": target_agent,
+            "session_name": result.get("session_name"),
+        }
+
+
+@mcp.tool()
 async def report_impediment(card_id: str, question: str) -> dict:
     """Report an impediment on a card. Moves it to Impediment column with a clear question.
     

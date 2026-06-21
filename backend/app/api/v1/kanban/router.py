@@ -253,6 +253,20 @@ async def disable(payload: EnableRequest):
     return {"enabled": False}
 
 
+@router.get("/mcp-status")
+async def mcp_status(project_path: str = Query(...)):
+    path = Path(project_path)
+    mcp_file = path / ".mcp.json"
+    if not mcp_file.exists():
+        return {"enabled": False}
+    try:
+        data = json.loads(mcp_file.read_text())
+        enabled = "cockpit-kanban" in data.get("mcpServers", {})
+    except (json.JSONDecodeError, OSError):
+        enabled = False
+    return {"enabled": enabled}
+
+
 @router.get("/project-key")
 async def project_key(project_path: str = Query(...)):
     return {"project_key": resolve_project_key(project_path)}

@@ -86,7 +86,7 @@ _PERSONA_BY_COLUMN = {}  # Dynamic - loaded from project agents
 def _persona_filename(column: str) -> Optional[str]:
     """Get the persona filename for a column. For agent columns, the column name IS the agent name."""
     # Fixed columns don't have personas
-    if column in ("Backlog", "Impediment", "Done"):
+    if column in ("Backlog", "Dispatch", "Impediment", "Done"):
         return None
     # Agent columns: column name matches agent filename
     return f"{column}.md"
@@ -178,6 +178,28 @@ def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
         "blocked or need clarification from another agent, use `status: impediment` with a "
         "clear `question` field explaining what you need."
         f"{_mail_section(handle, pending_mail)}"
+    )
+
+
+def build_dispatch_prompt(card, *, project_path: str, available_agents: list[str]) -> str:
+    """Build a prompt for the dispatch agent to triage and route a card."""
+    agent_list = ", ".join(available_agents) if available_agents else "developer"
+    return (
+        "You are the dispatch agent for the Claude Cockpit kanban board. "
+        "Your job is to analyze a new card and route it to the most appropriate agent.\n\n"
+        f"## Available Agents\n{agent_list}\n\n"
+        f"## Card to Route\n"
+        f"# {card.title}\n"
+        f"{getattr(card, 'description', '') or ''}\n\n"
+        "## Instructions\n"
+        "1. Analyze the card title and description\n"
+        "2. Choose the most appropriate agent from the list above\n"
+        "3. Use the `dispatch_to_agent` MCP tool to route the card\n\n"
+        "Consider:\n"
+        "- What type of work is this? (code, testing, review, analysis, etc.)\n"
+        "- Which agent has the right expertise?\n"
+        "- If unsure, default to 'developer'\n\n"
+        "After dispatching, your session will end automatically."
     )
 
 
@@ -281,7 +303,7 @@ def _live_sessions() -> Optional[set[str]]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-_DISPATCH_COLUMNS = ("Backlog",)  # Dispatch from Backlog; agent columns are for in-progress work
+_DISPATCH_COLUMNS = ("Backlog", "Dispatch")  # Dispatch from Backlog (new cards) and Dispatch (triage)
 
 
 def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
@@ -313,6 +335,27 @@ async def _run_card(
         )
     except ClaimRejected:
         return None  # lost the race; another tick/device took it
+
+    # Handle Dispatch column: spawn dispatch agent for triage
+    if source_column == "Dispatch" and not agent_override:
+        # Get available agents from project
+        agents_dir = Path(project_path) / ".claude" / "agents"
+        available_agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else ["developer"]
+        
+        prompt = build_dispatch_prompt(card, project_path=project_path, available_agents=available_agents)
+        try:
+            spawned = transport(directory=project_path, prompt=prompt, session_name=name)
+        except Exception:
+            await apply_operation(
+                session, op_type="release", entity_type="card", project_key=project_key,
+                entity_id=card.id, payload={},
+            )
+            logger.exception("spawn failed for dispatch card %s in %s", card.id, project_key)
+            raise
+        
+        logger.info("dispatched triage for card %s -> session %s", card.id, name)
+        return {"card_id": card.id, "session_name": name, "claimant": claimant,
+                "source_column": source_column, "spawned": spawned, "dispatch_agent": True}
 
     # Determine target agent column: agent_override > card.agent > persona fallback
     if agent_override:

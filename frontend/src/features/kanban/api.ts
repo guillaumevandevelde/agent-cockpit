@@ -123,6 +123,11 @@ export const kanbanApi = {
       `${BASE}/project-key?project_path=${encodeURIComponent(projectPath)}`
     ),
 
+  mcpStatus: (projectPath: string): Promise<{ enabled: boolean }> =>
+    apiClient<{ enabled: boolean }>(
+      `${BASE}/mcp-status?project_path=${encodeURIComponent(projectPath)}`
+    ),
+
   enable: (projectPath: string, slug?: string): Promise<{ project_key: string }> =>
     apiClient<{ project_key: string }>(`${BASE}/enable`, {
       method: "POST",
