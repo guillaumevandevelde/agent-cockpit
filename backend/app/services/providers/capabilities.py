@@ -104,6 +104,28 @@ PROVIDER_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "backup": capability("read_only", "Backup", "MiMoCode export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic MiMoCode restore is refused without a stable provider-owned restore API."),
     },
+    "open-code": {
+        "config": capability("write_capable", "Configuration", "OpenCode JSON configuration can be viewed and edited."),
+        "sessions": capability("read_only", "Session History", "OpenCode session history is available via CLI."),
+        "spawn": capability("write_capable", "Spawn Sessions", "Agent Bridge can launch OpenCode sessions."),
+        "resume": capability("write_capable", "Resume Sessions", "OpenCode resume is available via --session flag."),
+        "fork": capability("write_capable", "Fork Sessions", "OpenCode fork is available via --fork flag."),
+        "mcp": capability("write_capable", "MCP Servers", "OpenCode MCP servers can be managed via CLI."),
+        "plugins": capability("write_capable", "Plugins", "OpenCode plugins can be managed via CLI."),
+        "permissions": capability("write_capable", "Permissions", "OpenCode permissions can be configured via config."),
+        "commands": capability("write_capable", "Commands", "OpenCode custom commands can be managed via config and markdown files."),
+        "agents": capability("write_capable", "Agents", "OpenCode agents can be managed via CLI and markdown files."),
+        "skills": capability("write_capable", "Skills", "OpenCode agent skills can be managed."),
+        "hooks": capability("unsupported", "Hooks", "OpenCode does not expose hook management."),
+        "memory": capability("write_capable", "Memory", "OpenCode memory via AGENTS.md and instructions."),
+        "output_styles": capability("unsupported", "Output Styles", "OpenCode does not expose output style management."),
+        "statusline": capability("unsupported", "Status Line", "OpenCode does not expose status line settings."),
+        "usage": capability("read_only", "Usage", "OpenCode usage stats are available via CLI."),
+        "context": capability("unsupported", "Context", "OpenCode context diagnostics are not available."),
+        "doctor": capability("unsupported", "Doctor", "OpenCode does not expose provider doctor diagnostics."),
+        "backup": capability("read_only", "Backup", "OpenCode export-only backups are available."),
+        "restore": capability("unsupported", "Restore", "Automatic OpenCode restore is refused without a stable provider-owned restore API."),
+    },
 }
 
 

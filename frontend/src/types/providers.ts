@@ -1,4 +1,4 @@
-export type AgentProviderId = 'claude-code' | 'codex-cli' | 'mimo-code'
+export type AgentProviderId = 'claude-code' | 'codex-cli' | 'mimo-code' | 'open-code'
 
 export interface AgentProviderCapabilities {
   config: boolean

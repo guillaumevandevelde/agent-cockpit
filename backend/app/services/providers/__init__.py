@@ -5,12 +5,14 @@ from app.services.providers.base import AgentProvider
 from app.services.providers.claude_code import ClaudeCodeProvider
 from app.services.providers.codex_cli import CodexCliProvider
 from app.services.providers.mimo_code import MiMoCodeProvider
+from app.services.providers.open_code import OpenCodeProvider
 
 
 _PROVIDERS: dict[str, AgentProvider] = {
     "claude-code": ClaudeCodeProvider(),
     "codex-cli": CodexCliProvider(),
     "mimo-code": MiMoCodeProvider(),
+    "open-code": OpenCodeProvider(),
 }
 
 
