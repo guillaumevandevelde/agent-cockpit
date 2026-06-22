@@ -158,6 +158,48 @@ class ImpedimentResolveRequest(BaseModel):
     target_agent: Optional[str] = None  # override auto-detection
 
 
+# Agent performance dashboard schemas
+
+
+class AgentStat(BaseModel):
+    agent: str
+    tasks: int
+    completed: int
+    failed: int
+    in_progress: int
+    success_rate: Optional[float] = None
+    avg_duration_seconds: Optional[float] = None
+    median_duration_seconds: Optional[float] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    total_tokens: int = 0
+
+
+class StatsTotals(BaseModel):
+    total_tasks: int
+    completed: int
+    failed: int
+    in_progress: int
+    success_rate: Optional[float] = None
+    avg_duration_seconds: Optional[float] = None
+
+
+class FailureStat(BaseModel):
+    agent: Optional[str] = None
+    reason: str
+    count: int
+
+
+class AgentStatsResponse(BaseModel):
+    project_key: str
+    totals: StatsTotals
+    agents: list[AgentStat]
+    common_failures: list[FailureStat]
+    tokens_available: bool
+
+
 # Agent Mail schemas
 
 

@@ -1,9 +1,14 @@
 import { apiClient } from "@/lib/api";
-import type { Card, ActivityEntry, KanbanColumn } from "./types";
+import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse } from "./types";
 
 const BASE = "kanban";
 
 export const kanbanApi = {
+  stats: (projectKey: string): Promise<AgentStatsResponse> =>
+    apiClient<AgentStatsResponse>(
+      `${BASE}/stats?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
   listColumns: (projectKey: string): Promise<{ columns: KanbanColumn[] }> => {
     return apiClient<{ columns: KanbanColumn[] }>(
       `${BASE}/columns?project_key=${encodeURIComponent(projectKey)}`
