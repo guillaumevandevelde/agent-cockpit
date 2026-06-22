@@ -1,0 +1,28 @@
+#!/bin/bash
+# Auto-rebase on remote before pushing to prevent branch divergence
+# Only runs when pushing to the same branch on origin
+
+REMOTE="$1"
+LOCAL_REF="$2"
+REMOTE_REF="$3"
+
+# Only intervene when pushing the current branch to its tracked remote branch
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ -z "$CURRENT_BRANCH" ]; then
+    exit 0
+fi
+
+# Check if remote has commits we don't (diverged or behind)
+DIVERGED=$(git log --oneline HEAD..origin/"$CURRENT_BRANCH" 2>/dev/null | wc -l)
+if [ "$DIVERGED" -gt 0 ]; then
+    echo "⚠️  Remote has $DIVERGED commit(s) you don't have locally."
+    echo "   Auto-rebasing on origin/$CURRENT_BRANCH..."
+    git pull --rebase origin "$CURRENT_BRANCH"
+    if [ $? -ne 0 ]; then
+        echo "❌ Rebase failed. Fix conflicts manually, then push again."
+        exit 1
+    fi
+    echo "✅ Rebase complete."
+fi
+
+exit 0
