@@ -92,7 +92,7 @@ export function CardEditDialog({
 
           <div className="space-y-2">
             <Label>Description</Label>
-            <MarkdownPreviewToggle value={description} onChange={setDescription} />
+            <MarkdownPreviewToggle value={description} onChange={setDescription} minHeight="140px" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

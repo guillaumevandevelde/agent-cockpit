@@ -149,6 +149,25 @@ async def test_dispatch_skips_when_project_already_busy():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_card_bypasses_busy_cap():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        busy = await _make_card(s, title="busy", column="developer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
+        )
+        await _make_card(s, title="triage", column="Dispatch")
+        await s.commit()
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+    assert result is not None
+    assert result["source_column"] == "Dispatch"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_dispatch_no_todo_cards_is_a_noop():
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:

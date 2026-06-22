@@ -434,8 +434,11 @@ async def dispatch_project(
     session, *, project_key: str, project_path: str, transport: SpawnTransport,
     live_sessions: Optional[set[str]] = None,
 ) -> Optional[dict]:
-    """Claim+move+spawn the next Analysis/Todo card for one project. Returns a result
-    dict or None when there is nothing to do (no candidate card, or project is busy).
+    """Claim+move+spawn the next card for one project. Returns a result dict or
+    None when there is nothing to do (no candidate card, or project is busy).
+
+    Dispatch-column cards (triage) bypass the busy cap — they are short-lived
+    routing tasks, not work sessions.
 
     When `live_sessions` is provided, stale `agent:` claims on Doing cards whose
     session is no longer alive are reaped first, so a dead session can never wedge
@@ -447,12 +450,14 @@ async def dispatch_project(
             session, project_key=project_key, cards=cards, live_sessions=live_sessions,
         ):
             cards = await list_cards(session, project_key)
-    if _project_is_busy(cards):
-        return None
 
     card = _next_card(cards)
     if card is None:
         return None
+
+    if card.column != "Dispatch" and _project_is_busy(cards):
+        return None
+
     return await _run_card(
         session, card=card, project_key=project_key,
         project_path=project_path, transport=transport,
