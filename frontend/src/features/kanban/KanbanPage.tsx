@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -12,6 +12,8 @@ import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { ShipModeToggle } from "./components/ShipModeToggle";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
+
+const FIXED_COLUMNS = new Set(["Backlog", "Dispatch", "Impediment", "Done"]);
 
 export default function KanbanPage() {
   const { activeProject } = useProjectContext();
@@ -50,6 +52,21 @@ export default function KanbanPage() {
     void reload();
   }, [reload]);
 
+  const orphanCount = useMemo(
+    () => cards.filter((c) => !FIXED_COLUMNS.has(c.column) && !c.claimed_by).length,
+    [cards],
+  );
+
+  const redispatchAll = async () => {
+    try {
+      const r = await kanbanApi.redispatchAll(projectPath);
+      toast.success(`Re-dispatched ${r.redispatched} orphaned card(s)`);
+      void reload();
+    } catch {
+      toast.error("Re-dispatch all failed");
+    }
+  };
+
   const onMove = async (cardId: string, column: string) => {
     setCards((cs) => cs.map((c) => (c.id === cardId ? { ...c, column } : c)));
     try {
@@ -77,6 +94,11 @@ export default function KanbanPage() {
           <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
             Columns
           </Button>
+          {orphanCount > 0 && (
+            <Button size="sm" variant="outline" onClick={redispatchAll}>
+              Redispatch all ({orphanCount})
+            </Button>
+          )}
           <Button size="sm" onClick={() => setCreating(true)}>
             New card
           </Button>

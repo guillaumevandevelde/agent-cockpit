@@ -382,6 +382,20 @@ async def redispatch_now(cid: str, payload: RedispatchRequest):
     return res
 
 
+@router.post("/redispatch-all")
+async def redispatch_all(payload: EnableRequest):
+    """Re-dispatch all orphaned cards (unclaimed on agent columns) for a project."""
+    from app.kanban import dispatch
+    from app.kanban.project_key import resolve_project_key
+    key = resolve_project_key(payload.project_path)
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=key, project_path=payload.project_path,
+        )
+        await s.commit()
+    return {"redispatched": len(results), "results": results}
+
+
 @router.post("/cards/{cid}/workflow", response_model=WorkflowTriggerResponse)
 async def trigger_workflow(cid: str, payload: WorkflowTriggerRequest):
     """Trigger workflow based on agent output. Moves card to next column if status indicates."""

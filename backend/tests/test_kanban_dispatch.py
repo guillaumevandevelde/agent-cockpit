@@ -587,3 +587,48 @@ async def test_redispatch_returns_none_for_missing_card():
         )
     assert result is None
     assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_redispatch_all_orphans():
+    """Batch redispatch: all unclaimed cards on agent columns get dispatched."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Two orphaned cards on agent columns (unclaimed)
+        await _make_card(s, title="orphan1", column="developer")
+        await _make_card(s, title="orphan2", column="testing")
+        # One card that's fine (claimed)
+        claimed = await _make_card(s, title="busy", column="developer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=claimed, payload={"claimed_by": "agent:k-alive-0001"},
+        )
+        # One card on Backlog (not orphaned)
+        await _make_card(s, title="backlog", column="Backlog")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 2
+    assert len(transport.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_redispatch_all_no_orphans():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Only claimed cards
+        claimed = await _make_card(s, title="busy", column="developer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=claimed, payload={"claimed_by": "agent:k-alive-0001"},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+    assert len(results) == 0
+    assert transport.calls == []

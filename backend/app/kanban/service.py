@@ -100,6 +100,20 @@ async def get_column_default_agent(session, project_key: str, column_name: str) 
     return col.default_agent if col else None
 
 
+async def list_orphaned_cards(session, project_key: str) -> list[KanbanCard]:
+    """Cards on agent columns (not Backlog/Dispatch/Impediment/Done) that are unclaimed."""
+    from app.kanban.schemas import COLUMNS
+    stmt = (
+        select(KanbanCard)
+        .where(KanbanCard.project_key == project_key)
+        .where(KanbanCard.claimed_by.is_(None))
+        .where(~KanbanCard.column.in_(COLUMNS))
+        .options(selectinload(KanbanCard.deliverables))
+        .order_by(KanbanCard.rank.asc())
+    )
+    return (await session.execute(stmt)).scalars().all()
+
+
 async def sync_agent_columns(session, project_key: str, agents: list[str]) -> None:
     """Sync agent columns with the list of agents for a project.
     

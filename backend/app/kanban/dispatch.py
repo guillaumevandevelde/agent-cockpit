@@ -565,6 +565,30 @@ async def redispatch_card(
     )
 
 
+async def redispatch_all_orphans(
+    session, *, project_key: str, project_path: str,
+    transport: SpawnTransport = worktree_transport,
+) -> list[dict]:
+    """Re-dispatch all orphaned cards (unclaimed on agent columns) for a project.
+
+    Returns a list of result dicts for each successfully dispatched card.
+    """
+    from app.kanban.service import list_orphaned_cards
+    orphans = await list_orphaned_cards(session, project_key)
+    results = []
+    for card in orphans:
+        try:
+            res = await redispatch_card(
+                session, card_id=card.id, project_path=project_path,
+                transport=transport,
+            )
+            if res is not None:
+                results.append(res)
+        except Exception:
+            logger.exception("failed to redispatch orphan card %s", card.id)
+    return results
+
+
 # ---- project_key -> local path --------------------------------------------
 
 def match_project_paths(
