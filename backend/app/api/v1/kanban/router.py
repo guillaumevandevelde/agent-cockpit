@@ -11,7 +11,7 @@ from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
     CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
-    AutodispatchRequest, ShipModeRequest, DispatchRequest,
+    AutodispatchRequest, ShipModeRequest, DispatchRequest, RedispatchRequest,
     ColumnResponse, ColumnCreate, ColumnUpdate,
     WorkflowTriggerRequest, WorkflowTriggerResponse, ImpedimentResolveRequest,
 )
@@ -361,6 +361,24 @@ async def dispatch_now(cid: str, payload: DispatchRequest):
     if res is None:
         raise HTTPException(status.HTTP_409_CONFLICT,
             "could not dispatch (card missing or already claimed)")
+    return res
+
+
+@router.post("/cards/{cid}/redispatch")
+async def redispatch_now(cid: str, payload: RedispatchRequest):
+    """Release a stuck card and re-dispatch it with a fresh session."""
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            res = await dispatch.redispatch_card(
+                s, card_id=cid, project_path=payload.project_path,
+                agent_override=payload.agent,
+            )
+        except Exception as e:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"redispatch failed: {e}")
+        await s.commit()
+    if res is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "card not found")
     return res
 
 

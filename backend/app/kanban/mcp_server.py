@@ -185,6 +185,40 @@ async def report_impediment(card_id: str, question: str) -> dict:
         return _card_dict(await service.get_card(s, card_id))
 
 
+@mcp.tool()
+async def redispatch_card(card_id: str, project_path: str, agent: str | None = None) -> dict:
+    """Release a stuck card and re-dispatch it with a fresh session.
+    
+    Use this when a card is stuck on an agent column (e.g., the agent crashed,
+    got stuck, or you want to restart work with a fresh session). This will:
+    1. Kill the existing tmux session (if any)
+    2. Release the claim
+    3. Spawn a new session with the same (or different) agent
+    
+    Args:
+        card_id: The ID of the card to redispatch
+        project_path: The project path for spawning the session
+        agent: Optional agent override (uses card's current agent if not specified)
+    """
+    from app.kanban import dispatch as dispatch_mod
+    
+    async with KanbanSessionLocal() as s:
+        result = await dispatch_mod.redispatch_card(
+            s, card_id=card_id, project_path=project_path,
+            agent_override=agent,
+        )
+        await s.commit()
+        
+        if result is None:
+            return {"error": "not_found", "card_id": card_id}
+        
+        return {
+            "ok": True,
+            "card_id": card_id,
+            "session_name": result.get("session_name"),
+        }
+
+
 # --- Agent Mail -------------------------------------------------------------
 # Identity is passed explicitly (MCP/SSE is stateless — the server can't tell who
 # is calling, same as claim_card(claimed_by)). Spoofable, acceptable in the local

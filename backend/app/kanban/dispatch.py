@@ -520,6 +520,51 @@ async def dispatch_impediment_card(
     )
 
 
+async def redispatch_card(
+    session, *, card_id: str, project_path: str,
+    transport: SpawnTransport = worktree_transport,
+    agent_override: Optional[str] = None,
+) -> Optional[dict]:
+    """Release a stuck card, optionally kill its session, and re-dispatch.
+
+    This is the human override for cards that are stuck on agent columns.
+    It kills the existing tmux session (if any), releases the claim, and
+    re-dispatches with a fresh session.
+
+    Args:
+        card_id: The ID of the card to redispatch
+        project_path: Path to the project
+        transport: The spawn transport to use
+        agent_override: Optional agent to use instead of card's current agent
+
+    Returns:
+        Result dict or None if the card was not found
+    """
+    card = await get_card(session, card_id)
+    if card is None:
+        return None
+
+    # Kill existing tmux session if claimed by an agent
+    session_name = _claimant_session(card)
+    if session_name:
+        _kill_agent_session(session_name)
+        logger.info("killed old session %s for card %s", session_name, card_id)
+
+    # Release the claim
+    if card.claimed_by:
+        await apply_operation(
+            session, op_type="release", entity_type="card",
+            project_key=card.project_key, entity_id=card.id, payload={},
+        )
+
+    # Re-dispatch (bypasses busy cap since we just freed the project)
+    return await _run_card(
+        session, card=card, project_key=card.project_key,
+        project_path=project_path, transport=transport,
+        agent_override=agent_override,
+    )
+
+
 # ---- project_key -> local path --------------------------------------------
 
 def match_project_paths(
@@ -586,6 +631,17 @@ async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -
                 )
             except Exception:
                 logger.exception("dispatch tick failed for %s", project_key)
+
+
+def _kill_agent_session(session_name: str) -> None:
+    """Kill a tmux session belonging to an agent."""
+    try:
+        subprocess.run(
+            ["tmux", "kill-session", "-t", session_name],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
 
 
 class MemoryLimitExceeded(Exception):

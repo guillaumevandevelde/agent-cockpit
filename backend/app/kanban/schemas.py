@@ -103,6 +103,11 @@ class DispatchRequest(BaseModel):
     agent: Optional[str] = None  # override: use this agent instead of card's agent
 
 
+class RedispatchRequest(BaseModel):
+    project_path: str
+    agent: Optional[str] = None  # override: use this agent instead of card's current agent
+
+
 # Column management schemas
 
 

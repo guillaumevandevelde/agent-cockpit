@@ -507,3 +507,83 @@ async def test_spawn_failure_returns_analysis_card_to_analysis():
         card = await get_card(s, cid)
     assert card.column == "Backlog"      # compensated back to its source column
     assert card.claimed_by is None
+
+
+# ---- redispatch: human override for stuck cards ----------------------------
+
+@pytest.mark.asyncio
+async def test_redispatch_releases_claim_and_respawns():
+    """Re-dispatch a claimed card: release old claim, spawn new session."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck", column="developer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-old-0001"},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        result = await dispatch.redispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert result is not None
+    assert card.claimed_by.startswith("agent:")
+    assert card.claimed_by != "agent:k-old-0001"  # new session
+    assert card.column == "developer"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_redispatch_unclaimed_card_dispatches_normally():
+    """Re-dispatch an unclaimed card (e.g., after stale reaping) works like normal dispatch."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="orphan", column="developer")
+        # No claim - card was reaped
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        result = await dispatch.redispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert result is not None
+    assert card.claimed_by.startswith("agent:")
+    assert card.column == "developer"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_redispatch_with_agent_override():
+    """Re-dispatch with a different agent moves card to new agent's column."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck", column="developer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-old-0001"},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        result = await dispatch.redispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+            agent_override="testing",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert result is not None
+    assert card.column == "testing"
+    assert card.claimed_by.startswith("agent:")
+
+
+@pytest.mark.asyncio
+async def test_redispatch_returns_none_for_missing_card():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        result = await dispatch.redispatch_card(
+            s, card_id="nonexistent", project_path="/p", transport=transport,
+        )
+    assert result is None
+    assert transport.calls == []

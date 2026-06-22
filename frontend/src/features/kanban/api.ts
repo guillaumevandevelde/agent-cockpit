@@ -88,6 +88,12 @@ export const kanbanApi = {
       body: JSON.stringify({ project_path: projectPath, agent }),
     }),
 
+  redispatch: (id: string, projectPath: string, agent?: string): Promise<{ session_name: string }> =>
+    apiClient<{ session_name: string }>(`${BASE}/cards/${id}/redispatch`, {
+      method: "POST",
+      body: JSON.stringify({ project_path: projectPath, agent }),
+    }),
+
   move: (id: string, column: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}/move`, {
       method: "POST",

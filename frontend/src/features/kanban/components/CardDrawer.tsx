@@ -111,6 +111,21 @@ export function CardDrawer({
     }
   };
 
+  const redispatchNow = async () => {
+    try {
+      const agent = card.agent || selectedProviderId;
+      const r = await kanbanApi.redispatch(card.id, projectPath, agent);
+      toast.success(`Re-dispatched — session ${r.session_name}`);
+      onChanged();
+    } catch {
+      toast.error("Re-dispatch failed — the spawn may have errored");
+      onChanged();
+    }
+  };
+
+  const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
+  const isClaimedByHuman = card.claimed_by && !isClaimedByAgent;
+
   const remove = async () => {
     try {
       await kanbanApi.deleteCard(card.id);
@@ -147,13 +162,19 @@ export function CardDrawer({
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" variant="outline" onClick={dispatchNow}>
-            Dispatch
-          </Button>
+          {isClaimedByAgent ? (
+            <Button size="sm" variant="outline" onClick={redispatchNow}>
+              Re-dispatch
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={dispatchNow}>
+              Dispatch
+            </Button>
+          )}
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
             Edit
           </Button>
-          {card.claimed_by ? (
+          {isClaimedByHuman ? (
             <Button
               size="sm"
               variant="outline"
@@ -161,7 +182,7 @@ export function CardDrawer({
             >
               Release ({card.claimed_by})
             </Button>
-          ) : (
+          ) : card.claimed_by ? null : (
             <Button size="sm" onClick={() => act(() => kanbanApi.claim(card.id, "me@ui"))}>
               Claim
             </Button>
