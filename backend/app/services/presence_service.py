@@ -3,6 +3,7 @@
 Uses hardware-aware limits via memory_monitor for dynamic resource management.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -69,6 +70,7 @@ BUCKET_COUNT = 30
 FILE_EDIT_TOOLS = {"Write", "Edit", "MultiEdit"}
 EVENT_RETENTION_DAYS = 7
 IDLE_CHECK_INTERVAL_SECONDS = 30
+STOPPED_SESSION_RETENTION_MINUTES = 5
 
 # Guarded by _maintenance_lock to prevent concurrent double-execution
 _maintenance_lock = asyncio.Lock()
@@ -322,7 +324,7 @@ class PresenceService:
         return count
 
     async def _maybe_run_maintenance(self, db: AsyncSession, now: datetime):
-        """Run idle check and event pruning, throttled to avoid per-event overhead."""
+        """Run idle check, event pruning, and stopped-session cleanup, throttled."""
         global _last_idle_check, _last_prune
 
         current = time.monotonic()
@@ -339,6 +341,7 @@ class PresenceService:
 
         if run_idle:
             await self._mark_idle_sessions(db, now)
+            await self._remove_completed_sessions(db, now)
         if run_prune:
             await self._prune_old_events(db, now)
 
@@ -353,6 +356,24 @@ class PresenceService:
         for session in result.scalars().all():
             session.status = SessionStatus.IDLE
             session.status_text = None
+
+    async def _remove_completed_sessions(self, db: AsyncSession, now: datetime):
+        """Auto-remove STOPPED sessions older than retention threshold."""
+        cutoff = now - timedelta(minutes=STOPPED_SESSION_RETENTION_MINUTES)
+        result = await db.execute(
+            select(PresenceSession).where(
+                PresenceSession.status == SessionStatus.STOPPED,
+                PresenceSession.last_event_at < cutoff,
+            )
+        )
+        sessions = result.scalars().all()
+        for session in sessions:
+            await db.delete(session)
+        if sessions:
+            await db.flush()
+            for session in sessions:
+                msg = json.dumps({"type": "session_remove", "session_id": session.session_id})
+                await manager.broadcast(msg)
 
     async def _prune_old_events(self, db: AsyncSession, now: datetime):
         """Delete presence events older than retention period.
