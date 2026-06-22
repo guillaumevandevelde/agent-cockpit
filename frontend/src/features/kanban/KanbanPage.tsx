@@ -14,6 +14,7 @@ import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
 const FIXED_COLUMNS = new Set(["Backlog", "Dispatch", "Impediment", "Done"]);
+const DISPATCH_COLUMNS = new Set(["Backlog", "Dispatch"]);
 
 export default function KanbanPage() {
   const { activeProject } = useProjectContext();
@@ -57,6 +58,11 @@ export default function KanbanPage() {
     [cards],
   );
 
+  const pendingCount = useMemo(
+    () => cards.filter((c) => DISPATCH_COLUMNS.has(c.column) && !c.claimed_by).length,
+    [cards],
+  );
+
   const redispatchAll = async () => {
     try {
       const r = await kanbanApi.redispatchAll(projectPath);
@@ -64,6 +70,16 @@ export default function KanbanPage() {
       void reload();
     } catch {
       toast.error("Re-dispatch all failed");
+    }
+  };
+
+  const dispatchAll = async () => {
+    try {
+      const r = await kanbanApi.dispatchAll(projectPath);
+      toast.success(`Dispatched ${r.dispatched} card(s)`);
+      void reload();
+    } catch {
+      toast.error("Dispatch all failed");
     }
   };
 
@@ -97,6 +113,11 @@ export default function KanbanPage() {
           {orphanCount > 0 && (
             <Button size="sm" variant="outline" onClick={redispatchAll}>
               Redispatch all ({orphanCount})
+            </Button>
+          )}
+          {pendingCount > 0 && (
+            <Button size="sm" variant="outline" onClick={dispatchAll}>
+              Dispatch all ({pendingCount})
             </Button>
           )}
           <Button size="sm" onClick={() => setCreating(true)}>

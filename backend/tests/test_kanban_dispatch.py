@@ -632,3 +632,43 @@ async def test_redispatch_all_no_orphans():
         )
     assert len(results) == 0
     assert transport.calls == []
+
+
+# ---- dispatch_all_pending: batch dispatch from Backlog/Dispatch ------------
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending():
+    """Batch dispatch: all unclaimed Backlog/Dispatch cards get dispatched."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="card1", column="Backlog")
+        await _make_card(s, title="card2", column="Dispatch")
+        # claimed card should be skipped
+        claimed = await _make_card(s, title="busy", column="Backlog")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=claimed, payload={"claimed_by": "me@ui"},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 2
+    assert len(transport.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_empty():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Only Done cards
+        await _make_card(s, title="done", column="Done")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+    assert len(results) == 0
+    assert transport.calls == []

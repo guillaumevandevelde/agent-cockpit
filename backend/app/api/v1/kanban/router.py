@@ -396,6 +396,20 @@ async def redispatch_all(payload: EnableRequest):
     return {"redispatched": len(results), "results": results}
 
 
+@router.post("/dispatch-all")
+async def dispatch_all(payload: EnableRequest):
+    """Dispatch all pending Backlog/Dispatch cards for a project at once."""
+    from app.kanban import dispatch
+    from app.kanban.project_key import resolve_project_key
+    key = resolve_project_key(payload.project_path)
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=key, project_path=payload.project_path,
+        )
+        await s.commit()
+    return {"dispatched": len(results), "results": results}
+
+
 @router.post("/cards/{cid}/workflow", response_model=WorkflowTriggerResponse)
 async def trigger_workflow(cid: str, payload: WorkflowTriggerRequest):
     """Trigger workflow based on agent output. Moves card to next column if status indicates."""

@@ -565,6 +565,31 @@ async def redispatch_card(
     )
 
 
+async def dispatch_all_pending(
+    session, *, project_key: str, project_path: str,
+    transport: SpawnTransport = worktree_transport,
+) -> list[dict]:
+    """Dispatch all unclaimed Backlog/Dispatch cards for a project at once.
+
+    Bypasses the busy cap so multiple cards can be dispatched concurrently.
+    Returns a list of result dicts for each successfully dispatched card.
+    """
+    from app.kanban.service import list_pending_cards
+    pending = await list_pending_cards(session, project_key)
+    results = []
+    for card in pending:
+        try:
+            res = await _run_card(
+                session, card=card, project_key=project_key,
+                project_path=project_path, transport=transport,
+            )
+            if res is not None:
+                results.append(res)
+        except Exception:
+            logger.exception("failed to dispatch card %s", card.id)
+    return results
+
+
 async def redispatch_all_orphans(
     session, *, project_key: str, project_path: str,
     transport: SpawnTransport = worktree_transport,
