@@ -38,6 +38,18 @@ async def card_activity(session, card_id: str):
     return (await session.execute(stmt)).scalars().all()
 
 
+async def list_project_ops(session, project_key: str):
+    """All op-log entries for a project's cards. Ops carry project_key="" for
+    move/claim/comment (set by the router), so we join by card id instead."""
+    cards = await list_cards(session, project_key)
+    ids = [c.id for c in cards]
+    if not ids:
+        return cards, []
+    stmt = select(KanbanOp).where(KanbanOp.entity_id.in_(ids))
+    ops = (await session.execute(stmt)).scalars().all()
+    return cards, ops
+
+
 # Column management
 
 

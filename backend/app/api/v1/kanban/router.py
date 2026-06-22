@@ -14,6 +14,7 @@ from app.kanban.schemas import (
     AutodispatchRequest, ShipModeRequest, DispatchRequest, RedispatchRequest,
     ColumnResponse, ColumnCreate, ColumnUpdate,
     WorkflowTriggerRequest, WorkflowTriggerResponse, ImpedimentResolveRequest,
+    AgentStatsResponse,
 )
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
@@ -68,6 +69,27 @@ async def delete_column(column_id: str):
         if not await service.delete_column(s, column_id):
             raise HTTPException(404, "column not found")
         await s.commit()
+
+
+@router.get("/stats", response_model=AgentStatsResponse)
+async def agent_stats(project_key: str = Query(...)):
+    """Per-agent performance: time per task, success rate, token use, failures."""
+    from app.kanban import stats as kstats
+    from app.kanban.schemas import COLUMNS
+    async with KanbanSessionLocal() as s:
+        cards, ops = await service.list_project_ops(s, project_key)
+        cols = await service.list_columns(s, project_key)
+    agent_columns = {c.name for c in cols if c.name not in COLUMNS}
+    core = kstats.compute_core_stats(cards, ops, agent_columns)
+    usage_by_agent = await kstats.gather_token_usage(core["session_to_agent"])
+    tokens_available = kstats.apply_token_usage(core["agents"], usage_by_agent)
+    return AgentStatsResponse(
+        project_key=project_key,
+        totals=core["totals"],
+        agents=core["agents"],
+        common_failures=core["common_failures"],
+        tokens_available=tokens_available,
+    )
 
 
 @router.get("/cards")

@@ -36,6 +36,7 @@ const AutonomyPage = lazy(() => import('./features/autonomy/AutonomyPage').then(
 const AutomationTemplatesPage = lazy(() => import('./features/autonomy/AutomationTemplatesPage').then((m) => ({ default: m.AutomationTemplatesPage })))
 const ApmPage = lazy(() => import('./features/apm/ApmPage').then((m) => ({ default: m.ApmPage })))
 const MCPServerPage = lazy(() => import('./features/mcp-server/MCPServerPage').then((m) => ({ default: m.MCPServerPage })))
+const AgentPerformancePage = lazy(() => import('./features/agent-performance/AgentPerformancePage').then((m) => ({ default: m.AgentPerformancePage })))
 
 function App() {
   return (
@@ -78,6 +79,7 @@ function App() {
                 <Route path="autonomy" element={<AutonomyPage />} />
                 <Route path="automation-templates" element={<AutomationTemplatesPage />} />
                 <Route path="apm" element={<ApmPage />} />
+                <Route path="agent-performance" element={<AgentPerformancePage />} />
                 <Route path="mcp-server" element={<MCPServerPage />} />
               </Route>
             </Routes>
