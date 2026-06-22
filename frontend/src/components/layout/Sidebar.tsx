@@ -3,7 +3,6 @@ import { cn } from '@/lib/utils'
 import { ProjectSwitcher } from '@/features/projects/ProjectSwitcher'
 import { useSidebar } from '@/contexts/SidebarContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
-import { AutonomyModeToggle } from '@/features/autonomy/components/AutonomyModeToggle'
 import {
   Select,
   SelectContent,
@@ -36,12 +35,12 @@ import {
   CalendarClock,
   KanbanSquare,
   Mail,
-  Workflow,
   Boxes,
   TrendingUp,
   PanelLeftClose,
   PanelLeftOpen,
   Network,
+  Castle,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -76,9 +75,8 @@ const commonNavigation: NavGroup[] = [
       { name: 'Agent Performance', href: '/agent-performance', icon: TrendingUp },
       { name: 'Agent Mail', href: '/mailbox', icon: Mail },
       { name: 'Plans', href: '/plans', icon: ClipboardList },
-      { name: 'Autonomy', href: '/autonomy', icon: Shield },
-      { name: 'Templates', href: '/automation-templates', icon: Workflow },
       { name: 'MCP Server', href: '/mcp-server', icon: Network },
+      { name: 'Sandcastle', href: '/sandcastle', icon: Castle },
       { name: 'Backup', href: '/backup', icon: Archive, capability: 'backup' },
     ],
   },
@@ -131,6 +129,32 @@ const providerNavigation: Record<AgentProviderId, NavGroup[]> = {
         { name: 'Config', href: '/config', icon: Settings, capability: 'config' },
         { name: 'Skills', href: '/skills', icon: Sparkles, capability: 'skills' },
         { name: 'Memory', href: '/memory', icon: Brain, capability: 'memory' },
+      ],
+    },
+  ],
+  'open-code': [
+    {
+      name: 'OpenCode',
+      items: [
+        { name: 'Config', href: '/config', icon: Settings, capability: 'config' },
+        { name: 'Sessions', href: '/sessions', icon: MessageSquare, capability: 'sessions' },
+        { name: 'MCP Servers', href: '/mcp', icon: Server, capability: 'mcp' },
+        { name: 'Plugins', href: '/plugins', icon: Package, capability: 'plugins' },
+      ],
+    },
+    {
+      name: 'OpenCode Tools',
+      items: [
+        { name: 'Agents', href: '/agents', icon: Bot, capability: 'agents' },
+        { name: 'Skills', href: '/skills', icon: Sparkles, capability: 'skills' },
+        { name: 'Memory', href: '/memory', icon: Brain, capability: 'memory' },
+        { name: 'Commands', href: '/commands', icon: Terminal, capability: 'commands' },
+      ],
+    },
+    {
+      name: 'OpenCode Metrics',
+      items: [
+        { name: 'Usage', href: '/usage', icon: BarChart3, capability: 'usage' },
       ],
     },
   ],
@@ -218,9 +242,6 @@ export function Sidebar() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="px-4">
-            <AutonomyModeToggle />
           </div>
         </div>
       )}

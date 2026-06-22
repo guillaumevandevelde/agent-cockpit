@@ -26,12 +26,11 @@ from .status import router as status_router
 from .scheduled_messages.router import router as scheduled_messages_router
 from .kanban.router import router as kanban_router
 from .kanban.mail_router import router as kanban_mail_router
-from .autonomy import router as autonomy_router
 from .agent_activity import router as agent_activity_router
-from .automation_templates import router as automation_templates_router
 from .apm import router as apm_router
 from .files import router as files_router
 from .mcp_server import router as mcp_server_router
+from .sandcastle.router import router as sandcastle_router
 
 router = APIRouter()
 
@@ -74,9 +73,8 @@ router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)
 router.include_router(kanban_router)
 router.include_router(kanban_mail_router)
-router.include_router(autonomy_router)
 router.include_router(agent_activity_router)
-router.include_router(automation_templates_router)
 router.include_router(apm_router)
 router.include_router(files_router)
 router.include_router(mcp_server_router, tags=["MCP Server"])
+router.include_router(sandcastle_router, tags=["Sandcastle"])

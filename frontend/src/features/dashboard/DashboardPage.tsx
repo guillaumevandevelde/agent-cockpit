@@ -7,8 +7,8 @@ import { Progress } from '@/components/ui/progress'
 import { useDashboard } from '@/contexts/DashboardContext'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { getRelativeTime } from '@/features/usage/utils'
-import { AgentActivityCard } from '@/features/autonomy/components/AgentActivityCard'
-import { EnhancedProviderCards } from '@/features/autonomy/components/EnhancedProviderCards'
+import { AgentActivityCard } from '@/features/dashboard/components/AgentActivityCard'
+import { EnhancedProviderCards } from '@/features/dashboard/components/EnhancedProviderCards'
 
 export function DashboardPage() {
   const { stats, loading, error, lastFetched, refreshDashboard } = useDashboard({ autoFetch: true })

@@ -5,7 +5,6 @@ import { ProjectProvider } from './contexts/ProjectContext'
 import { DashboardProvider } from './contexts/DashboardContext'
 import { ProviderProvider } from './contexts/ProviderContext'
 import { AttentionProvider } from './contexts/AttentionContext'
-import { AutonomyProvider } from './contexts/AutonomyContext'
 import { MainLayout } from './components/layout/MainLayout'
 const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })))
 const ConfigViewerPage = lazy(() => import('./features/config/ConfigViewerPage').then((m) => ({ default: m.ConfigViewerPage })))
@@ -32,11 +31,10 @@ const PresencePage = lazy(() => import('./features/presence/PresencePage').then(
 const ScheduledMessagesPage = lazy(() => import('./features/scheduled-messages/ScheduledMessagesPage').then((m) => ({ default: m.ScheduledMessagesPage })))
 const KanbanPage = lazy(() => import('./features/kanban/KanbanPage'))
 const MailboxPage = lazy(() => import('./features/mailbox/MailboxPage').then((m) => ({ default: m.MailboxPage })))
-const AutonomyPage = lazy(() => import('./features/autonomy/AutonomyPage').then((m) => ({ default: m.AutonomyPage })))
-const AutomationTemplatesPage = lazy(() => import('./features/autonomy/AutomationTemplatesPage').then((m) => ({ default: m.AutomationTemplatesPage })))
 const ApmPage = lazy(() => import('./features/apm/ApmPage').then((m) => ({ default: m.ApmPage })))
 const MCPServerPage = lazy(() => import('./features/mcp-server/MCPServerPage').then((m) => ({ default: m.MCPServerPage })))
 const AgentPerformancePage = lazy(() => import('./features/agent-performance/AgentPerformancePage').then((m) => ({ default: m.AgentPerformancePage })))
+const SandcastlePage = lazy(() => import('./features/sandcastle/SandcastlePage').then((m) => ({ default: m.SandcastlePage })))
 
 function App() {
   return (
@@ -44,7 +42,6 @@ function App() {
       <ProviderProvider>
         <DashboardProvider>
           <AttentionProvider>
-          <AutonomyProvider>
           <BrowserRouter>
             <Toaster richColors position="top-right" />
             <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading...</div>}>
@@ -76,16 +73,14 @@ function App() {
                 <Route path="usage" element={<UsagePage />} />
                 <Route path="kanban" element={<KanbanPage />} />
                 <Route path="mailbox" element={<MailboxPage />} />
-                <Route path="autonomy" element={<AutonomyPage />} />
-                <Route path="automation-templates" element={<AutomationTemplatesPage />} />
                 <Route path="apm" element={<ApmPage />} />
                 <Route path="agent-performance" element={<AgentPerformancePage />} />
                 <Route path="mcp-server" element={<MCPServerPage />} />
+                <Route path="sandcastle" element={<SandcastlePage />} />
               </Route>
             </Routes>
             </Suspense>
           </BrowserRouter>
-          </AutonomyProvider>
           </AttentionProvider>
         </DashboardProvider>
       </ProviderProvider>
