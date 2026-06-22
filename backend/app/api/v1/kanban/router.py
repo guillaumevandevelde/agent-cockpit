@@ -1,5 +1,6 @@
 """REST API for the kanban board. All mutations go through apply_operation."""
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -17,6 +18,8 @@ from app.kanban.schemas import (
     AgentStatsResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
 
 
@@ -27,6 +30,26 @@ def _write_json_atomic(target: Path, data: dict) -> None:
     tmp = target.with_suffix(target.suffix + ".tmp")
     tmp.write_text(json.dumps(data, indent=2))
     os.replace(tmp, target)
+
+
+async def _resolve_project_path(project_key: str) -> str | None:
+    """Resolve a project_key to a local filesystem path."""
+    from sqlalchemy import select
+    from app.database import AsyncSessionLocal
+    from app.models.database import Project
+    async with AsyncSessionLocal() as db:
+        row = (await db.execute(
+            select(Project.path).join(Project, Project.path.isnot(None))
+        )).scalars().first()
+        # Find matching project by computing its key
+        all_paths = (await db.execute(select(Project.path))).scalars().all()
+    for p in all_paths:
+        try:
+            if resolve_project_key(p) == project_key:
+                return p
+        except Exception:
+            continue
+    return None
 
 router = APIRouter(prefix="/kanban", tags=["Kanban"])
 
@@ -158,6 +181,20 @@ async def move_card(cid: str, payload: MoveRequest):
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=cid, payload=payload.model_dump())
         await s.commit()
+
+        # When moved to Dispatch, immediately trigger dispatch session
+        if payload.column == "Dispatch":
+            from app.kanban.dispatch import dispatch_card
+            from app.kanban.project_key import resolve_project_key
+            project_key = card.project_key
+            project_path = await _resolve_project_path(project_key)
+            if project_path:
+                try:
+                    await dispatch_card(s, card_id=cid, project_path=project_path)
+                    await s.commit()
+                except Exception:
+                    logger.warning("auto-dispatch on move to Dispatch failed for card %s", cid)
+
         return await _reload(s, cid)
 
 

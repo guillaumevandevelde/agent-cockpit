@@ -163,17 +163,6 @@ export const kanbanApi = {
       body: JSON.stringify({ project_path: projectPath }),
     }),
 
-  getAutodispatch: (projectKey: string): Promise<{ enabled: boolean }> =>
-    apiClient<{ enabled: boolean }>(
-      `${BASE}/autodispatch?project_key=${encodeURIComponent(projectKey)}`
-    ),
-
-  setAutodispatch: (projectKey: string, enabled: boolean): Promise<{ enabled: boolean }> =>
-    apiClient<{ enabled: boolean }>(`${BASE}/autodispatch`, {
-      method: "POST",
-      body: JSON.stringify({ project_key: projectKey, enabled }),
-    }),
-
   getShipMode: (projectKey: string): Promise<{ mode: string }> =>
     apiClient<{ mode: string }>(
       `${BASE}/shipmode?project_key=${encodeURIComponent(projectKey)}`

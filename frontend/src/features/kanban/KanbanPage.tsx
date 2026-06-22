@@ -8,7 +8,6 @@ import { CardDrawer } from "./components/CardDrawer";
 import { CardEditDialog } from "./components/CardEditDialog";
 import { ColumnSettingsDialog } from "./components/ColumnSettingsDialog";
 import { EnableKanbanToggle } from "./components/EnableKanbanToggle";
-import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { ShipModeToggle } from "./components/ShipModeToggle";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
@@ -105,7 +104,6 @@ export default function KanbanPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />
-          <AutodispatchToggle projectKey={projectKey} />
           <ShipModeToggle projectKey={projectKey} />
           <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
             Columns

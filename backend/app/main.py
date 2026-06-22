@@ -11,9 +11,9 @@ from app.database import init_db
 from app.api.v1.router import router as api_v1_router
 from fastapi.staticfiles import StaticFiles
 import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
-import app.models.autonomy  # noqa: F401  (register tables for create_all)
-import app.models.automation_template  # noqa: F401  (register tables for create_all)
+
 import app.models.mcp_token  # noqa: F401  (register tables for create_all)
+import app.models.sandcastle  # noqa: F401  (register tables for create_all)
 
 
 @asynccontextmanager
@@ -44,8 +44,6 @@ async def lifespan(app: FastAPI):
                 scheduler_service.schedule_once(m.id, m.fire_at)
             elif m.trigger_type == "cron" and m.cron_expr:
                 scheduler_service.schedule_cron(m.id, m.cron_expr, m.timezone)
-    # Poll the kanban board for unclaimed Todo cards on auto-dispatch projects.
-    scheduler_service.schedule_kanban_dispatch()
     yield
     # Shutdown: Cleanup
     scheduler_service.shutdown()
