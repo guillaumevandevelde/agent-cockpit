@@ -43,6 +43,7 @@ const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
   { value: 'claude-code', label: 'Claude Code' },
   { value: 'codex-cli', label: 'Codex' },
   { value: 'mimo-code', label: 'MiMoCode' },
+  { value: 'open-code', label: 'OpenCode' },
 ]
 
 export function AgentActivityCard() {
@@ -61,6 +62,7 @@ export function AgentActivityCard() {
     'claude-code': agents.filter((a) => a.provider === 'claude-code').length,
     'codex-cli': agents.filter((a) => a.provider === 'codex-cli').length,
     'mimo-code': agents.filter((a) => a.provider === 'mimo-code').length,
+    'open-code': agents.filter((a) => a.provider === 'open-code').length,
   }
 
   const fetchAgents = async () => {

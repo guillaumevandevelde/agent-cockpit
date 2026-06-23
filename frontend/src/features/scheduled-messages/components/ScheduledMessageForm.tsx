@@ -174,12 +174,6 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
             : 'Start a sandcastle agent run in an isolated sandbox.'}
         </p>
       </div>
-        <p className="text-xs text-muted-foreground">
-          {targetKind === 'project'
-            ? 'Use the project’s live session, or spawn one if none is running.'
-            : 'Resume one specific past session (relaunched with --resume if it has exited).'}
-        </p>
-      </div>
 
       {targetKind === 'session' && (
         <div className="space-y-1.5">
