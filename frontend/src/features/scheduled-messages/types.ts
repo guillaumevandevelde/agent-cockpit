@@ -1,5 +1,5 @@
 export type TriggerType = 'once' | 'cron'
-export type TargetKind = 'project' | 'session'
+export type TargetKind = 'project' | 'session' | 'sandcastle'
 export type PermissionMode = 'default' | 'acceptEdits' | 'bypass'
 export type MessageStatus = 'scheduled' | 'pending_delivery' | 'delivered' | 'failed' | 'cancelled'
 export type DeliveryOutcome = 'success' | 'failed' | 'timeout'
@@ -21,6 +21,7 @@ export interface ScheduledMessage {
   target_session_id: string | null
   project_folder: string | null
   session_preview: string | null
+  sandcastle_config_id: number | null
   created_at: string
   updated_at: string
   last_fired_at: string | null
@@ -55,6 +56,7 @@ export interface ScheduledMessageCreate {
   target_session_id?: string
   project_folder?: string
   session_preview?: string
+  sandcastle_config_id?: number
 }
 
 export interface ResumableSession {

@@ -36,7 +36,13 @@ class DeliveryEngine:
                       target_kind: str = "project",
                       target_session_id: str | None = None,
                       project_folder: str | None = None,
-                      spawn_ready_timeout_s: float = 30.0) -> DeliveryResult:
+                      spawn_ready_timeout_s: float = 30.0,
+                      sandcastle_config_id: int | None = None) -> DeliveryResult:
+        if target_kind == "sandcastle":
+            return await self._deliver_sandcastle(
+                project_dir=project_dir, message=message,
+                sandcastle_config_id=sandcastle_config_id,
+            )
         if target_kind == "session":
             return await self._deliver_session(
                 session_id=target_session_id, project_folder=project_folder,
@@ -121,3 +127,62 @@ class DeliveryEngine:
                                   resolved_session=target, wait_duration_s=waited)
         return DeliveryResult(outcome="failed", action=action, resolved_session=target,
                               wait_duration_s=waited, error="send-keys failed")
+
+    async def _deliver_sandcastle(self, *, project_dir: str, message: str,
+                                  sandcastle_config_id: int | None) -> DeliveryResult:
+        """Deliver message via sandcastle run."""
+        from app.services.sandcastle_service import sandcastle_service
+        from app.database import AsyncSessionLocal
+        from app.models.sandcastle import SandcastleConfig
+        from sqlalchemy import select
+
+        wait_start = time.monotonic()
+
+        try:
+            # Get sandcastle config
+            async with AsyncSessionLocal() as session:
+                if sandcastle_config_id:
+                    result = await session.execute(
+                        select(SandcastleConfig).where(SandcastleConfig.id == sandcastle_config_id)
+                    )
+                    config = result.scalar_one_or_none()
+                else:
+                    result = await session.execute(
+                        select(SandcastleConfig).where(SandcastleConfig.project_path == project_dir)
+                    )
+                    config = result.scalar_one_or_none()
+
+                if not config:
+                    return DeliveryResult(
+                        outcome="failed",
+                        error="No sandcastle config found",
+                    )
+
+                if not config.enabled:
+                    return DeliveryResult(
+                        outcome="failed",
+                        error="Sandcastle is disabled for this project",
+                    )
+
+            # Start sandcastle run
+            run = await sandcastle_service.start_run(
+                project_path=project_dir,
+                prompt=message,
+                config_id=config.id if config else sandcastle_config_id,
+            )
+
+            waited = int(time.monotonic() - wait_start)
+            return DeliveryResult(
+                outcome="success",
+                action="sandcastle_run_started",
+                resolved_session=f"sandcastle-run-{run.id}",
+                wait_duration_s=waited,
+            )
+        except Exception as e:
+            waited = int(time.monotonic() - wait_start)
+            return DeliveryResult(
+                outcome="failed",
+                action="sandcastle_run_failed",
+                wait_duration_s=waited,
+                error=str(e),
+            )

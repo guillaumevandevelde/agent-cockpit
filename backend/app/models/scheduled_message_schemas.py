@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
 TriggerType = Literal["once", "cron"]
 PermissionMode = Literal["default", "acceptEdits", "bypass"]
 Status = Literal["scheduled", "pending_delivery", "delivered", "failed", "cancelled"]
-TargetKind = Literal["project", "session"]
+TargetKind = Literal["project", "session", "sandcastle"]
 
 
 def _as_utc_iso(dt: Optional[datetime]) -> Optional[str]:
@@ -37,6 +37,7 @@ class ScheduledMessageCreate(BaseModel):
     target_session_id: Optional[str] = None
     project_folder: Optional[str] = None
     session_preview: Optional[str] = None
+    sandcastle_config_id: Optional[int] = None
 
     @model_validator(mode="after")
     def _check_trigger(self):
@@ -49,6 +50,10 @@ class ScheduledMessageCreate(BaseModel):
         ):
             raise ValueError(
                 "target_session_id and project_folder are required for target_kind=session"
+            )
+        if self.target_kind == "sandcastle" and not self.sandcastle_config_id:
+            raise ValueError(
+                "sandcastle_config_id is required for target_kind=sandcastle"
             )
         return self
 
@@ -95,6 +100,7 @@ class ScheduledMessageResponse(BaseModel):
     target_session_id: Optional[str] = None
     project_folder: Optional[str] = None
     session_preview: Optional[str] = None
+    sandcastle_config_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     last_fired_at: Optional[datetime] = None

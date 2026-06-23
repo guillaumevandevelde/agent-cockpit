@@ -250,6 +250,84 @@ def worktree_transport(*, directory: str, prompt: str, session_name: str) -> dic
         raise
 
 
+def sandcastle_transport(*, directory: str, prompt: str, session_name: str) -> dict:
+    """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
+    
+    This transport uses sandcastle to run the agent in a Docker/Podman container.
+    The run is asynchronous - the function returns immediately after starting the run.
+    
+    Raises MemoryLimitExceeded if hardware memory limits are reached.
+    """
+    import asyncio
+    from app.services.scheduling.session_registry import session_registry
+
+    # Check memory limits before spawning
+    if not session_registry.can_add_session():
+        status = get_memory_status_cached()
+        raise MemoryLimitExceeded(
+            f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
+            f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
+        )
+
+    # Import sandcastle service
+    from app.services.sandcastle_service import sandcastle_service
+    
+    # Create a new event loop if we're not in one
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're in an async context, create a task
+            task = asyncio.create_task(
+                sandcastle_service.start_run(
+                    project_path=directory,
+                    prompt=prompt,
+                    branch_name=session_name,
+                )
+            )
+            # Return a placeholder result - the actual run happens async
+            return {
+                "session_name": session_name,
+                "transport": "sandcastle",
+                "status": "started",
+                "task_id": id(task),
+            }
+        else:
+            # We're in a sync context, run the coroutine
+            run = loop.run_until_complete(
+                sandcastle_service.start_run(
+                    project_path=directory,
+                    prompt=prompt,
+                    branch_name=session_name,
+                )
+            )
+            return {
+                "session_name": session_name,
+                "transport": "sandcastle",
+                "run_id": run.id,
+                "status": "started",
+            }
+    except RuntimeError:
+        # No event loop, create one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            run = loop.run_until_complete(
+                sandcastle_service.start_run(
+                    project_path=directory,
+                    prompt=prompt,
+                    branch_name=session_name,
+                )
+            )
+            return {
+                "session_name": session_name,
+                "transport": "sandcastle",
+                "run_id": run.id,
+                "status": "started",
+            }
+        finally:
+            loop.close()
+
+
 def _slug(name: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()
     return s or "project"
@@ -431,7 +509,7 @@ async def reap_stale_claims(
 
 
 async def dispatch_project(
-    session, *, project_key: str, project_path: str, transport: SpawnTransport,
+    session, *, project_key: str, project_path: str, transport: Optional[SpawnTransport] = None,
     live_sessions: Optional[set[str]] = None,
 ) -> Optional[dict]:
     """Claim+move+spawn the next card for one project. Returns a result dict or
@@ -443,7 +521,10 @@ async def dispatch_project(
     When `live_sessions` is provided, stale `agent:` claims on Doing cards whose
     session is no longer alive are reaped first, so a dead session can never wedge
     the busy cap. Passing None skips reaping (used by unit tests that exercise the
-    cap directly)."""
+    cap directly).
+    
+    If transport is None, the appropriate transport is automatically selected based
+    on the project's sandcastle configuration."""
     cards = await list_cards(session, project_key)
     if live_sessions is not None:
         if await reap_stale_claims(
@@ -457,6 +538,10 @@ async def dispatch_project(
 
     if card.column != "Dispatch" and _project_is_busy(cards):
         return None
+
+    # Auto-select transport if not provided
+    if transport is None:
+        transport = await get_transport_for_project(project_path)
 
     return await _run_card(
         session, card=card, project_key=project_key,
@@ -635,17 +720,20 @@ def match_project_paths(
     return out
 
 
-async def run_dispatch_tick(*, transport: SpawnTransport = worktree_transport) -> None:
+async def run_dispatch_tick(*, transport: Optional[SpawnTransport] = None) -> None:
     """One poll cycle: dispatch the next Analysis/Todo card for every enabled project
     that maps to a local path on this device.
     
     Also retries queued cards that were rejected due to memory limits.
+    
+    If transport is None, each project will automatically select the appropriate
+    transport based on its sandcastle configuration.
     """
     from app.kanban.db import KanbanSessionLocal
     from app.services.scheduling.pending_queue import pending_queue
 
     # First, try to retry queued cards if memory is available
-    await _retry_queued_cards(transport)
+    await _retry_queued_cards(transport or worktree_transport)
 
     async with KanbanSessionLocal() as ks:
         enabled = set(await list_autodispatch_projects(ks))
@@ -696,6 +784,35 @@ def _kill_agent_session(session_name: str) -> None:
 class MemoryLimitExceeded(Exception):
     """Raised when a spawn is rejected due to memory limits."""
     pass
+
+
+async def get_transport_for_project(project_path: str) -> SpawnTransport:
+    """Get the appropriate transport for a project based on its sandcastle config.
+    
+    Returns sandcastle_transport if sandcastle is enabled for the project,
+    otherwise returns the default worktree_transport.
+    """
+    from app.database import AsyncSessionLocal
+    from app.models.sandcastle import SandcastleConfig
+    from sqlalchemy import select
+    
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SandcastleConfig).where(
+                    SandcastleConfig.project_path == project_path,
+                    SandcastleConfig.enabled == True,  # noqa: E712
+                )
+            )
+            config = result.scalar_one_or_none()
+            
+            if config and config.enabled:
+                return sandcastle_transport
+    except Exception:
+        # If we can't check sandcastle config, fall back to default
+        pass
+    
+    return worktree_transport
 
 
 async def _retry_queued_cards(transport: SpawnTransport) -> None:

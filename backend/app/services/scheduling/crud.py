@@ -31,6 +31,7 @@ async def run_scheduled_delivery(message_id: int) -> None:
             target_kind=msg.target_kind or "project",
             target_session_id=msg.target_session_id,
             project_folder=msg.project_folder,
+            sandcastle_config_id=msg.sandcastle_config_id,
         )
 
         attempt.outcome = res.outcome

@@ -11,6 +11,7 @@ _NEW_COLUMNS = {
     "target_session_id": "VARCHAR(128)",
     "project_folder": "VARCHAR(255)",
     "session_preview": "TEXT",
+    "sandcastle_config_id": "INTEGER",
 }
 
 

@@ -6,9 +6,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { createScheduledMessage, listResumableSessions } from '../api'
+import { getSandcastleConfig } from '@/features/sandcastle/api'
 import type {
   ScheduledMessageCreate, TriggerType, PermissionMode, TargetKind, ResumableSession,
 } from '../types'
+import type { SandcastleConfig } from '@/features/sandcastle/types'
 
 interface Props {
   onCreated: () => void
@@ -24,6 +26,9 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [sessionsError, setSessionsError] = useState<string | null>(null)
   const [selectedSessionId, setSelectedSessionId] = useState('')
+  const [sandcastleConfig, setSandcastleConfig] = useState<SandcastleConfig | null>(null)
+  const [sandcastleLoading, setSandcastleLoading] = useState(false)
+  const [sandcastleError, setSandcastleError] = useState<string | null>(null)
   const [message, setMessage] = useState('')
   const [triggerType, setTriggerType] = useState<TriggerType>('once')
   const [fireAt, setFireAt] = useState('')
@@ -53,6 +58,24 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
     return () => { cancelled = true }
   }, [targetKind, targetProject])
 
+  // Load sandcastle config when targeting sandcastle.
+  useEffect(() => {
+    if (targetKind !== 'sandcastle' || !targetProject) {
+      setSandcastleConfig(null)
+      return
+    }
+    let cancelled = false
+    setSandcastleLoading(true)
+    setSandcastleError(null)
+    getSandcastleConfig(targetProject)
+      .then((cfg) => { if (!cancelled) setSandcastleConfig(cfg) })
+      .catch((err) => {
+        if (!cancelled) setSandcastleError(err instanceof Error ? err.message : 'Failed to load sandcastle config')
+      })
+      .finally(() => { if (!cancelled) setSandcastleLoading(false) })
+    return () => { cancelled = true }
+  }, [targetKind, targetProject])
+
   // A session selected for one project must not leak into another.
   useEffect(() => { setSelectedSessionId('') }, [targetProject, targetKind])
 
@@ -62,6 +85,7 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
     if (!targetProject) { setError('Select a project'); return }
     if (!message.trim()) { setError('Message is required'); return }
     if (targetKind === 'session' && !selectedSessionId) { setError('Select a session to resume'); return }
+    if (targetKind === 'sandcastle' && !sandcastleConfig) { setError('Sandcastle config not found'); return }
     if (triggerType === 'once' && !fireAt) { setError('Set a fire date/time'); return }
     if (triggerType === 'cron' && !cronExpr.trim()) { setError('Cron expression is required'); return }
 
@@ -80,6 +104,9 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
       payload.target_session_id = selectedSessionId
       payload.project_folder = sel?.project_folder
       payload.session_preview = sel?.summary
+    }
+    if (targetKind === 'sandcastle' && sandcastleConfig) {
+      payload.sandcastle_config_id = sandcastleConfig.id
     }
     if (triggerType === 'once') payload.fire_at = new Date(fireAt).toISOString()
     if (triggerType === 'cron') payload.cron_expr = cronExpr.trim()
@@ -125,6 +152,7 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
           {([
             ['project', 'Project session'],
             ['session', 'Resume a specific session'],
+            ['sandcastle', 'Sandcastle run'],
           ] as const).map(([k, lbl]) => (
             <label key={k} className="flex items-center gap-2 cursor-pointer text-sm">
               <input
@@ -132,12 +160,20 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
                 name="targetKind"
                 value={k}
                 checked={targetKind === k}
-                onChange={() => setTargetKind(k)}
+                onChange={() => setTargetKind(k as TargetKind)}
               />
               {lbl}
             </label>
           ))}
         </div>
+        <p className="text-xs text-muted-foreground">
+          {targetKind === 'project'
+            ? 'Use the project\'s live session, or spawn one if none is running.'
+            : targetKind === 'session'
+            ? 'Resume one specific past session (relaunched with --resume if it has exited).'
+            : 'Start a sandcastle agent run in an isolated sandbox.'}
+        </p>
+      </div>
         <p className="text-xs text-muted-foreground">
           {targetKind === 'project'
             ? 'Use the project’s live session, or spawn one if none is running.'
@@ -175,6 +211,29 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
                 ))}
               </SelectContent>
             </Select>
+          )}
+        </div>
+      )}
+
+      {targetKind === 'sandcastle' && (
+        <div className="space-y-1.5">
+          <Label>Sandcastle Configuration</Label>
+          {!targetProject ? (
+            <p className="text-sm text-muted-foreground">Select a project first.</p>
+          ) : sandcastleLoading ? (
+            <p className="text-sm text-muted-foreground">Loading sandcastle config…</p>
+          ) : sandcastleError ? (
+            <p className="text-sm text-destructive">{sandcastleError}</p>
+          ) : !sandcastleConfig ? (
+            <p className="text-sm text-muted-foreground">No sandcastle config found. Create one in the Sandcastle page first.</p>
+          ) : !sandcastleConfig.enabled ? (
+            <p className="text-sm text-destructive">Sandcastle is disabled for this project. Enable it in the Sandcastle page.</p>
+          ) : (
+            <div className="p-2 bg-muted rounded text-sm">
+              <p><strong>Provider:</strong> {sandcastleConfig.sandbox_provider}</p>
+              <p><strong>Agent:</strong> {sandcastleConfig.agent_provider}</p>
+              {sandcastleConfig.model && <p><strong>Model:</strong> {sandcastleConfig.model}</p>}
+            </div>
           )}
         </div>
       )}

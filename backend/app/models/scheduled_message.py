@@ -26,10 +26,11 @@ class ScheduledMessage(Base):
     status: Mapped[str] = mapped_column(String(20), default="scheduled")
     on_missing_session: Mapped[str] = mapped_column(String(12), default="spawn")
     when_busy: Mapped[str] = mapped_column(String(16), default="wait_until_idle")
-    target_kind: Mapped[str] = mapped_column(String(16), default="project")  # project | session
+    target_kind: Mapped[str] = mapped_column(String(16), default="project")  # project | session | sandcastle
     target_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     project_folder: Mapped[str | None] = mapped_column(String(255), nullable=True)
     session_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sandcastle_config_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sandcastle_configs.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
