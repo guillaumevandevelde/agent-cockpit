@@ -50,6 +50,7 @@ If you only use Claude Code casually with mostly default config, Claude Cockpit 
 - **Plan History** — Browse and review Claude Code implementation plans
 - **Backup & Restore** — Create and manage Claude Code backups with selective restore, plus redacted export-only Codex backups
 - **Projects** — Discover and manage project directories
+- **Sandcastle** — Run AI coding agents in isolated sandboxes (Docker, Podman, Vercel) with [sandcastle](https://github.com/mattpocock/sandcastle). Supports parallel execution, kanban integration, scheduled messages, and real-time log streaming
 
 ## What's New for the Next Release
 
@@ -192,6 +193,8 @@ If you use Claude Code heavily, issues and feature requests are especially welco
 The session transcript viewer was inspired by and includes code adapted from [claude-code-transcripts](https://github.com/simonw/claude-code-transcripts) by [Simon Willison](https://simonwillison.net/).
 
 The usage tracking feature ports algorithms from [ccusage](https://github.com/ryoppippi/ccusage) by [ryoppippi](https://github.com/ryoppippi), including session block identification, tiered pricing, and burn rate projections.
+
+The sandcastle integration uses [sandcastle](https://github.com/mattpocock/sandcastle) by [Matt Pocock](https://github.com/mattpocock) for orchestrating AI coding agents in isolated sandbox environments.
 
 ## Disclaimer
 
