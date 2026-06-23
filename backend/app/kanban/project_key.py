@@ -26,7 +26,6 @@ def normalize_remote(url: str) -> str:
     url = re.sub(r"\.git$", "", url)
     url = re.sub(r"^[a-z]+://", "", url)        # strip scheme (https://, ssh://)
     url = re.sub(r"^[^@/]+@", "", url)          # strip user@
-    url = url.replace(":", "/", 1) if "/" not in url.split(":", 1)[0] else url
     url = url.replace(":", "/")                 # scp-style host:path -> host/path
     return re.sub(r"/+", "/", url)
 
