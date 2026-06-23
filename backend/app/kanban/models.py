@@ -43,6 +43,7 @@ class KanbanCard(KanbanBase):
     priority: Mapped[str | None] = mapped_column(String(16), nullable=True)
     labels: Mapped[list | None] = mapped_column(JSON, nullable=True)
     agent: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    transport: Mapped[str | None] = mapped_column(String(16), nullable=True)  # worktree | sandcastle | auto (null)
     claimed_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

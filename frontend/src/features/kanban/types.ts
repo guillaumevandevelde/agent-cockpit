@@ -31,6 +31,7 @@ export interface Card {
   priority?: string | null;
   labels?: string[] | null;
   agent?: string | null;
+  transport?: string | null;  // worktree | sandcastle | auto (null)
   claimed_by?: string | null;
   claimed_at?: string | null;
   created_at: string;

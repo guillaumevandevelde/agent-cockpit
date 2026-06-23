@@ -58,6 +58,7 @@ export const kanbanApi = {
     priority?: string | null;
     labels?: string[] | null;
     agent?: string | null;
+    transport?: string | null;
   }): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards`, {
       method: "POST",
@@ -72,6 +73,7 @@ export const kanbanApi = {
       agent?: string | null;
       priority?: string | null;
       labels?: string[] | null;
+      transport?: string | null;
     }
   ): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}`, {

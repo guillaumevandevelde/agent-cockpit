@@ -31,6 +31,7 @@ class CardResponse(BaseModel):
     priority: Optional[str] = None
     labels: Optional[list] = None
     agent: Optional[str] = None
+    transport: Optional[str] = None  # worktree | sandcastle | auto (null)
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
     created_at: datetime
@@ -46,6 +47,7 @@ class CardCreate(BaseModel):
     priority: Optional[str] = None
     labels: Optional[list] = None
     agent: Optional[str] = None
+    transport: Optional[str] = None  # worktree | sandcastle | auto (null)
 
 
 class CardUpdate(BaseModel):
@@ -54,6 +56,7 @@ class CardUpdate(BaseModel):
     priority: Optional[str] = None
     labels: Optional[list] = None
     agent: Optional[str] = None
+    transport: Optional[str] = None  # worktree | sandcastle | auto (null)
 
 
 class MoveRequest(BaseModel):

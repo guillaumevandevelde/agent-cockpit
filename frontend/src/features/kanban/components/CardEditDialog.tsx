@@ -43,6 +43,7 @@ export function CardEditDialog({
     description: string;
     priority?: string | null;
     labels?: string[] | null;
+    transport?: string | null;
   };
   columns: string[];
   defaultAgent?: string | null;
@@ -54,6 +55,7 @@ export function CardEditDialog({
     priority: string | null;
     labels: string[];
     agent: string | null;
+    transport: string | null;
   }) => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -66,6 +68,7 @@ export function CardEditDialog({
     (initial?.labels ?? []).join(", ")
   );
   const [agent, setAgent] = useState<string>(defaultAgent ?? "");
+  const [transport, setTransport] = useState<string>(initial?.transport ?? "auto");
 
   const labels = parseLabels(labelsInput);
 
@@ -142,6 +145,27 @@ export function CardEditDialog({
           </div>
 
           <div className="space-y-2">
+            <Label>Transport</Label>
+            <Select value={transport} onValueChange={setTransport}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select transport" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto (use project default)</SelectItem>
+                <SelectItem value="worktree">Worktree (local)</SelectItem>
+                <SelectItem value="sandcastle">Sandcastle (isolated sandbox)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {transport === "auto"
+                ? "Uses project's sandcastle config if enabled, otherwise worktree."
+                : transport === "sandcastle"
+                ? "Run this card in an isolated Docker/Podman sandbox."
+                : "Run this card locally with git worktree."}
+            </p>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="card-labels">Labels</Label>
             <Input
               id="card-labels"
@@ -175,6 +199,7 @@ export function CardEditDialog({
                 priority: priority === "none" ? null : priority,
                 labels,
                 agent: agent.trim() || null,
+                transport: transport === "auto" ? null : transport,
               })
             }
           >

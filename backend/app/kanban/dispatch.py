@@ -401,10 +401,16 @@ async def _run_card(
     agent_override: Optional[str] = None,
 ) -> Optional[dict]:
     """Claim+move-to-agent-column+spawn one specific card. Returns a result dict, or None if
-    the claim was lost. The persona honours an explicit per-card agent over the column."""
+    the claim was lost. The persona honours an explicit per-card agent over the column.
+    
+    The transport parameter is the project default. If the card has an explicit transport
+    setting, that takes precedence."""
     source_column = card.column
     name = _mint_session_name(project_path, card.title)
     claimant = CLAIMANT_PREFIX + name
+
+    # Get the actual transport for this card (card transport > project default)
+    card_transport = get_transport_for_card(card, transport)
 
     try:
         await apply_operation(
@@ -422,7 +428,7 @@ async def _run_card(
         
         prompt = build_dispatch_prompt(card, project_path=project_path, available_agents=available_agents)
         try:
-            spawned = transport(directory=project_path, prompt=prompt, session_name=name)
+            spawned = card_transport(directory=project_path, prompt=prompt, session_name=name)
         except Exception:
             await apply_operation(
                 session, op_type="release", entity_type="card", project_key=project_key,
@@ -431,7 +437,8 @@ async def _run_card(
             logger.exception("spawn failed for dispatch card %s in %s", card.id, project_key)
             raise
         
-        logger.info("dispatched triage for card %s -> session %s", card.id, name)
+        logger.info("dispatched triage for card %s -> session %s (transport: %s)", card.id, name, 
+                    "sandcastle" if card_transport == sandcastle_transport else "worktree")
         return {"card_id": card.id, "session_name": name, "claimant": claimant,
                 "source_column": source_column, "spawned": spawned, "dispatch_agent": True}
 
@@ -462,7 +469,7 @@ async def _run_card(
         impediment_question=impediment_question, handle=target_agent,
         pending_mail=pending_mail)
     try:
-        spawned = transport(directory=project_path, prompt=prompt, session_name=name)
+        spawned = card_transport(directory=project_path, prompt=prompt, session_name=name)
     except Exception:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
@@ -475,7 +482,8 @@ async def _run_card(
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
         raise
 
-    logger.info("dispatched card %s (%s) -> session %s", card.id, source_column, name)
+    logger.info("dispatched card %s (%s) -> session %s (transport: %s)", card.id, source_column, name,
+                "sandcastle" if card_transport == sandcastle_transport else "worktree")
     return {"card_id": card.id, "session_name": name, "claimant": claimant,
             "source_column": source_column, "spawned": spawned}
 
@@ -813,6 +821,25 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
         pass
     
     return worktree_transport
+
+
+def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) -> SpawnTransport:
+    """Get the appropriate transport for a card based on its transport field.
+    
+    Transport priority:
+    1. Card's explicit transport setting (worktree | sandcastle)
+    2. Project's default transport (from sandcastle config)
+    
+    Returns the transport to use for this specific card.
+    """
+    # If card has explicit transport setting, use it
+    if card.transport == "sandcastle":
+        return sandcastle_transport
+    elif card.transport == "worktree":
+        return worktree_transport
+    
+    # Otherwise use the project default
+    return default_transport
 
 
 async def _retry_queued_cards(transport: SpawnTransport) -> None:

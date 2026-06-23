@@ -171,7 +171,7 @@ export default function KanbanPage() {
           columns={columns.map((c) => c.name)}
           defaultAgent={selectedProviderId}
           onClose={() => setCreating(false)}
-          onSubmit={async ({ title, description, column, priority, labels, agent }) => {
+          onSubmit={async ({ title, description, column, priority, labels, agent, transport }) => {
             try {
               await kanbanApi.createCard({
                 project_key: projectKey,
@@ -181,6 +181,7 @@ export default function KanbanPage() {
                 priority,
                 labels: labels.length ? labels : null,
                 agent,
+                transport,
               });
               setCreating(false);
               void reload();
