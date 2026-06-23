@@ -29,6 +29,7 @@ cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8
 cd frontend && npm run dev       # Frontend only (port 5173)
 
 # Self-healing dev stack (detached supervisor: auto-restart on crash, logs to logs/, survives terminal close)
+# cockpit.sh start auto-installs missing/stale deps (npm install, pip install) before starting
 ./scripts/cockpit.sh start       # Start backend+frontend supervised in the background
 ./scripts/cockpit.sh status      # Show supervisor/backend/frontend status
 ./scripts/cockpit.sh logs backend  # Follow backend logs (or: logs frontend)

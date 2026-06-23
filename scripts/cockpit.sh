@@ -153,6 +153,51 @@ watch_service() {
     done
 }
 
+# Ensure all runtime dependencies are installed; auto-install when missing or
+# stale (package-lock.json newer than node_modules, requirements-dev.txt newer
+# than the venv activation script). Skipped in test mode (injected commands).
+ensure_deps() {
+    # --- Frontend ---
+    local need_npm=0
+    if [ ! -d "$PROJECT_ROOT/frontend/node_modules" ]; then
+        need_npm=1
+    elif [ "$PROJECT_ROOT/frontend/package-lock.json" -nt "$PROJECT_ROOT/frontend/node_modules" ]; then
+        need_npm=1
+    fi
+
+    if [ "$need_npm" -eq 1 ]; then
+        echo "Frontend dependencies ontbreken of zijn verouderd — npm install uitvoeren..."
+        (cd "$PROJECT_ROOT/frontend" && npm install) \
+            || { echo "Fout: npm install mislukt — zie uitvoer hierboven."; return 1; }
+    fi
+
+    # --- Backend ---
+    local need_pip=0
+    if [ ! -f "$PROJECT_ROOT/backend/venv/bin/activate" ]; then
+        need_pip=1
+        local py=""
+        for candidate in python3.13 python3.12 python3.11; do
+            command -v "$candidate" &>/dev/null && { py="$candidate"; break; }
+        done
+        [ -z "$py" ] && { echo "Fout: Python 3.11+ niet gevonden. Installeer Python 3.11 of nieuwer."; return 1; }
+        echo "Python virtual environment aanmaken..."
+        "$py" -m venv "$PROJECT_ROOT/backend/venv" \
+            || { echo "Fout: venv aanmaken mislukt."; return 1; }
+    elif [ "$PROJECT_ROOT/backend/requirements-dev.txt" -nt "$PROJECT_ROOT/backend/venv/bin/activate" ]; then
+        need_pip=1
+    fi
+
+    if [ "$need_pip" -eq 1 ]; then
+        echo "Backend dependencies installeren..."
+        (cd "$PROJECT_ROOT/backend" \
+            && source venv/bin/activate \
+            && pip install -q -r requirements-dev.txt) \
+            || { echo "Fout: pip install mislukt — zie uitvoer hierboven."; return 1; }
+        # Update the venv mtime so we don't reinstall on the next start.
+        touch "$PROJECT_ROOT/backend/venv/bin/activate"
+    fi
+}
+
 # --- default service commands (overridable via env for tests) ---
 default_backend_cmd() {
     echo "cd '$PROJECT_ROOT/backend' && source venv/bin/activate && exec uvicorn app.main:app --reload --port 8000 ${HOST:+--host $HOST}"
@@ -223,6 +268,10 @@ cmd_start() {
     if is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER"; then
         echo "Cockpit draait al (supervisor pid $(cat "$RUN_DIR/supervisor.pid")). Gebruik 'restart' of 'status'."
         return 1
+    fi
+    # Auto-install missing or stale dependencies. Skipped in test mode.
+    if [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ]; then
+        ensure_deps || return 1
     fi
     # Preflight: don't crash-loop fighting another stack for the ports. Skipped
     # when commands are injected (tests use fake services on no ports).

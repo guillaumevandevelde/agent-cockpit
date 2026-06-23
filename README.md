@@ -121,17 +121,35 @@ cd claude-cockpit
 
 ## Development
 
+**Recommended — supervised background:**
+
+```bash
+./scripts/cockpit.sh start          # Start, auto-install deps if needed, detach
+./scripts/cockpit.sh logs backend   # Follow backend logs (or: logs frontend)
+./scripts/cockpit.sh status         # Show service status
+./scripts/cockpit.sh restart        # Restart after config changes
+./scripts/cockpit.sh stop           # Stop everything
+```
+
+The supervisor auto-restarts crashed services and automatically runs `npm install` or `pip install` when `package-lock.json` or `requirements-dev.txt` change. It also survives terminal close.
+
+**Alternative — attached mode:**
+
 ```bash
 ./scripts/dev.sh
 ```
 
-This starts:
+All output appears directly in the terminal; Ctrl+C stops both servers. Useful for debugging startup issues. Requires deps to be installed first (`./scripts/install.sh` or a prior `cockpit.sh start`).
+
+Both approaches start:
 - Backend at http://localhost:8000 (API docs at http://localhost:8000/docs)
 - Frontend at http://localhost:5173
 
 To make the dev environment reachable from another machine on your LAN or tailnet, set an API token and pass `--host`:
 
 ```bash
+API_TOKEN='replace-with-a-long-random-value' ./scripts/cockpit.sh start --host 0.0.0.0
+# or
 API_TOKEN='replace-with-a-long-random-value' ./scripts/dev.sh --host 0.0.0.0
 ```
 
