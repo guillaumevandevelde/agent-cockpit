@@ -12,7 +12,8 @@ from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
     CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
-    AutodispatchRequest, ShipModeRequest, DispatchRequest, RedispatchRequest,
+    AutodispatchRequest, ShipModeRequest, SkipPermissionsRequest,
+    DispatchRequest, RedispatchRequest,
     ColumnResponse, ColumnCreate, ColumnUpdate,
     WorkflowTriggerRequest, WorkflowTriggerResponse, ImpedimentResolveRequest,
     AgentStatsResponse,
@@ -366,6 +367,23 @@ async def set_shipmode(payload: ShipModeRequest):
             raise HTTPException(422, str(e))
         await s.commit()
     return {"project_key": payload.project_key, "mode": payload.mode}
+
+
+@router.get("/skip-permissions")
+async def get_skip_permissions(project_key: str = Query(...)):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {"project_key": project_key,
+                "enabled": await dispatch.get_skip_permissions(s, project_key)}
+
+
+@router.post("/skip-permissions")
+async def set_skip_permissions(payload: SkipPermissionsRequest):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_skip_permissions(s, payload.project_key, payload.enabled)
+        await s.commit()
+    return {"project_key": payload.project_key, "enabled": payload.enabled}
 
 
 @router.delete("/cards/{cid}", status_code=status.HTTP_204_NO_CONTENT)

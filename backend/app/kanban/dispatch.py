@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 META_PREFIX = "autodispatch:"
 CLAIMANT_PREFIX = "agent:"
 SHIPMODE_PREFIX = "shipmode:"
+SKIP_PERMISSIONS_PREFIX = "skip_permissions:"
 SHIP_MODES = ("pull-request", "direct")
 DEFAULT_SHIP_MODE = "pull-request"
 
@@ -57,6 +58,24 @@ async def list_autodispatch_projects(session) -> list[str]:
         for r in rows
         if r.key.startswith(META_PREFIX) and r.value == "1"
     ]
+
+
+async def get_skip_permissions(session, project_key: str) -> bool:
+    row = await session.get(KanbanMeta, SKIP_PERMISSIONS_PREFIX + project_key)
+    if row is None:
+        return True  # default: bypass permissions (existing behaviour)
+    return row.value == "1"
+
+
+async def set_skip_permissions(session, project_key: str, enabled: bool) -> None:
+    key = SKIP_PERMISSIONS_PREFIX + project_key
+    row = await session.get(KanbanMeta, key)
+    if row is None:
+        row = KanbanMeta(key=key, value="1" if enabled else "0")
+        session.add(row)
+    else:
+        row.value = "1" if enabled else "0"
+    await session.flush()
 
 
 async def get_ship_mode(session, project_key: str) -> str:
@@ -209,45 +228,50 @@ class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str) -> dict: ...
 
 
-def worktree_transport(*, directory: str, prompt: str, session_name: str) -> dict:
-    """Default transport: create a worktree off origin/master, then spawn an
-    autonomous (permission-skipping) Claude Code session in it.
-    
-    Raises MemoryLimitExceeded if hardware memory limits are reached.
-    """
-    from app.services.agent_bridge.spawn import spawn_session
-    from app.services.providers.base import SpawnCommandOptions
-    from app.services.scheduling.session_registry import session_registry
+def make_worktree_transport(skip_permissions: bool = True) -> "SpawnTransport":
+    """Factory that returns a worktree transport with configurable permission bypass."""
+    def _transport(*, directory: str, prompt: str, session_name: str) -> dict:
+        """Create a worktree off origin/master, then spawn a Claude Code session in it.
 
-    # Check memory limits before spawning
-    if not session_registry.can_add_session():
-        status = get_memory_status_cached()
-        raise MemoryLimitExceeded(
-            f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
-            f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
+        Raises MemoryLimitExceeded if hardware memory limits are reached.
+        """
+        from app.services.agent_bridge.spawn import spawn_session
+        from app.services.providers.base import SpawnCommandOptions
+        from app.services.scheduling.session_registry import session_registry
+
+        if not session_registry.can_add_session():
+            status = get_memory_status_cached()
+            raise MemoryLimitExceeded(
+                f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
+                f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
+            )
+
+        repo = directory
+        worktree_path = str(Path(repo) / ".claude" / "worktrees" / session_name)
+
+        subprocess.run(["git", "-C", repo, "fetch", "origin"],
+                       capture_output=True, text=True, timeout=60, check=True)
+        subprocess.run(
+            ["git", "-C", repo, "worktree", "add", "-b", session_name,
+             worktree_path, "origin/master"],
+            capture_output=True, text=True, timeout=60, check=True)
+
+        options = SpawnCommandOptions(
+            directory=worktree_path, mode="plain", prompt=prompt,
+            skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
         )
+        try:
+            return spawn_session("claude-code", options, session_name=session_name)
+        except Exception:
+            subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
+                           capture_output=True, text=True, timeout=30)
+            raise
 
-    repo = directory
-    worktree_path = str(Path(repo) / ".claude" / "worktrees" / session_name)
+    return _transport
 
-    subprocess.run(["git", "-C", repo, "fetch", "origin"],
-                   capture_output=True, text=True, timeout=60, check=True)
-    subprocess.run(
-        ["git", "-C", repo, "worktree", "add", "-b", session_name,
-         worktree_path, "origin/master"],
-        capture_output=True, text=True, timeout=60, check=True)
 
-    options = SpawnCommandOptions(
-        directory=worktree_path, mode="plain", prompt=prompt,
-        skip_permissions=True, worktree_path=worktree_path, repo_path=repo,
-    )
-    try:
-        return spawn_session("claude-code", options, session_name=session_name)
-    except Exception:
-        # the worktree exists but no session owns it; remove it so it isn't orphaned
-        subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
-                       capture_output=True, text=True, timeout=30)
-        raise
+# Default transport keeps existing behaviour (permissions bypassed)
+worktree_transport = make_worktree_transport(skip_permissions=True)
 
 
 def sandcastle_transport(*, directory: str, prompt: str, session_name: str) -> dict:
@@ -795,15 +819,24 @@ class MemoryLimitExceeded(Exception):
 
 
 async def get_transport_for_project(project_path: str) -> SpawnTransport:
-    """Get the appropriate transport for a project based on its sandcastle config.
-    
-    Returns sandcastle_transport if sandcastle is enabled for the project,
-    otherwise returns the default worktree_transport.
+    """Get the appropriate transport for a project.
+
+    Uses sandcastle if enabled; otherwise returns a worktree transport whose
+    skip_permissions flag reflects the per-project setting (default: True).
     """
     from app.database import AsyncSessionLocal
     from app.models.sandcastle import SandcastleConfig
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.project_key import resolve_project_key
     from sqlalchemy import select
-    
+
+    # Resolve project key for KanbanMeta lookup
+    try:
+        project_key = resolve_project_key(project_path)
+    except Exception:
+        project_key = None
+
+    # Check sandcastle first
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -813,14 +846,21 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
                 )
             )
             config = result.scalar_one_or_none()
-            
             if config and config.enabled:
                 return sandcastle_transport
     except Exception:
-        # If we can't check sandcastle config, fall back to default
         pass
-    
-    return worktree_transport
+
+    # Read per-project skip_permissions setting
+    skip = True  # default: preserve existing behaviour
+    if project_key:
+        try:
+            async with KanbanSessionLocal() as ks:
+                skip = await get_skip_permissions(ks, project_key)
+        except Exception:
+            pass
+
+    return make_worktree_transport(skip_permissions=skip)
 
 
 def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) -> SpawnTransport:

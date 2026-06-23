@@ -175,4 +175,15 @@ export const kanbanApi = {
       method: "POST",
       body: JSON.stringify({ project_key: projectKey, mode }),
     }),
+
+  getSkipPermissions: (projectKey: string): Promise<{ enabled: boolean }> =>
+    apiClient<{ enabled: boolean }>(
+      `${BASE}/skip-permissions?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
+  setSkipPermissions: (projectKey: string, enabled: boolean): Promise<{ enabled: boolean }> =>
+    apiClient<{ enabled: boolean }>(`${BASE}/skip-permissions`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, enabled }),
+    }),
 };

@@ -9,6 +9,7 @@ import { CardEditDialog } from "./components/CardEditDialog";
 import { ColumnSettingsDialog } from "./components/ColumnSettingsDialog";
 import { EnableKanbanToggle } from "./components/EnableKanbanToggle";
 import { ShipModeToggle } from "./components/ShipModeToggle";
+import { SkipPermissionsToggle } from "./components/SkipPermissionsToggle";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
@@ -105,6 +106,7 @@ export default function KanbanPage() {
         <div className="flex flex-wrap gap-2">
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />
           <ShipModeToggle projectKey={projectKey} />
+          <SkipPermissionsToggle projectKey={projectKey} />
           <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
             Columns
           </Button>

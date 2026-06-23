@@ -101,6 +101,11 @@ class ShipModeRequest(BaseModel):
     mode: str
 
 
+class SkipPermissionsRequest(BaseModel):
+    project_key: str
+    enabled: bool
+
+
 class DispatchRequest(BaseModel):
     project_path: str
     agent: Optional[str] = None  # override: use this agent instead of card's agent
