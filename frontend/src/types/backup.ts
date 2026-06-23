@@ -11,11 +11,40 @@ export interface Backup {
   project_id?: number | null;
   created_at: string;
   size_bytes: number;
+  is_automatic?: boolean;
   // Extended fields from manifest
   has_dependencies?: boolean;
   skill_count?: number;
   plugin_count?: number;
   mcp_server_count?: number;
+}
+
+export interface AutoBackupSettings {
+  enabled: boolean;
+  scope: "user" | "full";
+  project_path?: string | null;
+  time_of_day: string; // "HH:MM"
+  timezone: string;
+  retention_days: number;
+  last_run_at?: string | null;
+  last_status?: string | null;
+  last_backup_id?: number | null;
+}
+
+export interface AutoBackupSettingsUpdate {
+  enabled?: boolean;
+  scope?: "user" | "full";
+  project_path?: string | null;
+  time_of_day?: string;
+  timezone?: string;
+  retention_days?: number;
+}
+
+export interface AutoBackupRunResult {
+  success: boolean;
+  message: string;
+  backup_id?: number | null;
+  deleted_count: number;
 }
 
 export interface BackupCreate {

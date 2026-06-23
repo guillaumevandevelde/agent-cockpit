@@ -13,6 +13,9 @@ from app.models.schemas import (
     BackupResponse,
     BackupListResponse,
     BackupContentsResponse,
+    AutoBackupSettingsResponse,
+    AutoBackupSettingsUpdate,
+    AutoBackupRunResult,
     DependencyInstallRequest,
     DependencyInstallResult,
     RestoreOptions,
@@ -22,6 +25,8 @@ from app.models.schemas import (
     ExportResponse,
 )
 from app.services.backup_service import BackupService
+from app.services import auto_backup_service
+from app.services.scheduling.scheduler import scheduler_service
 
 router = APIRouter(prefix="/backup", tags=["Backup"])
 
@@ -53,6 +58,7 @@ def _backup_to_response(backup, manifest: Optional[BackupManifest] = None) -> Ba
         project_id=backup.project_id,
         created_at=backup.created_at.isoformat(),
         size_bytes=backup.size_bytes,
+        is_automatic=backup.is_automatic,
     )
 
     if manifest:
@@ -80,6 +86,7 @@ def _backup_to_basic_response(backup) -> BackupResponse:
         project_id=backup.project_id,
         created_at=backup.created_at.isoformat(),
         size_bytes=backup.size_bytes,
+        is_automatic=backup.is_automatic,
     )
 
 
@@ -143,6 +150,68 @@ async def create_backup(
             status_code=500,
             detail=f"Failed to create backup: {str(e)}"
         )
+
+
+def _settings_to_response(s) -> AutoBackupSettingsResponse:
+    """Convert an AutoBackupSettings model to its response schema."""
+    return AutoBackupSettingsResponse(
+        enabled=s.enabled,
+        scope=s.scope,
+        project_path=s.project_path,
+        time_of_day=s.time_of_day,
+        timezone=s.timezone,
+        retention_days=s.retention_days,
+        last_run_at=s.last_run_at.isoformat() if s.last_run_at else None,
+        last_status=s.last_status,
+        last_backup_id=s.last_backup_id,
+    )
+
+
+def _sync_auto_backup_schedule(s) -> None:
+    """Register or remove the scheduler job to match the current settings."""
+    if s.enabled:
+        scheduler_service.schedule_auto_backup(s.time_of_day, s.timezone)
+    else:
+        scheduler_service.remove_auto_backup()
+
+
+@router.get("/auto/settings", response_model=AutoBackupSettingsResponse)
+async def get_auto_backup_settings(db: AsyncSession = Depends(get_db)):
+    """Get the current automatic-backup schedule settings."""
+    settings = await auto_backup_service.get_or_create_settings(db)
+    return _settings_to_response(settings)
+
+
+@router.put("/auto/settings", response_model=AutoBackupSettingsResponse)
+async def update_auto_backup_settings(
+    update: AutoBackupSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the automatic-backup settings and (re)register the scheduler job."""
+    try:
+        settings = await auto_backup_service.update_settings(db, update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _sync_auto_backup_schedule(settings)
+    return _settings_to_response(settings)
+
+
+@router.post("/auto/run", response_model=AutoBackupRunResult)
+async def run_auto_backup_now(db: AsyncSession = Depends(get_db)):
+    """Trigger an automatic backup run immediately (ignores the schedule)."""
+    settings = await auto_backup_service.get_or_create_settings(db)
+    if not settings.enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="Automatic backups are disabled. Enable them first.",
+        )
+    backup = await auto_backup_service.run_auto_backup(db)
+    refreshed = await auto_backup_service.get_or_create_settings(db)
+    return AutoBackupRunResult(
+        success=backup is not None,
+        message=refreshed.last_status or "No backup created",
+        backup_id=backup.id if backup else None,
+    )
 
 
 @router.get("/{backup_id}", response_model=BackupCreateResponse)

@@ -15,6 +15,11 @@ _NEW_COLUMNS = {
 }
 
 
+_NEW_BACKUP_COLUMNS = {
+    "is_automatic": "BOOLEAN DEFAULT 0 NOT NULL",
+}
+
+
 async def ensure_scheduled_message_columns(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         result = await conn.exec_driver_sql("PRAGMA table_info(scheduled_messages)")
@@ -23,4 +28,15 @@ async def ensure_scheduled_message_columns(engine: AsyncEngine) -> None:
             if column not in existing:
                 await conn.exec_driver_sql(
                     f"ALTER TABLE scheduled_messages ADD COLUMN {column} {ddl}"
+                )
+
+
+async def ensure_backup_columns(engine: AsyncEngine) -> None:
+    async with engine.begin() as conn:
+        result = await conn.exec_driver_sql("PRAGMA table_info(backups)")
+        existing = {row[1] for row in result.fetchall()}
+        for column, ddl in _NEW_BACKUP_COLUMNS.items():
+            if column not in existing:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE backups ADD COLUMN {column} {ddl}"
                 )
