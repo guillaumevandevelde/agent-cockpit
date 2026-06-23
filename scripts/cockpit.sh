@@ -161,6 +161,46 @@ default_frontend_cmd() {
     echo "cd '$PROJECT_ROOT/frontend' && exec npm run dev ${HOST:+-- --host $HOST}"
 }
 
+# Check if frontend build is needed (dist missing or source newer than dist)
+needs_frontend_build() {
+    local dist_dir="$PROJECT_ROOT/frontend/dist"
+    local src_dir="$PROJECT_ROOT/frontend/src"
+    
+    # No dist directory = build needed
+    if [ ! -d "$dist_dir" ]; then
+        return 0
+    fi
+    
+    # Check if any source file is newer than the dist index.html
+    local dist_time src_time
+    dist_time=$(stat -c %Y "$dist_dir/index.html" 2>/dev/null || echo 0)
+    src_time=$(find "$src_dir" -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" | head -1 | xargs stat -c %Y 2>/dev/null || echo 0)
+    
+    if [ "$src_time" -gt "$dist_time" ]; then
+        return 0
+    fi
+    
+    return 1
+}
+
+# Build frontend if needed
+ensure_frontend_build() {
+    if needs_frontend_build; then
+        sup_log "Frontend build nodig (dist ontbreekt of is verouderd)"
+        echo "Frontend builden..."
+        cd "$PROJECT_ROOT/frontend" && npm run build 2>&1 | tail -5
+        if [ $? -eq 0 ]; then
+            sup_log "Frontend build geslaagd"
+            echo "Frontend build geslaagd."
+        else
+            sup_log "Frontend build gefaald"
+            echo "Frontend build gefaald — start dev server in plaats daarvan."
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # --- supervisor entrypoint (run detached by cmd_start) ---
 supervisor_main() {
     mkdir -p "$LOG_DIR"
@@ -199,6 +239,10 @@ cmd_start() {
     mkdir -p "$LOG_DIR"
     mkdir -p "$RUN_DIR"
     prune_logs
+    # Check frontend build (skip if COCKPIT_SKIP_BUILD is set)
+    if [ -z "${COCKPIT_SKIP_BUILD:-}" ]; then
+        ensure_frontend_build || true
+    fi
     # Detach: survive terminal close. Pass HOST + injected cmds through.
     COCKPIT_BACKEND_CMD="${COCKPIT_BACKEND_CMD:-}" \
     COCKPIT_FRONTEND_CMD="${COCKPIT_FRONTEND_CMD:-}" \
@@ -266,6 +310,9 @@ Commands:
 
 Options:
   --host <host>  Bind backend+frontend aan host (bv. 0.0.0.0)
+
+Environment:
+  COCKPIT_SKIP_BUILD=1  Overslaan van frontend build check
 EOF
 }
 
