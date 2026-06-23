@@ -14,6 +14,7 @@ import {
   Monitor,
   AlertTriangle,
   Bot,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -230,6 +231,16 @@ export function BackupList({ backups, onRestore, onDownload, onDelete }: BackupL
                   </Badge>
 
                   <Badge variant="outline">{formatBytes(backup.size_bytes)}</Badge>
+
+                  {backup.is_automatic && (
+                    <Badge
+                      variant="outline"
+                      className="bg-orange-50 text-orange-700 border-orange-200 flex items-center gap-1"
+                    >
+                      <Clock className="h-3 w-3" />
+                      Auto
+                    </Badge>
+                  )}
 
                   {/* Dependency indicator */}
                   {backup.has_dependencies ? (

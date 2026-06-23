@@ -45,6 +45,31 @@ class Backup(Base):
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_automatic: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+
+
+class AutoBackupSettings(Base):
+    """Singleton settings row for scheduled automatic backups.
+
+    Only the row with id=1 is used; the service creates it on first access.
+    """
+
+    __tablename__ = "auto_backup_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    scope: Mapped[str] = mapped_column(String, default="user", nullable=False)  # "user" or "full"
+    project_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    time_of_day: Mapped[str] = mapped_column(String, default="03:00", nullable=False)  # "HH:MM"
+    timezone: Mapped[str] = mapped_column(String, default="UTC", nullable=False)
+    retention_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_backup_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Marketplace(Base):

@@ -909,6 +909,7 @@ class BackupResponse(BackupBase):
     project_id: Optional[int] = None
     created_at: str
     size_bytes: int
+    is_automatic: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -917,6 +918,40 @@ class BackupListResponse(BaseModel):
     """List of backups."""
 
     backups: List[BackupResponse]
+
+
+class AutoBackupSettingsResponse(BaseModel):
+    """Current automatic-backup schedule settings."""
+
+    enabled: bool
+    scope: str  # "user" or "full"
+    project_path: Optional[str] = None
+    time_of_day: str  # "HH:MM"
+    timezone: str
+    retention_days: int
+    last_run_at: Optional[str] = None
+    last_status: Optional[str] = None
+    last_backup_id: Optional[int] = None
+
+
+class AutoBackupSettingsUpdate(BaseModel):
+    """Schema for updating automatic-backup settings."""
+
+    enabled: Optional[bool] = None
+    scope: Optional[str] = None  # "user" or "full"
+    project_path: Optional[str] = None
+    time_of_day: Optional[str] = None  # "HH:MM"
+    timezone: Optional[str] = None
+    retention_days: Optional[int] = None
+
+
+class AutoBackupRunResult(BaseModel):
+    """Result of triggering an automatic backup run."""
+
+    success: bool
+    message: str
+    backup_id: Optional[int] = None
+    deleted_count: int = 0
 
 
 class BackupContentsResponse(BaseModel):

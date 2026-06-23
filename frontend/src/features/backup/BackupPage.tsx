@@ -11,6 +11,7 @@ import {
 import { BackupList } from "./BackupList";
 import { BackupWizard } from "./BackupWizard";
 import { RestoreWizard } from "./RestoreWizard";
+import { AutoBackupSettings } from "./AutoBackupSettings";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient, buildEndpoint } from "@/lib/api";
 import { useProjectContext } from "@/contexts/ProjectContext";
@@ -191,6 +192,11 @@ export function BackupPage() {
           </CardHeader>
         </Card>
       </div>
+
+      {/* Automatic Backups (not applicable to export-only Codex) */}
+      {selectedProviderId !== "codex-cli" && (
+        <AutoBackupSettings onChange={fetchBackups} />
+      )}
 
       {/* Backup List */}
       <Card>

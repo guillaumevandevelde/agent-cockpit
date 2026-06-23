@@ -28,3 +28,11 @@ def test_cron_schedule_and_remove():
     assert svc.has_job(2) is True
     svc.remove(2)
     assert svc.has_job(2) is False
+
+
+def test_auto_backup_schedule_and_remove():
+    svc = SchedulerService()
+    svc.schedule_auto_backup(time_of_day="03:30", tz="Europe/Brussels")
+    assert svc.has_auto_backup() is True
+    svc.remove_auto_backup()
+    assert svc.has_auto_backup() is False

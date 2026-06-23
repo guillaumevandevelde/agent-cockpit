@@ -546,6 +546,7 @@ class BackupService:
         project_path: Optional[str] = None,
         description: Optional[str] = None,
         project_id: Optional[int] = None,
+        is_automatic: bool = False,
     ) -> Tuple[Backup, BackupManifest]:
         """
         Create a new backup.
@@ -556,6 +557,7 @@ class BackupService:
             project_path: Project path for project/full scope
             description: Optional description
             project_id: Optional project ID reference
+            is_automatic: Whether this backup was created by the scheduler
 
         Returns:
             Tuple of (Backup record, BackupManifest)
@@ -614,6 +616,7 @@ class BackupService:
             scope=scope,
             project_id=project_id,
             size_bytes=size_bytes,
+            is_automatic=is_automatic,
         )
 
         self.db.add(backup)

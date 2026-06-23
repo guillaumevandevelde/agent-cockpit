@@ -23,9 +23,13 @@ async def lifespan(app: FastAPI):
     await init_db()
     from app.kanban.db import init_kanban_db
     await init_kanban_db()
-    from app.services.scheduling.schema_guard import ensure_scheduled_message_columns
+    from app.services.scheduling.schema_guard import (
+        ensure_scheduled_message_columns,
+        ensure_backup_columns,
+    )
     from app.database import engine
     await ensure_scheduled_message_columns(engine)
+    await ensure_backup_columns(engine)
     # Clean up any orphaned relay processes from previous runs
     from app.services.cc_bridge.pty_relay import close_all_relays, cleanup_orphaned_relays
     cleanup_orphaned_relays()
@@ -44,6 +48,12 @@ async def lifespan(app: FastAPI):
                 scheduler_service.schedule_once(m.id, m.fire_at)
             elif m.trigger_type == "cron" and m.cron_expr:
                 scheduler_service.schedule_cron(m.id, m.cron_expr, m.timezone)
+    # Register the daily automatic-backup job when enabled.
+    from app.services.auto_backup_service import get_or_create_settings
+    async with AsyncSessionLocal() as s:
+        auto = await get_or_create_settings(s)
+        if auto.enabled:
+            scheduler_service.schedule_auto_backup(auto.time_of_day, auto.timezone)
     yield
     # Shutdown: Cleanup
     scheduler_service.shutdown()
