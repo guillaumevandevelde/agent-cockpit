@@ -105,7 +105,7 @@ _PERSONA_BY_COLUMN = {}  # Dynamic - loaded from project agents
 def _persona_filename(column: str) -> Optional[str]:
     """Get the persona filename for a column. For agent columns, the column name IS the agent name."""
     # Fixed columns don't have personas
-    if column in ("Backlog", "Dispatch", "Impediment", "Done"):
+    if column in ("Backlog", "Impediment", "Done"):
         return None
     # Agent columns: column name matches agent filename
     return f"{column}.md"
@@ -142,38 +142,21 @@ def _read_persona_file(project_path: str, filename: str) -> Optional[str]:
 
 
 def _persona_for_card(project_path: str, card, column: str) -> Optional[str]:
-    """An explicit per-card agent overrides the column default. `column` is passed
-    explicitly because the card may already have been moved to "Doing" by the caller."""
+    """Resolve persona for a card. `column` is passed explicitly because the card
+    may already have been moved to a non-persona column."""
     agent = getattr(card, "agent", None)
     if agent:
-        return _read_persona_file(project_path, f"{agent}.md")
+        # card.agent may be a persona name (e.g. "analyst") — try it first
+        persona = _read_persona_file(project_path, f"{agent}.md")
+        if persona:
+            return persona
     return _read_persona(project_path, column)
 
 
 # ---- prompt ----------------------------------------------------------------
 
-def _mail_section(handle: Optional[str], pending_mail: Optional[Iterable]) -> str:
-    if not handle:
-        return ""
-    lines = [
-        "\n\n# Agent Mail",
-        f"Je durable handle in dit project is `{handle}`. Check je inbox met "
-        "`check_inbox`; vraag gericht context met `request_context`; draag werk over "
-        "met `handoff`.",
-    ]
-    pending = list(pending_mail or [])
-    if pending:
-        lines.append("\nOpenstaande berichten voor jou op deze card (al gemarkeerd als gelezen):")
-        for m in pending:
-            label = "Handoff" if m.kind == "handoff" else "Context request"
-            lines.append(f"\n**{label} van `{m.from_handle}` — {m.subject}**\n{m.body}")
-    return "\n".join(lines)
-
-
 def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
-                      impediment_question: Optional[str] = None,
-                      handle: Optional[str] = None,
-                      pending_mail: Optional[Iterable] = None) -> str:
+                      impediment_question: Optional[str] = None) -> str:
     preamble = (persona.strip() + "\n\n") if persona else ""
     impediment_section = ""
     if impediment_question:
@@ -194,31 +177,7 @@ def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
         "Work autonomously to completion, following your role instructions above. "
         "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
         "`comment`) to update the card exactly as those instructions direct. If you are "
-        "blocked or need clarification from another agent, use `status: impediment` with a "
-        "clear `question` field explaining what you need."
-        f"{_mail_section(handle, pending_mail)}"
-    )
-
-
-def build_dispatch_prompt(card, *, project_path: str, available_agents: list[str]) -> str:
-    """Build a prompt for the dispatch agent to triage and route a card."""
-    agent_list = ", ".join(available_agents) if available_agents else "developer"
-    return (
-        "You are the dispatch agent for the Claude Cockpit kanban board. "
-        "Your job is to analyze a new card and route it to the most appropriate agent.\n\n"
-        f"## Available Agents\n{agent_list}\n\n"
-        f"## Card to Route\n"
-        f"# {card.title}\n"
-        f"{getattr(card, 'description', '') or ''}\n\n"
-        "## Instructions\n"
-        "1. Analyze the card title and description\n"
-        "2. Choose the most appropriate agent from the list above\n"
-        "3. Use the `dispatch_to_agent` MCP tool to route the card\n\n"
-        "Consider:\n"
-        "- What type of work is this? (code, testing, review, analysis, etc.)\n"
-        "- Which agent has the right expertise?\n"
-        "- If unsure, default to 'developer'\n\n"
-        "After dispatching, your session will end automatically."
+        "blocked, use `report_impediment` with a clear question explaining what you need."
     )
 
 
@@ -405,7 +364,7 @@ def _live_sessions() -> Optional[set[str]]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-_DISPATCH_COLUMNS = ("Backlog", "Dispatch")  # Dispatch from Backlog (new cards) and Dispatch (triage)
+_DISPATCH_COLUMNS = ("Backlog",)  # new cards are picked up straight from Backlog
 
 
 def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
@@ -444,54 +403,32 @@ async def _run_card(
     except ClaimRejected:
         return None  # lost the race; another tick/device took it
 
-    # Handle Dispatch column: spawn dispatch agent for triage
-    if source_column == "Dispatch" and not agent_override:
-        # Get available agents from project
-        agents_dir = Path(project_path) / ".claude" / "agents"
-        available_agents = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else ["developer"]
-        
-        prompt = build_dispatch_prompt(card, project_path=project_path, available_agents=available_agents)
-        try:
-            spawned = card_transport(directory=project_path, prompt=prompt, session_name=name)
-        except Exception:
-            await apply_operation(
-                session, op_type="release", entity_type="card", project_key=project_key,
-                entity_id=card.id, payload={},
-            )
-            logger.exception("spawn failed for dispatch card %s in %s", card.id, project_key)
-            raise
-        
-        logger.info("dispatched triage for card %s -> session %s (transport: %s)", card.id, name, 
-                    "sandcastle" if card_transport == sandcastle_transport else "worktree")
-        return {"card_id": card.id, "session_name": name, "claimant": claimant,
-                "source_column": source_column, "spawned": spawned, "dispatch_agent": True}
+    # Determine target agent column: agent_override > card.agent (if valid persona) > persona from column > "engineer".
+    agents_dir = Path(project_path) / ".claude" / "agents"
+    known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
 
-    # Determine target agent column: agent_override > card.agent > persona fallback
     if agent_override:
         target_agent = agent_override
     else:
-        persona = _persona_for_card(project_path, card, source_column)
-        target_agent = getattr(card, "agent", None) or _resolve_agent_from_persona(persona) or "developer"
-    
+        card_agent = getattr(card, "agent", None)
+        # card.agent can be a persona name (e.g. "engineer") or a provider ID
+        # (e.g. "mimo-code"). Only use it as column name if it's a known persona.
+        if card_agent and card_agent in known_agents:
+            target_agent = card_agent
+        else:
+            persona = _persona_for_card(project_path, card, source_column)
+            target_agent = _resolve_agent_from_persona(persona) or "engineer"
+
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=project_key,
         entity_id=card.id, payload={"column": target_agent},
     )
 
-    # Register the durable mail identity for this role + its live session, then
-    # collect any pending handoff/context mail to warm-start the prompt.
-    from app.kanban import mail
-    await mail.ensure_identity(session, project_key, target_agent, agent_session=name)
-    pending_mail = await mail.pending_for_card(session, project_key, card.id, target_agent)
-    for m in pending_mail:
-        await mail.mark_read(session, m.id, target_agent)
-
     # Load persona for the target agent
     persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
-        impediment_question=impediment_question, handle=target_agent,
-        pending_mail=pending_mail)
+        impediment_question=impediment_question)
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name)
     except Exception:
@@ -547,9 +484,6 @@ async def dispatch_project(
     """Claim+move+spawn the next card for one project. Returns a result dict or
     None when there is nothing to do (no candidate card, or project is busy).
 
-    Dispatch-column cards (triage) bypass the busy cap — they are short-lived
-    routing tasks, not work sessions.
-
     When `live_sessions` is provided, stale `agent:` claims on Doing cards whose
     session is no longer alive are reaped first, so a dead session can never wedge
     the busy cap. Passing None skips reaping (used by unit tests that exercise the
@@ -568,7 +502,7 @@ async def dispatch_project(
     if card is None:
         return None
 
-    if card.column != "Dispatch" and _project_is_busy(cards):
+    if _project_is_busy(cards):
         return None
 
     # Auto-select transport if not provided
@@ -583,15 +517,19 @@ async def dispatch_project(
 
 async def dispatch_card(
     session, *, card_id: str, project_path: str,
-    transport: SpawnTransport = worktree_transport,
+    transport: Optional[SpawnTransport] = None,
     agent_override: Optional[str] = None,
 ) -> Optional[dict]:
     """Manually dispatch one specific card now, regardless of the auto-pick toggle or
-    the busy cap. Returns the result dict, or None if the card is missing or its claim
+    the busy cap. Returns the result dict or None if the card is missing or its claim
     was lost. If agent_override is provided, use that agent instead of the card's agent."""
     card = await get_card(session, card_id)
     if card is None:
         return None
+    # Auto-select transport if not provided
+    if transport is None:
+        transport = await get_transport_for_project(project_path)
+    transport = get_transport_for_card(card, transport)
     return await _run_card(
         session, card=card, project_key=card.project_key,
         project_path=project_path, transport=transport,
@@ -602,7 +540,7 @@ async def dispatch_card(
 async def dispatch_impediment_card(
     session, *, card_id: str, project_path: str, target_agent: str,
     impediment_question: str,
-    transport: SpawnTransport = worktree_transport,
+    transport: Optional[SpawnTransport] = None,
 ) -> Optional[dict]:
     """Dispatch an impediment card to a specific agent for resolution.
     
@@ -611,7 +549,7 @@ async def dispatch_impediment_card(
         project_path: Path to the project
         target_agent: The agent to dispatch to (analyst, developer, testing, code-review)
         impediment_question: The question that needs to be answered
-        transport: The spawn transport to use
+        transport: The spawn transport to use (auto-selects based on card if None)
     
     Returns:
         Result dict or None if dispatch failed
@@ -630,6 +568,11 @@ async def dispatch_impediment_card(
         entity_id=card.id, payload={"column": "Doing"},
     )
     
+    # Auto-select transport if not provided
+    if transport is None:
+        transport = await get_transport_for_project(project_path)
+    transport = get_transport_for_card(card, transport)
+    
     return await _run_card(
         session, card=card, project_key=card.project_key,
         project_path=project_path, transport=transport,
@@ -639,7 +582,7 @@ async def dispatch_impediment_card(
 
 async def redispatch_card(
     session, *, card_id: str, project_path: str,
-    transport: SpawnTransport = worktree_transport,
+    transport: Optional[SpawnTransport] = None,
     agent_override: Optional[str] = None,
 ) -> Optional[dict]:
     """Release a stuck card, optionally kill its session, and re-dispatch.
@@ -648,10 +591,14 @@ async def redispatch_card(
     It kills the existing tmux session (if any), releases the claim, and
     re-dispatches with a fresh session.
 
+    When transport is None, the appropriate transport is automatically selected
+    based on the card's transport field (sandcastle/worktree) and the project's
+    sandcastle configuration.
+
     Args:
         card_id: The ID of the card to redispatch
         project_path: Path to the project
-        transport: The spawn transport to use
+        transport: The spawn transport to use (auto-selects based on card if None)
         agent_override: Optional agent to use instead of card's current agent
 
     Returns:
@@ -674,6 +621,11 @@ async def redispatch_card(
             project_key=card.project_key, entity_id=card.id, payload={},
         )
 
+    # Auto-select transport if not provided
+    if transport is None:
+        transport = await get_transport_for_project(project_path)
+    transport = get_transport_for_card(card, transport)
+
     # Re-dispatch (bypasses busy cap since we just freed the project)
     return await _run_card(
         session, card=card, project_key=card.project_key,
@@ -684,21 +636,26 @@ async def redispatch_card(
 
 async def dispatch_all_pending(
     session, *, project_key: str, project_path: str,
-    transport: SpawnTransport = worktree_transport,
+    transport: Optional[SpawnTransport] = None,
 ) -> list[dict]:
-    """Dispatch all unclaimed Backlog/Dispatch cards for a project at once.
+    """Dispatch all unclaimed Backlog cards for a project at once.
 
     Bypasses the busy cap so multiple cards can be dispatched concurrently.
+    When transport is None, each card's transport is auto-selected based on its
+    card.transport field and the project's sandcastle configuration.
     Returns a list of result dicts for each successfully dispatched card.
     """
+    if transport is None:
+        transport = await get_transport_for_project(project_path)
     from app.kanban.service import list_pending_cards
     pending = await list_pending_cards(session, project_key)
     results = []
     for card in pending:
         try:
+            card_transport = get_transport_for_card(card, transport)
             res = await _run_card(
                 session, card=card, project_key=project_key,
-                project_path=project_path, transport=transport,
+                project_path=project_path, transport=card_transport,
             )
             if res is not None:
                 results.append(res)
@@ -709,10 +666,11 @@ async def dispatch_all_pending(
 
 async def redispatch_all_orphans(
     session, *, project_key: str, project_path: str,
-    transport: SpawnTransport = worktree_transport,
+    transport: Optional[SpawnTransport] = None,
 ) -> list[dict]:
     """Re-dispatch all orphaned cards (unclaimed on agent columns) for a project.
 
+    When transport is None, each card's transport is auto-selected.
     Returns a list of result dicts for each successfully dispatched card.
     """
     from app.kanban.service import list_orphaned_cards
@@ -720,6 +678,7 @@ async def redispatch_all_orphans(
     results = []
     for card in orphans:
         try:
+            # Pass None so redispatch_card auto-selects per-card transport
             res = await redispatch_card(
                 session, card_id=card.id, project_path=project_path,
                 transport=transport,

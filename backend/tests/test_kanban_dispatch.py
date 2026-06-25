@@ -105,7 +105,7 @@ async def test_dispatch_claims_moves_to_doing_and_spawns():
         await s.commit()
         card = await get_card(s, cid)
     assert result is not None
-    assert card.column == "developer"
+    assert card.column == "engineer"
     assert card.claimed_by.startswith("agent:")
     assert len(transport.calls) == 1
     # claimant label == the spawned session name
@@ -125,7 +125,7 @@ async def test_dispatch_picks_first_todo_by_rank():
         )
         await s.commit()
         card = await get_card(s, first)
-    assert card.column == "developer"        # first card got picked
+    assert card.column == "engineer"        # first card got picked
     assert len(transport.calls) == 1
 
 
@@ -150,20 +150,23 @@ async def test_dispatch_skips_when_project_already_busy():
 
 @pytest.mark.asyncio
 async def test_dispatch_card_bypasses_busy_cap():
+    """Manual dispatch_card runs a card even while the project is busy."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        busy = await _make_card(s, title="busy", column="developer")
+        busy = await _make_card(s, title="busy", column="engineer")
         await apply_operation(
             s, op_type="claim", entity_type="card", project_key=PK,
             entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
         )
-        await _make_card(s, title="triage", column="Dispatch")
+        target = await _make_card(s, title="manual", column="Backlog")
         await s.commit()
-        result = await dispatch.dispatch_project(
-            s, project_key=PK, project_path="/p", transport=transport,
+        result = await dispatch.dispatch_card(
+            s, card_id=target, project_path="/p", transport=transport,
         )
+        await s.commit()
+        card = await get_card(s, target)
     assert result is not None
-    assert result["source_column"] == "Dispatch"
+    assert card.column == "engineer"
     assert len(transport.calls) == 1
 
 
@@ -239,7 +242,7 @@ async def test_reaps_dead_agent_claim_in_doing_and_dispatches_next():
     assert dead_card.claimed_by is None       # stale claim reaped
     assert dead_card.column == "developer"        # orphan left for a human to re-rank
     assert result is not None                 # cap freed -> next card dispatched
-    assert waiting_card.column == "developer"
+    assert waiting_card.column == "engineer"
     assert len(transport.calls) == 1
 
 
@@ -376,6 +379,28 @@ async def test_dispatch_picks_analysis_with_analyst_persona(tmp_path):
         await s.commit()
     assert res is not None
     assert "You are the Analyst." in t.calls[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_provider_id_falls_back_to_engineer(tmp_path):
+    """card.agent = provider ID (e.g. 'mimo-code') must not create a non-existent column."""
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "engineer.md").write_text("You are the Engineer.")
+    t = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="Task", column="Backlog")
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key=PK, entity_id=cid, payload={"agent": "mimo-code"})
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        res = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=str(tmp_path), transport=t)
+        await s.commit()
+    assert res is not None
+    card = await get_card(s, cid)
+    assert card.column == "engineer"
+    assert "You are the Engineer." in t.calls[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -516,7 +541,7 @@ async def test_redispatch_releases_claim_and_respawns():
     """Re-dispatch a claimed card: release old claim, spawn new session."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        cid = await _make_card(s, title="stuck", column="developer")
+        cid = await _make_card(s, title="stuck", column="engineer")
         await apply_operation(
             s, op_type="claim", entity_type="card", project_key=PK,
             entity_id=cid, payload={"claimed_by": "agent:k-old-0001"},
@@ -531,7 +556,7 @@ async def test_redispatch_releases_claim_and_respawns():
     assert result is not None
     assert card.claimed_by.startswith("agent:")
     assert card.claimed_by != "agent:k-old-0001"  # new session
-    assert card.column == "developer"
+    assert card.column == "engineer"
     assert len(transport.calls) == 1
 
 
@@ -540,7 +565,7 @@ async def test_redispatch_unclaimed_card_dispatches_normally():
     """Re-dispatch an unclaimed card (e.g., after stale reaping) works like normal dispatch."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        cid = await _make_card(s, title="orphan", column="developer")
+        cid = await _make_card(s, title="orphan", column="engineer")
         # No claim - card was reaped
         await s.commit()
     async with KanbanSessionLocal() as s:
@@ -551,7 +576,7 @@ async def test_redispatch_unclaimed_card_dispatches_normally():
         card = await get_card(s, cid)
     assert result is not None
     assert card.claimed_by.startswith("agent:")
-    assert card.column == "developer"
+    assert card.column == "engineer"
     assert len(transport.calls) == 1
 
 
@@ -634,15 +659,15 @@ async def test_redispatch_all_no_orphans():
     assert transport.calls == []
 
 
-# ---- dispatch_all_pending: batch dispatch from Backlog/Dispatch ------------
+# ---- dispatch_all_pending: batch dispatch from Backlog ---------------------
 
 @pytest.mark.asyncio
 async def test_dispatch_all_pending():
-    """Batch dispatch: all unclaimed Backlog/Dispatch cards get dispatched."""
+    """Batch dispatch: all unclaimed Backlog cards get dispatched."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await _make_card(s, title="card1", column="Backlog")
-        await _make_card(s, title="card2", column="Dispatch")
+        await _make_card(s, title="card2", column="Backlog")
         # claimed card should be skipped
         claimed = await _make_card(s, title="busy", column="Backlog")
         await apply_operation(

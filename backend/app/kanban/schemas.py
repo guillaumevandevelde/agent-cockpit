@@ -4,12 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
-COLUMNS = ["Backlog", "Dispatch", "Impediment", "Done"]
+COLUMNS = ["Backlog", "Impediment", "Done"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
-
-# Agent Mail
-MESSAGE_KINDS = ["context_request", "context_response", "handoff", "note"]
-MESSAGE_STATUSES = ["unread", "read", "answered"]
 
 
 class DeliverableResponse(BaseModel):
@@ -53,6 +49,7 @@ class CardCreate(BaseModel):
 class CardUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+    column: Optional[str] = None
     priority: Optional[str] = None
     labels: Optional[list] = None
     agent: Optional[str] = None
@@ -143,21 +140,9 @@ class ColumnUpdate(BaseModel):
     default_agent: Optional[str] = None
 
 
-class WorkflowTriggerRequest(BaseModel):
-    """Request to trigger workflow based on agent output."""
-    card_id: str
-    agent_output: str
-    manual_override: bool = False
-
-
-class WorkflowTriggerResponse(BaseModel):
-    """Response from workflow trigger."""
-    should_move: bool
-    next_column: Optional[str] = None
-    next_agent: Optional[str] = None
-    card_moved: bool = False
-    error: Optional[str] = None
-    impediment_question: Optional[str] = None
+class ColumnClearRequest(BaseModel):
+    project_key: str
+    column: str
 
 
 class ImpedimentResolveRequest(BaseModel):
@@ -206,55 +191,3 @@ class AgentStatsResponse(BaseModel):
     agents: list[AgentStat]
     common_failures: list[FailureStat]
     tokens_available: bool
-
-
-# Agent Mail schemas
-
-
-class IdentityResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: str
-    project_key: str
-    handle: str
-    display_name: Optional[str] = None
-    last_session: Optional[str] = None
-    created_at: datetime
-    last_seen_at: Optional[datetime] = None
-
-
-class MessageResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: str
-    project_key: str
-    from_handle: str
-    to_handle: Optional[str] = None
-    kind: str
-    subject: str
-    body: str
-    card_id: Optional[str] = None
-    in_reply_to: Optional[str] = None
-    status: str
-    created_at: datetime
-    read_at: Optional[datetime] = None
-
-
-class SendMessageRequest(BaseModel):
-    project_key: str
-    from_handle: str
-    to_handle: Optional[str] = None
-    kind: str = "note"
-    subject: str = ""
-    body: str = ""
-    card_id: Optional[str] = None
-    in_reply_to: Optional[str] = None
-
-
-class MarkReadRequest(BaseModel):
-    reader_handle: str
-
-
-class EnsureIdentityRequest(BaseModel):
-    project_key: str
-    handle: str
-    display_name: Optional[str] = None
-    session: Optional[str] = None

@@ -30,7 +30,6 @@ const CCBridgePage = lazy(() => import('./features/cc-bridge/CCBridgePage').then
 const PresencePage = lazy(() => import('./features/presence/PresencePage').then((m) => ({ default: m.PresencePage })))
 const ScheduledMessagesPage = lazy(() => import('./features/scheduled-messages/ScheduledMessagesPage').then((m) => ({ default: m.ScheduledMessagesPage })))
 const KanbanPage = lazy(() => import('./features/kanban/KanbanPage'))
-const MailboxPage = lazy(() => import('./features/mailbox/MailboxPage').then((m) => ({ default: m.MailboxPage })))
 const ApmPage = lazy(() => import('./features/apm/ApmPage').then((m) => ({ default: m.ApmPage })))
 const MCPServerPage = lazy(() => import('./features/mcp-server/MCPServerPage').then((m) => ({ default: m.MCPServerPage })))
 const AgentPerformancePage = lazy(() => import('./features/agent-performance/AgentPerformancePage').then((m) => ({ default: m.AgentPerformancePage })))
@@ -72,7 +71,6 @@ function App() {
                 <Route path="context" element={<ContextPage />} />
                 <Route path="usage" element={<UsagePage />} />
                 <Route path="kanban" element={<KanbanPage />} />
-                <Route path="mailbox" element={<MailboxPage />} />
                 <Route path="apm" element={<ApmPage />} />
                 <Route path="agent-performance" element={<AgentPerformancePage />} />
                 <Route path="mcp-server" element={<MCPServerPage />} />

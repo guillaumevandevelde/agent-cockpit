@@ -14,14 +14,23 @@ from app.kanban.schemas import (
     CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
     AutodispatchRequest, ShipModeRequest, SkipPermissionsRequest,
     DispatchRequest, RedispatchRequest,
-    ColumnResponse, ColumnCreate, ColumnUpdate,
-    WorkflowTriggerRequest, WorkflowTriggerResponse, ImpedimentResolveRequest,
+    ColumnResponse, ColumnCreate, ColumnUpdate, ColumnClearRequest,
+    ImpedimentResolveRequest,
     AgentStatsResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
+
+# Fallback routing for an impediment when no target_agent is given. Mirrors the
+# former card-flow.json `impediment_agents`; the first entry is chosen.
+_IMPEDIMENT_AGENTS = {
+    "developer": ["analyst", "testing", "code-review"],
+    "tester": ["developer", "analyst"],
+    "analyst": ["developer"],
+    "code-review": ["developer"],
+}
 
 
 def _write_json_atomic(target: Path, data: dict) -> None:
@@ -32,25 +41,6 @@ def _write_json_atomic(target: Path, data: dict) -> None:
     tmp.write_text(json.dumps(data, indent=2))
     os.replace(tmp, target)
 
-
-async def _resolve_project_path(project_key: str) -> str | None:
-    """Resolve a project_key to a local filesystem path."""
-    from sqlalchemy import select
-    from app.database import AsyncSessionLocal
-    from app.models.database import Project
-    async with AsyncSessionLocal() as db:
-        row = (await db.execute(
-            select(Project.path).join(Project, Project.path.isnot(None))
-        )).scalars().first()
-        # Find matching project by computing its key
-        all_paths = (await db.execute(select(Project.path))).scalars().all()
-    for p in all_paths:
-        try:
-            if resolve_project_key(p) == project_key:
-                return p
-        except Exception:
-            continue
-    return None
 
 router = APIRouter(prefix="/kanban", tags=["Kanban"])
 
@@ -155,9 +145,22 @@ async def activity(cid: str):
 @router.patch("/cards/{cid}", response_model=CardResponse)
 async def update_card(cid: str, payload: CardUpdate):
     async with KanbanSessionLocal() as s:
-        await apply_operation(s, op_type="update", entity_type="card",
-            project_key="", entity_id=cid,
-            payload=payload.model_dump(exclude_unset=True))
+        data = payload.model_dump(exclude_unset=True)
+        column_change = data.pop("column", None)
+
+        if column_change:
+            card = await service.get_card(s, cid)
+            if card is None:
+                raise HTTPException(404, "card not found")
+
+            await apply_operation(s, op_type="move", entity_type="card",
+                project_key="", entity_id=cid,
+                payload={"column": column_change})
+
+        if data:
+            await apply_operation(s, op_type="update", entity_type="card",
+                project_key="", entity_id=cid, payload=data)
+
         await s.commit()
         return await _reload(s, cid)
 
@@ -182,20 +185,6 @@ async def move_card(cid: str, payload: MoveRequest):
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=cid, payload=payload.model_dump())
         await s.commit()
-
-        # When moved to Dispatch, immediately trigger dispatch session
-        if payload.column == "Dispatch":
-            from app.kanban.dispatch import dispatch_card
-            from app.kanban.project_key import resolve_project_key
-            project_key = card.project_key
-            project_path = await _resolve_project_path(project_key)
-            if project_path:
-                try:
-                    await dispatch_card(s, card_id=cid, project_path=project_path)
-                    await s.commit()
-                except Exception:
-                    logger.warning("auto-dispatch on move to Dispatch failed for card %s", cid)
-
         return await _reload(s, cid)
 
 
@@ -487,80 +476,18 @@ async def dispatch_all(payload: EnableRequest):
     return {"dispatched": len(results), "results": results}
 
 
-@router.post("/cards/{cid}/workflow", response_model=WorkflowTriggerResponse)
-async def trigger_workflow(cid: str, payload: WorkflowTriggerRequest):
-    """Trigger workflow based on agent output. Moves card to next column if status indicates."""
-    from app.kanban.workflow import process_agent_output, load_flows
-    
+@router.post("/clear-column")
+async def clear_column(payload: ColumnClearRequest):
+    """Delete all cards in a given column for a project."""
     async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, cid)
-        if card is None:
-            raise HTTPException(404, "card not found")
-        
-        # Manual override: skip workflow and move to specified column
-        if payload.manual_override:
-            # For manual override, the agent_output should contain the target column
-            from app.kanban.workflow import parse_agent_output
-            parsed = parse_agent_output(payload.agent_output)
-            target_column = parsed.get("next_column") if parsed else None
-            if target_column:
-                await apply_operation(s, op_type="move", entity_type="card",
-                    project_key=card.project_key, entity_id=cid,
-                    payload={"column": target_column})
-                await s.commit()
-                return WorkflowTriggerResponse(
-                    should_move=True,
-                    next_column=target_column,
-                    card_moved=True,
-                )
-            else:
-                raise HTTPException(422, "manual override requires next_column in agent output")
-        
-        # Process agent output through workflow engine
-        flows = load_flows()
-        result = process_agent_output(
-            card_id=cid,
-            current_column=card.column,
-            agent_output=payload.agent_output,
-            flows=flows,
-        )
-        
-        if result["error"]:
-            return WorkflowTriggerResponse(
-                should_move=False,
-                error=result["error"],
-            )
-        
-        if result["should_move"] and result["next_column"]:
-            await apply_operation(s, op_type="move", entity_type="card",
-                project_key=card.project_key, entity_id=cid,
-                payload={"column": result["next_column"]})
-            
-            # Update agent if next_agent is specified
-            if result["next_agent"]:
-                await apply_operation(s, op_type="update", entity_type="card",
-                    project_key=card.project_key, entity_id=cid,
-                    payload={"agent": result["next_agent"]})
-            
-            # Store impediment question if present
-            if result["impediment_question"]:
-                await apply_operation(s, op_type="comment", entity_type="comment",
-                    project_key=card.project_key, entity_id=cid,
-                    payload={"text": f"**Impediment:** {result['impediment_question']}"})
-            
-            await s.commit()
-            return WorkflowTriggerResponse(
-                should_move=True,
-                next_column=result["next_column"],
-                next_agent=result["next_agent"],
-                card_moved=True,
-            )
-        
-        return WorkflowTriggerResponse(
-            should_move=False,
-            next_column=result.get("next_column"),
-            next_agent=result.get("next_agent"),
-        )
+        cards = await service.list_cards(s, payload.project_key, column=payload.column)
+        count = 0
+        for card in cards:
+            await apply_operation(s, op_type="delete", entity_type="card",
+                project_key="", entity_id=card.id, payload={})
+            count += 1
+        await s.commit()
+    return {"cleared": count}
 
 
 @router.post("/cards/{cid}/resolve-impediment", response_model=CardResponse)
@@ -590,11 +517,8 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
         # Determine target agent based on workflow rules or override
         target_agent = payload.target_agent
         if not target_agent:
-            from app.kanban.workflow import load_flows
-            flows = load_flows()
-            impediment_agents = flows.get("impediment_agents", {})
             current_agent = card.agent or "developer"
-            possible_agents = impediment_agents.get(current_agent, ["developer"])
+            possible_agents = _IMPEDIMENT_AGENTS.get(current_agent, ["developer"])
             target_agent = possible_agents[0] if possible_agents else "developer"
         
         try:

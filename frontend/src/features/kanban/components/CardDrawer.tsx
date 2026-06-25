@@ -30,8 +30,6 @@ import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
 import { MODAL_SIZES } from "@/lib/constants";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { kanbanApi } from "../api";
-import { mailApi } from "@/features/mailbox/api";
-import type { Message } from "@/features/mailbox/types";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
 import type { Card, ActivityEntry, KanbanColumn } from "../types";
@@ -54,7 +52,6 @@ export function CardDrawer({
   const { selectedProviderId } = useProviderContext();
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [agents, setAgents] = useState<string[]>([]);
-  const [mail, setMail] = useState<Message[]>([]);
   const [editing, setEditing] = useState(false);
 
   // A dispatched agent run is bound to the card via the `agent:<session>` claim.
@@ -64,11 +61,7 @@ export function CardDrawer({
 
   useEffect(() => {
     kanbanApi.activity(card.id).then(setActivity).catch(() => {});
-    mailApi
-      .forCard(card.project_key, card.id)
-      .then((r) => setMail(r.messages))
-      .catch(() => setMail([]));
-  }, [card.id, card.project_key]);
+  }, [card.id]);
 
   useEffect(() => {
     if (!projectPath) return;
@@ -213,9 +206,6 @@ export function CardDrawer({
           <TabsList>
             <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
-            <TabsTrigger value="mail">
-              Mail{mail.length > 0 ? ` (${mail.length})` : ""}
-            </TabsTrigger>
             {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
           </TabsList>
 
@@ -241,34 +231,6 @@ export function CardDrawer({
             ))}
           </TabsContent>
 
-          <TabsContent value="mail">
-            {mail.length === 0 && (
-              <div className="text-xs text-muted-foreground">
-                No mail references this card.
-              </div>
-            )}
-            {mail.map((m) => (
-              <div key={m.id} className="border-b py-2 text-xs last:border-b-0">
-                <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
-                  <span className="font-medium text-foreground">{m.from_handle}</span>
-                  <span>&rarr;</span>
-                  <span>{m.to_handle ?? "team"}</span>
-                  <span className="rounded bg-muted px-1">{m.kind}</span>
-                  <span>{m.status}</span>
-                  <span className="ml-auto">
-                    {new Date(m.created_at).toLocaleString()}
-                  </span>
-                </div>
-                <div className="mt-1 font-medium">{m.subject}</div>
-                {m.body && (
-                  <div className="mt-1">
-                    <MarkdownRenderer content={m.body} />
-                  </div>
-                )}
-              </div>
-            ))}
-          </TabsContent>
-
           {runSession && (
             <TabsContent value="run">
               <CardRunTab sessionName={runSession} projectPath={projectPath} />
@@ -282,6 +244,7 @@ export function CardDrawer({
             initial={{
               title: card.title,
               description: card.description,
+              column: card.column,
               priority: card.priority,
               labels: card.labels,
               transport: card.transport,
@@ -289,11 +252,12 @@ export function CardDrawer({
             columns={columns.map((c) => c.name)}
             defaultAgent={card.agent}
             onClose={() => setEditing(false)}
-            onSubmit={async ({ title, description, priority, labels, agent, transport }) => {
+            onSubmit={async ({ title, description, column, priority, labels, agent, transport }) => {
               try {
                 await kanbanApi.updateCard(card.id, {
                   title,
                   description,
+                  column,
                   priority,
                   labels: labels.length ? labels : null,
                   agent,

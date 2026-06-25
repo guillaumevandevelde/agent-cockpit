@@ -2,7 +2,6 @@
 - KanbanOp: append-only operation log (source of truth + activity feed).
 - KanbanCard / KanbanDeliverable: materialized, derived state for fast reads.
 - KanbanMeta: small key/value store (device_id, per-project flags).
-- AgentIdentity / AgentMessage: inter-agent mail, outside the op-log (see below).
 """
 from datetime import datetime, timezone
 
@@ -92,42 +91,3 @@ class KanbanMeta(KanbanBase):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
-
-
-# --- Agent Mail: inter-agent messaging, deliberately OUTSIDE the op-log ---------
-# Like KanbanColumn/KanbanMeta, these are materialized tables with their own
-# lifecycle and direct CRUD (no apply_operation). Mail is not card-scoped and is
-# not synced — consistent with the frozen sync seam. If sync ever revives, mail
-# gets its own seam or a migration. See docs/cockpit/agent-mail-spec.md.
-
-
-class AgentIdentity(KanbanBase):
-    __tablename__ = "agent_identities"
-    __table_args__ = (
-        UniqueConstraint("project_key", "handle", name="uq_agent_identity"),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    project_key: Mapped[str] = mapped_column(String(512), index=True)
-    handle: Mapped[str] = mapped_column(String(64))  # durable per-repo role identity
-    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    last_session: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class AgentMessage(KanbanBase):
-    __tablename__ = "agent_messages"
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    project_key: Mapped[str] = mapped_column(String(512), index=True)
-    from_handle: Mapped[str] = mapped_column(String(64))
-    to_handle: Mapped[str | None] = mapped_column(String(64), nullable=True)  # None = broadcast
-    kind: Mapped[str] = mapped_column(String(24))  # context_request|context_response|handoff|note
-    subject: Mapped[str] = mapped_column(String(512), default="")
-    body: Mapped[str] = mapped_column(Text, default="")
-    card_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
-    in_reply_to: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="unread")  # unread|read|answered
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

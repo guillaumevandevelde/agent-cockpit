@@ -113,13 +113,11 @@ async def get_column_default_agent(session, project_key: str, column_name: str) 
 
 
 async def list_pending_cards(session, project_key: str) -> list[KanbanCard]:
-    """Unclaimed cards in Backlog or Dispatch columns — candidates for dispatch."""
-    from app.kanban.schemas import COLUMNS
-    dispatch_cols = [c for c in ("Backlog", "Dispatch") if c in COLUMNS]
+    """Unclaimed cards in the Backlog column — candidates for dispatch."""
     stmt = (
         select(KanbanCard)
         .where(KanbanCard.project_key == project_key)
-        .where(KanbanCard.column.in_(dispatch_cols))
+        .where(KanbanCard.column == "Backlog")
         .where(KanbanCard.claimed_by.is_(None))
         .options(selectinload(KanbanCard.deliverables))
         .order_by(KanbanCard.rank.asc())

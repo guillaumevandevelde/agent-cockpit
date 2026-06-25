@@ -13,8 +13,8 @@ import { SkipPermissionsToggle } from "./components/SkipPermissionsToggle";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
-const FIXED_COLUMNS = new Set(["Backlog", "Dispatch", "Impediment", "Done"]);
-const DISPATCH_COLUMNS = new Set(["Backlog", "Dispatch"]);
+const FIXED_COLUMNS = new Set(["Backlog", "Impediment", "Done"]);
+const DISPATCH_COLUMNS = new Set(["Backlog"]);
 
 export default function KanbanPage() {
   const { activeProject } = useProjectContext();
@@ -62,6 +62,21 @@ export default function KanbanPage() {
     () => cards.filter((c) => DISPATCH_COLUMNS.has(c.column) && !c.claimed_by).length,
     [cards],
   );
+
+  const doneCount = useMemo(
+    () => cards.filter((c) => c.column === "Done").length,
+    [cards],
+  );
+
+  const clearDoneColumn = async () => {
+    try {
+      const r = await kanbanApi.clearColumn(projectKey, "Done");
+      toast.success(`Cleared ${r.cleared} card(s) from Done`);
+      void reload();
+    } catch {
+      toast.error("Failed to clear Done column");
+    }
+  };
 
   const redispatchAll = async () => {
     try {
@@ -118,6 +133,11 @@ export default function KanbanPage() {
           {pendingCount > 0 && (
             <Button size="sm" variant="outline" onClick={dispatchAll}>
               Dispatch all ({pendingCount})
+            </Button>
+          )}
+          {doneCount > 0 && (
+            <Button size="sm" variant="outline" className="text-destructive" onClick={clearDoneColumn}>
+              Clear Done ({doneCount})
             </Button>
           )}
           <Button size="sm" onClick={() => setCreating(true)}>
