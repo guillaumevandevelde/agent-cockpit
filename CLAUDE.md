@@ -103,6 +103,10 @@ All under `/api/v1/`: health, config, projects, cli, mcp, commands, plugins, hoo
 - **Modal sizes**: Use `MODAL_SIZES.SM`, `MODAL_SIZES.MD`, or `MODAL_SIZES.LG` from `@/lib/constants` for dialog sizing.
 - **Markdown rendering**: Use `<MarkdownRenderer>` from `@/components/shared/MarkdownRenderer` for read-only markdown display. Use `<MarkdownPreviewToggle>` from `@/components/shared/MarkdownPreviewToggle` for editable markdown with Edit/Preview tabs.
 
+## Git Workflow
+
+- **Finishing a branch**: The default is to **merge back to `master` and push** — no need to ask. Skip the merge/PR/cleanup menu. If the main checkout's `master` is dirty (concurrent sessions share one working copy), do the merge in a temporary worktree.
+
 ## CI/CD
 
 GitHub Actions workflows in `.github/workflows/`:
