@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Castle, Plus, ChevronDown, ChevronRight, Loader2, XCircle, CheckCircle, AlertCircle, Trash2 } from 'lucide-react'
+import { Castle, Plus, ChevronDown, ChevronRight, Loader2, XCircle, CheckCircle, AlertCircle, Trash2, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog,
   DialogContent,
@@ -402,7 +403,7 @@ export function SandcastlePage() {
             <Castle className="h-8 w-8" /> Sandcastle
           </h1>
           <p className="text-muted-foreground mt-1">
-            Orchestrate sandboxed coding agents in isolated environments
+            Run coding agents via sandcastle. Configure Docker or Podman for container isolation.
           </p>
         </div>
         <div className="flex gap-2">
@@ -504,6 +505,14 @@ export function SandcastlePage() {
           </CardHeader>
           {config.enabled && (
             <CardContent className="space-y-4">
+              {config.sandbox_provider === 'no-sandbox' && (
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong>No container isolation.</strong> Agents run directly on the host with full filesystem access. Switch to Docker or Podman for true sandbox isolation.
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Sandbox Provider</Label>
