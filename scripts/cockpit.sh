@@ -301,6 +301,7 @@ cmd_start() {
     sleep 1
     if is_running "$RUN_DIR/supervisor.pid"; then
         echo "Cockpit gestart (supervisor pid $(cat "$RUN_DIR/supervisor.pid"))."
+        echo "Frontend:  http://${HOST:-localhost}:5173"
         echo "Logs: ./scripts/cockpit.sh logs backend"
     else
         echo "Supervisor startte niet — zie $LOG_DIR/supervisor.log"
