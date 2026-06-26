@@ -22,6 +22,7 @@ class SessionRegistry:
         self._panes: dict[str, str] = {}
         self._idle: dict[str, bool] = {}
         self._waiters: dict[str, list[asyncio.Event]] = {}
+        self._external: set[str] = set()  # non-tmux sessions (e.g. sandcastle runs)
         self._max_sessions_override = max_sessions
 
     @property
@@ -34,12 +35,24 @@ class SessionRegistry:
 
     @property
     def session_count(self) -> int:
-        """Number of tracked sessions."""
-        return len(self._panes)
+        """Number of tracked sessions, tmux panes plus external reservations."""
+        return len(self._panes) + len(self._external)
 
     def can_add_session(self) -> bool:
         """Check if we can track another session without exceeding limits."""
         return self.session_count < self.effective_max_sessions
+
+    def reserve_external(self, key: str) -> None:
+        """Reserve a slot for a non-tmux session (e.g. a sandcastle container run).
+
+        Sandcastle agents run in containers, not tmux, so the hook-fed pane map never
+        sees them — yet they consume memory just the same. Reserving here makes them
+        count against the shared budget so `can_add_session()` is honest. Idempotent."""
+        self._external.add(key)
+
+    def release_external(self, key: str) -> None:
+        """Release a previously reserved external slot. No-op for unknown keys."""
+        self._external.discard(key)
 
     def record(self, event: str, session_id: str, cwd: str,
                tmux_pane: str | None = None) -> bool:

@@ -70,9 +70,11 @@ htmlcov/
 # APM dependencies
 apm_modules/
 
-# Sandcastle runtime artifacts (per-run configs + ephemeral worktrees)
+# Sandcastle runtime artifacts (per-run configs + ephemeral worktrees + logs)
 .sandcastle/run-config-*.json
+.sandcastle/parallel-config-*.json
 .sandcastle/worktrees/
+.sandcastle/logs/
 
 # Local tooling state
 .mimocode/

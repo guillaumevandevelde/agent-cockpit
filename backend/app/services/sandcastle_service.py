@@ -48,21 +48,44 @@ def _resolve_docker_image(sandbox_provider: str, docker_image: str | None) -> st
     return docker_image
 
 
-def _terminate_process_group(process) -> None:
-    """Best-effort kill of the runner's whole process group.
+# Grace window between asking the runner to shut down (SIGTERM, which it turns into
+# an AbortSignal so sandcastle can dispose the container) and force-killing it.
+_TERMINATE_GRACE_SECONDS = 20
 
-    The runner spawns docker/podman CLI children; killing only the node PID would
-    leave those (and their `wait`) dangling. The subprocess is launched with
-    start_new_session=True so its PID is also the process-group id. Note this still
-    cannot reap a detached dockerd-managed container — that needs label-based
-    cleanup the sandcastle library does on graceful dispose."""
+
+def _signal_process_group(process, sig) -> None:
+    """Send `sig` to the runner's whole process group.
+
+    The runner spawns docker/podman CLI children; signalling only the node PID would
+    leave those dangling. The subprocess is launched with start_new_session=True so
+    its PID is also the process-group id."""
     if process is None or process.returncode is not None:
         return
     try:
-        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        os.killpg(os.getpgid(process.pid), sig)
     except (ProcessLookupError, PermissionError):
         try:
-            process.kill()
+            process.send_signal(sig)
+        except ProcessLookupError:
+            pass
+
+
+async def _terminate_gracefully(process) -> None:
+    """SIGTERM the runner so it can dispose its container, then SIGKILL if it hangs.
+
+    The runner translates SIGTERM into an AbortSignal, letting sandcastle tear the
+    sandbox container down cleanly. A hard SIGKILL is the fallback when the runner
+    doesn't exit within the grace window (and can still orphan a dockerd-managed
+    container — the unavoidable case)."""
+    if process is None or process.returncode is not None:
+        return
+    _signal_process_group(process, signal.SIGTERM)
+    try:
+        await asyncio.wait_for(process.wait(), timeout=_TERMINATE_GRACE_SECONDS)
+    except asyncio.TimeoutError:
+        _signal_process_group(process, signal.SIGKILL)
+        try:
+            await process.wait()
         except ProcessLookupError:
             pass
 
@@ -303,11 +326,7 @@ class SandcastleService:
                         timeout=timeout
                     )
                 except asyncio.TimeoutError:
-                    _terminate_process_group(process)
-                    try:
-                        await process.wait()  # reap so we don't leak a zombie
-                    except ProcessLookupError:
-                        pass
+                    await _terminate_gracefully(process)
                     raise TimeoutError(f"Run timed out after {timeout} seconds")
 
                 # Update run with results
@@ -351,6 +370,10 @@ class SandcastleService:
                 await session.commit()
             finally:
                 _cleanup_run_config(config.project_path, f"run-config-{run_id}.json")
+                # Release the shared-budget slot the dispatcher reserved for this run.
+                if branch_name:
+                    from app.services.scheduling.session_registry import session_registry
+                    session_registry.release_external(branch_name)
 
     def _build_run_command(
         self,
