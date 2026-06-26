@@ -23,7 +23,7 @@ export function Column({
 
   return (
     <div
-      className={`flex-1 min-w-56 bg-muted/40 rounded-lg p-2 transition-colors ${
+      className={`flex-1 min-w-56 bg-muted/40 rounded-lg p-2 transition-colors flex flex-col min-h-0 ${
         dragOver ? "ring-2 ring-primary/50" : ""
       }`}
       onDragOver={(e) => {
@@ -53,19 +53,21 @@ export function Column({
             onDragStartColumn?.(kanbanColumn.id);
           }
         }}
-        className="px-1 pb-2 text-xs font-semibold uppercase text-muted-foreground cursor-grab active:cursor-grabbing"
+        className="px-1 pb-2 text-xs font-semibold uppercase text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0"
       >
         {column} <span className="ml-1">({cards.length})</span>
       </div>
-      {cards.map((c) => (
-        <div
-          key={c.id}
-          draggable
-          onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
-        >
-          <CardItem card={c} onOpen={onOpen} />
-        </div>
-      ))}
+      <div className="overflow-y-auto flex-1 min-h-0">
+        {cards.map((c) => (
+          <div
+            key={c.id}
+            draggable
+            onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
+          >
+            <CardItem card={c} onOpen={onOpen} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

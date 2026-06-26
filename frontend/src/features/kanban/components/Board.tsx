@@ -18,7 +18,7 @@ export function Board({
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-4">
+    <div className="flex gap-3 overflow-x-auto pb-4 flex-1 min-h-0">
       {columns.map((col) => (
         <Column
           key={col.id}

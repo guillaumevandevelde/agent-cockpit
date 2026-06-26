@@ -112,8 +112,8 @@ export default function KanbanPage() {
   if (!projectPath) return <div className="p-6">Select a project first.</div>;
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col h-full gap-4 overflow-hidden">
+      <div className="flex items-center justify-between flex-shrink-0">
         <div>
           <h1 className="text-xl font-semibold">Kanban</h1>
           <div className="text-xs text-muted-foreground">{projectKey || "…"}</div>
