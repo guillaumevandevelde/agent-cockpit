@@ -152,14 +152,14 @@ export function CardEditDialog({
               <SelectContent>
                 <SelectItem value="auto">Auto (use project default)</SelectItem>
                 <SelectItem value="worktree">Worktree (local)</SelectItem>
-                <SelectItem value="sandcastle">Sandcastle (isolated sandbox)</SelectItem>
+                <SelectItem value="sandcastle">Sandcastle</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">
               {transport === "auto"
                 ? "Uses project's sandcastle config if enabled, otherwise worktree."
                 : transport === "sandcastle"
-                ? "Run this card in an isolated Docker/Podman sandbox."
+                ? "Run via sandcastle. Isolation depends on the project's sandbox provider (docker/podman/no-sandbox)."
                 : "Run this card locally with git worktree."}
             </p>
           </div>
