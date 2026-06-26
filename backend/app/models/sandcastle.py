@@ -19,8 +19,8 @@ class SandcastleConfig(Base):
     project_path: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     sandbox_provider: Mapped[str] = mapped_column(String(32), default="no-sandbox")  # docker | podman | vercel | no-sandbox
-    agent_provider: Mapped[str] = mapped_column(String(32), default="claude-code")  # claude-code | codex | cursor | pi | opencode | copilot
-    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    agent_provider: Mapped[str] = mapped_column(String(32), default="claude-code")  # claude-code | codex-cli | open-code
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True, default="sonnet")
     branch_strategy: Mapped[str] = mapped_column(String(32), default="merge-to-head")  # head | merge-to-head | branch
     docker_image: Mapped[str | None] = mapped_column(String(256), nullable=True)
     max_iterations: Mapped[int] = mapped_column(Integer, default=1)

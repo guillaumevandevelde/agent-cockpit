@@ -53,11 +53,12 @@ async def get_config(project_path: str = Query(...)):
     if not config:
         # Return default config
         return {
+            "id": None,
             "project_path": project_path,
             "enabled": False,
             "sandbox_provider": "no-sandbox",
             "agent_provider": "claude-code",
-            "model": None,
+            "model": "sonnet",
             "branch_strategy": "merge-to-head",
             "docker_image": None,
             "max_iterations": 1,
@@ -139,7 +140,7 @@ async def list_configs():
 @router.get("/stats")
 async def get_stats():
     """Get sandcastle run statistics."""
-    from sqlalchemy import func
+    from sqlalchemy import func, select
     from app.database import AsyncSessionLocal
     from app.models.sandcastle import SandcastleRun
     
@@ -302,6 +303,7 @@ async def get_run_logs(run_id: int, offset: int = 0):
 
 from fastapi.responses import StreamingResponse
 import asyncio
+import json
 
 
 @router.get("/runs/{run_id}/stream")

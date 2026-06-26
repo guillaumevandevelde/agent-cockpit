@@ -28,6 +28,7 @@ import {
   checkSandcastleHealth,
   buildSandcastleImage,
   getSandcastleStats,
+  getSandcastleRunLogs,
 } from './api'
 import type { SandcastleConfig, SandcastleRun, SandcastleHealth, SandcastleStats } from './types'
 
@@ -55,6 +56,25 @@ interface RunCardProps {
 
 function RunCard({ run, onCancel }: RunCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [logs, setLogs] = useState<string | null>(null)
+  const [loadingLogs, setLoadingLogs] = useState(false)
+
+  const loadLogs = useCallback(async () => {
+    if (!expanded || logs !== null || run.status === 'pending') return
+    setLoadingLogs(true)
+    try {
+      const data = await getSandcastleRunLogs(run.id)
+      setLogs(data.log_content || data.stdout || null)
+    } catch {
+      // Logs might not be available yet
+    } finally {
+      setLoadingLogs(false)
+    }
+  }, [expanded, logs, run.id, run.status])
+
+  useEffect(() => {
+    loadLogs()
+  }, [loadLogs])
 
   return (
     <div>
@@ -101,7 +121,16 @@ function RunCard({ run, onCancel }: RunCardProps) {
               <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Prompt</p>
               <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-32">{run.prompt}</pre>
             </div>
-            {run.stdout && (
+            {loadingLogs && (
+              <div className="text-xs text-muted-foreground">Loading logs...</div>
+            )}
+            {logs && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Agent Logs</p>
+                <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-64 font-mono">{logs}</pre>
+              </div>
+            )}
+            {run.stdout && !logs && (
               <div>
                 <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Output</p>
                 <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-48">{run.stdout}</pre>
@@ -146,7 +175,7 @@ export function SandcastlePage() {
     } catch {
       // Config might not exist yet, use defaults
       setConfig({
-        id: 0,
+        id: null,
         project_path: activeProject.path,
         enabled: false,
         sandbox_provider: 'no-sandbox',
@@ -202,7 +231,7 @@ export function SandcastlePage() {
   const handleToggle = async () => {
     if (!config) return
     try {
-      if (config.id === 0) {
+      if (!config.id) {
         // Create new config
         await updateSandcastleConfig(config.project_path, { enabled: true })
       } else {
@@ -284,7 +313,7 @@ export function SandcastlePage() {
           prompt: p.prompt.trim(),
           branch_name: p.branch_name.trim() || undefined,
         })),
-        config?.id
+        config?.id ?? undefined
       )
       toast.success(`${validPrompts.length} runs started`)
       setShowParallelDialog(false)
@@ -468,11 +497,8 @@ export function SandcastlePage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="claude-code">Claude Code</SelectItem>
-                      <SelectItem value="codex">Codex</SelectItem>
-                      <SelectItem value="cursor">Cursor</SelectItem>
-                      <SelectItem value="pi">Pi</SelectItem>
-                      <SelectItem value="opencode">OpenCode</SelectItem>
-                      <SelectItem value="copilot">Copilot</SelectItem>
+                      <SelectItem value="codex-cli">Codex CLI</SelectItem>
+                      <SelectItem value="open-code">Open Code</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

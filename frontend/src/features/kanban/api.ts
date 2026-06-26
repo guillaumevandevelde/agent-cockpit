@@ -70,6 +70,7 @@ export const kanbanApi = {
     body: {
       title?: string;
       description?: string;
+      column?: string;
       agent?: string | null;
       priority?: string | null;
       labels?: string[] | null;
@@ -185,5 +186,11 @@ export const kanbanApi = {
     apiClient<{ enabled: boolean }>(`${BASE}/skip-permissions`, {
       method: "POST",
       body: JSON.stringify({ project_key: projectKey, enabled }),
+    }),
+
+  clearColumn: (projectKey: string, column: string): Promise<{ cleared: number }> =>
+    apiClient<{ cleared: number }>(`${BASE}/clear-column`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, column }),
     }),
 };

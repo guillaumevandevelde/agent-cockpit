@@ -41,6 +41,7 @@ export function CardEditDialog({
   initial?: {
     title: string;
     description: string;
+    column?: string;
     priority?: string | null;
     labels?: string[] | null;
     transport?: string | null;
@@ -60,7 +61,7 @@ export function CardEditDialog({
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [column, setColumn] = useState(columns[0] ?? "Backlog");
+  const [column, setColumn] = useState(initial?.column ?? columns[0] ?? "Backlog");
   const [priority, setPriority] = useState<Priority>(
     (initial?.priority as Priority) ?? "none"
   );
@@ -99,23 +100,21 @@ export function CardEditDialog({
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            {!initial && (
-              <div className="space-y-2">
-                <Label>Column</Label>
-                <Select value={column} onValueChange={setColumn}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select column" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {columns.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label>Column</Label>
+              <Select value={column} onValueChange={setColumn}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select column" />
+                </SelectTrigger>
+                <SelectContent>
+                  {columns.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
             <div className="space-y-2">
               <Label>Priority</Label>

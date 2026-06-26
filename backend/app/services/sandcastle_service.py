@@ -220,11 +220,15 @@ class SandcastleService:
 
                 # Execute the subprocess with timeout
                 try:
+                    env = os.environ.copy()
+                    backend_nm = str(SCRIPT_DIR.parent / "node_modules")
+                    env["NODE_PATH"] = backend_nm + os.pathsep + env.get("NODE_PATH", "")
                     process = await asyncio.create_subprocess_exec(
                         *cmd,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                         cwd=config.project_path,
+                        env=env,
                     )
                     run.pid = process.pid
                     await session.commit()
@@ -375,11 +379,15 @@ class SandcastleService:
                 await session.commit()
 
                 # Execute the subprocess
+                env = os.environ.copy()
+                backend_nm = str(SCRIPT_DIR.parent / "node_modules")
+                env["NODE_PATH"] = backend_nm + os.pathsep + env.get("NODE_PATH", "")
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=config.project_path,
+                    env=env,
                 )
 
                 for run in runs:

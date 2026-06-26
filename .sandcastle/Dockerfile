@@ -4,16 +4,16 @@ FROM node:22-slim AS builder
 LABEL maintainer="Claude Cockpit"
 LABEL description="Sandcastle agent container for isolated AI coding"
 
-# Security: versie pinnen via apt
-ARG GIT_VERSION=1:2.39.*
-ARG CURL_VERSION=7.88.*
-ARG JQ_VERSION=1.6.*
+# Use working mirror (deb.debian.org may be unreachable in some environments)
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+    && echo "deb http://ftp.be.debian.org/debian bookworm bookworm-updates main" > /etc/apt/sources.list \
+    && echo "deb http://security.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list
 
-# Install system dependencies met versie pinning
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git=${GIT_VERSION} \
-    curl=${CURL_VERSION} \
-    jq=${JQ_VERSION} \
+    git \
+    curl \
+    jq \
     ca-certificates \
     gnupg \
     && rm -rf /var/lib/apt/lists/* \
@@ -38,8 +38,9 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
 # Cleanup npm cache
 RUN rm -rf /root/.npm /tmp/*
 
-# Security: niet-root user aanmaken
-RUN groupadd -r agent && useradd -r -g agent -m -s /bin/bash agent \
+# Security: niet-root user aanmaken (uid 1000 voor --userns=keep-id compatibiliteit)
+RUN groupdel node 2>/dev/null; userdel node 2>/dev/null; true \
+    && groupadd -g 1000 agent && useradd -u 1000 -g agent -m -s /bin/bash agent \
     && mkdir -p /home/agent/.config /home/agent/.local \
     && chown -R agent:agent /home/agent
 

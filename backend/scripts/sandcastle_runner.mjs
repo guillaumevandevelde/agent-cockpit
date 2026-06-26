@@ -36,14 +36,30 @@ const config = JSON.parse(readFileSync(configPath, "utf-8"));
 
 // Helper to create sandbox provider
 async function createSandboxProvider(providerType, dockerImage) {
+  // Auto-mount Claude credentials for subscription-based auth
+  const claudeHome = process.env.HOME || "/home/guillaume";
+  const credentialsPath = `${claudeHome}/.claude/.credentials.json`;
+  const mounts = [];
+  try {
+    const { accessSync } = await import("node:fs");
+    accessSync(credentialsPath);
+    mounts.push({
+      hostPath: credentialsPath,
+      sandboxPath: "/home/agent/.claude/.credentials.json",
+      readonly: true,
+    });
+  } catch {
+    // No credentials file found — will fail with "not logged in"
+  }
+
   switch (providerType) {
     case "docker": {
       const { docker } = await import("@ai-hero/sandcastle/sandboxes/docker");
-      return docker(dockerImage ? { imageName: dockerImage } : {});
+      return docker({ imageName: dockerImage, mounts });
     }
     case "podman": {
       const { podman } = await import("@ai-hero/sandcastle/sandboxes/podman");
-      return podman(dockerImage ? { imageName: dockerImage } : {});
+      return podman({ imageName: dockerImage, mounts });
     }
     case "vercel": {
       const { vercel } = await import("@ai-hero/sandcastle/sandboxes/vercel");
@@ -58,32 +74,33 @@ async function createSandboxProvider(providerType, dockerImage) {
 }
 
 // Helper to create agent provider
+// Maps Claude Cockpit provider IDs to sandcastle library factories
 async function createAgentProvider(sandcastle, providerType, options = {}) {
+  const model = options.model || "sonnet";
   switch (providerType) {
-    case "codex": {
-      const { codex } = sandcastle;
-      return codex(options);
-    }
-    case "cursor": {
-      const { cursor } = sandcastle;
-      return cursor(options);
-    }
-    case "pi": {
-      const { pi } = sandcastle;
-      return pi(options);
-    }
-    case "opencode": {
-      const { opencode } = sandcastle;
-      return opencode(options);
-    }
-    case "copilot": {
-      const { copilot } = sandcastle;
-      return copilot(options);
-    }
-    case "claude-code":
-    default: {
+    case "claude-code": {
       const { claudeCode } = sandcastle;
-      return claudeCode(options);
+      return claudeCode(model, options);
+    }
+    case "codex-cli": {
+      const { codex } = sandcastle;
+      return codex(model, options);
+    }
+    case "open-code": {
+      const { opencode } = sandcastle;
+      return opencode(model, options);
+    }
+    case "mimo-code": {
+      throw new Error(
+        "mimo-code is not supported in sandbox mode — the container only has claude-code installed. " +
+        "Switch agent_provider to 'claude-code' for sandbox runs."
+      );
+    }
+    default: {
+      throw new Error(
+        `Unknown agent provider '${providerType}'. ` +
+        `Supported providers: claude-code, codex-cli, open-code`
+      );
     }
   }
 }
@@ -100,6 +117,8 @@ async function executeRun(sandcastle, config, runConfig) {
   const agentOptions = {};
   if (config.model) {
     agentOptions.model = config.model;
+  } else {
+    agentOptions.model = "sonnet";
   }
   
   const agentProvider = await createAgentProvider(
@@ -174,6 +193,8 @@ async function executeParallelRuns(sandcastle, config, runs) {
     const agentOptions = {};
     if (config.model) {
       agentOptions.model = config.model;
+    } else {
+      agentOptions.model = "sonnet";
     }
     
     const agentProvider = await createAgentProvider(
@@ -182,28 +203,38 @@ async function executeParallelRuns(sandcastle, config, runs) {
       agentOptions
     );
     
-    await using sandbox = await createSandbox({
+    const sandbox = await createSandbox({
       branch: config.shared_branch || "agent/parallel",
       sandbox: sandboxProvider,
     });
     
-    // Execute all runs on the same sandbox
-    const results = [];
-    for (const runConfig of runs) {
-      const result = await sandbox.run({
-        agent: agentProvider,
-        prompt: runConfig.prompt,
-        maxIterations: config.max_iterations || 1,
-      });
-      results.push({
-        run_id: runConfig.run_id,
-        iterations: result.iterations?.length || 0,
-        commits: result.commits || [],
-        branch: result.branch || null,
-      });
+    try {
+      // Execute all runs on the same sandbox
+      const results = [];
+      for (const runConfig of runs) {
+        const result = await sandbox.run({
+          agent: agentProvider,
+          prompt: runConfig.prompt,
+          maxIterations: config.max_iterations || 1,
+        });
+        results.push({
+          run_id: runConfig.run_id,
+          iterations: result.iterations?.length || 0,
+          commits: result.commits || [],
+          branch: result.branch || null,
+        });
+      }
+      
+      return { mode: "shared-sandbox", results };
+    } finally {
+      if (typeof sandbox[Symbol.asyncDispose] === "function") {
+        await sandbox[Symbol.asyncDispose]();
+      } else if (typeof sandbox.close === "function") {
+        await sandbox.close();
+      } else if (typeof sandbox.destroy === "function") {
+        await sandbox.destroy();
+      }
     }
-    
-    return { mode: "shared-sandbox", results };
   }
   
   // Execute runs in parallel on separate sandboxes
@@ -232,6 +263,8 @@ async function main() {
     // Dynamically import sandcastle
     const sandcastle = await import("@ai-hero/sandcastle");
     
+    console.error("Sandcastle config:", JSON.stringify(config, null, 2));
+    
     let output;
     
     if (values.mode === "parallel" && config.runs) {
@@ -247,6 +280,7 @@ async function main() {
     process.exit(0);
   } catch (error) {
     console.error("Sandcastle run failed:", error.message);
+    console.error("Stack:", error.stack);
     process.exit(1);
   }
 }

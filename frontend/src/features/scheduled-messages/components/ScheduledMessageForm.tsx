@@ -106,7 +106,7 @@ export function ScheduledMessageForm({ onCreated, onCancel }: Props) {
       payload.session_preview = sel?.summary
     }
     if (targetKind === 'sandcastle' && sandcastleConfig) {
-      payload.sandcastle_config_id = sandcastleConfig.id
+      payload.sandcastle_config_id = sandcastleConfig.id ?? undefined
     }
     if (triggerType === 'once') payload.fire_at = new Date(fireAt).toISOString()
     if (triggerType === 'cron') payload.cron_expr = cronExpr.trim()

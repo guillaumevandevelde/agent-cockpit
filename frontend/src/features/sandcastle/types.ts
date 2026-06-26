@@ -1,10 +1,10 @@
 /** Sandcastle configuration for a project */
 export interface SandcastleConfig {
-  id: number;
+  id: number | null;
   project_path: string;
   enabled: boolean;
   sandbox_provider: 'docker' | 'podman' | 'vercel' | 'no-sandbox';
-  agent_provider: 'claude-code' | 'codex' | 'cursor' | 'pi' | 'opencode' | 'copilot';
+  agent_provider: 'claude-code' | 'codex-cli' | 'open-code';
   model: string | null;
   branch_strategy: 'head' | 'merge-to-head' | 'branch';
   docker_image: string | null;
