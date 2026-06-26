@@ -99,14 +99,32 @@ export default function KanbanPage() {
   };
 
   const onMove = async (cardId: string, column: string) => {
+    const card = cards.find((c) => c.id === cardId);
+    const shouldDispatch =
+      card?.column === "Backlog" &&
+      !FIXED_COLUMNS.has(column) &&
+      !card.claimed_by?.startsWith("agent:");
+
     setCards((cs) => cs.map((c) => (c.id === cardId ? { ...c, column } : c)));
     try {
       await kanbanApi.move(cardId, column);
     } catch {
       toast.error("Failed to move card");
-    } finally {
       void reload();
+      return;
     }
+
+    if (shouldDispatch && card) {
+      try {
+        const agent = card.agent ?? selectedProviderId ?? undefined;
+        const r = await kanbanApi.dispatchNow(cardId, projectPath, agent);
+        toast.success(`Dispatched — session ${r.session_name}`);
+      } catch {
+        toast.error("Dispatch failed — card may be claimed or the spawn errored");
+      }
+    }
+
+    void reload();
   };
 
   if (!projectPath) return <div className="p-6">Select a project first.</div>;
