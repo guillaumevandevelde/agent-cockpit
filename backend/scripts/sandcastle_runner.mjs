@@ -34,6 +34,14 @@ if (!values.config) {
 const configPath = resolve(values.config);
 const config = JSON.parse(readFileSync(configPath, "utf-8"));
 
+// Cancellation: the Python backend terminates this process (via its process group)
+// to cancel/timeout a run. Translating SIGTERM/SIGINT into an AbortSignal lets
+// sandcastle's run() tear the container down gracefully instead of leaking it.
+const abortController = new AbortController();
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.on(sig, () => abortController.abort(new Error(`received ${sig}`)));
+}
+
 // Helper to create sandbox provider
 async function createSandboxProvider(providerType, dockerImage) {
   // Auto-mount Claude credentials for subscription-based auth. Note: this gives the
@@ -139,6 +147,7 @@ async function executeRun(sandcastle, config, runConfig) {
     prompt: runConfig.prompt,
     maxIterations: config.max_iterations || 1,
     idleTimeoutSeconds: config.idle_timeout_seconds || 600,
+    signal: abortController.signal,
   };
   
   // Add branch strategy if specified
@@ -222,6 +231,7 @@ async function executeParallelRuns(sandcastle, config, runs) {
           agent: agentProvider,
           prompt: runConfig.prompt,
           maxIterations: config.max_iterations || 1,
+          signal: abortController.signal,
         });
         results.push({
           run_id: runConfig.run_id,

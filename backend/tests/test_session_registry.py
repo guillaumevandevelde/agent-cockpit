@@ -26,6 +26,31 @@ def test_unknown_session_is_not_idle():
     assert reg.pane_for("nope") is None
 
 
+def test_external_reservations_count_toward_session_total():
+    # Sandcastle runs have no tmux pane but still consume memory, so they must
+    # count against the shared session budget.
+    reg = SessionRegistry(max_sessions=3)
+    assert reg.session_count == 0
+    reg.reserve_external("k-a-0001")
+    reg.reserve_external("k-b-0002")
+    assert reg.session_count == 2
+    # Mixed with a tmux session:
+    reg.record("SessionStart", session_id="s1", cwd="/proj", tmux_pane="%1")
+    assert reg.session_count == 3
+    assert reg.can_add_session() is False
+
+
+def test_external_reservations_are_released_and_idempotent():
+    reg = SessionRegistry(max_sessions=2)
+    reg.reserve_external("k-a-0001")
+    reg.reserve_external("k-a-0001")  # same key twice -> counts once
+    assert reg.session_count == 1
+    reg.release_external("k-a-0001")
+    assert reg.session_count == 0
+    reg.release_external("k-a-0001")  # releasing an unknown key is a no-op
+    assert reg.session_count == 0
+
+
 @pytest.mark.asyncio
 async def test_wait_until_idle_returns_immediately_when_idle():
     reg = SessionRegistry()

@@ -265,12 +265,22 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str) -> d
 
     from app.services.sandcastle_service import sandcastle_service
 
+    # Reserve a slot synchronously so this run counts against the shared session
+    # budget for the rest of the dispatch tick (the run record is created later, in a
+    # background task). The reservation is released by the run lifecycle: on success
+    # when the run finishes (_execute_run), or immediately if start_run fails.
+    session_registry.reserve_external(session_name)
+
     async def _start():
-        return await sandcastle_service.start_run(
-            project_path=directory,
-            prompt=prompt,
-            branch_name=session_name,
-        )
+        try:
+            return await sandcastle_service.start_run(
+                project_path=directory,
+                prompt=prompt,
+                branch_name=session_name,
+            )
+        except Exception:
+            session_registry.release_external(session_name)
+            raise
 
     try:
         loop = asyncio.get_running_loop()
