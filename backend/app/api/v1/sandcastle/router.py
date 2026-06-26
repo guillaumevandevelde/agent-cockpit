@@ -353,10 +353,31 @@ async def stream_run_logs(run_id: int, request: Request):
     )
 
 
-@router.delete("/runs/{run_id}")
+@router.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: int):
-    """Cancel a running sandcastle run."""
+    """Cancel a running sandcastle run (leaves the record in place)."""
     success = await sandcastle_service.cancel_run(run_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found or not running")
+    return {"success": True}
+
+
+@router.delete("/runs")
+async def clear_runs(
+    project_path: str | None = Query(None),
+    include_running: bool = Query(False),
+):
+    """Bulk-delete run records. Terminal runs only unless include_running=true."""
+    deleted = await sandcastle_service.clear_runs(
+        project_path=project_path, include_running=include_running
+    )
+    return {"deleted": deleted}
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: int):
+    """Delete a single run record (cancels it first if still active)."""
+    success = await sandcastle_service.delete_run(run_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     return {"success": True}

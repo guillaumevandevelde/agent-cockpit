@@ -98,6 +98,28 @@ def _cleanup_run_config(project_path: str, filename: str) -> None:
         logger.debug("could not remove sandcastle config %s", filename)
 
 
+def _kill_pid_group(pid: int | None, sig) -> None:
+    """Send `sig` to the process group of `pid`, falling back to the bare pid."""
+    if not pid:
+        return
+    try:
+        os.killpg(os.getpgid(pid), sig)
+    except (ProcessLookupError, PermissionError):
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+
+
+def _release_budget_slot(session_name: str) -> None:
+    """Release the shared-session-budget slot reserved for a sandcastle run."""
+    try:
+        from app.services.scheduling.session_registry import session_registry
+        session_registry.release_external(session_name)
+    except Exception:
+        logger.debug("could not release budget slot for %s", session_name)
+
+
 class SandcastleService:
     """Service for managing sandcastle configurations and runs."""
 
@@ -622,22 +644,70 @@ class SandcastleService:
             if not run or run.status != "running":
                 return False
 
-            # Kill the whole process group if PID is available, so the docker/podman
-            # CLI children the runner spawned die with the node process — not just
-            # the node PID.
-            if run.pid:
-                try:
-                    os.killpg(os.getpgid(run.pid), signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    try:
-                        os.kill(run.pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
+            # Kill the whole process group, so the docker/podman CLI children the
+            # runner spawned die with the node process — not just the node PID. The
+            # runner turns SIGTERM into an AbortSignal and disposes the container.
+            _kill_pid_group(run.pid, signal.SIGTERM)
+            if run.branch:
+                _release_budget_slot(run.branch)
 
             run.status = "cancelled"
             run.completed_at = datetime.now(timezone.utc)
             await session.commit()
             return True
+
+    async def delete_run(self, run_id: int) -> bool:
+        """Delete a run record entirely. Cancels it first if still active.
+
+        Returns False if no such run exists."""
+        async with AsyncSessionLocal() as session:
+            run = (
+                await session.execute(
+                    select(SandcastleRun).where(SandcastleRun.id == run_id)
+                )
+            ).scalar_one_or_none()
+            if not run:
+                return False
+            self._teardown_run(run)
+            await session.delete(run)
+            await session.commit()
+            return True
+
+    async def clear_runs(
+        self, project_path: str | None = None, include_running: bool = False
+    ) -> int:
+        """Bulk-delete run records, returning the number removed.
+
+        By default only terminal runs (completed/failed/cancelled) are removed so an
+        in-flight run is never yanked out from under the dispatcher. With
+        include_running=True, pending/running runs are cancelled first and then
+        removed too. An optional project_path scopes the cleanup to one project."""
+        terminal = ("completed", "failed", "cancelled")
+        async with AsyncSessionLocal() as session:
+            query = select(SandcastleRun)
+            if project_path:
+                query = query.where(SandcastleRun.project_path == project_path)
+            if not include_running:
+                query = query.where(SandcastleRun.status.in_(terminal))
+            runs = list((await session.execute(query)).scalars().all())
+            for run in runs:
+                self._teardown_run(run)
+                await session.delete(run)
+            await session.commit()
+            return len(runs)
+
+    def _teardown_run(self, run: SandcastleRun) -> None:
+        """Best-effort side-effect cleanup before a run row is deleted: kill an
+        active process group, free its budget slot, and remove its log file."""
+        if run.status in ("pending", "running"):
+            _kill_pid_group(run.pid, signal.SIGTERM)
+            if run.branch:
+                _release_budget_slot(run.branch)
+        if run.log_file_path:
+            try:
+                Path(run.log_file_path).unlink(missing_ok=True)
+            except OSError:
+                logger.debug("could not remove run log %s", run.log_file_path)
 
     async def get_run_logs(self, run_id: int, offset: int = 0) -> dict[str, Any]:
         """Get logs for a sandcastle run with optional offset for streaming."""
