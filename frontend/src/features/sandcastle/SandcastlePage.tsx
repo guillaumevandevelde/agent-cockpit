@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Castle, Plus, ChevronDown, ChevronRight, Loader2, XCircle, CheckCircle, AlertCircle } from 'lucide-react'
+import { Castle, Plus, ChevronDown, ChevronRight, Loader2, XCircle, CheckCircle, AlertCircle, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +25,8 @@ import {
   startParallelSandcastleRuns,
   listSandcastleRuns,
   cancelSandcastleRun,
+  deleteSandcastleRun,
+  clearSandcastleRuns,
   checkSandcastleHealth,
   buildSandcastleImage,
   getSandcastleStats,
@@ -52,9 +54,10 @@ function shortPath(p: string): string {
 interface RunCardProps {
   run: SandcastleRun
   onCancel: (id: number) => void
+  onDelete: (id: number) => void
 }
 
-function RunCard({ run, onCancel }: RunCardProps) {
+function RunCard({ run, onCancel, onDelete }: RunCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [logs, setLogs] = useState<string | null>(null)
   const [loadingLogs, setLoadingLogs] = useState(false)
@@ -102,7 +105,7 @@ function RunCard({ run, onCancel }: RunCardProps) {
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          {run.status === 'running' && (
+          {run.status === 'running' ? (
             <Button
               variant="ghost"
               size="icon"
@@ -110,6 +113,15 @@ function RunCard({ run, onCancel }: RunCardProps) {
               onClick={() => onCancel(run.id)}
             >
               <XCircle className="h-4 w-4 text-destructive" />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              title="Delete run"
+              onClick={() => onDelete(run.id)}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
             </Button>
           )}
         </div>
@@ -282,6 +294,30 @@ export function SandcastlePage() {
       await loadRuns()
     } catch {
       toast.error('Failed to cancel run')
+    }
+  }
+
+  const handleDeleteRun = async (runId: number) => {
+    try {
+      await deleteSandcastleRun(runId)
+      toast.success('Run deleted')
+      await Promise.all([loadRuns(), loadStats()])
+    } catch {
+      toast.error('Failed to delete run')
+    }
+  }
+
+  const handleClearAll = async () => {
+    if (!activeProject?.path || runs.length === 0) return
+    if (!window.confirm(
+      `Delete all ${runs.length} runs for this project? Any running runs will be cancelled first.`
+    )) return
+    try {
+      const res = await clearSandcastleRuns(activeProject.path, true)
+      toast.success(`Cleared ${res.deleted} run${res.deleted === 1 ? '' : 's'}`)
+      await Promise.all([loadRuns(), loadStats()])
+    } catch {
+      toast.error('Failed to clear runs')
     }
   }
 
@@ -537,8 +573,17 @@ export function SandcastlePage() {
       {/* Runs List */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle>Runs</CardTitle>
-          <CardDescription>{runs.length} total runs</CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Runs</CardTitle>
+              <CardDescription>{runs.length} total runs</CardDescription>
+            </div>
+            {runs.length > 0 && (
+              <Button variant="outline" size="sm" onClick={handleClearAll}>
+                <Trash2 className="h-4 w-4 mr-2" /> Clear all
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {runs.length === 0 ? (
@@ -546,7 +591,7 @@ export function SandcastlePage() {
           ) : (
             <div className="space-y-2">
               {runs.map((run) => (
-                <RunCard key={run.id} run={run} onCancel={handleCancelRun} />
+                <RunCard key={run.id} run={run} onCancel={handleCancelRun} onDelete={handleDeleteRun} />
               ))}
             </div>
           )}

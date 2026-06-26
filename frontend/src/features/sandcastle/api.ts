@@ -89,10 +89,29 @@ export async function getSandcastleRun(runId: number): Promise<SandcastleRun> {
   return apiClient<SandcastleRun>(`${BASE}/runs/${runId}`);
 }
 
-/** Cancel a sandcastle run */
+/** Cancel a running sandcastle run (keeps the record) */
 export async function cancelSandcastleRun(runId: number): Promise<{ success: boolean }> {
   return apiClient<{ success: boolean }>(
+    `${BASE}/runs/${runId}/cancel`,
+    { method: 'POST' }
+  );
+}
+
+/** Delete a single sandcastle run record (cancels it first if still active) */
+export async function deleteSandcastleRun(runId: number): Promise<{ success: boolean }> {
+  return apiClient<{ success: boolean }>(
     `${BASE}/runs/${runId}`,
+    { method: 'DELETE' }
+  );
+}
+
+/** Bulk-delete sandcastle runs. Terminal runs only unless includeRunning is set. */
+export async function clearSandcastleRuns(
+  projectPath?: string,
+  includeRunning = false
+): Promise<{ deleted: number }> {
+  return apiClient<{ deleted: number }>(
+    buildEndpoint(`${BASE}/runs`, { project_path: projectPath, include_running: includeRunning }),
     { method: 'DELETE' }
   );
 }
