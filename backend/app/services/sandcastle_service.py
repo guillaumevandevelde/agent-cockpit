@@ -20,6 +20,60 @@ logger = logging.getLogger(__name__)
 SCRIPT_DIR = Path(__file__).parent.parent.parent / "scripts"
 RUNNER_SCRIPT = SCRIPT_DIR / "sandcastle_runner.mjs"
 
+# Container providers that need a concrete image name.
+_CONTAINER_PROVIDERS = {"docker", "podman"}
+DEFAULT_DOCKER_IMAGE = "sandcastle:local"
+
+# Absolute wall-clock ceiling for a run, regardless of idle activity.
+_OVERALL_TIMEOUT_FLOOR = 1800  # 30 min
+
+
+def _overall_timeout(idle_timeout_seconds: int, max_iterations: int) -> int:
+    """Absolute wall-clock ceiling for a run.
+
+    The *idle* timeout is enforced inside the sandbox by sandcastle itself; the
+    Python subprocess only needs a generous absolute ceiling so a wedged run can
+    never hang forever. Using the idle timeout directly (the old behaviour) killed
+    actively-working runs at the idle boundary, so we scale it up by iterations and
+    apply a sane floor."""
+    idle = idle_timeout_seconds or 600
+    iterations = max(max_iterations or 1, 1)
+    return max(idle * iterations * 4, _OVERALL_TIMEOUT_FLOOR)
+
+
+def _resolve_docker_image(sandbox_provider: str, docker_image: str | None) -> str | None:
+    """Default the image for container providers; leave it unset otherwise."""
+    if sandbox_provider in _CONTAINER_PROVIDERS and not docker_image:
+        return DEFAULT_DOCKER_IMAGE
+    return docker_image
+
+
+def _terminate_process_group(process) -> None:
+    """Best-effort kill of the runner's whole process group.
+
+    The runner spawns docker/podman CLI children; killing only the node PID would
+    leave those (and their `wait`) dangling. The subprocess is launched with
+    start_new_session=True so its PID is also the process-group id. Note this still
+    cannot reap a detached dockerd-managed container — that needs label-based
+    cleanup the sandcastle library does on graceful dispose."""
+    if process is None or process.returncode is not None:
+        return
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+
+
+def _cleanup_run_config(project_path: str, filename: str) -> None:
+    """Remove a temporary run-config-*.json file; ignore if already gone."""
+    try:
+        (Path(project_path) / ".sandcastle" / filename).unlink(missing_ok=True)
+    except OSError:
+        logger.debug("could not remove sandcastle config %s", filename)
+
 
 class SandcastleService:
     """Service for managing sandcastle configurations and runs."""
@@ -116,12 +170,16 @@ class SandcastleService:
             if not config.enabled:
                 raise ValueError("Sandcastle is disabled for this project")
 
-            # Create run record
+            # Create run record. `branch` is seeded with the dispatcher's session
+            # name so the kanban reaper can recognise this as a live sandcastle
+            # session; `_parse_run_output` may later overwrite it with the real
+            # branch the agent pushed to.
             run = SandcastleRun(
                 project_path=project_path,
                 config_id=config.id,
                 prompt=prompt,
                 status="pending",
+                branch=branch_name,
             )
             session.add(run)
             await session.commit()
@@ -229,21 +287,27 @@ class SandcastleService:
                         stderr=asyncio.subprocess.PIPE,
                         cwd=config.project_path,
                         env=env,
+                        # Own process group so a timeout/cancel can take down the node
+                        # process *and* the docker/podman CLI children it spawned.
+                        start_new_session=True,
                     )
                     run.pid = process.pid
                     await session.commit()
 
-                    # Wait for completion with timeout
-                    timeout = config.idle_timeout_seconds or 600
+                    # Absolute wall-clock ceiling. The idle timeout itself is enforced
+                    # by sandcastle inside the sandbox; killing on the idle value here
+                    # would abort actively-working runs.
+                    timeout = _overall_timeout(config.idle_timeout_seconds, config.max_iterations)
                     stdout, stderr = await asyncio.wait_for(
                         process.communicate(),
                         timeout=timeout
                     )
                 except asyncio.TimeoutError:
-                    # Kill the process on timeout
-                    if process and process.returncode is None:
-                        process.kill()
-                        await process.communicate()
+                    _terminate_process_group(process)
+                    try:
+                        await process.wait()  # reap so we don't leak a zombie
+                    except ProcessLookupError:
+                        pass
                     raise TimeoutError(f"Run timed out after {timeout} seconds")
 
                 # Update run with results
@@ -285,6 +349,8 @@ class SandcastleService:
                 run.error = str(e)
                 run.completed_at = datetime.now(timezone.utc)
                 await session.commit()
+            finally:
+                _cleanup_run_config(config.project_path, f"run-config-{run_id}.json")
 
     def _build_run_command(
         self,
@@ -296,11 +362,12 @@ class SandcastleService:
         """Build the Node.js command to execute sandcastle."""
         # Create a temporary config file for this run
         run_config = {
+            "run_id": run.id,
             "sandbox_provider": config.sandbox_provider,
             "agent_provider": config.agent_provider,
             "model": config.model,
             "branch_strategy": config.branch_strategy,
-            "docker_image": config.docker_image,
+            "docker_image": _resolve_docker_image(config.sandbox_provider, config.docker_image),
             "max_iterations": max_iterations or config.max_iterations,
             "idle_timeout_seconds": config.idle_timeout_seconds,
             "prompt": run.prompt,
@@ -368,7 +435,7 @@ class SandcastleService:
 
             try:
                 # Build the parallel command
-                cmd = self._build_parallel_run_command(config, runs)
+                cmd = self._build_parallel_run_command(config, runs, use_shared_sandbox)
 
                 # Create log file
                 log_dir = Path(config.project_path) / ".sandcastle" / "logs"
@@ -388,6 +455,7 @@ class SandcastleService:
                     stderr=asyncio.subprocess.PIPE,
                     cwd=config.project_path,
                     env=env,
+                    start_new_session=True,
                 )
 
                 for run in runs:
@@ -433,11 +501,14 @@ class SandcastleService:
                     run.error = str(e)
                     run.completed_at = datetime.now(timezone.utc)
                 await session.commit()
+            finally:
+                _cleanup_run_config(config.project_path, f"parallel-config-{runs[0].id}.json")
 
     def _build_parallel_run_command(
         self,
         config: SandcastleConfig,
         runs: list[SandcastleRun],
+        use_shared_sandbox: bool = False,
     ) -> list[str]:
         """Build the Node.js command to execute parallel sandcastle runs."""
         # Create a temporary config file for parallel runs
@@ -455,12 +526,12 @@ class SandcastleService:
             "agent_provider": config.agent_provider,
             "model": config.model,
             "branch_strategy": config.branch_strategy,
-            "docker_image": config.docker_image,
+            "docker_image": _resolve_docker_image(config.sandbox_provider, config.docker_image),
             "max_iterations": config.max_iterations,
             "idle_timeout_seconds": config.idle_timeout_seconds,
             "project_path": config.project_path,
             "runs": runs_config,
-            "use_shared_sandbox": False,
+            "use_shared_sandbox": use_shared_sandbox,
         }
 
         # Write config to temp file
@@ -528,12 +599,17 @@ class SandcastleService:
             if not run or run.status != "running":
                 return False
 
-            # Kill the process if PID is available
+            # Kill the whole process group if PID is available, so the docker/podman
+            # CLI children the runner spawned die with the node process — not just
+            # the node PID.
             if run.pid:
                 try:
-                    os.kill(run.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+                    os.killpg(os.getpgid(run.pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    try:
+                        os.kill(run.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
 
             run.status = "cancelled"
             run.completed_at = datetime.now(timezone.utc)

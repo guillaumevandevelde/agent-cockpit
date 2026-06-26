@@ -1,5 +1,5 @@
 """Sandcastle API endpoints."""
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Any
 
@@ -306,33 +306,42 @@ import asyncio
 import json
 
 
+# Absolute cap so a wedged run (e.g. one stuck in "running") can't keep an SSE
+# connection — and its server task — alive forever. 2h at 1s/poll.
+_STREAM_MAX_POLLS = 7200
+
+
 @router.get("/runs/{run_id}/stream")
-async def stream_run_logs(run_id: int):
+async def stream_run_logs(run_id: int, request: Request):
     """Stream logs for a sandcastle run via Server-Sent Events."""
     async def event_generator():
         offset = 0
-        while True:
+        for _ in range(_STREAM_MAX_POLLS):
+            # Stop promptly if the client navigated away / closed the tab.
+            if await request.is_disconnected():
+                break
+
             logs = await sandcastle_service.get_run_logs(run_id, offset)
-            
+
             if "error" in logs and logs["error"] == "Run not found":
                 yield f"data: {json.dumps({'error': 'Run not found'})}\n\n"
                 break
-            
+
             # Send log update
             yield f"data: {json.dumps(logs)}\n\n"
-            
+
             # Update offset for next iteration
             if "log_offset" in logs:
                 offset = logs["log_offset"]
-            
+
             # Check if run is complete
             if logs.get("status") in ("completed", "failed", "cancelled"):
                 yield f"data: {json.dumps({'status': 'done'})}\n\n"
                 break
-            
+
             # Wait before next poll
             await asyncio.sleep(1)
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
