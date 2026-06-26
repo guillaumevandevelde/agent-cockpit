@@ -58,6 +58,10 @@ export interface SpawnSessionRequest {
 export interface SpawnSessionResponse {
   tmux_target: string
   session_name: string
+  /** The git branch name of the worktree, after sanitization (worktree mode). */
+  worktree_name?: string | null
+  /** True when the supplied worktree name had to be changed to be a valid git ref. */
+  worktree_name_adjusted?: boolean
 }
 
 export interface KillSessionResponse {

@@ -179,6 +179,56 @@ def test_spawn_session_uses_worktree_name_as_session_name(monkeypatch, tmp_path)
     assert calls[0][:5] == ["tmux", "new-session", "-d", "-s", "my-feature"]
 
 
+def test_spawn_session_sanitizes_dirty_worktree_name(monkeypatch, tmp_path):
+    from app.services.agent_bridge import spawn
+    from app.services.providers.base import SpawnCommandOptions
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_running_session_names", lambda: set())
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    result = spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(directory=str(tmp_path), mode="worktree",
+                            worktree_name="feature/foo bar"),
+    )
+
+    assert result["worktree_name"] == "feature/foo-bar"
+    assert result["worktree_name_adjusted"] is True
+    # the sanitized branch is what reaches `claude --worktree`
+    assert "--worktree feature/foo-bar" in calls[0][7]
+    # and what is stored so cleanup removes the real worktree
+    stored = spawn.get_spawned_sessions()[result["session_name"]]
+    assert stored["worktree_name"] == "feature/foo-bar"
+
+
+def test_spawn_session_keeps_clean_worktree_name_unflagged(monkeypatch, tmp_path):
+    from app.services.agent_bridge import spawn
+    from app.services.providers.base import SpawnCommandOptions
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_running_session_names", lambda: set())
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    result = spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(directory=str(tmp_path), mode="worktree",
+                            worktree_name="my-feature"),
+    )
+
+    assert result["worktree_name"] == "my-feature"
+    assert result["worktree_name_adjusted"] is False
+
+
 def test_spawn_session_explicit_session_name_overrides(monkeypatch, tmp_path):
     from app.services.agent_bridge import spawn
     from app.services.providers.base import SpawnCommandOptions

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
@@ -235,6 +236,9 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       }
 
       const response = await spawnSession(request)
+      if (response.worktree_name_adjusted && response.worktree_name) {
+        toast.info(`Worktree created as "${response.worktree_name}" (adjusted to a valid git branch name).`)
+      }
       onSpawned(response.tmux_target)
       onOpenChange(false)
     } catch (err) {

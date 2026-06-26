@@ -6,6 +6,8 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from app.utils.git_ref import sanitize_git_branch_name
+
 logger = logging.getLogger(__name__)
 
 _spawned_sessions: dict[str, dict] = {}
@@ -94,6 +96,14 @@ def spawn_session(
     # Use the resolved canonical path from here on
     directory = str(dir_path)
 
+    # A user-supplied worktree name becomes a git branch — coerce it to a valid
+    # ref before it reaches `--worktree`, and report whether it had to change.
+    worktree_name_adjusted = False
+    if mode == "worktree" and worktree_name:
+        sanitized = sanitize_git_branch_name(worktree_name)
+        worktree_name_adjusted = sanitized != worktree_name
+        worktree_name = sanitized
+
     # Generate tmux session name including project directory basename
     import re
     dir_basename = dir_path.name or "project"
@@ -146,7 +156,12 @@ def spawn_session(
     }
 
     logger.info("Spawned session %s in %s (mode=%s)", name, directory, mode)
-    return {"tmux_target": f"{name}:0.0", "session_name": name}
+    return {
+        "tmux_target": f"{name}:0.0",
+        "session_name": name,
+        "worktree_name": _spawned_sessions[name]["worktree_name"],
+        "worktree_name_adjusted": worktree_name_adjusted,
+    }
 
 
 def kill_session(session_name: str, cleanup_worktree: bool = False) -> dict:

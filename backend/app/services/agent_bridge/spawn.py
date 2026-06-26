@@ -12,6 +12,7 @@ from app.services.providers import get_provider
 from app.services.providers.base import SpawnCommandOptions
 from app.services.providers.claude_code import ClaudeCodeProvider
 from app.services.providers.platform_env import build_platform_env
+from app.utils.git_ref import sanitize_git_branch_name
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,15 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: 
 
     directory = _validate_directory(options.directory)
     options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})
+
+    # A user-supplied worktree name becomes a git branch — coerce it to a valid
+    # ref before it reaches `--worktree`, and report whether it had to change.
+    worktree_name_adjusted = False
+    if options.mode == "worktree" and options.worktree_name:
+        sanitized = sanitize_git_branch_name(options.worktree_name)
+        worktree_name_adjusted = sanitized != options.worktree_name
+        options = SpawnCommandOptions(**{**options.__dict__, "worktree_name": sanitized})
+
     preferred = session_name or (options.worktree_name if options.mode == "worktree" else None)
     name = _session_name_for(directory, preferred)
     if provider.id == "claude-code" and options.mode == "worktree" and not options.worktree_name:
@@ -115,6 +125,8 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: 
         "provider_display_name": provider.display_name,
         "tmux_target": f"{name}:0.0",
         "session_name": name,
+        "worktree_name": _spawned_sessions[name]["worktree_name"],
+        "worktree_name_adjusted": worktree_name_adjusted,
     }
 
 
