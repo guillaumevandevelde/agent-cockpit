@@ -233,12 +233,23 @@ def make_worktree_transport(skip_permissions: bool = True) -> "SpawnTransport":
 worktree_transport = make_worktree_transport(skip_permissions=True)
 
 
+# Strong references to in-flight sandcastle start tasks. asyncio only keeps weak
+# references to tasks, so without this set a fire-and-forget task can be garbage
+# collected mid-flight and the run silently never starts.
+_sandcastle_start_tasks: set = set()
+
+
 def sandcastle_transport(*, directory: str, prompt: str, session_name: str) -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
-    
-    This transport uses sandcastle to run the agent in a Docker/Podman container.
-    The run is asynchronous - the function returns immediately after starting the run.
-    
+
+    Runs the agent in a Docker/Podman container. The actual run is kicked off
+    asynchronously; this function returns immediately after scheduling it.
+
+    The dispatcher always calls transports from inside a running event loop, so we
+    schedule the start as a tracked task (kept alive via `_sandcastle_start_tasks`)
+    rather than blocking. `session_name` is stored as the run's branch so the reaper
+    can recognise the live sandcastle session and not release its claim.
+
     Raises MemoryLimitExceeded if hardware memory limits are reached.
     """
     import asyncio
@@ -252,63 +263,66 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str) -> d
             f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
         )
 
-    # Import sandcastle service
     from app.services.sandcastle_service import sandcastle_service
-    
-    # Create a new event loop if we're not in one
+
+    async def _start():
+        return await sandcastle_service.start_run(
+            project_path=directory,
+            prompt=prompt,
+            branch_name=session_name,
+        )
+
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're in an async context, create a task
-            task = asyncio.create_task(
-                sandcastle_service.start_run(
-                    project_path=directory,
-                    prompt=prompt,
-                    branch_name=session_name,
-                )
-            )
-            # Return a placeholder result - the actual run happens async
-            return {
-                "session_name": session_name,
-                "transport": "sandcastle",
-                "status": "started",
-                "task_id": id(task),
-            }
-        else:
-            # We're in a sync context, run the coroutine
-            run = loop.run_until_complete(
-                sandcastle_service.start_run(
-                    project_path=directory,
-                    prompt=prompt,
-                    branch_name=session_name,
-                )
-            )
-            return {
-                "session_name": session_name,
-                "transport": "sandcastle",
-                "run_id": run.id,
-                "status": "started",
-            }
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        # No event loop, create one
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            run = loop.run_until_complete(
-                sandcastle_service.start_run(
-                    project_path=directory,
-                    prompt=prompt,
-                    branch_name=session_name,
+        loop = None
+
+    if loop is not None:
+        # Async context (the normal dispatch path): schedule without blocking and
+        # keep a strong reference so the task can't be GC'd before it runs.
+        task = loop.create_task(_start())
+        _sandcastle_start_tasks.add(task)
+        task.add_done_callback(_sandcastle_start_tasks.discard)
+        return {
+            "session_name": session_name,
+            "transport": "sandcastle",
+            "status": "started",
+        }
+
+    # No running loop (e.g. a sync caller): run to completion so we can return run_id.
+    run = asyncio.run(_start())
+    return {
+        "session_name": session_name,
+        "transport": "sandcastle",
+        "run_id": run.id,
+        "status": "started",
+    }
+
+
+async def _live_sandcastle_sessions() -> set[str]:
+    """Session names of pending/running sandcastle runs on this device.
+
+    Returned as the `sandcastle_live` liveness source for the reaper. Defensive: any
+    failure yields an empty set, which only makes the reaper *more* eager — never
+    less — so a transient DB hiccup can't keep a truly-dead claim alive forever."""
+    try:
+        from sqlalchemy import select
+
+        from app.database import AsyncSessionLocal
+        from app.models.sandcastle import SandcastleRun
+
+        async with AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(SandcastleRun.branch).where(
+                        SandcastleRun.status.in_(("pending", "running"))
+                    )
                 )
-            )
-            return {
-                "session_name": session_name,
-                "transport": "sandcastle",
-                "run_id": run.id,
-                "status": "started",
-            }
-        finally:
-            loop.close()
+            ).scalars().all()
+        return {b for b in rows if b}
+    except Exception:
+        logger.exception("could not query live sandcastle sessions")
+        return set()
 
 
 def _slug(name: str) -> str:
@@ -451,22 +465,29 @@ async def _run_card(
 
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
+    sandcastle_live: set[str] | None = None,
 ) -> int:
-    """Release `agent:` claims on cards in agent columns whose tmux session is gone.
+    """Release `agent:` claims on cards in agent columns whose session is gone.
 
     A dispatched session that dies (crash, manual close, reboot) without moving its
     card out of an agent column would otherwise keep `_project_is_busy` True forever, silently
     wedging auto-dispatch for the whole project — the "auto-pick stopped working"
     symptom. Releasing the dead claim frees the per-project cap so the next card is
     picked up; the orphaned card is left in its agent column (now unclaimed) for a human to
-    re-rank. Human (`me@ui`) claims are never touched. Returns the number reaped."""
+    re-rank. Human (`me@ui`) claims are never touched. Returns the number reaped.
+
+    Liveness has two sources: `live_sessions` (tmux session names, for worktree-transport
+    cards) and `sandcastle_live` (session names of pending/running sandcastle runs).
+    Sandcastle cards have no tmux session, so without the second source every sandcastle
+    card would be reaped on the very next tick and re-dispatched in a loop."""
     from app.kanban.schemas import COLUMNS
+    sandcastle_live = sandcastle_live or set()
     reaped = 0
     for card in cards:
         if card.column in COLUMNS:  # Skip fixed columns (Backlog, Impediment, Done)
             continue
         name = _claimant_session(card)
-        if name is None or name in live_sessions:
+        if name is None or name in live_sessions or name in sandcastle_live:
             continue
         await apply_operation(
             session, op_type="release", entity_type="card",
@@ -480,6 +501,7 @@ async def reap_stale_claims(
 async def dispatch_project(
     session, *, project_key: str, project_path: str, transport: Optional[SpawnTransport] = None,
     live_sessions: Optional[set[str]] = None,
+    sandcastle_live: Optional[set[str]] = None,
 ) -> Optional[dict]:
     """Claim+move+spawn the next card for one project. Returns a result dict or
     None when there is nothing to do (no candidate card, or project is busy).
@@ -495,6 +517,7 @@ async def dispatch_project(
     if live_sessions is not None:
         if await reap_stale_claims(
             session, project_key=project_key, cards=cards, live_sessions=live_sessions,
+            sandcastle_live=sandcastle_live,
         ):
             cards = await list_cards(session, project_key)
 
@@ -737,6 +760,7 @@ async def run_dispatch_tick(*, transport: Optional[SpawnTransport] = None) -> No
         return
 
     live_sessions = _live_sessions()  # one tmux query per tick, shared across projects
+    sandcastle_live = await _live_sandcastle_sessions()  # sandcastle liveness, shared
 
     for project_key, project_path in mapping.items():
         async with KanbanSessionLocal() as ks:
@@ -744,6 +768,7 @@ async def run_dispatch_tick(*, transport: Optional[SpawnTransport] = None) -> No
                 result = await dispatch_project(
                     ks, project_key=project_key, project_path=project_path,
                     transport=transport, live_sessions=live_sessions,
+                    sandcastle_live=sandcastle_live,
                 )
                 await ks.commit()
                 

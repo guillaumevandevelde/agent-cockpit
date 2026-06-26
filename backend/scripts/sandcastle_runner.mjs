@@ -36,20 +36,26 @@ const config = JSON.parse(readFileSync(configPath, "utf-8"));
 
 // Helper to create sandbox provider
 async function createSandboxProvider(providerType, dockerImage) {
-  // Auto-mount Claude credentials for subscription-based auth
-  const claudeHome = process.env.HOME || "/home/guillaume";
-  const credentialsPath = `${claudeHome}/.claude/.credentials.json`;
+  // Auto-mount Claude credentials for subscription-based auth. Note: this gives the
+  // sandboxed agent your Claude account token; the secure compose keeps the agent on
+  // an isolated network to limit exfiltration risk.
+  const claudeHome = process.env.HOME;
   const mounts = [];
-  try {
-    const { accessSync } = await import("node:fs");
-    accessSync(credentialsPath);
-    mounts.push({
-      hostPath: credentialsPath,
-      sandboxPath: "/home/agent/.claude/.credentials.json",
-      readonly: true,
-    });
-  } catch {
-    // No credentials file found — will fail with "not logged in"
+  if (claudeHome) {
+    const credentialsPath = `${claudeHome}/.claude/.credentials.json`;
+    try {
+      const { accessSync } = await import("node:fs");
+      accessSync(credentialsPath);
+      mounts.push({
+        hostPath: credentialsPath,
+        sandboxPath: "/home/agent/.claude/.credentials.json",
+        readonly: true,
+      });
+    } catch {
+      // No credentials file found — will fail with "not logged in"
+    }
+  } else {
+    console.error("Warning: HOME is unset; skipping Claude credentials mount.");
   }
 
   switch (providerType) {
@@ -264,9 +270,15 @@ async function main() {
     const sandcastle = await import("@ai-hero/sandcastle");
     
     console.error("Sandcastle config:", JSON.stringify(config, null, 2));
-    
+
+    // Ensure run_id is set so the log filename matches the path the backend records
+    // (it falls back to Date.now() otherwise, and the backend can never find the log).
+    if (config.run_id == null && values["run-id"] != null) {
+      config.run_id = values["run-id"];
+    }
+
     let output;
-    
+
     if (values.mode === "parallel" && config.runs) {
       // Multi-agent parallel execution
       output = await executeParallelRuns(sandcastle, config, config.runs);

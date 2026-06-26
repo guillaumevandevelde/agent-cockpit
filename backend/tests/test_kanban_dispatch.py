@@ -287,6 +287,50 @@ async def test_reaper_ignores_human_ui_claims():
 
 
 @pytest.mark.asyncio
+async def test_reaper_spares_live_sandcastle_claim_without_tmux():
+    # A sandcastle-dispatched card has no tmux session, so tmux liveness can never
+    # vouch for it. As long as its sandcastle run is active (its session name is in
+    # sandcastle_live), the claim must NOT be reaped — otherwise the auto-dispatcher
+    # releases and re-spawns it every tick.
+    async with KanbanSessionLocal() as s:
+        sc = await _make_card(s, title="sandcastle WIP", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=sc, payload={"claimed_by": "agent:k-sc-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions=set(), sandcastle_live={"k-sc-0001"},
+        )
+        await s.commit()
+        card = await get_card(s, sc)
+    assert reaped == 0
+    assert card.claimed_by == "agent:k-sc-0001"
+
+
+@pytest.mark.asyncio
+async def test_reaper_reaps_dead_sandcastle_claim():
+    # When the sandcastle run is gone (not in sandcastle_live) and there is no tmux
+    # session either, the stale claim is reaped like any other dead session.
+    async with KanbanSessionLocal() as s:
+        sc = await _make_card(s, title="sandcastle dead", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=sc, payload={"claimed_by": "agent:k-sc-dead"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions=set(), sandcastle_live=set(),
+        )
+        await s.commit()
+        card = await get_card(s, sc)
+    assert reaped == 1
+    assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
 async def test_dispatch_without_live_sessions_does_not_reap():
     # The default (live_sessions=None) preserves the old behavior: an agent claim
     # blocks the cap, because we never reap without a liveness snapshot.
