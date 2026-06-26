@@ -34,8 +34,9 @@ class RecordingTransport:
         self.calls = []
         self.fail = fail
 
-    def __call__(self, *, directory, prompt, session_name):
-        self.calls.append({"directory": directory, "prompt": prompt, "session_name": session_name})
+    def __call__(self, *, directory, prompt, session_name, provider_id="claude-code"):
+        self.calls.append({"directory": directory, "prompt": prompt,
+                           "session_name": session_name, "provider_id": provider_id})
         if self.fail:
             raise RuntimeError("tmux exploded")
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
@@ -111,6 +112,59 @@ async def test_dispatch_claims_moves_to_doing_and_spawns():
     # claimant label == the spawned session name
     assert transport.calls[0]["session_name"] == card.claimed_by.split("agent:", 1)[1]
     assert transport.calls[0]["directory"] == "/home/me/repo"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_defaults_to_claude_code_provider():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider_id"] == "claude-code"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_threads_card_provider_to_transport():
+    """A provider id chosen in the UI selects the spawned CLI, but must not be
+    mistaken for a persona/column (there is no `mimo-code` agent column)."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "mimo-code"},
+        )
+        await s.commit()
+        result = await dispatch.dispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+            agent_override="mimo-code",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert result is not None
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider_id"] == "mimo-code"
+    assert card.column == "engineer"  # provider id is NOT used as the column
+
+
+@pytest.mark.asyncio
+async def test_persona_override_still_routes_to_persona_column():
+    """A non-provider agent_override (a persona name) keeps acting as the column."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+            agent_override="developer",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.column == "developer"
+    assert transport.calls[0]["provider_id"] == "claude-code"
 
 
 @pytest.mark.asyncio

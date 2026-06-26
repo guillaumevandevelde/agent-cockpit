@@ -184,13 +184,24 @@ def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
 # ---- transport -------------------------------------------------------------
 
 class SpawnTransport(Protocol):
-    def __call__(self, *, directory: str, prompt: str, session_name: str) -> dict: ...
+    def __call__(self, *, directory: str, prompt: str, session_name: str,
+                 provider_id: str = "claude-code") -> dict: ...
+
+
+def _known_provider_ids() -> set[str]:
+    """Ids of the agent providers the registry knows about (claude-code, codex-cli, …).
+
+    Used to tell a provider selection apart from a persona/column name, since
+    `card.agent` overloads both."""
+    from app.services.providers import get_providers
+    return {p.id for p in get_providers()}
 
 
 def make_worktree_transport(skip_permissions: bool = True) -> "SpawnTransport":
     """Factory that returns a worktree transport with configurable permission bypass."""
-    def _transport(*, directory: str, prompt: str, session_name: str) -> dict:
-        """Create a worktree off origin/master, then spawn a Claude Code session in it.
+    def _transport(*, directory: str, prompt: str, session_name: str,
+                   provider_id: str = "claude-code") -> dict:
+        """Create a worktree off origin/master, then spawn a `provider_id` session in it.
 
         Raises MemoryLimitExceeded if hardware memory limits are reached.
         """
@@ -220,7 +231,7 @@ def make_worktree_transport(skip_permissions: bool = True) -> "SpawnTransport":
             skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
         )
         try:
-            return spawn_session("claude-code", options, session_name=session_name)
+            return spawn_session(provider_id, options, session_name=session_name)
         except Exception:
             subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
                            capture_output=True, text=True, timeout=30)
@@ -239,8 +250,12 @@ worktree_transport = make_worktree_transport(skip_permissions=True)
 _sandcastle_start_tasks: set = set()
 
 
-def sandcastle_transport(*, directory: str, prompt: str, session_name: str) -> dict:
+def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
+                         provider_id: str = "claude-code") -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
+
+    `provider_id` is accepted for transport-signature parity but ignored: sandcastle
+    runs use the per-project sandcastle config's `agent_provider`, not the card's.
 
     Runs the agent in a Docker/Podman container. The actual run is kicked off
     asynchronously; this function returns immediately after scheduling it.
@@ -427,21 +442,31 @@ async def _run_card(
     except ClaimRejected:
         return None  # lost the race; another tick/device took it
 
-    # Determine target agent column: agent_override > card.agent (if valid persona) > persona from column > "engineer".
+    # `agent_override` / `card.agent` overload two unrelated concepts:
+    #   - a provider id (claude-code, mimo-code, …) → which CLI spawns the session
+    #   - a persona name (engineer, developer, …)  → which column + role prompt
+    # Resolve them separately so a provider id is never mistaken for a column.
+    known_providers = _known_provider_ids()
+    card_agent = getattr(card, "agent", None)
+
+    # Provider selection (which CLI to spawn). Override wins over the card's own value.
+    provider_id = next(
+        (v for v in (agent_override, card_agent) if v in known_providers),
+        "claude-code",
+    )
+
+    # Persona/column resolution: agent_override (if a persona) > card.agent (if a known
+    # persona) > persona from source column > "engineer". Provider ids are skipped here.
     agents_dir = Path(project_path) / ".claude" / "agents"
     known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
 
-    if agent_override:
+    if agent_override and agent_override not in known_providers:
         target_agent = agent_override
+    elif card_agent and card_agent in known_agents:
+        target_agent = card_agent
     else:
-        card_agent = getattr(card, "agent", None)
-        # card.agent can be a persona name (e.g. "engineer") or a provider ID
-        # (e.g. "mimo-code"). Only use it as column name if it's a known persona.
-        if card_agent and card_agent in known_agents:
-            target_agent = card_agent
-        else:
-            persona = _persona_for_card(project_path, card, source_column)
-            target_agent = _resolve_agent_from_persona(persona) or "engineer"
+        persona = _persona_for_card(project_path, card, source_column)
+        target_agent = _resolve_agent_from_persona(persona) or "engineer"
 
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=project_key,
@@ -454,7 +479,8 @@ async def _run_card(
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         impediment_question=impediment_question)
     try:
-        spawned = card_transport(directory=project_path, prompt=prompt, session_name=name)
+        spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
+                                 provider_id=provider_id)
     except Exception:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
@@ -467,8 +493,10 @@ async def _run_card(
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
         raise
 
-    logger.info("dispatched card %s (%s) -> session %s (transport: %s)", card.id, source_column, name,
-                "sandcastle" if card_transport == sandcastle_transport else "worktree")
+    logger.info("dispatched card %s (%s) -> session %s (transport: %s, provider: %s)",
+                card.id, source_column, name,
+                "sandcastle" if card_transport == sandcastle_transport else "worktree",
+                provider_id)
     return {"card_id": card.id, "session_name": name, "claimant": claimant,
             "source_column": source_column, "spawned": spawned}
 

@@ -49,10 +49,14 @@ export function CardDrawer({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const { selectedProviderId } = useProviderContext();
+  const { selectedProviderId, providers } = useProviderContext();
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
-  const [agents, setAgents] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
+
+  // The per-card agent selector picks which connected provider runs the card;
+  // `card.agent` holds the provider id (dispatch falls back to the globally
+  // selected provider when it's null — the "Auto" option below).
+  const installedProviders = providers.filter((p) => p.installed);
 
   // A dispatched agent run is bound to the card via the `agent:<session>` claim.
   const runSession = card.claimed_by?.startsWith("agent:")
@@ -62,14 +66,6 @@ export function CardDrawer({
   useEffect(() => {
     kanbanApi.activity(card.id).then(setActivity).catch(() => {});
   }, [card.id]);
-
-  useEffect(() => {
-    if (!projectPath) return;
-    kanbanApi
-      .agents(projectPath)
-      .then((r) => setAgents(r.agents))
-      .catch(() => setAgents([]));
-  }, [projectPath]);
 
   const act = async (fn: () => Promise<unknown>) => {
     try {
@@ -147,10 +143,10 @@ export function CardDrawer({
               <SelectValue placeholder="Agent" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={AUTO}>Auto (by column)</SelectItem>
-              {agents.map((a) => (
-                <SelectItem key={a} value={a}>
-                  {a}
+              <SelectItem value={AUTO}>Auto (selected provider)</SelectItem>
+              {installedProviders.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.display_name}
                 </SelectItem>
               ))}
             </SelectContent>
