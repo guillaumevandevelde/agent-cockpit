@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, status
+from app.config import settings
 
 from app.kanban.db import KanbanSessionLocal
 from app.kanban import service
@@ -240,9 +241,10 @@ async def enable(payload: EnableRequest):
             data = json.loads(mcp_file.read_text())
         except json.JSONDecodeError:
             data = {}
-    data.setdefault("mcpServers", {})["cockpit-kanban"] = {
-        "type": "sse", "url": MCP_SSE_URL,
-    }
+    entry: dict = {"type": "sse", "url": MCP_SSE_URL}
+    if settings.api_token:
+        entry["headers"] = {"Authorization": f"Bearer {settings.api_token}"}
+    data.setdefault("mcpServers", {})["cockpit-kanban"] = entry
     _write_json_atomic(mcp_file, data)
 
     # Ensure fixed columns exist for this project (Backlog, Impediment, Done)

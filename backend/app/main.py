@@ -79,7 +79,10 @@ _UNPROTECTED_PATHS = {
 @app.middleware("http")
 async def require_api_token(request: Request, call_next):
     """Require a bearer token when remote-access protection is configured."""
-    is_protected_api = request.url.path.startswith(settings.api_v1_prefix)
+    is_protected_api = (
+        request.url.path.startswith(settings.api_v1_prefix)
+        or request.url.path.startswith("/kanban-mcp")
+    )
     if settings.api_token and is_protected_api and request.url.path not in _UNPROTECTED_PATHS:
         authorization = request.headers.get("authorization", "")
         token = authorization.removeprefix("Bearer ").strip()
