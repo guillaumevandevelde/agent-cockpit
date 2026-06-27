@@ -32,6 +32,8 @@ export interface Card {
   labels?: string[] | null;
   agent?: string | null;
   transport?: string | null;  // worktree | sandcastle | auto (null)
+  resume_session_id?: string | null;
+  resume_project_folder?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
   created_at: string;

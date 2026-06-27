@@ -244,11 +244,14 @@ export function CardDrawer({
               priority: card.priority,
               labels: card.labels,
               transport: card.transport,
+              resume_session_id: card.resume_session_id,
+              resume_project_folder: card.resume_project_folder,
             }}
             columns={columns.map((c) => c.name)}
             defaultAgent={card.agent}
+            projectPath={projectPath}
             onClose={() => setEditing(false)}
-            onSubmit={async ({ title, description, column, priority, labels, agent, transport }) => {
+            onSubmit={async ({ title, description, column, priority, labels, agent, transport, resume_session_id, resume_project_folder }) => {
               try {
                 await kanbanApi.updateCard(card.id, {
                   title,
@@ -258,6 +261,8 @@ export function CardDrawer({
                   labels: labels.length ? labels : null,
                   agent,
                   transport,
+                  resume_session_id,
+                  resume_project_folder,
                 });
                 setEditing(false);
                 onChanged();

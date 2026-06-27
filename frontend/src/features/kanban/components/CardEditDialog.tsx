@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownPreviewToggle } from "@/components/shared/MarkdownPreviewToggle";
 import { MODAL_SIZES } from "@/lib/constants";
+import { cn } from "@/lib/utils";
+import { formatTimestamp } from "@/features/usage/utils";
+import { fetchResumableSessions } from "@/features/cc-bridge/api";
 import { PRIORITIES, type Priority } from "../types";
+import type { ResumableSession } from "@/types/sessions";
 
 function parseLabels(raw: string): string[] {
   return raw
@@ -34,6 +38,7 @@ export function CardEditDialog({
   initial,
   columns,
   defaultAgent,
+  projectPath,
   onClose,
   onSubmit,
 }: {
@@ -45,9 +50,12 @@ export function CardEditDialog({
     priority?: string | null;
     labels?: string[] | null;
     transport?: string | null;
+    resume_session_id?: string | null;
+    resume_project_folder?: string | null;
   };
   columns: string[];
   defaultAgent?: string | null;
+  projectPath?: string;
   onClose: () => void;
   onSubmit: (data: {
     title: string;
@@ -57,6 +65,8 @@ export function CardEditDialog({
     labels: string[];
     agent: string | null;
     transport: string | null;
+    resume_session_id: string | null;
+    resume_project_folder: string | null;
   }) => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -71,7 +81,48 @@ export function CardEditDialog({
   const [agent, setAgent] = useState<string>(defaultAgent ?? "");
   const [transport, setTransport] = useState<string>(initial?.transport ?? "auto");
 
+  const [resumeSessions, setResumeSessions] = useState<ResumableSession[]>([]);
+  const [selectedResume, setSelectedResume] = useState<ResumableSession | null>(null);
+  const [loadingResume, setLoadingResume] = useState(false);
+  const [showResumePicker, setShowResumePicker] = useState(
+    !!initial?.resume_session_id
+  );
+  // Tracks whether the user has ever interacted with the resume picker.
+  // Until they do, we preserve the initial value on submit.
+  const [resumeTouched, setResumeTouched] = useState(false);
+
   const labels = parseLabels(labelsInput);
+
+  // Pre-select the existing resume session when editing
+  useEffect(() => {
+    if (initial?.resume_session_id && resumeSessions.length > 0) {
+      const match = resumeSessions.find((s) => s.id === initial.resume_session_id);
+      if (match) setSelectedResume(match);
+    }
+  }, [initial?.resume_session_id, resumeSessions]);
+
+  // Fetch resumable sessions when the picker is opened
+  useEffect(() => {
+    if (!showResumePicker || !projectPath) return;
+    let cancelled = false;
+    setLoadingResume(true);
+    setResumeSessions([]);
+    fetchResumableSessions(projectPath, 30)
+      .then((r) => { if (!cancelled) setResumeSessions(r.sessions); })
+      .catch(() => { if (!cancelled) setResumeSessions([]); })
+      .finally(() => { if (!cancelled) setLoadingResume(false); });
+    return () => { cancelled = true; };
+  }, [showResumePicker, projectPath]);
+
+  // If the user has interacted with the picker, use their selection; otherwise
+  // preserve the initial value so editing an existing card without touching the
+  // picker doesn't silently clear a pre-existing resume association.
+  const resume_session_id = resumeTouched
+    ? (selectedResume?.id ?? null)
+    : (selectedResume?.id ?? initial?.resume_session_id ?? null);
+  const resume_project_folder = resumeTouched
+    ? (selectedResume?.project_folder ?? null)
+    : (selectedResume?.project_folder ?? initial?.resume_project_folder ?? null);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -164,6 +215,103 @@ export function CardEditDialog({
             </p>
           </div>
 
+          {/* Resume session picker */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Resume previous session</Label>
+              <div className="flex items-center gap-2">
+                {resume_session_id && (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-destructive"
+                    onClick={() => { setSelectedResume(null); setResumeTouched(true); setShowResumePicker(false); }}
+                  >
+                    Clear
+                  </button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-xs"
+                  onClick={() => setShowResumePicker((v) => !v)}
+                >
+                  {showResumePicker ? "Close" : "Pick session"}
+                </Button>
+              </div>
+            </div>
+
+            {showResumePicker && (
+              <div className="space-y-1.5">
+                {!projectPath ? (
+                  <p className="text-xs text-muted-foreground py-2">
+                    No project selected — save the card first, then edit it with a project active.
+                  </p>
+                ) : loadingResume ? (
+                  <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                    Loading sessions…
+                  </div>
+                ) : resumeSessions.length === 0 ? (
+                  <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                    No recent sessions found for this project.
+                  </div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto rounded-md border">
+                    {resumeSessions.map((session) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        className={cn(
+                          "block w-full min-w-0 text-left px-3 py-2 border-b last:border-b-0 transition-colors",
+                          selectedResume?.id === session.id
+                            ? "border-l-2 border-l-primary bg-primary/5"
+                            : "hover:bg-muted/50"
+                        )}
+                        onClick={() => {
+                          setSelectedResume((prev) =>
+                            prev?.id === session.id ? null : session
+                          );
+                          setResumeTouched(true);
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-sm font-medium truncate min-w-0">
+                              {session.project_name}
+                            </span>
+                            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              {session.worktree_label}
+                            </span>
+                          </span>
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {formatTimestamp(session.modified_at)}
+                          </span>
+                        </div>
+                        {session.summary && (
+                          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                            {session.summary}
+                          </p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedResume && (
+                  <p className="text-xs text-muted-foreground">
+                    Will resume: <span className="font-medium">{selectedResume.project_name}</span>{" "}
+                    ({selectedResume.worktree_label})
+                  </p>
+                )}
+              </div>
+            )}
+
+            {!showResumePicker && resume_session_id && (
+              <p className="text-xs text-muted-foreground">
+                Resuming session <span className="font-mono">{resume_session_id.slice(0, 8)}…</span>
+              </p>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="card-labels">Labels</Label>
             <Input
@@ -199,6 +347,8 @@ export function CardEditDialog({
                 labels,
                 agent: agent.trim() || null,
                 transport: transport === "auto" ? null : transport,
+                resume_session_id,
+                resume_project_folder,
               })
             }
           >
