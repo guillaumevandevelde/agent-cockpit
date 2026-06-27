@@ -59,6 +59,8 @@ export const kanbanApi = {
     labels?: string[] | null;
     agent?: string | null;
     transport?: string | null;
+    resume_session_id?: string | null;
+    resume_project_folder?: string | null;
   }): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards`, {
       method: "POST",
@@ -75,6 +77,8 @@ export const kanbanApi = {
       priority?: string | null;
       labels?: string[] | null;
       transport?: string | null;
+      resume_session_id?: string | null;
+      resume_project_folder?: string | null;
     }
   ): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}`, {
