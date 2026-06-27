@@ -154,6 +154,15 @@ export interface SkillListResponse {
   skills: Skill[];
 }
 
+export interface SkillUsageStat {
+  skill: string;
+  count: number;
+}
+
+export interface SkillStatsResponse {
+  stats: SkillUsageStat[];
+}
+
 // Registry Skills (skills.sh)
 
 export interface RegistrySkill {

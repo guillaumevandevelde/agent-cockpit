@@ -10,6 +10,7 @@ import {
   Shield,
   EyeOff,
   Search,
+  BarChart2,
 } from "lucide-react";
 import {
   Card,
@@ -32,9 +33,11 @@ import {
   type Skill,
   type SkillListResponse,
   type SkillDependencyStatus,
+  type SkillUsageStat,
+  type SkillStatsResponse,
 } from "@/types/agents";
 
-type SkillsTab = "installed" | "discover";
+type SkillsTab = "installed" | "discover" | "stats";
 
 export function SkillsPage() {
   const { activeProject } = useProjectContext();
@@ -48,6 +51,10 @@ export function SkillsPage() {
     Record<string, SkillDependencyStatus>
   >({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [skillStats, setSkillStats] = useState<SkillUsageStat[] | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsFetched, setStatsFetched] = useState(false);
 
   const fetchSkills = useCallback(async () => {
     setLoading(true);
@@ -66,9 +73,34 @@ export function SkillsPage() {
     }
   }, [activeProject?.path]);
 
+  const fetchStats = useCallback(async () => {
+    if (!activeProject?.path) return;
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      const params = { project_path: activeProject.path };
+      const response = await apiClient<SkillStatsResponse>(
+        buildEndpoint("agents/skills/stats", params)
+      );
+      setSkillStats(response.stats);
+    } catch (err) {
+      setStatsError(err instanceof Error ? err.message : "Failed to fetch stats");
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [activeProject?.path]);
+
   useEffect(() => {
     fetchSkills();
+    setStatsFetched(false);
+    setSkillStats(null);
   }, [fetchSkills]);
+
+  useEffect(() => {
+    if (activeTab !== "stats" || statsFetched) return;
+    setStatsFetched(true);
+    fetchStats();
+  }, [activeTab, statsFetched, fetchStats]);
 
   // Fetch dependency status for all skills (in parallel, non-blocking)
   useEffect(() => {
@@ -278,6 +310,10 @@ export function SkillsPage() {
             <Store className="h-4 w-4" />
             Discover
           </TabsTrigger>
+          <TabsTrigger value="stats" className="flex items-center gap-2">
+            <BarChart2 className="h-4 w-4" />
+            Stats
+          </TabsTrigger>
         </TabsList>
 
         {/* Installed Tab */}
@@ -402,6 +438,112 @@ export function SkillsPage() {
         {/* Discover Tab */}
         <TabsContent value="discover">
           <SkillRegistryBrowser onInstallComplete={fetchSkills} />
+        </TabsContent>
+
+        {/* Stats Tab */}
+        <TabsContent value="stats">
+          {!activeProject?.path ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                <BarChart2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>Select a project to see skill usage stats.</p>
+              </CardContent>
+            </Card>
+          ) : statsLoading ? (
+            <div className="text-center py-8 text-muted-foreground">
+              Loading...
+            </div>
+          ) : statsError ? (
+            <Card className="border-destructive">
+              <CardHeader>
+                <CardTitle className="text-destructive">Error</CardTitle>
+                <CardDescription>{statsError}</CardDescription>
+              </CardHeader>
+            </Card>
+          ) : skillStats && skillStats.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                <p>No skill invocations found for this project yet.</p>
+              </CardContent>
+            </Card>
+          ) : skillStats ? (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <BarChart2 className="h-5 w-5 text-primary" />
+                    Skill Invocations
+                  </CardTitle>
+                  <CardDescription>
+                    Ranked by usage in this project's sessions
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {skillStats.map((stat, i) => {
+                      const maxCount = skillStats[0].count;
+                      const pct = Math.round((stat.count / maxCount) * 100);
+                      return (
+                        <div key={stat.skill} className="flex items-center gap-3">
+                          <span className="text-sm text-muted-foreground w-5 text-right">
+                            {i + 1}
+                          </span>
+                          <span className="text-sm font-mono flex-1 truncate">
+                            {stat.skill}
+                          </span>
+                          <div className="w-32 bg-muted rounded-full h-2 shrink-0">
+                            <div
+                              className="bg-primary h-2 rounded-full"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <Badge variant="secondary" className="shrink-0 w-10 justify-center">
+                            {stat.count}
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {(() => {
+                const usedShortNames = new Set(
+                  skillStats.map((s) => s.skill.split(":").pop() ?? s.skill)
+                );
+                const neverUsed = skills.filter(
+                  (s) => !usedShortNames.has(s.name)
+                );
+                if (neverUsed.length === 0) return null;
+                return (
+                  <Card className="border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                        <AlertTriangle className="h-5 w-5" />
+                        Never Used ({neverUsed.length})
+                      </CardTitle>
+                      <CardDescription>
+                        These installed skills have no invocations in this project — consider uninstalling them to reduce context load.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-wrap gap-2">
+                        {neverUsed.map((s) => (
+                          <Badge
+                            key={`${s.location}-${s.name}`}
+                            variant="outline"
+                            className="text-amber-700 border-amber-300"
+                          >
+                            {s.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+            </div>
+          ) : null}
         </TabsContent>
       </Tabs>
 
