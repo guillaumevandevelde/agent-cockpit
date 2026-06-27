@@ -841,6 +841,19 @@ class SkillListResponse(BaseModel):
     skills: List[Skill]
 
 
+class SkillUsageStat(BaseModel):
+    """Usage count for a single skill."""
+
+    skill: str
+    count: int
+
+
+class SkillStatsResponse(BaseModel):
+    """Aggregated skill usage stats for a project."""
+
+    stats: List[SkillUsageStat]
+
+
 # Registry Skills (skills.sh)
 
 

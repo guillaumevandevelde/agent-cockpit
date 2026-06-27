@@ -16,10 +16,12 @@ from app.models.schemas import (
     SkillDependencyStatus,
     SkillInstallResult,
     SkillListResponse,
+    SkillStatsResponse,
     SkillSupportingFile,
 )
 from app.services.agent_service import AgentService
 from app.services.skill_dependency_service import SkillDependencyService
+from app.services.skill_stats_service import SkillStatsService
 from app.services.skills_registry_service import SkillsRegistryService
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
@@ -57,6 +59,23 @@ async def list_skills(
     """
     skills = AgentService.list_skills(project_path)
     return SkillListResponse(skills=skills)
+
+
+@router.get("/skills/stats", response_model=SkillStatsResponse)
+async def get_skill_stats(
+    project_path: Optional[str] = Query(None, description="Project path"),
+):
+    """
+    Get skill invocation stats for the active project.
+
+    Scans Claude session JSONL files for Skill tool_use events and aggregates
+    counts per skill name, sorted descending.
+    Returns empty stats if no project_path is provided.
+    """
+    if not project_path:
+        return SkillStatsResponse(stats=[])
+    stats = await SkillStatsService.scan_project(project_path)
+    return SkillStatsResponse(stats=stats)
 
 
 @router.get("/skills/{location}/{name}", response_model=Skill)
