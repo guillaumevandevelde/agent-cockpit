@@ -795,3 +795,101 @@ async def test_dispatch_all_pending_empty():
         )
     assert len(results) == 0
     assert transport.calls == []
+
+
+# ---- card transport field persistence ------------------------------------
+
+@pytest.mark.asyncio
+async def test_transport_field_persisted_on_create():
+    """card.transport set at create time must survive the round-trip."""
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card", project_key=PK,
+            entity_id=None,
+            payload={"title": "sandcastle card", "transport": "sandcastle"},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.transport == "sandcastle"
+
+
+@pytest.mark.asyncio
+async def test_transport_field_updated_via_update_op():
+    """card.transport can be changed after creation via an update op."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"transport": "sandcastle"},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.transport == "sandcastle"
+
+
+@pytest.mark.asyncio
+async def test_card_transport_sandcastle_uses_sandcastle_transport():
+    """A card with transport=sandcastle must use sandcastle_transport when dispatched."""
+    worktree = RecordingTransport()
+    sc_calls = []
+
+    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code"):
+        sc_calls.append(session_name)
+        return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
+
+    import unittest.mock as mock
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card", project_key=PK,
+            entity_id=None,
+            payload={"title": "sc card", "column": "Backlog", "transport": "sandcastle"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "sandcastle_transport", side_effect=fake_sandcastle):
+        async with KanbanSessionLocal() as s:
+            result = await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=worktree,
+            )
+            await s.commit()
+
+    # sandcastle_transport was called, not the worktree fallback
+    assert len(sc_calls) == 1
+    assert worktree.calls == []
+
+
+@pytest.mark.asyncio
+async def test_card_transport_worktree_overrides_sandcastle_project_default():
+    """A card with transport=worktree uses worktree even when the project default is sandcastle."""
+    sc_calls = []
+    wt_calls = []
+
+    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code"):
+        sc_calls.append(session_name)
+        return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
+
+    def fake_worktree(*, directory, prompt, session_name, provider_id="claude-code"):
+        wt_calls.append(session_name)
+        return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card", project_key=PK,
+            entity_id=None,
+            payload={"title": "worktree card", "column": "Backlog", "transport": "worktree"},
+        )
+        await s.commit()
+
+    import unittest.mock as mock
+    with mock.patch.object(dispatch, "sandcastle_transport", side_effect=fake_sandcastle), \
+         mock.patch.object(dispatch, "worktree_transport", side_effect=fake_worktree):
+        async with KanbanSessionLocal() as s:
+            # project default is sandcastle, but card overrides to worktree
+            result = await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=fake_sandcastle,
+            )
+            await s.commit()
+
+    assert sc_calls == []        # sandcastle was NOT called
+    assert len(wt_calls) == 1   # worktree WAS called
