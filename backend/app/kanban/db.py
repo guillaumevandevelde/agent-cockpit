@@ -101,6 +101,10 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN agent VARCHAR(64)")
     if "transport" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN transport VARCHAR(16)")
+    if "resume_session_id" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN resume_session_id VARCHAR(256)")
+    if "resume_project_folder" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN resume_project_folder VARCHAR(512)")
 
 
 async def _ensure_column_table(conn) -> None:

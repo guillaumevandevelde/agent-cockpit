@@ -119,6 +119,8 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 rank=payload.get("rank", hlc),
                 priority=payload.get("priority"), labels=payload.get("labels"),
                 agent=payload.get("agent"),
+                resume_session_id=payload.get("resume_session_id"),
+                resume_project_folder=payload.get("resume_project_folder"),
                 title_hlc=hlc, description_hlc=hlc, column_hlc=hlc, rank_hlc=hlc,
             ))
             await session.flush()
@@ -142,7 +144,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             for f in ("title", "description"):
                 if f in payload and payload[f] is not None:
                     _lww_set(card, f, payload[f], hlc)
-            for f in ("priority", "labels", "agent"):  # non-LWW scalar attrs
+            for f in ("priority", "labels", "agent", "resume_session_id", "resume_project_folder"):
                 if f in payload:
                     setattr(card, f, payload[f])
         card.updated_at = _utcnow()

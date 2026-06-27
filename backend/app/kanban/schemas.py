@@ -28,6 +28,8 @@ class CardResponse(BaseModel):
     labels: Optional[list] = None
     agent: Optional[str] = None
     transport: Optional[str] = None  # worktree | sandcastle | auto (null)
+    resume_session_id: Optional[str] = None
+    resume_project_folder: Optional[str] = None
     claimed_by: Optional[str] = None
     claimed_at: Optional[datetime] = None
     created_at: datetime
@@ -44,6 +46,8 @@ class CardCreate(BaseModel):
     labels: Optional[list] = None
     agent: Optional[str] = None
     transport: Optional[str] = None  # worktree | sandcastle | auto (null)
+    resume_session_id: Optional[str] = None
+    resume_project_folder: Optional[str] = None
 
 
 class CardUpdate(BaseModel):
@@ -54,6 +58,8 @@ class CardUpdate(BaseModel):
     labels: Optional[list] = None
     agent: Optional[str] = None
     transport: Optional[str] = None  # worktree | sandcastle | auto (null)
+    resume_session_id: Optional[str] = None
+    resume_project_folder: Optional[str] = None
 
 
 class MoveRequest(BaseModel):

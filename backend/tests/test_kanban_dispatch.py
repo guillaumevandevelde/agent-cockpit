@@ -795,3 +795,86 @@ async def test_dispatch_all_pending_empty():
         )
     assert len(results) == 0
     assert transport.calls == []
+
+
+# ---- resume transport -------------------------------------------------------
+
+def test_make_resume_transport_records_call():
+    """make_resume_transport produces a callable that passes session_id through."""
+    calls = []
+
+    def fake_spawn(provider_id, options, *, session_name):
+        calls.append({"options": options, "session_name": session_name})
+        return {"session_name": session_name}
+
+    import unittest.mock as mock
+    with mock.patch("app.services.agent_bridge.spawn.spawn_session", fake_spawn), \
+         mock.patch("app.services.scheduling.session_registry.session_registry.can_add_session",
+                    return_value=True):
+        transport = dispatch.make_resume_transport(
+            session_id="abc-123", project_folder="-home-user-repo",
+        )
+        result = transport(directory="/p", prompt="continue", session_name="k-test-0001")
+
+    assert len(calls) == 1
+    opts = calls[0]["options"]
+    assert opts.mode == "resume"
+    assert opts.session_id == "abc-123"
+    assert opts.project_folder == "-home-user-repo"
+    assert opts.prompt == "continue"
+    assert result == {"session_name": "k-test-0001"}
+
+
+@pytest.mark.asyncio
+async def test_get_transport_for_card_uses_resume_when_set():
+    """A card with resume_session_id gets make_resume_transport, not worktree_transport."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="resumable", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key="",
+            entity_id=cid,
+            payload={"resume_session_id": "sess-xyz", "resume_project_folder": "-p"},
+        )
+        await s.flush()
+        card = await get_card(s, cid)
+
+    transport = dispatch.get_transport_for_card(card, dispatch.worktree_transport)
+    # The returned transport should NOT be the worktree_transport or sandcastle_transport
+    assert transport is not dispatch.worktree_transport
+    assert transport is not dispatch.sandcastle_transport
+
+
+@pytest.mark.asyncio
+async def test_redispatch_with_resume_session_id_uses_resume_transport():
+    """When card has resume_session_id, redispatch calls resume transport, not worktree."""
+    calls = []
+
+    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code"):
+        calls.append({"mode": "resume", "session_name": session_name})
+        return {"session_name": session_name}
+
+    import unittest.mock as mock
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="context-limit card", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key="",
+            entity_id=cid,
+            payload={"resume_session_id": "old-sess-id"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-old-dead"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "make_resume_transport", return_value=resume_transport):
+        async with KanbanSessionLocal() as s:
+            result = await dispatch.redispatch_card(
+                s, card_id=cid, project_path="/p",
+            )
+            await s.commit()
+
+    assert result is not None
+    assert len(calls) == 1
+    assert calls[0]["mode"] == "resume"

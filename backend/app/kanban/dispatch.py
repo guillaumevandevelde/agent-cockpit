@@ -885,21 +885,62 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
     return make_worktree_transport(skip_permissions=skip)
 
 
+def make_resume_transport(session_id: str, project_folder: Optional[str] = None,
+                          skip_permissions: bool = True) -> "SpawnTransport":
+    """Factory that returns a transport that resumes an existing session.
+
+    Unlike the worktree transport, this does NOT create a new git worktree.
+    The ClaudeCodeProvider resolves the working directory from the session's
+    recorded cwd (via project_folder), and spawns with ``--resume session_id``.
+    """
+    def _transport(*, directory: str, prompt: str, session_name: str,
+                   provider_id: str = "claude-code") -> dict:
+        from app.services.agent_bridge.spawn import spawn_session
+        from app.services.providers.base import SpawnCommandOptions
+        from app.services.scheduling.session_registry import session_registry
+
+        if not session_registry.can_add_session():
+            status = get_memory_status_cached()
+            raise MemoryLimitExceeded(
+                f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
+                f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
+            )
+
+        options = SpawnCommandOptions(
+            directory=directory,
+            mode="resume",
+            session_id=session_id,
+            project_folder=project_folder,
+            prompt=prompt,
+            skip_permissions=skip_permissions,
+        )
+        return spawn_session(provider_id, options, session_name=session_name)
+
+    return _transport
+
+
 def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) -> SpawnTransport:
     """Get the appropriate transport for a card based on its transport field.
-    
+
     Transport priority:
-    1. Card's explicit transport setting (worktree | sandcastle)
-    2. Project's default transport (from sandcastle config)
-    
+    1. Card's resume_session_id (resume mode — no worktree created)
+    2. Card's explicit transport setting (worktree | sandcastle)
+    3. Project's default transport (from sandcastle config)
+
     Returns the transport to use for this specific card.
     """
+    # Resume takes priority: spawn with --resume rather than creating a worktree
+    resume_id = getattr(card, "resume_session_id", None)
+    if resume_id:
+        project_folder = getattr(card, "resume_project_folder", None)
+        return make_resume_transport(resume_id, project_folder)
+
     # If card has explicit transport setting, use it
     if card.transport == "sandcastle":
         return sandcastle_transport
     elif card.transport == "worktree":
         return worktree_transport
-    
+
     # Otherwise use the project default
     return default_transport
 

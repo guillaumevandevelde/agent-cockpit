@@ -139,6 +139,32 @@ async def report_impediment(card_id: str, question: str) -> dict:
 
 
 @mcp.tool()
+async def set_resume(card_id: str, session_id: str,
+                     project_folder: str | None = None) -> dict:
+    """Mark this card to resume an existing Claude session on next dispatch.
+
+    When session_id is set, the next dispatch uses ``claude --resume session_id``
+    in the session's original working directory instead of creating a new worktree.
+    This lets a new engineer session continue exactly where a context-limited
+    session left off.
+
+    Args:
+        card_id: The card to tag.
+        session_id: The Claude session UUID to resume (from ~/.claude/projects/…/*.jsonl).
+        project_folder: Encoded folder name (e.g. "-home-user-repo") that maps to
+            ~/.claude/projects/<folder>/.  Inferred from the session file when omitted.
+    """
+    payload: dict = {"resume_session_id": session_id}
+    if project_folder is not None:
+        payload["resume_project_folder"] = project_folder
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=card_id, payload=payload)
+        await s.commit()
+        return _card_dict(await service.get_card(s, card_id))
+
+
+@mcp.tool()
 async def redispatch_card(card_id: str, project_path: str, agent: str | None = None) -> dict:
     """Release a stuck card and re-dispatch it with a fresh session.
     
