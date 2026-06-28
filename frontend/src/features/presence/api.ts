@@ -1,4 +1,4 @@
-import { apiClient, apiTokenQuery } from '@/lib/api'
+import { apiClient } from '@/lib/api'
 import type { PresenceSessionList, PresenceSession, PresenceConfigSnippet } from '@/types/presence'
 import type { Hook } from '@/types/hooks'
 
@@ -44,9 +44,17 @@ export async function fetchConfigSnippet(): Promise<PresenceConfigSnippet> {
   return apiClient<PresenceConfigSnippet>(`${BASE}/config-snippet`)
 }
 
-export function buildPresenceWsUrl(): string {
+export async function fetchPresenceWsToken(): Promise<string | null> {
+  try {
+    const res = await apiClient<{ token: string }>(`${BASE}/token`)
+    return res.token
+  } catch {
+    return null
+  }
+}
+
+export function buildPresenceWsUrl(token?: string | null): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
-  const token = apiTokenQuery()
-  return `${protocol}//${host}/api/v1/${BASE}/ws${token ? `?${token}` : ''}`
+  return `${protocol}//${host}/api/v1/${BASE}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`
 }
