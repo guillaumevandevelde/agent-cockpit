@@ -26,6 +26,9 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
 
 
 class Backup(Base):
@@ -43,6 +46,9 @@ class Backup(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     is_automatic: Mapped[bool] = mapped_column(
@@ -70,6 +76,9 @@ class AutoBackupSettings(Base):
     )
     last_status: Mapped[str | None] = mapped_column(String, nullable=True)
     last_backup_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
 
 
 class Marketplace(Base):
@@ -83,6 +92,9 @@ class Marketplace(Base):
     last_synced: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
 
@@ -103,6 +115,9 @@ class SessionCache(Base):
     cached_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
     file_hash: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -118,6 +133,9 @@ class UsageCache(Base):
     data: Mapped[dict] = mapped_column(JSON, nullable=False)  # Aggregated usage data
     cached_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
     file_hash: Mapped[str | None] = mapped_column(String, nullable=True)  # For cache invalidation
 
@@ -145,6 +163,9 @@ class MCPServerCache(Base):
     cached_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
     config_hash: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (
@@ -170,6 +191,9 @@ class PresenceEvent(Base):
     )
     received_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
 
@@ -202,3 +226,6 @@ class PresenceSession(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_user_prompt: Mapped[str | None] = mapped_column(String, nullable=True)
     tmux_pane: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
