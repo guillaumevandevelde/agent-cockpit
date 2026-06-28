@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import type { PresenceSession, PresenceWsMessage } from '@/types/presence'
-import { buildPresenceWsUrl } from '@/features/presence/api'
+import { buildPresenceWsUrl, fetchPresenceWsToken } from '@/features/presence/api'
 
 interface UsePresenceWebSocketOptions {
   onSessionUpdate: (session: PresenceSession) => void
@@ -17,10 +17,14 @@ export function usePresenceWebSocket(options: UsePresenceWebSocketOptions) {
   const backoffRef = useRef(1000)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
+  const connect = useCallback(async () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return
 
-    const url = buildPresenceWsUrl()
+    const token = await fetchPresenceWsToken()
+    // Re-check after async token fetch in case another connect() succeeded first
+    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return
+
+    const url = buildPresenceWsUrl(token)
     const ws = new WebSocket(url)
     wsRef.current = ws
 

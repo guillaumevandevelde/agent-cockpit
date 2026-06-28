@@ -1,8 +1,9 @@
 """API endpoints for Presence Dashboard — webhook receiver, REST, and WebSocket."""
 import json
 import secrets
+import time
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -20,6 +21,24 @@ from app.services.scheduling.idle_state import idle_state
 
 router = APIRouter()
 service = PresenceService()
+
+_tokens: dict[str, float] = {}
+_TOKEN_TTL = 30  # seconds
+
+
+def _issue_token() -> str:
+    now = time.time()
+    expired = [t for t, ts in list(_tokens.items()) if now - ts > _TOKEN_TTL]
+    for t in expired:
+        _tokens.pop(t, None)
+    token = secrets.token_urlsafe(32)
+    _tokens[token] = now
+    return token
+
+
+def _consume_token(token: str) -> bool:
+    issued_at = _tokens.pop(token, None)
+    return issued_at is not None and (time.time() - issued_at) <= _TOKEN_TTL
 
 
 @router.post("/events")
@@ -139,16 +158,22 @@ async def get_config_snippet():
     return PresenceConfigSnippet(snippet=snippet, instructions=instructions)
 
 
+@router.get("/token")
+async def get_presence_ws_token():
+    """Issue a short-lived one-time token for WebSocket authentication."""
+    return {"token": _issue_token()}
+
+
 @router.websocket("/ws")
 async def presence_websocket(
     ws: WebSocket,
+    token: str = Query(default=""),
     db: AsyncSession = Depends(get_db),
 ):
     """WebSocket for live presence updates. On connect, sends all current sessions."""
     if settings.api_token:
-        supplied_token = ws.query_params.get("api_token", "")
-        if not secrets.compare_digest(supplied_token, settings.api_token):
-            await ws.close(code=4401, reason="Invalid API token")
+        if not _consume_token(token):
+            await ws.close(code=4401, reason="Invalid or expired token")
             return
     await manager.connect(ws)
     try:
