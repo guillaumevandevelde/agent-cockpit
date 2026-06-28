@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     # CORS settings
     cors_origins: list[str] = ["http://localhost:5173"]
     cors_credentials: bool = True
-    cors_methods: list[str] = ["*"]
-    cors_headers: list[str] = ["*"]
+    cors_methods: list[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    cors_headers: list[str] = ["Content-Type", "Authorization", "X-API-Token"]
 
     # Database settings
     database_url: str = "sqlite+aiosqlite:///./claude_registry.db"
