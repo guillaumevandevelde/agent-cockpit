@@ -1,4 +1,5 @@
 """Service for managing Claude Code memory files (CLAUDE.md, rules, etc.)."""
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,6 +13,8 @@ from app.utils.path_utils import (
     get_project_claude_dir,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class MemoryService:
     """Service for managing Claude Code memory files."""

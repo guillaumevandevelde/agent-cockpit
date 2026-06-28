@@ -1,4 +1,5 @@
 """Service for managing configuration backups."""
+import logging
 import json
 import os
 import platform
@@ -48,6 +49,8 @@ from app.services.cli_executor import ProviderCLIExecutor
 from app.services.providers import get_provider
 from app.services.providers.codex_cli import get_codex_home
 
+
+logger = logging.getLogger(__name__)
 
 CODEX_RESTORE_REFUSAL_MESSAGE = (
     "Codex backups are export-only; automatic restore is not supported because "
@@ -562,6 +565,7 @@ class BackupService:
         Returns:
             Tuple of (Backup record, BackupManifest)
         """
+        logger.info("Creating backup", extra={"name": name, "scope": scope, "automatic": is_automatic})
         paths = []
         extra_files: Dict[str, str] = {}
         file_overrides: Dict[Path, str] = {}
@@ -623,6 +627,7 @@ class BackupService:
         await self.db.commit()
         await self.db.refresh(backup)
 
+        logger.info("Backup created", extra={"backup_id": backup.id, "name": name, "scope": scope, "size_bytes": size_bytes})
         return backup, manifest
 
     async def list_backups(self) -> List[Backup]:
@@ -649,6 +654,7 @@ class BackupService:
         """
         backup = await self.get_backup(backup_id)
         if not backup:
+            logger.warning("Delete failed: backup not found", extra={"backup_id": backup_id})
             return False
 
         # Delete the archive file
@@ -660,6 +666,7 @@ class BackupService:
         await self.db.delete(backup)
         await self.db.commit()
 
+        logger.info("Backup deleted", extra={"backup_id": backup_id, "name": backup.name})
         return True
 
     def get_manifest_from_backup(self, file_path: str) -> Optional[BackupManifest]:
@@ -937,8 +944,10 @@ class BackupService:
         if options is None:
             options = RestoreOptions()
 
+        logger.info("Restoring backup", extra={"backup_id": backup_id, "dry_run": options.dry_run})
         backup = await self.get_backup(backup_id)
         if not backup:
+            logger.warning("Restore failed: backup not found", extra={"backup_id": backup_id})
             return RestoreResult(success=False, message="Backup not found")
 
         if backup.scope == "codex":
@@ -1028,6 +1037,10 @@ class BackupService:
             + (f", skipped {result.files_skipped}" if result.files_skipped else "")
         )
 
+        logger.info(
+            "Backup restore complete",
+            extra={"backup_id": backup_id, "dry_run": options.dry_run, "files_restored": result.files_restored, "files_skipped": result.files_skipped},
+        )
         return result
 
     async def install_dependencies(

@@ -1,4 +1,5 @@
 """Service for managing skill dependencies and installation."""
+import logging
 import json
 import os
 import shutil
@@ -16,6 +17,8 @@ from app.models.schemas import (
 )
 from app.utils.path_utils import get_claude_user_skills_dir
 
+
+logger = logging.getLogger(__name__)
 
 class SkillDependencyService:
     """Service for checking and installing skill dependencies."""

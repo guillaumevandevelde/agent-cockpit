@@ -1,4 +1,5 @@
 """Service for proxying MCP Registry API and generating install configs."""
+import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
@@ -7,6 +8,8 @@ import httpx
 from app.models.schemas import MCPServerCreate
 from app.services.mcp_service import MCPService
 
+
+logger = logging.getLogger(__name__)
 REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1"
 REQUEST_TIMEOUT = 15.0
 

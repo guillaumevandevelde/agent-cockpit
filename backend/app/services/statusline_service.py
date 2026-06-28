@@ -1,4 +1,5 @@
 """Service for managing Claude Code status line configuration."""
+import logging
 import json
 import os
 import stat
@@ -15,6 +16,8 @@ from app.models.schemas import (
 )
 from app.utils.path_utils import get_claude_user_settings_file
 
+
+logger = logging.getLogger(__name__)
 
 # Mock data for status line preview
 MOCK_PREVIEW_DATA = {

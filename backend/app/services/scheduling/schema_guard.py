@@ -4,8 +4,11 @@ The project has no migration framework (schema is created via create_all). When
 we add columns to an existing install, we ALTER the table at startup so the
 user's existing data survives. SQLite supports ADD COLUMN with a default.
 """
+import logging
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+
+logger = logging.getLogger(__name__)
 _NEW_COLUMNS = {
     "target_kind": "VARCHAR(16) DEFAULT 'project'",
     "target_session_id": "VARCHAR(128)",

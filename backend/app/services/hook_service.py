@@ -1,4 +1,5 @@
 """Service for managing Claude Code hooks."""
+import logging
 import json
 import uuid
 from pathlib import Path
@@ -10,6 +11,8 @@ from app.utils.path_utils import (
     get_project_settings_file,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class HookService:
     """Service for managing hook configurations."""

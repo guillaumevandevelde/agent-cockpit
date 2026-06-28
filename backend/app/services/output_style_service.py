@@ -1,4 +1,5 @@
 """Service for managing output styles."""
+import logging
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -12,6 +13,8 @@ from app.utils.path_utils import (
     get_project_output_styles_dir,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class OutputStyleService:
     """Service for managing output styles."""

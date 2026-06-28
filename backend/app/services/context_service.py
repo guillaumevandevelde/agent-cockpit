@@ -1,4 +1,5 @@
 """Service for context window analysis of Claude Code sessions."""
+import logging
 import json
 import time
 from pathlib import Path
@@ -24,6 +25,8 @@ from app.models.schemas import (
 )
 from app.utils.path_utils import get_claude_projects_dir, get_project_display_name
 
+
+logger = logging.getLogger(__name__)
 
 # Model context window limits (input tokens). Keys are normalized
 # substrings — `_normalize_model` strips dated suffixes before lookup.

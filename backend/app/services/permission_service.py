@@ -1,4 +1,5 @@
 """Permission management service."""
+import logging
 import re
 import uuid
 from pathlib import Path
@@ -19,6 +20,8 @@ from app.utils.path_utils import (
     get_project_settings_file,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class PermissionService:
     """Service for managing permission rules."""

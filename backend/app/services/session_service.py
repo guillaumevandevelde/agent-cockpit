@@ -4,6 +4,7 @@ Session parsing logic adapted from claude-code-transcripts by Simon Willison
 https://github.com/simonw/claude-code-transcripts
 Licensed under Apache 2.0
 """
+import logging
 import json
 import hashlib
 from pathlib import Path
@@ -22,6 +23,8 @@ from app.models.schemas import (
 )
 from app.utils.path_utils import get_claude_projects_dir, get_project_display_name
 
+
+logger = logging.getLogger(__name__)
 
 class SessionService:
     """Service for session transcript management."""

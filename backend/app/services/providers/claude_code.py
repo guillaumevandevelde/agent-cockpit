@@ -1,5 +1,6 @@
 """Claude Code provider implementation."""
 from __future__ import annotations
+import logging
 
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from app.services.providers.base import (
 )
 from app.utils.path_utils import ClaudePathUtils
 
+
+logger = logging.getLogger(__name__)
 
 class ClaudeCodeProvider(AgentProvider):
     id = "claude-code"

@@ -1,5 +1,6 @@
 """OpenCode provider implementation."""
 from __future__ import annotations
+import logging
 
 import os
 import re
@@ -14,6 +15,8 @@ from app.services.providers.base import (
     has_binary_descendant,
 )
 
+
+logger = logging.getLogger(__name__)
 
 def get_opencode_home() -> Path:
     """Return OPENCODE_CONFIG_DIR, defaulting to ~/.config/opencode."""

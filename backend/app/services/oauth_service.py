@@ -1,4 +1,5 @@
 """Service for MCP OAuth 2.1 authentication flows."""
+import logging
 import hashlib
 import secrets
 import base64
@@ -10,6 +11,8 @@ import httpx
 
 from app.services.credentials_service import CredentialsService
 
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class PendingAuth:

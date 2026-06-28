@@ -5,8 +5,11 @@ UserPromptSubmit, Stop, Notification, and SessionStart events. The hook reads
 the JSON CC passes on stdin (contains session_id + cwd) and forwards it.
 Requires `jq` and `curl` in the session environment (WSL Ubuntu has both).
 """
+import logging
 import json
 
+
+logger = logging.getLogger(__name__)
 
 def render_hook_command(event: str, port: int = 8000) -> str:
     url = f"http://localhost:{port}/api/v1/scheduled-messages/hook-event"

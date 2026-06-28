@@ -1,10 +1,13 @@
 """DB CRUD + the function APScheduler calls on fire."""
+import logging
 from datetime import datetime, timezone
 
 from app.database import AsyncSessionLocal
 from app.models.scheduled_message import ScheduledMessage, DeliveryAttempt
 from app.services.scheduling.delivery import DeliveryEngine
 
+
+logger = logging.getLogger(__name__)
 _engine = DeliveryEngine()
 
 

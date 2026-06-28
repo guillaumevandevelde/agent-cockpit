@@ -5,7 +5,10 @@ handled here: only non-secret configuration (region, profile name, model id)
 is set, and the AWS SDK credential chain on the host resolves actual creds.
 """
 from __future__ import annotations
+import logging
 
+
+logger = logging.getLogger(__name__)
 PLATFORM_ANTHROPIC = "anthropic"
 PLATFORM_BEDROCK = "bedrock"
 

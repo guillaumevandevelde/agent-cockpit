@@ -1,5 +1,6 @@
 """Codex CLI provider implementation."""
 from __future__ import annotations
+import logging
 
 import os
 from pathlib import Path
@@ -11,6 +12,8 @@ from app.services.providers.base import (
     has_binary_descendant,
 )
 
+
+logger = logging.getLogger(__name__)
 
 def get_codex_home() -> Path:
     """Return CODEX_HOME, defaulting to ~/.codex."""

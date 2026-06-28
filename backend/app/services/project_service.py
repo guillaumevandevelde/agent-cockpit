@@ -1,4 +1,5 @@
 """Project management service for discovering and managing Claude Code projects."""
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,8 @@ from app.utils.path_utils import (
     convert_path_to_folder_name,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class ProjectService:
     """Service for managing Claude Code projects."""

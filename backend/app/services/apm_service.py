@@ -1,11 +1,14 @@
 """APM (Agent Package Manager) service for managing dependencies per project."""
 from __future__ import annotations
+import logging
 
 import subprocess
 import yaml
 from pathlib import Path
 from typing import Any
 
+
+logger = logging.getLogger(__name__)
 
 class ApmService:
     """Service for managing APM dependencies in projects."""

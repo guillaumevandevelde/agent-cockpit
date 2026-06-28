@@ -1,4 +1,5 @@
 """Service for managing Claude Code OAuth credentials."""
+import logging
 import hashlib
 import json
 import os
@@ -8,6 +9,8 @@ from typing import Any, Dict, Optional
 
 from app.utils.path_utils import get_claude_user_config_dir
 
+
+logger = logging.getLogger(__name__)
 
 class CredentialsService:
     """Reads/writes ~/.claude/.credentials.json for MCP OAuth tokens."""
