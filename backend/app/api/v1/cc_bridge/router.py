@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, WebSocket, HTTPException
 from pydantic import BaseModel
 
+from app.config import settings
 from app.services.cc_bridge.discovery import discover_cc_sessions, capture_pane_preview
 from app.services.cc_bridge.pty_relay import PtyRelay
 
@@ -75,14 +76,10 @@ def _is_same_origin(origin: str, websocket: WebSocket) -> bool:
     if request_host and origin_host == request_host:
         return True
 
-    # Dev-mode fallback: Vite proxies WS to uvicorn, so when the browser
-    # connects to <host>:5173 the WS Host header is still <host>:5173 —
-    # which matches above. This branch only fires if a reverse proxy strips
-    # the port; accept any loopback origin in that case.
-    if origin_host.split(":")[0] in {"localhost", "127.0.0.1", "[::1]"}:
-        return True
-
-    return False
+    # Fallback for reverse-proxy setups where the Host header no longer
+    # carries the port: accept origins explicitly listed in cors_origins.
+    # This avoids the old loopback-only check that allowed any local port.
+    return origin in settings.cors_origins
 
 
 def _validate_token(token: str) -> bool:
