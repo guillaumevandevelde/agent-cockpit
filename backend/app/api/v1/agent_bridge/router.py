@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models.schemas import ResumableSessionListResponse
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
@@ -107,7 +108,7 @@ def _is_same_origin(origin: str, websocket: WebSocket) -> bool:
     request_host = (websocket.headers.get("host") or "").lower()
     if request_host and origin_host == request_host:
         return True
-    return origin_host.split(":")[0] in {"localhost", "127.0.0.1", "[::1]"}
+    return origin in settings.cors_origins
 
 
 def _validate_token(token: str) -> bool:
