@@ -15,6 +15,16 @@ from app.models.schemas import (
 )
 from app.utils.path_utils import get_claude_user_settings_file
 
+MAX_PREVIEW_SCRIPT_SIZE = 64 * 1024  # 64 KB
+
+# Minimal safe environment for script execution — strips all host secrets
+# (API keys, tokens, credentials) so preview scripts cannot exfiltrate them.
+_SAFE_ENV = {
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "HOME": "/tmp",
+    "LANG": "en_US.UTF-8",
+    "TERM": "xterm-256color",
+}
 
 # Mock data for status line preview
 MOCK_PREVIEW_DATA = {
@@ -343,6 +353,9 @@ class StatusLineService:
         Returns:
             Tuple of (success, output, error_message)
         """
+        if len(script_content) > MAX_PREVIEW_SCRIPT_SIZE:
+            return (False, "", f"Script too large (max {MAX_PREVIEW_SCRIPT_SIZE // 1024} KB)")
+
         # Create a temporary script file
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".sh", delete=False
@@ -351,20 +364,22 @@ class StatusLineService:
             script_path = f.name
 
         try:
-            # Make script executable
-            os.chmod(script_path, stat.S_IRWXU)
+            # Make script readable/executable only by owner
+            os.chmod(script_path, stat.S_IRUSR | stat.S_IXUSR)
 
             # Prepare mock JSON input
             mock_input = json.dumps(MOCK_PREVIEW_DATA)
 
-            # Execute script with mock data piped to stdin
+            # Execute with explicit bash (ignores shebang), stripped env, and
+            # no user config loading so ~/.bashrc cannot tamper with PATH.
             result = subprocess.run(
-                [script_path],
+                ["/bin/bash", "--norc", "--noprofile", script_path],
                 input=mock_input,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd="/tmp",  # Safe working directory
+                cwd="/tmp",
+                env=_SAFE_ENV,
             )
 
             if result.returncode == 0:
