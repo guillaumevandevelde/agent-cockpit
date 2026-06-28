@@ -1,4 +1,5 @@
 """Service for aggregating skill invocation stats from JSONL session files."""
+import logging
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -8,6 +9,8 @@ import aiofiles
 from app.models.schemas import SkillUsageStat
 from app.utils.path_utils import get_claude_projects_dir, convert_path_to_folder_name
 
+
+logger = logging.getLogger(__name__)
 
 class SkillStatsService:
     """Scans Claude session JSONL files and counts Skill tool invocations."""

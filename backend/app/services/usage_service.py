@@ -4,6 +4,7 @@ Usage tracking algorithms adapted from ccusage by ryoppippi
 https://github.com/ryoppippi/ccusage
 Licensed under MIT
 """
+import logging
 import hashlib
 import json
 from collections import defaultdict
@@ -34,6 +35,8 @@ from app.models.schemas import (
 from app.services.pricing_service import PricingService
 from app.utils.path_utils import get_claude_projects_dir, get_project_display_name, convert_path_to_folder_name
 
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class LoadedUsageEntry:

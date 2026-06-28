@@ -4,6 +4,7 @@ Plugin Service for Claude Cockpit
 Manages plugin listing, installation, and marketplace operations.
 """
 
+import logging
 import json
 import shutil
 import subprocess
@@ -47,6 +48,8 @@ from ..utils.file_utils import read_json_file, write_json_file
 from .cli_executor import CLIExecutor
 from .plugin_descriptions import get_plugin_info
 
+
+logger = logging.getLogger(__name__)
 
 class PluginService:
     """Service for managing Claude Code plugins."""
@@ -617,6 +620,7 @@ class PluginService:
         """
         # For now, we'll use a simple install command
         # In the future, this could use marketplace-specific install commands
+        logger.info("Installing plugin", extra={"plugin": request.name})
         try:
             # Configure git to use HTTPS instead of SSH for GitHub
             # This allows cloning public repos without SSH keys
@@ -635,12 +639,14 @@ class PluginService:
             if success:
                 message = f"Successfully installed plugin '{request.name}'"
                 enhanced_stderr = result.stderr
+                logger.info("Plugin installed", extra={"plugin": request.name})
             else:
                 # Enhance error message if it's a known issue
                 enhanced_stderr = self._enhance_git_error_message(
                     result.stderr, result.stdout
                 )
                 message = f"Failed to install plugin '{request.name}'"
+                logger.warning("Plugin install failed", extra={"plugin": request.name, "exit_code": result.exit_code})
 
             return PluginInstallResponse(
                 success=success,
@@ -649,6 +655,7 @@ class PluginService:
                 stderr=enhanced_stderr,
             )
         except Exception as e:
+            logger.exception("Exception installing plugin", extra={"plugin": request.name})
             return PluginInstallResponse(
                 success=False,
                 message=f"Error installing plugin: {str(e)}",
@@ -669,6 +676,7 @@ class PluginService:
         Returns:
             True if uninstalled successfully, False otherwise
         """
+        logger.info("Uninstalling plugin", extra={"plugin": name})
         removed_any = False
         matching_key = None
 
@@ -699,7 +707,7 @@ class PluginService:
                                     shutil.rmtree(plugin_dir)
                                     removed_any = True
                                 except Exception as e:
-                                    print(f"Error removing plugin directory {plugin_dir}: {e}")
+                                    logger.error("Error removing plugin directory", extra={"path": str(plugin_dir), "error": str(e)})
 
                     # Remove from installed_plugins.json
                     del plugins[matching_key]
@@ -707,7 +715,7 @@ class PluginService:
                         json.dump(data, f, indent=2)
                     removed_any = True
             except Exception as e:
-                print(f"Error processing installed_plugins.json: {e}")
+                logger.exception("Error processing installed_plugins.json", extra={"plugin": name})
 
         # ALWAYS try to remove from settings.json (enabledPlugins)
         settings_file = get_claude_user_settings_file()
@@ -728,8 +736,9 @@ class PluginService:
                     await write_json_file(settings_file, settings_data)
                     removed_any = True
             except Exception as e:
-                print(f"Error updating settings.json: {e}")
+                logger.exception("Error updating settings.json", extra={"plugin": name})
 
+        logger.info("Plugin uninstall complete", extra={"plugin": name, "removed": removed_any})
         return removed_any
 
     async def toggle_plugin(
@@ -746,6 +755,7 @@ class PluginService:
         Returns:
             PluginToggleResponse with success status and updated plugin
         """
+        logger.info("Toggling plugin", extra={"plugin": name, "enabled": enabled})
         settings_file = get_claude_user_settings_file()
 
         # Read current settings
@@ -774,6 +784,7 @@ class PluginService:
         success = await write_json_file(settings_file, settings_data)
 
         if not success:
+            logger.warning("Failed to write settings file for plugin toggle", extra={"plugin": name})
             return PluginToggleResponse(
                 success=False,
                 message=f"Failed to write settings file",

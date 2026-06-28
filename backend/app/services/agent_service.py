@@ -1,4 +1,5 @@
 """Service for managing agents and skills."""
+import logging
 import json
 import re
 from pathlib import Path
@@ -14,6 +15,8 @@ from app.utils.path_utils import (
     get_project_agents_dir,
 )
 
+
+logger = logging.getLogger(__name__)
 
 def get_agent_memory_dir(agent_name: str) -> Path:
     """Get the memory directory for an agent."""

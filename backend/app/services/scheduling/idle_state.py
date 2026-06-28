@@ -3,9 +3,12 @@
 State is keyed by resolved project cwd. A session is 'idle' after a Stop with no
 later UserPromptSubmit. Unknown => treated as busy (caller should not assume idle).
 """
+import logging
 import asyncio
 import os
 
+
+logger = logging.getLogger(__name__)
 _IDLE_EVENTS = {"Stop"}
 _BUSY_EVENTS = {"UserPromptSubmit", "SessionStart", "Notification"}
 

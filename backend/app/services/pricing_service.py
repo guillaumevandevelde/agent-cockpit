@@ -4,8 +4,11 @@ Pricing logic adapted from ccusage by ryoppippi
 https://github.com/ryoppippi/ccusage
 Licensed under MIT
 """
+import logging
 from typing import Optional
 
+
+logger = logging.getLogger(__name__)
 
 class PricingService:
     """Service for model pricing and cost calculation."""

@@ -1,5 +1,6 @@
 """Read-only diagnostics for Codex history and model cache files."""
 from __future__ import annotations
+import logging
 
 import hashlib
 import json
@@ -9,6 +10,8 @@ from typing import Any
 
 from app.services.providers.codex_cli import get_codex_home
 
+
+logger = logging.getLogger(__name__)
 
 class CodexHistoryService:
     """Summarize generated Codex files without exposing prompt text."""

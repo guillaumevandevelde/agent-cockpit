@@ -5,8 +5,11 @@ This module provides curated descriptions, usage instructions, and examples
 for known official plugins from Anthropic.
 """
 
+import logging
 from typing import TypedDict, List, Optional
 
+
+logger = logging.getLogger(__name__)
 
 class PluginInfo(TypedDict, total=False):
     """Plugin information structure."""

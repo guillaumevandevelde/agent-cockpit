@@ -1,10 +1,13 @@
 """Compatibility wrappers for agent bridge discovery."""
 from __future__ import annotations
+import logging
 
 from app.models.constants import SessionStatus
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
 from app.services.providers import get_provider
 
+
+logger = logging.getLogger(__name__)
 
 def _is_claude_code(command: str, pid: str = "") -> bool:
     """Check if a tmux pane is running Claude Code."""

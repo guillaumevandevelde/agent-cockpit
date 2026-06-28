@@ -1,5 +1,6 @@
 """Read and update Codex CLI TOML configuration."""
 from __future__ import annotations
+import logging
 
 import shutil
 import tempfile
@@ -16,6 +17,8 @@ from tomlkit.items import Table
 
 from app.services.providers.codex_cli import get_codex_home
 
+
+logger = logging.getLogger(__name__)
 
 SAFE_SCALAR_FIELDS = {
     "model": str,

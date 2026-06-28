@@ -1,5 +1,6 @@
 """Provider-aware CLI executor service."""
 
+import logging
 import subprocess
 import shutil
 import re
@@ -8,6 +9,8 @@ from ..models.schemas import CLIResult
 from .providers import get_provider
 from .providers.base import AgentProvider
 
+
+logger = logging.getLogger(__name__)
 
 class ProviderCLIExecutor:
     """Execute whitelisted provider CLI commands with security constraints."""

@@ -6,9 +6,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from app.logging_config import configure_logging
+configure_logging()
+
 from app.config import settings
 from app.database import init_db
 from app.api.v1.router import router as api_v1_router
+from app.middleware.correlation_id import CorrelationIdMiddleware
 from fastapi.staticfiles import StaticFiles
 import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
 
@@ -99,6 +103,7 @@ app.add_middleware(
     allow_methods=settings.cors_methods,
     allow_headers=settings.cors_headers,
 )
+app.add_middleware(CorrelationIdMiddleware)
 
 # Include API routers
 app.include_router(api_v1_router, prefix=settings.api_v1_prefix)

@@ -1,5 +1,6 @@
 """Aggregate resumable Claude Code sessions across a project and its git worktrees."""
 from __future__ import annotations
+import logging
 
 import subprocess
 from pathlib import Path
@@ -11,6 +12,8 @@ from app.models.schemas import ResumableSession
 from app.services.agent_bridge.spawn import _validate_directory
 from app.services.session_service import SessionService
 
+
+logger = logging.getLogger(__name__)
 
 def _encode_project_folder(path: str) -> str:
     """Encode an absolute path to Claude's project folder name.

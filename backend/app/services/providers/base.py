@@ -1,5 +1,6 @@
 """Provider abstraction for local agent CLIs."""
 from __future__ import annotations
+import logging
 
 import re
 import shutil
@@ -11,6 +12,8 @@ from typing import Any
 
 from app.services.providers.capabilities import capability_flags, normalize_capability_matrix
 
+
+logger = logging.getLogger(__name__)
 
 _MAX_TREE_DEPTH = 4
 

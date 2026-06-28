@@ -1,4 +1,5 @@
 """Configuration service for reading and merging Claude Code configurations."""
+import logging
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
@@ -14,6 +15,8 @@ from ..utils.path_utils import (
 from ..utils.file_utils import read_json_file
 from ..utils.pattern_utils import sanitize_permission_rules
 
+
+logger = logging.getLogger(__name__)
 
 # Settings scope priority (highest to lowest)
 SCOPE_PRIORITY = ["managed", "local", "project", "user"]

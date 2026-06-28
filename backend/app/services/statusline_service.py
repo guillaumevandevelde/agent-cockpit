@@ -1,4 +1,5 @@
 """Service for managing Claude Code status line configuration."""
+import logging
 import json
 import os
 import stat
@@ -25,6 +26,8 @@ _SAFE_ENV = {
     "LANG": "en_US.UTF-8",
     "TERM": "xterm-256color",
 }
+
+logger = logging.getLogger(__name__)
 
 # Mock data for status line preview
 MOCK_PREVIEW_DATA = {

@@ -1,4 +1,5 @@
 """Service for managing MCP server configurations."""
+import logging
 import asyncio
 import hashlib
 import json
@@ -33,6 +34,8 @@ from app.utils.path_utils import (
     get_project_mcp_config_file,
 )
 
+
+logger = logging.getLogger(__name__)
 
 class MCPService:
     """Service for managing MCP server configurations."""
@@ -446,6 +449,7 @@ class MCPService:
         Returns:
             Created MCPServer object
         """
+        logger.info("Adding MCP server", extra={"server": server.name, "scope": server.scope, "type": server.type})
         # Build config from server fields, excluding None values
         config = {"type": server.type}
         for field in ("command", "args", "url", "headers", "env"):
@@ -463,6 +467,7 @@ class MCPService:
             servers[server.name] = config
             await self._write_project_mcp_config(servers, project_path)
 
+        logger.info("MCP server added", extra={"server": server.name, "scope": server.scope})
         return self._create_mcp_server(server.name, config, server.scope)
 
     async def update_server(
@@ -484,6 +489,7 @@ class MCPService:
         Returns:
             Updated MCPServer object or None if not found
         """
+        logger.info("Updating MCP server", extra={"server": name, "scope": scope})
         # Read existing servers
         if scope == "user":
             servers = self._read_user_mcp_config()
@@ -491,6 +497,7 @@ class MCPService:
             servers = self._read_project_mcp_config(project_path)
 
         if name not in servers:
+            logger.warning("MCP server not found for update", extra={"server": name, "scope": scope})
             return None
 
         # Update config with non-None values
@@ -508,6 +515,7 @@ class MCPService:
         else:
             await self._write_project_mcp_config(servers, project_path)
 
+        logger.info("MCP server updated", extra={"server": name, "scope": scope})
         return self._create_mcp_server(name, config, scope)
 
     async def remove_server(
@@ -524,6 +532,7 @@ class MCPService:
         Returns:
             True if removed, False if not found
         """
+        logger.info("Removing MCP server", extra={"server": name, "scope": scope})
         # Read existing servers
         if scope == "user":
             servers = self._read_user_mcp_config()
@@ -531,6 +540,7 @@ class MCPService:
             servers = self._read_project_mcp_config(project_path)
 
         if name not in servers:
+            logger.warning("MCP server not found for removal", extra={"server": name, "scope": scope})
             return False
 
         # Remove server
@@ -542,6 +552,7 @@ class MCPService:
         else:
             await self._write_project_mcp_config(servers, project_path)
 
+        logger.info("MCP server removed", extra={"server": name, "scope": scope})
         return True
 
     async def test_connection(
@@ -1129,6 +1140,7 @@ class MCPService:
         Returns:
             True if successful
         """
+        logger.info("Toggling MCP server", extra={"server": name, "disabled": disabled})
         settings_path = get_claude_user_settings_file()
         config = read_json_file(settings_path) or {}
 
@@ -1140,4 +1152,9 @@ class MCPService:
             disabled_list.discard(name)
 
         config["disabledMcpServers"] = sorted(disabled_list)
-        return await write_json_file(settings_path, config)
+        result = await write_json_file(settings_path, config)
+        if result:
+            logger.info("MCP server toggled", extra={"server": name, "disabled": disabled})
+        else:
+            logger.warning("Failed to write settings for MCP server toggle", extra={"server": name})
+        return result

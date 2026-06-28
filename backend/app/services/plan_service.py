@@ -1,4 +1,5 @@
 """Service for browsing Claude Code plan files."""
+import logging
 import json
 import re
 from datetime import datetime
@@ -8,6 +9,8 @@ from typing import Any, Dict, List, Optional
 from app.services.config_service import ConfigService
 from app.utils.path_utils import get_claude_plans_dir, get_claude_projects_dir, get_project_display_name
 
+
+logger = logging.getLogger(__name__)
 
 class PlanService:
     """Service for reading and searching Claude Code plan files."""

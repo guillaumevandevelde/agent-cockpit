@@ -1,4 +1,5 @@
 """Service for managing slash commands."""
+import logging
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -14,6 +15,8 @@ from app.utils.path_utils import (
 )
 from app.utils.file_utils import read_json_file
 
+
+logger = logging.getLogger(__name__)
 
 class CommandService:
     """Service for managing slash commands."""
