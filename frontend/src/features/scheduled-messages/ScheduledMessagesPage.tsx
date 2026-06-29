@@ -10,9 +10,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { RefreshButton } from '@/components/shared/RefreshButton'
 import { CLICKABLE_CARD, MODAL_SIZES } from '@/lib/constants'
-import { listScheduledMessages, deleteScheduledMessage, updateScheduledMessage } from './api'
+import { listScheduledMessages, deleteScheduledMessage, updateScheduledMessage, deleteScheduledMessageHistory } from './api'
 import { ScheduledMessageForm } from './components/ScheduledMessageForm'
 import { DeliveryLog } from './components/DeliveryLog'
 import type { ScheduledMessage, MessageStatus } from './types'
@@ -152,6 +163,16 @@ export function ScheduledMessagesPage() {
     }
   }
 
+  const handleClearHistory = async () => {
+    try {
+      const { deleted } = await deleteScheduledMessageHistory()
+      toast.success(deleted === 0 ? 'Nothing to clear' : `Cleared ${deleted} message${deleted === 1 ? '' : 's'}`)
+      await load()
+    } catch {
+      toast.error('Failed to clear history')
+    }
+  }
+
   const scheduled = messages.filter((m) => m.status === 'scheduled' || m.status === 'pending_delivery')
   const done = messages.filter((m) => !['scheduled', 'pending_delivery'].includes(m.status))
 
@@ -215,7 +236,32 @@ export function ScheduledMessagesPage() {
       {/* History */}
       {done.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-lg font-semibold text-muted-foreground">History</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-muted-foreground">History</h2>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive gap-1">
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Clear history
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Clear message history?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will permanently delete all {done.length} delivered, failed, and cancelled message{done.length === 1 ? '' : 's'}.
+                    Pending messages are not affected.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleClearHistory} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Clear history
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
           {done.map((m) => (
             <MessageRow key={m.id} msg={m} onToggle={handleToggle} onDelete={handleDelete} />
           ))}

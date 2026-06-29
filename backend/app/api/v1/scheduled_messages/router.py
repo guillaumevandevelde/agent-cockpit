@@ -1,6 +1,6 @@
 """REST API for scheduled messages + CC hook ingest."""
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 
 from app.database import AsyncSessionLocal
 from app.models.scheduled_message import ScheduledMessage, DeliveryAttempt
@@ -69,6 +69,33 @@ async def update(mid: int, payload: ScheduledMessageUpdate):
         await s.refresh(msg)
         _register(msg)
         return ScheduledMessageResponse.model_validate(msg)
+
+
+_TERMINAL_STATUSES = ("delivered", "failed", "cancelled")
+
+
+@router.delete("/history")
+async def delete_history():
+    """Delete all messages in terminal states (delivered, failed, cancelled)."""
+    async with AsyncSessionLocal() as s:
+        id_rows = await s.execute(
+            select(ScheduledMessage.id)
+            .where(ScheduledMessage.status.in_(_TERMINAL_STATUSES))
+        )
+        ids = id_rows.scalars().all()
+        if ids:
+            await s.execute(
+                sa_delete(DeliveryAttempt)
+                .where(DeliveryAttempt.scheduled_message_id.in_(ids))
+            )
+            await s.execute(
+                sa_delete(ScheduledMessage)
+                .where(ScheduledMessage.id.in_(ids))
+            )
+            await s.commit()
+    for mid in ids:
+        scheduler_service.remove(mid)
+    return {"deleted": len(ids)}
 
 
 @router.delete("/{mid}")
