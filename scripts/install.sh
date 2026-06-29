@@ -88,6 +88,11 @@ npm install
 
 echo "Documentation setup complete!"
 
+# Install git hooks (pre-push test gate)
+echo ""
+echo "Installing git hooks..."
+bash "$SCRIPT_DIR/install-hooks.sh"
+
 # Create required directories
 echo ""
 echo "Creating required directories..."

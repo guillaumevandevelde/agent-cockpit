@@ -565,7 +565,7 @@ class BackupService:
         Returns:
             Tuple of (Backup record, BackupManifest)
         """
-        logger.info("Creating backup", extra={"name": name, "scope": scope, "automatic": is_automatic})
+        logger.info("Creating backup", extra={"backup_name": name, "scope": scope, "automatic": is_automatic})
         paths = []
         extra_files: Dict[str, str] = {}
         file_overrides: Dict[Path, str] = {}
@@ -627,7 +627,7 @@ class BackupService:
         await self.db.commit()
         await self.db.refresh(backup)
 
-        logger.info("Backup created", extra={"backup_id": backup.id, "name": name, "scope": scope, "size_bytes": size_bytes})
+        logger.info("Backup created", extra={"backup_id": backup.id, "backup_name": name, "scope": scope, "size_bytes": size_bytes})
         return backup, manifest
 
     async def list_backups(self) -> List[Backup]:
@@ -666,7 +666,7 @@ class BackupService:
         await self.db.delete(backup)
         await self.db.commit()
 
-        logger.info("Backup deleted", extra={"backup_id": backup_id, "name": backup.name})
+        logger.info("Backup deleted", extra={"backup_id": backup_id, "backup_name": backup.name})
         return True
 
     def get_manifest_from_backup(self, file_path: str) -> Optional[BackupManifest]:

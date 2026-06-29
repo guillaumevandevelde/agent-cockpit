@@ -89,6 +89,37 @@ async def test_run_auto_backup_creates_automatic_backup(db, monkeypatch, tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_create_backup_survives_info_logging(db, monkeypatch, tmp_path, caplog):
+    """create_backup must not crash when INFO logging is actually emitted.
+
+    backup_service logged with extra={"name": ...}; "name" is a reserved LogRecord
+    field, so makeRecord raises KeyError -- but only once INFO is enabled, which it
+    is in production (structured logging at INFO). In an isolated test the logger
+    sits at WARNING so logger.info is a no-op and the bug hides; this test forces
+    INFO so the regression is caught deterministically, not by test ordering.
+    """
+    import logging
+
+    config_file = tmp_path / "config.json"
+    config_file.write_text("{}", encoding="utf-8")
+    backups_dir = tmp_path / "backups"
+    backups_dir.mkdir()
+
+    from app.services import backup_service as bs
+    monkeypatch.setattr(bs, "get_backup_storage_dir", lambda: backups_dir)
+    monkeypatch.setattr(
+        bs.BackupService, "_get_user_config_paths", lambda self: [config_file]
+    )
+
+    await svc.update_settings(db, AutoBackupSettingsUpdate(enabled=True))
+    with caplog.at_level(logging.INFO, logger="app.services.backup_service"):
+        backup = await svc.run_auto_backup(db)
+
+    assert backup is not None
+    assert "success" in (await svc.get_or_create_settings(db)).last_status
+
+
+@pytest.mark.asyncio
 async def test_rotation_deletes_old_automatic_only(db):
     now = datetime.now(timezone.utc)
     old_auto = Backup(
