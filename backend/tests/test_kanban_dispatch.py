@@ -6,6 +6,7 @@ from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card, list_cards
 from app.kanban import dispatch
+from app.kanban.models import KanbanCard
 
 KanbanSessionLocal = TestSessionLocal()
 
@@ -173,6 +174,7 @@ async def test_dispatch_picks_first_todo_by_rank():
     async with KanbanSessionLocal() as s:
         first = await _make_card(s, title="A")
         await _make_card(s, title="B")
+        await dispatch.set_max_sessions(s, PK, 1)
         await s.commit()
         await dispatch.dispatch_project(
             s, project_key=PK, project_path="/p", transport=transport,
@@ -194,6 +196,7 @@ async def test_dispatch_skips_when_project_already_busy():
             entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
         )
         await _make_card(s, title="waiting", column="Backlog")
+        await dispatch.set_max_sessions(s, PK, 1)
         await s.commit()
         result = await dispatch.dispatch_project(
             s, project_key=PK, project_path="/p", transport=transport,
@@ -221,6 +224,84 @@ async def test_dispatch_card_bypasses_busy_cap():
         card = await get_card(s, target)
     assert result is not None
     assert card.column == "engineer"
+    assert len(transport.calls) == 1
+
+
+# ---- per-project session cap ----------------------------------------------
+
+def _bare_card(column, claimed_by):
+    c = KanbanCard(id="x", project_key=PK, title="t", description="",
+                   column=column, rank="1")
+    c.claimed_by = claimed_by
+    return c
+
+
+def test_active_session_count_counts_agent_claims_in_agent_columns():
+    cards = [
+        _bare_card("engineer", "agent:a"),
+        _bare_card("review", "agent:b"),
+        _bare_card("Backlog", "agent:c"),   # fixed column: excluded
+        _bare_card("Done", "agent:d"),       # fixed column: excluded
+        _bare_card("engineer", "me@ui"),     # human claim: excluded
+        _bare_card("engineer", None),         # unclaimed: excluded
+    ]
+    assert dispatch._active_session_count(cards) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_max_sessions_defaults_to_4():
+    async with KanbanSessionLocal() as s:
+        assert await dispatch.get_max_sessions(s, PK) == 4
+
+
+@pytest.mark.asyncio
+async def test_set_then_get_max_sessions_roundtrips():
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 2)
+        await s.commit()
+        assert await dispatch.get_max_sessions(s, PK) == 2
+
+
+@pytest.mark.asyncio
+async def test_dispatch_fills_up_to_cap_then_stops():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 2)
+        for i in range(4):
+            await _make_card(s, title=f"c{i}", column="Backlog")
+        await s.commit()
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert result is not None
+    assert len(transport.calls) == 2  # fills exactly the 2 free slots in one tick
+
+
+@pytest.mark.asyncio
+async def test_dispatch_freed_slot_is_reusable():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 1)
+        busy = await _make_card(s, title="busy", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
+        )
+        await _make_card(s, title="waiting", column="Backlog")
+        await s.commit()
+        # cap full -> no dispatch
+        assert await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport) is None
+        # free the slot, then exactly one dispatches
+        await apply_operation(
+            s, op_type="release", entity_type="card", project_key=PK,
+            entity_id=busy, payload={})
+        await s.commit()
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport)
+        await s.commit()
+    assert result is not None
     assert len(transport.calls) == 1
 
 
@@ -310,6 +391,7 @@ async def test_live_agent_claim_in_doing_still_blocks():
             entity_id=busy, payload={"claimed_by": "agent:k-alive-0001"},
         )
         await _make_card(s, title="waiting", column="Backlog")
+        await dispatch.set_max_sessions(s, PK, 1)
         await s.commit()
         result = await dispatch.dispatch_project(
             s, project_key=PK, project_path="/p", transport=transport,
@@ -396,6 +478,7 @@ async def test_dispatch_without_live_sessions_does_not_reap():
             entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
         )
         await _make_card(s, title="waiting", column="Backlog")
+        await dispatch.set_max_sessions(s, PK, 1)
         await s.commit()
         result = await dispatch.dispatch_project(
             s, project_key=PK, project_path="/p", transport=transport)

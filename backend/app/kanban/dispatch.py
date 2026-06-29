@@ -30,6 +30,8 @@ SHIPMODE_PREFIX = "shipmode:"
 SKIP_PERMISSIONS_PREFIX = "skip_permissions:"
 SHIP_MODES = ("pull-request", "direct")
 DEFAULT_SHIP_MODE = "pull-request"
+MAX_SESSIONS_PREFIX = "max_sessions:"
+DEFAULT_MAX_SESSIONS = 4
 
 
 # ---- enablement: device-local, stored in KanbanMeta (not part of the op-log) ----
@@ -75,6 +77,29 @@ async def set_skip_permissions(session, project_key: str, enabled: bool) -> None
         session.add(row)
     else:
         row.value = "1" if enabled else "0"
+    await session.flush()
+
+
+async def get_max_sessions(session, project_key: str) -> int:
+    row = await session.get(KanbanMeta, MAX_SESSIONS_PREFIX + project_key)
+    if row is None:
+        return DEFAULT_MAX_SESSIONS
+    try:
+        n = int(row.value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_SESSIONS
+    return n if n >= 1 else DEFAULT_MAX_SESSIONS
+
+
+async def set_max_sessions(session, project_key: str, n: int) -> None:
+    if n < 1:
+        raise ValueError("max_sessions must be >= 1")
+    key = MAX_SESSIONS_PREFIX + project_key
+    row = await session.get(KanbanMeta, key)
+    if row is None:
+        session.add(KanbanMeta(key=key, value=str(n)))
+    else:
+        row.value = str(n)
     await session.flush()
 
 
@@ -365,12 +390,13 @@ def _mint_session_name(project_path: str, card_title: str = "") -> str:
     return f"k-{slug}-{uuid.uuid4().hex[:4]}"
 
 
-def _project_is_busy(cards: Iterable[KanbanCard]) -> bool:
-    """Check if project has any cards in agent columns (not Backlog, Impediment, or Done)."""
+def _active_session_count(cards: Iterable[KanbanCard]) -> int:
+    """Number of occupied dispatch slots: cards in agent columns (not Backlog,
+    Impediment, or Done) held by an `agent:` claim."""
     from app.kanban.schemas import COLUMNS
-    return any(
-        c.column not in COLUMNS and (c.claimed_by or "").startswith(CLAIMANT_PREFIX)
-        for c in cards
+    return sum(
+        1 for c in cards
+        if c.column not in COLUMNS and (c.claimed_by or "").startswith(CLAIMANT_PREFIX)
     )
 
 
@@ -559,21 +585,28 @@ async def dispatch_project(
         ):
             cards = await list_cards(session, project_key)
 
-    card = _next_card(cards)
-    if card is None:
-        return None
+    cap = await get_max_sessions(session, project_key)
+    last_result: Optional[dict] = None
 
-    if _project_is_busy(cards):
-        return None
+    # Fill every free slot in this tick, re-listing after each dispatch so the
+    # claim just made counts toward the cap.
+    while _active_session_count(cards) < cap:
+        card = _next_card(cards)
+        if card is None:
+            break
 
-    # Auto-select transport if not provided
-    if transport is None:
-        transport = await get_transport_for_project(project_path)
+        if transport is None:
+            transport = await get_transport_for_project(project_path)
 
-    return await _run_card(
-        session, card=card, project_key=project_key,
-        project_path=project_path, transport=transport,
-    )
+        last_result = await _run_card(
+            session, card=card, project_key=project_key,
+            project_path=project_path, transport=transport,
+        )
+        if last_result is None:
+            break  # dispatch failed (e.g. memory) — let the tick queue/retry
+        cards = await list_cards(session, project_key)
+
+    return last_result
 
 
 async def dispatch_card(
