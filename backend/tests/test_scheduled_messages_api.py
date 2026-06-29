@@ -47,6 +47,59 @@ async def test_create_cron_and_attempts_empty():
 
 
 @pytest.mark.asyncio
+async def test_delete_history_removes_terminal_messages():
+    from sqlalchemy import update
+    from app.database import AsyncSessionLocal
+    from app.models.scheduled_message import ScheduledMessage
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        once_payload = {"target_project": "/tmp", "message": "x",
+                        "trigger_type": "once", "fire_at": "2999-01-01T09:00:00+00:00"}
+        r1 = await ac.post("/api/v1/scheduled-messages", json=once_payload)
+        r2 = await ac.post("/api/v1/scheduled-messages", json=once_payload)
+        r3 = await ac.post("/api/v1/scheduled-messages", json=once_payload)
+        id_delivered = r1.json()["id"]
+        id_failed = r2.json()["id"]
+        id_scheduled = r3.json()["id"]
+
+    async with AsyncSessionLocal() as s:
+        await s.execute(
+            update(ScheduledMessage)
+            .where(ScheduledMessage.id == id_delivered)
+            .values(status="delivered")
+        )
+        await s.execute(
+            update(ScheduledMessage)
+            .where(ScheduledMessage.id == id_failed)
+            .values(status="failed")
+        )
+        await s.commit()
+
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.delete("/api/v1/scheduled-messages/history")
+        assert r.status_code == 200
+        assert r.json()["deleted"] >= 2
+
+        remaining = (await ac.get("/api/v1/scheduled-messages")).json()["items"]
+        remaining_ids = [m["id"] for m in remaining]
+        assert id_scheduled in remaining_ids
+        assert id_delivered not in remaining_ids
+        assert id_failed not in remaining_ids
+
+        await ac.delete(f"/api/v1/scheduled-messages/{id_scheduled}")
+
+
+@pytest.mark.asyncio
+async def test_delete_history_when_nothing_to_clean():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.delete("/api/v1/scheduled-messages/history")
+        assert r.status_code == 200
+        assert r.json()["deleted"] == 0
+
+
+@pytest.mark.asyncio
 async def test_hook_event_updates_idle_state():
     from app.services.scheduling.idle_state import idle_state
     transport = ASGITransport(app=app)
