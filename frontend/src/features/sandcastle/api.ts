@@ -7,6 +7,7 @@ import type {
   SandcastleHealth,
   SandcastleConfigListResponse,
   SandcastleRunListResponse,
+  SandcastleContainersResponse,
 } from './types';
 
 const BASE = 'sandcastle';
@@ -163,6 +164,11 @@ export async function getSandcastleRunLogs(runId: number, offset: number = 0): P
     log_content?: string;
     log_offset?: number;
   }>(`${BASE}/runs/${runId}/logs?offset=${offset}`);
+}
+
+/** List running Docker/Podman sandcastle containers */
+export async function listSandcastleContainers(): Promise<SandcastleContainersResponse> {
+  return apiClient<SandcastleContainersResponse>(`${BASE}/containers`);
 }
 
 /** Create a streaming connection for run logs */

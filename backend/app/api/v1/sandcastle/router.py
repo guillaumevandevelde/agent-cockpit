@@ -381,3 +381,9 @@ async def delete_run(run_id: int):
     if not success:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
     return {"success": True}
+
+
+@router.get("/containers")
+async def list_containers():
+    """List running Docker/Podman sandcastle containers."""
+    return await sandcastle_service.list_running_containers()

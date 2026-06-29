@@ -61,6 +61,9 @@ source venv/bin/activate
 echo "Installing Python dependencies..."
 pip install -r requirements-dev.txt
 
+echo "Installing backend Node.js dependencies..."
+npm install
+
 # Database schema is created automatically on first run by the FastAPI
 # lifespan (Base.metadata.create_all); no migration step required.
 echo "Backend setup complete!"

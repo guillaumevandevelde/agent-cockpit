@@ -815,6 +815,37 @@ class SandcastleService:
 
         return health
 
+    async def list_running_containers(self) -> dict[str, Any]:
+        """List running Docker and Podman containers whose name starts with 'sandcastle-'."""
+        containers: list[dict[str, Any]] = []
+
+        for runtime in ("docker", "podman"):
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    runtime, "ps",
+                    "--filter", "name=sandcastle-",
+                    "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.CreatedAt}}",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=5)
+                if process.returncode == 0:
+                    for line in stdout.decode().strip().splitlines():
+                        parts = line.split("\t")
+                        if len(parts) >= 5:
+                            containers.append({
+                                "runtime": runtime,
+                                "id": parts[0],
+                                "name": parts[1],
+                                "image": parts[2],
+                                "status": parts[3],
+                                "created_at": parts[4],
+                            })
+            except (FileNotFoundError, asyncio.TimeoutError):
+                pass
+
+        return {"containers": containers}
+
     async def build_docker_image(self, image_name: str = "sandcastle:local") -> dict[str, Any]:
         """Build the sandcastle Docker image."""
         dockerfile_path = Path(__file__).parent.parent.parent.parent / ".sandcastle" / "Dockerfile"
