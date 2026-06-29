@@ -21,8 +21,11 @@ export function usePresenceWebSocket(options: UsePresenceWebSocketOptions) {
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return
 
     const token = await fetchPresenceWsToken()
-    // Re-check after async token fetch in case another connect() succeeded first
-    if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return
+    // Re-check after async token fetch in case another connect() succeeded first.
+    // Read through a fresh local: across the await, TS otherwise keeps the
+    // readyState narrowing from the guard above and flags this as a dead compare.
+    const current = wsRef.current
+    if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) return
 
     const url = buildPresenceWsUrl(token)
     const ws = new WebSocket(url)

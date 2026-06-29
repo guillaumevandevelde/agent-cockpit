@@ -87,3 +87,13 @@ export interface AgentStatsResponse {
   common_failures: FailureStat[];
   tokens_available: boolean;
 }
+
+export interface McpHealth {
+  ok: boolean;
+  advertised_endpoint: string | null;
+  routes_to_mount: boolean;
+  message_post_status: number | null;
+  tools: string[];
+  db_ok: boolean;
+  error: string | null;
+}

@@ -8,6 +8,7 @@ import { CardDrawer } from "./components/CardDrawer";
 import { CardEditDialog } from "./components/CardEditDialog";
 import { ColumnSettingsDialog } from "./components/ColumnSettingsDialog";
 import { EnableKanbanToggle } from "./components/EnableKanbanToggle";
+import { McpHealthBadge } from "./components/McpHealthBadge";
 import { ShipModeToggle } from "./components/ShipModeToggle";
 import { SkipPermissionsToggle } from "./components/SkipPermissionsToggle";
 import { kanbanApi } from "./api";
@@ -132,9 +133,12 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-full gap-4 overflow-hidden">
       <div className="flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className="text-xl font-semibold">Kanban</h1>
-          <div className="text-xs text-muted-foreground">{projectKey || "…"}</div>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-xl font-semibold">Kanban</h1>
+            <div className="text-xs text-muted-foreground">{projectKey || "…"}</div>
+          </div>
+          <McpHealthBadge />
         </div>
         <div className="flex flex-wrap gap-2">
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />

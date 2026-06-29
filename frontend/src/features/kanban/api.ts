@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api";
-import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse } from "./types";
+import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse, McpHealth } from "./types";
 
 const BASE = "kanban";
 
@@ -157,6 +157,8 @@ export const kanbanApi = {
     apiClient<{ enabled: boolean }>(
       `${BASE}/mcp-status?project_path=${encodeURIComponent(projectPath)}`
     ),
+
+  mcpHealth: (): Promise<McpHealth> => apiClient<McpHealth>(`${BASE}/mcp-health`),
 
   enable: (projectPath: string, slug?: string): Promise<{ project_key: string }> =>
     apiClient<{ project_key: string }>(`${BASE}/enable`, {
