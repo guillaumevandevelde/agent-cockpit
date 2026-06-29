@@ -14,6 +14,7 @@ from app.kanban.schemas import (
     CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
     CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
     AutodispatchRequest, ShipModeRequest, SkipPermissionsRequest,
+    MaxSessionsRequest, DefaultTransportRequest,
     DispatchRequest, RedispatchRequest,
     ColumnResponse, ColumnCreate, ColumnUpdate, ColumnClearRequest,
     ImpedimentResolveRequest,
@@ -385,6 +386,46 @@ async def set_skip_permissions(payload: SkipPermissionsRequest):
         await dispatch.set_skip_permissions(s, payload.project_key, payload.enabled)
         await s.commit()
     return {"project_key": payload.project_key, "enabled": payload.enabled}
+
+
+@router.get("/max-sessions")
+async def get_max_sessions(project_key: str = Query(...)):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {"project_key": project_key,
+                "max_sessions": await dispatch.get_max_sessions(s, project_key)}
+
+
+@router.post("/max-sessions")
+async def set_max_sessions(payload: MaxSessionsRequest):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            await dispatch.set_max_sessions(s, payload.project_key, payload.max_sessions)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        await s.commit()
+    return {"project_key": payload.project_key, "max_sessions": payload.max_sessions}
+
+
+@router.get("/transport")
+async def get_transport(project_key: str = Query(...)):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {"project_key": project_key,
+                "transport": await dispatch.get_default_transport(s, project_key)}
+
+
+@router.post("/transport")
+async def set_transport(payload: DefaultTransportRequest):
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            await dispatch.set_default_transport(s, payload.project_key, payload.transport)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        await s.commit()
+    return {"project_key": payload.project_key, "transport": payload.transport}
 
 
 @router.delete("/cards/{cid}", status_code=status.HTTP_204_NO_CONTENT)

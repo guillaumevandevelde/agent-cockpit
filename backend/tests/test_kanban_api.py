@@ -55,3 +55,49 @@ async def test_enable_writes_mcp_entry(tmp_path):
         mcp_file = tmp_path / ".mcp.json"
         assert mcp_file.exists()
         assert "cockpit-kanban" in mcp_file.read_text()
+
+
+@pytest.mark.asyncio
+async def test_max_sessions_defaults_to_4():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/api/v1/kanban/max-sessions", params={"project_key": "p1"})
+        assert r.status_code == 200
+        assert r.json()["max_sessions"] == 4
+
+
+@pytest.mark.asyncio
+async def test_set_max_sessions_roundtrip():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/max-sessions",
+                          json={"project_key": "p1", "max_sessions": 3})
+        assert r.status_code == 200
+        g = await ac.get("/api/v1/kanban/max-sessions", params={"project_key": "p1"})
+        assert g.json()["max_sessions"] == 3
+
+
+@pytest.mark.asyncio
+async def test_set_max_sessions_rejects_zero():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/max-sessions",
+                          json={"project_key": "p1", "max_sessions": 0})
+        assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_transport_defaults_worktree_and_roundtrips():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.get("/api/v1/kanban/transport", params={"project_key": "p2"})
+        assert r.json()["transport"] == "worktree"
+        s = await ac.post("/api/v1/kanban/transport",
+                          json={"project_key": "p2", "transport": "sandcastle"})
+        assert s.status_code == 200
+        g = await ac.get("/api/v1/kanban/transport", params={"project_key": "p2"})
+        assert g.json()["transport"] == "sandcastle"
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_unknown():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/transport",
+                          json={"project_key": "p2", "transport": "podman"})
+        assert r.status_code == 422
