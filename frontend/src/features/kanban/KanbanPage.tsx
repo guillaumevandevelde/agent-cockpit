@@ -133,12 +133,12 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-full gap-4 overflow-hidden">
       <div className="flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div>
+        <div>
+          <div className="flex items-center gap-3">
             <h1 className="text-xl font-semibold">Kanban</h1>
-            <div className="text-xs text-muted-foreground">{projectKey || "…"}</div>
+            <McpHealthBadge />
           </div>
-          <McpHealthBadge />
+          <div className="text-xs text-muted-foreground">{projectKey || "…"}</div>
         </div>
         <div className="flex flex-wrap gap-2">
           <EnableKanbanToggle projectPath={projectPath} onChanged={reload} />

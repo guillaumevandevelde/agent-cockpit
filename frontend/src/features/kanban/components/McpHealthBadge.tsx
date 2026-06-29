@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { kanbanApi } from "../api";
 import type { McpHealth } from "../types";
 
@@ -65,13 +66,15 @@ export function McpHealthBadge() {
       ].filter(Boolean).join("\n")
     : "Checking MCP wiring…";
 
+  const checking = loading && !health;
+
   return (
     <Badge
       role="button"
       tabIndex={0}
       variant={ok ? "secondary" : "destructive"}
       title={title}
-      className="cursor-pointer select-none"
+      className="cursor-pointer select-none gap-1.5"
       onClick={() => void check()}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -80,6 +83,13 @@ export function McpHealthBadge() {
         }
       }}
     >
+      <span
+        aria-hidden
+        className={cn(
+          "h-2 w-2 shrink-0 rounded-full",
+          checking ? "animate-pulse bg-muted-foreground" : ok ? "bg-emerald-500" : "bg-red-100",
+        )}
+      />
       {label}
     </Badge>
   );

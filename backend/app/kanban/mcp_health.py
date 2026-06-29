@@ -54,31 +54,32 @@ async def check_mcp_health(*, app=None, mcp=None, mount_prefix: str = _MOUNT_PRE
         "message_post_status": None, "tools": [], "db_ok": False, "error": None,
     }
 
-    # 1 + 2: the advertised message endpoint and whether it routes to the mount.
+    # 1 + 2: reproduce an agent's first round-trip end to end -- open the SSE
+    # stream, read the message endpoint it advertises, and POST a real ping back
+    # to it *with the session_id from the handshake, while that session is still
+    # live*. A correctly wired mount answers 202 Accepted (the message was queued
+    # for the server). That is the unambiguous healthy signal: a doubled mount
+    # makes the agent POST to a path that 404s, and a POST that falls through to
+    # the StaticFiles frontend 405s -- only 202 means a tool call would actually
+    # land on the MCP server. (Posting *without* a session_id, as an earlier probe
+    # did, always drew a 400 "session_id is required"; that proved routing but read
+    # as a failure and logged a warning on every check.)
     try:
-        advertised = await asyncio.wait_for(
-            _advertised_endpoint(app, f"{mount_prefix}/sse"), timeout=5.0
+        advertised, status_code = await asyncio.wait_for(
+            _message_roundtrip(app, f"{mount_prefix}/sse"), timeout=8.0
         )
     except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001 - probe must not raise
-        advertised = None
-        result["error"] = f"could not read advertised endpoint: {e}"
+        advertised, status_code = None, 0
+        result["error"] = f"could not probe MCP message endpoint: {e}"
     if advertised:
         result["advertised_endpoint"] = advertised
-        # A top-level Mount match is too coarse: the doubled path still matches the
-        # outer /kanban-mcp mount by prefix, then 404s *inside* the sub-app. Drive a
-        # real POST through ASGI and look at the status -- 404 means the agent's tool
-        # calls land on no handler (the actual symptom).
-        try:
-            status_code = await asyncio.wait_for(_post_status(app, advertised), timeout=5.0)
-        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
-            status_code = 0
-            result["error"] = result["error"] or f"could not probe message endpoint: {e}"
         result["message_post_status"] = status_code
-        result["routes_to_mount"] = status_code not in (0, 404)
+        result["routes_to_mount"] = status_code == 202
         if not result["routes_to_mount"] and result["error"] is None:
             result["error"] = (
-                f"advertised message endpoint {advertised} returns {status_code} -- agent "
-                "tool calls land on a 404 / the frontend instead of the MCP mount"
+                f"advertised message endpoint {advertised} returned {status_code} "
+                "(expected 202 Accepted) -- agent tool calls would not reach the MCP "
+                "mount (doubled prefix, a 404, or the frontend intercepting the POST)"
             )
 
     # 3: tools registered.
@@ -105,9 +106,16 @@ async def check_mcp_health(*, app=None, mcp=None, mount_prefix: str = _MOUNT_PRE
     return result
 
 
-async def _advertised_endpoint(app, sse_path: str) -> Optional[str]:
-    """Drive the SSE route over raw ASGI and return the advertised message path
-    (without the ?session_id=... suffix), or None if none is emitted."""
+async def _message_roundtrip(app, sse_path: str) -> tuple[Optional[str], int]:
+    """Open the SSE stream, read the advertised message endpoint, and POST a ping
+    back to it using the session_id from the handshake -- all while the SSE task
+    (and therefore the session) is still alive. Returns
+    ``(advertised_path_without_session, post_status)``; ``(None, 0)`` if the SSE
+    stream never advertises an endpoint.
+
+    The SSE task is left running until the POST completes so the session writer is
+    still registered when the message lands; a sessionless POST would only ever
+    draw a 400."""
     scope = {
         "type": "http", "method": "GET", "path": sse_path, "raw_path": sse_path.encode(),
         "headers": [(b"host", b"localhost:8000")], "query_string": b"",
@@ -131,22 +139,27 @@ async def _advertised_endpoint(app, sse_path: str) -> Optional[str]:
     task = asyncio.create_task(app(scope, receive, send))
     try:
         await asyncio.wait_for(done.wait(), timeout=5)
+        if not captured:
+            return None, 0
+        advertised = captured[0]
+        status = await asyncio.wait_for(_post_status(app, advertised), timeout=5)
+        return advertised.split("?")[0], status
     finally:
         task.cancel()
-    return captured[0].split("?")[0] if captured else None
 
 
 async def _post_status(app, path: str) -> int:
-    """Drive a real POST through the ASGI app to ``path`` and return the response
-    status. 404 means no handler is wired there (the doubled-path symptom); any
-    other status means the message route exists and answered."""
-    bare = path.split("?")[0]
+    """Drive a real POST through the ASGI app to ``path`` (keeping its
+    ?session_id=... query string) and return the response status. 202 means the
+    message route exists, found the live session, and queued the message; 404
+    means no handler is wired there (the doubled-path symptom)."""
+    bare, _, query = path.partition("?")
     body = b'{"jsonrpc":"2.0","id":0,"method":"ping"}'
     scope = {
         "type": "http", "method": "POST", "path": bare, "raw_path": bare.encode(),
         "headers": [(b"host", b"localhost:8000"), (b"content-type", b"application/json"),
                     (b"content-length", str(len(body)).encode())],
-        "query_string": b"", "scheme": "http", "server": ("localhost", 8000),
+        "query_string": query.encode(), "scheme": "http", "server": ("localhost", 8000),
         "client": ("127.0.0.1", 1), "root_path": "", "app": app,
     }
     captured: dict = {}

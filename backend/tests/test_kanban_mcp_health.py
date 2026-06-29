@@ -19,6 +19,9 @@ def test_mcp_health_is_ok_for_the_real_app():
     assert result["ok"] is True, result
     assert result["advertised_endpoint"] == "/kanban-mcp/messages/", result
     assert result["routes_to_mount"] is True, result
+    # A genuine agent round-trip (SSE handshake + POST with its session_id) is
+    # accepted; the probe must observe 202, not the 400 a sessionless POST drew.
+    assert result["message_post_status"] == 202, result
     assert "list_cards" in result["tools"], result
     assert result["db_ok"] is True, result
 
