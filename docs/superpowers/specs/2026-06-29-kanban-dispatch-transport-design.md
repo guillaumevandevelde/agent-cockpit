@@ -33,6 +33,8 @@ Two related gaps in the Kanban auto-dispatch feature:
 - Add a **per-project concurrency cap** (max concurrent agent sessions). Default **4**.
 - Add a **per-project "Default transport" dropdown** (`worktree | sandcastle`) as the
   single source of truth that card-transport `auto` resolves to.
+- Ensure **session auto-close fully frees a slot** for every transport, so the cap stays
+  accurate (see "Session lifecycle & auto-close").
 
 ## Non-goals
 
@@ -117,9 +119,51 @@ No schema migration: `KanbanMeta` is already a generic key/value table.
 - Default transport = `sandcastle` but no usable Sandcastle config → a clear UI warning
   rather than a silent fallback.
 
+## Session lifecycle & auto-close (cap correctness)
+
+The session cap is only meaningful if finished sessions reliably free their slot. A
+slot is "occupied" while a card sits in an **agent column** claimed by `agent:`
+(`Backlog`/`Impediment`/`Done` are fixed columns, excluded from the count). Slots free
+through three paths, all of which must work:
+
+1. **Card → Done** (human or agent via MCP). `operations.py:141` already triggers
+   `on_card_moved_to_done` → `cleanup_session_for_card`: kills the tmux session and removes
+   the worktree. Done is excluded from the count, so the slot frees immediately.
+2. **Reaper — dead worktree session.** A worktree agent that exits without moving its card
+   to Done leaves a claim in an agent column; the reaper (inside the dispatch tick) releases
+   it once `tmux` no longer lists the session, freeing the slot and leaving the card
+   unclaimed for re-rank.
+3. **Reaper — finished sandcastle run.** Same, using `sandcastle_live` as the liveness
+   source so a still-running sandcastle card is never reaped mid-run.
+
+### Gaps to fix (in scope, because the cap depends on them)
+
+- **Sandcastle auto-close on Done.** `cleanup_session_for_card` only does `tmux kill-session`
+  + worktree removal. For a sandcastle card the tmux kill fails (`failed_to_kill_session`)
+  and, critically, the running `SandcastleRun` is **not cancelled** — the process keeps
+  consuming real resources after the card is marked Done. Fix: when the card's resolved
+  transport is sandcastle, cancel the active `SandcastleRun` for that card/session instead
+  of (or in addition to) attempting a tmux kill. Worktree removal is skipped for sandcastle.
+- **Release the claim on Done.** When a card moves to Done, clear its `agent:` claim as part
+  of cleanup, so Done cards are never shown as claimed and no count path can mistake them
+  for active.
+- **Reaper coverage with the toggle on.** Reaping lives in the dispatch tick; confirm it runs
+  every tick for auto-dispatch-enabled projects (it does today) so a finished session frees
+  its slot on the next tick (≤10s), not only on the next successful dispatch.
+
 ## Testing
 
-Templates: `backend/tests/test_kanban_dispatch.py`, `test_kanban_shipmode.py`.
+Templates: `backend/tests/test_kanban_dispatch.py`, `test_kanban_shipmode.py`,
+`test_kanban_dispatch` reaper cases.
+
+Auto-close / cap-freeing:
+- Card → Done releases the `agent:` claim and (worktree) kills tmux + removes worktree.
+- Sandcastle card → Done cancels the `SandcastleRun` and does not error on the missing
+  tmux session.
+- Reaper frees a slot for a dead worktree session and for a finished sandcastle run; does
+  not reap a live sandcastle run.
+- Freed slot is immediately reusable: with cap N full, completing one card lets the next
+  tick dispatch exactly one more.
 - Cap counting: busy at N active, free at N-1; poller fills up to the cap in one tick.
 - `get_transport_for_project` resolves from the `transport:` meta (worktree and sandcastle
   cases); setter keeps `SandcastleConfig.enabled` in sync.
