@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from app.services.sandcastle_service import sandcastle_service
+
 logger = logging.getLogger(__name__)
 
 DONE_COLUMN = "Done"
@@ -93,6 +95,50 @@ def _remove_worktree_at(session_name: str, project_path: str) -> bool:
         return False
 
 
+async def _find_running_sandcastle_run(session_name: str):
+    """Return the pending/running SandcastleRun whose branch == session_name, or None."""
+    from sqlalchemy import select
+    from app.database import AsyncSessionLocal
+    from app.models.sandcastle import SandcastleRun
+
+    async with AsyncSessionLocal() as db:
+        return (await db.execute(
+            select(SandcastleRun).where(
+                SandcastleRun.branch == session_name,
+                SandcastleRun.status.in_(("pending", "running")),
+            )
+        )).scalar_one_or_none()
+
+
+async def _cancel_sandcastle_run(session_name: str) -> bool:
+    """Cancel the sandcastle run backing this session, if any. Returns True if a run
+    was found and cancellation was attempted."""
+    run = await _find_running_sandcastle_run(session_name)
+    if run is None:
+        return False
+    try:
+        await sandcastle_service.cancel_run(run.id)
+    except Exception:
+        logger.exception("failed to cancel sandcastle run %s", run.id)
+    return True
+
+
+async def _release_claim(card_id: str, project_key: str) -> None:
+    """Clear the card's agent: claim so a Done card is never shown as claimed."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import apply_operation
+
+    try:
+        async with KanbanSessionLocal() as session:
+            await apply_operation(
+                session, op_type="release", entity_type="card",
+                project_key=project_key, entity_id=card_id, payload={},
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("failed to release claim on card %s", card_id)
+
+
 async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
     """Clean up the agent session that worked on a completed card.
 
@@ -122,6 +168,13 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
 
             result["session_name"] = session_name
 
+        # Sandcastle sessions have no tmux session: cancel the run instead.
+        if await _cancel_sandcastle_run(session_name):
+            await _release_claim(card_id, project_key)
+            result["cleaned"] = True
+            logger.info("Cancelled sandcastle run for completed card %s", card_id)
+            return result
+
         if not _kill_tmux_session(session_name):
             result["error"] = "failed_to_kill_session"
             return result
@@ -134,6 +187,7 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
                 "No registered path for project %s; worktree not removed", project_key
             )
 
+        await _release_claim(card_id, project_key)
         result["cleaned"] = True
         logger.info("Cleaned up session %s for completed card %s", session_name, card_id)
 
