@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Castle, Plus, ChevronDown, ChevronRight, Loader2, XCircle, CheckCircle, AlertCircle, Trash2, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Castle, Plus, ChevronDown, ChevronRight, Loader2, XCircle, CheckCircle, AlertCircle, Trash2, AlertTriangle, Container, Radio } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,8 +32,10 @@ import {
   buildSandcastleImage,
   getSandcastleStats,
   getSandcastleRunLogs,
+  streamSandcastleRunLogs,
+  listSandcastleContainers,
 } from './api'
-import type { SandcastleConfig, SandcastleRun, SandcastleHealth, SandcastleStats } from './types'
+import type { SandcastleConfig, SandcastleRun, SandcastleHealth, SandcastleStats, SandcastleContainer } from './types'
 
 function StatusBadge({ status }: { status: SandcastleRun['status'] }) {
   const variants: Record<SandcastleRun['status'], { icon: React.ReactNode; className: string }> = {
@@ -61,24 +63,45 @@ interface RunCardProps {
 function RunCard({ run, onCancel, onDelete }: RunCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [logs, setLogs] = useState<string | null>(null)
-  const [loadingLogs, setLoadingLogs] = useState(false)
+  const logsEndRef = useRef<HTMLDivElement>(null)
 
-  const loadLogs = useCallback(async () => {
-    if (!expanded || logs !== null || run.status === 'pending') return
-    setLoadingLogs(true)
-    try {
-      const data = await getSandcastleRunLogs(run.id)
-      setLogs(data.log_content || data.stdout || null)
-    } catch {
-      // Logs might not be available yet
-    } finally {
-      setLoadingLogs(false)
-    }
-  }, [expanded, logs, run.id, run.status])
+  const isActive = run.status === 'running' || run.status === 'pending'
+  // isLive: SSE stream open (active run, panel expanded)
+  const isLive = expanded && isActive
+  // loadingLogs: panel open, terminal run, not yet fetched
+  const loadingLogs = expanded && !isActive && logs === null
 
+  // SSE stream: open when expanded+active, close on unmount or collapse
   useEffect(() => {
-    loadLogs()
-  }, [loadLogs])
+    if (!isLive) return
+    const es = streamSandcastleRunLogs(
+      run.id,
+      (data) => {
+        const content = (data.log_content as string | undefined) || (data.stdout as string | undefined)
+        if (content) setLogs(content)
+      },
+    )
+    return () => es.close()
+  }, [isLive, run.id])
+
+  // Fetch logs once when panel opens for a terminal run (logs===null guards re-fetch)
+  useEffect(() => {
+    if (!expanded || isActive || logs !== null) return
+    let cancelled = false
+    getSandcastleRunLogs(run.id).then((data) => {
+      if (!cancelled) setLogs(data.log_content || data.stdout || '')
+    }).catch(() => {
+      if (!cancelled) setLogs('')
+    })
+    return () => { cancelled = true }
+  }, [expanded, isActive, logs, run.id])
+
+  // Auto-scroll to bottom while streaming
+  useEffect(() => {
+    if (isLive && logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [logs, isLive])
 
   return (
     <div>
@@ -137,13 +160,23 @@ function RunCard({ run, onCancel, onDelete }: RunCardProps) {
             {loadingLogs && (
               <div className="text-xs text-muted-foreground">Loading logs...</div>
             )}
-            {logs && (
+            {(logs !== null || isLive) && (
               <div>
-                <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Agent Logs</p>
-                <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-64 font-mono">{logs}</pre>
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Agent Logs</p>
+                  {isLive && (
+                    <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
+                      <Radio className="h-3 w-3 animate-pulse" /> Live
+                    </span>
+                  )}
+                </div>
+                <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-64 font-mono whitespace-pre-wrap">
+                  {logs || '(waiting for output…)'}
+                  <div ref={logsEndRef} />
+                </pre>
               </div>
             )}
-            {run.stdout && !logs && (
+            {run.stdout && logs === null && !isLive && (
               <div>
                 <p className="text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wide">Output</p>
                 <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-48">{run.stdout}</pre>
@@ -162,10 +195,39 @@ function RunCard({ run, onCancel, onDelete }: RunCardProps) {
   )
 }
 
+function LiveContainersPanel({ containers }: { containers: SandcastleContainer[] }) {
+  if (containers.length === 0) return null
+  return (
+    <Card className="border-green-500/30">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Container className="h-4 w-4 text-green-600" />
+          Live Containers
+          <Badge className="bg-green-500 text-white text-xs">{containers.length} running</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {containers.map((c) => (
+            <div key={c.id} className="flex items-center gap-3 text-sm font-mono border rounded-md p-2 bg-muted/40">
+              <span className="h-2 w-2 rounded-full bg-green-500 shrink-0 animate-pulse" />
+              <span className="text-xs text-muted-foreground">{c.runtime}</span>
+              <span className="font-medium truncate">{c.name}</span>
+              <span className="text-xs text-muted-foreground truncate">{c.image}</span>
+              <span className="ml-auto text-xs text-green-700 shrink-0">{c.status}</span>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function SandcastlePage() {
   const { activeProject } = useProjectContext()
   const [config, setConfig] = useState<SandcastleConfig | null>(null)
   const [runs, setRuns] = useState<SandcastleRun[]>([])
+  const [containers, setContainers] = useState<SandcastleContainer[]>([])
   const [loading, setLoading] = useState(true)
   const [health, setHealth] = useState<SandcastleHealth | null>(null)
   const [stats, setStats] = useState<SandcastleStats | null>(null)
@@ -233,13 +295,32 @@ export function SandcastlePage() {
     }
   }, [])
 
+  const loadContainers = useCallback(async () => {
+    try {
+      const res = await listSandcastleContainers()
+      setContainers(res.containers)
+    } catch {
+      // Not critical
+    }
+  }, [])
+
   const load = useCallback(async () => {
     setLoading(true)
-    await Promise.all([loadConfig(), loadRuns(), loadHealth(), loadStats()])
+    await Promise.all([loadConfig(), loadRuns(), loadHealth(), loadStats(), loadContainers()])
     setLoading(false)
-  }, [loadConfig, loadRuns, loadHealth, loadStats])
+  }, [loadConfig, loadRuns, loadHealth, loadStats, loadContainers])
 
   useEffect(() => { load() }, [load])
+
+  // Poll runs + containers every 3s while there are active runs
+  const hasActiveRuns = runs.some((r) => r.status === 'running' || r.status === 'pending')
+  useEffect(() => {
+    if (!hasActiveRuns) return
+    const id = setInterval(async () => {
+      await Promise.all([loadRuns(), loadContainers(), loadStats()])
+    }, 3000)
+    return () => clearInterval(id)
+  }, [hasActiveRuns, loadRuns, loadContainers, loadStats])
 
   const handleToggle = async () => {
     if (!config) return
@@ -487,6 +568,9 @@ export function SandcastlePage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Live Containers */}
+      <LiveContainersPanel containers={containers} />
 
       {/* Configuration Card */}
       {config && (

@@ -102,3 +102,18 @@ export interface SandcastleStats {
   recent_runs_24h: number;
   active_runs: number;
 }
+
+/** A running Docker/Podman container */
+export interface SandcastleContainer {
+  runtime: 'docker' | 'podman';
+  id: string;
+  name: string;
+  image: string;
+  status: string;
+  created_at: string;
+}
+
+/** Response from /containers */
+export interface SandcastleContainersResponse {
+  containers: SandcastleContainer[];
+}

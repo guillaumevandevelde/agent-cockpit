@@ -196,6 +196,20 @@ ensure_deps() {
         # Update the venv mtime so we don't reinstall on the next start.
         touch "$PROJECT_ROOT/backend/venv/bin/activate"
     fi
+
+    # --- Backend npm (sandcastle runner) ---
+    local need_backend_npm=0
+    if [ ! -d "$PROJECT_ROOT/backend/node_modules" ]; then
+        need_backend_npm=1
+    elif [ "$PROJECT_ROOT/backend/package-lock.json" -nt "$PROJECT_ROOT/backend/node_modules" ]; then
+        need_backend_npm=1
+    fi
+
+    if [ "$need_backend_npm" -eq 1 ]; then
+        echo "Backend npm dependencies ontbreken of zijn verouderd — npm install uitvoeren..."
+        (cd "$PROJECT_ROOT/backend" && npm install) \
+            || { echo "Fout: backend npm install mislukt — zie uitvoer hierboven."; return 1; }
+    fi
 }
 
 # --- default service commands (overridable via env for tests) ---
