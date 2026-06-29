@@ -306,6 +306,50 @@ async def test_dispatch_freed_slot_is_reusable():
 
 
 @pytest.mark.asyncio
+async def test_get_default_transport_defaults_to_worktree():
+    async with KanbanSessionLocal() as s:
+        assert await dispatch.get_default_transport(s, PK) == "worktree"
+
+
+@pytest.mark.asyncio
+async def test_set_then_get_default_transport_roundtrips(monkeypatch):
+    async def _noop(project_key, enabled):
+        return None
+    monkeypatch.setattr(dispatch, "_sync_sandcastle_enabled", _noop)
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_default_transport(s, PK, "sandcastle")
+        await s.commit()
+        assert await dispatch.get_default_transport(s, PK) == "sandcastle"
+
+
+@pytest.mark.asyncio
+async def test_set_default_transport_rejects_unknown():
+    async with KanbanSessionLocal() as s:
+        with pytest.raises(ValueError):
+            await dispatch.set_default_transport(s, PK, "podman")
+
+
+@pytest.mark.asyncio
+async def test_get_transport_for_project_uses_meta_sandcastle(monkeypatch):
+    async def _noop(project_key, enabled):
+        return None
+    monkeypatch.setattr(dispatch, "_sync_sandcastle_enabled", _noop)
+    monkeypatch.setattr(dispatch, "_safe_resolve_key", lambda p: PK)
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_default_transport(s, PK, "sandcastle")
+        await s.commit()
+    t = await dispatch.get_transport_for_project("/any/path")
+    assert t is dispatch.sandcastle_transport
+
+
+@pytest.mark.asyncio
+async def test_get_transport_for_project_defaults_worktree(monkeypatch):
+    monkeypatch.setattr(dispatch, "_safe_resolve_key", lambda p: PK)
+    t = await dispatch.get_transport_for_project("/any/path")
+    assert t is not dispatch.sandcastle_transport  # a worktree transport callable
+
+
+@pytest.mark.asyncio
 async def test_dispatch_no_todo_cards_is_a_noop():
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:

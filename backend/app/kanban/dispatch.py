@@ -32,6 +32,9 @@ SHIP_MODES = ("pull-request", "direct")
 DEFAULT_SHIP_MODE = "pull-request"
 MAX_SESSIONS_PREFIX = "max_sessions:"
 DEFAULT_MAX_SESSIONS = 4
+TRANSPORT_PREFIX = "transport:"
+TRANSPORTS = ("worktree", "sandcastle")
+DEFAULT_TRANSPORT = "worktree"
 
 
 # ---- enablement: device-local, stored in KanbanMeta (not part of the op-log) ----
@@ -101,6 +104,65 @@ async def set_max_sessions(session, project_key: str, n: int) -> None:
     else:
         row.value = str(n)
     await session.flush()
+
+
+async def get_default_transport(session, project_key: str) -> str:
+    row = await session.get(KanbanMeta, TRANSPORT_PREFIX + project_key)
+    if row and row.value in TRANSPORTS:
+        return row.value
+    return DEFAULT_TRANSPORT
+
+
+async def set_default_transport(session, project_key: str, value: str) -> None:
+    if value not in TRANSPORTS:
+        raise ValueError(f"unknown transport: {value}")
+    key = TRANSPORT_PREFIX + project_key
+    row = await session.get(KanbanMeta, key)
+    if row is None:
+        session.add(KanbanMeta(key=key, value=value))
+    else:
+        row.value = value
+    await session.flush()
+    await _sync_sandcastle_enabled(project_key, value == "sandcastle")
+
+
+async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
+    """Keep SandcastleConfig.enabled aligned with the project's default transport so
+    the two never drift. Resolves the project path from the registry; no-op if the
+    project isn't locally registered."""
+    from app.database import AsyncSessionLocal
+    from app.models.database import Project
+    from app.models.sandcastle import SandcastleConfig
+    from sqlalchemy import select
+
+    try:
+        async with AsyncSessionLocal() as db:
+            paths = (await db.execute(select(Project.path))).scalars().all()
+            target = next(
+                (p for p in paths if _safe_resolve_key(p) == project_key), None
+            )
+            if target is None:
+                return
+            cfg = (await db.execute(
+                select(SandcastleConfig).where(SandcastleConfig.project_path == target)
+            )).scalar_one_or_none()
+            if cfg is None:
+                if enabled:
+                    db.add(SandcastleConfig(project_path=target, enabled=True))
+                    await db.commit()
+                return
+            if cfg.enabled != enabled:
+                cfg.enabled = enabled
+                await db.commit()
+    except Exception:
+        logger.exception("failed to sync sandcastle enabled for %s", project_key)
+
+
+def _safe_resolve_key(path: str) -> Optional[str]:
+    try:
+        return resolve_project_key(path)
+    except Exception:
+        return None
 
 
 async def get_ship_mode(session, project_key: str) -> str:
@@ -876,44 +938,21 @@ class MemoryLimitExceeded(Exception):
 async def get_transport_for_project(project_path: str) -> SpawnTransport:
     """Get the appropriate transport for a project.
 
-    Uses sandcastle if enabled; otherwise returns a worktree transport whose
-    skip_permissions flag reflects the per-project setting (default: True).
+    The authoritative source is the `transport:<project_key>` meta (worktree |
+    sandcastle), set via the project's Default-transport control. Worktree honors
+    the per-project skip_permissions flag.
     """
-    from app.database import AsyncSessionLocal
-    from app.models.sandcastle import SandcastleConfig
     from app.kanban.db import KanbanSessionLocal
-    from app.kanban.project_key import resolve_project_key
-    from sqlalchemy import select
 
-    # Resolve project key for KanbanMeta lookup
-    try:
-        project_key = resolve_project_key(project_path)
-    except Exception:
-        project_key = None
+    project_key = _safe_resolve_key(project_path)
+    if project_key is None:
+        return make_worktree_transport(skip_permissions=True)
 
-    # Check sandcastle first
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(SandcastleConfig).where(
-                    SandcastleConfig.project_path == project_path,
-                    SandcastleConfig.enabled == True,  # noqa: E712
-                )
-            )
-            config = result.scalar_one_or_none()
-            if config and config.enabled:
-                return sandcastle_transport
-    except Exception:
-        pass
-
-    # Read per-project skip_permissions setting
-    skip = True  # default: preserve existing behaviour
-    if project_key:
-        try:
-            async with KanbanSessionLocal() as ks:
-                skip = await get_skip_permissions(ks, project_key)
-        except Exception:
-            pass
+    async with KanbanSessionLocal() as ks:
+        transport_name = await get_default_transport(ks, project_key)
+        if transport_name == "sandcastle":
+            return sandcastle_transport
+        skip = await get_skip_permissions(ks, project_key)
 
     return make_worktree_transport(skip_permissions=skip)
 
