@@ -107,18 +107,8 @@ class PresenceService:
                 f"Memory: {status.usage_percent:.0%} used. "
                 f"Rejecting new session {session_id[:8]}..."
             )
-            # Still store the event for audit trail, but don't create session
-            db.add(PresenceEvent(
-                session_id=session_id,
-                event_type=event_type,
-                tool_name=payload.get("tool_name"),
-                tool_input=payload.get("tool_input"),
-                tool_result=payload.get("tool_result"),
-                message=payload.get("message"),
-                cwd=payload.get("cwd"),
-                timestamp=now,
-                received_at=now,
-            ))
+            # Don't persist the event: with no session created it would be an
+            # orphan, which the ON DELETE CASCADE FK on presence_events forbids.
             # Return a minimal response
             return PresenceSessionResponse(
                 session_id=session_id,

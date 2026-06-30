@@ -1,7 +1,7 @@
 """SQLAlchemy database models."""
 from datetime import datetime, timezone
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, JSON, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.models.constants import SessionStatus
@@ -179,7 +179,12 @@ class PresenceEvent(Base):
     __tablename__ = "presence_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[str] = mapped_column(String, index=True, nullable=False)
+    session_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("presence_sessions.session_id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
     event_type: Mapped[str] = mapped_column(String, nullable=False)
     tool_name: Mapped[str | None] = mapped_column(String, nullable=True)
     tool_input: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -228,4 +233,15 @@ class PresenceSession(Base):
     tmux_pane: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    # Deleting a session cascade-deletes its raw events. passive_deletes lets
+    # the DB-level ON DELETE CASCADE do the work (so bulk DELETEs are covered
+    # too) instead of the ORM loading and nulling children.
+    events: Mapped[list["PresenceEvent"]] = relationship(
+        "PresenceEvent",
+        primaryjoin="PresenceSession.session_id == PresenceEvent.session_id",
+        foreign_keys="PresenceEvent.session_id",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
