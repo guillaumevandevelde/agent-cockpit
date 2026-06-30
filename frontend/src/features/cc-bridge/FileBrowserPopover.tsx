@@ -33,7 +33,7 @@ export function FileBrowserPopover({ onSelect }: FileBrowserPopoverProps) {
         variant="ghost"
         size="icon"
         className="h-7 w-7"
-        title="Bestand kiezen"
+        title="Choose file"
         onClick={() => setOpen((v) => !v)}
       >
         <Folder className="h-3.5 w-3.5" />
@@ -46,7 +46,7 @@ export function FileBrowserPopover({ onSelect }: FileBrowserPopoverProps) {
               <button
                 className="text-muted-foreground hover:text-foreground shrink-0"
                 onClick={() => navigate(listing.parent!)}
-                title="Omhoog"
+                title="Go up"
               >
                 <ChevronUp className="h-3.5 w-3.5" />
               </button>
