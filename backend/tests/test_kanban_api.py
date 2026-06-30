@@ -1,4 +1,6 @@
 # backend/tests/test_kanban_api.py
+import json
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -55,6 +57,32 @@ async def test_enable_writes_mcp_entry(tmp_path):
         mcp_file = tmp_path / ".mcp.json"
         assert mcp_file.exists()
         assert "cockpit-kanban" in mcp_file.read_text()
+
+
+@pytest.mark.asyncio
+async def test_enable_mcp_url_derives_from_request(tmp_path):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://example.test") as ac:
+        r = await ac.post("/api/v1/kanban/enable",
+            json={"project_path": str(tmp_path)})
+        assert r.status_code == 200, r.text
+    data = json.loads((tmp_path / ".mcp.json").read_text())
+    url = data["mcpServers"]["cockpit-kanban"]["url"]
+    assert url == "http://example.test/kanban-mcp/sse"
+
+
+@pytest.mark.asyncio
+async def test_enable_mcp_url_honours_public_base_url(tmp_path, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "public_base_url", "https://cockpit.example.com")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/enable",
+            json={"project_path": str(tmp_path)})
+        assert r.status_code == 200, r.text
+    data = json.loads((tmp_path / ".mcp.json").read_text())
+    url = data["mcpServers"]["cockpit-kanban"]["url"]
+    assert url == "https://cockpit.example.com/kanban-mcp/sse"
 
 
 @pytest.mark.asyncio

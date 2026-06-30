@@ -3,8 +3,9 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from app.config import settings
+from app.utils.url_utils import resolve_base_url
 
 from app.kanban.db import KanbanSessionLocal
 from app.kanban import service
@@ -22,8 +23,6 @@ from app.kanban.schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-MCP_SSE_URL = "http://localhost:8000/kanban-mcp/sse"
 
 # Fallback routing for an impediment when no target_agent is given. Mirrors the
 # former card-flow.json `impediment_agents`; the first entry is chosen.
@@ -230,7 +229,7 @@ async def attach(cid: str, payload: AttachRequest):
 
 
 @router.post("/enable")
-async def enable(payload: EnableRequest):
+async def enable(payload: EnableRequest, request: Request):
     path = Path(payload.project_path)
     if not path.is_dir():
         raise HTTPException(422, "project_path is not a directory")
@@ -242,7 +241,7 @@ async def enable(payload: EnableRequest):
             data = json.loads(mcp_file.read_text())
         except json.JSONDecodeError:
             data = {}
-    entry: dict = {"type": "sse", "url": MCP_SSE_URL}
+    entry: dict = {"type": "sse", "url": f"{resolve_base_url(request)}/kanban-mcp/sse"}
     if settings.api_token:
         entry["headers"] = {"Authorization": f"Bearer {settings.api_token}"}
     data.setdefault("mcpServers", {})["cockpit-kanban"] = entry

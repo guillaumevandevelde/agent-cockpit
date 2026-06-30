@@ -3,11 +3,12 @@ import json
 import secrets
 import time
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.config import settings
+from app.utils.url_utils import resolve_base_url
 from app.models.constants import SessionStatus
 from app.models.schemas import (
     PresenceConfigSnippet,
@@ -115,9 +116,9 @@ async def clear_all_sessions(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/config-snippet", response_model=PresenceConfigSnippet)
-async def get_config_snippet():
+async def get_config_snippet(request: Request):
     """Generate the settings.json snippet for hooking up Claude Code."""
-    url = "http://localhost:8000/api/v1/presence/events"
+    url = f"{resolve_base_url(request)}/api/v1/presence/events"
     events = [
         "Notification", "PreToolUse", "PostToolUse", "Stop",
         "SessionStart", "SessionEnd", "UserPromptSubmit",

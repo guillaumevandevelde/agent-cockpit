@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     api_token: str | None = None
+    # Public-facing base URL advertised to clients (Claude Code hooks, the kanban
+    # MCP entry in .mcp.json). Leave None to derive it per-request from the
+    # incoming Request (handles reverse proxies that set forwarded headers); set
+    # it explicitly for deployments where the request host isn't reachable by the
+    # consumer, e.g. PUBLIC_BASE_URL=https://cockpit.example.com.
+    public_base_url: str | None = None
 
     # Tunable operational constants (defaults match the historical hardcoded values)
     kanban_dispatch_interval_seconds: int = 10

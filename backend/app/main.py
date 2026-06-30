@@ -113,7 +113,8 @@ app.add_middleware(CorrelationIdMiddleware)
 app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 
 # Mount the kanban MCP server (SSE) at /kanban-mcp. Agents point their
-# .mcp.json at http://localhost:8000/kanban-mcp/sse.
+# .mcp.json at <base_url>/kanban-mcp/sse, where base_url is derived per-request
+# (or PUBLIC_BASE_URL when set) — see app/api/v1/kanban/router.py::enable.
 from app.kanban.mcp_server import mcp as kanban_mcp  # noqa: E402
 # Do NOT pass mount_path here. The SSE transport already prepends the ASGI
 # scope's root_path (the "/kanban-mcp" supplied by app.mount) to the advertised

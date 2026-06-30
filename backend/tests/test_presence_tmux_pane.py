@@ -72,6 +72,33 @@ async def test_config_snippet_is_command_hook_with_tmux_pane():
 
 
 @pytest.mark.asyncio
+async def test_config_snippet_derives_events_url_from_request():
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://example.test") as ac:
+        r = await ac.get("/api/v1/presence/config-snippet")
+    cmd = r.json()["snippet"]["hooks"]["Stop"][0]["hooks"][0]["command"]
+    assert "http://example.test/api/v1/presence/events" in cmd
+    assert "localhost:8000" not in cmd
+
+
+@pytest.mark.asyncio
+async def test_config_snippet_honours_public_base_url(monkeypatch):
+    from httpx import AsyncClient, ASGITransport
+    from app.main import app
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "public_base_url", "https://cockpit.example.com")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.get("/api/v1/presence/config-snippet")
+    cmd = r.json()["snippet"]["hooks"]["Stop"][0]["hooks"][0]["command"]
+    assert "https://cockpit.example.com/api/v1/presence/events" in cmd
+
+
+@pytest.mark.asyncio
 async def test_failed_tool_result_marks_session_error():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
