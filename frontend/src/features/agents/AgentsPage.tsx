@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Plus, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import { AgentEditor } from "./AgentEditor";
 import { AgentWizard } from "./AgentWizard";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
 import {
@@ -25,32 +26,18 @@ import {
 
 export function AgentsPage() {
   const { activeProject } = useProjectContext();
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [showWizard, setShowWizard] = useState(false);
 
-  const fetchAgents = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = { project_path: activeProject?.path };
-      const response = await apiClient<AgentListResponse>(
-        buildEndpoint("agents", params)
-      );
-      setAgents(response.agents);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch agents");
-      toast.error("Failed to load agents");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchAgents();
-  }, [fetchAgents]);
+  const { data, loading, error, refresh: fetchAgents } = useFetchData(
+    () =>
+      apiClient<AgentListResponse>(
+        buildEndpoint("agents", { project_path: activeProject?.path })
+      ),
+    [activeProject?.path],
+    () => toast.error("Failed to load agents")
+  );
+  const agents = data?.agents ?? [];
 
   const handleCreate = async (agent: AgentCreate) => {
     try {

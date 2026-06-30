@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import {
   Brain,
   FileText,
@@ -26,6 +26,7 @@ import { RulesManager } from "./RulesManager";
 import { AutoMemoryManager } from "./AutoMemoryManager";
 import { ImportTree } from "./ImportTree";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { CLICKABLE_CARD } from "@/lib/constants";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
@@ -54,32 +55,18 @@ const SCOPE_COLORS: Record<string, string> = {
 export function MemoryPage() {
   const { activeProject } = useProjectContext();
   const [activeTab, setActiveTab] = useState<MemoryTab>("hierarchy");
-  const [files, setFiles] = useState<MemoryHierarchyItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<MemoryHierarchyItem | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
 
-  const fetchHierarchy = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = { project_path: activeProject?.path };
-      const response = await apiClient<MemoryHierarchyResponse>(
-        buildEndpoint("memory/hierarchy", params)
-      );
-      setFiles(response.files);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch memory files");
-      toast.error("Failed to load memory hierarchy");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchHierarchy();
-  }, [fetchHierarchy]);
+  const { data, loading, error, refresh: fetchHierarchy } = useFetchData(
+    () =>
+      apiClient<MemoryHierarchyResponse>(
+        buildEndpoint("memory/hierarchy", { project_path: activeProject?.path })
+      ),
+    [activeProject?.path],
+    () => toast.error("Failed to load memory hierarchy")
+  );
+  const files = data?.files ?? [];
 
   const handleFileClick = (file: MemoryHierarchyItem) => {
     setSelectedFile(file);

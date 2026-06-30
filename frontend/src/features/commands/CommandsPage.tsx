@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { Plus, Terminal, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -12,40 +12,28 @@ import { CommandWizard } from './CommandWizard';
 import { CommandDetailDialog } from './CommandDetailDialog';
 import type { SlashCommand } from '@/types/commands';
 import { apiClient, buildEndpoint } from '@/lib/api';
+import { useFetchData } from '@/hooks/useFetchData';
 import { useProjectContext } from '@/contexts/ProjectContext';
 import { toast } from 'sonner';
 
 export function CommandsPage() {
   const { activeProject } = useProjectContext();
-  const [commands, setCommands] = useState<SlashCommand[]>([]);
   const [selectedCommand, setSelectedCommand] = useState<SlashCommand | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [detailCommand, setDetailCommand] = useState<SlashCommand | null>(null);
   const [showDetail, setShowDetail] = useState(false);
 
-  const fetchCommands = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const endpoint = buildEndpoint("commands", { project_path: activeProject?.path });
-      const data = await apiClient<{ commands: SlashCommand[] }>(endpoint);
-      setCommands(data.commands || []);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch commands';
-      setError(message);
-      toast.error('Failed to fetch commands');
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchCommands();
-  }, [fetchCommands]);
+  const { data, loading, error, refresh: fetchCommands } = useFetchData(
+    () =>
+      apiClient<{ commands: SlashCommand[] }>(
+        buildEndpoint("commands", { project_path: activeProject?.path })
+      ),
+    [activeProject?.path],
+    () => toast.error('Failed to fetch commands')
+  );
+  const commands = data?.commands ?? [];
 
   const handleViewDetail = (command: SlashCommand) => {
     setDetailCommand(command);

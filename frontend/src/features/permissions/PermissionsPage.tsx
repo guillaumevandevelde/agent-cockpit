@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Plus, Shield, ShieldCheck, ShieldX, ShieldQuestion, Settings2, FolderPlus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ import { RuleList } from "./RuleList";
 import { RuleBuilder } from "./RuleBuilder";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
 import {
@@ -39,35 +40,22 @@ import {
 
 export function PermissionsPage() {
   const { activeProject } = useProjectContext();
-  const [rules, setRules] = useState<PermissionRule[]>([]);
-  const [settings, setSettings] = useState<PermissionSettings>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [editingRule, setEditingRule] = useState<PermissionRule | null>(null);
   const [showBuilder, setShowBuilder] = useState(false);
   const [builderType, setBuilderType] = useState<PermissionType>("allow");
   const [newDirectory, setNewDirectory] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
 
-  const fetchPermissions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const endpoint = buildEndpoint("permissions", { project_path: activeProject?.path });
-      const response = await apiClient<PermissionListResponse>(endpoint);
-      setRules(response.rules);
-      setSettings(response.settings || {});
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch permissions");
-      toast.error("Failed to load permissions");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchPermissions();
-  }, [fetchPermissions]);
+  const { data, loading, error, refresh: fetchPermissions } = useFetchData(
+    () =>
+      apiClient<PermissionListResponse>(
+        buildEndpoint("permissions", { project_path: activeProject?.path })
+      ),
+    [activeProject?.path],
+    () => toast.error("Failed to load permissions")
+  );
+  const rules = data?.rules ?? [];
+  const settings: PermissionSettings = data?.settings ?? {};
 
   const handleCreate = async (rule: {
     type: PermissionType;

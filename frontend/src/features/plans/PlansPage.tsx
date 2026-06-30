@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ClipboardList, Search, Calendar, HardDrive, FileText } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -6,9 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { RefreshButton } from '@/components/shared/RefreshButton'
 import { usePlansApi } from '@/hooks/usePlansApi'
+import { useFetchData } from '@/hooks/useFetchData'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { formatBytes } from '@/types/backup'
-import type { PlanSummary, PlanStatsResponse } from '@/types/plans'
+import type { PlanSummary } from '@/types/plans'
 
 function formatRelativeDate(isoDate: string): string {
   const date = new Date(isoDate)
@@ -55,32 +56,14 @@ function groupByDate(plans: PlanSummary[]): { label: string; plans: PlanSummary[
 export function PlansPage() {
   const navigate = useNavigate()
   const { listPlans, getStats } = usePlansApi()
-  const [plans, setPlans] = useState<PlanSummary[]>([])
-  const [stats, setStats] = useState<PlanStatsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [plansData, statsData] = await Promise.all([
-        listPlans(),
-        getStats(),
-      ])
-      setPlans(plansData.plans)
-      setStats(statsData)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load plans')
-    } finally {
-      setLoading(false)
-    }
-  }, [listPlans, getStats])
-
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
+  const { data, loading, error, refresh: fetchData } = useFetchData(
+    () => Promise.all([listPlans(), getStats()]),
+    [listPlans, getStats]
+  )
+  const plans = data?.[0].plans ?? []
+  const stats = data?.[1] ?? null
 
   // Client-side filtering by search query
   const filteredPlans = useMemo(() => {
