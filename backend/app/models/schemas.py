@@ -1737,6 +1737,19 @@ class PlanDetail(BaseModel):
     linked_sessions: List[PlanLinkedSession]
 
 
+class PlanCreate(BaseModel):
+    """Payload for creating a new plan."""
+
+    filename: str = Field(..., min_length=1)
+    content: str
+
+
+class PlanUpdate(BaseModel):
+    """Payload for updating an existing plan's content."""
+
+    content: str
+
+
 class PlanSearchResult(BaseModel):
     """Plan matching a search query."""
 
