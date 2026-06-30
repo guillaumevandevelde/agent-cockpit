@@ -31,6 +31,15 @@ export interface PlanDetail {
   linked_sessions: PlanLinkedSession[]
 }
 
+export interface PlanCreate {
+  filename: string
+  content: string
+}
+
+export interface PlanUpdate {
+  content: string
+}
+
 export interface PlanSearchResult {
   filename: string
   slug: string

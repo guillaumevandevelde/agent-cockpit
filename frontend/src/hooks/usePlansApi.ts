@@ -11,6 +11,11 @@ import type {
   PlanStatsResponse,
 } from '@/types/plans'
 
+interface PlanMutationInput {
+  filename: string
+  content: string
+}
+
 export function usePlansApi() {
   const { activeProject } = useProjectContext()
 
@@ -43,10 +48,38 @@ export function usePlansApi() {
     )
   }, [activeProject?.path])
 
+  const createPlan = useCallback(async ({ filename, content }: PlanMutationInput) => {
+    return apiClient<PlanDetailResponse>(
+      buildEndpoint('plans', { project_path: activeProject?.path }),
+      { method: 'POST', body: JSON.stringify({ filename, content }) }
+    )
+  }, [activeProject?.path])
+
+  const updatePlan = useCallback(async ({ filename, content }: PlanMutationInput) => {
+    return apiClient<PlanDetailResponse>(
+      buildEndpoint(`plans/${encodeURIComponent(filename)}`, {
+        project_path: activeProject?.path,
+      }),
+      { method: 'PUT', body: JSON.stringify({ content }) }
+    )
+  }, [activeProject?.path])
+
+  const deletePlan = useCallback(async (filename: string) => {
+    return apiClient<Record<string, never>>(
+      buildEndpoint(`plans/${encodeURIComponent(filename)}`, {
+        project_path: activeProject?.path,
+      }),
+      { method: 'DELETE' }
+    )
+  }, [activeProject?.path])
+
   return {
     listPlans,
     getPlan,
     searchPlans,
     getStats,
+    createPlan,
+    updatePlan,
+    deletePlan,
   }
 }

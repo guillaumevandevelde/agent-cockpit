@@ -136,6 +136,56 @@ class PlanService:
         return plans
 
     @classmethod
+    def _resolve_plan_path(cls, plans_dir: Path, filename: str) -> Path:
+        """Resolve a user-supplied filename to a safe path inside plans_dir.
+
+        Normalizes a missing ``.md`` suffix and rejects anything that would
+        escape the plans directory (path separators, ``..`` traversal, etc.).
+        """
+        name = (filename or "").strip()
+        if not name.endswith(".md"):
+            name = f"{name}.md"
+
+        if name == ".md" or "/" in name or "\\" in name or ".." in name or name != Path(name).name:
+            raise ValueError(f"Invalid plan filename: {filename!r}")
+
+        candidate = (plans_dir / name).resolve()
+        if candidate.parent != plans_dir.resolve():
+            raise ValueError(f"Invalid plan filename: {filename!r}")
+        return candidate
+
+    @classmethod
+    def create_plan(cls, plans_dir: Path, filename: str, content: str) -> Dict[str, Any]:
+        """Create a new plan file. Raises ValueError if it already exists."""
+        path = cls._resolve_plan_path(plans_dir, filename)
+        if path.exists():
+            raise ValueError(f"Plan already exists: {path.name}")
+
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return cls.get_plan(plans_dir, path.name)
+
+    @classmethod
+    def update_plan(cls, plans_dir: Path, filename: str, content: str) -> Optional[Dict[str, Any]]:
+        """Overwrite an existing plan's content. Returns None if not found."""
+        path = cls._resolve_plan_path(plans_dir, filename)
+        if not path.exists():
+            return None
+
+        path.write_text(content, encoding="utf-8")
+        return cls.get_plan(plans_dir, path.name)
+
+    @classmethod
+    def delete_plan(cls, plans_dir: Path, filename: str) -> bool:
+        """Delete a plan file. Returns True if deleted, False if not found."""
+        path = cls._resolve_plan_path(plans_dir, filename)
+        if not path.exists():
+            return False
+
+        path.unlink()
+        return True
+
+    @classmethod
     def get_plan(cls, plans_dir: Path, filename: str) -> Optional[Dict[str, Any]]:
         """Get full plan content and metadata."""
         plan_file = plans_dir / filename

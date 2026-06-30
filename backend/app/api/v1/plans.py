@@ -4,10 +4,12 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.services.plan_service import PlanService
 from app.models.schemas import (
+    PlanCreate,
     PlanDetailResponse,
     PlanListResponse,
     PlanSearchResponse,
     PlanStatsResponse,
+    PlanUpdate,
 )
 
 router = APIRouter()
@@ -72,3 +74,63 @@ async def get_plan_detail(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get plan: {str(e)}")
+
+
+@router.post("/plans", response_model=PlanDetailResponse, status_code=201)
+async def create_plan(
+    payload: PlanCreate,
+    project_path: Optional[str] = Query(None, description="Active project path"),
+):
+    """Create a new plan file."""
+    try:
+        plans_dir = PlanService.resolve_plans_dir(project_path)
+        plan_data = PlanService.create_plan(plans_dir, payload.filename, payload.content)
+        plan_data["linked_sessions"] = PlanService.get_plan_sessions(plan_data["slug"])
+        return {"plan": plan_data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create plan: {str(e)}")
+
+
+@router.put("/plans/{filename}", response_model=PlanDetailResponse)
+async def update_plan(
+    filename: str,
+    payload: PlanUpdate,
+    project_path: Optional[str] = Query(None, description="Active project path"),
+):
+    """Update an existing plan's content."""
+    try:
+        plans_dir = PlanService.resolve_plans_dir(project_path)
+        plan_data = PlanService.update_plan(plans_dir, filename, payload.content)
+        if plan_data is None:
+            raise HTTPException(status_code=404, detail="Plan not found")
+        plan_data["linked_sessions"] = PlanService.get_plan_sessions(plan_data["slug"])
+        return {"plan": plan_data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update plan: {str(e)}")
+
+
+@router.delete("/plans/{filename}", status_code=204)
+async def delete_plan(
+    filename: str,
+    project_path: Optional[str] = Query(None, description="Active project path"),
+):
+    """Delete a plan file."""
+    try:
+        plans_dir = PlanService.resolve_plans_dir(project_path)
+        deleted = PlanService.delete_plan(plans_dir, filename)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Plan not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete plan: {str(e)}")
