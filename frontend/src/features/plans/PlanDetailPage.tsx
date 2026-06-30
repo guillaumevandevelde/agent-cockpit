@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { ArrowLeft, FileText, Calendar, HardDrive, Code, Table, GitBranch } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -7,34 +6,18 @@ import { Badge } from '@/components/ui/badge'
 import { MarkdownRenderer } from '@/components/shared/MarkdownRenderer'
 import { RefreshButton } from '@/components/shared/RefreshButton'
 import { usePlansApi } from '@/hooks/usePlansApi'
+import { useFetchData } from '@/hooks/useFetchData'
 import { formatBytes } from '@/types/backup'
-import type { PlanDetail } from '@/types/plans'
 
 export function PlanDetailPage() {
   const { filename } = useParams<{ filename: string }>()
   const navigate = useNavigate()
   const { getPlan } = usePlansApi()
-  const [plan, setPlan] = useState<PlanDetail | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
-  const fetchPlan = useCallback(async () => {
-    if (!filename) return
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await getPlan(filename)
-      setPlan(data.plan)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load plan')
-    } finally {
-      setLoading(false)
-    }
-  }, [filename, getPlan])
-
-  useEffect(() => {
-    fetchPlan()
-  }, [fetchPlan])
+  const { data: plan, loading, error, refresh: fetchPlan } = useFetchData(
+    () => (filename ? getPlan(filename).then((d) => d.plan) : Promise.resolve(null)),
+    [filename, getPlan]
+  )
 
   const backButton = (
     <Button variant="ghost" size="sm" onClick={() => navigate('/plans')} className="mb-2">

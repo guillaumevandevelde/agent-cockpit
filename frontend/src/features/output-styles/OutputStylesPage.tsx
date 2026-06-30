@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Plus, Paintbrush } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,7 @@ import { OutputStyleEditor } from "./OutputStyleEditor";
 import { OutputStyleWizard } from "./OutputStyleWizard";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
 import {
@@ -25,30 +26,18 @@ import {
 
 export function OutputStylesPage() {
   const { activeProject } = useProjectContext();
-  const [styles, setStyles] = useState<OutputStyle[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [editingStyle, setEditingStyle] = useState<OutputStyle | null>(null);
   const [showWizard, setShowWizard] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const endpoint = buildEndpoint("output-styles", { project_path: activeProject?.path });
-      const response = await apiClient<OutputStyleListResponse>(endpoint);
-      setStyles(response.output_styles);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch data");
-      toast.error("Failed to load output styles");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const { data, loading, error, refresh: fetchData } = useFetchData(
+    () =>
+      apiClient<OutputStyleListResponse>(
+        buildEndpoint("output-styles", { project_path: activeProject?.path })
+      ),
+    [activeProject?.path],
+    () => toast.error("Failed to load output styles")
+  );
+  const styles = data?.output_styles ?? [];
 
   const handleCreate = async (style: OutputStyleCreate) => {
     try {
