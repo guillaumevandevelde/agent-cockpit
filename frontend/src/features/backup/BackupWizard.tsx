@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import { Progress } from "@/components/ui/progress";
 import {
   ChevronLeft,
@@ -413,7 +414,7 @@ export function BackupWizard({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className={MODAL_SIZES.SM}>
         <DialogHeader>
           <DialogTitle>Create Backup</DialogTitle>
           <DialogDescription>

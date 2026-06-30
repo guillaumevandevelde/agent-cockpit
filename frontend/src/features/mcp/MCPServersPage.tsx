@@ -18,6 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -458,7 +459,7 @@ export function MCPServersPage() {
 
       {/* Add Server Wizard Dialog */}
       <Dialog open={showWizard} onOpenChange={setShowWizard}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className={MODAL_SIZES.MD}>
           <DialogHeader>
             <DialogTitle>Add MCP Server</DialogTitle>
             <DialogDescription>
@@ -474,7 +475,7 @@ export function MCPServersPage() {
 
       {/* Edit Server Dialog */}
       <Dialog open={!!editingServer} onOpenChange={(open) => !open && setEditingServer(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className={MODAL_SIZES.MD}>
           <DialogHeader>
             <DialogTitle>Edit MCP Server</DialogTitle>
             <DialogDescription>

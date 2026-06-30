@@ -227,7 +227,7 @@ export function CommandsPage() {
 
       {/* Create Command Wizard Dialog */}
       <Dialog open={showWizard} onOpenChange={setShowWizard}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={MODAL_SIZES.MD}>
           <DialogHeader>
             <DialogTitle>Create New Command</DialogTitle>
             <DialogDescription>Create a new slash command step by step</DialogDescription>

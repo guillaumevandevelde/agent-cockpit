@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import {
   Collapsible,
   CollapsibleContent,
@@ -141,7 +142,7 @@ export function RuleBuilder({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px]">
+      <DialogContent className={MODAL_SIZES.SM}>
         <DialogHeader>
           <DialogTitle>
             {editingRule ? "Edit Permission Rule" : "Create Permission Rule"}

@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/collapsible";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient } from "@/lib/api";
-import { CLICKABLE_CARD } from "@/lib/constants";
+import { CLICKABLE_CARD, MODAL_SIZES } from "@/lib/constants";
 import { toast } from "sonner";
 import { TerminalPreview } from "./TerminalPreview";
 import type {
@@ -481,7 +481,7 @@ export function StatusLinePage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className={MODAL_SIZES.MD}>
           <DialogHeader>
             <DialogTitle>{previewPreset?.name}</DialogTitle>
             <DialogDescription>{previewPreset?.description}</DialogDescription>

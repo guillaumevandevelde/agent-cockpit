@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import { type OutputStyle, type OutputStyleUpdate } from "@/types/output-styles";
 
 interface OutputStyleEditorProps {
@@ -63,7 +64,7 @@ export function OutputStyleEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.LG}>
         <DialogHeader>
           <DialogTitle>Edit Output Style: {style.name}</DialogTitle>
           <DialogDescription>
