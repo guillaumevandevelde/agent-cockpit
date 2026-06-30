@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.config import settings
 from app.database import Base
 from app.models.constants import SessionStatus
 
@@ -70,7 +71,9 @@ class AutoBackupSettings(Base):
     project_path: Mapped[str | None] = mapped_column(String, nullable=True)
     time_of_day: Mapped[str] = mapped_column(String, default="03:00", nullable=False)  # "HH:MM"
     timezone: Mapped[str] = mapped_column(String, default="UTC", nullable=False)
-    retention_days: Mapped[int] = mapped_column(Integer, default=7, nullable=False)
+    retention_days: Mapped[int] = mapped_column(
+        Integer, default=settings.default_backup_retention_days, nullable=False
+    )
     last_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

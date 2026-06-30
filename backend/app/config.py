@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     port: int = 8000
     api_token: str | None = None
 
+    # Tunable operational constants (defaults match the historical hardcoded values)
+    kanban_dispatch_interval_seconds: int = 10
+    provider_doctor_timeout_seconds: int = 30
+    sqlite_busy_timeout_ms: int = 5000
+    default_backup_retention_days: int = 7
+
 
 # Global settings instance
 settings = Settings()

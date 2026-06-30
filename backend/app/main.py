@@ -45,8 +45,10 @@ async def lifespan(app: FastAPI):
     from sqlalchemy import select
     from app.models.scheduled_message import ScheduledMessage
     scheduler_service.start()
-    # Start kanban auto-dispatch polling (every 10 seconds)
-    scheduler_service.schedule_kanban_dispatch(interval_seconds=10)
+    # Start kanban auto-dispatch polling
+    scheduler_service.schedule_kanban_dispatch(
+        interval_seconds=settings.kanban_dispatch_interval_seconds
+    )
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(
             select(ScheduledMessage).where(ScheduledMessage.enabled == True)  # noqa: E712

@@ -30,7 +30,7 @@ if settings.database_url.startswith("sqlite"):
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA synchronous=NORMAL")
         cur.execute("PRAGMA foreign_keys=ON")
-        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute(f"PRAGMA busy_timeout={settings.sqlite_busy_timeout_ms}")
         cur.close()
 
 # Create async session factory
