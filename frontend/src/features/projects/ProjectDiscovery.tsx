@@ -25,13 +25,17 @@ export function ProjectDiscovery({ onProjectsDiscovered }: ProjectDiscoveryProps
   const [discoveredProjects, setDiscoveredProjects] = useState<ProjectBase[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backendAvailable, setBackendAvailable] = useState(true);
   const [addingProjects, setAddingProjects] = useState<Set<string>>(new Set());
 
   // Pre-populate with the real home path on mount
   useEffect(() => {
     apiClient<BrowseResult>('projects/browse?path=~')
-      .then((r) => setSearchPath(r.path))
-      .catch(() => { /* leave empty if backend not ready */ });
+      .then((r) => {
+        setSearchPath(r.path);
+        setBackendAvailable(true);
+      })
+      .catch(() => setBackendAvailable(false));
   }, []);
 
   // Directory browser state
@@ -85,6 +89,11 @@ export function ProjectDiscovery({ onProjectsDiscovered }: ProjectDiscoveryProps
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {!backendAvailable && (
+          <div className="text-sm text-destructive">
+            Backend not available — start the backend server and reload to discover projects.
+          </div>
+        )}
         <div className="flex gap-2">
           <Input
             type="text"
