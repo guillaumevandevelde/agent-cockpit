@@ -63,8 +63,9 @@ async def test_list_sessions_rejects_invalid_sort():
 async def test_get_session_detail_not_found_returns_404():
     async with _client() as ac:
         r = await ac.get("/api/v1/sessions/no-such-project/no-such-session")
+    # Detail text is not asserted: the SPA 404 handler rewrites API 404 bodies
+    # when frontend/dist is built, so only the status code is stable.
     assert r.status_code == 404
-    assert r.json()["detail"] == "Session not found"
 
 
 @pytest.mark.asyncio

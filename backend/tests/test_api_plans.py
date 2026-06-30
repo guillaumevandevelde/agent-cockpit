@@ -48,5 +48,6 @@ async def test_get_plan_not_found_returns_404():
          patch("app.api.v1.plans.PlanService.get_plan", return_value=None):
         async with _client() as ac:
             r = await ac.get("/api/v1/plans/does-not-exist.md")
+    # Detail text is not asserted: the SPA 404 handler rewrites API 404 bodies
+    # when frontend/dist is built, so only the status code is stable.
     assert r.status_code == 404
-    assert r.json()["detail"] == "Plan not found"
