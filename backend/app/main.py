@@ -128,12 +128,13 @@ app.mount("/kanban-mcp", kanban_mcp.sse_app())
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    return {
-        "name": settings.app_name,
-        "version": settings.app_version,
-        "status": "running"
-    }
+    """Health check endpoint.
+
+    Returns a minimal status only — app name/version are deliberately omitted
+    so the unauthenticated endpoint does not help attackers fingerprint the
+    deployment. Verbose info lives behind the auth-protected /api/v1/status.
+    """
+    return {"status": "ok"}
 
 # Serve static files from the frontend build directory
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
