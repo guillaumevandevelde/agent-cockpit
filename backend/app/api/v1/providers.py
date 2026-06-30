@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
+from app.config import settings
 from app.models.schemas import CLIExecuteRequest, CLIResult
 from app.services.cli_executor import ProviderCLIExecutor
 from app.services.codex_history_service import CodexHistoryService
@@ -434,7 +435,7 @@ def get_provider_doctor(provider_id: str):
     _require_capability(provider, "doctor", "doctor diagnostics")
     _require_provider_binary(executor, "doctor diagnostics")
 
-    result = executor.execute("doctor", ["--json"], timeout=30)
+    result = executor.execute("doctor", ["--json"], timeout=settings.provider_doctor_timeout_seconds)
     report = None
     parse_error = None
     if result.stdout.strip():
@@ -459,7 +460,7 @@ def get_provider_mcp_inventory(provider_id: str):
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "MCP inventory")
 
-    result = executor.execute("mcp", ["list", "--json"], timeout=30)
+    result = executor.execute("mcp", ["list", "--json"], timeout=settings.provider_doctor_timeout_seconds)
     servers = None
     parse_error = None
     raw_stdout = _redact_value(result.stdout)
@@ -488,7 +489,7 @@ def add_provider_mcp_server(provider_id: str, request: CodexMcpAddRequest):
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "MCP server mutation")
 
-    result = executor.execute("mcp", mcp_args, timeout=30)
+    result = executor.execute("mcp", mcp_args, timeout=settings.provider_doctor_timeout_seconds)
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
@@ -508,7 +509,7 @@ def remove_provider_mcp_server(provider_id: str, server_name: str):
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "MCP server mutation")
 
-    result = executor.execute("mcp", ["remove", safe_name], timeout=30)
+    result = executor.execute("mcp", ["remove", safe_name], timeout=settings.provider_doctor_timeout_seconds)
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
@@ -523,7 +524,7 @@ def get_provider_plugin_inventory(provider_id: str):
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "plugin inventory")
 
-    result = executor.execute("plugin", ["list"], timeout=30)
+    result = executor.execute("plugin", ["list"], timeout=settings.provider_doctor_timeout_seconds)
     safe_stdout = _redact_value(result.stdout)
     return {
         "provider": provider.id,
@@ -542,7 +543,7 @@ def get_provider_feature_inventory(provider_id: str):
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "feature inventory")
 
-    result = executor.execute("features", ["list"], timeout=30)
+    result = executor.execute("features", ["list"], timeout=settings.provider_doctor_timeout_seconds)
     safe_stdout = _redact_value(result.stdout)
     return {
         "provider": provider.id,
