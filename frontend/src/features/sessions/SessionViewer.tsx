@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { MODAL_SIZES } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react'
@@ -60,7 +61,7 @@ export function SessionViewer({ sessionId, projectFolder, open, onClose }: Props
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.LG}>
         <DialogHeader>
           <div className="flex items-start justify-between">
             <div className="space-y-1.5">

@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -170,7 +171,7 @@ export function HookWizard({ open, onOpenChange, onCreate }: HookWizardProps) {
         if (!o) resetForm();
       }}
     >
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className={MODAL_SIZES.LG}>
         <DialogHeader>
           <DialogTitle>Create New Hook</DialogTitle>
           <DialogDescription>

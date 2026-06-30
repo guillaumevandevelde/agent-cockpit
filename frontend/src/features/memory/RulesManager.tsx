@@ -28,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -315,7 +316,7 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
 
       {/* Create Rule Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className={MODAL_SIZES.MD}>
           <DialogHeader>
             <DialogTitle>Create New Rule</DialogTitle>
             <DialogDescription>
@@ -394,7 +395,7 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
 
       {/* Edit Rule Dialog */}
       <Dialog open={!!editingRule} onOpenChange={() => setEditingRule(null)}>
-        <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
+        <DialogContent className={`${MODAL_SIZES.LG} h-[80vh] flex flex-col`}>
           <DialogHeader>
             <DialogTitle>Edit Rule: {editingRule?.name}</DialogTitle>
             <DialogDescription className="font-mono text-xs">

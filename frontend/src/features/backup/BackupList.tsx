@@ -43,6 +43,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiClient } from "@/lib/api";
 import {
@@ -285,7 +286,7 @@ export function BackupList({ backups, onRestore, onDownload, onDelete }: BackupL
 
       {/* View Plan Dialog */}
       <Dialog open={planDialogOpen} onOpenChange={setPlanDialogOpen}>
-        <DialogContent className="sm:max-w-[550px]">
+        <DialogContent className={MODAL_SIZES.SM}>
           <DialogHeader>
             <DialogTitle>Restore Plan</DialogTitle>
             <DialogDescription>

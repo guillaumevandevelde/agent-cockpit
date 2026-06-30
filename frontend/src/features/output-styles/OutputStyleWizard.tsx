@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import { Progress } from "@/components/ui/progress";
 import { ChevronLeft, ChevronRight, User, FolderOpen } from "lucide-react";
 import { type OutputStyleCreate, type OutputStyleScope } from "@/types/output-styles";
@@ -224,7 +225,7 @@ Format code blocks with appropriate language tags.`}
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[600px]">
+      <DialogContent className={MODAL_SIZES.MD}>
         <DialogHeader>
           <DialogTitle>Create New Output Style</DialogTitle>
           <DialogDescription>

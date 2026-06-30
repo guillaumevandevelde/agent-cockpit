@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MODAL_SIZES } from "@/lib/constants";
 import { Progress } from "@/components/ui/progress";
 import {
   AlertTriangle,
@@ -790,7 +791,7 @@ export function RestoreWizard({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-[550px]">
+      <DialogContent className={MODAL_SIZES.SM}>
         <DialogHeader>
           <DialogTitle>Restore Backup</DialogTitle>
           <DialogDescription>
