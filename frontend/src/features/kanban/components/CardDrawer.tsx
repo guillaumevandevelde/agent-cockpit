@@ -64,7 +64,10 @@ export function CardDrawer({
     : null;
 
   useEffect(() => {
-    kanbanApi.activity(card.id).then(setActivity).catch(() => {});
+    kanbanApi
+      .activity(card.id)
+      .then(setActivity)
+      .catch(() => toast.error("Failed to load activity log"));
   }, [card.id]);
 
   const act = async (fn: () => Promise<unknown>) => {
