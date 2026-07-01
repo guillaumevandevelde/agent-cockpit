@@ -306,6 +306,45 @@ async def test_dispatch_freed_slot_is_reusable():
 
 
 @pytest.mark.asyncio
+async def test_retry_queued_cards_respects_per_project_cap(monkeypatch):
+    """Retrying memory-queued cards must honour the per-project session cap.
+
+    Regression: the retry path dispatched every retryable card, checking only the
+    hardware/memory limit, so queued cards could push a project past its cap (e.g.
+    3 running from the normal loop + 3 retried = 6 sessions)."""
+    from types import SimpleNamespace
+    from app.services.scheduling.pending_queue import PendingQueue
+    import app.services.scheduling.pending_queue as pq_mod
+    import app.kanban.db as kdb
+
+    fresh_queue = PendingQueue()
+    monkeypatch.setattr(pq_mod, "pending_queue", fresh_queue)
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    monkeypatch.setattr(
+        dispatch, "get_memory_status_cached",
+        lambda: SimpleNamespace(is_critical=False, usage_percent=0.1),
+    )
+
+    transport = RecordingTransport()
+    ids = []
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 2)
+        for i in range(4):
+            ids.append(await _make_card(s, title=f"q{i}", column="Backlog"))
+        await s.commit()
+
+    for cid in ids:
+        fresh_queue.enqueue(card_id=cid, project_key=PK, project_path="/p")
+
+    await dispatch._retry_queued_cards(transport)
+
+    assert len(transport.calls) == 2  # never exceeds the cap of 2
+    assert fresh_queue.size == 2       # the over-cap cards stay queued for later
+    # A cap hold is not a failed dispatch, so it must not burn retry budget.
+    assert all(c.retry_count == 0 for c in fresh_queue._queue.values())
+
+
+@pytest.mark.asyncio
 async def test_get_default_transport_defaults_to_worktree():
     async with KanbanSessionLocal() as s:
         assert await dispatch.get_default_transport(s, PK) == "worktree"

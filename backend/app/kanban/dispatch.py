@@ -1047,6 +1047,20 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                     pending_queue.dequeue(card.card_id)
                     continue
 
+                # Honour the per-project session cap. Memory may be free again, but
+                # the project can still be at its user-set cap; retrying past it is
+                # exactly how a cap of 3 ends up running 6 sessions. A cap hold is not
+                # a failed dispatch, so leave the card untouched in the queue (don't
+                # mark_retry, which would count toward max_retries and eventually drop
+                # a card that is merely waiting for a slot).
+                cap = await get_max_sessions(ks, card.project_key)
+                if _active_session_count(await list_cards(ks, card.project_key)) >= cap:
+                    logger.info(
+                        f"Card {card.card_id} held back: project {card.project_key} "
+                        f"at session cap ({cap})"
+                    )
+                    continue
+
                 result = await _run_card(
                     ks, card=card_data, project_key=card.project_key,
                     project_path=card.project_path, transport=transport,
