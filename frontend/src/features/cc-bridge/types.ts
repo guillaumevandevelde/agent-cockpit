@@ -64,6 +64,32 @@ export interface SpawnSessionResponse {
   worktree_name_adjusted?: boolean
 }
 
+export interface BulkResumeRequest {
+  provider?: AgentProviderId
+  directory?: string
+  sessions: { session_id: string; project_folder: string }[]
+  skip_permissions?: boolean
+  platform?: 'anthropic' | 'bedrock'
+  aws_region?: string
+  aws_profile?: string
+  bedrock_model?: string
+}
+
+export interface BulkResumeResult {
+  session_id: string
+  project_folder: string
+  ok: boolean
+  tmux_target?: string | null
+  session_name?: string | null
+  error?: string | null
+}
+
+export interface BulkResumeResponse {
+  results: BulkResumeResult[]
+  spawned: number
+  failed: number
+}
+
 export interface KillSessionResponse {
   killed: boolean
   error?: string

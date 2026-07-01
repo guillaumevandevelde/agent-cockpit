@@ -167,6 +167,90 @@ def spawn_session_endpoint(request: SpawnRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+class BulkResumeItem(BaseModel):
+    session_id: str
+    project_folder: str
+
+
+class BulkResumeRequest(BaseModel):
+    provider: str = "claude-code"
+    directory: str = ""
+    sessions: list[BulkResumeItem]
+    skip_permissions: bool = False
+    platform: str = "anthropic"
+    aws_region: str | None = None
+    aws_profile: str | None = None
+    bedrock_model: str | None = None
+
+
+class BulkResumeResult(BaseModel):
+    session_id: str
+    project_folder: str
+    ok: bool
+    tmux_target: str | None = None
+    session_name: str | None = None
+    error: str | None = None
+
+
+class BulkResumeResponse(BaseModel):
+    results: list[BulkResumeResult]
+    spawned: int
+    failed: int
+
+
+@router.post("/sessions/bulk-resume", response_model=BulkResumeResponse)
+def bulk_resume_endpoint(request: BulkResumeRequest):
+    if not request.sessions:
+        raise HTTPException(status_code=400, detail="No sessions provided")
+    try:
+        get_provider(request.provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    results: list[BulkResumeResult] = []
+    for item in request.sessions:
+        # Each session resolves its own launch directory from its project_folder,
+        # so a batch can span multiple worktrees. One failure never aborts the rest.
+        options = SpawnCommandOptions(
+            directory=request.directory,
+            mode="resume",
+            session_id=item.session_id,
+            project_folder=item.project_folder,
+            skip_permissions=request.skip_permissions,
+            platform=request.platform,
+            aws_region=request.aws_region,
+            aws_profile=request.aws_profile,
+            bedrock_model=request.bedrock_model,
+        )
+        try:
+            spawned = spawn_session(request.provider, options)
+            results.append(
+                BulkResumeResult(
+                    session_id=item.session_id,
+                    project_folder=item.project_folder,
+                    ok=True,
+                    tmux_target=spawned["tmux_target"],
+                    session_name=spawned["session_name"],
+                )
+            )
+        except ValueError as exc:
+            results.append(
+                BulkResumeResult(
+                    session_id=item.session_id,
+                    project_folder=item.project_folder,
+                    ok=False,
+                    error=str(exc),
+                )
+            )
+
+    spawned_count = sum(1 for r in results if r.ok)
+    return BulkResumeResponse(
+        results=results,
+        spawned=spawned_count,
+        failed=len(results) - spawned_count,
+    )
+
+
 @router.delete("/sessions/{target}")
 def kill_session_endpoint(target: str, cleanup_worktree: bool = False):
     return kill_session(session_name=target, cleanup_worktree=cleanup_worktree)

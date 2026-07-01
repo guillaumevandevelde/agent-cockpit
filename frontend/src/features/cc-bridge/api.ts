@@ -1,6 +1,6 @@
 import { apiClient, buildEndpoint } from '@/lib/api'
 import type { AgentProviderId } from '@/types/providers'
-import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse } from './types'
+import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse, BulkResumeRequest, BulkResumeResponse } from './types'
 import type { ResumableSessionListResponse } from '@/types/sessions'
 
 const BASE = 'agent-bridge'
@@ -34,6 +34,13 @@ export function buildTerminalWsUrl(target: string, token: string, mode: 'readonl
 
 export async function spawnSession(request: SpawnSessionRequest): Promise<SpawnSessionResponse> {
   return apiClient<SpawnSessionResponse>(BASE + '/sessions', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
+export async function bulkResumeSessions(request: BulkResumeRequest): Promise<BulkResumeResponse> {
+  return apiClient<BulkResumeResponse>(BASE + '/sessions/bulk-resume', {
     method: 'POST',
     body: JSON.stringify(request),
   })
