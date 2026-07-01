@@ -131,6 +131,42 @@ export default function KanbanPage() {
     void reload();
   };
 
+  const reorderWithin = async (cardId: string, column: string, index: number) => {
+    const colCards = cards.filter((c) => c.column === column);
+    const oldIndex = colCards.findIndex((c) => c.id === cardId);
+    if (oldIndex === -1) return;
+
+    const without = colCards.filter((c) => c.id !== cardId);
+    const insertAt = index > oldIndex ? index - 1 : index;
+    without.splice(insertAt, 0, colCards[oldIndex]);
+    const orderedIds = without.map((c) => c.id);
+    if (orderedIds.every((id, i) => id === colCards[i].id)) return;
+
+    const width = Math.max(4, String(orderedIds.length).length);
+    const rankOf = new Map(orderedIds.map((id, i) => [id, String(i).padStart(width, "0")]));
+    setCards((cs) =>
+      [...cs.map((c) => (rankOf.has(c.id) ? { ...c, rank: rankOf.get(c.id)! } : c))].sort(
+        (a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0),
+      ),
+    );
+    try {
+      await kanbanApi.reorder(projectKey, column, orderedIds);
+    } catch {
+      toast.error("Failed to reorder");
+      void reload();
+    }
+  };
+
+  const onDropCardAt = (cardId: string, column: string, index: number) => {
+    const card = cards.find((c) => c.id === cardId);
+    if (!card) return;
+    if (card.column === column) {
+      void reorderWithin(cardId, column, index);
+    } else {
+      void onMove(cardId, column);
+    }
+  };
+
   if (!projectPath) return <div className="p-6">Select a project first.</div>;
 
   return (
@@ -178,7 +214,7 @@ export default function KanbanPage() {
         columns={columns}
         cards={cards}
         onOpen={setOpen}
-        onMove={onMove}
+        onDropCardAt={onDropCardAt}
         onReorderColumns={async (sourceId, targetId) => {
           const source = columns.find((c) => c.id === sourceId);
           const target = columns.find((c) => c.id === targetId);

@@ -67,6 +67,12 @@ class MoveRequest(BaseModel):
     rank: Optional[str] = None
 
 
+class ReorderRequest(BaseModel):
+    project_key: str
+    column: str
+    ordered_ids: list[str]
+
+
 class ClaimRequest(BaseModel):
     claimed_by: str  # "<session-id>@<device>" or a human label
 

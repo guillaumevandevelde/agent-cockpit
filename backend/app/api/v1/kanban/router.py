@@ -12,7 +12,7 @@ from app.kanban import service
 from app.kanban.operations import apply_operation, ClaimRejected
 from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
-    CardResponse, CardCreate, CardUpdate, MoveRequest, ClaimRequest,
+    CardResponse, CardCreate, CardUpdate, MoveRequest, ReorderRequest, ClaimRequest,
     CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
     AutodispatchRequest, ShipModeRequest, SkipPermissionsRequest,
     MaxSessionsRequest, DefaultTransportRequest,
@@ -129,6 +129,27 @@ async def create_card(payload: CardCreate):
             payload=payload.model_dump(exclude={"project_key"}))
         await s.commit()
         return await _reload(s, cid)
+
+
+@router.post("/cards/reorder")
+async def reorder_cards(payload: ReorderRequest):
+    """Reassign ranks so cards in `column` follow `ordered_ids`. Emits rank-only
+    move ops (no column change, no dispatch side effects). Unknown ids are skipped
+    and ids whose rank is already correct are left untouched."""
+    width = max(4, len(str(len(payload.ordered_ids))))
+    async with KanbanSessionLocal() as s:
+        for i, cid in enumerate(payload.ordered_ids):
+            card = await service.get_card(s, cid)
+            if card is None or card.column != payload.column:
+                continue
+            new_rank = str(i).zfill(width)
+            if card.rank == new_rank:
+                continue
+            await apply_operation(s, op_type="move", entity_type="card",
+                project_key="", entity_id=cid, payload={"rank": new_rank})
+        await s.commit()
+        rows = await service.list_cards(s, payload.project_key, payload.column)
+        return {"items": [CardResponse.model_validate(c) for c in rows]}
 
 
 @router.get("/cards/{cid}", response_model=CardResponse)

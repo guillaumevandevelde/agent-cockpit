@@ -6,13 +6,13 @@ export function Board({
   columns,
   cards,
   onOpen,
-  onMove,
+  onDropCardAt,
   onReorderColumns,
 }: {
   columns: KanbanColumn[];
   cards: Card[];
   onOpen: (c: Card) => void;
-  onMove: (cardId: string, column: string) => void;
+  onDropCardAt: (cardId: string, column: string, index: number) => void;
   onReorderColumns?: (sourceId: string, targetId: string) => void;
 }) {
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export function Board({
           kanbanColumn={col}
           cards={cards.filter((c) => c.column === col.name)}
           onOpen={onOpen}
-          onDropCard={onMove}
+          onDropCardAt={onDropCardAt}
           onDragStartColumn={setDraggedColumn}
           onDropColumn={(targetId) => {
             if (draggedColumn && draggedColumn !== targetId) {

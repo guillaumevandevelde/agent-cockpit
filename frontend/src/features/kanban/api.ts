@@ -124,6 +124,12 @@ export const kanbanApi = {
       body: JSON.stringify({ column }),
     }),
 
+  reorder: (projectKey: string, column: string, orderedIds: string[]): Promise<{ items: Card[] }> =>
+    apiClient<{ items: Card[] }>(`${BASE}/cards/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, column, ordered_ids: orderedIds }),
+    }),
+
   claim: (id: string, claimedBy: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}/claim`, {
       method: "POST",
