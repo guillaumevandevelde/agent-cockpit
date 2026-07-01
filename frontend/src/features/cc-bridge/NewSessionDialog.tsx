@@ -22,7 +22,7 @@ import {
 import { MODAL_SIZES } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
-import { spawnSession, fetchResumableSessions } from './api'
+import { spawnSession, fetchResumableSessions, bulkResumeSessions } from './api'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgentProviderId } from '@/types/providers'
@@ -107,7 +107,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [error, setError] = useState<string | null>(null)
 
   const [recentSessions, setRecentSessions] = useState<ResumableSession[]>([])
-  const [selectedSession, setSelectedSession] = useState<ResumableSession | null>(null)
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set())
   const [loadingSessions, setLoadingSessions] = useState(false)
 
   const { projects, activeProject } = useProjectContext()
@@ -137,7 +137,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   useEffect(() => {
     if (mode !== 'resume' || isCodex) return
     let cancelled = false
-    setSelectedSession(null)
+    setSelectedSessionIds(new Set())
     setRecentSessions([])
     const dir = directory.trim()
     if (!dir) {
@@ -172,7 +172,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setCodexSessionId('')
       setUseLast(true)
       setError(null)
-      setSelectedSession(null)
+      setSelectedSessionIds(new Set())
       setRecentSessions([])
       setSubmitting(false)
     }
@@ -183,7 +183,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     if (isCodex && (mode === 'resume' || mode === 'fork')) {
       return directory.trim().length > 0 && (useLast || codexSessionId.trim().length > 0)
     }
-    if (!isCodex && mode === 'resume') return directory.trim().length > 0 && selectedSession !== null
+    if (!isCodex && mode === 'resume') return directory.trim().length > 0 && selectedSessionIds.size > 0
     return directory.trim().length > 0
   })()
 
@@ -206,16 +206,39 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       } catch {
         // Persisting the platform preference is best-effort; ignore storage failures.
       }
+
+      // Resume mode (Claude Code) resumes every selected session in one batch,
+      // each in its own tmux pane.
+      if (provider === 'claude-code' && mode === 'resume') {
+        const selected = recentSessions.filter((s) => selectedSessionIds.has(s.id))
+        const result = await bulkResumeSessions({
+          provider,
+          directory: directory.trim(),
+          sessions: selected.map((s) => ({ session_id: s.id, project_folder: s.project_folder })),
+          ...(skipPermissions && { skip_permissions: true }),
+          ...(isBedrock && { platform: 'bedrock' as const }),
+          ...(isBedrock && awsRegion.trim() && { aws_region: awsRegion.trim() }),
+          ...(isBedrock && awsProfile.trim() && { aws_profile: awsProfile.trim() }),
+          ...(isBedrock && bedrockModel.trim() && { bedrock_model: bedrockModel.trim() }),
+        })
+        for (const item of result.results) {
+          if (item.ok && item.tmux_target) onSpawned(item.tmux_target)
+        }
+        if (result.failed > 0) {
+          toast.error(`Resumed ${result.spawned} session(s), ${result.failed} failed.`)
+        } else if (result.spawned > 1) {
+          toast.success(`Resumed ${result.spawned} sessions.`)
+        }
+        onOpenChange(false)
+        return
+      }
+
       const request: SpawnSessionRequest = {
         provider,
         directory: directory.trim(),
         mode,
         ...(sessionName.trim() && { session_name: sessionName.trim() }),
         ...(provider === 'claude-code' && mode === 'worktree' && worktreeName.trim() && { worktree_name: worktreeName.trim() }),
-        ...(provider === 'claude-code' && mode === 'resume' && selectedSession && {
-          session_id: selectedSession.id,
-          project_folder: selectedSession.project_folder,
-        }),
         ...(provider === 'claude-code' && skipPermissions && { skip_permissions: true }),
         ...(isCodex && prompt.trim() && { prompt: prompt.trim() }),
         ...(isCodex && model.trim() && { model: model.trim() }),
@@ -266,7 +289,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
               onValueChange={(value) => {
                 setProvider(value as AgentProviderId)
                 setMode('plain')
-                setSelectedSession(null)
+                setSelectedSessionIds(new Set())
                 setError(null)
               }}
             >
@@ -299,7 +322,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                   )}
                   onClick={() => {
                     setMode(opt.value)
-                    setSelectedSession(null)
+                    setSelectedSessionIds(new Set())
                     setError(null)
                   }}
                 >
@@ -337,7 +360,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                     } else {
                       setDirectory(value)
                     }
-                    setSelectedSession(null)
+                    setSelectedSessionIds(new Set())
                     setError(null)
                   }}
                 >
@@ -361,7 +384,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
               value={directory}
               onChange={(e) => {
                 setDirectory(e.target.value)
-                setSelectedSession(null)
+                setSelectedSessionIds(new Set())
                 setError(null)
               }}
               placeholder="/home/user/project"
@@ -385,10 +408,21 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             </div>
           )}
 
-          {/* Resume session picker */}
+          {/* Resume session picker (multi-select — resumes each in its own pane) */}
           {!isCodex && mode === 'resume' && (
             <div className="space-y-1.5">
-              <Label>Recent Sessions</Label>
+              <div className="flex items-center justify-between">
+                <Label>Recent Sessions</Label>
+                {selectedSessionIds.size > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setSelectedSessionIds(new Set())}
+                  >
+                    Clear ({selectedSessionIds.size})
+                  </button>
+                )}
+              </div>
               {loadingSessions ? (
                 <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
                   Loading sessions...
@@ -399,38 +433,52 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                 </div>
               ) : (
                 <div className="max-h-48 w-full overflow-y-auto rounded-md border">
-                  {recentSessions.map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      className={cn(
-                        'block w-full min-w-0 text-left px-3 py-2 border-b last:border-b-0 transition-colors',
-                        selectedSession?.id === session.id
-                          ? 'border-l-2 border-l-primary bg-primary/5'
-                          : 'hover:bg-muted/50'
-                      )}
-                      onClick={() => setSelectedSession(session)}
-                    >
-                      <div className="flex items-center justify-between gap-2 min-w-0">
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-sm font-medium truncate min-w-0">
-                            {session.project_name}
+                  {recentSessions.map((session) => {
+                    const checked = selectedSessionIds.has(session.id)
+                    return (
+                      <button
+                        key={session.id}
+                        type="button"
+                        aria-pressed={checked}
+                        className={cn(
+                          'flex w-full min-w-0 items-start gap-2 text-left px-3 py-2 border-b last:border-b-0 transition-colors',
+                          checked
+                            ? 'border-l-2 border-l-primary bg-primary/5'
+                            : 'hover:bg-muted/50'
+                        )}
+                        onClick={() =>
+                          setSelectedSessionIds((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(session.id)) next.delete(session.id)
+                            else next.add(session.id)
+                            return next
+                          })
+                        }
+                      >
+                        <Checkbox checked={checked} className="mt-0.5 shrink-0 pointer-events-none" />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center justify-between gap-2 min-w-0">
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-sm font-medium truncate min-w-0">
+                                {session.project_name}
+                              </span>
+                              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                {session.worktree_label}
+                              </span>
+                            </span>
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {formatTimestamp(session.modified_at)}
+                            </span>
                           </span>
-                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                            {session.worktree_label}
-                          </span>
+                          {session.summary && (
+                            <span className="block text-xs text-muted-foreground mt-0.5 truncate">
+                              {session.summary}
+                            </span>
+                          )}
                         </span>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {formatTimestamp(session.modified_at)}
-                        </span>
-                      </div>
-                      {session.summary && (
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                          {session.summary}
-                        </p>
-                      )}
-                    </button>
-                  ))}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
