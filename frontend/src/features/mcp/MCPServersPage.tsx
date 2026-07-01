@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { MODAL_SIZES } from "@/lib/constants";
+import { CLICKABLE_CARD, MODAL_SIZES } from "@/lib/constants";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -352,7 +352,7 @@ export function MCPServersPage() {
           <Collapsible open={approvalSettingsOpen} onOpenChange={setApprovalSettingsOpen}>
             <Card>
               <CollapsibleTrigger asChild>
-                <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+                <CardHeader className={CLICKABLE_CARD}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Info className="h-5 w-5" />
