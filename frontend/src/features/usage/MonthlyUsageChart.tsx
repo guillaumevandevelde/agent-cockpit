@@ -118,9 +118,9 @@ export function MonthlyUsageChart({ data, loading }: MonthlyUsageChartProps) {
               }
             />
             <Bar dataKey="cost" radius={[4, 4, 0, 0]}>
-              {chartData.map((entry, index) => (
+              {chartData.map((entry) => (
                 <Cell
-                  key={`cell-${index}`}
+                  key={entry.fullMonth}
                   fill={`hsl(var(--chart-1) / ${0.4 + (entry.cost / maxCost) * 0.6})`}
                 />
               ))}

@@ -194,7 +194,7 @@ export function ListEditor({ value: rawValue, onChange, placeholder }: {
       <div className="flex flex-wrap gap-2">
         {value.map((item, index) => (
           <div
-            key={index}
+            key={item}
             className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-sm"
           >
             <span>{item}</span>
@@ -253,7 +253,7 @@ export function ObjectArrayEditor({ value: rawValue, onChange, field1Label, fiel
       </div>
       <div className="space-y-1">
         {value.map((item, index) => (
-          <div key={index} className="flex items-center gap-2 bg-muted px-2 py-1 rounded text-sm">
+          <div key={`${item.name}-${item.url}`} className="flex items-center gap-2 bg-muted px-2 py-1 rounded text-sm">
             <span className="font-medium">{item.name}</span>
             <span className="text-muted-foreground truncate flex-1">{item.url}</span>
             <button

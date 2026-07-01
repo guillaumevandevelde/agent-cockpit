@@ -332,9 +332,9 @@ export function ApmPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {dependencyList.map((dep, index) => (
+              {dependencyList.map((dep) => (
                 <div
-                  key={index}
+                  key={dep.name}
                   className="flex items-center justify-between p-3 border rounded-lg"
                 >
                   <div className="flex items-center gap-3">

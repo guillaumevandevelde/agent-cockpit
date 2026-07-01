@@ -83,9 +83,9 @@ export function CommandWizard({ onComplete, onCancel }: CommandWizardProps) {
 
       {/* Progress Bar */}
       <div className="flex gap-2">
-        {steps.map((_, index) => (
+        {steps.map((label, index) => (
           <div
-            key={index}
+            key={label}
             className={`h-2 flex-1 rounded-full ${
               index < step ? 'bg-primary' : 'bg-muted'
             }`}

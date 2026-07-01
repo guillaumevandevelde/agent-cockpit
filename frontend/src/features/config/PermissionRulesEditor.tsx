@@ -202,7 +202,7 @@ export function PermissionRulesEditor({
                       const validation = validatePermissionPattern(rule)
                       return (
                         <div
-                          key={index}
+                          key={rule}
                           className={`flex items-center gap-1 bg-background border rounded-md px-2 py-1 text-sm font-mono ${
                             !validation.valid ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20' : ''
                           }`}

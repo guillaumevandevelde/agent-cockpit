@@ -236,9 +236,9 @@ export function SandcastlePage() {
   const [runBranch, setRunBranch] = useState('')
   const [starting, setStarting] = useState(false)
   const [showParallelDialog, setShowParallelDialog] = useState(false)
-  const [parallelPrompts, setParallelPrompts] = useState<{ prompt: string; branch_name: string }[]>([
-    { prompt: '', branch_name: '' },
-    { prompt: '', branch_name: '' },
+  const [parallelPrompts, setParallelPrompts] = useState<{ id: string; prompt: string; branch_name: string }[]>([
+    { id: crypto.randomUUID(), prompt: '', branch_name: '' },
+    { id: crypto.randomUUID(), prompt: '', branch_name: '' },
   ])
   const [startingParallel, setStartingParallel] = useState(false)
 
@@ -435,7 +435,10 @@ export function SandcastlePage() {
       )
       toast.success(`${validPrompts.length} runs started`)
       setShowParallelDialog(false)
-      setParallelPrompts([{ prompt: '', branch_name: '' }, { prompt: '', branch_name: '' }])
+      setParallelPrompts([
+        { id: crypto.randomUUID(), prompt: '', branch_name: '' },
+        { id: crypto.randomUUID(), prompt: '', branch_name: '' },
+      ])
       await loadRuns()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to start parallel runs')
@@ -445,7 +448,7 @@ export function SandcastlePage() {
   }
 
   const addParallelPrompt = () => {
-    setParallelPrompts([...parallelPrompts, { prompt: '', branch_name: '' }])
+    setParallelPrompts([...parallelPrompts, { id: crypto.randomUUID(), prompt: '', branch_name: '' }])
   }
 
   const removeParallelPrompt = (index: number) => {
@@ -739,7 +742,7 @@ export function SandcastlePage() {
               Start multiple agent runs in parallel. Each run will execute independently in its own sandbox.
             </p>
             {parallelPrompts.map((item, index) => (
-              <div key={index} className="space-y-2 border rounded-lg p-3">
+              <div key={item.id} className="space-y-2 border rounded-lg p-3">
                 <div className="flex items-center justify-between">
                   <Label>Run {index + 1}</Label>
                   {parallelPrompts.length > 1 && (
