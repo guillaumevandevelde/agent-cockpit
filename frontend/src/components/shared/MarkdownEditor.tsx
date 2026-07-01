@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { MarkdownPreviewToggle } from './MarkdownPreviewToggle';
 import { AVAILABLE_TOOLS } from '../../types/commands';
+import { CLICKABLE_CARD } from '@/lib/constants';
 
 interface MarkdownEditorProps {
   description?: string;
@@ -41,7 +42,7 @@ export function MarkdownEditor({
     <div className="space-y-4">
       {/* Frontmatter Section */}
       <Card>
-        <CardHeader className="cursor-pointer" onClick={() => setFrontmatterOpen(!frontmatterOpen)}>
+        <CardHeader className={CLICKABLE_CARD} onClick={() => setFrontmatterOpen(!frontmatterOpen)}>
           <CardTitle className="flex items-center justify-between text-lg">
             <span>Frontmatter (YAML Metadata)</span>
             {frontmatterOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
