@@ -7,7 +7,7 @@ export function Column({
   kanbanColumn,
   cards,
   onOpen,
-  onDropCard,
+  onDropCardAt,
   onDragStartColumn,
   onDropColumn,
 }: {
@@ -15,11 +15,17 @@ export function Column({
   kanbanColumn?: KanbanColumn;
   cards: Card[];
   onOpen: (c: Card) => void;
-  onDropCard: (cardId: string, column: Col) => void;
+  onDropCardAt: (cardId: string, column: Col, index: number) => void;
   onDragStartColumn?: (columnId: string) => void;
   onDropColumn?: (targetColumnId: string) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  const clearDrag = () => {
+    setDragOver(false);
+    setDropIndex(null);
+  };
 
   return (
     <div
@@ -30,19 +36,21 @@ export function Column({
         e.preventDefault();
         setDragOver(true);
       }}
-      onDragLeave={() => setDragOver(false)}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) clearDrag();
+      }}
       onDrop={(e) => {
         e.preventDefault();
-        setDragOver(false);
         const data = e.dataTransfer.getData("text/plain");
         if (data.startsWith("column:")) {
           const sourceId = data.replace("column:", "");
           if (sourceId && kanbanColumn && sourceId !== kanbanColumn.id) {
             onDropColumn?.(kanbanColumn.id);
           }
-        } else {
-          onDropCard(data, column);
+        } else if (data) {
+          onDropCardAt(data, column, dropIndex ?? cards.length);
         }
+        clearDrag();
       }}
     >
       <div
@@ -58,15 +66,23 @@ export function Column({
         {column} <span className="ml-1">({cards.length})</span>
       </div>
       <div className="overflow-y-auto flex-1 min-h-0">
-        {cards.map((c) => (
+        {cards.map((c, i) => (
           <div
             key={c.id}
             draggable
             onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              const rect = e.currentTarget.getBoundingClientRect();
+              const after = e.clientY - rect.top > rect.height / 2;
+              setDropIndex(after ? i + 1 : i);
+            }}
           >
+            {dropIndex === i && <div className="h-0.5 bg-primary rounded mb-2" />}
             <CardItem card={c} onOpen={onOpen} />
           </div>
         ))}
+        {dropIndex === cards.length && <div className="h-0.5 bg-primary rounded mb-2" />}
       </div>
     </div>
   );

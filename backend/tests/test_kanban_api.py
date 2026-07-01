@@ -33,6 +33,51 @@ async def test_create_list_move_card():
 
 
 @pytest.mark.asyncio
+async def test_reorder_cards_sets_rank_order():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        ids = []
+        for title in ("A", "B", "C"):
+            r = await ac.post("/api/v1/kanban/cards",
+                json={"project_key": "P", "title": title, "column": "Backlog"})
+            ids.append(r.json()["id"])
+
+        # Reverse the order: C, B, A
+        reordered = list(reversed(ids))
+        r = await ac.post("/api/v1/kanban/cards/reorder",
+            json={"project_key": "P", "column": "Backlog", "ordered_ids": reordered})
+        assert r.status_code == 200, r.text
+
+        r = await ac.get("/api/v1/kanban/cards",
+            params={"project_key": "P", "column": "Backlog"})
+        got = [c["id"] for c in r.json()["items"]]
+        assert got == reordered
+        ranks = [c["rank"] for c in r.json()["items"]]
+        assert ranks == sorted(ranks)
+
+
+@pytest.mark.asyncio
+async def test_reorder_ignores_unknown_ids_and_keeps_column():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        a = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "A", "column": "Backlog"})).json()["id"]
+        b = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "B", "column": "Backlog"})).json()["id"]
+
+        r = await ac.post("/api/v1/kanban/cards/reorder",
+            json={"project_key": "P", "column": "Backlog",
+                  "ordered_ids": [b, "does-not-exist", a]})
+        assert r.status_code == 200, r.text
+
+        r = await ac.get("/api/v1/kanban/cards",
+            params={"project_key": "P", "column": "Backlog"})
+        items = r.json()["items"]
+        assert [c["id"] for c in items] == [b, a]
+        assert all(c["column"] == "Backlog" for c in items)
+
+
+@pytest.mark.asyncio
 async def test_claim_conflict_returns_409():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
