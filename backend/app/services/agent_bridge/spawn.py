@@ -8,6 +8,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from app.services.host_service import build_ssh_base
 from app.services.providers import get_provider
 from app.services.providers.base import SpawnCommandOptions
 from app.services.providers.claude_code import ClaudeCodeProvider
@@ -60,8 +61,48 @@ def _session_name_for(directory: str, preferred: str | None = None) -> str:
     return f"{safe_basename}-{uuid.uuid4().hex[:4]}"
 
 
-def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: str | None = None) -> dict:
-    """Spawn a new provider CLI session inside tmux."""
+def _spawn_session_remote(
+    host_data: dict,
+    provider_display_name: str,
+    name: str,
+    directory: str,
+    shell_command: str,
+    env_flags: list[str],
+) -> None:
+    """Run tmux new-session on a remote host via SSH."""
+    tmux_cmd = [
+        "tmux", "new-session", "-d", "-s", name, "-c", directory,
+        *env_flags, shell_command,
+    ]
+    ssh_cmd = build_ssh_base(host_data) + tmux_cmd
+    try:
+        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise ValueError(
+                f"Remote tmux new-session failed on {host_data['alias']}: "
+                f"{result.stderr.strip()}"
+            )
+    except FileNotFoundError:
+        raise ValueError("ssh is not installed or not in PATH")
+    except subprocess.TimeoutExpired:
+        raise ValueError("Remote tmux new-session timed out")
+    logger.info(
+        "Spawned remote session %s on %s (dir=%s)",
+        name, host_data["alias"], directory,
+    )
+
+
+def spawn_session(
+    provider_id: str,
+    options: SpawnCommandOptions,
+    session_name: str | None = None,
+    host_data: dict | None = None,
+) -> dict:
+    """Spawn a new provider CLI session inside tmux.
+
+    When *host_data* is provided the session is spawned on that remote host
+    via SSH instead of locally.
+    """
     provider = get_provider(provider_id)
     if isinstance(provider, ClaudeCodeProvider):
         directory = provider.resolve_directory(options)
@@ -95,19 +136,22 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: 
     for key, value in platform_env.items():
         env_flags += ["-e", f"{key}={value}"]
 
-    try:
-        result = subprocess.run(
-            ["tmux", "new-session", "-d", "-s", name, "-c", directory, *env_flags, shell_command],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            raise ValueError(f"tmux new-session failed: {result.stderr.strip()}")
-    except FileNotFoundError:
-        raise ValueError("tmux is not installed or not in PATH")
-    except subprocess.TimeoutExpired:
-        raise ValueError("tmux new-session timed out")
+    if host_data:
+        _spawn_session_remote(host_data, provider.display_name, name, directory, shell_command, env_flags)
+    else:
+        try:
+            result = subprocess.run(
+                ["tmux", "new-session", "-d", "-s", name, "-c", directory, *env_flags, shell_command],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                raise ValueError(f"tmux new-session failed: {result.stderr.strip()}")
+        except FileNotFoundError:
+            raise ValueError("tmux is not installed or not in PATH")
+        except subprocess.TimeoutExpired:
+            raise ValueError("tmux new-session timed out")
 
     _spawned_sessions[name] = {
         "provider": provider.id,
@@ -117,12 +161,20 @@ def spawn_session(provider_id: str, options: SpawnCommandOptions, session_name: 
         "worktree_path": options.worktree_path,
         "repo_path": options.repo_path,
         "platform": options.platform,
+        "host_id": host_data["id"] if host_data else None,
+        "host_alias": host_data["alias"] if host_data else None,
     }
 
-    logger.info("Spawned %s session %s in %s (mode=%s)", provider.id, name, directory, options.mode)
+    logger.info(
+        "%s %s session %s in %s (mode=%s)",
+        "Remotely spawned" if host_data else "Spawned",
+        provider.id, name, directory, options.mode,
+    )
+
+    display_name = f"{provider.display_name} ({host_data['alias']})" if host_data else provider.display_name
     return {
         "provider": provider.id,
-        "provider_display_name": provider.display_name,
+        "provider_display_name": display_name,
         "tmux_target": f"{name}:0.0",
         "session_name": name,
         "worktree_name": _spawned_sessions[name]["worktree_name"],

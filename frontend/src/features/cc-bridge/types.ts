@@ -63,6 +63,7 @@ export interface SpawnSessionRequest {
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
+  host_id?: number
 }
 
 export interface SpawnSessionResponse {

@@ -44,6 +44,7 @@ class SpawnCommandOptions:
     aws_region: str | None = None
     aws_profile: str | None = None
     bedrock_model: str | None = None
+    host_id: int | None = None
 
 
 def argv0_name(command: str) -> str:
