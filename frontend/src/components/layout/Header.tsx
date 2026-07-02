@@ -1,0 +1,73 @@
+import { Terminal, Radio, AlertCircle } from "lucide-react";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { AttentionToggle } from "@/components/ui/attention-toggle";
+import { Badge } from "@/components/ui/badge";
+import { useSystemStatus } from "@/hooks/useSystemStatus";
+import { useProviderContext } from "@/contexts/ProviderContext";
+import { cn } from "@/lib/utils";
+
+export function Header() {
+  const status = useSystemStatus();
+  const { providers, selectedProviderId, selectedProvider } = useProviderContext();
+  const providerStatuses = providers
+    .map((provider) => status?.providers?.[provider.id] ?? provider)
+    .filter((provider) => provider.installed || provider.id === selectedProviderId);
+
+  if (providerStatuses.length === 0 && selectedProvider) {
+    providerStatuses.push(status?.providers?.[selectedProviderId] ?? selectedProvider);
+  }
+
+  return (
+    <header className="border-b bg-background">
+      <div className="flex h-16 items-center justify-between px-6">
+        <div className="flex items-center gap-3">
+          <img
+            src="/claude-cockpit-logo.svg"
+            alt="Claude Cockpit"
+            className="h-10 w-10"
+          />
+          <div>
+            <h1 className="text-2xl font-bold text-primary leading-tight">Claude Cockpit</h1>
+            <p className="text-xs text-muted-foreground">Mission control for your local agents</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {status && (
+            <>
+              {providerStatuses.map((provider) => (
+                <Badge
+                  key={provider.id}
+                  variant="outline"
+                  className={cn(
+                    "gap-1 text-xs",
+                    provider.installed ? "font-mono" : "border-destructive/40 text-destructive"
+                  )}
+                >
+                  {provider.installed ? (
+                    <Terminal className="h-3 w-3" />
+                  ) : (
+                    <AlertCircle className="h-3 w-3" />
+                  )}
+                  {provider.display_name}
+                  {provider.version ? ` v${provider.version}` : provider.installed ? " ready" : " missing"}
+                </Badge>
+              ))}
+              <Badge
+                variant="secondary"
+                className={cn(
+                  "gap-1 text-xs",
+                  status.activeSessions > 0 && "bg-green-500/15 text-green-600 dark:text-green-400"
+                )}
+              >
+                <Radio className="h-3 w-3" />
+                {status.activeSessions} active
+              </Badge>
+            </>
+          )}
+          <AttentionToggle />
+          <ThemeToggle />
+        </div>
+      </div>
+    </header>
+  )
+}

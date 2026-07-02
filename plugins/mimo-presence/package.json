@@ -1,0 +1,16 @@
+{
+  "name": "mimo-presence",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MiMoCode plugin that sends presence events to Claude Cockpit",
+  "main": "index.js",
+  "dependencies": {},
+  "peerDependencies": {
+    "@mimo-ai/plugin": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@mimo-ai/plugin": {
+      "optional": false
+    }
+  }
+}

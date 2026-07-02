@@ -1,0 +1,125 @@
+# ⚠️ Fork: Claude Cockpit — lees dit eerst
+
+Dit is een **fork** van claude-deck, hernoemd naar **Claude Cockpit**. We bouwen er een
+**scheduled-messages** feature bovenop (timer/cron → injectie in CC-sessies via tmux).
+
+- **Volledige oriëntatie + huidige taak:** `docs/cockpit/00-orientation.md`
+- **NU bezig — FASE 1 VALIDATIE:** `docs/cockpit/fase-1-validation.md`
+  (bevestigen dat claude-deck's CC Bridge werkt onder WSL; **bouw nog niets van fase 2**).
+- **Fase 2-ontwerp (na validatie):** `docs/cockpit/fase-2-spec.md`
+- **Omgeving:** WSL Ubuntu, user `guillaume`, Docker (`docker compose up -d` → :8000), tmux, claude CLI.
+
+Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur etc.).
+
+---
+
+# Claude Cockpit
+
+Web app for managing Claude Code configurations, MCP servers, commands, plugins, hooks, and permissions.
+
+## Commands
+
+```bash
+# Install
+./scripts/install.sh             # Setup venv, install deps, create dirs (requires Python 3.11+, Node 18+)
+
+# Development
+./scripts/dev.sh                 # Start both backend + frontend servers (attached, Ctrl+C to stop)
+cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000  # Backend only
+cd frontend && npm run dev       # Frontend only (port 5173)
+
+# Self-healing dev stack (detached supervisor: auto-restart on crash, logs to logs/, survives terminal close)
+# cockpit.sh start auto-installs missing/stale deps (npm install, pip install) before starting
+./scripts/cockpit.sh start       # Start backend+frontend supervised in the background
+./scripts/cockpit.sh status      # Show supervisor/backend/frontend status
+./scripts/cockpit.sh logs backend  # Follow backend logs (or: logs frontend)
+./scripts/cockpit.sh restart     # Stop, then start
+./scripts/cockpit.sh stop        # Stop supervisor + all processes
+bash scripts/test_cockpit.sh     # Test the supervisor (bash harness)
+
+# Build
+./scripts/build.sh               # Production frontend build → frontend/dist
+cd frontend && npm run build     # Same as above
+
+# Test
+cd backend && source venv/bin/activate && pytest tests/  # Python tests
+bash backend/test_commands_api.sh                         # Curl-based API tests
+
+# Lint
+cd frontend && npm run lint      # ESLint
+
+# Version
+./scripts/bump-version.sh <major|minor|patch>  # Sync version across VERSION, package.json, pyproject.toml
+```
+
+## Architecture
+
+```
+backend/                  # FastAPI + async SQLAlchemy + aiosqlite
+├── app/
+│   ├── main.py          # FastAPI app, CORS, lifespan
+│   ├── config.py        # pydantic-settings (defaults in code, no .env required)
+│   ├── database.py      # Async SQLAlchemy engine + session
+│   ├── api/v1/          # 30 route modules (router.py aggregates all), incl. subdir routers:
+│   │                    #   agent_bridge/, cc_bridge/, kanban/, sandcastle/, scheduled_messages/
+│   ├── models/          # database.py (ORM), schemas.py (Pydantic)
+│   ├── services/        # 58 service files (business logic), incl. subdirs:
+│   │                    #   agent_bridge/, cc_bridge/, providers/, scheduling/
+│   └── utils/           # path_utils, file_utils
+
+frontend/                 # React 19 + Vite + TypeScript + shadcn/ui
+├── src/
+│   ├── App.tsx          # Routes (29 pages)
+│   ├── features/        # Feature modules (26 dirs, each with page + components + API + types)
+│   ├── components/      # layout/, shared/, ui/ (19 shadcn components)
+│   ├── hooks/           # useApi, useProjects, useSessionsApi, useUsageApi
+│   ├── contexts/        # ProjectContext, ThemeContext
+│   ├── types/           # Shared TypeScript types (15 files)
+│   └── lib/             # api.ts, constants.ts, utils.ts
+```
+
+### Features
+
+Config, MCP Servers, MCP Server (registry), Commands, Plugins, Hooks, Permissions, Agents, Agent Performance, Skills, Memory, Context, Projects, Backup, Output Styles, Status Line, Sessions, CC Bridge, Kanban, Scheduled Messages, Plans, Presence, Sandcastle, APM, Usage, Dashboard
+
+### API Routes
+
+All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins, hooks, permissions, agents, agent-activity, backup, output-styles, statusline, sessions, usage, memory, context, plans, presence, providers, codex-config, status, apm, files, plus subdir routers: cc-bridge, agent-bridge, kanban, scheduled-messages, sandcastle
+
+## Key Decisions
+
+- **Backend**: FastAPI + async SQLAlchemy + aiosqlite + SQLite
+- **Frontend**: React 19 + Vite 7 + TypeScript + TailwindCSS + shadcn/ui
+- **Database**: SQLite at `backend/claude_registry.db` (auto-created via `create_all`, no migrations)
+- **API**: RESTful `/api/v1/`, Vite proxies `/api` → `http://localhost:8000`
+- **CORS**: `localhost:5173`
+
+## Code Style
+
+- **Frontend**: ESLint + TypeScript strict mode (`noUnusedLocals`, `noUnusedParameters`). Path alias `@/*` → `./src/*`
+- **Backend**: Type hints throughout, async/await patterns, pydantic models for validation
+
+## UI Conventions
+
+- **Clickable cards**: All clickable Card components must use the `CLICKABLE_CARD` constant from `@/lib/constants`. This gives a consistent `border-2 hover:border-primary/50` orange border hover effect, plus `cursor-pointer`, `transition-colors`, and `focus-visible:ring-2` for keyboard a11y. Action buttons inside clickable cards must use `e.stopPropagation()` and keyboard handlers must support Enter/Space.
+- **Modal sizes**: Use `MODAL_SIZES.SM`, `MODAL_SIZES.MD`, or `MODAL_SIZES.LG` from `@/lib/constants` for dialog sizing.
+- **Markdown rendering**: Use `<MarkdownRenderer>` from `@/components/shared/MarkdownRenderer` for read-only markdown display. Use `<MarkdownPreviewToggle>` from `@/components/shared/MarkdownPreviewToggle` for editable markdown with Edit/Preview tabs.
+
+## Git Workflow
+
+- **Finishing a branch**: The default is to **merge back to `master` and push** — no need to ask. Skip the merge/PR/cleanup menu. If the main checkout's `master` is dirty (concurrent sessions share one working copy), do the merge in a temporary worktree.
+
+## CI/CD
+
+GitHub Actions workflows in `.github/workflows/`:
+- `claude.yml` — Claude Code integration (triggers on @claude mentions)
+- `codeql.yml` — CodeQL security analysis
+- `release.yml` — Manual release (builds frontend, creates GitHub release)
+
+## Gotchas
+
+- No `.env` file needed — all config has defaults in `backend/app/config.py`
+- Database lives at `backend/claude_registry.db`, created automatically on first run
+- No database migration system — schema changes require deleting the db
+- Frontend tests not yet set up
+- Backups stored in `~/.claude-registry/backups/`

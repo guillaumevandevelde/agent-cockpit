@@ -1,0 +1,425 @@
+"""Service for managing Claude Code hooks."""
+import logging
+import json
+import uuid
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from app.models.schemas import Hook, HookCreate, HookUpdate, VALID_HOOK_EVENTS
+from app.utils.path_utils import (
+    get_claude_user_settings_file,
+    get_project_settings_file,
+)
+
+
+logger = logging.getLogger(__name__)
+
+class HookService:
+    """Service for managing hook configurations."""
+
+    def __init__(self):
+        """Initialize the hook service."""
+        pass
+
+    def _parse_hook_from_data(self, hook_data: dict, event: str, scope: str) -> Hook:
+        """Parse a hook from JSON data."""
+        hook_id = hook_data.get("id", str(uuid.uuid4()))
+        return Hook(
+            id=hook_id,
+            event=event,
+            matcher=hook_data.get("matcher"),
+            type=hook_data.get("type", "command"),
+            command=hook_data.get("command"),
+            prompt=hook_data.get("prompt"),
+            model=hook_data.get("model"),
+            async_=hook_data.get("async"),  # JSON field is "async"
+            statusMessage=hook_data.get("statusMessage"),
+            once=hook_data.get("once"),
+            timeout=hook_data.get("timeout"),
+            url=hook_data.get("url"),
+            headers=hook_data.get("headers"),
+            allowedEnvVars=hook_data.get("allowedEnvVars"),
+            scope=scope
+        )
+
+    def _validate_event(self, event: str) -> bool:
+        """Validate that an event type is valid."""
+        return event in VALID_HOOK_EVENTS
+
+    def _iter_hooks_from_settings(self, hooks_section: dict, scope: str):
+        """Yield Hook objects from a hooks section of settings.json.
+
+        Claude Code uses a nested format where each event maps to a list
+        of hook groups, each with an optional matcher and a ``hooks`` array::
+
+            "Notification": [{"matcher": "", "hooks": [{"type": "http", ...}]}]
+
+        For backwards compatibility, also handles flat format where each
+        event maps directly to a list of hook definitions::
+
+            "Notification": [{"type": "http", ...}]
+        """
+        for event, event_hooks in hooks_section.items():
+            if not isinstance(event_hooks, list):
+                continue
+            for entry in event_hooks:
+                if not isinstance(entry, dict):
+                    continue
+                if "hooks" in entry and isinstance(entry["hooks"], list):
+                    # Nested format: entry is a hook group
+                    group_matcher = entry.get("matcher", "")
+                    for hook_data in entry["hooks"]:
+                        if isinstance(hook_data, dict):
+                            if group_matcher and "matcher" not in hook_data:
+                                hook_data = {**hook_data, "matcher": group_matcher}
+                            yield self._parse_hook_from_data(hook_data, event, scope)
+                else:
+                    # Flat format: entry is a hook definition itself
+                    yield self._parse_hook_from_data(entry, event, scope)
+
+    def list_hooks(self, project_path: Optional[str] = None) -> List[Hook]:
+        """
+        List all hooks from user and project settings files.
+
+        Args:
+            project_path: Optional path to project directory
+
+        Returns:
+            List of Hook objects
+        """
+        hooks = []
+
+        # Read user-level hooks
+        user_settings_file = get_claude_user_settings_file()
+        if user_settings_file.exists():
+            try:
+                with open(user_settings_file, "r") as f:
+                    user_settings = json.load(f)
+                    hooks.extend(self._iter_hooks_from_settings(
+                        user_settings.get("hooks", {}), "user"
+                    ))
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        # Read project-level hooks
+        if project_path:
+            project_settings_file = get_project_settings_file(project_path)
+            if project_settings_file.exists():
+                try:
+                    with open(project_settings_file, "r") as f:
+                        project_settings = json.load(f)
+                        hooks.extend(self._iter_hooks_from_settings(
+                            project_settings.get("hooks", {}), "project"
+                        ))
+                except (json.JSONDecodeError, IOError):
+                    pass
+
+        return hooks
+
+    def get_hooks_by_event(
+        self, event: str, project_path: Optional[str] = None
+    ) -> List[Hook]:
+        """
+        Get hooks filtered by event type.
+
+        Args:
+            event: Event type to filter by
+            project_path: Optional path to project directory
+
+        Returns:
+            List of Hook objects for the specified event
+        """
+        all_hooks = self.list_hooks(project_path)
+        return [hook for hook in all_hooks if hook.event == event]
+
+    def add_hook(
+        self, hook: HookCreate, project_path: Optional[str] = None
+    ) -> Hook:
+        """
+        Add a new hook to the appropriate settings file.
+
+        Args:
+            hook: Hook creation data
+            project_path: Optional path to project directory
+
+        Returns:
+            Created Hook object
+
+        Raises:
+            ValueError: If event type is invalid
+        """
+        # Validate event type
+        if not self._validate_event(hook.event):
+            raise ValueError(f"Invalid event type: {hook.event}. Valid types: {', '.join(VALID_HOOK_EVENTS)}")
+
+        # Generate unique ID
+        hook_id = str(uuid.uuid4())
+
+        # Determine settings file path
+        if hook.scope == "user":
+            settings_file = get_claude_user_settings_file()
+        else:
+            settings_file = get_project_settings_file(project_path)
+
+        # Ensure parent directory exists
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Read existing settings or create new
+        if settings_file.exists():
+            with open(settings_file, "r") as f:
+                settings = json.load(f)
+        else:
+            settings = {}
+
+        # Ensure hooks section exists
+        if "hooks" not in settings:
+            settings["hooks"] = {}
+
+        # Ensure event array exists
+        if hook.event not in settings["hooks"]:
+            settings["hooks"][hook.event] = []
+
+        # Create hook data
+        hook_data = {
+            "id": hook_id,
+            "type": hook.type,
+        }
+
+        if hook.matcher:
+            hook_data["matcher"] = hook.matcher
+        if hook.command:
+            hook_data["command"] = hook.command
+        if hook.prompt:
+            hook_data["prompt"] = hook.prompt
+        if hook.model:
+            hook_data["model"] = hook.model
+        if hook.async_ is not None:
+            hook_data["async"] = hook.async_  # JSON field is "async"
+        if hook.statusMessage:
+            hook_data["statusMessage"] = hook.statusMessage
+        if hook.once is not None:
+            hook_data["once"] = hook.once
+        if hook.timeout:
+            hook_data["timeout"] = hook.timeout
+        if hook.url:
+            hook_data["url"] = hook.url
+        if hook.headers:
+            hook_data["headers"] = hook.headers
+        if hook.allowedEnvVars:
+            hook_data["allowedEnvVars"] = hook.allowedEnvVars
+
+        # Add hook to settings using Claude Code's nested format
+        # Each event has a list of hook groups: [{"matcher": "", "hooks": [...]}]
+        event_groups = settings["hooks"][hook.event]
+        matcher = hook.matcher or ""
+
+        # Find an existing group with the same matcher, or create one
+        target_group = None
+        for group in event_groups:
+            if isinstance(group, dict) and "hooks" in group and group.get("matcher", "") == matcher:
+                target_group = group
+                break
+
+        if target_group is None:
+            target_group = {"matcher": matcher, "hooks": []}
+            event_groups.append(target_group)
+
+        target_group["hooks"].append(hook_data)
+
+        # Write settings back
+        with open(settings_file, "w") as f:
+            json.dump(settings, f, indent=2)
+
+        return Hook(
+            id=hook_id,
+            event=hook.event,
+            matcher=hook.matcher,
+            type=hook.type,
+            command=hook.command,
+            prompt=hook.prompt,
+            model=hook.model,
+            async_=hook.async_,
+            statusMessage=hook.statusMessage,
+            once=hook.once,
+            timeout=hook.timeout,
+            url=hook.url,
+            headers=hook.headers,
+            allowedEnvVars=hook.allowedEnvVars,
+            scope=hook.scope
+        )
+
+    def update_hook(
+        self,
+        hook_id: str,
+        hook_update: HookUpdate,
+        scope: str,
+        project_path: Optional[str] = None
+    ) -> Optional[Hook]:
+        """
+        Update an existing hook.
+
+        Args:
+            hook_id: ID of the hook to update
+            hook_update: Hook update data
+            scope: "user" or "project"
+            project_path: Optional path to project directory
+
+        Returns:
+            Updated Hook object or None if not found
+
+        Raises:
+            ValueError: If event type is invalid
+        """
+        # Validate event type if provided
+        if hook_update.event and not self._validate_event(hook_update.event):
+            raise ValueError(f"Invalid event type: {hook_update.event}. Valid types: {', '.join(VALID_HOOK_EVENTS)}")
+
+        # Determine settings file path
+        if scope == "user":
+            settings_file = get_claude_user_settings_file()
+        else:
+            settings_file = get_project_settings_file(project_path)
+
+        if not settings_file.exists():
+            return None
+
+        # Read settings
+        with open(settings_file, "r") as f:
+            settings = json.load(f)
+
+        hooks_section = settings.get("hooks", {})
+
+        # Find and update hook (handles both nested and flat formats)
+        updated_hook = None
+        for event, event_hooks in hooks_section.items():
+            if not isinstance(event_hooks, list):
+                continue
+            for gi, group in enumerate(event_hooks):
+                if not isinstance(group, dict):
+                    continue
+                is_nested = "hooks" in group and isinstance(group["hooks"], list)
+                inner_hooks = group["hooks"] if is_nested else [group]
+
+                for i, hook_data in enumerate(inner_hooks):
+                    if hook_data.get("id") != hook_id:
+                        continue
+
+                    # Apply updates
+                    if hook_update.matcher is not None:
+                        hook_data["matcher"] = hook_update.matcher
+                    if hook_update.type is not None:
+                        hook_data["type"] = hook_update.type
+                    if hook_update.command is not None:
+                        hook_data["command"] = hook_update.command
+                    if hook_update.prompt is not None:
+                        hook_data["prompt"] = hook_update.prompt
+                    if hook_update.model is not None:
+                        hook_data["model"] = hook_update.model
+                    if hook_update.async_ is not None:
+                        hook_data["async"] = hook_update.async_
+                    if hook_update.statusMessage is not None:
+                        hook_data["statusMessage"] = hook_update.statusMessage
+                    if hook_update.once is not None:
+                        hook_data["once"] = hook_update.once
+                    if hook_update.timeout is not None:
+                        hook_data["timeout"] = hook_update.timeout
+                    if hook_update.url is not None:
+                        hook_data["url"] = hook_update.url
+                    if hook_update.headers is not None:
+                        hook_data["headers"] = hook_update.headers
+                    if hook_update.allowedEnvVars is not None:
+                        hook_data["allowedEnvVars"] = hook_update.allowedEnvVars
+
+                    # Handle event change
+                    if hook_update.event and hook_update.event != event:
+                        if is_nested:
+                            inner_hooks.pop(i)
+                            if not inner_hooks:
+                                event_hooks.pop(gi)
+                        else:
+                            event_hooks.pop(gi)
+                        if hook_update.event not in hooks_section:
+                            hooks_section[hook_update.event] = []
+                        hooks_section[hook_update.event].append(
+                            {"matcher": "", "hooks": [hook_data]}
+                        )
+                        event = hook_update.event
+
+                    updated_hook = self._parse_hook_from_data(hook_data, event, scope)
+                    break
+            if updated_hook:
+                break
+
+        if not updated_hook:
+            return None
+
+        # Write settings back
+        with open(settings_file, "w") as f:
+            json.dump(settings, f, indent=2)
+
+        return updated_hook
+
+    def remove_hook(
+        self, hook_id: str, scope: str, project_path: Optional[str] = None
+    ) -> bool:
+        """
+        Remove a hook from settings.
+
+        Args:
+            hook_id: ID of the hook to remove
+            scope: "user" or "project"
+            project_path: Optional path to project directory
+
+        Returns:
+            True if removed, False if not found
+        """
+        # Determine settings file path
+        if scope == "user":
+            settings_file = get_claude_user_settings_file()
+        else:
+            settings_file = get_project_settings_file(project_path)
+
+        if not settings_file.exists():
+            return False
+
+        # Read settings
+        with open(settings_file, "r") as f:
+            settings = json.load(f)
+
+        hooks_section = settings.get("hooks", {})
+
+        # Find and remove hook (handles both nested and flat formats)
+        removed = False
+        for event, event_hooks in hooks_section.items():
+            if not isinstance(event_hooks, list):
+                continue
+            for gi, group in enumerate(event_hooks):
+                if not isinstance(group, dict):
+                    continue
+                if "hooks" in group and isinstance(group["hooks"], list):
+                    # Nested format
+                    for i, hook_data in enumerate(group["hooks"]):
+                        if hook_data.get("id") == hook_id:
+                            group["hooks"].pop(i)
+                            # Remove empty group
+                            if not group["hooks"]:
+                                event_hooks.pop(gi)
+                            removed = True
+                            break
+                else:
+                    # Flat format
+                    if group.get("id") == hook_id:
+                        event_hooks.pop(gi)
+                        removed = True
+                        break
+            if removed:
+                break
+
+        if not removed:
+            return False
+
+        # Write settings back
+        with open(settings_file, "w") as f:
+            json.dump(settings, f, indent=2)
+
+        return True
