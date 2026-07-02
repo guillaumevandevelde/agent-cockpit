@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models.schemas import ResumableSessionListResponse
+from app.services.agent_bridge import git_status as git_status_service
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
 from app.services.agent_bridge.pty_relay import PtyRelay
 from app.services.agent_bridge.resumable import list_resumable_sessions
@@ -83,6 +84,25 @@ def get_session_preview(target: str):
     if not content:
         raise HTTPException(status_code=404, detail="Could not capture pane")
     return {"target": target, "content": content}
+
+
+class GitStatusResponse(BaseModel):
+    is_git_repo: bool
+    branch: str | None = None
+    detached: bool = False
+    upstream: str | None = None
+    ahead: int = 0
+    behind: int = 0
+    dirty: bool = False
+
+
+@router.get("/sessions/{target:path}/git-status", response_model=GitStatusResponse)
+async def get_session_git_status(target: str):
+    """Live git status of a running session's working directory (on demand)."""
+    status = await git_status_service.get_session_git_status(target)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Session pane not found")
+    return status
 
 
 @router.get("/token")

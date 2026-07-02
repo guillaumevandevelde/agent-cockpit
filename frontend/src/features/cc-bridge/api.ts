@@ -1,6 +1,6 @@
 import { apiClient, buildEndpoint } from '@/lib/api'
 import type { AgentProviderId } from '@/types/providers'
-import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse, BulkResumeRequest, BulkResumeResponse } from './types'
+import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, GitStatusResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse, BulkResumeRequest, BulkResumeResponse } from './types'
 import type { ResumableSessionListResponse } from '@/types/sessions'
 
 const BASE = 'agent-bridge'
@@ -20,6 +20,10 @@ export async function fetchResumableSessions(
 
 export async function fetchSessionPreview(target: string): Promise<CCPreviewResponse> {
   return apiClient<CCPreviewResponse>(`${BASE}/sessions/${encodeURIComponent(target)}/preview`)
+}
+
+export async function fetchSessionGitStatus(target: string): Promise<GitStatusResponse> {
+  return apiClient<GitStatusResponse>(`${BASE}/sessions/${encodeURIComponent(target)}/git-status`)
 }
 
 export async function fetchTerminalToken(): Promise<CCTokenResponse> {
