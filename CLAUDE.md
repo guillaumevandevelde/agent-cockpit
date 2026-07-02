@@ -109,6 +109,7 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 
 - **Finishing a branch**: The default is to **merge back to `master` and push** — no need to ask. Skip the merge/PR/cleanup menu. If the main checkout's `master` is dirty (concurrent sessions share one working copy), do the merge in a temporary worktree.
 - **Worktree hygiene**: After merging, the finished worktree + branch should be removed so `.claude/worktrees/` doesn't accumulate leftovers. Kanban dispatch auto-removes on card→Done; for everything else run `scripts/worktree-gc.sh` (dry-run) then `--apply`. It only removes worktrees whose branch is fully merged into `master` **and** whose tree is clean — dirty or unmerged worktrees are always kept. `cockpit.sh start` nudges when leftovers exist.
+- **Repo safeguards** (hardening): The `.githooks/pre-push` gate refuses any push that collapses a branch's file tree (a test git-fixture once wiped `master` down to `a.txt` and it got pushed). A deliberate tree-shrinking push must set `ALLOW_TREE_WIPE=1 git push …`. Run `scripts/cockpit-doctor.sh` (or `cockpit.sh doctor`) for a read-only health check — clobbered/tiny tree, `core.bare` mismatch, stale checkout, leftover worktrees, hook drift; it also runs (non-blocking) on `cockpit.sh start`.
 
 ## CI/CD
 

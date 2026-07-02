@@ -347,13 +347,11 @@ supervisor_main() {
 # Finish-hook: nudge (never auto-delete) when finished worktrees pile up. The
 # actual reclaim is worktree-gc.sh --apply; here we only surface the count so the
 # "mess of leftover worktrees" gets noticed early instead of accumulating.
-report_stale_worktrees() {
-    [ -x "$SCRIPT_DIR/worktree-gc.sh" ] || return 0
-    local n
-    n="$("$SCRIPT_DIR/worktree-gc.sh" 2>/dev/null | grep -c '^WOULD-REMOVE' || true)"
-    if [ "${n:-0}" -gt 0 ]; then
-        echo "⚠ $n afgeronde worktree(s) blijven hangen — ruim op met: ./scripts/worktree-gc.sh --apply"
-    fi
+run_doctor() {
+    [ -x "$SCRIPT_DIR/cockpit-doctor.sh" ] || return 0
+    # Non-blocking: surface dangerous repo states (clobbered tree, stale checkout,
+    # leftover worktrees, hook drift) at startup, but never block the dev stack.
+    "$SCRIPT_DIR/cockpit-doctor.sh" || true
 }
 
 cmd_start() {
@@ -365,7 +363,7 @@ cmd_start() {
     if [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ]; then
         ensure_deps || return 1
         ensure_git_hooks
-        report_stale_worktrees
+        run_doctor
     fi
     # Preflight: don't crash-loop fighting another stack for the ports. Skipped
     # when commands are injected (tests use fake services on no ports).
@@ -460,6 +458,7 @@ Commands:
   restart        Stop, dan start
   status         Toon status van supervisor/backend/frontend
   logs [svc]     Volg logs (svc = backend|frontend, default backend)
+  doctor         Read-only health check (repo mode, tree wipe, drift, worktrees, hook)
 
 Options:
   --host <host>  Bind backend+frontend aan host (bv. 0.0.0.0)
@@ -493,6 +492,7 @@ main() {
         restart)    cmd_restart ;;
         status)     cmd_status ;;
         logs)       cmd_logs "$svc_arg" ;;
+        doctor)     "$SCRIPT_DIR/cockpit-doctor.sh" ;;
         __supervisor) supervisor_main ;;
         -h|--help|"") usage ;;
         *) echo "Onbekend commando: $cmd"; usage; return 1 ;;

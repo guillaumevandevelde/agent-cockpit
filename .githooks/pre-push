@@ -28,6 +28,30 @@ say()  { printf '%s\n' "${bold}[pre-push]${rst} $*"; }
 fail() { printf '%s\n' "${red}[pre-push] $*${rst}" >&2; }
 warn() { printf '%s\n' "${ylw}[pre-push] $*${rst}" >&2; }
 
+# ---- 0. tree-wipe guard --------------------------------------------------------
+# A test git-fixture once committed `init`/`a.txt` onto HEAD (715 files -> 1) and it
+# got pushed to master, wiping the default branch. Refuse to push any ref whose new
+# tip both drops below a file floor AND removes most of the branch. Recovery pushes
+# GROW the tree so they pass. Intentional wipe: ALLOW_TREE_WIPE=1 git push …
+# pre-push feeds ref updates on stdin: "<local ref> <local sha> <remote ref> <remote sha>".
+while read -r _lref lsha _rref rsha; do
+    [ -z "${lsha:-}" ] && continue
+    [[ "$lsha" =~ ^0+$ ]] && continue          # branch deletion — nothing pushed
+    [[ "$rsha" =~ ^0+$ ]] && continue          # brand-new remote branch — nothing to destroy
+    if [ -n "${ALLOW_TREE_WIPE:-}" ]; then
+        warn "tree-wipe guard bypassed (ALLOW_TREE_WIPE set) for ${_rref:-ref}"
+        continue
+    fi
+    newn=$(git ls-tree -r --name-only "$lsha" 2>/dev/null | wc -l | tr -d ' ')
+    oldn=$(git ls-tree -r --name-only "$rsha" 2>/dev/null | wc -l | tr -d ' ')
+    [ "${oldn:-0}" -gt 0 ] 2>/dev/null || continue   # old tip unavailable — can't compare
+    if [ "${newn:-0}" -lt 20 ] && [ "$newn" -lt "$(( oldn * 2 / 5 ))" ]; then
+        fail "REFUSING push: ${_rref:-ref} would go from $oldn files to $newn — looks like a tree wipe."
+        fail "If this is deliberate, re-run with:  ALLOW_TREE_WIPE=1 git push …"
+        exit 1
+    fi
+done
+
 status=0
 
 # ---- 1a. backend: pytest ----------------------------------------------------
