@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { MonitorPlay, Monitor } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useCCSessions } from './useCCSessions'
+import { useTeams } from './useTeams'
 import { SessionList } from './SessionList'
 import { TerminalView } from './TerminalView'
 import { NewSessionDialog } from './NewSessionDialog'
@@ -34,6 +35,7 @@ export function CCBridgePage() {
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>('all')
   const { providers, selectedProviderId } = useProviderContext()
   const { sessions, loading, error, refresh } = useCCSessions()
+  const { teams, ungrouped, loading: teamsLoading, refresh: refreshTeams } = useTeams()
   const attentionByPane = useAttentionByPane()
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeTargets, setActiveTargets] = useState<string[]>([])
@@ -46,6 +48,14 @@ export function CCBridgePage() {
   const visibleSessions = providerFilter === 'all'
     ? sessions
     : sessions.filter((session) => session.provider === providerFilter)
+
+  const visibleTeams = providerFilter === 'all'
+    ? teams
+    : teams.filter((team) => team.provider === providerFilter)
+
+  const visibleUngrouped = providerFilter === 'all'
+    ? ungrouped
+    : ungrouped.filter((s) => s.provider === providerFilter)
 
   const providersById = providers.reduce<Partial<Record<AgentProviderId, AgentProviderStatus>>>((acc, provider) => {
     acc[provider.id] = provider
@@ -141,6 +151,7 @@ export function CCBridgePage() {
 
   const handleSpawned = (tmuxTarget: string) => {
     refresh()
+    refreshTeams()
     setActiveTargets((prev) => addTarget(prev, tmuxTarget))
   }
 
@@ -152,7 +163,8 @@ export function CCBridgePage() {
     setFocusedTarget((cur) => (cur === oldTarget ? newTarget : cur))
     setFullscreenTarget((cur) => (cur === oldTarget ? newTarget : cur))
     refresh()
-  }, [refresh])
+    refreshTeams()
+  }, [refresh, refreshTeams])
 
   const handleKilled = () => {
     if (killSession) {
@@ -160,6 +172,7 @@ export function CCBridgePage() {
     }
     setKillSession(null)
     refresh()
+    refreshTeams()
   }
 
   const gridCols = activeTargets.length <= 1 ? 'grid-cols-1' : 'grid-cols-2'
@@ -205,11 +218,13 @@ export function CCBridgePage() {
           <div className="w-52 border-r shrink-0">
             <SessionList
               sessions={visibleSessions}
-              loading={loading}
+              teams={visibleTeams}
+              ungrouped={visibleUngrouped}
+              loading={loading || teamsLoading}
               error={error}
               activeTargets={activeTargets}
               onToggleTarget={toggleTarget}
-              onRefresh={refresh}
+              onRefresh={() => { refresh(); refreshTeams() }}
               onNewSession={() => setNewSessionOpen(true)}
               onKillSession={setKillSession}
               onRename={handleRename}
