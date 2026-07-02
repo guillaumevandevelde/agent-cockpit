@@ -383,6 +383,6 @@ export const HOOK_TEMPLATES: HookTemplate[] = [
     description: "Send events to Presence Dashboard via HTTP hook",
     event: "PostToolUse",
     type: "http",
-    url: "http://localhost:8000/api/v1/presence/events",
+    url: `${window.location.origin}/api/v1/presence/events`,
   },
 ];
