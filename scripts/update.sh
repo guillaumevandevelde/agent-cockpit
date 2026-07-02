@@ -53,13 +53,17 @@ fi
 CURRENT_BRANCH="$(GIT_DIR="$PROJECT_ROOT/.git" git rev-parse --abbrev-ref HEAD)"
 if [ "$CURRENT_BRANCH" = "master" ] || [ "$CURRENT_BRANCH" = "main" ]; then
     # Fast-forward only: no accidental merge commits
-    if ! git -C "$PROJECT_ROOT" merge --ff-only "origin/$CURRENT_BRANCH" 2>&1; then
+    if ! git -C "$PROJECT_ROOT" merge --ff-only "origin/$CURRENT_BRANCH" 2>&1 | while IFS= read -r line; do
+        log_event "pulling" "$line"
+    done; then
         log_event "error" "git merge --ff-only origin/$CURRENT_BRANCH is niet mogelijk (diverged?)."
         exit 1
     fi
 else
     # For branches: pull with rebase
-    if ! git -C "$PROJECT_ROOT" pull --rebase 2>&1; then
+    if ! git -C "$PROJECT_ROOT" pull --rebase 2>&1 | while IFS= read -r line; do
+        log_event "pulling" "$line"
+    done; then
         log_event "error" "git pull --rebase mislukt."
         exit 1
     fi
