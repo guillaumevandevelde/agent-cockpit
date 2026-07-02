@@ -344,6 +344,18 @@ supervisor_main() {
     wait
 }
 
+# Finish-hook: nudge (never auto-delete) when finished worktrees pile up. The
+# actual reclaim is worktree-gc.sh --apply; here we only surface the count so the
+# "mess of leftover worktrees" gets noticed early instead of accumulating.
+report_stale_worktrees() {
+    [ -x "$SCRIPT_DIR/worktree-gc.sh" ] || return 0
+    local n
+    n="$("$SCRIPT_DIR/worktree-gc.sh" 2>/dev/null | grep -c '^WOULD-REMOVE' || true)"
+    if [ "${n:-0}" -gt 0 ]; then
+        echo "⚠ $n afgeronde worktree(s) blijven hangen — ruim op met: ./scripts/worktree-gc.sh --apply"
+    fi
+}
+
 cmd_start() {
     if is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER"; then
         echo "Cockpit draait al (supervisor pid $(cat "$RUN_DIR/supervisor.pid")). Gebruik 'restart' of 'status'."
@@ -353,6 +365,7 @@ cmd_start() {
     if [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ]; then
         ensure_deps || return 1
         ensure_git_hooks
+        report_stale_worktrees
     fi
     # Preflight: don't crash-loop fighting another stack for the ports. Skipped
     # when commands are injected (tests use fake services on no ports).

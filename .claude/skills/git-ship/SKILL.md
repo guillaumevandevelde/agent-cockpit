@@ -89,6 +89,14 @@ Once the card reaches `Done`, the backend automatically:
 
 You do **not** need to clean up tmux or worktrees yourself. Just `move_card` to `Done`.
 
+**Safety net:** the auto-cleanup only fires for cards that actually reach `Done`.
+Worktrees that are merged-but-never-Done, or created outside the kanban flow, leak.
+`scripts/worktree-gc.sh` reclaims them — it removes a worktree only when its branch
+is fully merged into `master` **and** its working tree is clean; anything dirty or
+unmerged is kept. Run `scripts/worktree-gc.sh` (dry-run) to see leftovers, then
+`scripts/worktree-gc.sh --apply` to remove them. `cockpit.sh start` prints a nudge
+when leftovers exist.
+
 ## Rules
 
 - Push **only** to `origin`. Never to any other remote. Never `--force`.

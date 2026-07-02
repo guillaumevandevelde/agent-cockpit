@@ -108,6 +108,7 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 ## Git Workflow
 
 - **Finishing a branch**: The default is to **merge back to `master` and push** — no need to ask. Skip the merge/PR/cleanup menu. If the main checkout's `master` is dirty (concurrent sessions share one working copy), do the merge in a temporary worktree.
+- **Worktree hygiene**: After merging, the finished worktree + branch should be removed so `.claude/worktrees/` doesn't accumulate leftovers. Kanban dispatch auto-removes on card→Done; for everything else run `scripts/worktree-gc.sh` (dry-run) then `--apply`. It only removes worktrees whose branch is fully merged into `master` **and** whose tree is clean — dirty or unmerged worktrees are always kept. `cockpit.sh start` nudges when leftovers exist.
 
 ## CI/CD
 
