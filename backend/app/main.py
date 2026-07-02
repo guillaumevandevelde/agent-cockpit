@@ -45,6 +45,14 @@ async def lifespan(app: FastAPI):
     from sqlalchemy import select
     from app.models.scheduled_message import ScheduledMessage
     scheduler_service.start()
+    # Resume agent sessions interrupted by a host/backend restart. Runs before the
+    # dispatch scheduler so the reaper can't release (and orphan) their claims first.
+    import logging
+    from app.kanban.session_recovery import recover_interrupted_sessions
+    try:
+        await recover_interrupted_sessions()
+    except Exception:
+        logging.getLogger(__name__).exception("session recovery failed at startup")
     # Start kanban auto-dispatch polling
     scheduler_service.schedule_kanban_dispatch(
         interval_seconds=settings.kanban_dispatch_interval_seconds
