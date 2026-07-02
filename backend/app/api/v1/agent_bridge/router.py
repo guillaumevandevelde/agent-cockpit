@@ -20,6 +20,7 @@ from app.services.agent_bridge.discovery import capture_pane_preview, discover_a
 from app.services.agent_bridge.pty_relay import PtyRelay
 from app.services.agent_bridge.resumable import list_resumable_sessions
 from app.services.agent_bridge.spawn import kill_session, rename_session, spawn_session
+from app.services.host_service import HostNotFoundError
 from app.services.providers import get_provider
 from app.services.providers.base import SpawnCommandOptions
 
@@ -54,6 +55,7 @@ class SpawnRequest(BaseModel):
     aws_region: str | None = None
     aws_profile: str | None = None
     bedrock_model: str | None = None
+    host_id: int | None = None
 
 
 @router.get("/sessions")
@@ -157,9 +159,15 @@ async def session_terminal(
 
 
 @router.post("/sessions")
-def spawn_session_endpoint(request: SpawnRequest):
+async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depends(get_db)):
     try:
         get_provider(request.provider)
+
+        host_data = None
+        if request.host_id is not None:
+            from app.services.host_service import get_host as get_host_data
+            host_data = await get_host_data(db, request.host_id)
+
         options = SpawnCommandOptions(
             directory=request.directory,
             mode=request.mode,
@@ -181,10 +189,13 @@ def spawn_session_endpoint(request: SpawnRequest):
             aws_region=request.aws_region,
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
+            host_id=request.host_id,
         )
-        return spawn_session(request.provider, options, session_name=request.session_name)
+        return spawn_session(request.provider, options, session_name=request.session_name, host_data=host_data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HostNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 class BulkResumeItem(BaseModel):

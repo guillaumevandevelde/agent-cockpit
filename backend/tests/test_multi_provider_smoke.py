@@ -46,12 +46,13 @@ def test_agent_bridge_session_filter_smoke(monkeypatch):
     assert codex_response["sessions"][0]["provider"] == "codex-cli"
 
 
-def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_path):
     from app.api.v1.agent_bridge import router as agent_bridge_api
 
     captured = {}
 
-    def fake_spawn(provider_id, options, session_name=None):
+    def fake_spawn(provider_id, options, session_name=None, host_data=None):
         captured["provider_id"] = provider_id
         captured["options"] = options
         return {
@@ -63,7 +64,7 @@ def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_path):
 
     monkeypatch.setattr(agent_bridge_api, "spawn_session", fake_spawn)
 
-    response = agent_bridge_api.spawn_session_endpoint(
+    response = await agent_bridge_api.spawn_session_endpoint(
         agent_bridge_api.SpawnRequest(
             provider="codex-cli",
             directory=str(tmp_path),
@@ -73,7 +74,8 @@ def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_path):
             approval_policy="on-request",
             search=True,
             no_alt_screen=True,
-        )
+        ),
+        db=None,
     )
 
     assert response["provider"] == "codex-cli"
@@ -85,15 +87,17 @@ def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_path):
     assert captured["options"].no_alt_screen is True
 
 
-def test_agent_bridge_spawn_unknown_provider_smoke(tmp_path):
+@pytest.mark.asyncio
+async def test_agent_bridge_spawn_unknown_provider_smoke(tmp_path):
     from app.api.v1.agent_bridge import router as agent_bridge_api
 
     with pytest.raises(agent_bridge_api.HTTPException) as exc_info:
-        agent_bridge_api.spawn_session_endpoint(
+        await agent_bridge_api.spawn_session_endpoint(
             agent_bridge_api.SpawnRequest(
                 provider="unknown-provider",
                 directory=str(tmp_path),
-            )
+            ),
+            db=None,
         )
 
     assert exc_info.value.status_code == 400
