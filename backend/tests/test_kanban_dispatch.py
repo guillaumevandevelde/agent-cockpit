@@ -5,7 +5,7 @@ import pytest_asyncio
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card, list_cards
-from app.kanban import dispatch
+from app.kanban import dispatch, service
 from app.kanban.models import KanbanCard
 
 KanbanSessionLocal = TestSessionLocal()
@@ -963,6 +963,200 @@ async def test_dispatch_all_pending_empty():
     assert transport.calls == []
 
 
+# ---- count consistency: frontend vs backend vs actual dispatch ------------
+
+from app.kanban.schemas import COLUMNS as _COLUMNS
+
+_FIXED = set(_COLUMNS)
+
+
+def _frontend_pending_count(cards) -> int:
+    return sum(1 for c in cards if c.column == "Backlog" and not c.claimed_by)
+
+
+def _frontend_orphan_count(cards) -> int:
+    return sum(1 for c in cards if c.column not in _FIXED and not c.claimed_by)
+
+
+@pytest.mark.asyncio
+async def test_pending_count_matches_dispatch_results():
+    """Frontend-style pending count = backend list_pending_cards = dispatch_all_pending results."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="a", column="Backlog")
+        await _make_card(s, title="b", column="Backlog")
+        await _make_card(s, title="c", column="Backlog")
+        busy = await _make_card(s, title="busy", column="Backlog")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy, payload={"claimed_by": "me@ui"},
+        )
+        await _make_card(s, title="done", column="Done")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        fe = _frontend_pending_count(cards)
+        backend = len(await service.list_pending_cards(s, PK))
+        assert fe == 3, f"frontend pending={fe}"
+        assert backend == 3, f"backend pending={backend}"
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 3, f"dispatched={len(results)}"
+
+
+@pytest.mark.asyncio
+async def test_orphan_count_matches_redispatch_results():
+    """Frontend-style orphan count = backend list_orphaned_cards = redispatch_all_orphans results."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="o1", column="engineer")
+        await _make_card(s, title="o2", column="testing")
+        await _make_card(s, title="o3", column="code-review")
+        busy = await _make_card(s, title="busy", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy, payload={"claimed_by": "agent:k-alive-0001"},
+        )
+        await _make_card(s, title="backlog", column="Backlog")
+        await _make_card(s, title="blocked", column="Impediment")
+        await _make_card(s, title="done2", column="Done")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        fe = _frontend_orphan_count(cards)
+        backend = len(await service.list_orphaned_cards(s, PK))
+        assert fe == 3, f"frontend orphans={fe}"
+        assert backend == 3, f"backend orphans={backend}"
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 3, f"redispatched={len(results)}"
+
+
+@pytest.mark.asyncio
+async def test_frontend_backend_claimed_by_unanimity():
+    """Frontend `!c.claimed_by` and backend `claimed_by.is_(None)` must agree on all valid states."""
+    async with KanbanSessionLocal() as s:
+        c_unclaimed = await _make_card(s, title="none", column="engineer")
+        c_human = await _make_card(s, title="human", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=c_human, payload={"claimed_by": "me@ui"},
+        )
+        c_agent = await _make_card(s, title="agented", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=c_agent, payload={"claimed_by": "agent:k-test-0001"},
+        )
+        await s.commit()
+
+        card_none = await get_card(s, c_unclaimed)
+        card_human = await get_card(s, c_human)
+        card_agent = await get_card(s, c_agent)
+
+        assert card_none.claimed_by is None
+        assert not card_none.claimed_by
+
+        assert card_human.claimed_by == "me@ui"
+        assert card_human.claimed_by
+
+        assert card_agent.claimed_by == "agent:k-test-0001"
+        assert card_agent.claimed_by
+
+        cards = await list_cards(s, PK)
+        fe_orphans = _frontend_orphan_count(cards)
+        be_orphans = len(await service.list_orphaned_cards(s, PK))
+        assert fe_orphans == 1
+        assert be_orphans == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_string_claimed_by_causes_mismatch():
+    """claimed_by='' (empty string): frontend treats as unclaimed, backend treats as claimed."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="bogus", column="engineer")
+        await s.commit()
+
+        from sqlalchemy import update
+        from app.kanban.models import KanbanCard as KCModel
+        await s.execute(
+            update(KCModel).where(KCModel.id == cid).values(claimed_by="")
+        )
+        await s.commit()
+
+        card = await get_card(s, cid)
+        assert card.claimed_by == ""
+        assert not card.claimed_by
+
+        cards = await list_cards(s, PK)
+        fe_orphans = _frontend_orphan_count(cards)
+        be_orphans = len(await service.list_orphaned_cards(s, PK))
+        assert fe_orphans == 1, f"frontend sees {fe_orphans} orphans"
+        assert be_orphans == 0, f"backend sees {be_orphans} orphans"
+
+        fe_pending = _frontend_pending_count(cards)
+        be_pending = len(await service.list_pending_cards(s, PK))
+        assert fe_pending == 0
+        assert be_pending == 0
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_remaining_count_is_correct():
+    """After dispatch_all_pending, remaining cards still show correct counts."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="a", column="Backlog")
+        await _make_card(s, title="b", column="Backlog")
+        await _make_card(s, title="orphan", column="engineer")
+        busy = await _make_card(s, title="claimed", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy, payload={"claimed_by": "agent:k-alive-0001"},
+        )
+        await _make_card(s, title="blocked", column="Impediment")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        assert len(results) == 2
+
+        cards = await list_cards(s, PK)
+        assert _frontend_pending_count(cards) == 0
+        assert _frontend_orphan_count(cards) == 1
+        assert len(await service.list_pending_cards(s, PK)) == 0
+        assert len(await service.list_orphaned_cards(s, PK)) == 1
+
+
+@pytest.mark.asyncio
+async def test_redispatch_all_remaining_count_is_correct():
+    """After redispatch_all_orphans, remaining cards still show correct counts."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="o1", column="engineer")
+        await _make_card(s, title="o2", column="testing")
+        await _make_card(s, title="pending", column="Backlog")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        assert len(results) == 2
+
+        cards = await list_cards(s, PK)
+        assert _frontend_orphan_count(cards) == 0
+        assert _frontend_pending_count(cards) == 1
+        assert len(await service.list_orphaned_cards(s, PK)) == 0
+        assert len(await service.list_pending_cards(s, PK)) == 1
+
+
 # ---- card transport field persistence ------------------------------------
 
 @pytest.mark.asyncio
@@ -1142,3 +1336,304 @@ async def test_redispatch_with_resume_session_id_uses_resume_transport():
     assert result is not None
     assert len(calls) == 1
     assert calls[0]["mode"] == "resume"
+
+
+# ---- To Resume column ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_move_to_resume_moves_card_to_to_resume():
+    """_move_to_resume finds a resumable session, sets resume fields, moves to To Resume,
+    kills the tmux session, and releases the claim."""
+    import unittest.mock as mock
+
+    cid = None
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="context-limit", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-0001"},
+        )
+        await s.commit()
+
+    card = None
+    from app.kanban import session_recovery
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=("sess-abc", "proj-folder"),
+    ):
+        with mock.patch.object(
+            dispatch, "_kill_agent_session", return_value=None,
+        ) as kill_mock:
+            async with KanbanSessionLocal() as s:
+                card = await get_card(s, cid)
+                result = await dispatch._move_to_resume(
+                    s, card=card, project_key=PK, project_path="/p",
+                )
+                await s.commit()
+                card = await get_card(s, cid)
+
+    assert result is True
+    assert card is not None
+    assert card.column == "To Resume"
+    assert card.resume_session_id == "sess-abc"
+    assert card.resume_project_folder == "proj-folder"
+    assert card.claimed_by is None
+    kill_mock.assert_called_once_with("k-dead-0001")
+
+
+@pytest.mark.asyncio
+async def test_move_to_resume_returns_false_when_no_resume_target():
+    """_move_to_resume returns False when no resumable transcript is found."""
+    import unittest.mock as mock
+    from app.kanban import session_recovery
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="no-resume", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-0002"},
+        )
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=None,
+    ):
+        async with KanbanSessionLocal() as s:
+            card = await get_card(s, cid)
+            result = await dispatch._move_to_resume(
+                s, card=card, project_key=PK, project_path="/p",
+            )
+            await s.commit()
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_move_to_resume_returns_false_for_fixed_column_card():
+    """_move_to_resume returns False immediately for cards already on fixed columns."""
+    import unittest.mock as mock
+    from app.kanban import session_recovery
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="already-done", column="Done")
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=("sess-abc", "proj-folder"),
+    ):
+        async with KanbanSessionLocal() as s:
+            card = await get_card(s, cid)
+            result = await dispatch._move_to_resume(
+                s, card=card, project_key=PK, project_path="/p",
+            )
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_reaper_moves_resumable_dead_session_to_to_resume():
+    """reap_stale_claims with project_path moves resumable dead sessions to To Resume."""
+    import unittest.mock as mock
+    from app.kanban import session_recovery
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="resumable-dead", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-0003"},
+        )
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=("sess-xyz", "proj-folder"),
+    ):
+        with mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+            async with KanbanSessionLocal() as s:
+                reaped = await dispatch.reap_stale_claims(
+                    s, project_key=PK, cards=await list_cards(s, PK),
+                    live_sessions=set(), project_path="/p",
+                )
+                await s.commit()
+                card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert card.column == "To Resume"
+    assert card.resume_session_id == "sess-xyz"
+    assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_reaper_without_project_path_plain_release():
+    """reap_stale_claims without project_path falls back to plain release for dead sessions."""
+    import unittest.mock as mock
+    from app.kanban import session_recovery
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="plain-dead", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-0004"},
+        )
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=("sess-xyz", "proj-folder"),
+    ):
+        async with KanbanSessionLocal() as s:
+            reaped = await dispatch.reap_stale_claims(
+                s, project_key=PK, cards=await list_cards(s, PK),
+                live_sessions=set(),
+                # project_path not set — should NOT call _move_to_resume
+            )
+            await s.commit()
+            card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert card.column == "engineer"  # NOT moved to To Resume
+    assert card.resume_session_id is None  # resume fields NOT set
+    assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_active_session_count_excludes_to_resume():
+    """Cards in To Resume are excluded from _active_session_count (fixed column)."""
+    async with KanbanSessionLocal() as s:
+        c1 = await _make_card(s, title="active", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=c1, payload={"claimed_by": "agent:k-alive-0005"},
+        )
+        c2 = await _make_card(s, title="resumable", column="To Resume")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=c2, payload={"claimed_by": "agent:k-alive-0006"},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        count = dispatch._active_session_count(cards)
+
+    assert count == 1  # only c1 (engineer), not c2 (To Resume)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_picks_up_to_resume_card():
+    """_next_card picks unclaimed cards from To Resume when Backlog is empty."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="resume-me", column="To Resume")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.column == "To Resume"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_prefers_backlog_over_to_resume():
+    """_next_card prefers Backlog cards over To Resume cards."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="new-task", column="Backlog")
+        await _make_card(s, title="resume-me", column="To Resume")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.title == "new-task"
+    assert next_card.column == "Backlog"
+
+
+# ---- git-ship / session-end workflow --------------------------------------
+
+
+class TestBuildShipInstructions:
+    """_build_ship_instructions produces correct instructions per ship mode."""
+
+    def test_direct_mode_includes_merge_commands(self):
+        instructions = dispatch._build_ship_instructions("direct")
+        assert "git merge --no-ff" in instructions
+        assert "git push origin HEAD:master" in instructions
+        assert "git fetch origin" in instructions
+        assert "pytest backend/tests/" in instructions
+        assert "attach_deliverable" in instructions
+        assert 'kind="branch"' in instructions
+        assert 'move_card' in instructions
+        assert '"Done"' in instructions
+        assert "gh pr create" not in instructions
+
+    def test_pull_request_mode_includes_gh_commands(self):
+        instructions = dispatch._build_ship_instructions("pull-request")
+        assert "gh pr create --draft" in instructions
+        assert "git push -u origin HEAD" in instructions
+        assert "git fetch origin" in instructions
+        assert "pytest backend/tests/" in instructions
+        assert "attach_deliverable" in instructions
+        assert 'kind="pr"' in instructions
+        assert 'move_card' in instructions
+        assert '"Done"' in instructions
+        assert "git merge --no-ff" not in instructions
+
+    def test_both_modes_include_test_gate(self):
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            assert "Run the project tests" in instructions
+            assert "Never ship with red tests" in instructions
+            assert "commit your work" in instructions.lower() or "Commit your work" in instructions
+
+    def test_both_modes_include_sync_step(self):
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            assert "git fetch origin" in instructions
+
+
+class TestBuildCardPromptSessionEnd:
+    """build_card_prompt includes the Session-end workflow section."""
+
+    def test_direct_mode_includes_session_end_section(self):
+        class _C:
+            title = "My Card"
+            description = "Do the thing"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        assert "Session-end workflow" in prompt
+        assert "git merge --no-ff" in prompt
+        assert "git push origin HEAD:master" in prompt
+        assert "move_card" in prompt
+        assert '"Done"' in prompt
+
+    def test_pull_request_mode_includes_session_end_section(self):
+        class _C:
+            title = "My Card"
+            description = "Do the thing"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="pull-request")
+        assert "Session-end workflow" in prompt
+        assert "gh pr create --draft" in prompt
+        assert "git push -u origin HEAD" in prompt
+        assert "move_card" in prompt
+        assert '"Done"' in prompt
+
+    def test_impediment_card_still_has_session_end_section(self):
+        class _C:
+            title = "Bug"
+            description = "Fix the crash"
+        prompt = dispatch.build_card_prompt(
+            _C(), persona="You are a debugger.", ship_mode="direct",
+            impediment_question="Where is the crash?",
+        )
+        assert "IMPEDIMENT" in prompt
+        assert "Session-end workflow" in prompt
+        assert "merge --no-ff" in prompt
+
+    def test_session_end_section_comes_after_main_instructions(self):
+        class _C:
+            title = "T"
+            description = ""
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        # The session-end section should appear after the main "Work autonomously" paragraph
+        main_idx = prompt.index("Work autonomously")
+        ship_idx = prompt.index("Session-end workflow")
+        assert ship_idx > main_idx, "Session-end workflow should appear after main instructions"

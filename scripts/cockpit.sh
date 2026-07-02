@@ -106,10 +106,41 @@ sup_log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_DIR/supervisor.log"
 }
 
+# Self-heal watchdog: a process can stay alive yet stop serving — e.g. uvicorn
+# hung mid-reload keeps the port bound but never accepts, so PID-liveness alone
+# reports "running" while every request times out. Poll an HTTP health URL and,
+# after $maxfail consecutive failures, kill the process tree so watch_service's
+# normal restart path brings it back. Exits on its own once the target dies.
+health_watch() {
+    local target_pid="$1" url="$2" name="$3"
+    local grace="${COCKPIT_HEALTH_GRACE:-30}"       # let startup finish first
+    local interval="${COCKPIT_HEALTH_INTERVAL:-10}"
+    local timeout="${COCKPIT_HEALTH_TIMEOUT:-5}"
+    local maxfail="${COCKPIT_HEALTH_MAXFAIL:-3}"
+    local fails=0
+    sleep "$grace"
+    while kill -0 "$target_pid" 2>/dev/null; do
+        if curl -fsS -o /dev/null --max-time "$timeout" "$url" 2>/dev/null; then
+            fails=0
+        else
+            fails=$((fails + 1))
+            sup_log "$name health check faalde ($fails/$maxfail) op $url"
+            if [ "$fails" -ge "$maxfail" ]; then
+                sup_log "$name reageert niet (vastgelopen proces pid $target_pid) — kill voor herstart"
+                kill_tree "$target_pid" 2>/dev/null
+                return 0
+            fi
+        fi
+        sleep "$interval"
+    done
+}
+
 # Supervise one service: run cmd, restart on exit with backoff, give up on
 # crash-loop (MAX_FAILS consecutive fast crashes with no healthy run between).
+# health_url (optional): if set, a health_watch runs alongside and kills the
+# process when it goes unresponsive, feeding it back into the restart loop.
 watch_service() {
-    local name="$1" cmd="$2"
+    local name="$1" cmd="$2" health_url="${3:-}"
     local svc_dir="$LOG_DIR/$name"
     local pidf="$RUN_DIR/$name.pid"
     local base="${COCKPIT_BACKOFF_BASE:-1}"
@@ -131,7 +162,14 @@ watch_service() {
         setsid bash -c "$cmd" >>"$logf" 2>&1 &
         child=$!
         echo "$child" > "$pidf"
+        # Self-heal: watchdog kills the child if it stops answering health checks.
+        local hpid=""
+        if [ -n "$health_url" ]; then
+            health_watch "$child" "$health_url" "$name" &
+            hpid=$!
+        fi
         wait "$child"; local code=$?
+        [ -n "$hpid" ] && kill "$hpid" 2>/dev/null
         ended=$(date +%s); ran=$((ended - started))
         restart=$((restart + 1))
         sup_log "$name exited code=$code (ran ${ran}s, restart #$restart)"
@@ -233,7 +271,12 @@ ensure_git_hooks() {
 
 # --- default service commands (overridable via env for tests) ---
 default_backend_cmd() {
-    echo "cd '$PROJECT_ROOT/backend' && source venv/bin/activate && exec uvicorn app.main:app --reload --port 8000 ${HOST:+--host $HOST}"
+    # --reload-dir app: only watch our own source, not venv/. Watching the whole
+    #   CWD makes WSL/pip file-touch churn under venv/ trigger endless reloads.
+    # --timeout-graceful-shutdown: force-exit if a reload's graceful shutdown
+    #   stalls (e.g. uvicorn waiting forever on an open SSE stream), so the
+    #   reloader can actually restart instead of leaving the port bound-but-dead.
+    echo "cd '$PROJECT_ROOT/backend' && source venv/bin/activate && exec uvicorn app.main:app --reload --reload-dir app --timeout-graceful-shutdown 10 --port 8000 ${HOST:+--host $HOST}"
 }
 default_frontend_cmd() {
     echo "cd '$PROJECT_ROOT/frontend' && exec npm run dev ${HOST:+-- --host $HOST}"
@@ -284,15 +327,19 @@ supervisor_main() {
     mkdir -p "$LOG_DIR"
     mkdir -p "$RUN_DIR"
     echo "$$" > "$RUN_DIR/supervisor.pid"
-    local backend_cmd frontend_cmd
+    local backend_cmd frontend_cmd backend_health=""
     backend_cmd="${COCKPIT_BACKEND_CMD:-}"
-    [ -z "$backend_cmd" ] && backend_cmd="$(default_backend_cmd)"
+    if [ -z "$backend_cmd" ]; then
+        backend_cmd="$(default_backend_cmd)"
+        # Only health-probe the real backend, never injected test commands.
+        backend_health="http://127.0.0.1:8000/api/v1/status"
+    fi
     frontend_cmd="${COCKPIT_FRONTEND_CMD:-}"
     [ -z "$frontend_cmd" ] && frontend_cmd="$(default_frontend_cmd)"
     local children=()
     trap 'for c in "${children[@]}"; do kill_tree "$c"; done; rm -f "$RUN_DIR"/*.pid; exit 0' TERM INT
     sup_log "supervisor started (pid $$)"
-    watch_service backend  "$backend_cmd"  & children+=("$!")
+    watch_service backend  "$backend_cmd" "$backend_health" & children+=("$!")
     watch_service frontend "$frontend_cmd" & children+=("$!")
     wait
 }
@@ -365,6 +412,15 @@ cmd_status() {
     is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER" && s="running (pid $(cat "$RUN_DIR/supervisor.pid"))" || s="stopped"
     is_running "$RUN_DIR/backend.pid"    && b="running (pid $(cat "$RUN_DIR/backend.pid"))"    || b="stopped"
     is_running "$RUN_DIR/frontend.pid"   && f="running (pid $(cat "$RUN_DIR/frontend.pid"))"   || f="stopped"
+    # A live PID isn't proof of a serving backend — probe HTTP so a hung process
+    # (bound port, no responses) reads as "unhealthy" instead of "running".
+    if is_running "$RUN_DIR/backend.pid"; then
+        if curl -fsS -o /dev/null --max-time 5 "http://127.0.0.1:8000/api/v1/status" 2>/dev/null; then
+            b="$b, healthy"
+        else
+            b="$b, UNHEALTHY (reageert niet)"
+        fi
+    fi
     echo "supervisor: $s"
     echo "backend:    $b"
     echo "frontend:   $f"

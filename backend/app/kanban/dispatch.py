@@ -192,7 +192,7 @@ _PERSONA_BY_COLUMN = {}  # Dynamic - loaded from project agents
 def _persona_filename(column: str) -> Optional[str]:
     """Get the persona filename for a column. For agent columns, the column name IS the agent name."""
     # Fixed columns don't have personas
-    if column in ("Backlog", "Impediment", "Done"):
+    if column in ("Backlog", "Impediment", "Done", "To Resume"):
         return None
     # Agent columns: column name matches agent filename
     return f"{column}.md"
@@ -253,6 +253,14 @@ def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
             f"> {impediment_question}\n\n"
             "Please address this question or clarify what's needed before proceeding.\n"
         )
+
+    # Standardised session-end workflow — provider-agnostic, works with any
+    # coding agent (Claude Code, OpenCode, Codex CLI, …).  The agent runs
+    # tests → ships (merge/PR) → attaches the deliverable → moves the card
+    # to Done.  The backend then kills the tmux session and removes the
+    # worktree automatically.
+    ship_instructions = _build_ship_instructions(ship_mode)
+
     return (
         f"{preamble}"
         "You are picking up a Kanban card from the Claude Cockpit board. "
@@ -265,7 +273,69 @@ def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
         "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
         "`comment`) to update the card exactly as those instructions direct. If you are "
         "blocked, use `report_impediment` with a clear question explaining what you need."
+        f"\n\n## Session-end workflow\n"
+        "When your work on this card is complete, follow these steps in order:\n\n"
+        f"{ship_instructions}"
     )
+
+
+def _build_ship_instructions(ship_mode: str) -> str:
+    """Build the standardised session-end workflow instructions.
+
+    These instructions are provider-agnostic: they work the same for Claude Code,
+    OpenCode, Codex CLI, or any other coding agent that spawns in a git worktree.
+    A skill at ``.claude/skills/git-ship/SKILL.md`` mirrors this logic when the
+    agent has filesystem access.
+    """
+    sync = (
+        "1. **Sync** — `git fetch origin` so you are up to date with the remote.\n"
+    )
+    tests = (
+        "2. **Run the project tests** — they gate everything.  Never ship with "
+        "red tests.\n"
+        "   - Backend: ``pytest backend/tests/ -q``\n"
+        "   - Frontend: ``cd frontend && npm run lint && npm run build``\n"
+        "   If any test fails: **stop**.  Do not ship.  ``comment`` on the card "
+        "with the failure output and fix the issue first.\n"
+    )
+    commit = (
+        "3. **Commit your work** — make sure every change is committed to the "
+        "current branch.\n"
+    )
+
+    if ship_mode == "direct":
+        shipping = (
+            "4. **Ship (direct mode)** — merge your branch into master and push:\n"
+            "   ```bash\n"
+            "   BRANCH=$(git rev-parse --abbrev-ref HEAD)\n"
+            "   git checkout master\n"
+            "   git merge --no-ff \"$BRANCH\"\n"
+            "   git push origin HEAD:master\n"
+            "   git checkout \"$BRANCH\"   # back so the worktree stays valid\n"
+            "   ```\n"
+            "5. **Attach the deliverable** — ``attach_deliverable`` with "
+            "``kind=\"branch\"`` and ``ref=<your-branch-name>``.\n"
+            "6. **Move the card to Done** — ``move_card`` to ``\"Done\"``.  "
+            "The backend will kill this session and remove the worktree.\n"
+        )
+    else:
+        shipping = (
+            "4. **Ship (pull-request mode)** — push your branch and open a draft PR:\n"
+            "   ```bash\n"
+            "   gh auth status || { echo 'gh unavailable — manual PR needed'; exit 1; }\n"
+            "   git push -u origin HEAD\n"
+            "   gh pr create --draft --base master --fill\n"
+            "   ```\n"
+            "   Capture the PR URL from ``gh pr create`` output.\n"
+            "   If ``gh`` is unavailable: push the branch, ``comment`` with the "
+            "branch name and note that a manual PR is needed.\n"
+            "5. **Attach the deliverable** — ``attach_deliverable`` with "
+            "``kind=\"pr\"`` and ``ref=<PR-URL>`` (or ``kind=\"branch\"`` if no PR).\n"
+            "6. **Move the card to Done** — ``move_card`` to ``\"Done\"``.  "
+            "The backend will kill this session and remove the worktree.\n"
+        )
+
+    return sync + tests + commit + shipping
 
 
 # ---- transport -------------------------------------------------------------
@@ -491,7 +561,7 @@ def _live_sessions() -> Optional[set[str]]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
-_DISPATCH_COLUMNS = ("Backlog",)  # new cards are picked up straight from Backlog
+_DISPATCH_COLUMNS = ("Backlog", "To Resume")  # new cards from Backlog, resumed cards from To Resume
 
 
 def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
@@ -589,9 +659,57 @@ async def _run_card(
             "source_column": source_column, "spawned": spawned}
 
 
+async def _move_to_resume(
+    session, *, card, project_key: str, project_path: str,
+) -> bool:
+    """When a dead agent session has a resumable worktree, move its card to "To Resume".
+
+    Resolves the resume target via ``_resolve_resume_target``, persists the resume
+    session id/folder on the card, moves it to the "To Resume" fixed column, kills
+    the dead tmux session, and releases the agent claim. Returns True when a resume
+    target was found and the card was moved; False when the worktree has no resumable
+    transcript — the caller should fall back to a plain claim release (reaper default).
+    """
+    from app.kanban.schemas import COLUMNS
+    from app.kanban.session_recovery import _resolve_resume_target
+
+    if card.column in COLUMNS:
+        return False
+    session_name = _claimant_session(card)
+    if session_name is None:
+        return False
+
+    target = _resolve_resume_target(project_path, session_name)
+    if target is None:
+        return False
+
+    session_id, project_folder = target
+    await apply_operation(
+        session, op_type="update", entity_type="card", project_key=project_key,
+        entity_id=card.id,
+        payload={"resume_session_id": session_id,
+                 "resume_project_folder": project_folder},
+    )
+    await apply_operation(
+        session, op_type="move", entity_type="card", project_key=project_key,
+        entity_id=card.id, payload={"column": "To Resume"},
+    )
+    _kill_agent_session(session_name)
+    await apply_operation(
+        session, op_type="release", entity_type="card",
+        project_key=project_key, entity_id=card.id, payload={},
+    )
+    logger.info(
+        "moved card %s to To Resume (session %s -> %s, project_folder=%s)",
+        card.id, session_name, session_id, project_folder,
+    )
+    return True
+
+
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
     sandcastle_live: set[str] | None = None,
+    project_path: str | None = None,
 ) -> int:
     """Release `agent:` claims on cards in agent columns whose session is gone.
 
@@ -605,16 +723,32 @@ async def reap_stale_claims(
     Liveness has two sources: `live_sessions` (tmux session names, for worktree-transport
     cards) and `sandcastle_live` (session names of pending/running sandcastle runs).
     Sandcastle cards have no tmux session, so without the second source every sandcastle
-    card would be reaped on the very next tick and re-dispatched in a loop."""
+    card would be reaped on the very next tick and re-dispatched in a loop.
+
+    When ``project_path`` is provided, dead sessions with a resumable transcript in
+    their worktree are moved to the "To Resume" column (via ``_move_to_resume``)
+    instead of being just released. Cards without a resumable worktree fall back to
+    the plain release as before."""
     from app.kanban.schemas import COLUMNS
     sandcastle_live = sandcastle_live or set()
     reaped = 0
     for card in cards:
-        if card.column in COLUMNS:  # Skip fixed columns (Backlog, Impediment, Done)
+        if card.column in COLUMNS:  # Skip fixed columns (Backlog, Impediment, Done, To Resume)
             continue
         name = _claimant_session(card)
         if name is None or name in live_sessions or name in sandcastle_live:
             continue
+
+        # If we know the project path, try resume recovery first
+        if project_path is not None:
+            if await _move_to_resume(
+                session, card=card, project_key=project_key,
+                project_path=project_path,
+            ):
+                reaped += 1
+                continue
+
+        # Fallback: plain release for non-resumable dead sessions
         await apply_operation(
             session, op_type="release", entity_type="card",
             project_key=project_key, entity_id=card.id, payload={},
@@ -643,7 +777,7 @@ async def dispatch_project(
     if live_sessions is not None:
         if await reap_stale_claims(
             session, project_key=project_key, cards=cards, live_sessions=live_sessions,
-            sandcastle_live=sandcastle_live,
+            sandcastle_live=sandcastle_live, project_path=project_path,
         ):
             cards = await list_cards(session, project_key)
 

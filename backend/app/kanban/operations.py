@@ -156,6 +156,10 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         card = await session.get(KanbanCard, entity_id)
         if card is None:
             return
+        # Reject empty claimants so frontend `!c.claimed_by` and backend
+        # `claimed_by.is_(None)` never diverge on the same card.
+        if not payload.get("claimed_by"):
+            raise ValueError("claimed_by must be a non-empty string")
         # Conditional: a live claim with an equal/earlier claim_hlc wins.
         if card.claimed_by is not None and hlc_max(card.claim_hlc, hlc) != hlc:
             raise ClaimRejected(card.claimed_by)

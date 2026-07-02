@@ -207,22 +207,27 @@ class TestCleanupSessionForCard:
         assert result["error"] == "no_agent_session"
 
     @pytest.mark.asyncio
-    async def test_returns_error_when_kill_fails(self):
+    async def test_continues_when_kill_fails(self):
+        """When tmux is already dead, cleanup should still succeed and
+        remove the worktree (the agent may have exited naturally)."""
         mock_card = MagicMock()
         mock_card.claimed_by = "agent:k-test-1234"
 
         with patch("app.kanban.db.KanbanSessionLocal") as mock_ksl, \
              patch("app.kanban.service.get_card",
                    new=AsyncMock(return_value=mock_card)), \
-             patch("app.kanban.session_cleanup._kill_tmux_session", return_value=False):
+             patch("app.kanban.session_cleanup._kill_tmux_session", return_value=False), \
+             patch("app.kanban.session_cleanup._get_project_path",
+                   new=AsyncMock(return_value="/tmp/repo")), \
+             patch("app.kanban.session_cleanup._remove_worktree_at"):
             mock_session = AsyncMock()
             mock_ksl.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_ksl.return_value.__aexit__ = AsyncMock(return_value=None)
 
             result = await cleanup_session_for_card("card-123", "git:example.com/me/repo")
 
-        assert result["cleaned"] is False
-        assert result["error"] == "failed_to_kill_session"
+        assert result["cleaned"] is True
+        assert result["tmux_killed"] is False
 
     @pytest.mark.asyncio
     async def test_skips_worktree_removal_when_no_project_path(self):

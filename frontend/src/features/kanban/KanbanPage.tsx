@@ -17,8 +17,8 @@ import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
-const FIXED_COLUMNS = new Set(["Backlog", "Impediment", "Done"]);
-const DISPATCH_COLUMNS = new Set(["Backlog"]);
+const FIXED_COLUMNS = new Set(["Backlog", "Impediment", "Done", "To Resume"]);
+const DISPATCH_COLUMNS = new Set(["Backlog", "To Resume"]);
 const POLL_INTERVAL_MS = 5000;
 
 export default function KanbanPage() {
@@ -134,7 +134,7 @@ export default function KanbanPage() {
   const onMove = async (cardId: string, column: string) => {
     const card = cards.find((c) => c.id === cardId);
     const shouldDispatch =
-      card?.column === "Backlog" &&
+      (card?.column === "Backlog" || card?.column === "To Resume") &&
       !FIXED_COLUMNS.has(column) &&
       !card.claimed_by?.startsWith("agent:");
 

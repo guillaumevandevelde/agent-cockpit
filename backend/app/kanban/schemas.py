@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
-COLUMNS = ["Backlog", "Impediment", "Done"]
+COLUMNS = ["Backlog", "Impediment", "Done", "To Resume"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
 
 

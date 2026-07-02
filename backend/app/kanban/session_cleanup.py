@@ -175,9 +175,16 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
             logger.info("Cancelled sandcastle run for completed card %s", card_id)
             return result
 
-        if not _kill_tmux_session(session_name):
-            result["error"] = "failed_to_kill_session"
-            return result
+        # Try to kill the tmux session. A failure here is non-fatal — the agent
+        # may already have exited naturally after finishing its prompt, or may
+        # have been killed by the user. We continue with worktree removal and
+        # claim release regardless.
+        tmux_killed = _kill_tmux_session(session_name)
+        if not tmux_killed:
+            logger.info(
+                "tmux session %s already dead (agent likely exited) — "
+                "continuing cleanup for card %s", session_name, card_id
+            )
 
         project_path = await _get_project_path(project_key)
         if project_path:
@@ -189,7 +196,11 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
 
         await _release_claim(card_id, project_key)
         result["cleaned"] = True
-        logger.info("Cleaned up session %s for completed card %s", session_name, card_id)
+        result["tmux_killed"] = tmux_killed
+        logger.info(
+            "Cleaned up session %s for completed card %s (tmux killed: %s)",
+            session_name, card_id, tmux_killed,
+        )
 
     except Exception as e:
         result["error"] = str(e)
