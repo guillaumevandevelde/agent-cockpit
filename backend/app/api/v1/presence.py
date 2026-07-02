@@ -18,6 +18,7 @@ from app.models.schemas import (
     PresenceSessionUpdate,
 )
 from app.services.presence_service import PresenceService, manager
+from app.services import push_service
 from app.services.scheduling.idle_state import idle_state
 
 router = APIRouter()
@@ -59,6 +60,11 @@ async def receive_event(
     # Broadcast to WebSocket clients
     msg = json.dumps({"type": "session_update", "session": updated_session.model_dump()})
     await manager.broadcast(msg)
+
+    # Fire a real Web Push for attention-worthy transitions (waiting for input,
+    # completion, errors) so a closed tab / phone still gets notified. Detached so
+    # the slow network send never blocks the hook response.
+    push_service.schedule_dispatch(payload.hook_event_name, updated_session)
 
     return {}
 
