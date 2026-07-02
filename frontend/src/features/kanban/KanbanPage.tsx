@@ -113,6 +113,7 @@ export default function KanbanPage() {
 
   const redispatchAll = async () => {
     try {
+      await reload();
       const r = await kanbanApi.redispatchAll(projectPath);
       toast.success(`Re-dispatched ${r.redispatched} orphaned card(s)`);
       void reload();
@@ -123,6 +124,7 @@ export default function KanbanPage() {
 
   const dispatchAll = async () => {
     try {
+      await reload();
       const r = await kanbanApi.dispatchAll(projectPath);
       toast.success(`Dispatched ${r.dispatched} card(s)`);
       void reload();

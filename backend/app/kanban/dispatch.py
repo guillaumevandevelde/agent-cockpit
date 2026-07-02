@@ -764,6 +764,15 @@ async def redispatch_card(
     if card is None:
         return None
 
+    # Auto-select transport BEFORE releasing the claim. The transport lookup
+    # opens a temporary KanbanSessionLocal internally; with StaticPool (used
+    # by aiosqlite :memory: for tests) that inner session shares the same
+    # SQLite connection and its close issues a ROLLBACK that would undo any
+    # uncommitted changes made after this point.
+    if transport is None:
+        transport = await get_transport_for_project(project_path)
+    transport = get_transport_for_card(card, transport)
+
     # Kill existing tmux session if claimed by an agent
     session_name = _claimant_session(card)
     if session_name:
@@ -776,11 +785,6 @@ async def redispatch_card(
             session, op_type="release", entity_type="card",
             project_key=card.project_key, entity_id=card.id, payload={},
         )
-
-    # Auto-select transport if not provided
-    if transport is None:
-        transport = await get_transport_for_project(project_path)
-    transport = get_transport_for_card(card, transport)
 
     # Re-dispatch (bypasses busy cap since we just freed the project)
     return await _run_card(

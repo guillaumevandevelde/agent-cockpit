@@ -6,6 +6,7 @@ from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card, list_cards
 from app.kanban import dispatch
+from app.kanban import service as kanban_service
 from app.kanban.models import KanbanCard
 
 KanbanSessionLocal = TestSessionLocal()
@@ -1142,3 +1143,181 @@ async def test_redispatch_with_resume_session_id_uses_resume_transport():
     assert result is not None
     assert len(calls) == 1
     assert calls[0]["mode"] == "resume"
+
+
+# ---- count consistency: UI count vs actual dispatch ----------------------
+
+@pytest.mark.asyncio
+async def test_pending_count_matches_list_pending_cards():
+    """Verify that the count shown on 'Dispatch all' button (computed in frontend
+    as cards in Backlog where claimed_by is null) matches list_pending_cards."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # 3 unclaimed Backlog
+        await _make_card(s, title="a", column="Backlog")
+        await _make_card(s, title="b", column="Backlog")
+        await _make_card(s, title="c", column="Backlog")
+        # 1 claimed Backlog (should NOT be counted)
+        cid = await _make_card(s, title="claimed backlog", column="Backlog")
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key=PK, entity_id=cid, payload={"claimed_by": "me@ui"})
+        # 1 unclaimed Impediment (should NOT be counted)
+        await _make_card(s, title="impeded", column="Impediment")
+        # 1 unclaimed Done (should NOT be counted)
+        await _make_card(s, title="done", column="Done")
+        # 2 unclaimed agent-column cards (should NOT be counted as pending)
+        await _make_card(s, title="orphan1", column="developer")
+        await _make_card(s, title="orphan2", column="testing")
+        await s.commit()
+
+    # Frontend-style count: Backlog + unclaimed
+    async with KanbanSessionLocal() as s:
+        all_cards = await kanban_service.list_cards(s, PK)
+        from app.kanban.schemas import COLUMNS
+        FIXED = {"Backlog", "Impediment", "Done"}
+        pending = [c for c in all_cards if c.column == "Backlog" and not c.claimed_by]
+        orphans = [c for c in all_cards if c.column not in FIXED and not c.claimed_by]
+        assert len(pending) == 3, f"expected 3 pending, got {len(pending)}"
+        assert len(orphans) == 2, f"expected 2 orphans, got {len(orphans)}"
+
+        # Backend queries should match frontend-style counts
+        db_pending = await kanban_service.list_pending_cards(s, PK)
+        db_orphans = await kanban_service.list_orphaned_cards(s, PK)
+        assert len(db_pending) == len(pending)
+        assert len(db_orphans) == len(orphans)
+
+        # Now dispatch all pending and verify count matches
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 3, f"dispatch_all_pending returned {len(results)}, expected 3"
+    assert len(transport.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_orphan_count_matches_list_orphaned_cards():
+    """Verify that the count shown on 'Redispatch all' button matches what
+    redispatch_all_orphans actually processes."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # 2 unclaimed agent-column cards (orphans)
+        await _make_card(s, title="orphan1", column="developer")
+        await _make_card(s, title="orphan2", column="testing")
+        # 1 claimed agent-column card (NOT an orphan)
+        cid = await _make_card(s, title="busy", column="developer")
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key=PK, entity_id=cid, payload={"claimed_by": "agent:k-alive"})
+        # 1 Backlog unclaimed (NOT an orphan)
+        await _make_card(s, title="backlog", column="Backlog")
+        # 1 Impediment unclaimed (NOT an orphan)
+        await _make_card(s, title="stuck", column="Impediment")
+        # 1 Done unclaimed (NOT an orphan)
+        await _make_card(s, title="finished", column="Done")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        db_orphans = await kanban_service.list_orphaned_cards(s, PK)
+        assert len(db_orphans) == 2, f"expected 2 orphans, got {len(db_orphans)}"
+
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 2, f"redispatch_all_orphans returned {len(results)}, expected 2"
+    assert len(transport.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_does_not_touch_non_pending_cards():
+    """dispatch_all_pending should ONLY dispatch unclaimed Backlog cards, never
+    Impediment, Done, agent-column, or claimed cards."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="valid", column="Backlog")
+        await _make_card(s, title="done", column="Done")
+        await _make_card(s, title="impediment", column="Impediment")
+        await _make_card(s, title="orphan", column="developer")
+        cid = await _make_card(s, title="claimed backlog", column="Backlog")
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key=PK, entity_id=cid, payload={"claimed_by": "me@ui"})
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        pending = await kanban_service.list_pending_cards(s, PK)
+        assert len(pending) == 1, f"expected 1 pending, got {len(pending)}"
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 1
+    assert len(transport.calls) == 1
+
+    # Verify that Done/Impediment cards were NOT moved
+    async with KanbanSessionLocal() as s:
+        all_cards = await kanban_service.list_cards(s, PK)
+        done_cards = [c for c in all_cards if c.column == "Done"]
+        impediment_cards = [c for c in all_cards if c.column == "Impediment"]
+        assert len(done_cards) == 1
+        assert len(impediment_cards) == 1
+
+
+@pytest.mark.asyncio
+async def test_redispatch_all_does_not_touch_non_orphan_cards():
+    """redispatch_all_orphans should ONLY dispatch unclaimed agent-column cards,
+    never Backlog, Impediment, Done, or claimed cards."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="orphan", column="developer")
+        await _make_card(s, title="backlog", column="Backlog")
+        await _make_card(s, title="done", column="Done")
+        await _make_card(s, title="impediment", column="Impediment")
+        cid = await _make_card(s, title="claimed-agent", column="testing")
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key=PK, entity_id=cid, payload={"claimed_by": "agent:k-alive"})
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        orphans = await kanban_service.list_orphaned_cards(s, PK)
+        assert len(orphans) == 1, f"expected 1 orphan, got {len(orphans)}"
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 1
+    assert len(transport.calls) == 1
+
+    # Verify that other cards were NOT moved
+    async with KanbanSessionLocal() as s:
+        all_cards = await kanban_service.list_cards(s, PK)
+        backlog = [c for c in all_cards if c.column == "Backlog"]
+        assert len(backlog) == 1
+        done = [c for c in all_cards if c.column == "Done"]
+        assert len(done) == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_batch_idempotency():
+    """After dispatch_all_pending processes cards, a second call should find
+    nothing to dispatch (the cards were moved to agent columns)."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="a", column="Backlog")
+        await _make_card(s, title="b", column="Backlog")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        r1 = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(r1) == 2
+
+    async with KanbanSessionLocal() as s:
+        pending = await kanban_service.list_pending_cards(s, PK)
+        assert len(pending) == 0, "all pending should have been dispatched"
+        r2 = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(r2) == 0, f"second dispatch_all should return 0, got {len(r2)}"

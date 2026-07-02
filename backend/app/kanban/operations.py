@@ -28,8 +28,10 @@ class ClaimRejected(Exception):
 
 
 # One in-process clock per backend. node_id is bound lazily to the device_id.
-# The lock serializes clock acquisition + tick so concurrent requests (UI + an
-# MCP agent, or two agents) get distinct, monotonic HLCs.
+# The lock serialises the full apply_operation (incl. _materialize + flush) so
+# concurrent requests (UI + an MCP agent, or two agents) cannot race on the
+# same card: a claim that _materialize has just flushed is committed to the DB
+# before the next op can read the card's state.
 _clock: Optional[HLC] = None
 _clock_lock = asyncio.Lock()
 
@@ -70,30 +72,39 @@ async def apply_operation(
     session, *, op_type: str, entity_type: str, project_key: str,
     entity_id: Optional[str], payload: dict,
 ) -> str:
-    """Append an op and fold it into materialized state. Returns entity_id."""
+    """Append an op and fold it into materialized state. Returns entity_id.
+
+    The entire operation is serialized under _clock_lock so that concurrent
+    `apply_operation` calls from different sessions never claim the same card:
+    the lock ensures _materialize + flush complete before the next call can
+    read the card's committed state. Without this, two sessions can each load
+    ``claimed_by = None`` from their identity maps and both think they won the
+    race.
+    """
     async with _clock_lock:
         clock = await _clock_for(session)
         device_id = await get_device_id(session)
         hlc = clock.tick()
-    entity_id = entity_id or uuid.uuid4().hex
-    # Mutations arrive with an empty project_key (callers don't know it); stamp
-    # the op with the owning card's key so the op-log stays self-describing and
-    # per-project sync/filtering works. Creates carry their own project_key.
-    if not project_key:
-        owner = await session.get(KanbanCard, entity_id)
-        if owner is not None:
-            project_key = owner.project_key
-    seq = await _next_seq(session, device_id)
+        entity_id = entity_id or uuid.uuid4().hex
+        # Mutations arrive with an empty project_key (callers don't know it);
+        # stamp the op with the owning card's key so the op-log stays
+        # self-describing and per-project sync/filtering works. Creates carry
+        # their own project_key.
+        if not project_key:
+            owner = await session.get(KanbanCard, entity_id)
+            if owner is not None:
+                project_key = owner.project_key
+        seq = await _next_seq(session, device_id)
 
-    session.add(KanbanOp(
-        op_id=uuid.uuid4().hex, device_id=device_id, seq=seq, hlc=hlc,
-        project_key=project_key, entity_type=entity_type, entity_id=entity_id,
-        op_type=op_type, payload=payload,
-    ))
-    await session.flush()
-    await _materialize(session, op_type=op_type, entity_type=entity_type,
-                       project_key=project_key, entity_id=entity_id,
-                       payload=payload, hlc=hlc)
+        session.add(KanbanOp(
+            op_id=uuid.uuid4().hex, device_id=device_id, seq=seq, hlc=hlc,
+            project_key=project_key, entity_type=entity_type, entity_id=entity_id,
+            op_type=op_type, payload=payload,
+        ))
+        await session.flush()
+        await _materialize(session, op_type=op_type, entity_type=entity_type,
+                           project_key=project_key, entity_id=entity_id,
+                           payload=payload, hlc=hlc)
     return entity_id
 
 
@@ -156,11 +167,15 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         card = await session.get(KanbanCard, entity_id)
         if card is None:
             return
+        # Refresh the card from the DB so we read the latest committed state.
+        # Without this, a session that loaded the card *before* another session
+        # claimed it would still see ``claimed_by = None`` and wrongly accept
+        # a claim that should fail.
+        await session.refresh(card, attribute_names=["claimed_by", "claim_hlc"])
         # Conditional: a live claim with an equal/earlier claim_hlc wins.
         if card.claimed_by is not None and hlc_max(card.claim_hlc, hlc) != hlc:
             raise ClaimRejected(card.claimed_by)
         if card.claimed_by is not None and card.claim_hlc and card.claim_hlc < hlc:
-            # An earlier claim already holds it; later claim is rejected.
             raise ClaimRejected(card.claimed_by)
         card.claimed_by = payload["claimed_by"]
         card.claimed_at = _utcnow()
