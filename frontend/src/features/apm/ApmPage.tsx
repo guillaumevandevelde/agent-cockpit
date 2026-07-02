@@ -82,7 +82,6 @@ export function ApmPage() {
       setModules(modulesRes.modules || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch APM data");
-      toast.error("Failed to load APM data");
     } finally {
       setLoading(false);
     }
