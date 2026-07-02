@@ -60,15 +60,17 @@ backend/                  # FastAPI + async SQLAlchemy + aiosqlite
 │   ├── main.py          # FastAPI app, CORS, lifespan
 │   ├── config.py        # pydantic-settings (defaults in code, no .env required)
 │   ├── database.py      # Async SQLAlchemy engine + session
-│   ├── api/v1/          # 17 route modules (router.py aggregates all)
+│   ├── api/v1/          # 30 route modules (router.py aggregates all), incl. subdir routers:
+│   │                    #   agent_bridge/, cc_bridge/, kanban/, sandcastle/, scheduled_messages/
 │   ├── models/          # database.py (ORM), schemas.py (Pydantic)
-│   ├── services/        # 18 service files (business logic)
+│   ├── services/        # 58 service files (business logic), incl. subdirs:
+│   │                    #   agent_bridge/, cc_bridge/, providers/, scheduling/
 │   └── utils/           # path_utils, file_utils
 
 frontend/                 # React 19 + Vite + TypeScript + shadcn/ui
 ├── src/
-│   ├── App.tsx          # Routes (17 pages)
-│   ├── features/        # Feature modules (16 dirs, each with page + components + API + types)
+│   ├── App.tsx          # Routes (29 pages)
+│   ├── features/        # Feature modules (26 dirs, each with page + components + API + types)
 │   ├── components/      # layout/, shared/, ui/ (19 shadcn components)
 │   ├── hooks/           # useApi, useProjects, useSessionsApi, useUsageApi
 │   ├── contexts/        # ProjectContext, ThemeContext
@@ -78,11 +80,11 @@ frontend/                 # React 19 + Vite + TypeScript + shadcn/ui
 
 ### Features
 
-Config, MCP Servers, Commands, Plugins, Hooks, Permissions, Agents, Skills, Memory, Projects, Backup, Output Styles, Status Line, Sessions, CC Bridge, Usage, Dashboard
+Config, MCP Servers, MCP Server (registry), Commands, Plugins, Hooks, Permissions, Agents, Agent Performance, Skills, Memory, Context, Projects, Backup, Output Styles, Status Line, Sessions, CC Bridge, Kanban, Scheduled Messages, Plans, Presence, Sandcastle, APM, Usage, Dashboard
 
 ### API Routes
 
-All under `/api/v1/`: health, config, projects, cli, mcp, commands, plugins, hooks, permissions, agents, backup, output-styles, statusline, sessions, cc-bridge, usage, memory
+All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins, hooks, permissions, agents, agent-activity, backup, output-styles, statusline, sessions, usage, memory, context, plans, presence, providers, codex-config, status, apm, files, plus subdir routers: cc-bridge, agent-bridge, kanban, scheduled-messages, sandcastle
 
 ## Key Decisions
 
