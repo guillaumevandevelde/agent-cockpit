@@ -41,6 +41,36 @@ async def _reset_test_db():
 
 
 @pytest_asyncio.fixture(autouse=True, scope="session")
+async def _cleanup_test_projects():
+    """Safety net: purge leftover test rows from the real app DB.
+
+    Some tests (e.g. test_mcp_server.py::test_mcp_tool_list_projects) must
+    exercise the actual `projects` table in claude_registry.db rather than
+    an isolated test DB, because they go through the MCP tool layer. By
+    convention those tests name their row "mcp-test-*" / path it under
+    "/tmp/test-*". Individual tests clean up after themselves, but a crash
+    or an interrupted run can still leak rows — this fixture sweeps any
+    stragglers once the whole session finishes so claude_registry.db can't
+    accumulate junk projects across repeated test runs.
+    """
+    yield
+
+    from sqlalchemy import delete, or_
+    from app.database import AsyncSessionLocal, Base, engine
+    from app.models.database import Project
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            delete(Project).where(
+                or_(Project.name.like("mcp-test-%"), Project.path.like("/tmp/test-%"))
+            )
+        )
+        await db.commit()
+
+
+@pytest_asyncio.fixture(autouse=True, scope="session")
 def _patch_kanban_db():
     """Replace KanbanSessionLocal in all modules that import it."""
     originals = {}

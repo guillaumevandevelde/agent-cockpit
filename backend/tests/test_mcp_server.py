@@ -143,16 +143,28 @@ async def test_mcp_tool_list_projects():
 
     uid = uuid.uuid4().hex[:8]
     test_path = f"/tmp/test-{uid}"
+    from app.models.database import Project
+
     async with AsyncSessionLocal() as db:
-        from app.models.database import Project
         p = Project(name=f"mcp-test-{uid}", path=test_path, is_active=True)
         db.add(p)
         await db.commit()
 
-    result = await mcp.call_tool("list_projects", {})
-    content_list, _ = result
-    text = content_list[0].text
-    data = json.loads(text)
-    assert "projects" in data
-    matching = [p for p in data["projects"] if p["name"] == f"mcp-test-{uid}"]
-    assert len(matching) == 1
+    try:
+        result = await mcp.call_tool("list_projects", {})
+        content_list, _ = result
+        text = content_list[0].text
+        data = json.loads(text)
+        assert "projects" in data
+        matching = [p for p in data["projects"] if p["name"] == f"mcp-test-{uid}"]
+        assert len(matching) == 1
+    finally:
+        # This test writes to the real app DB (claude_registry.db), not an
+        # isolated test DB — clean up so repeated runs don't accumulate
+        # "mcp-test-*" rows forever. See _cleanup_test_projects in conftest.py
+        # for a session-level safety net covering any that still leak.
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Project, p.id)
+            if row:
+                await db.delete(row)
+                await db.commit()
