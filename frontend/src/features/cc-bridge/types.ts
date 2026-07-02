@@ -110,3 +110,46 @@ export interface RenameSessionResponse {
   session_name: string
   tmux_target: string
 }
+
+// ── Agent Team types ─────────────────────────────────────────────────────
+
+export interface AgentTeamMember {
+  session_name: string
+  pane_id?: string | null
+  tmux_target: string
+}
+
+export interface AgentTeam {
+  team_id: string
+  name: string
+  provider: string
+  provider_display_name?: string
+  cwd: string
+  is_auto_detected: boolean
+  lead: AgentSession | null
+  members: AgentSession[]
+}
+
+export interface AgentTeamsResponse {
+  teams: AgentTeam[]
+  ungrouped: AgentSession[]
+  total_teams: number
+  total_sessions: number
+}
+
+export interface CreateTeamRequest {
+  name: string
+  provider?: string
+  cwd?: string
+  lead_session_name?: string | null
+  members: { session_name: string; pane_id?: string | null; tmux_target: string }[]
+}
+
+export interface CreateTeamResponse {
+  team_id: string
+  name: string
+  provider: string
+  cwd: string
+  is_auto_detected: boolean
+  members: AgentTeamMember[]
+}

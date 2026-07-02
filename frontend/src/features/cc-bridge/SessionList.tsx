@@ -2,7 +2,8 @@ import { Loader2, RefreshCw, MonitorX, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { SessionCard } from './SessionCard'
-import type { CCSession } from './types'
+import { TeamCard } from './TeamCard'
+import type { CCSession, AgentTeam } from './types'
 import type { AttentionKind } from './attention'
 import type { AgentProviderId } from '@/types/providers'
 
@@ -10,6 +11,8 @@ type ProviderFilter = 'all' | AgentProviderId
 
 interface SessionListProps {
   sessions: CCSession[]
+  teams: AgentTeam[]
+  ungrouped: CCSession[]
   loading: boolean
   error: string | null
   activeTargets: string[]
@@ -26,6 +29,8 @@ interface SessionListProps {
 
 export function SessionList({
   sessions,
+  teams,
+  ungrouped,
   loading,
   error,
   activeTargets,
@@ -39,6 +44,7 @@ export function SessionList({
   createDisabledReason,
   attentionByPane,
 }: SessionListProps) {
+  const totalCount = sessions.length
   const emptyName = providerFilter === 'all'
     ? 'agent'
     : providerFilter === 'codex-cli' ? 'Codex'
@@ -53,7 +59,12 @@ export function SessionList({
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-3 border-b">
         <span className="text-sm font-medium">
-          Sessions ({sessions.length})
+          Sessions ({totalCount})
+          {teams.length > 0 && (
+            <span className="text-muted-foreground ml-1">
+              · {teams.length} team{teams.length !== 1 ? 's' : ''}
+            </span>
+          )}
         </span>
         <div className="flex items-center gap-0.5">
           <Button
@@ -73,7 +84,7 @@ export function SessionList({
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
-        {loading && sessions.length === 0 && (
+        {loading && totalCount === 0 && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
@@ -83,7 +94,7 @@ export function SessionList({
           <p className="text-sm text-destructive p-2">{error}</p>
         )}
 
-        {!loading && !error && sessions.length === 0 && (
+        {!loading && !error && totalCount === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
             <MonitorX className="h-8 w-8 mb-2" />
             <p className="text-sm">No {emptyName} sessions found</p>
@@ -91,7 +102,21 @@ export function SessionList({
           </div>
         )}
 
-        {sessions.map((session) => {
+        {/* Render team cards */}
+        {teams.map((team) => (
+          <TeamCard
+            key={team.team_id}
+            team={team}
+            activeTargets={activeTargets}
+            onToggleTarget={onToggleTarget}
+            onKillSession={onKillSession}
+            onRename={onRename}
+            attentionByPane={attentionByPane}
+          />
+        ))}
+
+        {/* Render ungrouped sessions */}
+        {ungrouped.map((session) => {
           const pos = activeTargets.indexOf(session.tmux_target)
           return (
             <SessionCard
