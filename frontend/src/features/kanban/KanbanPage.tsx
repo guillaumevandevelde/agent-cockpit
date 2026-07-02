@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -19,6 +19,7 @@ import type { Card, KanbanColumn } from "./types";
 
 const FIXED_COLUMNS = new Set(["Backlog", "Impediment", "Done"]);
 const DISPATCH_COLUMNS = new Set(["Backlog"]);
+const POLL_INTERVAL_MS = 5000;
 
 export default function KanbanPage() {
   const { activeProject } = useProjectContext();
@@ -30,6 +31,8 @@ export default function KanbanPage() {
   const [open, setOpen] = useState<Card | null>(null);
   const [creating, setCreating] = useState(false);
   const [editingColumns, setEditingColumns] = useState(false);
+  const draggingRef = useRef(false);
+  const mutatingRef = useRef(0);
 
   const reload = useCallback(async () => {
     if (!projectKey) return;
@@ -56,6 +59,32 @@ export default function KanbanPage() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    const start = () => {
+      draggingRef.current = true;
+    };
+    const end = () => {
+      draggingRef.current = false;
+    };
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!projectKey) return;
+    const id = setInterval(() => {
+      if (document.hidden || draggingRef.current || mutatingRef.current > 0) return;
+      void reload();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [projectKey, reload]);
 
   const orphanCount = useMemo(
     () => cards.filter((c) => !FIXED_COLUMNS.has(c.column) && !c.claimed_by).length,
@@ -109,26 +138,31 @@ export default function KanbanPage() {
       !FIXED_COLUMNS.has(column) &&
       !card.claimed_by?.startsWith("agent:");
 
+    mutatingRef.current += 1;
     setCards((cs) => cs.map((c) => (c.id === cardId ? { ...c, column } : c)));
     try {
-      await kanbanApi.move(cardId, column);
-    } catch {
-      toast.error("Failed to move card");
-      void reload();
-      return;
-    }
-
-    if (shouldDispatch && card) {
       try {
-        const agent = card.agent ?? selectedProviderId ?? undefined;
-        const r = await kanbanApi.dispatchNow(cardId, projectPath, agent);
-        toast.success(`Dispatched — session ${r.session_name}`);
+        await kanbanApi.move(cardId, column);
       } catch {
-        toast.error("Dispatch failed — card may be claimed or the spawn errored");
+        toast.error("Failed to move card");
+        void reload();
+        return;
       }
-    }
 
-    void reload();
+      if (shouldDispatch && card) {
+        try {
+          const agent = card.agent ?? selectedProviderId ?? undefined;
+          const r = await kanbanApi.dispatchNow(cardId, projectPath, agent);
+          toast.success(`Dispatched — session ${r.session_name}`);
+        } catch {
+          toast.error("Dispatch failed — card may be claimed or the spawn errored");
+        }
+      }
+
+      void reload();
+    } finally {
+      mutatingRef.current -= 1;
+    }
   };
 
   const reorderWithin = async (cardId: string, column: string, index: number) => {
@@ -144,6 +178,7 @@ export default function KanbanPage() {
 
     const width = Math.max(4, String(orderedIds.length).length);
     const rankOf = new Map(orderedIds.map((id, i) => [id, String(i).padStart(width, "0")]));
+    mutatingRef.current += 1;
     setCards((cs) =>
       [...cs.map((c) => (rankOf.has(c.id) ? { ...c, rank: rankOf.get(c.id)! } : c))].sort(
         (a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0),
@@ -154,6 +189,8 @@ export default function KanbanPage() {
     } catch {
       toast.error("Failed to reorder");
       void reload();
+    } finally {
+      mutatingRef.current -= 1;
     }
   };
 
@@ -227,6 +264,7 @@ export default function KanbanPage() {
           const [moved] = newColumns.splice(sourceIdx, 1);
           newColumns.splice(targetIdx, 0, moved);
 
+          mutatingRef.current += 1;
           setColumns(newColumns);
 
           try {
@@ -238,6 +276,8 @@ export default function KanbanPage() {
           } catch {
             toast.error("Failed to reorder columns");
             void reload();
+          } finally {
+            mutatingRef.current -= 1;
           }
         }}
       />
