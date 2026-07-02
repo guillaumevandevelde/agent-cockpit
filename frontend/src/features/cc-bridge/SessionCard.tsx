@@ -1,11 +1,12 @@
-import { useRef, useState } from 'react'
-import { Pencil, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, GitBranch, Pencil, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { cn } from '@/lib/utils'
-import type { CCSession } from './types'
+import { fetchSessionGitStatus } from './api'
+import type { CCSession, GitStatusResponse } from './types'
 import type { AttentionKind } from './attention'
 
 interface SessionCardProps {
@@ -28,6 +29,17 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
   // Set when Escape cancels, so the input's onBlur (which fires as the input
   // unmounts) skips the commit it would otherwise trigger.
   const cancelledRef = useRef(false)
+
+  const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null)
+
+  // On-demand git status: fetched once when the card mounts (no polling).
+  useEffect(() => {
+    let active = true
+    fetchSessionGitStatus(session.tmux_target)
+      .then((status) => { if (active) setGitStatus(status) })
+      .catch(() => { if (active) setGitStatus(null) })
+    return () => { active = false }
+  }, [session.tmux_target])
 
   function startEdit() {
     cancelledRef.current = false
@@ -149,6 +161,33 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
         <p className="text-xs text-muted-foreground mt-0.5">
           {session.tmux_target}
         </p>
+        {gitStatus?.is_git_repo && (
+          <div
+            className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground"
+            title={gitStatus.dirty ? 'Uncommitted changes' : 'Working tree clean'}
+          >
+            <GitBranch className="h-3 w-3 shrink-0" />
+            <span className="truncate font-medium">
+              {gitStatus.detached ? 'detached' : gitStatus.branch ?? 'unknown'}
+            </span>
+            {gitStatus.dirty && (
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0"
+                title="Uncommitted changes"
+              />
+            )}
+            {gitStatus.ahead > 0 && (
+              <span className="flex items-center" title={`${gitStatus.ahead} ahead of upstream`}>
+                <ArrowUp className="h-3 w-3" />{gitStatus.ahead}
+              </span>
+            )}
+            {gitStatus.behind > 0 && (
+              <span className="flex items-center" title={`${gitStatus.behind} behind upstream`}>
+                <ArrowDown className="h-3 w-3" />{gitStatus.behind}
+              </span>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

@@ -26,6 +26,16 @@ export interface CCPreviewResponse {
   content: string
 }
 
+export interface GitStatusResponse {
+  is_git_repo: boolean
+  branch: string | null
+  detached: boolean
+  upstream: string | null
+  ahead: number
+  behind: number
+  dirty: boolean
+}
+
 export interface CCTokenResponse {
   token: string
 }
