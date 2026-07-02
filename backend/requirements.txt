@@ -13,4 +13,5 @@ apscheduler>=3.11.2,<4
 croniter>=6.2.2
 mcp>=1.27,<2
 bcrypt>=4.0.0
+pywebpush>=1.14.0
 python-json-logger>=2.0.7

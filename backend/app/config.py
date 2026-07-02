@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     # consumer, e.g. PUBLIC_BASE_URL=https://cockpit.example.com.
     public_base_url: str | None = None
 
+    # Web Push (VAPID) settings. Leave the keys None to have the server generate a
+    # stable keypair on first use and cache it at ~/.claude-registry/vapid.json.
+    # Override for multi-host deploys via VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY
+    # (public = base64url application server key, private = PKCS8 PEM).
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    # `sub` claim sent with every push; some push services reject a bare mailto.
+    vapid_subject: str = "mailto:cockpit@localhost"
+
     # Tunable operational constants (defaults match the historical hardcoded values)
     kanban_dispatch_interval_seconds: int = 10
     provider_doctor_timeout_seconds: int = 30

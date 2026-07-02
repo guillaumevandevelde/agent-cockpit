@@ -1,6 +1,7 @@
 import { Terminal, Radio, AlertCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { AttentionToggle } from "@/components/ui/attention-toggle";
+import { PushSettings } from "@/components/ui/push-settings";
 import { Badge } from "@/components/ui/badge";
 import { useSystemStatus } from "@/hooks/useSystemStatus";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -65,6 +66,7 @@ export function Header() {
             </>
           )}
           <AttentionToggle />
+          <PushSettings />
           <ThemeToggle />
         </div>
       </div>
