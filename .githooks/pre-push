@@ -16,9 +16,12 @@
 set -uo pipefail
 
 REMOTE="${1:-origin}"
-ROOT="$(git rev-parse --show-toplevel)"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
 # Parent of the common git dir = the main checkout (same path for a normal clone).
 MAIN="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
+# When pushing from a bare top-level checkout, --show-toplevel is empty; fall back
+# to the main checkout so `cd "$ROOT/backend"` doesn't become `cd /backend`.
+[ -z "$ROOT" ] && ROOT="$MAIN"
 
 bold=$'\033[1m'; red=$'\033[31m'; grn=$'\033[32m'; ylw=$'\033[33m'; rst=$'\033[0m'
 say()  { printf '%s\n' "${bold}[pre-push]${rst} $*"; }
