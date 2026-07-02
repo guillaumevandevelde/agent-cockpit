@@ -1,10 +1,10 @@
-"""Agent Bridge endpoints: mixed provider session discovery and terminal access."""
+"""Agent Bridge endpoints: mixed provider session discovery, terminal access, and team grouping."""
 from __future__ import annotations
 
 import logging
 import secrets
 import time
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
@@ -16,6 +16,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.schemas import ResumableSessionListResponse
 from app.services.agent_bridge import git_status as git_status_service
+from app.services.agent_bridge import teams as teams_service
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
 from app.services.agent_bridge.pty_relay import PtyRelay
 from app.services.agent_bridge.resumable import list_resumable_sessions
@@ -297,4 +298,109 @@ def rename_session_endpoint(target: str, request: RenameRequest):
         return rename_session(old_name=target, new_name=request.name)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ── Agent Team endpoints ──────────────────────────────────────────────────
+
+
+class TeamMemberInfo(BaseModel):
+    session_name: str
+    pane_id: str | None = None
+    tmux_target: str = ""
+
+
+class AgentTeamResponse(BaseModel):
+    team_id: str
+    name: str
+    provider: str
+    cwd: str
+    is_auto_detected: bool
+    lead: dict[str, Any] | None = None
+    members: list[dict[str, Any]]
+
+
+class AgentTeamsResponse(BaseModel):
+    teams: list[AgentTeamResponse]
+    ungrouped: list[dict[str, Any]]
+    total_teams: int
+    total_sessions: int
+
+
+@router.get("/teams")
+async def list_teams(db: AsyncSession = Depends(get_db)):
+    """List all agent teams (auto-detected + manual) with their sessions."""
+    sessions = discover_agent_sessions()
+    manual_teams = await teams_service.get_manual_teams(db)
+    teams = teams_service.discover_teams(sessions, manual_teams)
+    ungrouped = teams_service.get_ungrouped_sessions(sessions, teams)
+    return AgentTeamsResponse(
+        teams=[AgentTeamResponse(**t) for t in teams],
+        ungrouped=ungrouped,
+        total_teams=len(teams),
+        total_sessions=len(sessions),
+    )
+
+
+class CreateTeamRequest(BaseModel):
+    name: str
+    provider: str = ""
+    cwd: str = ""
+    lead_session_name: str | None = None
+    members: list[TeamMemberInfo] = []
+
+
+@router.post("/teams")
+async def create_team(request: CreateTeamRequest, db: AsyncSession = Depends(get_db)):
+    """Create a new manual agent team."""
+    try:
+        team = await teams_service.create_manual_team(
+            db,
+            name=request.name,
+            provider=request.provider,
+            cwd=request.cwd,
+            lead_session_name=request.lead_session_name,
+            member_sessions=[m.model_dump() for m in request.members],
+        )
+        return team
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/teams/{team_id}")
+async def delete_team(team_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a manual agent team."""
+    success = await teams_service.delete_manual_team(db, team_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return {"deleted": True}
+
+
+class AddMemberRequest(BaseModel):
+    session_name: str
+    pane_id: str | None = None
+    tmux_target: str = ""
+
+
+@router.post("/teams/{team_id}/members")
+async def add_team_member(
+    team_id: int, request: AddMemberRequest, db: AsyncSession = Depends(get_db)
+):
+    """Add a member to a manual team."""
+    success = await teams_service.add_team_member(
+        db, team_id, request.session_name, request.pane_id, request.tmux_target
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return {"added": True}
+
+
+@router.delete("/teams/{team_id}/members/{member_id}")
+async def remove_team_member(
+    team_id: int, member_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Remove a member from a manual team."""
+    success = await teams_service.remove_team_member(db, member_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return {"removed": True}
 

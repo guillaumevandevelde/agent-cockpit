@@ -35,6 +35,7 @@ const MCPServerPage = lazy(() => import('./features/mcp-server/MCPServerPage').t
 const AgentPerformancePage = lazy(() => import('./features/agent-performance/AgentPerformancePage').then((m) => ({ default: m.AgentPerformancePage })))
 const SandcastlePage = lazy(() => import('./features/sandcastle/SandcastlePage').then((m) => ({ default: m.SandcastlePage })))
 const HostsPage = lazy(() => import('./features/hosts/HostsPage').then((m) => ({ default: m.HostsPage })))
+const UpdatesPage = lazy(() => import('./features/updates/UpdatesPage').then((m) => ({ default: m.UpdatesPage })))
 
 function App() {
   return (
@@ -77,6 +78,7 @@ function App() {
                 <Route path="mcp-server" element={<MCPServerPage />} />
                 <Route path="sandcastle" element={<SandcastlePage />} />
                 <Route path="hosts" element={<HostsPage />} />
+                <Route path="updates" element={<UpdatesPage />} />
               </Route>
             </Routes>
             </Suspense>

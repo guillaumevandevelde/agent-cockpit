@@ -63,3 +63,46 @@ export async function renameSession(sessionName: string, name: string): Promise<
     body: JSON.stringify({ name }),
   })
 }
+
+// ── Team API ──────────────────────────────────────────────────────────────
+
+import type { AgentTeamsResponse, CreateTeamRequest, CreateTeamResponse } from './types'
+
+export async function fetchTeams(): Promise<AgentTeamsResponse> {
+  return apiClient<AgentTeamsResponse>(BASE + '/teams')
+}
+
+export async function createTeam(request: CreateTeamRequest): Promise<CreateTeamResponse> {
+  return apiClient<CreateTeamResponse>(BASE + '/teams', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
+export async function deleteTeam(teamId: number): Promise<{ deleted: boolean }> {
+  return apiClient<{ deleted: boolean }>(`${BASE}/teams/${teamId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function addTeamMember(
+  teamId: number,
+  sessionName: string,
+  tmuxTarget: string,
+  paneId?: string,
+): Promise<{ added: boolean }> {
+  return apiClient<{ added: boolean }>(`${BASE}/teams/${teamId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({
+      session_name: sessionName,
+      tmux_target: tmuxTarget,
+      pane_id: paneId ?? null,
+    }),
+  })
+}
+
+export async function removeTeamMember(teamId: number, memberId: number): Promise<{ removed: boolean }> {
+  return apiClient<{ removed: boolean }>(`${BASE}/teams/${teamId}/members/${memberId}`, {
+    method: 'DELETE',
+  })
+}

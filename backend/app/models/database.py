@@ -248,3 +248,52 @@ class PresenceSession(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+
+class AgentTeam(Base):
+    """A group of related agent sessions (a team with lead + members).
+
+    Auto-detected by matching cwd across sessions, or created manually via
+    the "Make team" action in the UI.
+    """
+
+    __tablename__ = "agent_teams"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    lead_session_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    cwd: Mapped[str] = mapped_column(String, nullable=False)
+    is_auto_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    members: Mapped[list["AgentTeamMember"]] = relationship(
+        "AgentTeamMember",
+        back_populates="team",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class AgentTeamMember(Base):
+    """A member session belonging to an agent team."""
+
+    __tablename__ = "agent_team_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    team_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("agent_teams.id", ondelete="CASCADE"), nullable=False
+    )
+    session_name: Mapped[str] = mapped_column(String, nullable=False)
+    pane_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    tmux_target: Mapped[str] = mapped_column(String, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    team: Mapped["AgentTeam"] = relationship("AgentTeam", back_populates="members")
