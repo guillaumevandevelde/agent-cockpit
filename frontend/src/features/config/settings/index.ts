@@ -1,1 +1,0 @@
-export { SettingsEditor } from './SettingsEditor'
