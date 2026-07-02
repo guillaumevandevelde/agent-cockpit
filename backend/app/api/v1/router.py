@@ -30,6 +30,7 @@ from .apm import router as apm_router
 from .files import router as files_router
 from .mcp_server import router as mcp_server_router
 from .sandcastle.router import router as sandcastle_router
+from .update.router import router as update_router
 
 router = APIRouter()
 
@@ -76,3 +77,4 @@ router.include_router(apm_router)
 router.include_router(files_router)
 router.include_router(mcp_server_router, tags=["MCP Server"])
 router.include_router(sandcastle_router, tags=["Sandcastle"])
+router.include_router(update_router)

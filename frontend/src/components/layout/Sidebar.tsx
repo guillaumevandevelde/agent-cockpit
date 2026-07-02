@@ -40,6 +40,7 @@ import {
   PanelLeftOpen,
   Network,
   Castle,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -76,6 +77,7 @@ const commonNavigation: NavGroup[] = [
       { name: 'MCP Server', href: '/mcp-server', icon: Network },
       { name: 'Sandcastle', href: '/sandcastle', icon: Castle },
       { name: 'Backup', href: '/backup', icon: Archive, capability: 'backup' },
+      { name: 'Updates', href: '/updates', icon: RefreshCw },
     ],
   },
 ]
