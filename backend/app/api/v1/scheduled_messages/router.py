@@ -1,4 +1,6 @@
 """REST API for scheduled messages + CC hook ingest."""
+import logging
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select, delete as sa_delete
 
@@ -12,6 +14,8 @@ from app.services.scheduling.auto_resume import auto_resume_service
 from app.services.scheduling.idle_state import idle_state
 from app.services.scheduling.session_registry import session_registry
 from app.services.scheduling.scheduler import scheduler_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scheduled-messages", tags=["Scheduled Messages"])
 
@@ -144,9 +148,19 @@ async def hook_event(ev: HookEvent):
     session_registry.record(ev.event, session_id=ev.session_id, cwd=ev.cwd,
                             tmux_pane=ev.tmux_pane)
 
-    # Auto-resume: detect session limit notifications and schedule resume
-    if ev.event == "Notification" and auto_resume_service.is_enabled(ev.cwd):
-        if auto_resume_service.is_limit_notification(ev.message):
+    if ev.event == "Notification" and auto_resume_service.is_limit_notification(ev.message):
+        # Kanban-dispatched session hit its usage limit and is stuck open: move its
+        # card to "To Resume" and kill the tmux session now, rather than leaving it
+        # dangling until a human notices. No-op for non-kanban sessions.
+        from app.kanban.dispatch import move_limited_session_to_resume
+        try:
+            await move_limited_session_to_resume(ev.cwd)
+        except Exception:
+            logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
+
+        # Auto-resume: schedule a resume job for the scheduled-messages feature,
+        # for projects that opted in explicitly (independent of the kanban path).
+        if auto_resume_service.is_enabled(ev.cwd):
             parsed = auto_resume_service.parse_reset_time(ev.message)
             if parsed:
                 reset_time, tz_name = parsed

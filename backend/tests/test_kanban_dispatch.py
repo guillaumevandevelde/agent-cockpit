@@ -1495,6 +1495,89 @@ async def test_reaper_without_project_path_plain_release():
     assert card.claimed_by is None
 
 
+# ---- move_limited_session_to_resume (live session hit its usage limit) -----
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_moves_matching_card(monkeypatch):
+    """A Notification hook event for a live, limit-hit session moves its card to
+    To Resume and kills the (still alive) tmux session, same as the dead-session
+    reaper does for a crashed one."""
+    import unittest.mock as mock
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="limit-hit", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-live-0001"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-live", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None) as kill_mock:
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-live-0001",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert result is True
+    assert card.column == "To Resume"
+    assert card.resume_session_id == "sess-live"
+    assert card.claimed_by is None
+    kill_mock.assert_called_once_with("k-live-0001")
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_ignores_non_worktree_cwd():
+    """A cwd that isn't a `<project>/.claude/worktrees/<name>` shape (e.g. a manual
+    `claude` session, or the project root itself) is left untouched."""
+    result = await dispatch.move_limited_session_to_resume("/home/me/some-project")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_returns_false_when_no_matching_card(monkeypatch):
+    """No card claimed by that session -> no-op, even if the cwd shape matches."""
+    import unittest.mock as mock
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="unrelated", column="engineer")
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-no-such-session",
+        )
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_returns_false_when_project_key_unresolved():
+    """When the derived project path can't be resolved to a project key, bail out
+    before touching the kanban DB at all."""
+    import unittest.mock as mock
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-live-0002",
+        )
+
+    assert result is False
+
+
 @pytest.mark.asyncio
 async def test_active_session_count_excludes_to_resume():
     """Cards in To Resume are excluded from _active_session_count (fixed column)."""

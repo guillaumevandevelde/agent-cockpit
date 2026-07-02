@@ -120,3 +120,45 @@ async def test_hook_event_populates_session_registry():
                                 "cwd": "/proj", "tmux_pane": "%7"})
         assert r.status_code == 200
     assert session_registry.pane_for("sX") == "%7"
+
+
+@pytest.mark.asyncio
+async def test_hook_event_limit_notification_moves_kanban_card_to_resume():
+    """A "hit your session limit" Notification triggers the kanban To-Resume move,
+    independent of whether the scheduled-messages auto-resume toggle is on."""
+    from unittest import mock
+    import app.kanban.dispatch as dispatch
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(
+        dispatch, "move_limited_session_to_resume", return_value=True,
+    ) as move_mock:
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={"event": "Notification", "session_id": "s2",
+                      "cwd": "/p/.claude/worktrees/k-limit-0001",
+                      "message": "You've hit your session limit · resets 11:10pm (Europe/Brussels)"},
+            )
+            assert r.status_code == 200
+
+    move_mock.assert_awaited_once_with("/p/.claude/worktrees/k-limit-0001")
+
+
+@pytest.mark.asyncio
+async def test_hook_event_non_limit_notification_does_not_touch_kanban():
+    from unittest import mock
+    import app.kanban.dispatch as dispatch
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(dispatch, "move_limited_session_to_resume") as move_mock:
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={"event": "Notification", "session_id": "s3",
+                      "cwd": "/p/.claude/worktrees/k-other-0001",
+                      "message": "Waiting for your input"},
+            )
+            assert r.status_code == 200
+
+    move_mock.assert_not_called()

@@ -706,6 +706,57 @@ async def _move_to_resume(
     return True
 
 
+def _resume_target_from_cwd(cwd: str) -> Optional[tuple[str, str]]:
+    """Derive (project_path, session_name) from a dispatched session's cwd.
+
+    Kanban-dispatched sessions run in `<project_path>/.claude/worktrees/<session_name>`
+    (see `session_recovery._resolve_resume_target`). Any other cwd shape (project
+    root, sandcastle, a manually started `claude` session) isn't ours to touch.
+    """
+    worktree = Path(cwd)
+    if worktree.parent.name != "worktrees" or worktree.parent.parent.name != ".claude":
+        return None
+    return str(worktree.parent.parent.parent), worktree.name
+
+
+async def move_limited_session_to_resume(cwd: str) -> bool:
+    """When a live kanban-dispatched session hits its Claude usage/session limit,
+    move its card to "To Resume" and kill the tmux session right away.
+
+    The dead-session reaper (`reap_stale_claims`) only notices a session once its
+    tmux pane is gone, but a session that has hit its limit stays open showing the
+    limit notice forever (the CLI never exits) -- so without this, the card would
+    sit claimed in its agent column indefinitely. Reuses `_move_to_resume`, which
+    doesn't check liveness itself, so calling it for a still-alive session is safe.
+    """
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.schemas import COLUMNS
+
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return False
+    project_path, session_name = target
+    project_key = _safe_resolve_key(project_path)
+    if project_key is None:
+        return False
+
+    claimant = CLAIMANT_PREFIX + session_name
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards if c.column not in COLUMNS and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return False
+        moved = await _move_to_resume(
+            ks, card=card, project_key=project_key, project_path=project_path,
+        )
+        if moved:
+            await ks.commit()
+        return moved
+
+
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
     sandcastle_live: set[str] | None = None,
