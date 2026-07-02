@@ -157,6 +157,8 @@ class TestCleanupSessionForCard:
         with patch("app.kanban.db.KanbanSessionLocal") as mock_ksl, \
              patch("app.kanban.service.get_card",
                    new=AsyncMock(return_value=mock_card)), \
+             patch("app.kanban.session_cleanup._cancel_sandcastle_run",
+                   new=AsyncMock(return_value=False)), \
              patch("app.kanban.session_cleanup._kill_tmux_session",
                    return_value=True) as mock_kill, \
              patch("app.kanban.session_cleanup._get_project_path",
@@ -216,6 +218,8 @@ class TestCleanupSessionForCard:
         with patch("app.kanban.db.KanbanSessionLocal") as mock_ksl, \
              patch("app.kanban.service.get_card",
                    new=AsyncMock(return_value=mock_card)), \
+             patch("app.kanban.session_cleanup._cancel_sandcastle_run",
+                   new=AsyncMock(return_value=False)), \
              patch("app.kanban.session_cleanup._kill_tmux_session", return_value=False), \
              patch("app.kanban.session_cleanup._get_project_path",
                    new=AsyncMock(return_value="/tmp/repo")), \
@@ -237,6 +241,8 @@ class TestCleanupSessionForCard:
         with patch("app.kanban.db.KanbanSessionLocal") as mock_ksl, \
              patch("app.kanban.service.get_card",
                    new=AsyncMock(return_value=mock_card)), \
+             patch("app.kanban.session_cleanup._cancel_sandcastle_run",
+                   new=AsyncMock(return_value=False)), \
              patch("app.kanban.session_cleanup._kill_tmux_session", return_value=True), \
              patch("app.kanban.session_cleanup._get_project_path",
                    new=AsyncMock(return_value=None)), \
@@ -248,6 +254,32 @@ class TestCleanupSessionForCard:
             result = await cleanup_session_for_card("card-123", "git:unknown/repo")
 
         assert result["cleaned"] is True
+        mock_rm.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancels_sandcastle_run_and_skips_tmux(self):
+        """Sandcastle sessions have no tmux/worktree: cancelling the run is the
+        whole cleanup, so the tmux/worktree path must be skipped."""
+        mock_card = MagicMock()
+        mock_card.claimed_by = "agent:k-test-1234"
+
+        with patch("app.kanban.db.KanbanSessionLocal") as mock_ksl, \
+             patch("app.kanban.service.get_card",
+                   new=AsyncMock(return_value=mock_card)), \
+             patch("app.kanban.session_cleanup._cancel_sandcastle_run",
+                   new=AsyncMock(return_value=True)), \
+             patch("app.kanban.session_cleanup._release_claim",
+                   new=AsyncMock(return_value=None)), \
+             patch("app.kanban.session_cleanup._kill_tmux_session") as mock_kill, \
+             patch("app.kanban.session_cleanup._remove_worktree_at") as mock_rm:
+            mock_session = AsyncMock()
+            mock_ksl.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_ksl.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            result = await cleanup_session_for_card("card-123", "git:example.com/me/repo")
+
+        assert result["cleaned"] is True
+        mock_kill.assert_not_called()
         mock_rm.assert_not_called()
 
 
