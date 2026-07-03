@@ -93,3 +93,22 @@ class KanbanMeta(KanbanBase):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class KanbanGate(KanbanBase):
+    """A decision gate on a card: an open question + structured choices that a
+    human answers from the Kanban UI while the agent session blocks and waits
+    (via the `open_gate` MCP tool), instead of ending the session the way
+    report_impediment does.
+    """
+    __tablename__ = "kanban_gates"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("kanban_cards.id"), index=True)
+    project_key: Mapped[str] = mapped_column(String(512), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    options: Mapped[list] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(16), default="open", index=True)
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

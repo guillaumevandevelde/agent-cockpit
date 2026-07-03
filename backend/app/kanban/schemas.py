@@ -173,6 +173,31 @@ class ImpedimentResolveRequest(BaseModel):
     target_agent: Optional[str] = None  # override auto-detection
 
 
+# Decision gates
+
+
+class GateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    card_id: str
+    project_key: str
+    question: str
+    options: list[str]
+    status: str
+    answer: Optional[str] = None
+    created_at: datetime
+    answered_at: Optional[datetime] = None
+
+
+class GateOpenRequest(BaseModel):
+    question: str
+    options: list[str]
+
+
+class GateAnswerRequest(BaseModel):
+    answer: str
+
+
 # Agent performance dashboard schemas
 
 

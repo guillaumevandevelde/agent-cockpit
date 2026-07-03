@@ -20,6 +20,7 @@ from app.kanban.schemas import (
     ColumnResponse, ColumnCreate, ColumnUpdate, ColumnClearRequest,
     ImpedimentResolveRequest,
     AgentStatsResponse,
+    GateResponse, GateOpenRequest, GateAnswerRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -247,6 +248,43 @@ async def attach(cid: str, payload: AttachRequest):
             project_key="", entity_id=cid, payload=payload.model_dump())
         await s.commit()
         return await _reload(s, cid)
+
+
+@router.post("/cards/{cid}/gates", response_model=GateResponse, status_code=status.HTTP_201_CREATED)
+async def open_gate(cid: str, payload: GateOpenRequest):
+    """Open a decision gate: a question + structured choices rendered in the
+    UI. Also logs a comment so it shows up in the card's activity feed."""
+    async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is None:
+            raise HTTPException(404, "card not found")
+        gate = await service.create_gate(s, card_id=cid, project_key=card.project_key,
+            question=payload.question, options=payload.options)
+        await apply_operation(s, op_type="comment", entity_type="comment",
+            project_key="", entity_id=cid,
+            payload={"text": f"**Gate:** {payload.question}"})
+        await s.commit()
+        return GateResponse.model_validate(gate)
+
+
+@router.get("/cards/{cid}/gates", response_model=list[GateResponse])
+async def list_gates(cid: str):
+    async with KanbanSessionLocal() as s:
+        gates = await service.list_gates(s, cid)
+        return [GateResponse.model_validate(g) for g in gates]
+
+
+@router.post("/gates/{gate_id}/answer", response_model=GateResponse)
+async def answer_gate(gate_id: str, payload: GateAnswerRequest):
+    async with KanbanSessionLocal() as s:
+        try:
+            gate = await service.answer_gate(s, gate_id, payload.answer)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        if gate is None:
+            raise HTTPException(404, "gate not found")
+        await s.commit()
+        return GateResponse.model_validate(gate)
 
 
 @router.post("/enable")

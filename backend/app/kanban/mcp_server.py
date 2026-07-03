@@ -4,7 +4,9 @@ backend reaches the store, so the agent never sees DB/sync credentials.
 Each tool is a thin wrapper over apply_operation/service, returning plain
 dicts (JSON-serializable) for the MCP layer.
 """
+import asyncio
 import logging
+import time
 
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import text
@@ -19,6 +21,13 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("cockpit-kanban")
 
 _NOT_FOUND = "not_found"
+
+# open_gate polls for an answer instead of pushing one — a lightweight choice
+# that avoids a callback/websocket channel back into the MCP tool call. 2s is
+# imperceptible to a human answering in the UI; 30min default timeout is long
+# enough for a human to notice and respond without blocking the tool forever.
+_GATE_POLL_INTERVAL_SECONDS = 2
+_GATE_DEFAULT_TIMEOUT_SECONDS = 1800
 
 
 def _card_dict(card) -> dict:
@@ -194,6 +203,56 @@ async def report_impediment(card_id: str, question: str) -> dict:
         await s.commit()
         logger.info("report_impediment: %s — %s", card_id, question[:80])
         return _card_dict(await service.get_card(s, card_id))
+
+
+@mcp.tool()
+async def open_gate(card_id: str, question: str, options: list[str],
+                    timeout_seconds: int = _GATE_DEFAULT_TIMEOUT_SECONDS) -> dict:
+    """Open an in-browser decision gate and block until a human answers it.
+
+    Renders `question` (Markdown) with `options` as choice buttons in the
+    Kanban UI, and logs it to the card's activity feed. Unlike
+    report_impediment, this does NOT release the claim or end the session —
+    it simply waits (polling) for the human's pick, then returns it so the
+    run can continue inline. Use this for a single decision that shouldn't
+    interrupt the flow; use report_impediment when you're truly stuck and
+    need to hand off to another agent.
+
+    Args:
+        card_id: The card to attach the gate to.
+        question: Markdown-rendered question shown to the human.
+        options: The structured choices offered (at least one).
+        timeout_seconds: How long to wait before giving up (default 30 min).
+
+    Returns {"answer": <chosen option>, "gate_id": ...} once answered, or
+    {"error": "timeout", "gate_id": ...} if nobody answers in time — the gate
+    stays open, so a human can still answer it later via the UI/API.
+    """
+    async with KanbanSessionLocal() as s:
+        card = await _require_card(s, card_id)
+        if card is None:
+            logger.debug("open_gate: %s not found", card_id)
+            return {"error": _NOT_FOUND, "card_id": card_id}
+        gate = await service.create_gate(s, card_id=card_id, project_key=card.project_key,
+            question=question, options=options)
+        await apply_operation(s, op_type="comment", entity_type="comment",
+            project_key="", entity_id=card_id,
+            payload={"text": f"**Gate:** {question}"})
+        await s.commit()
+        gate_id = gate.id
+        logger.info("open_gate: %s opened on %s", gate_id, card_id)
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        await asyncio.sleep(_GATE_POLL_INTERVAL_SECONDS)
+        async with KanbanSessionLocal() as s:
+            current = await service.get_gate(s, gate_id)
+            if current is not None and current.status == "answered":
+                logger.info("open_gate: %s answered: %s", gate_id, current.answer)
+                return {"answer": current.answer, "gate_id": gate_id}
+
+    logger.info("open_gate: %s timed out after %ss", gate_id, timeout_seconds)
+    return {"error": "timeout", "gate_id": gate_id}
 
 
 @mcp.tool()

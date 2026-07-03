@@ -32,7 +32,9 @@ import { useProviderContext } from "@/contexts/ProviderContext";
 import { kanbanApi } from "../api";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
-import type { Card, ActivityEntry, KanbanColumn } from "../types";
+import type { Card, ActivityEntry, KanbanColumn, Gate } from "../types";
+
+const GATE_POLL_INTERVAL_MS = 3000;
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
 
@@ -52,6 +54,8 @@ export function CardDrawer({
   const { selectedProviderId, providers } = useProviderContext();
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [editing, setEditing] = useState(false);
+  const [gates, setGates] = useState<Gate[]>([]);
+  const [answering, setAnswering] = useState<string | null>(null);
 
   // The per-card agent selector picks which connected provider runs the card;
   // `card.agent` holds the provider id (dispatch falls back to the globally
@@ -69,6 +73,42 @@ export function CardDrawer({
       .then(setActivity)
       .catch(() => toast.error("Failed to load activity log"));
   }, [card.id]);
+
+  // A running session opens a gate via the open_gate MCP tool at any time,
+  // independent of anything the UI does — poll so it shows up without a
+  // manual refresh, and so the session (blocked waiting for the answer)
+  // unblocks as soon as this drawer posts one.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      kanbanApi
+        .listGates(card.id)
+        .then((g) => {
+          if (!cancelled) setGates(g);
+        })
+        .catch(() => {});
+    };
+    load();
+    const interval = setInterval(load, GATE_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [card.id]);
+
+  const openGates = gates.filter((g) => g.status === "open");
+
+  const answerGate = async (gate: Gate, option: string) => {
+    setAnswering(gate.id);
+    try {
+      const updated = await kanbanApi.answerGate(gate.id, option);
+      setGates((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
+    } catch {
+      toast.error("Failed to submit answer");
+    } finally {
+      setAnswering(null);
+    }
+  };
 
   const act = async (fn: () => Promise<unknown>) => {
     try {
@@ -135,6 +175,30 @@ export function CardDrawer({
         <DialogHeader>
           <DialogTitle>{card.title}</DialogTitle>
         </DialogHeader>
+
+        {openGates.map((gate) => (
+          <div
+            key={gate.id}
+            className="rounded-md border-2 border-primary/50 bg-primary/5 p-3 text-sm"
+          >
+            <div className="mb-2 text-xs font-semibold uppercase text-primary">
+              Decision requested
+            </div>
+            <MarkdownRenderer content={gate.question} />
+            <div className="mt-3 flex flex-wrap gap-2">
+              {gate.options.map((option) => (
+                <Button
+                  key={option}
+                  size="sm"
+                  disabled={answering === gate.id}
+                  onClick={() => answerGate(gate, option)}
+                >
+                  {option}
+                </Button>
+              ))}
+            </div>
+          </div>
+        ))}
 
         <div className="text-sm">
           <MarkdownRenderer content={card.description || "_No description_"} />

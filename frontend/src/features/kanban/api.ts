@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api";
-import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse, McpHealth } from "./types";
+import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse, McpHealth, Gate } from "./types";
 
 const BASE = "kanban";
 
@@ -237,5 +237,14 @@ export const kanbanApi = {
     apiClient<{ transport: string }>(`${BASE}/transport`, {
       method: "POST",
       body: JSON.stringify({ project_key: projectKey, transport }),
+    }),
+
+  listGates: (cardId: string): Promise<Gate[]> =>
+    apiClient<Gate[]>(`${BASE}/cards/${cardId}/gates`),
+
+  answerGate: (gateId: string, answer: string): Promise<Gate> =>
+    apiClient<Gate>(`${BASE}/gates/${gateId}/answer`, {
+      method: "POST",
+      body: JSON.stringify({ answer }),
     }),
 };

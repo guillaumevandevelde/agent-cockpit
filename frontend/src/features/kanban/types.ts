@@ -41,6 +41,18 @@ export interface Card {
   deliverables: Deliverable[];
 }
 
+export interface Gate {
+  id: string;
+  card_id: string;
+  project_key: string;
+  question: string;
+  options: string[];
+  status: "open" | "answered";
+  answer?: string | null;
+  created_at: string;
+  answered_at?: string | null;
+}
+
 export interface ActivityEntry {
   hlc: string;
   op_type: string;
