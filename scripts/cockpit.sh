@@ -344,13 +344,23 @@ supervisor_main() {
     wait
 }
 
-# Finish-hook: nudge (never auto-delete) when finished worktrees pile up. The
-# actual reclaim is worktree-gc.sh --apply; here we only surface the count so the
-# "mess of leftover worktrees" gets noticed early instead of accumulating.
+# Auto-reclaim finished worktrees on every start: worktree-gc.sh --apply only
+# ever removes a worktree that is BOTH clean and fully merged into master, so
+# it's safe to run unattended — nothing dirty or unmerged is ever touched.
+run_worktree_gc() {
+    [ -x "$SCRIPT_DIR/worktree-gc.sh" ] || return 0
+    local out
+    out="$("$SCRIPT_DIR/worktree-gc.sh" --apply 2>&1)" || true
+    if grep -q '^REMOVED' <<<"$out"; then
+        sup_log "worktree-gc: $(grep -c '^REMOVED' <<<"$out") leftover worktree(s) auto-removed"
+        echo "$out" | grep '^REMOVED'
+    fi
+}
+
+# Doctor: surface remaining dangerous repo states (clobbered tree, stale
+# checkout, hook drift) at startup. Never blocks the dev stack.
 run_doctor() {
     [ -x "$SCRIPT_DIR/cockpit-doctor.sh" ] || return 0
-    # Non-blocking: surface dangerous repo states (clobbered tree, stale checkout,
-    # leftover worktrees, hook drift) at startup, but never block the dev stack.
     "$SCRIPT_DIR/cockpit-doctor.sh" || true
 }
 
@@ -363,6 +373,7 @@ cmd_start() {
     if [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ]; then
         ensure_deps || return 1
         ensure_git_hooks
+        run_worktree_gc
         run_doctor
     fi
     # Preflight: don't crash-loop fighting another stack for the ports. Skipped
