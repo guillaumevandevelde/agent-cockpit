@@ -12,7 +12,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 log_event() {
-    local type="$1" msg="${2:-}" data="${3:-{}}"
+    # NB: do NOT default with ${3:-{}} — when $3 is set, bash treats the default
+    # word as `{` and appends the trailing `}` literally, corrupting valid data
+    # into `…}}` (invalid JSON). Default explicitly instead.
+    local type="$1" msg="${2:-}" data="${3:-}"
+    [ -n "$data" ] || data='{}'
     printf '{"event":"%s","message":"%s","data":%s}\n' "$type" "$msg" "$data"
 }
 
