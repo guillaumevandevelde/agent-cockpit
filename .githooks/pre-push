@@ -1,111 +1,239 @@
 #!/usr/bin/env bash
-# Pre-push gate. Two jobs, in order:
-#   1. Run the test set so green-before-push is systematic, not ad-hoc. A red gate
-#      blocks the push *before* any local state is touched.
-#   2. Auto-rebase on the remote (the original behaviour) to prevent divergence.
+# Pre-push gate. Jobs, in order:
+#   0. Tree-wipe guard — refuse a push that collapses a branch's file tree.
+#   1. Run the test set (backend pytest + frontend ESLint + build) so
+#      green-before-push is systematic. A red gate blocks the push.
+#   2. Auto-rebase on the remote to prevent divergence.
 #
 # Active via `git config core.hooksPath .githooks` (set by scripts/install-hooks.sh,
 # called from scripts/install.sh). Tracked in the repo, so every clone and every git
 # worktree -- dispatched agents included -- gets the same gate.
 #
-# The gate runs backend pytest + frontend ESLint + tsc/vite build against the code of
-# the checkout being pushed, reusing this checkout's venv/node_modules and falling back
-# to the main checkout's (worktrees don't have their own). If a tool environment is
-# genuinely absent it SKIPS that half with a loud warning rather than blocking a push it
-# cannot meaningfully test. Emergency bypass: git push --no-verify
+# Concurrency hardening (multiple engineer agents push on one shared box):
+#   * The heavy checks run under a SHARED flock so N gates don't stampede the CPU/IO
+#     (this is what used to make the gate look hung). The lock lives in the git
+#     common dir, shared by the main checkout and every worktree. If the lock is
+#     held, we wait (COCKPIT_GATE_LOCK_WAIT, default 900s) then proceed unserialized
+#     rather than block a push forever.
+#   * Each heavy run is wrapped in `timeout` (COCKPIT_GATE_RUN_TIMEOUT, default 600s)
+#     so a genuinely stuck run dies and releases the lock instead of poisoning the
+#     queue for every waiter.
+#   * The backend pytest run points DATABASE_URL at a throwaway temp DB so it neither
+#     fights the live backend for the production sqlite file nor pollutes it.
+#   * The lock fd (200) is NOT inherited by the heavy child processes (each is run
+#     with `200>&-`), so an orphaned child can never leak the lock. Verified: bash
+#     does not set close-on-exec on {fd}/numbered exec redirections.
+#
+# If a tool environment is genuinely absent (no venv/node_modules) or a helper binary
+# (flock/timeout) is missing, the gate SKIPS/degrades with a loud warning rather than
+# blocking a push it cannot meaningfully run. Emergency bypass: git push --no-verify
+#
+# Testable: sourcing this file only DEFINES functions; the gate runs only when the
+# file is executed (guard at the bottom). See scripts/test_prepush_gate.sh.
 set -uo pipefail
 
-REMOTE="${1:-origin}"
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-# Parent of the common git dir = the main checkout (same path for a normal clone).
-MAIN="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
-# When pushing from a bare top-level checkout, --show-toplevel is empty; fall back
-# to the main checkout so `cd "$ROOT/backend"` doesn't become `cd /backend`.
-[ -z "$ROOT" ] && ROOT="$MAIN"
-
 bold=$'\033[1m'; red=$'\033[31m'; grn=$'\033[32m'; ylw=$'\033[33m'; rst=$'\033[0m'
-say()  { printf '%s\n' "${bold}[pre-push]${rst} $*"; }
-fail() { printf '%s\n' "${red}[pre-push] $*${rst}" >&2; }
-warn() { printf '%s\n' "${ylw}[pre-push] $*${rst}" >&2; }
+gate_say()  { printf '%s\n' "${bold}[pre-push]${rst} $*"; }
+gate_fail() { printf '%s\n' "${red}[pre-push] $*${rst}" >&2; }
+gate_warn() { printf '%s\n' "${ylw}[pre-push] $*${rst}" >&2; }
 
-# ---- 0. tree-wipe guard --------------------------------------------------------
+# Fixed high fd for the gate lock. Kept literal (not a variable) so the redirections
+# below stay static — no eval needed to open/close/close-in-child.
+# COCKPIT_GATE_LOCK_FD = 200
+GATE_LOCK_WAIT="${COCKPIT_GATE_LOCK_WAIT:-900}"     # seconds to wait for the lock
+GATE_RUN_TIMEOUT="${COCKPIT_GATE_RUN_TIMEOUT:-600}" # seconds per heavy run
+GATE_KILL_AFTER=30                                  # SIGKILL grace after SIGTERM
+
+# ---- tree-wipe guard --------------------------------------------------------
 # A test git-fixture once committed `init`/`a.txt` onto HEAD (715 files -> 1) and it
 # got pushed to master, wiping the default branch. Refuse to push any ref whose new
 # tip both drops below a file floor AND removes most of the branch. Recovery pushes
 # GROW the tree so they pass. Intentional wipe: ALLOW_TREE_WIPE=1 git push …
 # pre-push feeds ref updates on stdin: "<local ref> <local sha> <remote ref> <remote sha>".
-while read -r _lref lsha _rref rsha; do
-    [ -z "${lsha:-}" ] && continue
-    [[ "$lsha" =~ ^0+$ ]] && continue          # branch deletion — nothing pushed
-    [[ "$rsha" =~ ^0+$ ]] && continue          # brand-new remote branch — nothing to destroy
-    if [ -n "${ALLOW_TREE_WIPE:-}" ]; then
-        warn "tree-wipe guard bypassed (ALLOW_TREE_WIPE set) for ${_rref:-ref}"
-        continue
-    fi
-    newn=$(git ls-tree -r --name-only "$lsha" 2>/dev/null | wc -l | tr -d ' ')
-    oldn=$(git ls-tree -r --name-only "$rsha" 2>/dev/null | wc -l | tr -d ' ')
-    [ "${oldn:-0}" -gt 0 ] 2>/dev/null || continue   # old tip unavailable — can't compare
-    if [ "${newn:-0}" -lt 20 ] && [ "$newn" -lt "$(( oldn * 2 / 5 ))" ]; then
-        fail "REFUSING push: ${_rref:-ref} would go from $oldn files to $newn — looks like a tree wipe."
-        fail "If this is deliberate, re-run with:  ALLOW_TREE_WIPE=1 git push …"
-        exit 1
-    fi
-done
+gate_tree_wipe_guard() {
+    local _lref lsha _rref rsha newn oldn
+    while read -r _lref lsha _rref rsha; do
+        [ -z "${lsha:-}" ] && continue
+        [[ "$lsha" =~ ^0+$ ]] && continue          # branch deletion — nothing pushed
+        [[ "$rsha" =~ ^0+$ ]] && continue          # brand-new remote branch — nothing to destroy
+        if [ -n "${ALLOW_TREE_WIPE:-}" ]; then
+            gate_warn "tree-wipe guard bypassed (ALLOW_TREE_WIPE set) for ${_rref:-ref}"
+            continue
+        fi
+        newn=$(git ls-tree -r --name-only "$lsha" 2>/dev/null | wc -l | tr -d ' ')
+        oldn=$(git ls-tree -r --name-only "$rsha" 2>/dev/null | wc -l | tr -d ' ')
+        [ "${oldn:-0}" -gt 0 ] 2>/dev/null || continue   # old tip unavailable — can't compare
+        if [ "${newn:-0}" -lt 20 ] && [ "$newn" -lt "$(( oldn * 2 / 5 ))" ]; then
+            gate_fail "REFUSING push: ${_rref:-ref} would go from $oldn files to $newn — looks like a tree wipe."
+            gate_fail "If this is deliberate, re-run with:  ALLOW_TREE_WIPE=1 git push …"
+            exit 1
+        fi
+    done
+}
 
-status=0
+# ---- shared lock ------------------------------------------------------------
+# Absolute path to a lock file in the git common dir (shared by main checkout and
+# all linked worktrees). Empty output if git can't resolve it.
+gate_lock_path() {
+    local common
+    common="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
+    common="$(cd "$common" 2>/dev/null && pwd)" || return 1
+    [ -n "$common" ] || return 1
+    printf '%s/cockpit-prepush.lock\n' "$common"
+}
 
-# ---- 1a. backend: pytest ----------------------------------------------------
-VENV_PY=""
-for cand in "$ROOT/backend/venv/bin/python" "$MAIN/backend/venv/bin/python"; do
-    [ -x "$cand" ] && { VENV_PY="$cand"; break; }
-done
-if [ -n "$VENV_PY" ]; then
-    say "backend: pytest"
-    # cd into this checkout's backend so the worktree's own app/ is imported,
-    # while reusing the (possibly main) venv's installed dependencies.
-    if ( cd "$ROOT/backend" && "$VENV_PY" -m pytest tests -q ); then
-        say "${grn}backend tests passed${rst}"
+# Open fd 200 on the lock file (in THIS shell so the lock is held after we return)
+# and acquire it. Returns 0 whenever the caller should proceed: on success, or —
+# after waiting GATE_LOCK_WAIT — unserialized as a last resort, or when flock is
+# unavailable. Never blocks a push indefinitely.
+gate_acquire_lock() {
+    local lockfile="$1"
+    if ! command -v flock >/dev/null 2>&1; then
+        gate_warn "flock not found — running gate WITHOUT serialization"
+        return 0
+    fi
+    # Open fd 200 while suppressing only a possible open error. NB: the redirection
+    # is scoped to the brace group — `exec 200>file 2>/dev/null` (command-less exec)
+    # would make the 2>/dev/null PERMANENT and silently mute the gate's own stderr.
+    if ! { exec 200>"$lockfile"; } 2>/dev/null; then
+        gate_warn "cannot open lock file $lockfile — running gate WITHOUT serialization"
+        return 0
+    fi
+    if flock -n 200; then
+        return 0
+    fi
+    gate_say "another pre-push gate is running — waiting up to ${GATE_LOCK_WAIT}s for the lock…"
+    if flock -w "$GATE_LOCK_WAIT" 200; then
+        return 0
+    fi
+    gate_warn "gate lock still busy after ${GATE_LOCK_WAIT}s — proceeding WITHOUT serialization"
+    return 0
+}
+
+gate_release_lock() {
+    # Brace-group scope so 2>/dev/null does not permanently mute the shell's stderr.
+    { exec 200>&-; } 2>/dev/null || true
+}
+
+# ---- timed run + outcome classification -------------------------------------
+# gate_timed <timeout_secs> <kill_after_secs> -- <cmd> [args...]
+# Runs the command under `timeout` when available, else directly. Returns the raw
+# exit status: 0 = ok, 124 = timed out (SIGTERM), 137 = timed out then SIGKILL,
+# anything else = the command's own exit code.
+gate_timed() {
+    local to="$1" ka="$2"; shift 2
+    [ "${1:-}" = "--" ] && shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout -k "$ka" "$to" "$@"
     else
-        fail "backend tests FAILED"
-        status=1
+        "$@"
     fi
-else
-    warn "no backend venv found (run scripts/install.sh) — skipping backend tests"
-fi
+}
 
-# ---- 1b. frontend: lint + build ---------------------------------------------
-if [ -d "$ROOT/frontend/node_modules" ]; then
-    say "frontend: eslint + build"
-    if ( cd "$ROOT/frontend" && npm run lint && npm run build ); then
-        say "${grn}frontend lint + build passed${rst}"
+# gate_report <label> <rc> — print the outcome, return 0 on success else 1.
+gate_report() {
+    local label="$1" rc="$2"
+    if [ "$rc" -eq 0 ]; then
+        gate_say "${grn}${label} passed${rst}"
+        return 0
+    elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+        gate_fail "${label} TIMED OUT after ${GATE_RUN_TIMEOUT}s — likely resource starvation under concurrent agents."
+        gate_fail "Retry, or bypass with: git push --no-verify"
+        return 1
     else
-        fail "frontend lint/build FAILED"
-        status=1
+        gate_fail "${label} FAILED (exit $rc)"
+        return 1
     fi
-else
-    warn "no frontend node_modules found (run scripts/install.sh) — skipping frontend checks"
-fi
+}
 
-if [ "$status" -ne 0 ]; then
-    fail "push blocked. Fix the above, or bypass with: git push --no-verify"
-    exit "$status"
-fi
+# ---- backend + frontend checks ----------------------------------------------
+# Each heavy child runs in a subshell with `200>&-` so it never inherits the lock
+# fd; the parent shell keeps fd 200 open and alone owns the lock.
+gate_run_backend() {
+    local root="$1" main="$2" venv_py="" cand tmp rc
+    for cand in "$root/backend/venv/bin/python" "$main/backend/venv/bin/python"; do
+        [ -x "$cand" ] && { venv_py="$cand"; break; }
+    done
+    if [ -z "$venv_py" ]; then
+        gate_warn "no backend venv found (run scripts/install.sh) — skipping backend tests"
+        return 0
+    fi
+    gate_say "backend: pytest (isolated temp DB)"
+    tmp="$(mktemp -d)"
+    (
+        cd "$root/backend" \
+            && DATABASE_URL="sqlite+aiosqlite:///$tmp/gate.db" \
+               gate_timed "$GATE_RUN_TIMEOUT" "$GATE_KILL_AFTER" -- "$venv_py" -m pytest tests -q
+    ) 200>&-
+    rc=$?
+    rm -rf "$tmp"
+    gate_report "backend tests" "$rc"
+}
 
-# ---- 2. auto-rebase on remote to prevent branch divergence ------------------
-CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
-if [ -z "$CURRENT_BRANCH" ]; then
+gate_run_frontend() {
+    local root="$1" rc
+    if [ ! -d "$root/frontend/node_modules" ]; then
+        gate_warn "no frontend node_modules found (run scripts/install.sh) — skipping frontend checks"
+        return 0
+    fi
+    gate_say "frontend: eslint + build"
+    (
+        cd "$root/frontend" \
+            && gate_timed "$GATE_RUN_TIMEOUT" "$GATE_KILL_AFTER" -- bash -c 'npm run lint && npm run build'
+    ) 200>&-
+    rc=$?
+    gate_report "frontend lint + build" "$rc"
+}
+
+# ---- auto-rebase on remote to prevent branch divergence ---------------------
+gate_autorebase() {
+    local remote="$1" current diverged
+    current=$(git symbolic-ref --short HEAD 2>/dev/null)
+    [ -z "$current" ] && return 0
+    diverged=$(git log --oneline "HEAD..$remote/$current" 2>/dev/null | wc -l)
+    if [ "$diverged" -gt 0 ]; then
+        echo "⚠️  Remote has $diverged commit(s) you don't have locally."
+        echo "   Auto-rebasing on $remote/$current..."
+        if ! git pull --rebase "$remote" "$current"; then
+            echo "❌ Rebase failed. Fix conflicts manually, then push again."
+            exit 1
+        fi
+        echo "✅ Rebase complete."
+    fi
+}
+
+# ---- orchestration ----------------------------------------------------------
+main() {
+    local remote="${1:-origin}"
+    local ROOT MAIN lock status=0
+
+    ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+    # Parent of the common git dir = the main checkout (same path for a normal clone).
+    MAIN="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
+    # Pushing from a bare top-level checkout leaves --show-toplevel empty; fall back
+    # to the main checkout so `cd "$ROOT/backend"` doesn't become `cd /backend`.
+    [ -z "$ROOT" ] && ROOT="$MAIN"
+
+    gate_tree_wipe_guard        # consumes stdin (ref updates); may exit 1
+
+    lock="$(gate_lock_path)" || lock=""
+    [ -n "$lock" ] && gate_acquire_lock "$lock"
+
+    gate_run_backend "$ROOT" "$MAIN" || status=1
+    gate_run_frontend "$ROOT"        || status=1
+
+    gate_release_lock
+
+    if [ "$status" -ne 0 ]; then
+        gate_fail "push blocked. Fix the above, or bypass with: git push --no-verify"
+        exit "$status"
+    fi
+
+    gate_autorebase "$remote"
     exit 0
-fi
+}
 
-DIVERGED=$(git log --oneline HEAD.."$REMOTE"/"$CURRENT_BRANCH" 2>/dev/null | wc -l)
-if [ "$DIVERGED" -gt 0 ]; then
-    echo "⚠️  Remote has $DIVERGED commit(s) you don't have locally."
-    echo "   Auto-rebasing on $REMOTE/$CURRENT_BRANCH..."
-    if ! git pull --rebase "$REMOTE" "$CURRENT_BRANCH"; then
-        echo "❌ Rebase failed. Fix conflicts manually, then push again."
-        exit 1
-    fi
-    echo "✅ Rebase complete."
+# Run the gate only when executed by git; sourcing (tests) just defines functions.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
 fi
-
-exit 0
