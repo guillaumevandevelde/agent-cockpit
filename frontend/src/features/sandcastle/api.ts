@@ -8,6 +8,7 @@ import type {
   SandcastleConfigListResponse,
   SandcastleRunListResponse,
   SandcastleContainersResponse,
+  SandcastleRunGraph,
 } from './types';
 
 const BASE = 'sandcastle';
@@ -164,6 +165,13 @@ export async function getSandcastleRunLogs(runId: number, offset: number = 0): P
     log_content?: string;
     log_offset?: number;
   }>(`${BASE}/runs/${runId}/logs?offset=${offset}`);
+}
+
+/** Get the run graph (batch fan-out) for a project */
+export async function getSandcastleRunGraph(projectPath: string): Promise<SandcastleRunGraph> {
+  return apiClient<SandcastleRunGraph>(
+    buildEndpoint(`${BASE}/runs/graph`, { project_path: projectPath })
+  );
 }
 
 /** List running Docker/Podman sandcastle containers */

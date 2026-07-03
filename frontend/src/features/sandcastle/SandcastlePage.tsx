@@ -15,9 +15,11 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { RefreshButton } from '@/components/shared/RefreshButton'
 import { CLICKABLE_CARD, MODAL_SIZES } from '@/lib/constants'
 import { useProjectContext } from '@/contexts/ProjectContext'
+import { RunGraph } from './RunGraph'
 import {
   getSandcastleConfig,
   updateSandcastleConfig,
@@ -685,11 +687,22 @@ export function SandcastlePage() {
           {runs.length === 0 ? (
             <p className="text-muted-foreground text-sm">No runs yet. Click "New Run" to start one.</p>
           ) : (
-            <div className="space-y-2">
-              {runs.map((run) => (
-                <RunCard key={run.id} run={run} onCancel={handleCancelRun} onDelete={handleDeleteRun} />
-              ))}
-            </div>
+            <Tabs defaultValue="list">
+              <TabsList>
+                <TabsTrigger value="list">List</TabsTrigger>
+                <TabsTrigger value="graph">Graph</TabsTrigger>
+              </TabsList>
+              <TabsContent value="list">
+                <div className="space-y-2">
+                  {runs.map((run) => (
+                    <RunCard key={run.id} run={run} onCancel={handleCancelRun} onDelete={handleDeleteRun} />
+                  ))}
+                </div>
+              </TabsContent>
+              <TabsContent value="graph">
+                <RunGraph projectPath={activeProject.path} />
+              </TabsContent>
+            </Tabs>
           )}
         </CardContent>
       </Card>
