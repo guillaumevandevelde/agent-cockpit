@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.kanban.models import KanbanCard, KanbanColumn, KanbanOp
+from app.kanban.models import KanbanCard, KanbanColumn, KanbanGate, KanbanOp
 
 
 async def list_cards(session, project_key: str, column: str | None = None):
@@ -164,5 +164,54 @@ async def sync_agent_columns(session, project_key: str, agents: list[str]) -> No
             # Insert before Done: rank between last fixed column and Done
             rank = f"{int(done_rank) - len(agents) + i:04d}" if done_rank != "9999" else f"0{len(COLUMNS) + i:03d}"
             await create_column(session, project_key, name=agent_name, rank=rank, default_agent=agent_name)
-    
+
     await session.flush()
+
+
+# Decision gates
+
+
+async def create_gate(session, card_id: str, project_key: str,
+                      question: str, options: list[str]) -> KanbanGate:
+    gate = KanbanGate(
+        id=uuid.uuid4().hex,
+        card_id=card_id,
+        project_key=project_key,
+        question=question,
+        options=options,
+        status="open",
+    )
+    session.add(gate)
+    await session.flush()
+    return gate
+
+
+async def get_gate(session, gate_id: str) -> KanbanGate | None:
+    return await session.get(KanbanGate, gate_id)
+
+
+async def list_gates(session, card_id: str) -> list[KanbanGate]:
+    stmt = (
+        select(KanbanGate)
+        .where(KanbanGate.card_id == card_id)
+        .order_by(KanbanGate.created_at.asc())
+    )
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def answer_gate(session, gate_id: str, answer: str) -> KanbanGate | None:
+    """Record the human's answer. Idempotent: answering an already-answered
+    gate again is a no-op that returns the existing (first) answer, so a
+    double-click in the UI can't silently overwrite what was already recorded."""
+    gate = await session.get(KanbanGate, gate_id)
+    if gate is None:
+        return None
+    if gate.status == "answered":
+        return gate
+    if answer not in gate.options:
+        raise ValueError("answer must be one of the gate's options")
+    gate.answer = answer
+    gate.status = "answered"
+    gate.answered_at = datetime.now(timezone.utc)
+    await session.flush()
+    return gate
