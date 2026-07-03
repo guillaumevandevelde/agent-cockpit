@@ -79,3 +79,6 @@ apm_modules/
 # Local tooling state
 .mimocode/
 .omo/
+
+# superpowers subagent-driven-development scratch (briefs/reports/diffs/ledger)
+.superpowers/
