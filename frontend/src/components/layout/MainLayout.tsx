@@ -1,14 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Header } from './Header'
 import { Sidebar } from './Sidebar'
 import { Footer } from './Footer'
 import { SidebarContext } from '@/contexts/SidebarContext'
 import { useAttentionNotifications } from '@/hooks/useAttentionNotifications'
+import { CommandPalette } from '@/features/command-palette/CommandPalette'
 
 export function MainLayout() {
   const [collapsed, setCollapsed] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   useAttentionNotifications()
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen((prev) => !prev)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   return (
     <SidebarContext.Provider value={{ collapsed, setCollapsed }}>
@@ -22,6 +35,7 @@ export function MainLayout() {
         </div>
         <Footer />
       </div>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </SidebarContext.Provider>
   )
 }
