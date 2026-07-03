@@ -931,9 +931,14 @@ async def redispatch_card(
 ) -> Optional[dict]:
     """Release a stuck card, optionally kill its session, and re-dispatch.
 
-    This is the human override for cards that are stuck on agent columns.
-    It kills the existing tmux session (if any), releases the claim, and
-    re-dispatches with a fresh session.
+    This is the human override for cards that are stuck on agent columns —
+    most commonly a session that hit its usage limit and never exited, so the
+    dead-session reaper never noticed it. Before killing the existing tmux
+    session, we check whether its worktree holds a resumable Claude transcript
+    (same lookup the auto-recovery reaper uses). If one is found, the card is
+    tagged with `resume_session_id`/`resume_project_folder` so the re-dispatch
+    below picks the resume transport (`claude --resume`, same worktree) instead
+    of discarding the conversation and starting a brand new session.
 
     When transport is None, the appropriate transport is automatically selected
     based on the card's transport field (sandcastle/worktree) and the project's
@@ -955,6 +960,22 @@ async def redispatch_card(
     # Kill existing tmux session if claimed by an agent
     session_name = _claimant_session(card)
     if session_name:
+        if not getattr(card, "resume_session_id", None) and card.transport != "sandcastle":
+            from app.kanban.session_recovery import _resolve_resume_target
+
+            target = _resolve_resume_target(project_path, session_name)
+            if target is not None:
+                resume_session_id, resume_project_folder = target
+                await apply_operation(
+                    session, op_type="update", entity_type="card",
+                    project_key=card.project_key, entity_id=card.id,
+                    payload={"resume_session_id": resume_session_id,
+                             "resume_project_folder": resume_project_folder},
+                )
+                logger.info(
+                    "redispatch: resuming card %s (session %s -> %s) instead of a fresh session",
+                    card_id, session_name, resume_session_id,
+                )
         _kill_agent_session(session_name)
         logger.info("killed old session %s for card %s", session_name, card_id)
 
