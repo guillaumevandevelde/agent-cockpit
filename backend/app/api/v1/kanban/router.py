@@ -409,6 +409,18 @@ async def set_autodispatch(payload: AutodispatchRequest):
     return {"project_key": payload.project_key, "enabled": payload.enabled}
 
 
+@router.get("/dispatch-pause")
+async def get_dispatch_pause():
+    """Whether auto-dispatch is globally paused after a Claude usage-limit hit,
+    and until when. Not scoped to a project: the underlying limit is account-wide."""
+    from app.kanban import dispatch_pause
+    async with KanbanSessionLocal() as s:
+        paused = await dispatch_pause.is_dispatch_paused(s)
+        paused_until = await dispatch_pause.get_paused_until(s) if paused else None
+    return {"paused": paused,
+            "paused_until": paused_until.isoformat() if paused_until else None}
+
+
 @router.get("/shipmode")
 async def get_shipmode(project_key: str = Query(...)):
     from app.kanban import dispatch

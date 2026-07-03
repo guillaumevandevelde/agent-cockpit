@@ -14,6 +14,7 @@ import { SkipPermissionsToggle } from "./components/SkipPermissionsToggle";
 import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { MaxSessionsControl } from "./components/MaxSessionsControl";
 import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
+import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
@@ -208,6 +209,7 @@ export default function KanbanPage() {
 
   return (
     <div className="flex flex-col h-full gap-4 overflow-hidden">
+      <DispatchPauseBanner />
       <div className="flex items-center justify-between flex-shrink-0">
         <div>
           <div className="flex items-center gap-3">

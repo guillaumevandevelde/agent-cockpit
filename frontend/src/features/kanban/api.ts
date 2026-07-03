@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api";
-import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse, McpHealth, Gate } from "./types";
+import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse, McpHealth, DispatchPauseStatus, Gate } from "./types";
 
 const BASE = "kanban";
 
@@ -165,6 +165,9 @@ export const kanbanApi = {
     ),
 
   mcpHealth: (): Promise<McpHealth> => apiClient<McpHealth>(`${BASE}/mcp-health`),
+
+  dispatchPause: (): Promise<DispatchPauseStatus> =>
+    apiClient<DispatchPauseStatus>(`${BASE}/dispatch-pause`),
 
   enable: (projectPath: string, slug?: string): Promise<{ project_key: string }> =>
     apiClient<{ project_key: string }>(`${BASE}/enable`, {

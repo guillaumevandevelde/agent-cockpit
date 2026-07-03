@@ -158,17 +158,32 @@ async def hook_event(ev: HookEvent):
         except Exception:
             logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
 
+        parsed = auto_resume_service.parse_reset_time(ev.message)
+
+        # The usage limit is account-wide: every session hits the same wall for
+        # the rest of the reset window. Pause the whole auto-dispatch tick (every
+        # project on this device) until then, so it doesn't keep respawning "To
+        # Resume" cards every ~10s only to immediately re-hit the same limit.
+        if parsed:
+            reset_time, _tz_name = parsed
+            from app.kanban.db import KanbanSessionLocal
+            from app.kanban.dispatch_pause import set_paused_until
+            try:
+                async with KanbanSessionLocal() as ks:
+                    await set_paused_until(ks, reset_time)
+                    await ks.commit()
+            except Exception:
+                logger.exception("failed to set global dispatch pause for %s", ev.cwd)
+
         # Auto-resume: schedule a resume job for the scheduled-messages feature,
         # for projects that opted in explicitly (independent of the kanban path).
-        if auto_resume_service.is_enabled(ev.cwd):
-            parsed = auto_resume_service.parse_reset_time(ev.message)
-            if parsed:
-                reset_time, tz_name = parsed
-                auto_resume_service.schedule_resume(
-                    cwd=ev.cwd,
-                    reset_time=reset_time,
-                    tz_name=tz_name,
-                    session_id=ev.session_id,
-                )
+        if parsed and auto_resume_service.is_enabled(ev.cwd):
+            reset_time, tz_name = parsed
+            auto_resume_service.schedule_resume(
+                cwd=ev.cwd,
+                reset_time=reset_time,
+                tz_name=tz_name,
+                session_id=ev.session_id,
+            )
 
     return {"ok": True}

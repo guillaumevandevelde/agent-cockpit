@@ -1069,7 +1069,13 @@ async def run_dispatch_tick(*, transport: Optional[SpawnTransport] = None) -> No
     transport based on its sandcastle configuration.
     """
     from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import is_dispatch_paused
     from app.services.scheduling.pending_queue import pending_queue
+
+    async with KanbanSessionLocal() as ks:
+        if await is_dispatch_paused(ks):
+            logger.info("dispatch tick skipped: paused after a Claude usage-limit hit")
+            return
 
     # First, try to retry queued cards if memory is available
     await _retry_queued_cards(transport or worktree_transport)

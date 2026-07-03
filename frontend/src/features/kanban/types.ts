@@ -109,3 +109,8 @@ export interface McpHealth {
   db_ok: boolean;
   error: string | null;
 }
+
+export interface DispatchPauseStatus {
+  paused: boolean;
+  paused_until: string | null;
+}
