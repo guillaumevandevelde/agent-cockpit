@@ -24,6 +24,18 @@
 #     with `200>&-`), so an orphaned child can never leak the lock. Verified: bash
 #     does not set close-on-exec on {fd}/numbered exec redirections.
 #
+# Abort/orphan hardening (interrupting a MANUAL push must not leave a wedged run):
+#   * Each heavy check runs in its OWN process group (bash monitor mode) so the whole
+#     subtree — timeout, pytest and its workers, npm and its children — is killable
+#     with a single `kill -PGID`.
+#   * A signal trap (INT/TERM/HUP) tears that group down and releases the lock the
+#     moment the hook is interrupted (Ctrl-C, closed tmux pane, SIGTERM).
+#   * A parent-death watchdog handles the case a trap CANNOT: when `git` itself is
+#     killed, the hook is reparented (never signalled) and, without this, its child
+#     would orphan and run to the full 600s timeout. The supervise loop polls
+#     /proc/$$/status PPid and, on reparent, kills the group instead of lingering.
+#   Together these guarantee an aborted push cannot leave an orphaned/deadlocked run.
+#
 # If a tool environment is genuinely absent (no venv/node_modules) or a helper binary
 # (flock/timeout) is missing, the gate SKIPS/degrades with a loud warning rather than
 # blocking a push it cannot meaningfully run. Emergency bypass: git push --no-verify
@@ -43,6 +55,10 @@ gate_warn() { printf '%s\n' "${ylw}[pre-push] $*${rst}" >&2; }
 GATE_LOCK_WAIT="${COCKPIT_GATE_LOCK_WAIT:-900}"     # seconds to wait for the lock
 GATE_RUN_TIMEOUT="${COCKPIT_GATE_RUN_TIMEOUT:-600}" # seconds per heavy run
 GATE_KILL_AFTER=30                                  # SIGKILL grace after SIGTERM
+
+# Abort/orphan state (see "Abort/orphan hardening" above).
+GATE_CHILD_PGID=""    # process-group id of the currently-running heavy check (empty = none)
+GATE_ABORTED=0        # set to 1 by the signal trap so the supervise loop bails out
 
 # ---- tree-wipe guard --------------------------------------------------------
 # A test git-fixture once committed `init`/`a.txt` onto HEAD (715 files -> 1) and it
@@ -146,9 +162,93 @@ gate_report() {
     fi
 }
 
+# ---- abort / orphan teardown ------------------------------------------------
+# Live parent pid of THIS shell. Must read /proc/$$/status (NOT /proc/self — inside
+# a $(…) subshell `self` is the awk process, whose parent is always us). Empty when
+# /proc is unavailable, which simply disables the orphan guard (traps still work).
+gate_ppid() { awk '/^PPid:/{print $2}' "/proc/$$/status" 2>/dev/null; }
+
+# Kill the currently-running heavy check's whole process group: SIGTERM, a short
+# grace poll, then SIGKILL for anything wedged (a genuinely deadlocked test will not
+# honour TERM — this is what stops it dead instead of waiting out the 600s budget).
+# Falls back to the bare pid if the group form is rejected. No-op when nothing runs.
+gate_kill_child() {
+    local pg="$GATE_CHILD_PGID" n=0
+    [ -n "$pg" ] || return 0
+    kill -TERM -"$pg" 2>/dev/null || kill -TERM "$pg" 2>/dev/null || true
+    while { kill -0 -"$pg" 2>/dev/null || kill -0 "$pg" 2>/dev/null; } && [ "$n" -lt 30 ]; do
+        sleep 0.1; n=$((n+1))
+    done
+    kill -KILL -"$pg" 2>/dev/null || kill -KILL "$pg" 2>/dev/null || true
+    GATE_CHILD_PGID=""
+}
+
+# Signal trap (INT/TERM/HUP): the hook was interrupted — tear down any in-flight
+# check and drop the lock so no run is left orphaned and no waiter is left stalled.
+gate_on_signal() {
+    GATE_ABORTED=1
+    gate_warn "interrupted — killing in-flight checks and releasing the gate lock"
+    gate_kill_child
+    gate_release_lock
+    exit 130
+}
+
+# gate_supervise <timeout_secs> <kill_after_secs> -- <cmd> [args...]
+# Like gate_timed, but the command runs in its OWN process group (bash monitor mode,
+# so $! is the group leader) and is supervised rather than blindly waited on. `timeout`
+# stays as the hard backstop for a hung run. The loop returns the moment the child
+# exits (rc preserved: 0 ok, 124/137 timed-out), OR tears the whole group down early
+# when the hook is signalled (GATE_ABORTED) or orphaned (our parent/git disappeared).
+# The child is launched with `200>&-` so it never inherits — or can leak — the lock fd.
+gate_supervise() {
+    local to="$1" ka="$2"; shift 2
+    [ "${1:-}" = "--" ] && shift
+    local start_ppid rc now child had_m=0
+    start_ppid="$(gate_ppid)"
+    case "$-" in *m*) had_m=1;; esac
+    # Launch the check DIRECTLY in the background (no wrapper subshell): $! is then the
+    # process-group leader. `timeout` puts its command in a fresh process group of its
+    # own; monitor mode does the same for the no-timeout fallback. Either way the heavy
+    # subtree ends up in one killable group, isolated from the hook's own group.
+    set -m
+    if command -v timeout >/dev/null 2>&1; then
+        timeout -k "$ka" "$to" "$@" 200>&- &
+    else
+        "$@" 200>&- &
+    fi
+    child=$!
+    [ "$had_m" -eq 1 ] || set +m
+    # Read the REAL process-group id — do NOT assume it equals $! (with `timeout` the
+    # group leader is timeout itself, whose pid == $! here; but resolving it explicitly
+    # keeps gate_kill_child correct regardless of how the group got created).
+    GATE_CHILD_PGID="$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' ')"
+    [ -n "$GATE_CHILD_PGID" ] || GATE_CHILD_PGID="$child"
+    while kill -0 "$child" 2>/dev/null; do
+        [ "$GATE_ABORTED" -eq 1 ] && break
+        if [ -n "$start_ppid" ]; then
+            now="$(gate_ppid)"
+            if [ -n "$now" ] && [ "$now" != "$start_ppid" ]; then
+                gate_warn "parent (git) exited — tearing down in-flight checks (orphan guard)"
+                gate_kill_child
+                gate_release_lock
+                exit 137
+            fi
+        fi
+        sleep 0.5
+    done
+    if [ "$GATE_ABORTED" -eq 1 ]; then
+        gate_kill_child
+        gate_release_lock
+        exit 130
+    fi
+    wait "$child"; rc=$?
+    GATE_CHILD_PGID=""
+    return "$rc"
+}
+
 # ---- backend + frontend checks ----------------------------------------------
-# Each heavy child runs in a subshell with `200>&-` so it never inherits the lock
-# fd; the parent shell keeps fd 200 open and alone owns the lock.
+# Each heavy child runs in its own process group with `200>&-` so it never inherits
+# the lock fd; the parent shell keeps fd 200 open and alone owns the lock.
 gate_run_backend() {
     local root="$1" main="$2" venv_py="" cand tmp rc
     for cand in "$root/backend/venv/bin/python" "$main/backend/venv/bin/python"; do
@@ -160,11 +260,9 @@ gate_run_backend() {
     fi
     gate_say "backend: pytest (isolated temp DB)"
     tmp="$(mktemp -d)"
-    (
-        cd "$root/backend" \
-            && DATABASE_URL="sqlite+aiosqlite:///$tmp/gate.db" \
-               gate_timed "$GATE_RUN_TIMEOUT" "$GATE_KILL_AFTER" -- "$venv_py" -m pytest tests -q
-    ) 200>&-
+    gate_supervise "$GATE_RUN_TIMEOUT" "$GATE_KILL_AFTER" -- \
+        env "DATABASE_URL=sqlite+aiosqlite:///$tmp/gate.db" \
+        bash -c 'cd "$1" && exec "$2" -m pytest tests -q' _ "$root/backend" "$venv_py"
     rc=$?
     rm -rf "$tmp"
     gate_report "backend tests" "$rc"
@@ -177,10 +275,8 @@ gate_run_frontend() {
         return 0
     fi
     gate_say "frontend: eslint + build"
-    (
-        cd "$root/frontend" \
-            && gate_timed "$GATE_RUN_TIMEOUT" "$GATE_KILL_AFTER" -- bash -c 'npm run lint && npm run build'
-    ) 200>&-
+    gate_supervise "$GATE_RUN_TIMEOUT" "$GATE_KILL_AFTER" -- \
+        bash -c 'cd "$1" && npm run lint && npm run build' _ "$root/frontend"
     rc=$?
     gate_report "frontend lint + build" "$rc"
 }
@@ -213,6 +309,10 @@ main() {
     # Pushing from a bare top-level checkout leaves --show-toplevel empty; fall back
     # to the main checkout so `cd "$ROOT/backend"` doesn't become `cd /backend`.
     [ -z "$ROOT" ] && ROOT="$MAIN"
+
+    # Interrupt handling: from here on, an aborted push tears down cleanly instead of
+    # leaving an orphaned check or a stuck lock (see "Abort/orphan hardening" above).
+    trap gate_on_signal INT TERM HUP
 
     gate_tree_wipe_guard        # consumes stdin (ref updates); may exit 1
 

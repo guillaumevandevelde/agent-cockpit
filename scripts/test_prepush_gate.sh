@@ -104,5 +104,61 @@ head "gate_lock_path shape"
   esac
 ) && ok "absolute path ending in cockpit-prepush.lock" || bad "gate_lock_path (rc $?)"
 
+# --- 7. gate_supervise: normal exit codes preserved --------------------------
+head "gate_supervise passes through success / timeout classification"
+(
+  source "$HOOK"
+  gate_supervise 5 1 -- true;    [ $? -eq 0 ]   || exit 71
+  gate_supervise 1 1 -- sleep 5; [ $? -eq 124 ] || exit 72   # timeout backstop still fires
+) && ok "success=0, over-budget=124 (timeout backstop intact)" || bad "gate_supervise passthrough (rc $?)"
+
+# --- 8. signal trap tears down the child group (no orphan) --------------------
+head "gate_on_signal kills the in-flight check group on interrupt"
+(
+  sarg="99$$"                                    # unique, numeric sleep -> findable, no collisions
+  pkill -f "sleep $sarg" 2>/dev/null
+  (
+    source "$HOOK"
+    trap gate_on_signal INT TERM HUP
+    gate_supervise 60 5 -- bash -c "sleep $sarg"
+  ) &
+  sup=$!
+  for _ in $(seq 1 50); do pgrep -f "sleep $sarg" >/dev/null && break; sleep 0.1; done
+  pgrep -f "sleep $sarg" >/dev/null || { kill "$sup" 2>/dev/null; exit 81; }   # never started
+  kill -TERM "$sup" 2>/dev/null                  # interrupt the supervising shell
+  gone=0
+  for _ in $(seq 1 50); do pgrep -f "sleep $sarg" >/dev/null || { gone=1; break; }; sleep 0.1; done
+  pkill -f "sleep $sarg" 2>/dev/null; wait "$sup" 2>/dev/null
+  [ "$gone" -eq 1 ] || exit 82
+) && ok "interrupted supervise reaps the whole check group (no orphan)" || bad "trap teardown (rc $?)"
+
+# --- 9. orphan guard: parent (git) death tears the run down ------------------
+head "gate_supervise orphan guard reaps when the parent process dies"
+(
+  tmp="$(mktemp -d)"; sarg="88$$"
+  pkill -f "sleep $sarg" 2>/dev/null
+  cat > "$tmp/h.sh" <<HS
+source "$HOOK"
+gate_supervise 60 5 -- bash -c "sleep $sarg"
+HS
+  # genuine parent->hook chain ('& wait' defeats bash's single-command exec collapse)
+  setsid bash -c "bash '$tmp/h.sh' & wait" &
+  for _ in $(seq 1 50); do pgrep -f "sleep $sarg" >/dev/null && break; sleep 0.1; done
+  pgrep -f "sleep $sarg" >/dev/null || { rm -rf "$tmp"; exit 91; }
+  # the hook = the bash running h.sh whose argv does NOT contain -c; kill its parent
+  hook=""
+  for p in $(pgrep -f "$tmp/h.sh"); do
+    tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q -- ' -c ' && continue
+    hook="$p"; break
+  done
+  [ -n "$hook" ] || { pkill -f "sleep $sarg" 2>/dev/null; rm -rf "$tmp"; exit 92; }
+  gitlike="$(awk '/^PPid:/{print $2}' "/proc/$hook/status")"
+  kill -9 "$gitlike" 2>/dev/null                 # git dies; hook is orphaned, never signalled
+  gone=0
+  for _ in $(seq 1 80); do pgrep -f "sleep $sarg" >/dev/null || { gone=1; break; }; sleep 0.1; done
+  pkill -f "sleep $sarg" 2>/dev/null; rm -rf "$tmp"
+  [ "$gone" -eq 1 ] || exit 93
+) && ok "orphaned run is reaped, not left to the timeout budget" || bad "orphan guard (rc $?)"
+
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
