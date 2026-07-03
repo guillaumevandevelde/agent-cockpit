@@ -617,6 +617,111 @@ class SandcastleService:
             )
             return result.scalar_one_or_none()
 
+    async def get_run_graph(self, project_path: str, limit: int = 300) -> dict[str, Any]:
+        """Build a lightweight run graph for a project from existing run data.
+
+        SandcastleRun has no dependency/parent field, so batches are inferred
+        from the log_file_path correlator that _execute_parallel_runs already
+        stamps onto every run started via one /runs/parallel call: runs
+        sharing a log file fan out from a synthetic batch node, everything
+        else is a standalone node.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(SandcastleRun)
+                .where(SandcastleRun.project_path == project_path)
+                .order_by(SandcastleRun.created_at.asc())
+                .limit(limit)
+            )
+            runs = list(result.scalars().all())
+
+        groups: dict[str, list[SandcastleRun]] = {}
+        solo: list[SandcastleRun] = []
+        for run in runs:
+            if run.log_file_path:
+                groups.setdefault(run.log_file_path, []).append(run)
+            else:
+                solo.append(run)
+
+        nodes: list[dict[str, Any]] = []
+        edges: list[dict[str, str]] = []
+
+        for log_path, group_runs in groups.items():
+            if len(group_runs) > 1:
+                batch_id = f"batch:{log_path}"
+                nodes.append(self._batch_node(batch_id, group_runs))
+                for run in group_runs:
+                    run_node = self._run_node(run)
+                    nodes.append(run_node)
+                    edges.append({"source": batch_id, "target": run_node["id"]})
+            else:
+                nodes.append(self._run_node(group_runs[0]))
+
+        for run in solo:
+            nodes.append(self._run_node(run))
+
+        return {"nodes": nodes, "edges": edges}
+
+    def _run_node(self, run: SandcastleRun) -> dict[str, Any]:
+        """Graph node for a single run."""
+        duration = None
+        if run.started_at:
+            # SQLite round-trips DateTime(timezone=True) as naive even though it's
+            # always written as UTC (see usage_service.py's cached_at handling for
+            # the same idiom) -- reattach tzinfo before subtracting.
+            started = run.started_at.replace(tzinfo=timezone.utc)
+            end = (
+                run.completed_at.replace(tzinfo=timezone.utc)
+                if run.completed_at else datetime.now(timezone.utc)
+            )
+            duration = (end - started).total_seconds()
+        return {
+            "id": f"run:{run.id}",
+            "type": "run",
+            "run_id": run.id,
+            "label": run.prompt[:80],
+            "prompt": run.prompt,
+            "status": run.status,
+            "branch": run.branch,
+            "commits_count": len(run.commits) if run.commits else 0,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+            "duration_seconds": duration,
+            "error": run.error,
+        }
+
+    def _batch_node(self, batch_id: str, group_runs: list[SandcastleRun]) -> dict[str, Any]:
+        """Synthetic root node fanning out to a parallel batch's runs."""
+        started = [r.started_at for r in group_runs if r.started_at]
+        completed = [r.completed_at for r in group_runs if r.completed_at]
+        return {
+            "id": batch_id,
+            "type": "batch",
+            "run_id": None,
+            "label": f"{len(group_runs)} parallel runs",
+            "prompt": None,
+            "status": self._aggregate_status(group_runs),
+            "branch": None,
+            "commits_count": None,
+            "started_at": min(started).isoformat() if started else None,
+            "completed_at": max(completed).isoformat() if len(completed) == len(group_runs) else None,
+            "duration_seconds": None,
+            "error": None,
+        }
+
+    @staticmethod
+    def _aggregate_status(group_runs: list[SandcastleRun]) -> str:
+        """Batch status: running while any child is active, else failed if any
+        failed, else cancelled only if every child was cancelled, else completed."""
+        statuses = {r.status for r in group_runs}
+        if statuses & {"pending", "running"}:
+            return "running"
+        if "failed" in statuses:
+            return "failed"
+        if statuses == {"cancelled"}:
+            return "cancelled"
+        return "completed"
+
     async def list_runs(
         self,
         project_path: str | None = None,

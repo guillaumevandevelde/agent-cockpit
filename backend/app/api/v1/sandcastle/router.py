@@ -267,6 +267,12 @@ async def list_runs(
     }
 
 
+@router.get("/runs/graph")
+async def get_run_graph(project_path: str = Query(...)):
+    """Group a project's runs into a lightweight DAG (batch fan-out) for the run-graph view."""
+    return await sandcastle_service.get_run_graph(project_path)
+
+
 @router.get("/runs/{run_id}")
 async def get_run(run_id: int):
     """Get a sandcastle run by ID."""

@@ -117,3 +117,32 @@ export interface SandcastleContainer {
 export interface SandcastleContainersResponse {
   containers: SandcastleContainer[];
 }
+
+/** A node in the run graph: either a single run, or a synthetic batch root
+ * fanning out to the runs started together via /runs/parallel. */
+export interface SandcastleGraphNode {
+  id: string;
+  type: 'run' | 'batch';
+  run_id: number | null;
+  label: string;
+  prompt: string | null;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  branch: string | null;
+  commits_count: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  error: string | null;
+}
+
+/** A directed edge from a batch node to one of its child run nodes */
+export interface SandcastleGraphEdge {
+  source: string;
+  target: string;
+}
+
+/** Run graph for a project (from /runs/graph) */
+export interface SandcastleRunGraph {
+  nodes: SandcastleGraphNode[];
+  edges: SandcastleGraphEdge[];
+}
