@@ -12,6 +12,7 @@
 #   4. stale checkout  — working copy is missing many files origin/master has
 #   5. worktree leaks  — merged+clean worktrees left lying around
 #   6. hook sync       — on-disk .githooks/pre-push differs from the committed one
+#   7. test-project rows — leftover "mcp-test-*" rows in claude_registry.db
 #
 # Usage: scripts/cockpit-doctor.sh
 set -uo pipefail
@@ -87,6 +88,16 @@ if [ -f "$ROOT/.githooks/pre-push" ]; then
         pass "pre-push hook in sync with $ref."
     else
         warn "on-disk .githooks/pre-push differs from $ref — checkout may be drifting."
+    fi
+fi
+
+# 7. leftover test-project rows (reuse the cleanup script's dry-run)
+if [ -x "$ROOT/scripts/cleanup-test-projects.sh" ]; then
+    stale=$("$ROOT/scripts/cleanup-test-projects.sh" 2>/dev/null | grep -c '^WOULD-REMOVE')
+    if [ "${stale:-0}" -gt 0 ]; then
+        warn "$stale leftover test-project row(s) in claude_registry.db — run scripts/cleanup-test-projects.sh --apply."
+    else
+        pass "no leftover test-project rows."
     fi
 fi
 
