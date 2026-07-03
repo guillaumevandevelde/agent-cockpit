@@ -34,7 +34,7 @@ export function HostsPage() {
     try {
       const data = await fetchHosts()
       setHosts(data)
-    } catch (err) {
+    } catch {
       toast.error('Failed to load hosts')
     } finally {
       setLoading(false)
@@ -51,7 +51,7 @@ export function HostsPage() {
       await deleteHost(host.id)
       toast.success(`Deleted host "${host.alias}"`)
       void loadHosts()
-    } catch (err) {
+    } catch {
       toast.error('Failed to delete host')
     }
   }
@@ -62,7 +62,7 @@ export function HostsPage() {
       const result = await testHostConnection(id)
       toast.info(result.reachable ? `✅ ${result.alias} is reachable` : `❌ ${result.alias} is not reachable`)
       void loadHosts()
-    } catch (err) {
+    } catch {
       toast.error('Connection test failed')
     } finally {
       setTestingId(null)
