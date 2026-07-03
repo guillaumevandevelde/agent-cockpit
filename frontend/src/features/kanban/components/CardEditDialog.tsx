@@ -23,7 +23,7 @@ import { MODAL_SIZES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
 import { fetchResumableSessions } from "@/features/cc-bridge/api";
-import { kanbanApi } from "../api";
+import { useProviderContext } from "@/contexts/ProviderContext";
 import { PRIORITIES, type Priority } from "../types";
 import type { ResumableSession } from "@/types/sessions";
 
@@ -33,6 +33,8 @@ function parseLabels(raw: string): string[] {
     .map((l) => l.trim())
     .filter(Boolean);
 }
+
+const AUTO = "__auto__"; // sentinel: null agent (dispatch resolves the provider at run time)
 
 export function CardEditDialog({
   open,
@@ -79,10 +81,11 @@ export function CardEditDialog({
   const [labelsInput, setLabelsInput] = useState(
     (initial?.labels ?? []).join(", ")
   );
-  const [agent, setAgent] = useState<string>(defaultAgent ?? "");
+  const [agent, setAgent] = useState<string>(defaultAgent ?? AUTO);
   const [transport, setTransport] = useState<string>(initial?.transport ?? "auto");
+  const { providers } = useProviderContext();
+  const installedProviders = providers.filter((p) => p.installed);
 
-  const [availableAgents, setAvailableAgents] = useState<string[]>([]);
   const [resumeSessions, setResumeSessions] = useState<ResumableSession[]>([]);
   const [selectedResume, setSelectedResume] = useState<ResumableSession | null>(null);
   const [loadingResume, setLoadingResume] = useState(false);
@@ -115,16 +118,6 @@ export function CardEditDialog({
       .finally(() => { if (!cancelled) setLoadingResume(false); });
     return () => { cancelled = true; };
   }, [showResumePicker, projectPath]);
-
-  // Fetch available agents for the dropdown
-  useEffect(() => {
-    if (!projectPath) return;
-    let cancelled = false;
-    kanbanApi.agents(projectPath)
-      .then((r) => { if (!cancelled) setAvailableAgents(r.agents); })
-      .catch(() => { if (!cancelled) setAvailableAgents([]); });
-    return () => { cancelled = true; };
-  }, [projectPath]);
 
   // If the user has interacted with the picker, use their selection; otherwise
   // preserve the initial value so editing an existing card without touching the
@@ -197,29 +190,20 @@ export function CardEditDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Agent</Label>
-            {availableAgents.length > 0 ? (
-              <Select value={agent} onValueChange={setAgent}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select agent (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">None</SelectItem>
-                  {availableAgents.map((a) => (
-                    <SelectItem key={a} value={a}>
-                      {a}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                id="card-agent"
-                placeholder="Agent name (optional)"
-                value={agent}
-                onChange={(e) => setAgent(e.target.value)}
-              />
-            )}
+            <Label>Provider</Label>
+            <Select value={agent} onValueChange={setAgent}>
+              <SelectTrigger>
+                <SelectValue placeholder="Provider" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO}>Auto (selected provider)</SelectItem>
+                {installedProviders.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
@@ -373,7 +357,7 @@ export function CardEditDialog({
                 column,
                 priority: priority === "none" ? null : priority,
                 labels,
-                agent: agent.trim() || null,
+                agent: agent === AUTO ? null : agent,
                 transport: transport === "auto" ? null : transport,
                 resume_session_id,
                 resume_project_folder,

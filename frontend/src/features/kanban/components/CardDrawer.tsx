@@ -143,7 +143,7 @@ export function CardDrawer({
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Select value={card.agent ?? AUTO} onValueChange={setAgent}>
             <SelectTrigger className="h-8 w-[140px]">
-              <SelectValue placeholder="Agent" />
+              <SelectValue placeholder="Provider" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={AUTO}>Auto (selected provider)</SelectItem>
