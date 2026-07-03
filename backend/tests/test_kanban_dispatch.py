@@ -20,10 +20,13 @@ async def _tables():
 PK = "git:example.com/me/repo"
 
 
-async def _make_card(s, title="Task", column="Backlog"):
+async def _make_card(s, title="Task", column="Backlog", priority=None):
+    payload = {"title": title, "column": column}
+    if priority is not None:
+        payload["priority"] = priority
     cid = await apply_operation(
         s, op_type="create", entity_type="card", project_key=PK,
-        entity_id=None, payload={"title": title, "column": column},
+        entity_id=None, payload=payload,
     )
     await s.flush()
     return cid
@@ -1630,6 +1633,55 @@ async def test_dispatch_prefers_backlog_over_to_resume():
     assert next_card is not None
     assert next_card.title == "new-task"
     assert next_card.column == "Backlog"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_prefers_higher_priority_within_column():
+    """_next_card picks a 'high' priority card over an older 'none'-priority card
+    in the same column, even though rank order would otherwise pick the older one."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="filed-first", column="Backlog", priority=None)
+        await _make_card(s, title="urgent", column="Backlog", priority="high")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.title == "urgent"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_orders_by_priority_high_medium_low_none():
+    """_next_card ranks priority high > medium > low > none, regardless of rank order."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="none-card", column="Backlog", priority="none")
+        await _make_card(s, title="low-card", column="Backlog", priority="low")
+        await _make_card(s, title="medium-card", column="Backlog", priority="medium")
+        await _make_card(s, title="high-card", column="Backlog", priority="high")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.title == "high-card"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_column_preference_beats_priority():
+    """Backlog still wins over To Resume even when the To Resume card is 'high'
+    priority — the column preference is about resume-recovery, not urgency."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="new-task", column="Backlog", priority=None)
+        await _make_card(s, title="resume-me", column="To Resume", priority="high")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.title == "new-task"
 
 
 # ---- git-ship / session-end workflow --------------------------------------

@@ -565,6 +565,7 @@ def _live_sessions() -> Optional[set[str]]:
 
 
 _DISPATCH_COLUMNS = ("Backlog", "To Resume")  # new cards from Backlog, resumed cards from To Resume
+_PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
 
 
 def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
@@ -572,7 +573,10 @@ def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
     for col in _DISPATCH_COLUMNS:
         col_cards = [c for c in cards if c.column == col and not c.claimed_by]
         if col_cards:
-            return col_cards[0]  # list_cards is ordered by rank
+            # list_cards is ordered by rank; stable-sort by priority on top of that
+            # so higher-priority cards jump the queue within the same column.
+            col_cards.sort(key=lambda c: _PRIORITY_RANK.get(c.priority, 0), reverse=True)
+            return col_cards[0]
     return None
 
 
