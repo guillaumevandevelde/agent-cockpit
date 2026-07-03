@@ -162,3 +162,54 @@ async def test_hook_event_non_limit_notification_does_not_touch_kanban():
             assert r.status_code == 200
 
     move_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hook_event_limit_notification_pauses_global_dispatch():
+    """The usage limit is account-wide: every session hits the same wall for the
+    rest of the reset window, so a limit notification must pause the whole
+    auto-dispatch tick (every project), not just move the reporting card."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+    from app.kanban import dispatch_pause
+    from app.kanban.db import KanbanSessionLocal
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(dispatch, "move_limited_session_to_resume", return_value=False):
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={"event": "Notification", "session_id": "s4",
+                      "cwd": "/p/.claude/worktrees/k-limit-0002",
+                      "message": "You've hit your session limit · resets 11:10pm (Europe/Brussels)"},
+            )
+            assert r.status_code == 200
+
+    async with KanbanSessionLocal() as s:
+        assert await dispatch_pause.is_dispatch_paused(s) is True
+
+
+@pytest.mark.asyncio
+async def test_hook_event_limit_notification_without_reset_time_does_not_pause():
+    """If the reset time can't be parsed from the message, we don't know how
+    long to pause for -- better to leave dispatch running than guess."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+    from app.kanban import dispatch_pause
+    from app.kanban.db import KanbanSessionLocal
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(dispatch, "move_limited_session_to_resume", return_value=False):
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={"event": "Notification", "session_id": "s5",
+                      "cwd": "/p/.claude/worktrees/k-limit-0003",
+                      "message": "You've hit your session limit"},
+            )
+            assert r.status_code == 200
+
+    async with KanbanSessionLocal() as s:
+        assert await dispatch_pause.is_dispatch_paused(s) is False

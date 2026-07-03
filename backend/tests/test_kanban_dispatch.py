@@ -1721,3 +1721,49 @@ class TestBuildCardPromptSessionEnd:
         main_idx = prompt.index("Work autonomously")
         ship_idx = prompt.index("Session-end workflow")
         assert ship_idx > main_idx, "Session-end workflow should appear after main instructions"
+
+
+# ---- run_dispatch_tick honours the global usage-limit pause ----------------
+
+@pytest.mark.asyncio
+async def test_run_dispatch_tick_skips_everything_when_paused(monkeypatch):
+    """When a global dispatch pause is active (Claude usage limit hit), the tick
+    must not touch queued-card retries or per-project dispatch at all --
+    respawning while the account-wide limit is still active would just bounce
+    the card straight back to "To Resume" and re-trigger the same limit."""
+    import unittest.mock as mock
+    from datetime import datetime, timedelta, timezone
+
+    import app.kanban.db as kdb
+    from app.kanban.dispatch_pause import set_paused_until
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(s, datetime.now(timezone.utc) + timedelta(minutes=5))
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_retry_queued_cards") as retry_mock, \
+         mock.patch.object(dispatch, "list_autodispatch_projects") as list_mock:
+        await dispatch.run_dispatch_tick()
+
+    retry_mock.assert_not_called()
+    list_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_dispatch_tick_runs_normally_when_not_paused(monkeypatch):
+    """Sanity check: the new pause guard must not block a tick when there is no
+    active pause -- otherwise every project's auto-dispatch would silently die."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    with mock.patch.object(dispatch, "_retry_queued_cards") as retry_mock, \
+         mock.patch.object(dispatch, "list_autodispatch_projects", return_value=[]) as list_mock:
+        await dispatch.run_dispatch_tick()
+
+    retry_mock.assert_called_once()
+    list_mock.assert_called_once()
