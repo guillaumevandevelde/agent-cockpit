@@ -249,9 +249,10 @@ def test_active_session_count_counts_agent_claims_in_agent_columns():
 
 
 @pytest.mark.asyncio
-async def test_get_max_sessions_defaults_to_4():
+async def test_get_max_sessions_defaults_to_3():
     async with KanbanSessionLocal() as s:
-        assert await dispatch.get_max_sessions(s, PK) == 4
+        assert await dispatch.get_max_sessions(s, PK) == dispatch.DEFAULT_MAX_SESSIONS
+        assert dispatch.DEFAULT_MAX_SESSIONS == 3
 
 
 @pytest.mark.asyncio
@@ -1642,7 +1643,7 @@ class TestBuildShipInstructions:
         assert "git merge --no-ff" in instructions
         assert "git push origin HEAD:master" in instructions
         assert "git fetch origin" in instructions
-        assert "pytest backend/tests/" in instructions
+        assert "pytest backend/tests/" not in instructions  # gate runs tests, no double-run
         assert "attach_deliverable" in instructions
         assert 'kind="branch"' in instructions
         assert 'move_card' in instructions
@@ -1654,18 +1655,18 @@ class TestBuildShipInstructions:
         assert "gh pr create --draft" in instructions
         assert "git push -u origin HEAD" in instructions
         assert "git fetch origin" in instructions
-        assert "pytest backend/tests/" in instructions
+        assert "pytest backend/tests/" not in instructions  # gate runs tests, no double-run
         assert "attach_deliverable" in instructions
         assert 'kind="pr"' in instructions
         assert 'move_card' in instructions
         assert '"Done"' in instructions
         assert "git merge --no-ff" not in instructions
 
-    def test_both_modes_include_test_gate(self):
+    def test_both_modes_rely_on_pre_push_gate(self):
         for mode in ("direct", "pull-request"):
             instructions = dispatch._build_ship_instructions(mode)
-            assert "Run the project tests" in instructions
-            assert "Never ship with red tests" in instructions
+            assert "pre-push gate" in instructions
+            assert "--no-verify" in instructions   # told never to bypass a red gate
             assert "commit your work" in instructions.lower() or "Commit your work" in instructions
 
     def test_both_modes_include_sync_step(self):

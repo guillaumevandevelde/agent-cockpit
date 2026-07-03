@@ -19,25 +19,16 @@ the workflow works even when the agent cannot read `.claude/skills/`.
 git fetch origin
 ```
 
-## 2. Run the tests — they gate everything
+## 2. Tests run at push — don't double-run them
 
-- **Backend**: activate the project's Python venv. In this repo it lives in the **main
-  checkout** (not your worktree). Find the main checkout and activate it:
-  ```bash
-  MAIN=$(git rev-parse --git-common-dir | xargs dirname)
-  source "$MAIN/backend/venv/bin/activate"
-  ```
-  then run the tests from the worktree's own backend dir:
-  ```bash
-  cd backend && pytest tests/ -q
-  ```
-- **Frontend** (if frontend files changed):
-  ```bash
-  cd frontend && npm run lint && npm run build
-  ```
+The pre-push gate (`.githooks/pre-push`) runs the full backend pytest suite +
+frontend lint/build **automatically when you push** — serialized across sessions and
+against an isolated temp DB. You don't need to run them yourself as a ship step;
+doing so doubles the load on the shared box.
 
-If anything fails: **stop**. Do not merge, do not open a PR. `comment` on the card with the
-failing output and fix the issue. The card stays in `Doing`.
+If the gate blocks your push: **stop**. Do not retry with `--no-verify`. Read the
+gate's output, `comment` on the card with the failing output, fix the issue, and
+push again. The card stays in `Doing` until the push succeeds.
 
 ## 3. Commit your work
 
