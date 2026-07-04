@@ -158,14 +158,19 @@ export function CardDrawer({
   const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
   const isClaimedByHuman = card.claimed_by && !isClaimedByAgent;
 
-  const remove = async () => {
+  const remove = async (force = false) => {
     try {
-      await kanbanApi.deleteCard(card.id);
+      await kanbanApi.deleteCard(card.id, force);
       toast.success("Card deleted");
       onChanged();
       onClose();
-    } catch {
-      toast.error("Failed to delete card");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete card";
+      if (!force && window.confirm(`${message}\n\nDelete anyway?`)) {
+        await remove(true);
+        return;
+      }
+      if (force) toast.error("Failed to delete card");
     }
   };
 
@@ -259,7 +264,7 @@ export function CardDrawer({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={remove}>Delete</AlertDialogAction>
+                <AlertDialogAction onClick={() => remove()}>Delete</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

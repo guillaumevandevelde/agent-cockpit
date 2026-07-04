@@ -499,8 +499,31 @@ async def set_transport(payload: DefaultTransportRequest):
 
 
 @router.delete("/cards/{cid}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_card(cid: str):
+async def delete_card(cid: str, force: bool = Query(False)):
+    from app.kanban.session_cleanup import find_worktree_unmerged_warning
+
     async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is not None and not force:
+            warning = await find_worktree_unmerged_warning(card)
+            if warning is not None:
+                parts = []
+                if warning["ahead"] > 0:
+                    parts.append(
+                        f"{warning['ahead']} commit(s) on branch '{warning['branch']}' "
+                        f"not yet merged into {warning['default_branch']}"
+                    )
+                if warning["dirty"]:
+                    parts.append("uncommitted changes")
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"This card's worktree still has {' and '.join(parts)} "
+                        f"({warning['worktree_path']}). Deleting the card won't delete "
+                        f"the work, but it will no longer be tracked on the board. "
+                        f"Retry with force=true to delete anyway."
+                    ),
+                )
         await apply_operation(s, op_type="delete", entity_type="card",
             project_key="", entity_id=cid, payload={})
         await s.commit()

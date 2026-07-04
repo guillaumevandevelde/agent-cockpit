@@ -86,8 +86,8 @@ export const kanbanApi = {
       body: JSON.stringify(body),
     }),
 
-  deleteCard: (id: string): Promise<void> =>
-    apiClient<void>(`${BASE}/cards/${id}`, { method: "DELETE" }),
+  deleteCard: (id: string, force = false): Promise<void> =>
+    apiClient<void>(`${BASE}/cards/${id}${force ? "?force=true" : ""}`, { method: "DELETE" }),
 
   agents: (projectPath: string): Promise<{ agents: string[] }> =>
     apiClient<{ agents: string[] }>(

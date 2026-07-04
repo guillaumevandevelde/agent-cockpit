@@ -139,6 +139,105 @@ async def _release_claim(card_id: str, project_key: str) -> None:
         logger.exception("failed to release claim on card %s", card_id)
 
 
+def _default_branch(worktree_path: str) -> str:
+    """Best-effort remote default branch name (falls back to 'master')."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", worktree_path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().rsplit("/", 1)[-1]
+    except Exception:
+        pass
+    return "master"
+
+
+async def _worktree_path_for_card(card) -> Optional[Path]:
+    """Best-effort resolution of the git worktree directory backing this card.
+
+    Tries the live claim (worktree lives at <project_path>/.claude/worktrees/
+    <session_name>) first, then a "To Resume" target (card.resume_project_folder,
+    which was recorded by the dead-session reaper). Returns None when neither
+    resolves to an existing worktree.
+    """
+    session_name = _extract_session_name(getattr(card, "claimed_by", None))
+    if session_name:
+        project_path = await _get_project_path(card.project_key)
+        if project_path:
+            candidate = Path(project_path) / ".claude" / "worktrees" / session_name
+            if candidate.is_dir():
+                return candidate
+
+    resume_folder = getattr(card, "resume_project_folder", None)
+    if resume_folder:
+        from app.services.cc_bridge.spawn import _resolve_project_directory
+        try:
+            resolved = _resolve_project_directory(
+                resume_folder, getattr(card, "resume_session_id", None),
+            )
+        except ValueError:
+            return None
+        return Path(resolved)
+
+    return None
+
+
+async def find_worktree_unmerged_warning(card) -> Optional[dict]:
+    """Check whether the git worktree backing this card (if any) still holds
+    commits or changes that never landed on the project's default branch.
+
+    Advisory only — never raises. A card that survived a killed/orphaned agent
+    session (see [[prepush-drvfs-contention...]] postmortem: a session's finished,
+    committed fix sat unmerged for a day because the card was deleted without
+    anyone checking its worktree) is exactly the case this guards against.
+    Returns None when there's nothing to warn about, or when the worktree/git
+    state can't be determined at all.
+    """
+    worktree_path = await _worktree_path_for_card(card)
+    if worktree_path is None or not (worktree_path / ".git").exists():
+        return None
+
+    try:
+        branch = subprocess.run(
+            ["git", "-C", str(worktree_path), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip() or "HEAD"
+
+        default_branch = _default_branch(str(worktree_path))
+        merged = subprocess.run(
+            ["git", "-C", str(worktree_path), "merge-base", "--is-ancestor", "HEAD", default_branch],
+            capture_output=True, timeout=10,
+        ).returncode == 0
+
+        ahead = 0
+        if not merged:
+            count = subprocess.run(
+                ["git", "-C", str(worktree_path), "rev-list", "--count", f"{default_branch}..HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            ahead = int(count.stdout.strip() or 0)
+
+        dirty = bool(subprocess.run(
+            ["git", "-C", str(worktree_path), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip())
+    except Exception:
+        logger.warning("could not inspect worktree %s for unmerged work", worktree_path, exc_info=True)
+        return None
+
+    if merged and not dirty:
+        return None
+
+    return {
+        "worktree_path": str(worktree_path),
+        "branch": branch,
+        "default_branch": default_branch,
+        "ahead": ahead,
+        "dirty": dirty,
+    }
+
+
 async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
     """Clean up the agent session that worked on a completed card.
 

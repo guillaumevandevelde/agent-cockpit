@@ -174,3 +174,50 @@ async def test_transport_rejects_unknown():
         r = await ac.post("/api/v1/kanban/transport",
                           json={"project_key": "p2", "transport": "podman"})
         assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_delete_card_without_worktree_succeeds():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "no worktree"})
+        cid = r.json()["id"]
+
+        r = await ac.delete(f"/api/v1/kanban/cards/{cid}")
+        assert r.status_code == 204
+
+        r = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
+        assert not any(c["id"] == cid for c in r.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_delete_card_warns_on_unmerged_worktree_then_force_deletes(monkeypatch):
+    from app.api.v1.kanban import router as kanban_router
+
+    async def fake_warning(card):
+        return {"worktree_path": "/tmp/fake", "branch": "feature",
+                "default_branch": "master", "ahead": 2, "dirty": False}
+
+    monkeypatch.setattr(
+        "app.kanban.session_cleanup.find_worktree_unmerged_warning", fake_warning
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "has worktree"})
+        cid = r.json()["id"]
+
+        r = await ac.delete(f"/api/v1/kanban/cards/{cid}")
+        assert r.status_code == 409
+        assert "feature" in r.json()["detail"]
+        assert "master" in r.json()["detail"]
+
+        # card must still exist — the warning blocked the delete
+        r = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
+        assert any(c["id"] == cid for c in r.json()["items"])
+
+        r = await ac.delete(f"/api/v1/kanban/cards/{cid}", params={"force": "true"})
+        assert r.status_code == 204
+
+        r = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
+        assert not any(c["id"] == cid for c in r.json()["items"])
