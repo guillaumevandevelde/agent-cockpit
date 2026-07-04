@@ -113,11 +113,16 @@ async def get_column_default_agent(session, project_key: str, column_name: str) 
 
 
 async def list_pending_cards(session, project_key: str) -> list[KanbanCard]:
-    """Unclaimed cards in the Backlog column — candidates for dispatch."""
+    """Unclaimed cards in Backlog or To Resume — candidates for dispatch.
+
+    To Resume cards carry a `resume_session_id` set by the limit-recovery path,
+    so dispatching them goes through the resume transport (`get_transport_for_card`)
+    instead of spawning a fresh session.
+    """
     stmt = (
         select(KanbanCard)
         .where(KanbanCard.project_key == project_key)
-        .where(KanbanCard.column == "Backlog")
+        .where(KanbanCard.column.in_(("Backlog", "To Resume")))
         .where(KanbanCard.claimed_by.is_(None))
         .options(selectinload(KanbanCard.deliverables))
         .order_by(KanbanCard.rank.asc())

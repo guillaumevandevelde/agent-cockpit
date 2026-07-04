@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Brain, FileText, FolderOpen, RefreshCw } from "lucide-react";
 import {
   Card,
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CLICKABLE_CARD } from "@/lib/constants";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { toast } from "sonner";
 import { MemoryEditor } from "./MemoryEditor";
 import type { AutoMemoryFileInfo, AutoMemoryListResponse, MemoryHierarchyItem } from "@/types/memory";
@@ -31,40 +32,24 @@ function formatDate(timestamp: number): string {
 }
 
 export function AutoMemoryManager({ projectPath, onRefresh }: AutoMemoryManagerProps) {
-  const [files, setFiles] = useState<AutoMemoryFileInfo[]>([]);
-  const [memoryDir, setMemoryDir] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<MemoryHierarchyItem | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
 
-  const fetchFiles = useCallback(async () => {
-    if (!projectPath) {
-      setFiles([]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
+  const { data, loading, error, refresh: fetchFiles } = useFetchData<AutoMemoryListResponse>(
+    () => {
+      if (!projectPath) {
+        return Promise.resolve({ files: [], memory_dir: "" });
+      }
       const params = { project_path: projectPath };
-      const response = await apiClient<AutoMemoryListResponse>(
+      return apiClient<AutoMemoryListResponse>(
         buildEndpoint("memory/auto-memory", params)
       );
-      setFiles(response.files);
-      setMemoryDir(response.memory_dir);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch auto-memory files");
-      toast.error("Failed to load auto-memory files");
-    } finally {
-      setLoading(false);
-    }
-  }, [projectPath]);
-
-  useEffect(() => {
-    fetchFiles();
-  }, [fetchFiles]);
+    },
+    [projectPath],
+    () => toast.error("Failed to load auto-memory files")
+  );
+  const files = data?.files ?? [];
+  const memoryDir = data?.memory_dir ?? "";
 
   const handleFileClick = (file: AutoMemoryFileInfo) => {
     setSelectedFile({

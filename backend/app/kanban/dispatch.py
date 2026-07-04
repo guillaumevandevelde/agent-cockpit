@@ -577,6 +577,18 @@ def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
             # so higher-priority cards jump the queue within the same column.
             col_cards.sort(key=lambda c: _PRIORITY_RANK.get(c.priority, 0), reverse=True)
             return col_cards[0]
+
+    # Fall back to orphans: cards left unclaimed in an agent column, most commonly
+    # by reap_stale_claims releasing a dead session's claim without a resumable
+    # transcript to fall back on. Without this, an orphan is invisible to every
+    # later tick -- it sits in its agent column forever, cap slot unused, until a
+    # human notices and hits "redispatch" by hand (see kanban card "auto dispatch
+    # nakijken": auto-dispatch looked stuck even though it was enabled).
+    from app.kanban.schemas import COLUMNS
+    orphans = [c for c in cards if c.column not in COLUMNS and not c.claimed_by]
+    if orphans:
+        orphans.sort(key=lambda c: _PRIORITY_RANK.get(c.priority, 0), reverse=True)
+        return orphans[0]
     return None
 
 
@@ -775,8 +787,10 @@ async def reap_stale_claims(
     card out of an agent column would otherwise keep `_project_is_busy` True forever, silently
     wedging auto-dispatch for the whole project — the "auto-pick stopped working"
     symptom. Releasing the dead claim frees the per-project cap so the next card is
-    picked up; the orphaned card is left in its agent column (now unclaimed) for a human to
-    re-rank. Human (`me@ui`) claims are never touched. Returns the number reaped.
+    picked up; the orphaned card is left in its agent column (now unclaimed), where
+    `_next_card`'s orphan fallback will pick it back up itself once there's a free
+    cap slot and nothing waiting in Backlog/To Resume — no human redispatch needed.
+    Human (`me@ui`) claims are never touched. Returns the number reaped.
 
     Liveness has two sources: `live_sessions` (tmux session names, for worktree-transport
     cards) and `sandcastle_live` (session names of pending/running sandcastle runs).
@@ -935,9 +949,14 @@ async def redispatch_card(
 ) -> Optional[dict]:
     """Release a stuck card, optionally kill its session, and re-dispatch.
 
-    This is the human override for cards that are stuck on agent columns.
-    It kills the existing tmux session (if any), releases the claim, and
-    re-dispatches with a fresh session.
+    This is the human override for cards that are stuck on agent columns —
+    most commonly a session that hit its usage limit and never exited, so the
+    dead-session reaper never noticed it. Before killing the existing tmux
+    session, we check whether its worktree holds a resumable Claude transcript
+    (same lookup the auto-recovery reaper uses). If one is found, the card is
+    tagged with `resume_session_id`/`resume_project_folder` so the re-dispatch
+    below picks the resume transport (`claude --resume`, same worktree) instead
+    of discarding the conversation and starting a brand new session.
 
     When transport is None, the appropriate transport is automatically selected
     based on the card's transport field (sandcastle/worktree) and the project's
@@ -959,6 +978,22 @@ async def redispatch_card(
     # Kill existing tmux session if claimed by an agent
     session_name = _claimant_session(card)
     if session_name:
+        if not getattr(card, "resume_session_id", None) and card.transport != "sandcastle":
+            from app.kanban.session_recovery import _resolve_resume_target
+
+            target = _resolve_resume_target(project_path, session_name)
+            if target is not None:
+                resume_session_id, resume_project_folder = target
+                await apply_operation(
+                    session, op_type="update", entity_type="card",
+                    project_key=card.project_key, entity_id=card.id,
+                    payload={"resume_session_id": resume_session_id,
+                             "resume_project_folder": resume_project_folder},
+                )
+                logger.info(
+                    "redispatch: resuming card %s (session %s -> %s) instead of a fresh session",
+                    card_id, session_name, resume_session_id,
+                )
         _kill_agent_session(session_name)
         logger.info("killed old session %s for card %s", session_name, card_id)
 
@@ -1239,8 +1274,17 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                     pending_queue.dequeue(card.card_id)
                     continue
 
-                # Check if card is still in a dispatchable state
-                if card_data.column not in ("Backlog",) or card_data.claimed_by:
+                # Check if card is still in a dispatchable state: unclaimed, and
+                # either a fresh Backlog/To-Resume card or an orphan left behind in
+                # an agent column (mirrors _next_card's orphan fallback above --
+                # otherwise a queued orphan gets silently dropped here instead of
+                # retried).
+                from app.kanban.schemas import COLUMNS
+                dispatchable_column = (
+                    card_data.column in _DISPATCH_COLUMNS
+                    or card_data.column not in COLUMNS
+                )
+                if card_data.claimed_by or not dispatchable_column:
                     logger.info(f"Card {card.card_id} is no longer dispatchable, removing from queue")
                     pending_queue.dequeue(card.card_id)
                     continue

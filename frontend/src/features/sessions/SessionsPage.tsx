@@ -1,40 +1,29 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { MessageSquare } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { RefreshButton } from '@/components/shared/RefreshButton'
 import { useSessionsApi } from '@/hooks/useSessionsApi'
+import { useFetchData } from '@/hooks/useFetchData'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { SessionList } from './SessionList'
-import type { SessionProject } from '@/types/sessions'
 
 export function SessionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { activeProject } = useProjectContext()
   const { listProjects } = useSessionsApi()
 
-  const [projects, setProjects] = useState<SessionProject[]>([])
   const [selectedProject, setSelectedProject] = useState<string | null>(
     activeProject?.path || searchParams.get('project') || null
   )
-  const [loading, setLoading] = useState(true)
 
-  const loadProjects = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await listProjects()
-      setProjects(data.projects)
-    } catch (err) {
-      console.error('Failed to load projects:', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [listProjects])
-
-  useEffect(() => {
-    loadProjects()
-  }, [loadProjects])
+  const { data, loading, refresh: loadProjects } = useFetchData(
+    () => listProjects(),
+    [listProjects],
+    (message) => console.error('Failed to load projects:', message)
+  )
+  const projects = data?.projects ?? []
 
   const handleProjectChange = (value: string) => {
     const folder = value === 'all' ? null : value

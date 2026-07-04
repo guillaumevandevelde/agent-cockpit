@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import {
   Plus,
   BookOpen,
@@ -41,6 +41,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { toast } from "sonner";
 import type { RuleInfo, RulesListResponse, SaveMemoryResponse } from "@/types/memory";
 
@@ -57,10 +58,6 @@ interface CreateRuleForm {
 }
 
 export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
-  const [rules, setRules] = useState<RuleInfo[]>([]);
-  const [rulesDir, setRulesDir] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<RuleInfo | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -72,27 +69,16 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
   });
   const [creating, setCreating] = useState(false);
 
-  const fetchRules = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const { data, loading, error, refresh: fetchRules } = useFetchData(
+    () => {
       const params = { project_path: projectPath };
-      const response = await apiClient<RulesListResponse>(
-        buildEndpoint("memory/rules", params)
-      );
-      setRules(response.rules);
-      setRulesDir(response.rules_dir);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch rules");
-      toast.error("Failed to load rules");
-    } finally {
-      setLoading(false);
-    }
-  }, [projectPath]);
-
-  useEffect(() => {
-    fetchRules();
-  }, [fetchRules]);
+      return apiClient<RulesListResponse>(buildEndpoint("memory/rules", params));
+    },
+    [projectPath],
+    () => toast.error("Failed to load rules")
+  );
+  const rules = data?.rules ?? [];
+  const rulesDir = data?.rules_dir ?? "";
 
   const handleCreateRule = async () => {
     if (!createForm.name.trim()) {
