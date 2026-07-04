@@ -116,6 +116,107 @@ class CodexMcpAddRequest(BaseModel):
         return safe_env
 
 
+class ProviderStatus(BaseModel):
+    id: str
+    display_name: str
+    binary_name: str
+    installed: bool
+    binary_path: str | None = None
+    version: str | None = None
+    capabilities: dict[str, bool]
+    capability_matrix: dict[str, Any]
+    capability_details: dict[str, Any]
+    config_paths: dict[str, Any]
+    backup_policy: dict[str, Any] | None = None
+
+
+class ProviderListResponse(BaseModel):
+    providers: list[ProviderStatus]
+    count: int
+
+
+class ProviderCapabilitiesResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    capabilities: dict[str, bool]
+    capability_matrix: dict[str, Any]
+
+
+class ProviderDoctorResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    exit_code: int
+    report: Any | None = None
+    parse_error: str | None = None
+    stderr: str
+
+
+class ProviderMcpInventoryResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    exit_code: int
+    servers: Any | None = None
+    parse_error: str | None = None
+    stderr: str
+    raw_stdout: str
+
+
+class ProviderMcpMutationResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    name: str
+    stdout: str
+    stderr: str
+    exit_code: int
+
+
+class ProviderPluginInventoryResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    exit_code: int
+    plugins: list[dict[str, str]]
+    mutation_capabilities: dict[str, dict[str, str]]
+    stderr: str
+    raw_stdout: str
+
+
+class ProviderFeatureInventoryResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    exit_code: int
+    features: list[dict[str, Any]]
+    stderr: str
+    raw_stdout: str
+
+
+class ProviderPluginMutationResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    name: str
+    action: str
+    stdout: str
+    stderr: str
+    exit_code: int
+
+
+class ProviderHistoryDiagnosticsResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    decision: dict[str, Any]
+    history: dict[str, Any]
+    models_cache: dict[str, Any]
+
+
+class ProviderUsageContextDiagnosticsResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    decision: dict[str, Any]
+    sources: dict[str, Any]
+    history: dict[str, Any]
+    models_cache: dict[str, Any]
+    metric_findings: dict[str, Any]
+
+
 class CodexPluginMutationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=256)
     marketplace: str | None = Field(default=None, max_length=128)
@@ -133,7 +234,7 @@ class CodexPluginMutationRequest(BaseModel):
         return _validate_plugin_marketplace(value)
 
 
-@router.get("/providers")
+@router.get("/providers", response_model=ProviderListResponse)
 async def list_providers():
     providers = await asyncio.gather(
         *(asyncio.to_thread(provider.get_status) for provider in get_providers())
@@ -141,12 +242,12 @@ async def list_providers():
     return {"providers": providers, "count": len(providers)}
 
 
-@router.get("/providers/{provider_id}/status")
+@router.get("/providers/{provider_id}/status", response_model=ProviderStatus)
 async def get_provider_status(provider_id: str):
     return await asyncio.to_thread(_get_provider_or_404(provider_id).get_status)
 
 
-@router.get("/providers/{provider_id}/capabilities")
+@router.get("/providers/{provider_id}/capabilities", response_model=ProviderCapabilitiesResponse)
 async def get_provider_capabilities(provider_id: str):
     provider = _get_provider_or_404(provider_id)
     capabilities, capability_matrix = await asyncio.gather(
@@ -435,7 +536,7 @@ async def execute_provider_cli(provider_id: str, request: CLIExecuteRequest):
     return CLIResult(**_redact_cli_result(result))
 
 
-@router.get("/providers/{provider_id}/doctor")
+@router.get("/providers/{provider_id}/doctor", response_model=ProviderDoctorResponse)
 async def get_provider_doctor(provider_id: str):
     provider = _get_provider_or_404(provider_id)
     executor = ProviderCLIExecutor(provider.id)
@@ -463,7 +564,7 @@ async def get_provider_doctor(provider_id: str):
     }
 
 
-@router.get("/providers/{provider_id}/mcp")
+@router.get("/providers/{provider_id}/mcp", response_model=ProviderMcpInventoryResponse)
 async def get_provider_mcp_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "MCP inventory")
     executor = ProviderCLIExecutor(provider.id)
@@ -493,7 +594,7 @@ async def get_provider_mcp_inventory(provider_id: str):
     }
 
 
-@router.post("/providers/{provider_id}/mcp")
+@router.post("/providers/{provider_id}/mcp", response_model=ProviderMcpMutationResponse)
 async def add_provider_mcp_server(provider_id: str, request: CodexMcpAddRequest):
     mcp_args = _build_codex_mcp_add_args(request)
     provider = _require_codex_provider(provider_id, "MCP server mutation")
@@ -511,7 +612,7 @@ async def add_provider_mcp_server(provider_id: str, request: CodexMcpAddRequest)
     }
 
 
-@router.delete("/providers/{provider_id}/mcp/{server_name}")
+@router.delete("/providers/{provider_id}/mcp/{server_name}", response_model=ProviderMcpMutationResponse)
 async def remove_provider_mcp_server(provider_id: str, server_name: str):
     try:
         safe_name = _validate_mcp_server_name(server_name)
@@ -533,7 +634,7 @@ async def remove_provider_mcp_server(provider_id: str, server_name: str):
     }
 
 
-@router.get("/providers/{provider_id}/plugins")
+@router.get("/providers/{provider_id}/plugins", response_model=ProviderPluginInventoryResponse)
 async def get_provider_plugin_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "plugin inventory")
     executor = ProviderCLIExecutor(provider.id)
@@ -554,7 +655,7 @@ async def get_provider_plugin_inventory(provider_id: str):
     }
 
 
-@router.get("/providers/{provider_id}/features")
+@router.get("/providers/{provider_id}/features", response_model=ProviderFeatureInventoryResponse)
 async def get_provider_feature_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "feature inventory")
     executor = ProviderCLIExecutor(provider.id)
@@ -574,7 +675,7 @@ async def get_provider_feature_inventory(provider_id: str):
     }
 
 
-@router.post("/providers/{provider_id}/plugins")
+@router.post("/providers/{provider_id}/plugins", response_model=ProviderPluginMutationResponse)
 async def install_provider_plugin(provider_id: str, request: CodexPluginMutationRequest):
     plugin_args = _build_codex_plugin_args("add", request.name, request.marketplace)
     provider = _require_codex_provider(provider_id, "plugin mutation")
@@ -591,7 +692,7 @@ async def install_provider_plugin(provider_id: str, request: CodexPluginMutation
     }
 
 
-@router.delete("/providers/{provider_id}/plugins/{plugin_name}")
+@router.delete("/providers/{provider_id}/plugins/{plugin_name}", response_model=ProviderPluginMutationResponse)
 async def remove_provider_plugin(provider_id: str, plugin_name: str, marketplace: str | None = None):
     plugin_args = _build_codex_plugin_args("remove", plugin_name, marketplace)
     provider = _require_codex_provider(provider_id, "plugin mutation")
@@ -634,7 +735,7 @@ async def disable_provider_plugin(provider_id: str, plugin_name: str):
     )
 
 
-@router.get("/providers/{provider_id}/history-diagnostics")
+@router.get("/providers/{provider_id}/history-diagnostics", response_model=ProviderHistoryDiagnosticsResponse)
 async def get_provider_history_diagnostics(provider_id: str):
     provider = _require_codex_provider(provider_id, "history diagnostics")
     diagnostics = await asyncio.to_thread(CodexHistoryService().get_diagnostics)
@@ -645,7 +746,7 @@ async def get_provider_history_diagnostics(provider_id: str):
     }
 
 
-@router.get("/providers/{provider_id}/usage-context-diagnostics")
+@router.get("/providers/{provider_id}/usage-context-diagnostics", response_model=ProviderUsageContextDiagnosticsResponse)
 async def get_provider_usage_context_diagnostics(provider_id: str):
     provider = _require_codex_provider(provider_id, "usage context diagnostics")
     diagnostics = await asyncio.to_thread(CodexUsageContextService().get_diagnostics)

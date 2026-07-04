@@ -20,7 +20,18 @@ class AgentActivity(BaseModel):
     status: str = "active"
 
 
-@router.get("/live")
+class AgentActivityListResponse(BaseModel):
+    agents: list[AgentActivity]
+    count: int
+
+
+class ActivitySummaryResponse(BaseModel):
+    total: int
+    by_provider: dict[str, int]
+    has_active: bool
+
+
+@router.get("/live", response_model=AgentActivityListResponse)
 async def get_live_agents(
     provider: str | None = Query(default=None),
     preview_lines: int = Query(default=5, ge=1, le=20),
@@ -60,7 +71,7 @@ def _infer_status(preview: str | None, session: dict) -> str:
     return "active"
 
 
-@router.get("/summary")
+@router.get("/summary", response_model=ActivitySummaryResponse)
 async def get_activity_summary() -> dict:
     """Return a compact summary for the dashboard."""
     sessions = await asyncio.to_thread(discover_agent_sessions)

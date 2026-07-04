@@ -157,7 +157,38 @@ class TokenCreateRequest(BaseModel):
     agent_name: Optional[str] = None
 
 
-@router.post("/mcp-server/tokens")
+class TokenResponse(BaseModel):
+    id: int
+    token: str
+    name: str
+    scope: str
+    agent_name: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class TokenInfo(BaseModel):
+    id: int
+    name: str
+    scope: str
+    agent_name: Optional[str] = None
+    enabled: bool
+    token_prefix: str
+    last_used_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    created_at: Optional[str] = None
+    revoked_at: Optional[str] = None
+
+
+class TokenListResponse(BaseModel):
+    tokens: list[TokenInfo]
+
+
+class TokenRevokeResponse(BaseModel):
+    revoked: bool
+    id: int
+
+
+@router.post("/mcp-server/tokens", response_model=TokenResponse)
 async def create_token(payload: TokenCreateRequest, db: AsyncSession = Depends(get_db)):
     """Create a new MCP access token. Returns the full token (shown once)."""
     full_token, prefix, secret = generate_token()
@@ -184,7 +215,7 @@ async def create_token(payload: TokenCreateRequest, db: AsyncSession = Depends(g
     }
 
 
-@router.get("/mcp-server/tokens")
+@router.get("/mcp-server/tokens", response_model=TokenListResponse)
 async def list_tokens(db: AsyncSession = Depends(get_db)):
     """List all MCP access tokens (without secrets)."""
     result = await db.execute(
@@ -211,7 +242,7 @@ async def list_tokens(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.delete("/mcp-server/tokens/{token_id}")
+@router.delete("/mcp-server/tokens/{token_id}", response_model=TokenRevokeResponse)
 async def revoke_token(token_id: int, db: AsyncSession = Depends(get_db)):
     """Revoke an MCP access token."""
     from datetime import datetime, timezone

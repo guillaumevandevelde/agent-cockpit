@@ -1891,3 +1891,73 @@ class SystemStatusResponse(BaseModel):
     claude_code_version: Optional[str] = None
     active_sessions: int = 0
     providers: Dict[str, Any] = Field(default_factory=dict)
+
+
+# Shared generic response models
+
+
+class MessageResponse(BaseModel):
+    """Generic message-only response for simple success confirmations."""
+
+    message: str
+
+
+class ScopedSettingsResponse(BaseModel):
+    """Settings for a single, non-merged scope."""
+
+    settings: Dict[str, Any]
+    scope: str
+
+
+class AllScopedSettingsResponse(BaseModel):
+    """Settings from every scope, kept separate (not merged)."""
+
+    scopes: Dict[str, Dict[str, Any]]
+
+
+class ResolvedConfigEntry(BaseModel):
+    """Effective value of one settings key plus its source scope."""
+
+    effective_value: Any
+    source_scope: Optional[str]
+    values_by_scope: Dict[str, Any]
+
+
+class ScopeConfigDetail(BaseModel):
+    """Per-scope settings plus file metadata."""
+
+    settings: Dict[str, Any]
+    path: Optional[str]
+    exists: bool
+    readonly: bool
+
+
+class ResolvedConfigScopes(BaseModel):
+    """File metadata for each settings scope."""
+
+    managed: ScopeConfigDetail
+    user: ScopeConfigDetail
+    project: ScopeConfigDetail
+    local: ScopeConfigDetail
+
+
+class ResolvedConfigResponse(BaseModel):
+    """Resolved configuration with effective values and their source scopes."""
+
+    resolved: Dict[str, ResolvedConfigEntry]
+    scopes: ResolvedConfigScopes
+
+
+class DirectoryBrowseResponse(BaseModel):
+    """Subdirectories of a browsed path."""
+
+    path: str
+    parent: Optional[str]
+    directories: List[str]
+
+
+class ProjectConfigResponse(BaseModel):
+    """A project's details plus its merged configuration."""
+
+    project: ProjectResponse
+    config: MergedConfig

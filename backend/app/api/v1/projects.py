@@ -13,6 +13,9 @@ from app.models.schemas import (
     ProjectListResponse,
     ProjectResponse,
     SetActiveProjectRequest,
+    DirectoryBrowseResponse,
+    MessageResponse,
+    ProjectConfigResponse,
 )
 from app.services.project_service import ProjectService
 
@@ -49,7 +52,7 @@ async def discover_projects(
     return ProjectDiscoveryResponse(discovered=discovered)
 
 
-@router.get("/projects/browse")
+@router.get("/projects/browse", response_model=DirectoryBrowseResponse)
 async def browse_directory(path: str = Query(default="~")):
     """Return subdirectories of the given path for the directory browser.
 
@@ -118,7 +121,7 @@ async def get_active_project(db: AsyncSession = Depends(get_db)):
     return project
 
 
-@router.delete("/projects/active")
+@router.delete("/projects/active", response_model=MessageResponse)
 async def clear_active_project(db: AsyncSession = Depends(get_db)):
     """Clear the active project (switch to global scope)."""
     service = ProjectService(db)
@@ -127,7 +130,7 @@ async def clear_active_project(db: AsyncSession = Depends(get_db)):
 
 
 # Routes with path parameters - MUST be after /projects/active routes
-@router.delete("/projects/{project_id}")
+@router.delete("/projects/{project_id}", response_model=MessageResponse)
 async def remove_project(
     project_id: int,
     db: AsyncSession = Depends(get_db)
@@ -142,7 +145,7 @@ async def remove_project(
     return {"message": "Project removed successfully"}
 
 
-@router.get("/projects/{project_id}/config")
+@router.get("/projects/{project_id}/config", response_model=ProjectConfigResponse)
 async def get_project_config(
     project_id: int,
     db: AsyncSession = Depends(get_db)
