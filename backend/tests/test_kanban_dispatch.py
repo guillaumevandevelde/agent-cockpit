@@ -872,6 +872,84 @@ async def test_redispatch_with_agent_override():
 
 
 @pytest.mark.asyncio
+async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
+    """A card stuck on a live-but-limit-hit session (never reaped, no resume_session_id
+    set yet) should resume the existing Claude conversation when redispatched, not
+    discard it and spawn a brand new worktree session."""
+    import unittest.mock as mock
+    from app.kanban import session_recovery
+
+    resume_calls = []
+
+    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code"):
+        resume_calls.append(session_name)
+        return {"session_name": session_name}
+
+    fresh_transport = RecordingTransport()
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="limit-hit", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-limited-0001"},
+        )
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target",
+        return_value=("sess-resumed", "proj-folder"),
+    ), mock.patch.object(
+        dispatch, "make_resume_transport", return_value=resume_transport,
+    ), mock.patch.object(
+        dispatch, "_kill_agent_session", return_value=None,
+    ) as kill_mock:
+        async with KanbanSessionLocal() as s:
+            result = await dispatch.redispatch_card(
+                s, card_id=cid, project_path="/p", transport=fresh_transport,
+            )
+            await s.commit()
+            card = await get_card(s, cid)
+
+    assert result is not None
+    assert len(resume_calls) == 1
+    assert fresh_transport.calls == []  # never fell back to a fresh session
+    assert card.resume_session_id == "sess-resumed"
+    assert card.resume_project_folder == "proj-folder"
+    kill_mock.assert_called_once_with("k-limited-0001")
+
+
+@pytest.mark.asyncio
+async def test_redispatch_no_resumable_transcript_falls_back_to_fresh_session():
+    """When the old session's worktree has no resumable transcript, redispatch still
+    falls back to a fresh session (existing behaviour)."""
+    import unittest.mock as mock
+    from app.kanban import session_recovery
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-old-0002"},
+        )
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=None,
+    ):
+        async with KanbanSessionLocal() as s:
+            result = await dispatch.redispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+            card = await get_card(s, cid)
+
+    assert result is not None
+    assert len(transport.calls) == 1
+    assert card.resume_session_id is None
+
+
+@pytest.mark.asyncio
 async def test_redispatch_returns_none_for_missing_card():
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -975,7 +1053,7 @@ _FIXED = set(_COLUMNS)
 
 
 def _frontend_pending_count(cards) -> int:
-    return sum(1 for c in cards if c.column == "Backlog" and not c.claimed_by)
+    return sum(1 for c in cards if c.column in ("Backlog", "To Resume") and not c.claimed_by)
 
 
 def _frontend_orphan_count(cards) -> int:
@@ -1009,6 +1087,59 @@ async def test_pending_count_matches_dispatch_results():
         )
         await s.commit()
     assert len(results) == 3, f"dispatched={len(results)}"
+
+
+@pytest.mark.asyncio
+async def test_list_pending_cards_includes_unclaimed_to_resume():
+    """To Resume cards (unclaimed, tagged for resume) are dispatch candidates too —
+    not just Backlog. Dispatch all must not silently skip them."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="backlog-card", column="Backlog")
+        await _make_card(s, title="resumable-card", column="To Resume")
+        claimed = await _make_card(s, title="claimed-resume", column="To Resume")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=claimed, payload={"claimed_by": "me@ui"},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        pending = await service.list_pending_cards(s, PK)
+    assert {c.title for c in pending} == {"backlog-card", "resumable-card"}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_resumes_to_resume_cards():
+    """dispatch_all_pending must dispatch unclaimed To Resume cards through the
+    resume transport (their recorded resume_session_id), not the default/fresh one."""
+    import unittest.mock as mock
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="a", column="Backlog")
+        resumable = await _make_card(s, title="resumable", column="To Resume")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=resumable,
+            payload={"resume_session_id": "sess-abc", "resume_project_folder": "proj-folder"},
+        )
+        await s.commit()
+
+    resume_calls = []
+
+    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code"):
+        resume_calls.append(session_name)
+        return {"session_name": session_name}
+
+    with mock.patch.object(dispatch, "make_resume_transport", return_value=resume_transport):
+        async with KanbanSessionLocal() as s:
+            results = await dispatch.dispatch_all_pending(
+                s, project_key=PK, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert len(results) == 2
+    assert len(resume_calls) == 1        # the To Resume card resumed its session
+    assert len(transport.calls) == 1     # the plain Backlog card used the default transport
 
 
 @pytest.mark.asyncio
