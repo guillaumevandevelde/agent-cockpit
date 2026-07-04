@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import {
   Package,
   RefreshCw,
@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
 import type {
@@ -48,13 +49,14 @@ import type {
   ApmModule,
 } from "@/types/apm";
 
+interface ApmData {
+  status: ApmStatus;
+  deps: ApmDependenciesResponse;
+  modules: ApmModule[];
+}
+
 export function ApmPage() {
   const { activeProject, projects } = useProjectContext();
-  const [status, setStatus] = useState<ApmStatus | null>(null);
-  const [deps, setDeps] = useState<ApmDependenciesResponse | null>(null);
-  const [modules, setModules] = useState<ApmModule[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
 
   // Dialog states
@@ -63,10 +65,8 @@ export function ApmPage() {
   const [addForm, setAddForm] = useState({ name: "", source: "" });
   const [syncForm, setSyncForm] = useState({ target_project: "" });
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const { data, loading, error, refresh: fetchData } = useFetchData<ApmData>(
+    async () => {
       const params = { project_path: activeProject?.path };
 
       const [statusRes, depsRes, modulesRes] = await Promise.all([
@@ -77,19 +77,13 @@ export function ApmPage() {
         ),
       ]);
 
-      setStatus(statusRes);
-      setDeps(depsRes);
-      setModules(modulesRes.modules || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch APM data");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      return { status: statusRes, deps: depsRes, modules: modulesRes.modules || [] };
+    },
+    [activeProject?.path]
+  );
+  const status = data?.status ?? null;
+  const deps = data?.deps ?? null;
+  const modules = data?.modules ?? [];
 
   const handleInstall = async (frozen: boolean = false) => {
     setInstalling(true);

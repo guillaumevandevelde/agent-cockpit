@@ -26,6 +26,7 @@ import { RefreshButton } from "@/components/shared/RefreshButton";
 import { SkillDetailDialog } from "./SkillDetailDialog";
 import { SkillRegistryBrowser } from "./SkillRegistryBrowser";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { CLICKABLE_CARD } from "@/lib/constants";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
@@ -42,9 +43,6 @@ type SkillsTab = "installed" | "discover" | "stats";
 export function SkillsPage() {
   const { activeProject } = useProjectContext();
   const [activeTab, setActiveTab] = useState<SkillsTab>("installed");
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [depStatuses, setDepStatuses] = useState<
@@ -56,22 +54,15 @@ export function SkillsPage() {
   const [statsError, setStatsError] = useState<string | null>(null);
   const [statsFetched, setStatsFetched] = useState(false);
 
-  const fetchSkills = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const { data, loading, error, refresh: fetchSkills } = useFetchData(
+    () => {
       const params = { project_path: activeProject?.path };
-      const response = await apiClient<SkillListResponse>(
-        buildEndpoint("agents/skills", params)
-      );
-      setSkills(response.skills);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch skills");
-      toast.error("Failed to load skills");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
+      return apiClient<SkillListResponse>(buildEndpoint("agents/skills", params));
+    },
+    [activeProject?.path],
+    () => toast.error("Failed to load skills")
+  );
+  const skills = data?.skills ?? [];
 
   const fetchStats = useCallback(async () => {
     if (!activeProject?.path) return;
@@ -91,7 +82,6 @@ export function SkillsPage() {
   }, [activeProject?.path]);
 
   useEffect(() => {
-    fetchSkills();
     setStatsFetched(false);
     setSkillStats(null);
   }, [fetchSkills]);

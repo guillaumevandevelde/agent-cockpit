@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { RefreshCw, RotateCw, CheckCircle2, XCircle, AlertTriangle, Terminal, GitCommit, GitBranch, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { apiClient } from '@/lib/api'
+import { useFetchData } from '@/hooks/useFetchData'
 
 type UpdateStatus = {
   version: string
@@ -44,31 +45,18 @@ function eventColor(evt: LogEntry['event']): string {
 }
 
 export function UpdatesPage() {
-  const [status, setStatus] = useState<UpdateStatus | null>(null)
-  const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [logExpanded, setLogExpanded] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement>(null)
 
-  const fetchStatus = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await apiClient<UpdateStatus>('update/status')
-      setStatus(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load update status')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchStatus()
-  }, [fetchStatus])
+  const { data: status, loading, error: fetchError, refresh: fetchStatus } = useFetchData(
+    () => apiClient<UpdateStatus>('update/status'),
+    []
+  )
+  const error = updateError ?? fetchError
 
   // Auto-scroll log
   useEffect(() => {
@@ -80,7 +68,7 @@ export function UpdatesPage() {
 
     setUpdating(true)
     setLogs([])
-    setError(null)
+    setUpdateError(null)
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -147,7 +135,7 @@ export function UpdatesPage() {
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        setError(err instanceof Error ? err.message : 'Update failed')
+        setUpdateError(err instanceof Error ? err.message : 'Update failed')
         setLogs(prev => [...prev, {
           event: 'error',
           message: err instanceof Error ? err.message : 'Update mislukt',

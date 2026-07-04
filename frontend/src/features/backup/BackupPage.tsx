@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Plus, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +14,7 @@ import { RestoreWizard } from "./RestoreWizard";
 import { AutoBackupSettings } from "./AutoBackupSettings";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { toast } from "sonner";
@@ -27,24 +28,19 @@ import {
 export function BackupPage() {
   const { activeProject } = useProjectContext();
   const { selectedProviderId, selectedProvider } = useProviderContext();
-  const [backups, setBackups] = useState<Backup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [showCreateWizard, setShowCreateWizard] = useState(false);
   const [showRestoreWizard, setShowRestoreWizard] = useState(false);
   const [selectedBackup, setSelectedBackup] = useState<Backup | null>(null);
 
-  const fetchBackups = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const { data, loading, error, refresh: fetchBackups } = useFetchData<Backup[]>(
+    async () => {
       const endpoint = buildEndpoint("backup/list", {
         project_path: activeProject?.path,
       });
       const response = await apiClient<BackupListResponse>(endpoint);
-      
+
       // Fetch detailed info for each backup to get dependency info
-      const detailedBackups = await Promise.all(
+      return Promise.all(
         response.backups.map(async (backup) => {
           try {
             const detailed = await apiClient<Backup>(`/api/v1/backup/${backup.id}`);
@@ -54,19 +50,11 @@ export function BackupPage() {
           }
         })
       );
-      
-      setBackups(detailedBackups);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch backups");
-      toast.error("Failed to load backups");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchBackups();
-  }, [fetchBackups]);
+    },
+    [activeProject?.path],
+    () => toast.error("Failed to load backups")
+  );
+  const backups = data ?? [];
 
   const handleCreate = async (backupData: BackupCreate): Promise<Backup> => {
     try {

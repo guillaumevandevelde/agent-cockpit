@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Plus, Webhook } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +21,7 @@ import { HookDetailDialog } from "./HookDetailDialog";
 import { HookWizard } from "./HookWizard";
 import { RefreshButton } from "@/components/shared/RefreshButton";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
 import {
@@ -33,9 +34,6 @@ import {
 
 export function HooksPage() {
   const { activeProject } = useProjectContext();
-  const [hooks, setHooks] = useState<Hook[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<HookEvent>("PreToolUse");
   const [editingHook, setEditingHook] = useState<Hook | null>(null);
   const [showEditor, setShowEditor] = useState(false);
@@ -43,24 +41,15 @@ export function HooksPage() {
   const [detailHook, setDetailHook] = useState<Hook | null>(null);
   const [showDetail, setShowDetail] = useState(false);
 
-  const fetchHooks = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const { data, loading, error, refresh: fetchHooks } = useFetchData(
+    () => {
       const endpoint = buildEndpoint("hooks", { project_path: activeProject?.path });
-      const response = await apiClient<HookListResponse>(endpoint);
-      setHooks(response.hooks);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch hooks");
-      toast.error("Failed to load hooks");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
-  useEffect(() => {
-    fetchHooks();
-  }, [fetchHooks]);
+      return apiClient<HookListResponse>(endpoint);
+    },
+    [activeProject?.path],
+    () => toast.error("Failed to load hooks")
+  );
+  const hooks = data?.hooks ?? [];
 
   const handleCreate = async (hook: {
     event: HookEvent;
