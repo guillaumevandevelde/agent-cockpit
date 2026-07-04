@@ -59,10 +59,11 @@ export interface SpawnSessionRequest {
   no_alt_screen?: boolean
   dangerously_bypass_approvals_and_sandbox?: boolean
   use_last?: boolean
-  platform?: 'anthropic' | 'bedrock'
+  platform?: 'anthropic' | 'bedrock' | 'minimax'
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
+  minimax_base_url?: string
   host_id?: number
 }
 
@@ -80,10 +81,11 @@ export interface BulkResumeRequest {
   directory?: string
   sessions: { session_id: string; project_folder: string }[]
   skip_permissions?: boolean
-  platform?: 'anthropic' | 'bedrock'
+  platform?: 'anthropic' | 'bedrock' | 'minimax'
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
+  minimax_base_url?: string
 }
 
 export interface BulkResumeResult {
@@ -99,6 +101,10 @@ export interface BulkResumeResponse {
   results: BulkResumeResult[]
   spawned: number
   failed: number
+}
+
+export interface PlatformStatusResponse {
+  configured: boolean
 }
 
 export interface KillSessionResponse {

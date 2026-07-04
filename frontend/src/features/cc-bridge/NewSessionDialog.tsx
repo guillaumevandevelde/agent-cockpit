@@ -23,7 +23,7 @@ import { MODAL_SIZES } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
 import { fetchHosts } from '@/features/hosts/api'
-import { spawnSession, fetchResumableSessions, bulkResumeSessions } from './api'
+import { spawnSession, fetchResumableSessions, bulkResumeSessions, fetchMinimaxPlatformStatus } from './api'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgentProviderId } from '@/types/providers'
@@ -56,26 +56,40 @@ const CUSTOM_PROJECT_VALUE = '__custom__'
 
 const PLATFORM_STORAGE_KEY = 'cc-bridge.platform'
 
-type Platform = 'anthropic' | 'bedrock'
+type Platform = 'anthropic' | 'bedrock' | 'minimax'
+
+const MINIMAX_BASE_URL_INTERNATIONAL = 'https://api.minimax.io/anthropic'
+const MINIMAX_BASE_URL_CHINA = 'https://api.minimaxi.com/anthropic'
 
 interface RememberedPlatform {
   platform: Platform
   aws_region: string
   aws_profile: string
   bedrock_model: string
+  minimax_base_url: string
 }
 
 function loadRememberedPlatform(): RememberedPlatform {
-  const fallback: RememberedPlatform = { platform: 'anthropic', aws_region: '', aws_profile: '', bedrock_model: '' }
+  const fallback: RememberedPlatform = {
+    platform: 'anthropic',
+    aws_region: '',
+    aws_profile: '',
+    bedrock_model: '',
+    minimax_base_url: MINIMAX_BASE_URL_INTERNATIONAL,
+  }
   try {
     const raw = localStorage.getItem(PLATFORM_STORAGE_KEY)
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as Partial<RememberedPlatform>
+    const platform: Platform =
+      parsed.platform === 'bedrock' ? 'bedrock' : parsed.platform === 'minimax' ? 'minimax' : 'anthropic'
     return {
-      platform: parsed.platform === 'bedrock' ? 'bedrock' : 'anthropic',
+      platform,
       aws_region: typeof parsed.aws_region === 'string' ? parsed.aws_region : '',
       aws_profile: typeof parsed.aws_profile === 'string' ? parsed.aws_profile : '',
       bedrock_model: typeof parsed.bedrock_model === 'string' ? parsed.bedrock_model : '',
+      minimax_base_url:
+        typeof parsed.minimax_base_url === 'string' ? parsed.minimax_base_url : MINIMAX_BASE_URL_INTERNATIONAL,
     }
   } catch {
     return fallback
@@ -105,6 +119,8 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [awsRegion, setAwsRegion] = useState('')
   const [awsProfile, setAwsProfile] = useState('')
   const [bedrockModel, setBedrockModel] = useState('')
+  const [minimaxBaseUrl, setMinimaxBaseUrl] = useState(MINIMAX_BASE_URL_INTERNATIONAL)
+  const [minimaxConfigured, setMinimaxConfigured] = useState<boolean | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -137,7 +153,20 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     setAwsRegion(remembered.aws_region)
     setAwsProfile(remembered.aws_profile)
     setBedrockModel(remembered.bedrock_model)
+    setMinimaxBaseUrl(remembered.minimax_base_url)
   }, [open])
+
+  // Check whether the backend has a MiniMax API key configured. Cockpit never
+  // handles the key itself, so this only toggles a "not configured" notice.
+  useEffect(() => {
+    if (!open || platform !== 'minimax') return
+    let cancelled = false
+    setMinimaxConfigured(null)
+    fetchMinimaxPlatformStatus()
+      .then((data) => { if (!cancelled) setMinimaxConfigured(data.configured) })
+      .catch(() => { if (!cancelled) setMinimaxConfigured(null) })
+    return () => { cancelled = true }
+  }, [open, platform])
 
   useEffect(() => {
     if (!open) return
@@ -195,6 +224,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setSubmitting(false)
       setSelectedHostId(null)
       setHosts([])
+      setMinimaxConfigured(null)
     }
   }, [open, defaultProvider])
 
@@ -213,6 +243,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
 
     try {
       const isBedrock = !isCodex && platform === 'bedrock'
+      const isMinimax = !isCodex && platform === 'minimax'
       try {
         localStorage.setItem(
           PLATFORM_STORAGE_KEY,
@@ -221,6 +252,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             aws_region: awsRegion,
             aws_profile: awsProfile,
             bedrock_model: bedrockModel,
+            minimax_base_url: minimaxBaseUrl,
           }),
         )
       } catch {
@@ -240,6 +272,8 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
           ...(isBedrock && awsRegion.trim() && { aws_region: awsRegion.trim() }),
           ...(isBedrock && awsProfile.trim() && { aws_profile: awsProfile.trim() }),
           ...(isBedrock && bedrockModel.trim() && { bedrock_model: bedrockModel.trim() }),
+          ...(isMinimax && { platform: 'minimax' as const }),
+          ...(isMinimax && minimaxBaseUrl.trim() && { minimax_base_url: minimaxBaseUrl.trim() }),
         })
         for (const item of result.results) {
           if (item.ok && item.tmux_target) onSpawned(item.tmux_target)
@@ -276,6 +310,8 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
         ...(isBedrock && awsRegion.trim() && { aws_region: awsRegion.trim() }),
         ...(isBedrock && awsProfile.trim() && { aws_profile: awsProfile.trim() }),
         ...(isBedrock && bedrockModel.trim() && { bedrock_model: bedrockModel.trim() }),
+        ...(isMinimax && { platform: 'minimax' as const }),
+        ...(isMinimax && minimaxBaseUrl.trim() && { minimax_base_url: minimaxBaseUrl.trim() }),
         ...(selectedHostId !== null && { host_id: selectedHostId }),
       }
 
@@ -610,6 +646,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                 <SelectContent>
                   <SelectItem value="anthropic">Anthropic (default)</SelectItem>
                   <SelectItem value="bedrock">Amazon Bedrock</SelectItem>
+                  <SelectItem value="minimax">MiniMax</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -631,6 +668,31 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
               <div className="space-y-1.5">
                 <Label htmlFor="bedrock-model">Model ARN / ID (optional)</Label>
                 <Input id="bedrock-model" value={bedrockModel} onChange={(e) => setBedrockModel(e.target.value)} placeholder="arn:aws:bedrock:..." />
+              </div>
+            </div>
+          )}
+
+          {!isCodex && platform === 'minimax' && (
+            <div className="space-y-3 rounded-md border border-border p-3">
+              {minimaxConfigured === false && (
+                <p className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive">
+                  MiniMax API key not configured. Set MINIMAX_API_KEY in the backend .env and restart the backend.
+                </p>
+              )}
+              {minimaxConfigured === null && (
+                <p className="text-xs text-muted-foreground">Checking configuration...</p>
+              )}
+              <div className="space-y-1.5">
+                <Label>Endpoint</Label>
+                <Select value={minimaxBaseUrl} onValueChange={setMinimaxBaseUrl}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={MINIMAX_BASE_URL_INTERNATIONAL}>International</SelectItem>
+                    <SelectItem value={MINIMAX_BASE_URL_CHINA}>China</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}

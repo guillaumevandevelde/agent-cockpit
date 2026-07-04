@@ -56,6 +56,7 @@ class SpawnRequest(BaseModel):
     aws_region: str | None = None
     aws_profile: str | None = None
     bedrock_model: str | None = None
+    minimax_base_url: str | None = None
     host_id: int | None = None
 
 
@@ -106,6 +107,20 @@ async def get_session_git_status(target: str):
     if status is None:
         raise HTTPException(status_code=404, detail="Session pane not found")
     return status
+
+
+class PlatformStatusResponse(BaseModel):
+    configured: bool
+
+
+@router.get("/platforms/minimax/status", response_model=PlatformStatusResponse)
+def get_minimax_platform_status():
+    """Whether MINIMAX_API_KEY is set in the backend environment.
+
+    Never returns the key itself: Cockpit resolves it server-side in
+    spawn_session and it must never reach the browser.
+    """
+    return {"configured": bool(settings.minimax_api_key)}
 
 
 @router.get("/token")
@@ -190,6 +205,7 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             aws_region=request.aws_region,
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
+            minimax_base_url=request.minimax_base_url,
             host_id=request.host_id,
         )
         return spawn_session(request.provider, options, session_name=request.session_name, host_data=host_data)
@@ -213,6 +229,7 @@ class BulkResumeRequest(BaseModel):
     aws_region: str | None = None
     aws_profile: str | None = None
     bedrock_model: str | None = None
+    minimax_base_url: str | None = None
 
 
 class BulkResumeResult(BaseModel):
@@ -253,6 +270,7 @@ def bulk_resume_endpoint(request: BulkResumeRequest):
             aws_region=request.aws_region,
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
+            minimax_base_url=request.minimax_base_url,
         )
         try:
             spawned = spawn_session(request.provider, options)

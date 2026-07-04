@@ -1,6 +1,6 @@
 import { apiClient, buildEndpoint } from '@/lib/api'
 import type { AgentProviderId } from '@/types/providers'
-import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, GitStatusResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse, BulkResumeRequest, BulkResumeResponse } from './types'
+import type { CCSessionsResponse, CCPreviewResponse, CCTokenResponse, GitStatusResponse, SpawnSessionRequest, SpawnSessionResponse, KillSessionResponse, RenameSessionResponse, BulkResumeRequest, BulkResumeResponse, PlatformStatusResponse } from './types'
 import type { ResumableSessionListResponse } from '@/types/sessions'
 
 const BASE = 'agent-bridge'
@@ -41,6 +41,10 @@ export async function spawnSession(request: SpawnSessionRequest): Promise<SpawnS
     method: 'POST',
     body: JSON.stringify(request),
   })
+}
+
+export async function fetchMinimaxPlatformStatus(): Promise<PlatformStatusResponse> {
+  return apiClient<PlatformStatusResponse>(BASE + '/platforms/minimax/status')
 }
 
 export async function bulkResumeSessions(request: BulkResumeRequest): Promise<BulkResumeResponse> {
