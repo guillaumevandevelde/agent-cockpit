@@ -50,14 +50,12 @@ import type {
   MCPTestAllResponse,
 } from "@/types/mcp";
 import { apiClient, buildEndpoint } from "@/lib/api";
+import { useFetchData } from "@/hooks/useFetchData";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { toast } from "sonner";
 
 export function MCPServersPage() {
   const { activeProject } = useProjectContext();
-  const [servers, setServers] = useState<MCPServer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [editingServer, setEditingServer] = useState<MCPServer | null>(null);
   const [approvalSettingsOpen, setApprovalSettingsOpen] = useState(false);
@@ -74,6 +72,16 @@ export function MCPServersPage() {
   const [testingAll, setTestingAll] = useState(false);
   const [showTestAllConfirm, setShowTestAllConfirm] = useState(false);
 
+  const { data, loading, error, refresh: fetchServers } = useFetchData(
+    () => {
+      const endpoint = buildEndpoint("mcp/servers", { project_path: activeProject?.path });
+      return apiClient<MCPServerListResponse>(endpoint);
+    },
+    [activeProject?.path],
+    (message) => toast.error(message)
+  );
+  const servers = data?.servers ?? [];
+
   // Separate managed servers from editable ones
   const managedServers = servers.filter(s => s.scope === "managed");
   const editableServers = servers.filter(s => s.scope !== "managed");
@@ -88,22 +96,6 @@ export function MCPServersPage() {
     return map;
   }, [approvalSettings]);
 
-  const fetchServers = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const endpoint = buildEndpoint("mcp/servers", { project_path: activeProject?.path });
-      const response = await apiClient<MCPServerListResponse>(endpoint);
-      setServers(response.servers);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load MCP servers";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeProject?.path]);
-
   const fetchApprovalSettings = useCallback(async () => {
     try {
       const response = await apiClient<MCPServerApprovalSettings>("mcp/approval-settings");
@@ -114,9 +106,8 @@ export function MCPServersPage() {
   }, []);
 
   useEffect(() => {
-    fetchServers();
     fetchApprovalSettings();
-  }, [fetchServers, fetchApprovalSettings]);
+  }, [fetchApprovalSettings]);
 
   const handleApprovalSettingsChange = async (defaultMode: string) => {
     try {
