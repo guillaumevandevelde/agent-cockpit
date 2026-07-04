@@ -141,6 +141,21 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             if new_column == "Done" and old_column != "Done":
                 from app.kanban.session_cleanup import on_card_moved_to_done
                 on_card_moved_to_done(entity_id, project_key)
+            # A card leaving an agent column back into a fixed one (e.g. a UI
+            # drag-drop to Backlog) without an explicit release would otherwise
+            # keep its `agent:` claim forever: _next_card requires unclaimed,
+            # and the stale-claim reaper skips fixed columns on purpose (so a
+            # human `claim_card` reservation on a Backlog card isn't disturbed).
+            # That combination makes the card invisible to auto-dispatch for
+            # good. Done is excluded here since session_cleanup already
+            # releases the claim for that transition.
+            from app.kanban.schemas import COLUMNS
+            if (new_column in COLUMNS and new_column != "Done"
+                    and old_column not in COLUMNS
+                    and (card.claimed_by or "").startswith("agent:")):
+                card.claimed_by = None
+                card.claimed_at = None
+                card.claim_hlc = hlc
         else:  # update
             for f in ("title", "description"):
                 if f in payload and payload[f] is not None:
