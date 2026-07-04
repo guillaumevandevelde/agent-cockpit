@@ -8,6 +8,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from app.config import settings
 from app.services.host_service import build_ssh_base
 from app.services.providers import get_provider
 from app.services.providers.base import SpawnCommandOptions
@@ -131,6 +132,8 @@ def spawn_session(
         region=options.aws_region,
         aws_profile=options.aws_profile,
         model=options.bedrock_model,
+        minimax_api_key=settings.minimax_api_key,
+        minimax_base_url=options.minimax_base_url or settings.minimax_base_url,
     )
     env_flags: list[str] = []
     for key, value in platform_env.items():

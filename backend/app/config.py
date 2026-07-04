@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     sqlite_busy_timeout_ms: int = 5000
     default_backup_retention_days: int = 7
 
+    # MiniMax credentials (process-env only, e.g. via .env). Cockpit never
+    # stores this in the database or returns it in an API response; spawn_session
+    # reads it server-side and injects it into the tmux session's env.
+    minimax_api_key: str | None = None
+    minimax_base_url: str | None = None
+
 
 # Global settings instance
 settings = Settings()

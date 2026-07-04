@@ -104,6 +104,90 @@ def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
     assert spawn.get_spawned_sessions()["repo-abcd"]["platform"] == "bedrock"
 
 
+def test_minimax_platform_injects_configured_key_and_default_base_url(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.services.agent_bridge import spawn
+    from app.services.providers.base import SpawnCommandOptions
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    monkeypatch.setattr(settings, "minimax_api_key", "sk-test-key")
+    monkeypatch.setattr(settings, "minimax_base_url", None)
+    spawn.get_spawned_sessions().clear()
+
+    spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", platform="minimax"),
+    )
+
+    argv = calls[0]
+    assert "-e" in argv
+    assert "ANTHROPIC_AUTH_TOKEN=sk-test-key" in argv
+    assert "ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic" in argv
+    assert spawn.get_spawned_sessions()["repo-abcd"]["platform"] == "minimax"
+
+
+def test_minimax_platform_uses_configured_base_url_override(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.services.agent_bridge import spawn
+    from app.services.providers.base import SpawnCommandOptions
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    monkeypatch.setattr(settings, "minimax_api_key", "sk-test-key")
+    monkeypatch.setattr(settings, "minimax_base_url", None)
+    spawn.get_spawned_sessions().clear()
+
+    spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(
+            directory=str(tmp_path),
+            mode="plain",
+            platform="minimax",
+            minimax_base_url="https://api.minimaxi.com/anthropic",
+        ),
+    )
+
+    assert "ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic" in calls[0]
+
+
+def test_minimax_platform_without_configured_key_omits_auth_token(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.services.agent_bridge import spawn
+    from app.services.providers.base import SpawnCommandOptions
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    monkeypatch.setattr(settings, "minimax_api_key", None)
+    spawn.get_spawned_sessions().clear()
+
+    spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", platform="minimax"),
+    )
+
+    argv = calls[0]
+    assert not any(flag.startswith("ANTHROPIC_AUTH_TOKEN=") for flag in argv)
+
+
 def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
     from app.services.agent_bridge import spawn
     from app.services.providers.base import SpawnCommandOptions
