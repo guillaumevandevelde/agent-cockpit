@@ -12,6 +12,9 @@ from ...models.schemas import (
     SettingsValidationRequest,
     SettingsValidationResponse,
     PatternIssue,
+    ScopedSettingsResponse,
+    ResolvedConfigResponse,
+    AllScopedSettingsResponse,
 )
 from ...utils.pattern_utils import validate_permission_pattern, migrate_deprecated_pattern
 
@@ -145,7 +148,7 @@ async def validate_settings(request: SettingsValidationRequest):
     )
 
 
-@router.get("/settings/{scope}")
+@router.get("/settings/{scope}", response_model=ScopedSettingsResponse)
 async def get_settings_by_scope(
     scope: str,
     project_path: Optional[str] = Query(None)
@@ -167,7 +170,7 @@ async def get_settings_by_scope(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/resolved")
+@router.get("/resolved", response_model=ResolvedConfigResponse)
 async def get_resolved_config(project_path: Optional[str] = Query(None)):
     """
     Get resolved configuration with effective values and source scopes.
@@ -187,7 +190,7 @@ async def get_resolved_config(project_path: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/scopes")
+@router.get("/scopes", response_model=AllScopedSettingsResponse)
 async def get_all_scoped_settings(project_path: Optional[str] = Query(None)):
     """
     Get settings from all scopes separately (not merged).
