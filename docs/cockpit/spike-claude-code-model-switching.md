@@ -41,6 +41,26 @@ Onderzocht: `backend/app/api/v1/providers.py`, `codex_config.py`,
 - Repo-wide search: **geen** bestaande referenties naar "minimax",
   "claude-code-router", `ANTHROPIC_BASE_URL` of `ANTHROPIC_AUTH_TOKEN`. Dit is
   nieuw terrein.
+- **Update (interview 2026-07-04, gebruiker heeft een MiniMax-account):**
+  MiniMax's eigen documentatie (`platform.minimax.io/docs/token-plan/claude-code`)
+  bevestigt dat hun endpoint **rechtstreeks Anthropic-Messages-API-compatible**
+  is — geen CCR of andere tussenlaag nodig voor de kale switch. Gedocumenteerde
+  config (in `~/.claude/settings.json`, of dus evengoed als env vars bij het
+  spawnen van een sessie):
+  - `ANTHROPIC_BASE_URL`: `https://api.minimax.io/anthropic` (internationaal) of
+    `https://api.minimaxi.com/anthropic` (China)
+  - `ANTHROPIC_AUTH_TOKEN`: de MiniMax-API-key
+  - `ANTHROPIC_MODEL`: `MiniMax-M3[1m]`
+  - `CLAUDE_CODE_AUTO_COMPACT_WINDOW`: `1000000`
+  - MiniMax's docs waarschuwen expliciet dat bestaande `ANTHROPIC_AUTH_TOKEN`/
+    `ANTHROPIC_BASE_URL` eerst gewist moeten worden om conflicten te vermijden.
+
+  Dit is **exact dezelfde vorm** als de bestaande Bedrock-branch in
+  `platform_env.py` (env vars zetten, geen gateway-proces). Dit verandert de
+  aanbeveling: de kale "switch tussen Anthropic- en MiniMax-subscriptie"-vraag
+  op de kaart heeft **geen CCR nodig** — dat kan met een directe uitbreiding van
+  `platform_env.py`. CCR blijft wél nodig voor het *adaptieve* deel (scenario-
+  routing binnen één sessie, auto-failover) — zie herziene aanbeveling in §6.
 
 ## 3. Tool A — Clother (jolehuit/clother)
 
@@ -109,69 +129,101 @@ beide adaptieve voorbeelden op de kaart.
 | Config-vorm | `secrets.env` + CLI-launcher-symlinks | `config.json` (1.x, headless) of SQLite via desktop-UI (2.x) — `ccr`-CLI-bin blijft aanwezig |
 | Past op Cockpit's bestaande uitbreidingspunt | Nee — vervangt hoe `claude` aangeroepen wordt | Ja — is niets meer dan een `ANTHROPIC_BASE_URL`-switch, exact het patroon dat `platform_env.py` al hanteert voor Bedrock |
 
-## 6. Aanbeveling
+## 6. Aanbeveling (herzien na interview 2026-07-04)
 
-**Claude Code Router (CCR), niet Clother.**
+**Twee lagen, niet één tool-keuze:**
 
-De kaart vraagt expliciet om adaptief gedrag — dat is precies wat Clother zelf
-uitsluit ("no adaptive failover") en wat CCR als kernfeature aanbiedt
-(scenario-routing + fallback-routing). CCR past bovendien naadloos op het
-bestaande uitbreidingspunt van Cockpit: het is functioneel niets meer dan een
-lokale HTTP-gateway waar Claude Code via `ANTHROPIC_BASE_URL` naartoe wijst —
-exact hetzelfde soort env-var-injectie dat `platform_env.py`/
-`SpawnCommandOptions` vandaag al doet voor Bedrock (`CLAUDE_CODE_USE_BEDROCK`).
-Er is geen nieuwe architectuur nodig, enkel een nieuwe `platform`-waarde.
+**Laag 1 — kale subscriptie-switch (geen CCR nodig).** MiniMax's endpoint is
+rechtstreeks Anthropic-Messages-compatible (§2). Dit dekt het eerste deel van de
+kaart ("ondersteuning van verschillende configuraties") met exact het bestaande
+`platform_env.py`-patroon: een nieuwe `PLATFORM_MINIMAX`-branch die
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL` zet, net zoals de
+Bedrock-branch dat vandaag doet. Kleinste, laagste-risico stap — geen extern
+proces, geen nieuwe dependency.
+
+**Laag 2 — adaptief gedrag (Claude Code Router, niet Clother).** Voor de twee
+adaptieve voorbeelden op de kaart (analyse-vs-uitvoering-routing binnen één
+sessie, auto-failover bij sessielimiet) is per-request routing nodig, niet
+per-sessie env vars — dat kan geen van beide tools puur via env vars, maar CCR
+biedt het als kernfeature (scenario-routing + fallback-routing), terwijl
+Clother's eigen README dit expliciet uitsluit ("no adaptive failover"). CCR
+draait dan als lokale HTTP-gateway waar Claude Code via `ANTHROPIC_BASE_URL`
+naartoe wijst — nog steeds hetzelfde `platform_env.py`-patroon, alleen wijst de
+URL nu naar de CCR-gateway in plaats van rechtstreeks naar MiniMax.
 
 **Caveat**: richt op de 1.x-achtige headless/`config.json`-werkwijze, niet op de
 2.0-desktop-UI-flow — Cockpit draait in WSL zonder Electron-GUI. Het `ccr`-CLI-bin
 blijft aanwezig in het 2.0.0-npm-package volgens de registry-metadata, maar dit
 moet hands-on bevestigd worden vóórdat een vervolgkaart hierop bouwt.
 
-## 7. Concreet integratievoorstel (voor de vervolgkaart, niet nu bouwen)
+**Beslissingen uit interview (2026-07-04):**
+- CCR draait als **één gedeeld achtergrondproces** voor alle sessies/projecten
+  (niet per-project) — analoog aan hoe sandcastle nu draait.
+- Automatische failover bij sessielimiet is **nice-to-have**, geen MVP-blocker;
+  Laag 1 (handmatige switch) levert de kernwaarde, Laag 2 (adaptief) volgt erna
+  op medium prioriteit.
 
-- Nieuwe constante `PLATFORM_MINIMAX` (of generieker `PLATFORM_CCR`) naast
-  `PLATFORM_ANTHROPIC`/`PLATFORM_BEDROCK` in `platform_env.py`.
-- `build_platform_env` krijgt een branch die, wanneer `platform == PLATFORM_CCR`,
-  `ANTHROPIC_BASE_URL=http://localhost:<ccr-port>` (en evt.
-  `ANTHROPIC_AUTH_TOKEN` als CCR dat vereist) zet — hergebruik van de bestaande
-  `SpawnCommandOptions`-injectiemechaniek, geen nieuwe.
-- CCR zelf draait niet per-sessie maar als één gedeeld achtergrondproces
-  (vergelijkbaar met hoe sandcastle wordt aangestuurd, zie
-  `sandcastle-integration-plan.md`), met een `config.json` die de
-  scenario→model-mapping vastlegt (`default`/`think` → Anthropic Sonnet 5,
-  `background` → MiniMax) plus een fallback-regel voor rate-limit-condities.
+## 7. Concreet integratievoorstel (voor de vervolgkaarten, niet nu bouwen)
+
+**Laag 1 (direct, geen CCR):**
+- Nieuwe constante `PLATFORM_MINIMAX` naast `PLATFORM_ANTHROPIC`/
+  `PLATFORM_BEDROCK` in `platform_env.py`.
+- `build_platform_env` krijgt een branch die, wanneer `platform ==
+  PLATFORM_MINIMAX`, `ANTHROPIC_BASE_URL` (international/China-varianten),
+  `ANTHROPIC_AUTH_TOKEN` en `ANTHROPIC_MODEL=MiniMax-M3[1m]` zet — hergebruik
+  van de bestaande `SpawnCommandOptions`-injectiemechaniek, geen nieuwe.
 - UI: uitbreiden van de bestaande platform-selector (waar Bedrock nu gekozen
   wordt, zie `EnhancedProviderCards.tsx`/`useProviders.ts`) met een
-  "MiniMax (via CCR)"-optie — geen nieuwe featuremodule nodig.
+  "MiniMax"-optie.
+
+**Laag 2 (later, CCR voor adaptief gedrag):**
+- CCR draait als één **gedeeld achtergrondproces** (beslist, zie §6),
+  vergelijkbaar met hoe sandcastle wordt aangestuurd
+  (`sandcastle-integration-plan.md`), met een `config.json` die de
+  scenario→model-mapping vastlegt (`default`/`think` → Anthropic Sonnet 5,
+  `background` → MiniMax) plus een fallback-regel voor rate-limit-condities.
+- Wanneer een sessie voor CCR-routing kiest, wijst `platform_env.py` z'n
+  `ANTHROPIC_BASE_URL` naar de lokale CCR-gateway in plaats van rechtstreeks
+  naar MiniMax.
 - Geen wijziging aan `providers.py`/`codex_config.py` — die blijven
   agent-CLI-registries, ongerelateerd aan dit voorstel.
 
-## 8. Vervolgkaarten (uit scope van deze spike)
+## 8. Vervolgkaarten (aangemaakt op het bord, zie §10)
 
-1. **CCR headless-haalbaarheid verifiëren** — installeer
-   `@musistudio/claude-code-router` in de WSL-omgeving, bevestig dat `ccr`
-   start/config laadt zonder de Electron-UI, en documenteer het exacte
-   `config.json`-schema zoals het vandaag daadwerkelijk werkt (de 2.0-README
-   documenteert dit niet meer expliciet).
-2. **`PLATFORM_MINIMAX`/`PLATFORM_CCR` toevoegen aan `platform_env.py`** + tests,
-   analoog aan de bestaande Bedrock-branch.
-3. **CCR-gateway lifecycle-beheer** — beslissen of Cockpit het CCR-proces zelf
-   start/bewaakt (zoals sandcastle) of dat het een door de gebruiker extern
-   beheerd proces is waar Cockpit alleen naar verwijst.
-4. **Adaptief-switch-gedrag valideren** — hands-on bevestigen dat CCR's
+1. **`PLATFORM_MINIMAX` toevoegen aan `platform_env.py`** (Laag 1) — directe
+   subscriptie-switch, geen CCR, analoog aan de bestaande Bedrock-branch + tests.
+2. **CCR headless-haalbaarheid verifiëren** (Laag 2, voorwaarde voor kaart 3/4) —
+   installeer `@musistudio/claude-code-router` in de WSL-omgeving, bevestig dat
+   `ccr` start/config laadt zonder de Electron-UI, documenteer het exacte
+   `config.json`-schema zoals het vandaag daadwerkelijk werkt.
+3. **CCR als gedeeld achtergrondproces opzetten** (Laag 2) — lifecycle-beheer
+   (start/stop/bewaking) analoog aan sandcastle; scenario-routingconfig
+   (default/think → Anthropic, background → MiniMax).
+4. **Adaptief-switch-gedrag (auto-failover bij sessielimiet) valideren** (Laag 2,
+   medium prioriteit, nice-to-have) — hands-on bevestigen dat CCR's
    fallback-routing daadwerkelijk overschakelt bij een rate-limit/sessielimiet-
    response van Anthropic (niet alleen bij statisch geconfigureerde condities),
    vóórdat dit als betrouwbaarheidsmechanisme aan gebruikers wordt beloofd.
 
-## 9. Open vragen voor de vervolgkaarten
+## 9. Open vragen — opgelost via interview (2026-07-04)
 
-- Wil de gebruiker CCR als één gedeeld achtergrondproces voor alle sessies, of
-  per-sessie/per-project met een eigen routing-config?
-- Heeft MiniMax's API daadwerkelijk een Anthropic-Messages-compatibele of
-  OpenAI-compatible endpoint die CCR zonder extra transformer-script kan
-  aanspreken? CCR noemt MiniMax met naam, maar het exacte protocol is niet uit
-  de huidige README te halen — te verifiëren in vervolgkaart 1.
-- Triggert CCR's "fallback routing" daadwerkelijk op een 429/limiet-response, of
-  is het alleen regel-gebaseerd op request-kenmerken (model-prefix,
-  taak-categorie)? Bepaalt of voorbeeld 2 van de kaart (sessielimiet → auto-switch)
-  out-of-the-box werkt of een extra laag nodig heeft.
+- ~~Gedeeld achtergrondproces vs. per-project?~~ → **Gedeeld proces**, analoog
+  aan sandcastle (zie §6).
+- ~~Is MiniMax's endpoint Anthropic-Messages-compatible?~~ → **Ja**, bevestigd
+  via `platform.minimax.io/docs/token-plan/claude-code` (zie §2-update). Dit
+  maakt Laag 1 mogelijk zonder CCR.
+- ~~Hoe belangrijk is auto-failover voor de eerste versie?~~ → **Nice-to-have**,
+  geen MVP-blocker; wel als kaart aangemaakt op medium prioriteit (kaart 4).
+- **Nog open (voor vervolgkaart 4)**: triggert CCR's "fallback routing"
+  daadwerkelijk op een 429/limiet-response, of is het alleen regel-gebaseerd op
+  request-kenmerken (model-prefix, taak-categorie)? Bepaalt of het
+  sessielimiet-auto-switch-scenario out-of-the-box werkt of een extra laag
+  nodig heeft — te verifiëren hands-on, niet iets de gebruiker vooraf kan weten.
+
+## 10. Kanban-vervolgkaarten
+
+Aangemaakt in de `Backlog`-kolom van dit project, gelinkt aan deze spike:
+- "MiniMax platform toevoegen aan platform_env.py (directe switch, geen CCR)"
+- "Claude Code Router (CCR) headless-haalbaarheid verifiëren in WSL"
+- "CCR als gedeeld achtergrondproces opzetten voor scenario-routing"
+- "Adaptief-switch-gedrag (auto-failover bij sessielimiet) valideren via CCR — medium prioriteit"
