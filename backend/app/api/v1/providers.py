@@ -1,6 +1,7 @@
 """Provider registry API."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -133,24 +134,30 @@ class CodexPluginMutationRequest(BaseModel):
 
 
 @router.get("/providers")
-def list_providers():
-    providers = [provider.get_status() for provider in get_providers()]
+async def list_providers():
+    providers = await asyncio.gather(
+        *(asyncio.to_thread(provider.get_status) for provider in get_providers())
+    )
     return {"providers": providers, "count": len(providers)}
 
 
 @router.get("/providers/{provider_id}/status")
-def get_provider_status(provider_id: str):
-    return _get_provider_or_404(provider_id).get_status()
+async def get_provider_status(provider_id: str):
+    return await asyncio.to_thread(_get_provider_or_404(provider_id).get_status)
 
 
 @router.get("/providers/{provider_id}/capabilities")
-def get_provider_capabilities(provider_id: str):
+async def get_provider_capabilities(provider_id: str):
     provider = _get_provider_or_404(provider_id)
+    capabilities, capability_matrix = await asyncio.gather(
+        asyncio.to_thread(provider.get_capabilities),
+        asyncio.to_thread(provider.get_capability_matrix),
+    )
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
-        "capabilities": provider.get_capabilities(),
-        "capability_matrix": provider.get_capability_matrix(),
+        "capabilities": capabilities,
+        "capability_matrix": capability_matrix,
     }
 
 
@@ -406,7 +413,7 @@ def _parse_codex_feature_rows(stdout: str) -> list[dict[str, Any]]:
 
 
 @router.post("/providers/{provider_id}/cli", response_model=CLIResult)
-def execute_provider_cli(provider_id: str, request: CLIExecuteRequest):
+async def execute_provider_cli(provider_id: str, request: CLIExecuteRequest):
     provider = _get_provider_or_404(provider_id)
     executor = ProviderCLIExecutor(provider.id)
 
@@ -424,18 +431,20 @@ def execute_provider_cli(provider_id: str, request: CLIExecuteRequest):
 
     _require_provider_binary(executor, f"cli:{request.command}")
 
-    result = executor.execute(request.command, request.args)
+    result = await asyncio.to_thread(executor.execute, request.command, request.args)
     return CLIResult(**_redact_cli_result(result))
 
 
 @router.get("/providers/{provider_id}/doctor")
-def get_provider_doctor(provider_id: str):
+async def get_provider_doctor(provider_id: str):
     provider = _get_provider_or_404(provider_id)
     executor = ProviderCLIExecutor(provider.id)
     _require_capability(provider, "doctor", "doctor diagnostics")
     _require_provider_binary(executor, "doctor diagnostics")
 
-    result = executor.execute("doctor", ["--json"], timeout=settings.provider_doctor_timeout_seconds)
+    result = await asyncio.to_thread(
+        executor.execute, "doctor", ["--json"], timeout=settings.provider_doctor_timeout_seconds
+    )
     report = None
     parse_error = None
     if result.stdout.strip():
@@ -455,12 +464,14 @@ def get_provider_doctor(provider_id: str):
 
 
 @router.get("/providers/{provider_id}/mcp")
-def get_provider_mcp_inventory(provider_id: str):
+async def get_provider_mcp_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "MCP inventory")
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "MCP inventory")
 
-    result = executor.execute("mcp", ["list", "--json"], timeout=settings.provider_doctor_timeout_seconds)
+    result = await asyncio.to_thread(
+        executor.execute, "mcp", ["list", "--json"], timeout=settings.provider_doctor_timeout_seconds
+    )
     servers = None
     parse_error = None
     raw_stdout = _redact_value(result.stdout)
@@ -483,13 +494,15 @@ def get_provider_mcp_inventory(provider_id: str):
 
 
 @router.post("/providers/{provider_id}/mcp")
-def add_provider_mcp_server(provider_id: str, request: CodexMcpAddRequest):
+async def add_provider_mcp_server(provider_id: str, request: CodexMcpAddRequest):
     mcp_args = _build_codex_mcp_add_args(request)
     provider = _require_codex_provider(provider_id, "MCP server mutation")
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "MCP server mutation")
 
-    result = executor.execute("mcp", mcp_args, timeout=settings.provider_doctor_timeout_seconds)
+    result = await asyncio.to_thread(
+        executor.execute, "mcp", mcp_args, timeout=settings.provider_doctor_timeout_seconds
+    )
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
@@ -499,7 +512,7 @@ def add_provider_mcp_server(provider_id: str, request: CodexMcpAddRequest):
 
 
 @router.delete("/providers/{provider_id}/mcp/{server_name}")
-def remove_provider_mcp_server(provider_id: str, server_name: str):
+async def remove_provider_mcp_server(provider_id: str, server_name: str):
     try:
         safe_name = _validate_mcp_server_name(server_name)
     except ValueError as exc:
@@ -509,7 +522,9 @@ def remove_provider_mcp_server(provider_id: str, server_name: str):
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "MCP server mutation")
 
-    result = executor.execute("mcp", ["remove", safe_name], timeout=settings.provider_doctor_timeout_seconds)
+    result = await asyncio.to_thread(
+        executor.execute, "mcp", ["remove", safe_name], timeout=settings.provider_doctor_timeout_seconds
+    )
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
@@ -519,12 +534,14 @@ def remove_provider_mcp_server(provider_id: str, server_name: str):
 
 
 @router.get("/providers/{provider_id}/plugins")
-def get_provider_plugin_inventory(provider_id: str):
+async def get_provider_plugin_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "plugin inventory")
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "plugin inventory")
 
-    result = executor.execute("plugin", ["list"], timeout=settings.provider_doctor_timeout_seconds)
+    result = await asyncio.to_thread(
+        executor.execute, "plugin", ["list"], timeout=settings.provider_doctor_timeout_seconds
+    )
     safe_stdout = _redact_value(result.stdout)
     return {
         "provider": provider.id,
@@ -538,12 +555,14 @@ def get_provider_plugin_inventory(provider_id: str):
 
 
 @router.get("/providers/{provider_id}/features")
-def get_provider_feature_inventory(provider_id: str):
+async def get_provider_feature_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "feature inventory")
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "feature inventory")
 
-    result = executor.execute("features", ["list"], timeout=settings.provider_doctor_timeout_seconds)
+    result = await asyncio.to_thread(
+        executor.execute, "features", ["list"], timeout=settings.provider_doctor_timeout_seconds
+    )
     safe_stdout = _redact_value(result.stdout)
     return {
         "provider": provider.id,
@@ -556,13 +575,13 @@ def get_provider_feature_inventory(provider_id: str):
 
 
 @router.post("/providers/{provider_id}/plugins")
-def install_provider_plugin(provider_id: str, request: CodexPluginMutationRequest):
+async def install_provider_plugin(provider_id: str, request: CodexPluginMutationRequest):
     plugin_args = _build_codex_plugin_args("add", request.name, request.marketplace)
     provider = _require_codex_provider(provider_id, "plugin mutation")
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "plugin mutation")
 
-    result = executor.execute("plugin", plugin_args, timeout=60)
+    result = await asyncio.to_thread(executor.execute, "plugin", plugin_args, timeout=60)
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
@@ -573,13 +592,13 @@ def install_provider_plugin(provider_id: str, request: CodexPluginMutationReques
 
 
 @router.delete("/providers/{provider_id}/plugins/{plugin_name}")
-def remove_provider_plugin(provider_id: str, plugin_name: str, marketplace: str | None = None):
+async def remove_provider_plugin(provider_id: str, plugin_name: str, marketplace: str | None = None):
     plugin_args = _build_codex_plugin_args("remove", plugin_name, marketplace)
     provider = _require_codex_provider(provider_id, "plugin mutation")
     executor = ProviderCLIExecutor(provider.id)
     _require_provider_binary(executor, "plugin mutation")
 
-    result = executor.execute("plugin", plugin_args, timeout=60)
+    result = await asyncio.to_thread(executor.execute, "plugin", plugin_args, timeout=60)
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
@@ -590,7 +609,7 @@ def remove_provider_plugin(provider_id: str, plugin_name: str, marketplace: str 
 
 
 @router.post("/providers/{provider_id}/plugins/{plugin_name}/enable")
-def enable_provider_plugin(provider_id: str, plugin_name: str):
+async def enable_provider_plugin(provider_id: str, plugin_name: str):
     _require_codex_provider(provider_id, "plugin mutation")
     try:
         _validate_plugin_selector(plugin_name)
@@ -603,7 +622,7 @@ def enable_provider_plugin(provider_id: str, plugin_name: str):
 
 
 @router.post("/providers/{provider_id}/plugins/{plugin_name}/disable")
-def disable_provider_plugin(provider_id: str, plugin_name: str):
+async def disable_provider_plugin(provider_id: str, plugin_name: str):
     _require_codex_provider(provider_id, "plugin mutation")
     try:
         _validate_plugin_selector(plugin_name)
@@ -616,9 +635,9 @@ def disable_provider_plugin(provider_id: str, plugin_name: str):
 
 
 @router.get("/providers/{provider_id}/history-diagnostics")
-def get_provider_history_diagnostics(provider_id: str):
+async def get_provider_history_diagnostics(provider_id: str):
     provider = _require_codex_provider(provider_id, "history diagnostics")
-    diagnostics = CodexHistoryService().get_diagnostics()
+    diagnostics = await asyncio.to_thread(CodexHistoryService().get_diagnostics)
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,
@@ -627,9 +646,9 @@ def get_provider_history_diagnostics(provider_id: str):
 
 
 @router.get("/providers/{provider_id}/usage-context-diagnostics")
-def get_provider_usage_context_diagnostics(provider_id: str):
+async def get_provider_usage_context_diagnostics(provider_id: str):
     provider = _require_codex_provider(provider_id, "usage context diagnostics")
-    diagnostics = CodexUsageContextService().get_diagnostics()
+    diagnostics = await asyncio.to_thread(CodexUsageContextService().get_diagnostics)
     return {
         "provider": provider.id,
         "provider_display_name": provider.display_name,

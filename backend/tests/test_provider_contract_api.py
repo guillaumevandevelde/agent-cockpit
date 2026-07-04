@@ -4,22 +4,22 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_provider_status_unknown_provider_returns_structured_404():
+async def test_provider_status_unknown_provider_returns_structured_404():
     from app.api.v1 import providers as providers_api
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.get_provider_status("missing-provider")
+        await providers_api.get_provider_status("missing-provider")
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail["code"] == "unknown_provider"
     assert exc_info.value.detail["provider"] == "missing-provider"
 
 
-def test_provider_doctor_unsupported_capability_returns_contract_error():
+async def test_provider_doctor_unsupported_capability_returns_contract_error():
     from app.api.v1 import providers as providers_api
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.get_provider_doctor("claude-code")
+        await providers_api.get_provider_doctor("claude-code")
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == {
@@ -31,11 +31,11 @@ def test_provider_doctor_unsupported_capability_returns_contract_error():
     }
 
 
-def test_provider_mcp_inventory_wrong_provider_returns_contract_error():
+async def test_provider_mcp_inventory_wrong_provider_returns_contract_error():
     from app.api.v1 import providers as providers_api
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.get_provider_mcp_inventory("claude-code")
+        await providers_api.get_provider_mcp_inventory("claude-code")
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "unsupported_provider_operation"
@@ -44,7 +44,7 @@ def test_provider_mcp_inventory_wrong_provider_returns_contract_error():
     assert exc_info.value.detail["supported_providers"] == ["codex-cli"]
 
 
-def test_provider_cli_disallowed_command_returns_contract_error(monkeypatch):
+async def test_provider_cli_disallowed_command_returns_contract_error(monkeypatch):
     from app.api.v1 import providers as providers_api
     from app.models.schemas import CLIExecuteRequest
 
@@ -60,7 +60,7 @@ def test_provider_cli_disallowed_command_returns_contract_error(monkeypatch):
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.execute_provider_cli(
+        await providers_api.execute_provider_cli(
             "codex-cli",
             CLIExecuteRequest(command="logout", args=[]),
         )
@@ -71,7 +71,7 @@ def test_provider_cli_disallowed_command_returns_contract_error(monkeypatch):
     assert exc_info.value.detail["operation"] == "cli:logout"
 
 
-def test_provider_cli_missing_binary_returns_contract_error(monkeypatch):
+async def test_provider_cli_missing_binary_returns_contract_error(monkeypatch):
     from app.api.v1 import providers as providers_api
     from app.models.schemas import CLIExecuteRequest
 
@@ -87,7 +87,7 @@ def test_provider_cli_missing_binary_returns_contract_error(monkeypatch):
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.execute_provider_cli(
+        await providers_api.execute_provider_cli(
             "codex-cli",
             CLIExecuteRequest(command="doctor", args=[]),
         )

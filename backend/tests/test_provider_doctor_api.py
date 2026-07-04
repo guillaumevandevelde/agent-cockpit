@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 
 
-def test_provider_doctor_returns_parsed_codex_report(monkeypatch):
+async def test_provider_doctor_returns_parsed_codex_report(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     class FakeExecutor:
@@ -20,14 +20,14 @@ def test_provider_doctor_returns_parsed_codex_report(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.get_provider_doctor("codex-cli")
+    response = await providers_api.get_provider_doctor("codex-cli")
 
     assert response["provider"] == "codex-cli"
     assert response["exit_code"] == 0
     assert response["report"]["overallStatus"] == "ok"
 
 
-def test_provider_doctor_redacts_report_and_stderr(monkeypatch):
+async def test_provider_doctor_redacts_report_and_stderr(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     class FakeExecutor:
@@ -42,7 +42,7 @@ def test_provider_doctor_redacts_report_and_stderr(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.get_provider_doctor("codex-cli")
+    response = await providers_api.get_provider_doctor("codex-cli")
 
     assert response["report"]["checks"]["auth"] == "[redacted]"
     assert "secret-token" not in str(response)

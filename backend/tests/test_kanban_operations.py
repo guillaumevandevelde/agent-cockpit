@@ -195,6 +195,45 @@ async def test_mutation_ops_inherit_card_project_key():
 
 
 @pytest.mark.asyncio
+async def test_move_to_fixed_column_releases_dangling_agent_claim():
+    # Reproduces a real stuck-Backlog card: dispatcher claims + moves a card
+    # into an agent column, then it gets moved back to Backlog (e.g. a UI
+    # drag-drop) without an explicit release. Without clearing the claim here,
+    # the card is invisible to _next_card (requires unclaimed) *and* to the
+    # stale-claim reaper (which skips fixed columns) — permanently blocking
+    # auto-dispatch for that card.
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t", "column": "Backlog"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "engineer"})
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "agent:k-test-1234"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "Backlog"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "Backlog"
+        assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_move_to_fixed_column_keeps_human_claim():
+    # A human claiming a Backlog card to reserve it (never left a fixed
+    # column, no "agent:" prefix) must not be auto-released.
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t", "column": "Backlog"})
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "me@ui"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "Backlog"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.claimed_by == "me@ui"
+
+
+@pytest.mark.asyncio
 async def test_op_ids_are_unique_across_many_ops():
     async with KanbanSessionLocal() as s:
         for i in range(25):

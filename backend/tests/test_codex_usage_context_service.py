@@ -143,7 +143,7 @@ def test_diagnostics_include_sqlite_metadata_only(tmp_path):
     ]
 
 
-def test_provider_usage_context_endpoint_is_codex_only(monkeypatch):
+async def test_provider_usage_context_endpoint_is_codex_only(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     class FakeService:
@@ -155,12 +155,12 @@ def test_provider_usage_context_endpoint_is_codex_only(monkeypatch):
 
     monkeypatch.setattr(providers_api, "CodexUsageContextService", lambda: FakeService())
 
-    response = providers_api.get_provider_usage_context_diagnostics("codex-cli")
+    response = await providers_api.get_provider_usage_context_diagnostics("codex-cli")
 
     assert response["provider"] == "codex-cli"
     assert response["provider_display_name"] == "Codex"
     assert response["decision"]["usage_status"] == "unsupported"
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.get_provider_usage_context_diagnostics("claude-code")
+        await providers_api.get_provider_usage_context_diagnostics("claude-code")
     assert exc_info.value.status_code == 400

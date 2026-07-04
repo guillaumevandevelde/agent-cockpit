@@ -1,4 +1,6 @@
 """API tests for the agent-activity endpoints (live agent discovery)."""
+import asyncio
+import time
 from unittest.mock import patch
 
 import pytest
@@ -82,3 +84,38 @@ async def test_activity_summary_groups_by_provider():
     assert body["total"] == 3
     assert body["by_provider"] == {"claude-code": 2, "codex": 1}
     assert body["has_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_live_agents_does_not_block_the_event_loop():
+    """The critical bug: capture_pane_preview shells out via subprocess.run.
+
+    If /live ever awaits that call directly on the event loop instead of
+    offloading it to a thread, no other coroutine can make progress while
+    tmux is being captured. Prove ticks interleave with the "slow" capture.
+    """
+    events: list[str] = []
+
+    def slow_capture(target: str) -> str:
+        time.sleep(0.2)
+        events.append("capture-done")
+        return "line1"
+
+    async def ticker() -> None:
+        for _ in range(4):
+            await asyncio.sleep(0.05)
+            events.append("tick")
+
+    fake_sessions = [{"tmux_target": "s:0.0", "provider": "claude-code"}]
+    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=fake_sessions), \
+         patch("app.api.v1.agent_activity.capture_pane_preview", side_effect=slow_capture):
+        async def do_request() -> None:
+            async with _client() as ac:
+                r = await ac.get("/api/v1/agent-activity/live")
+                assert r.status_code == 200, r.text
+
+        await asyncio.gather(do_request(), ticker())
+
+    assert "tick" in events[:events.index("capture-done")], (
+        "event loop was blocked while capturing the tmux pane"
+    )

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_codex_mcp_inventory_parses_json_and_redacts(monkeypatch):
+async def test_codex_mcp_inventory_parses_json_and_redacts(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     class FakeExecutor:
@@ -21,7 +21,7 @@ def test_codex_mcp_inventory_parses_json_and_redacts(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.get_provider_mcp_inventory("codex-cli")
+    response = await providers_api.get_provider_mcp_inventory("codex-cli")
 
     assert response["exit_code"] == 0
     assert response["parse_error"] is None
@@ -30,7 +30,7 @@ def test_codex_mcp_inventory_parses_json_and_redacts(monkeypatch):
     assert '"authToken": "[redacted]"' in response["raw_stdout"]
 
 
-def test_codex_mcp_inventory_surfaces_errors(monkeypatch):
+async def test_codex_mcp_inventory_surfaces_errors(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     class FakeExecutor:
@@ -45,7 +45,7 @@ def test_codex_mcp_inventory_surfaces_errors(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.get_provider_mcp_inventory("codex-cli")
+    response = await providers_api.get_provider_mcp_inventory("codex-cli")
 
     assert response["exit_code"] == 2
     assert response["servers"] is None
@@ -53,7 +53,7 @@ def test_codex_mcp_inventory_surfaces_errors(monkeypatch):
     assert "auth_token=[redacted]" in response["stderr"]
 
 
-def test_codex_plugin_inventory_returns_text_and_best_effort_rows(monkeypatch):
+async def test_codex_plugin_inventory_returns_text_and_best_effort_rows(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     header = f"{'PLUGIN':<28}{'STATUS':<16}{'VERSION':<12}PATH"
@@ -91,7 +91,7 @@ def test_codex_plugin_inventory_returns_text_and_best_effort_rows(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.get_provider_plugin_inventory("codex-cli")
+    response = await providers_api.get_provider_plugin_inventory("codex-cli")
 
     assert response["exit_code"] == 0
     assert response["raw_stdout"].startswith("Marketplace")
@@ -116,7 +116,7 @@ def test_codex_plugin_inventory_returns_text_and_best_effort_rows(monkeypatch):
     assert response["mutation_capabilities"]["disable"]["state"] == "unsupported"
 
 
-def test_codex_feature_inventory_parses_known_features(monkeypatch):
+async def test_codex_feature_inventory_parses_known_features(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     class FakeExecutor:
@@ -138,7 +138,7 @@ def test_codex_feature_inventory_parses_known_features(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.get_provider_feature_inventory("codex-cli")
+    response = await providers_api.get_provider_feature_inventory("codex-cli")
 
     assert response["exit_code"] == 0
     assert response["features"] == [
@@ -148,7 +148,7 @@ def test_codex_feature_inventory_parses_known_features(monkeypatch):
     ]
 
 
-def test_codex_mcp_add_uses_cli_command_args_and_env(monkeypatch):
+async def test_codex_mcp_add_uses_cli_command_args_and_env(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     calls = []
@@ -162,7 +162,7 @@ def test_codex_mcp_add_uses_cli_command_args_and_env(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.add_provider_mcp_server(
+    response = await providers_api.add_provider_mcp_server(
         "codex-cli",
         providers_api.CodexMcpAddRequest(
             name="linear",
@@ -183,7 +183,7 @@ def test_codex_mcp_add_uses_cli_command_args_and_env(monkeypatch):
     assert "secret-value" not in response["stdout"]
 
 
-def test_codex_mcp_add_uses_url_cli_args(monkeypatch):
+async def test_codex_mcp_add_uses_url_cli_args(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     calls = []
@@ -197,7 +197,7 @@ def test_codex_mcp_add_uses_url_cli_args(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    providers_api.add_provider_mcp_server(
+    await providers_api.add_provider_mcp_server(
         "codex-cli",
         providers_api.CodexMcpAddRequest(
             name="remote-server",
@@ -215,7 +215,7 @@ def test_codex_mcp_add_uses_url_cli_args(monkeypatch):
     ]
 
 
-def test_codex_mcp_add_rejects_ambiguous_payload():
+async def test_codex_mcp_add_rejects_ambiguous_payload():
     from app.api.v1 import providers as providers_api
 
     request = providers_api.CodexMcpAddRequest(
@@ -225,12 +225,12 @@ def test_codex_mcp_add_rejects_ambiguous_payload():
     )
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.add_provider_mcp_server("codex-cli", request)
+        await providers_api.add_provider_mcp_server("codex-cli", request)
 
     assert exc_info.value.status_code == 400
 
 
-def test_codex_mcp_remove_uses_cli_remove(monkeypatch):
+async def test_codex_mcp_remove_uses_cli_remove(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     calls = []
@@ -244,13 +244,13 @@ def test_codex_mcp_remove_uses_cli_remove(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.remove_provider_mcp_server("codex-cli", "linear")
+    response = await providers_api.remove_provider_mcp_server("codex-cli", "linear")
 
     assert calls == [("mcp", ["remove", "linear"], 30)]
     assert response["exit_code"] == 0
 
 
-def test_codex_plugin_install_uses_cli_add_with_marketplace(monkeypatch):
+async def test_codex_plugin_install_uses_cli_add_with_marketplace(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     calls = []
@@ -264,7 +264,7 @@ def test_codex_plugin_install_uses_cli_add_with_marketplace(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.install_provider_plugin(
+    response = await providers_api.install_provider_plugin(
         "codex-cli",
         providers_api.CodexPluginMutationRequest(name="linear", marketplace="openai-curated"),
     )
@@ -275,7 +275,7 @@ def test_codex_plugin_install_uses_cli_add_with_marketplace(monkeypatch):
     assert "secret-value" not in response["stdout"]
 
 
-def test_codex_plugin_install_accepts_selector(monkeypatch):
+async def test_codex_plugin_install_accepts_selector(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     calls = []
@@ -289,7 +289,7 @@ def test_codex_plugin_install_accepts_selector(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    providers_api.install_provider_plugin(
+    await providers_api.install_provider_plugin(
         "codex-cli",
         providers_api.CodexPluginMutationRequest(name="linear@openai-curated"),
     )
@@ -297,7 +297,7 @@ def test_codex_plugin_install_accepts_selector(monkeypatch):
     assert calls == [("plugin", ["add", "linear@openai-curated"], 60)]
 
 
-def test_codex_plugin_remove_uses_cli_remove(monkeypatch):
+async def test_codex_plugin_remove_uses_cli_remove(monkeypatch):
     from app.api.v1 import providers as providers_api
 
     calls = []
@@ -311,7 +311,7 @@ def test_codex_plugin_remove_uses_cli_remove(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.remove_provider_plugin(
+    response = await providers_api.remove_provider_plugin(
         "codex-cli",
         "linear",
         marketplace="openai-curated",
@@ -322,7 +322,7 @@ def test_codex_plugin_remove_uses_cli_remove(monkeypatch):
     assert "secret-value" not in response["stderr"]
 
 
-def test_codex_plugin_mutation_rejects_unsafe_selectors():
+async def test_codex_plugin_mutation_rejects_unsafe_selectors():
     from app.api.v1 import providers as providers_api
     from pydantic import ValidationError
 
@@ -334,23 +334,23 @@ def test_codex_plugin_mutation_rejects_unsafe_selectors():
         marketplace="other",
     )
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.install_provider_plugin("codex-cli", request)
+        await providers_api.install_provider_plugin("codex-cli", request)
 
     assert exc_info.value.status_code == 400
 
     with pytest.raises(providers_api.HTTPException) as remove_exc:
-        providers_api.remove_provider_plugin("codex-cli", "..bad")
+        await providers_api.remove_provider_plugin("codex-cli", "..bad")
 
     assert remove_exc.value.status_code == 400
 
 
-def test_codex_plugin_enable_disable_are_explicitly_unsupported():
+async def test_codex_plugin_enable_disable_are_explicitly_unsupported():
     from app.api.v1 import providers as providers_api
 
     with pytest.raises(providers_api.HTTPException) as enable_exc:
-        providers_api.enable_provider_plugin("codex-cli", "linear@openai-curated")
+        await providers_api.enable_provider_plugin("codex-cli", "linear@openai-curated")
     with pytest.raises(providers_api.HTTPException) as disable_exc:
-        providers_api.disable_provider_plugin("codex-cli", "linear@openai-curated")
+        await providers_api.disable_provider_plugin("codex-cli", "linear@openai-curated")
 
     assert enable_exc.value.status_code == 400
     assert "does not expose plugin enable" in enable_exc.value.detail
@@ -358,13 +358,13 @@ def test_codex_plugin_enable_disable_are_explicitly_unsupported():
     assert "does not expose plugin disable" in disable_exc.value.detail
 
 
-def test_codex_plugin_enable_disable_reject_unsafe_selectors():
+async def test_codex_plugin_enable_disable_reject_unsafe_selectors():
     from app.api.v1 import providers as providers_api
 
     with pytest.raises(providers_api.HTTPException) as enable_exc:
-        providers_api.enable_provider_plugin("codex-cli", "..bad")
+        await providers_api.enable_provider_plugin("codex-cli", "..bad")
     with pytest.raises(providers_api.HTTPException) as disable_exc:
-        providers_api.disable_provider_plugin("codex-cli", "..bad")
+        await providers_api.disable_provider_plugin("codex-cli", "..bad")
 
     assert enable_exc.value.status_code == 400
     assert "Plugin selector" in enable_exc.value.detail

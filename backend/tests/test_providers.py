@@ -33,10 +33,10 @@ def test_provider_status_includes_central_capability_matrix():
     assert codex["capability_matrix"]["doctor"]["state"] == "read_only"
 
 
-def test_provider_capabilities_api_returns_matrix():
+async def test_provider_capabilities_api_returns_matrix():
     from app.api.v1 import providers as providers_api
 
-    response = providers_api.get_provider_capabilities("codex-cli")
+    response = await providers_api.get_provider_capabilities("codex-cli")
 
     assert response["provider"] == "codex-cli"
     assert response["capabilities"]["config"] is True

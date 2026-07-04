@@ -1,7 +1,7 @@
 """Agent activity API — live status of running agent sessions."""
 from __future__ import annotations
 
-import subprocess
+import asyncio
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
@@ -21,18 +21,18 @@ class AgentActivity(BaseModel):
 
 
 @router.get("/live")
-def get_live_agents(
+async def get_live_agents(
     provider: str | None = Query(default=None),
     preview_lines: int = Query(default=5, ge=1, le=20),
 ) -> dict:
     """Return currently running agent sessions with optional pane preview."""
-    sessions = discover_agent_sessions(provider)
+    sessions = await asyncio.to_thread(discover_agent_sessions, provider)
     agents: list[AgentActivity] = []
     for s in sessions:
         preview = None
         target = s.get("tmux_target", "")
         if target:
-            raw = capture_pane_preview(target)
+            raw = await asyncio.to_thread(capture_pane_preview, target)
             if raw:
                 lines = raw.strip().splitlines()
                 preview = "\n".join(lines[-preview_lines:])
@@ -61,9 +61,9 @@ def _infer_status(preview: str | None, session: dict) -> str:
 
 
 @router.get("/summary")
-def get_activity_summary() -> dict:
+async def get_activity_summary() -> dict:
     """Return a compact summary for the dashboard."""
-    sessions = discover_agent_sessions()
+    sessions = await asyncio.to_thread(discover_agent_sessions)
     providers: dict[str, int] = {}
     for s in sessions:
         p = s.get("provider", "unknown")
