@@ -349,6 +349,40 @@ async def test_retry_queued_cards_respects_per_project_cap(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_retry_queued_cards_dispatches_queued_orphan(monkeypatch):
+    # An orphan (unclaimed card left behind in an agent column, see the orphan
+    # fallback in _next_card) that got memory-queued must be retried like any
+    # other queued card, not silently dropped for not being in "Backlog".
+    from types import SimpleNamespace
+    from app.services.scheduling.pending_queue import PendingQueue
+    import app.services.scheduling.pending_queue as pq_mod
+    import app.kanban.db as kdb
+
+    fresh_queue = PendingQueue()
+    monkeypatch.setattr(pq_mod, "pending_queue", fresh_queue)
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    monkeypatch.setattr(
+        dispatch, "get_memory_status_cached",
+        lambda: SimpleNamespace(is_critical=False, usage_percent=0.1),
+    )
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        orphan = await _make_card(s, title="orphaned", column="developer")
+        await s.commit()
+
+    fresh_queue.enqueue(card_id=orphan, project_key=PK, project_path="/p")
+
+    await dispatch._retry_queued_cards(transport)
+
+    assert len(transport.calls) == 1
+    assert fresh_queue.size == 0
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, orphan)
+    assert card.claimed_by is not None
+
+
+@pytest.mark.asyncio
 async def test_get_default_transport_defaults_to_worktree():
     async with KanbanSessionLocal() as s:
         assert await dispatch.get_default_transport(s, PK) == "worktree"
@@ -445,6 +479,8 @@ async def test_spawn_failure_releases_and_returns_card_to_todo():
 async def test_reaps_dead_agent_claim_in_doing_and_dispatches_next():
     # A session died without moving its card out of Doing. With no matching live
     # tmux session, the stale claim is released so the next Todo card dispatches.
+    # Cap pinned to 1 so this test isolates the reap-then-dispatch-next-Backlog-card
+    # behavior from the orphan-redispatch fallback covered separately below.
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         dead = await _make_card(s, title="orphaned", column="developer")
@@ -453,6 +489,7 @@ async def test_reaps_dead_agent_claim_in_doing_and_dispatches_next():
             entity_id=dead, payload={"claimed_by": "agent:k-dead-0001"},
         )
         waiting = await _make_card(s, title="waiting", column="Backlog")
+        await dispatch.set_max_sessions(s, PK, 1)
         await s.commit()
         result = await dispatch.dispatch_project(
             s, project_key=PK, project_path="/p", transport=transport,
@@ -462,9 +499,52 @@ async def test_reaps_dead_agent_claim_in_doing_and_dispatches_next():
         dead_card = await get_card(s, dead)
         waiting_card = await get_card(s, waiting)
     assert dead_card.claimed_by is None       # stale claim reaped
-    assert dead_card.column == "developer"        # orphan left for a human to re-rank
+    assert dead_card.column == "developer"    # cap full after "waiting" -> not yet redispatched
     assert result is not None                 # cap freed -> next card dispatched
     assert waiting_card.column == "engineer"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_orphaned_agent_column_card_redispatched_when_cap_has_room():
+    # A card left unclaimed in an agent column (e.g. by a prior reap whose dead
+    # session had no resumable transcript, see reap_stale_claims) must not be
+    # stranded forever: with a free cap slot and nothing waiting in Backlog/To
+    # Resume, the tick must pick it back up itself -- otherwise auto-dispatch
+    # silently stalls until a human notices and hits "redispatch" by hand.
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        orphan = await _make_card(s, title="orphaned", column="developer")
+        await s.commit()
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        card = await get_card(s, orphan)
+    assert result is not None
+    assert len(transport.calls) == 1
+    assert card.claimed_by is not None and card.claimed_by.startswith("agent:")
+
+
+@pytest.mark.asyncio
+async def test_orphaned_agent_column_card_waits_for_backlog_cards_first():
+    # When both a fresh Backlog card and a leftover orphan are available, the
+    # Backlog card is prioritised (it's new work); the orphan only fills cap
+    # room left over after Backlog/To Resume are exhausted.
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        orphan = await _make_card(s, title="orphaned", column="developer")
+        waiting = await _make_card(s, title="waiting", column="Backlog")
+        await dispatch.set_max_sessions(s, PK, 1)
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        orphan_card = await get_card(s, orphan)
+        waiting_card = await get_card(s, waiting)
+    assert waiting_card.claimed_by is not None   # Backlog card wins the single slot
+    assert orphan_card.claimed_by is None        # orphan still waiting for room
     assert len(transport.calls) == 1
 
 
