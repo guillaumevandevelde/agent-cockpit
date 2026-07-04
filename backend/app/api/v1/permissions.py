@@ -1,4 +1,5 @@
 """Permission management API endpoints."""
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/permissions", tags=["Permissions"])
 
 
 @router.get("", response_model=PermissionListResponse)
-def list_permissions(
+async def list_permissions(
     project_path: Optional[str] = Query(None, description="Path to project directory"),
 ) -> PermissionListResponse:
     """
@@ -31,13 +32,13 @@ def list_permissions(
         List of all permission rules with settings
     """
     try:
-        return PermissionService.list_permissions(project_path)
+        return await asyncio.to_thread(PermissionService.list_permissions, project_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list permissions: {str(e)}")
 
 
 @router.get("/scope/{scope}", response_model=PermissionListResponse)
-def list_permissions_by_scope(
+async def list_permissions_by_scope(
     scope: str,
     project_path: Optional[str] = Query(None, description="Path to project directory"),
 ) -> PermissionListResponse:
@@ -55,7 +56,7 @@ def list_permissions_by_scope(
         raise HTTPException(status_code=400, detail="Scope must be 'user' or 'project'")
 
     try:
-        all_rules = PermissionService.list_permissions(project_path)
+        all_rules = await asyncio.to_thread(PermissionService.list_permissions, project_path)
         filtered_rules = [rule for rule in all_rules.rules if rule.scope == scope]
         return PermissionListResponse(rules=filtered_rules, settings=all_rules.settings)
     except Exception as e:

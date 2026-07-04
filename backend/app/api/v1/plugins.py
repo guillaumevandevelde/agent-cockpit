@@ -2,6 +2,7 @@
 Plugin API endpoints for Claude Cockpit
 """
 
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +32,7 @@ router = APIRouter()
 
 
 @router.get("/plugins", response_model=PluginListResponse)
-def list_plugins(
+async def list_plugins(
     project_path: Optional[str] = Query(None, description="Optional project path")
 ):
     """
@@ -41,7 +42,7 @@ def list_plugins(
     """
     try:
         service = PluginService()
-        return service.list_installed_plugins(project_path=project_path)
+        return await asyncio.to_thread(service.list_installed_plugins, project_path=project_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list plugins: {str(e)}")
 
@@ -50,7 +51,7 @@ def list_plugins(
 
 
 @router.get("/plugins/marketplaces")
-def list_marketplaces():
+async def list_marketplaces():
     """
     List all configured plugin marketplaces.
 
@@ -58,7 +59,7 @@ def list_marketplaces():
     """
     try:
         service = PluginService()
-        marketplaces = service.list_marketplaces_from_files()
+        marketplaces = await asyncio.to_thread(service.list_marketplaces_from_files)
         return {"marketplaces": marketplaces}
     except Exception as e:
         raise HTTPException(
@@ -67,7 +68,7 @@ def list_marketplaces():
 
 
 @router.post("/plugins/marketplaces", status_code=201)
-def add_marketplace(marketplace: MarketplaceCreate):
+async def add_marketplace(marketplace: MarketplaceCreate):
     """
     Add a new plugin marketplace via Claude CLI.
 
@@ -79,7 +80,7 @@ def add_marketplace(marketplace: MarketplaceCreate):
 
     try:
         service = PluginService()
-        result = service.add_marketplace_via_cli(marketplace.input)
+        result = await asyncio.to_thread(service.add_marketplace_via_cli, marketplace.input)
 
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])
@@ -94,7 +95,7 @@ def add_marketplace(marketplace: MarketplaceCreate):
 
 
 @router.delete("/plugins/marketplaces/{name}")
-def remove_marketplace(name: str):
+async def remove_marketplace(name: str):
     """
     Remove a plugin marketplace via Claude CLI.
 
@@ -102,7 +103,7 @@ def remove_marketplace(name: str):
     """
     try:
         service = PluginService()
-        result = service.remove_marketplace_via_cli(name)
+        result = await asyncio.to_thread(service.remove_marketplace_via_cli, name)
 
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["message"])
@@ -117,7 +118,7 @@ def remove_marketplace(name: str):
 
 
 @router.get("/plugins/marketplace/{name}/browse")
-def browse_marketplace(name: str):
+async def browse_marketplace(name: str):
     """
     Browse plugins available in a marketplace.
 
@@ -125,7 +126,7 @@ def browse_marketplace(name: str):
     """
     try:
         service = PluginService()
-        plugins = service.browse_marketplace_from_files(name)
+        plugins = await asyncio.to_thread(service.browse_marketplace_from_files, name)
         return {"plugins": plugins}
     except Exception as e:
         raise HTTPException(
@@ -134,7 +135,7 @@ def browse_marketplace(name: str):
 
 
 @router.get("/plugins/marketplace/{marketplace_name}/plugin/{plugin_name}")
-def get_marketplace_plugin_details(marketplace_name: str, plugin_name: str):
+async def get_marketplace_plugin_details(marketplace_name: str, plugin_name: str):
     """
     Get detailed information about a plugin from a marketplace.
 
@@ -142,7 +143,9 @@ def get_marketplace_plugin_details(marketplace_name: str, plugin_name: str):
     """
     try:
         service = PluginService()
-        details = service.get_marketplace_plugin_details(marketplace_name, plugin_name)
+        details = await asyncio.to_thread(
+            service.get_marketplace_plugin_details, marketplace_name, plugin_name
+        )
         if details is None:
             raise HTTPException(status_code=404, detail="Plugin not found in marketplace")
         return details
@@ -155,7 +158,7 @@ def get_marketplace_plugin_details(marketplace_name: str, plugin_name: str):
 
 
 @router.post("/plugins/marketplace/{name}/update", status_code=200)
-def update_marketplace(name: str):
+async def update_marketplace(name: str):
     """
     Update a marketplace via Claude CLI.
 
@@ -163,7 +166,7 @@ def update_marketplace(name: str):
     """
     try:
         service = PluginService()
-        result = service.update_marketplace_via_cli(name)
+        result = await asyncio.to_thread(service.update_marketplace_via_cli, name)
 
         if not result["success"]:
             raise HTTPException(
@@ -213,7 +216,7 @@ async def set_marketplace_auto_update(name: str, request: dict):
 
 
 @router.get("/plugins/updates", response_model=PluginUpdatesResponse)
-def check_plugin_updates():
+async def check_plugin_updates():
     """
     Check for available plugin updates.
 
@@ -222,7 +225,7 @@ def check_plugin_updates():
     """
     try:
         service = PluginService()
-        return service.check_for_updates()
+        return await asyncio.to_thread(service.check_for_updates)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to check for updates: {str(e)}"
@@ -230,7 +233,7 @@ def check_plugin_updates():
 
 
 @router.get("/plugins/available", response_model=AvailablePluginsResponse)
-def get_all_available_plugins():
+async def get_all_available_plugins():
     """
     Get all available plugins from all configured marketplaces.
 
@@ -238,7 +241,7 @@ def get_all_available_plugins():
     """
     try:
         service = PluginService()
-        plugins = service.get_all_available_plugins()
+        plugins = await asyncio.to_thread(service.get_all_available_plugins)
         return AvailablePluginsResponse(plugins=plugins)
     except Exception as e:
         raise HTTPException(
@@ -247,7 +250,7 @@ def get_all_available_plugins():
 
 
 @router.post("/plugins/validate", response_model=PluginValidationResult)
-def validate_plugin(request: PluginValidateRequest):
+async def validate_plugin(request: PluginValidateRequest):
     """
     Validate a plugin at the given path.
 
@@ -255,7 +258,7 @@ def validate_plugin(request: PluginValidateRequest):
     """
     try:
         service = PluginService()
-        return service.validate_plugin(request.path)
+        return await asyncio.to_thread(service.validate_plugin, request.path)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to validate plugin: {str(e)}"
@@ -263,13 +266,13 @@ def validate_plugin(request: PluginValidateRequest):
 
 
 @router.post("/plugins/update-all", response_model=PluginUpdateAllResponse)
-def update_all_plugins():
+async def update_all_plugins():
     """
     Update all plugins that have available updates.
     """
     try:
         service = PluginService()
-        return service.update_all_plugins()
+        return await asyncio.to_thread(service.update_all_plugins)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to update plugins: {str(e)}"
@@ -277,7 +280,7 @@ def update_all_plugins():
 
 
 @router.post("/plugins/{name}/update", response_model=PluginUpdateResponse)
-def update_plugin(name: str):
+async def update_plugin(name: str):
     """
     Update a specific plugin.
 
@@ -285,7 +288,7 @@ def update_plugin(name: str):
     """
     try:
         service = PluginService()
-        return service.update_plugin(name)
+        return await asyncio.to_thread(service.update_plugin, name)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to update plugin: {str(e)}"
@@ -296,7 +299,7 @@ def update_plugin(name: str):
 
 
 @router.post("/plugins/install", response_model=PluginInstallResponse)
-def install_plugin(request: PluginInstallRequest):
+async def install_plugin(request: PluginInstallRequest):
     """
     Install a plugin from a marketplace.
 
@@ -304,7 +307,7 @@ def install_plugin(request: PluginInstallRequest):
     """
     try:
         service = PluginService()
-        return service.install_plugin(request)
+        return await asyncio.to_thread(service.install_plugin, request)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to install plugin: {str(e)}"
@@ -332,7 +335,7 @@ async def toggle_plugin(name: str, request: PluginToggleRequest):
 
 
 @router.get("/plugins/{name}", response_model=Plugin)
-def get_plugin(
+async def get_plugin(
     name: str,
     project_path: Optional[str] = Query(None, description="Optional project path")
 ):
@@ -343,7 +346,7 @@ def get_plugin(
     """
     try:
         service = PluginService()
-        plugin = service.get_plugin_details(name, project_path=project_path)
+        plugin = await asyncio.to_thread(service.get_plugin_details, name, project_path=project_path)
 
         if not plugin:
             raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")

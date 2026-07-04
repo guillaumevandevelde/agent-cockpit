@@ -105,7 +105,7 @@ def test_codex_history_diagnostics_truncate_large_history_and_cache(tmp_path):
     assert "model-a" not in serialized
 
 
-def test_provider_history_diagnostics_endpoint_is_codex_only(monkeypatch, tmp_path):
+async def test_provider_history_diagnostics_endpoint_is_codex_only(monkeypatch, tmp_path):
     from app.api.v1 import providers as providers_api
     from app.services.codex_history_service import CodexHistoryService
 
@@ -119,14 +119,14 @@ def test_provider_history_diagnostics_endpoint_is_codex_only(monkeypatch, tmp_pa
         lambda: CodexHistoryService(codex_home=tmp_path),
     )
 
-    response = providers_api.get_provider_history_diagnostics("codex-cli")
+    response = await providers_api.get_provider_history_diagnostics("codex-cli")
 
     assert response["provider"] == "codex-cli"
     assert response["provider_display_name"] == "Codex"
     assert response["history"]["valid_rows"] == 1
 
     try:
-        providers_api.get_provider_history_diagnostics("claude-code")
+        await providers_api.get_provider_history_diagnostics("claude-code")
     except providers_api.HTTPException as exc:
         assert exc.status_code == 400
     else:

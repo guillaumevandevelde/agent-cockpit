@@ -16,7 +16,7 @@ def test_provider_cli_executor_uses_codex_binary_and_whitelist():
     assert result.exit_code == 0
 
 
-def test_provider_cli_api_redacts_sensitive_output(monkeypatch):
+async def test_provider_cli_api_redacts_sensitive_output(monkeypatch):
     from app.api.v1 import providers as providers_api
     from app.models.schemas import CLIExecuteRequest
 
@@ -33,7 +33,7 @@ def test_provider_cli_api_redacts_sensitive_output(monkeypatch):
 
     monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
 
-    response = providers_api.execute_provider_cli(
+    response = await providers_api.execute_provider_cli(
         "codex-cli",
         CLIExecuteRequest(command="doctor", args=[]),
     )

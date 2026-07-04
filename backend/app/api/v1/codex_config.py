@@ -1,6 +1,8 @@
 """Codex configuration API."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -15,34 +17,35 @@ class CodexConfigUpdateRequest(BaseModel):
 
 
 @router.get("/codex-config")
-def get_codex_config():
-    return CodexConfigService().get_config()
+async def get_codex_config():
+    return await asyncio.to_thread(CodexConfigService().get_config)
 
 
 @router.get("/codex-config/files")
-def list_codex_config_files():
+async def list_codex_config_files():
     service = CodexConfigService()
-    files = service.get_all_config_files()
+    files = await asyncio.to_thread(service.get_all_config_files)
     return {"files": files, "count": len(files)}
 
 
 @router.get("/codex-config/file")
-def get_codex_config_file(path: str):
+async def get_codex_config_file(path: str):
     try:
-        return CodexConfigService().get_file_content(path)
+        return await asyncio.to_thread(CodexConfigService().get_file_content, path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/codex-config/raw")
-def get_codex_config_raw(path: str):
-    return get_codex_config_file(path)
+async def get_codex_config_raw(path: str):
+    return await get_codex_config_file(path)
 
 
 @router.patch("/codex-config")
-def update_codex_config(request: CodexConfigUpdateRequest):
+async def update_codex_config(request: CodexConfigUpdateRequest):
     try:
-        return CodexConfigService().update_safe_settings(
+        return await asyncio.to_thread(
+            CodexConfigService().update_safe_settings,
             settings=request.settings,
             features=request.features,
         )
@@ -51,5 +54,5 @@ def update_codex_config(request: CodexConfigUpdateRequest):
 
 
 @router.put("/codex-config")
-def replace_codex_config_safe_settings(request: CodexConfigUpdateRequest):
-    return update_codex_config(request)
+async def replace_codex_config_safe_settings(request: CodexConfigUpdateRequest):
+    return await update_codex_config(request)

@@ -2,17 +2,17 @@
 import pytest
 
 
-def test_provider_registry_smoke_exposes_claude_and_codex_statuses():
+async def test_provider_registry_smoke_exposes_claude_and_codex_statuses():
     from app.api.v1 import providers as providers_api
 
-    response = providers_api.list_providers()
+    response = await providers_api.list_providers()
 
     provider_ids = {provider["id"] for provider in response["providers"]}
     assert response["count"] == 4
     assert provider_ids == {"claude-code", "codex-cli", "mimo-code", "open-code"}
 
-    claude_status = providers_api.get_provider_status("claude-code")
-    codex_status = providers_api.get_provider_status("codex-cli")
+    claude_status = await providers_api.get_provider_status("claude-code")
+    codex_status = await providers_api.get_provider_status("codex-cli")
 
     assert claude_status["capabilities"]["sessions"] is True
     assert claude_status["capabilities"]["usage"] is True
@@ -104,11 +104,11 @@ async def test_agent_bridge_spawn_unknown_provider_smoke(tmp_path):
     assert "Unknown provider" in exc_info.value.detail
 
 
-def test_provider_specific_inventory_smoke_rejects_wrong_provider():
+async def test_provider_specific_inventory_smoke_rejects_wrong_provider():
     from app.api.v1 import providers as providers_api
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
-        providers_api.get_provider_mcp_inventory("claude-code")
+        await providers_api.get_provider_mcp_inventory("claude-code")
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == "unsupported_provider_operation"
