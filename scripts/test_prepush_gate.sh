@@ -160,5 +160,21 @@ HS
   [ "$gone" -eq 1 ] || exit 93
 ) && ok "orphaned run is reaped, not left to the timeout budget" || bad "orphan guard (rc $?)"
 
+# --- 10. GATE_LOCK_WAIT default must exceed the worst-case single-holder hold --
+# gate_acquire_lock is taken ONCE and held across BOTH gate_run_backend and
+# gate_run_frontend, each independently capped at GATE_RUN_TIMEOUT+GATE_KILL_AFTER.
+# If a queued waiter's GATE_LOCK_WAIT is shorter than that combined worst case, it
+# gives up mid-hold and "proceeds unserialized" -- stacking a second full
+# backend+frontend run on top of the first. That doubles contention, slows both
+# runs further, and pushes the NEXT waiter past its own budget too: a thundering
+# herd that made concurrent pushes hang indefinitely.
+head "GATE_LOCK_WAIT default safely exceeds worst-case backend+frontend hold"
+(
+  unset COCKPIT_GATE_LOCK_WAIT COCKPIT_GATE_RUN_TIMEOUT
+  source "$HOOK"
+  worst_case=$(( (GATE_RUN_TIMEOUT + GATE_KILL_AFTER) * 2 ))
+  [ "$GATE_LOCK_WAIT" -gt "$worst_case" ] || exit 81
+) && ok "default lock wait > worst-case sequential backend+frontend hold" || bad "GATE_LOCK_WAIT vs GATE_RUN_TIMEOUT relationship (rc $?)"
+
 printf '\n\033[1m%d passed, %d failed\033[0m\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

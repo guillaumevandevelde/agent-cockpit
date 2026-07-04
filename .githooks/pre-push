@@ -13,8 +13,9 @@
 #   * The heavy checks run under a SHARED flock so N gates don't stampede the CPU/IO
 #     (this is what used to make the gate look hung). The lock lives in the git
 #     common dir, shared by the main checkout and every worktree. If the lock is
-#     held, we wait (COCKPIT_GATE_LOCK_WAIT, default 900s) then proceed unserialized
-#     rather than block a push forever.
+#     held, we wait (COCKPIT_GATE_LOCK_WAIT, default 2*(GATE_RUN_TIMEOUT+30)+60s —
+#     comfortably above the worst case a single holder can occupy the lock for,
+#     see below) then proceed unserialized rather than block a push forever.
 #   * Each heavy run is wrapped in `timeout` (COCKPIT_GATE_RUN_TIMEOUT, default 600s)
 #     so a genuinely stuck run dies and releases the lock instead of poisoning the
 #     queue for every waiter.
@@ -52,9 +53,17 @@ gate_warn() { printf '%s\n' "${ylw}[pre-push] $*${rst}" >&2; }
 # Fixed high fd for the gate lock. Kept literal (not a variable) so the redirections
 # below stay static — no eval needed to open/close/close-in-child.
 # COCKPIT_GATE_LOCK_FD = 200
-GATE_LOCK_WAIT="${COCKPIT_GATE_LOCK_WAIT:-900}"     # seconds to wait for the lock
 GATE_RUN_TIMEOUT="${COCKPIT_GATE_RUN_TIMEOUT:-600}" # seconds per heavy run
 GATE_KILL_AFTER=30                                  # SIGKILL grace after SIGTERM
+# gate_acquire_lock is taken ONCE and held across BOTH gate_run_backend and
+# gate_run_frontend (sequential), each independently capped at GATE_RUN_TIMEOUT
+# +GATE_KILL_AFTER. A queued waiter's default wait budget MUST exceed that combined
+# worst case -- otherwise it gives up mid-hold and "proceeds unserialized",
+# stacking a second full backend+frontend run on top of the first. That doubles
+# contention, slows both runs further, and pushes the NEXT waiter past its own
+# budget too: a thundering herd that made concurrent pushes hang indefinitely
+# under multi-agent load. +60s margin on top of the doubled worst case.
+GATE_LOCK_WAIT="${COCKPIT_GATE_LOCK_WAIT:-$(( (GATE_RUN_TIMEOUT + GATE_KILL_AFTER) * 2 + 60 ))}"
 
 # Abort/orphan state (see "Abort/orphan hardening" above).
 GATE_CHILD_PGID=""    # process-group id of the currently-running heavy check (empty = none)
