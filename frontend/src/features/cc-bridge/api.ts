@@ -47,6 +47,19 @@ export async function fetchMinimaxPlatformStatus(): Promise<PlatformStatusRespon
   return apiClient<PlatformStatusResponse>(BASE + '/platforms/minimax/status')
 }
 
+export async function setMinimaxApiKey(minimaxApiKey: string): Promise<PlatformStatusResponse> {
+  return apiClient<PlatformStatusResponse>(BASE + '/platforms/minimax/credentials', {
+    method: 'POST',
+    body: JSON.stringify({ minimax_api_key: minimaxApiKey }),
+  })
+}
+
+export async function clearMinimaxApiKey(): Promise<PlatformStatusResponse> {
+  return apiClient<PlatformStatusResponse>(BASE + '/platforms/minimax/credentials', {
+    method: 'DELETE',
+  })
+}
+
 export async function bulkResumeSessions(request: BulkResumeRequest): Promise<BulkResumeResponse> {
   return apiClient<BulkResumeResponse>(BASE + '/sessions/bulk-resume', {
     method: 'POST',

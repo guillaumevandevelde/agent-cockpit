@@ -16,6 +16,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.schemas import ResumableSessionListResponse
 from app.services.agent_bridge import git_status as git_status_service
+from app.services.agent_bridge import minimax_credentials
 from app.services.agent_bridge import teams as teams_service
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
 from app.services.agent_bridge.pty_relay import PtyRelay
@@ -121,6 +122,27 @@ def get_minimax_platform_status():
     spawn_session and it must never reach the browser.
     """
     return {"configured": bool(settings.minimax_api_key)}
+
+
+class MinimaxCredentialsRequest(BaseModel):
+    minimax_api_key: str
+
+
+@router.post("/platforms/minimax/credentials", response_model=PlatformStatusResponse)
+def set_minimax_credentials(request: MinimaxCredentialsRequest):
+    """Set the MiniMax API key from the UI: writes it to the backend .env file
+    and updates the running Settings immediately. Never returns the key."""
+    try:
+        minimax_credentials.set_minimax_api_key(request.minimax_api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"configured": True}
+
+
+@router.delete("/platforms/minimax/credentials", response_model=PlatformStatusResponse)
+def clear_minimax_credentials():
+    minimax_credentials.clear_minimax_api_key()
+    return {"configured": False}
 
 
 @router.get("/token")

@@ -23,7 +23,7 @@ import { MODAL_SIZES } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
 import { fetchHosts } from '@/features/hosts/api'
-import { spawnSession, fetchResumableSessions, bulkResumeSessions, fetchMinimaxPlatformStatus } from './api'
+import { spawnSession, fetchResumableSessions, bulkResumeSessions, fetchMinimaxPlatformStatus, setMinimaxApiKey, clearMinimaxApiKey } from './api'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgentProviderId } from '@/types/providers'
@@ -121,6 +121,10 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [bedrockModel, setBedrockModel] = useState('')
   const [minimaxBaseUrl, setMinimaxBaseUrl] = useState(MINIMAX_BASE_URL_INTERNATIONAL)
   const [minimaxConfigured, setMinimaxConfigured] = useState<boolean | null>(null)
+  const [minimaxKeyInput, setMinimaxKeyInput] = useState('')
+  const [minimaxKeyEditing, setMinimaxKeyEditing] = useState(false)
+  const [savingMinimaxKey, setSavingMinimaxKey] = useState(false)
+  const [minimaxKeyError, setMinimaxKeyError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -162,11 +166,46 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     if (!open || platform !== 'minimax') return
     let cancelled = false
     setMinimaxConfigured(null)
+    setMinimaxKeyInput('')
+    setMinimaxKeyEditing(false)
+    setMinimaxKeyError(null)
     fetchMinimaxPlatformStatus()
       .then((data) => { if (!cancelled) setMinimaxConfigured(data.configured) })
       .catch(() => { if (!cancelled) setMinimaxConfigured(null) })
     return () => { cancelled = true }
   }, [open, platform])
+
+  async function handleSaveMinimaxKey() {
+    const key = minimaxKeyInput.trim()
+    if (!key) return
+    setSavingMinimaxKey(true)
+    setMinimaxKeyError(null)
+    try {
+      const result = await setMinimaxApiKey(key)
+      setMinimaxConfigured(result.configured)
+      setMinimaxKeyInput('')
+      setMinimaxKeyEditing(false)
+    } catch (err) {
+      setMinimaxKeyError(err instanceof Error ? err.message : 'Failed to save MiniMax API key')
+    } finally {
+      setSavingMinimaxKey(false)
+    }
+  }
+
+  async function handleClearMinimaxKey() {
+    setSavingMinimaxKey(true)
+    setMinimaxKeyError(null)
+    try {
+      const result = await clearMinimaxApiKey()
+      setMinimaxConfigured(result.configured)
+      setMinimaxKeyInput('')
+      setMinimaxKeyEditing(false)
+    } catch (err) {
+      setMinimaxKeyError(err instanceof Error ? err.message : 'Failed to clear MiniMax API key')
+    } finally {
+      setSavingMinimaxKey(false)
+    }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -225,6 +264,9 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setSelectedHostId(null)
       setHosts([])
       setMinimaxConfigured(null)
+      setMinimaxKeyInput('')
+      setMinimaxKeyEditing(false)
+      setMinimaxKeyError(null)
     }
   }, [open, defaultProvider])
 
@@ -674,14 +716,74 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
 
           {!isCodex && platform === 'minimax' && (
             <div className="space-y-3 rounded-md border border-border p-3">
-              {minimaxConfigured === false && (
-                <p className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive">
-                  MiniMax API key not configured. Set MINIMAX_API_KEY in the backend .env and restart the backend.
-                </p>
-              )}
               {minimaxConfigured === null && (
                 <p className="text-xs text-muted-foreground">Checking configuration...</p>
               )}
+
+              {minimaxConfigured === true && !minimaxKeyEditing && (
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">MiniMax API key configured.</p>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => setMinimaxKeyEditing(true)}
+                    >
+                      Change
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-destructive hover:text-destructive/80 underline"
+                      onClick={handleClearMinimaxKey}
+                      disabled={savingMinimaxKey}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {(minimaxConfigured === false || minimaxKeyEditing) && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="minimax-api-key">MiniMax API key</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="minimax-api-key"
+                      type="password"
+                      autoComplete="off"
+                      value={minimaxKeyInput}
+                      onChange={(e) => setMinimaxKeyInput(e.target.value)}
+                      placeholder="sk-..."
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleSaveMinimaxKey}
+                      disabled={!minimaxKeyInput.trim() || savingMinimaxKey}
+                    >
+                      {savingMinimaxKey ? 'Saving...' : 'Save'}
+                    </Button>
+                    {minimaxConfigured === true && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setMinimaxKeyEditing(false); setMinimaxKeyInput(''); setMinimaxKeyError(null) }}
+                        disabled={savingMinimaxKey}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Sent once to the backend and written to its local .env file. Never stored in the database, never shown again.
+                  </p>
+                  {minimaxKeyError && (
+                    <p className="text-xs text-destructive">{minimaxKeyError}</p>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <Label>Endpoint</Label>
                 <Select value={minimaxBaseUrl} onValueChange={setMinimaxBaseUrl}>
