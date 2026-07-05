@@ -11,6 +11,7 @@ and, eventually, multi-device sync. Frozen on purpose — the sync seam (sync.py
 pruned. See docs/cockpit/sync-hlc-freeze-vs-prune.md.
 """
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -19,6 +20,9 @@ from sqlalchemy import select, func, delete
 
 from app.kanban.hlc import HLC, hlc_max
 from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanMeta, KanbanOp
+
+logger = logging.getLogger(__name__)
+
 
 class ClaimRejected(Exception):
     """Raised when a claim loses to an existing earlier claim."""
@@ -94,6 +98,10 @@ async def apply_operation(
     await _materialize(session, op_type=op_type, entity_type=entity_type,
                        project_key=project_key, entity_id=entity_id,
                        payload=payload, hlc=hlc)
+    logger.info(
+        "kanban op: %s %s %s (project=%s, payload_keys=%s)",
+        op_type, entity_type, entity_id, project_key, sorted(payload.keys()),
+    )
     return entity_id
 
 
@@ -191,6 +199,10 @@ async def _materialize(session, *, op_type, entity_type, project_key,
     if entity_type == "card" and op_type == "delete":
         card = await session.get(KanbanCard, entity_id)
         if card is not None:
+            logger.info(
+                "deleting card %s %r (column=%s, claimed_by=%s)",
+                entity_id, card.title, card.column, card.claimed_by,
+            )
             await session.execute(
                 delete(KanbanDeliverable).where(KanbanDeliverable.card_id == entity_id)
             )

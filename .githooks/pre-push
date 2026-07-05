@@ -319,6 +319,17 @@ main() {
     # to the main checkout so `cd "$ROOT/backend"` doesn't become `cd /backend`.
     [ -z "$ROOT" ] && ROOT="$MAIN"
 
+    # Persist this run's output alongside the live terminal view. A killed/closed
+    # session (tmux pane gone, SSH drop) used to take the gate's actual test output
+    # down with it, leaving no way to tell what a failed push actually printed.
+    # `tee` duplicates everything from here on to both the terminal and the file;
+    # the 7-day prune mirrors scripts/cockpit.sh's run-*.log retention.
+    local prepush_log_dir="$MAIN/logs/prepush"
+    if mkdir -p "$prepush_log_dir" 2>/dev/null; then
+        find "$prepush_log_dir" -type f -name '*.log' -mtime +7 -delete 2>/dev/null || true
+        exec > >(tee -a "$prepush_log_dir/$(date +%Y%m%d-%H%M%S)-$$.log") 2>&1
+    fi
+
     # Interrupt handling: from here on, an aborted push tears down cleanly instead of
     # leaving an orphaned check or a stuck lock (see "Abort/orphan hardening" above).
     trap gate_on_signal INT TERM HUP
