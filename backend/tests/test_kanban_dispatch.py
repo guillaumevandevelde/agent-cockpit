@@ -1954,6 +1954,13 @@ class TestBuildShipInstructions:
             instructions = dispatch._build_ship_instructions(mode)
             assert "git fetch origin" in instructions
 
+    def test_pull_request_mode_polls_for_merge_before_done(self):
+        instructions = dispatch._build_ship_instructions("pull-request")
+        assert "gh pr ready" in instructions
+        assert "gh pr merge --auto --squash" in instructions
+        assert "mergeStateStatus" in instructions
+        assert "report_impediment" in instructions
+
 
 class TestBuildCardPromptSessionEnd:
     """build_card_prompt includes the Session-end workflow section."""

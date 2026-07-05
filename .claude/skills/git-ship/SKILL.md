@@ -60,7 +60,7 @@ Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`) and `move_ca
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
 
-## 4b. Ship mode `pull-request` — open a draft PR
+## 4b. Ship mode `pull-request` — open a PR and wait for it to merge
 
 Only when every test passed. Requires the `gh` CLI authenticated:
 
@@ -68,14 +68,35 @@ Only when every test passed. Requires the `gh` CLI authenticated:
 gh auth status            # if this fails, see "gh unavailable" below
 git push -u origin HEAD
 gh pr create --draft --base master --fill
+gh pr ready
+gh pr merge --auto --squash
 ```
 
-Capture the PR URL from `gh pr create` output, `attach_deliverable` (kind `pr`, ref=`<PR-URL>`),
-then `move_card` to `Done`.
+Then **poll until the PR actually merges** — `master` requires the `quality.yml`
+checks to pass, so this can take a few minutes:
+
+```bash
+while true; do
+  STATE=$(gh pr view --json state,mergeStateStatus -q '.state + " " + .mergeStateStatus')
+  echo "PR state: $STATE"
+  case "$STATE" in
+    MERGED*) break ;;
+    *DIRTY*|*BLOCKED*|CLOSED*) echo 'PR did not merge'; exit 1 ;;
+  esac
+  sleep 30
+done
+```
+
+If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `move_card` to `Done`.
+
+If the loop exited because a check failed or the PR was closed: `attach_deliverable`
+(kind `pr`, ref=`<PR-URL>`), then `report_impediment` instead of moving to Done —
+a human needs to look at the failing PR.
 
 **gh unavailable:** if `gh auth status` fails, do not merge. Push the branch
 (`git push -u origin HEAD`), `comment` "gh unavailable — manual PR needed from <branch>",
-`attach_deliverable` (kind `branch`), and `move_card` to `Done`.
+`attach_deliverable` (kind `branch`), and stop — do not move the card to Done.
+A human needs to open the PR manually.
 
 ## 5. Cleanup (automatic)
 
