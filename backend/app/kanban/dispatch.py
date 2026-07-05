@@ -358,7 +358,7 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "     # mergeStateStatus=BLOCKED also just means \"checks still running\" "
             "— only a genuinely failed/cancelled/timed-out check is a real failure.\n"
             "     FAILED=$(echo \"$DATA\" | jq '[.statusCheckRollup[]? | "
-            "select((.conclusion // .status // \"\") | "
+            "select((.conclusion // .status // .state // \"\") | "
             "test(\"FAILURE|ERROR|CANCELLED|TIMED_OUT|ACTION_REQUIRED\"; \"i\"))] "
             "| length')\n"
             "     if [ \"$FAILED\" -gt 0 ]; then\n"

@@ -90,7 +90,7 @@ while true; do
   fi
   # mergeStateStatus=BLOCKED also just means "checks still running" — only a
   # genuinely failed/cancelled/timed-out check is a real failure.
-  FAILED=$(echo "$DATA" | jq '[.statusCheckRollup[]? | select((.conclusion // .status // "") | test("FAILURE|ERROR|CANCELLED|TIMED_OUT|ACTION_REQUIRED"; "i"))] | length')
+  FAILED=$(echo "$DATA" | jq '[.statusCheckRollup[]? | select((.conclusion // .status // .state // "") | test("FAILURE|ERROR|CANCELLED|TIMED_OUT|ACTION_REQUIRED"; "i"))] | length')
   if [ "$FAILED" -gt 0 ]; then
     echo 'A required check failed'; exit 1
   fi

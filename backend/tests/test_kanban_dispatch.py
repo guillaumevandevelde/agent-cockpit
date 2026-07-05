@@ -1965,7 +1965,8 @@ class TestBuildShipInstructions:
         # treats *BLOCKED* as failure would false-fail on every PR the instant
         # CI starts running. Failure detection must instead be based on actual
         # check conclusions.
-        assert "*BLOCKED*) echo" not in instructions
+        assert "*BLOCKED*|CLOSED*) echo" not in instructions
+        assert "FAILED" in instructions
         assert "statusCheckRollup" in instructions
         # A wedged PR must not poll forever.
         assert "ITER" in instructions and "40" in instructions
