@@ -1,0 +1,51 @@
+name: Auto-fix on red CI
+
+on:
+  workflow_run:
+    workflows: ["Quality"]
+    types: [completed]
+
+jobs:
+  comment-if-first-failure:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Find the PR for this workflow run
+        id: pr
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { data: pulls } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${context.payload.workflow_run.head_branch}`,
+              state: 'open',
+            });
+            if (pulls.length === 0) {
+              core.setOutput('number', '');
+              return;
+            }
+            core.setOutput('number', String(pulls[0].number));
+            core.setOutput('labels', JSON.stringify(pulls[0].labels.map(l => l.name)));
+
+      - name: Comment and label, once only
+        if: steps.pr.outputs.number != '' && !contains(steps.pr.outputs.labels, 'auto-fix-attempted')
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const prNumber = Number('${{ steps.pr.outputs.number }}');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: '@claude fix the failing checks',
+            });
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['auto-fix-attempted'],
+            });
