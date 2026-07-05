@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
 from pydantic import BaseModel
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings

@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from app.services.sandcastle_service import sandcastle_service
 
@@ -45,16 +44,17 @@ def _kill_tmux_session(session_name: str) -> bool:
         return False
 
 
-async def _get_project_path(project_key: str) -> Optional[str]:
+async def _get_project_path(project_key: str) -> str | None:
     """Look up the local project path for a kanban project key.
 
     Scans all registered projects and returns the first whose computed key
     matches. Returns None when no match is found or on error.
     """
     from sqlalchemy import select
+
     from app.database import AsyncSessionLocal
-    from app.models.database import Project
     from app.kanban.project_key import resolve_project_key
+    from app.models.database import Project
 
     try:
         async with AsyncSessionLocal() as db:
@@ -98,6 +98,7 @@ def _remove_worktree_at(session_name: str, project_path: str) -> bool:
 async def _find_running_sandcastle_run(session_name: str):
     """Return the pending/running SandcastleRun whose branch == session_name, or None."""
     from sqlalchemy import select
+
     from app.database import AsyncSessionLocal
     from app.models.sandcastle import SandcastleRun
 
@@ -153,7 +154,7 @@ def _default_branch(worktree_path: str) -> str:
     return "master"
 
 
-async def _worktree_path_for_card(card) -> Optional[Path]:
+async def _worktree_path_for_card(card) -> Path | None:
     """Best-effort resolution of the git worktree directory backing this card.
 
     Tries the live claim (worktree lives at <project_path>/.claude/worktrees/
@@ -183,7 +184,7 @@ async def _worktree_path_for_card(card) -> Optional[Path]:
     return None
 
 
-async def find_worktree_unmerged_warning(card) -> Optional[dict]:
+async def find_worktree_unmerged_warning(card) -> dict | None:
     """Check whether the git worktree backing this card (if any) still holds
     commits or changes that never landed on the project's default branch.
 

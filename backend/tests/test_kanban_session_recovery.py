@@ -5,11 +5,11 @@ import os
 import pytest
 import pytest_asyncio
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
+from app.kanban import session_recovery as recovery
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card
-from app.kanban import session_recovery as recovery
 from app.utils.path_utils import convert_path_to_folder_name
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 

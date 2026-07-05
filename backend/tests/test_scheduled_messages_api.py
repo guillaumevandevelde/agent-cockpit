@@ -1,9 +1,9 @@
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.database import Base, engine
+from app.main import app
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -49,6 +49,7 @@ async def test_create_cron_and_attempts_empty():
 @pytest.mark.asyncio
 async def test_delete_history_removes_terminal_messages():
     from sqlalchemy import update
+
     from app.database import AsyncSessionLocal
     from app.models.scheduled_message import ScheduledMessage
 
@@ -127,6 +128,7 @@ async def test_hook_event_limit_notification_moves_kanban_card_to_resume():
     """A "hit your session limit" Notification triggers the kanban To-Resume move,
     independent of whether the scheduled-messages auto-resume toggle is on."""
     from unittest import mock
+
     import app.kanban.dispatch as dispatch
 
     transport = ASGITransport(app=app)
@@ -148,6 +150,7 @@ async def test_hook_event_limit_notification_moves_kanban_card_to_resume():
 @pytest.mark.asyncio
 async def test_hook_event_non_limit_notification_does_not_touch_kanban():
     from unittest import mock
+
     import app.kanban.dispatch as dispatch
 
     transport = ASGITransport(app=app)

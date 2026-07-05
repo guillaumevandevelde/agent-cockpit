@@ -1,6 +1,5 @@
 """Tests for CC Bridge session discovery."""
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 def test_is_claude_code_matches_claude_command():

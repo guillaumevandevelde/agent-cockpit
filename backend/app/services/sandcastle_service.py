@@ -4,12 +4,11 @@ import json
 import logging
 import os
 import signal
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
 from app.models.sandcastle import SandcastleConfig, SandcastleRun
@@ -82,7 +81,7 @@ async def _terminate_gracefully(process) -> None:
     _signal_process_group(process, signal.SIGTERM)
     try:
         await asyncio.wait_for(process.wait(), timeout=_TERMINATE_GRACE_SECONDS)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _signal_process_group(process, signal.SIGKILL)
         try:
             await process.wait()
@@ -160,7 +159,7 @@ class SandcastleService:
                 if hasattr(config, key):
                     setattr(config, key, value)
 
-            config.updated_at = datetime.now(timezone.utc)
+            config.updated_at = datetime.now(UTC)
             await session.commit()
             await session.refresh(config)
             return config
@@ -176,7 +175,7 @@ class SandcastleService:
                 raise ValueError(f"Config {config_id} not found")
 
             config.enabled = not config.enabled
-            config.updated_at = datetime.now(timezone.utc)
+            config.updated_at = datetime.now(UTC)
             await session.commit()
             await session.refresh(config)
             return config
@@ -303,7 +302,7 @@ class SandcastleService:
 
             # Update status to running
             run.status = "running"
-            run.started_at = datetime.now(timezone.utc)
+            run.started_at = datetime.now(UTC)
             await session.commit()
 
             try:
@@ -347,14 +346,14 @@ class SandcastleService:
                         process.communicate(),
                         timeout=timeout
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     await _terminate_gracefully(process)
                     raise TimeoutError(f"Run timed out after {timeout} seconds")
 
                 # Update run with results
                 run.stdout = stdout.decode() if stdout else None
                 run.stderr = stderr.decode() if stderr else None
-                run.completed_at = datetime.now(timezone.utc)
+                run.completed_at = datetime.now(UTC)
 
                 if process.returncode == 0:
                     run.status = "completed"
@@ -371,24 +370,24 @@ class SandcastleService:
 
             except asyncio.CancelledError:
                 run.status = "cancelled"
-                run.completed_at = datetime.now(timezone.utc)
+                run.completed_at = datetime.now(UTC)
                 run.error = "Run was cancelled by user"
                 await session.commit()
             except TimeoutError as e:
                 run.status = "failed"
                 run.error = str(e)
-                run.completed_at = datetime.now(timezone.utc)
+                run.completed_at = datetime.now(UTC)
                 await session.commit()
             except FileNotFoundError as e:
                 run.status = "failed"
                 run.error = f"Prerequisite missing: {e}"
-                run.completed_at = datetime.now(timezone.utc)
+                run.completed_at = datetime.now(UTC)
                 await session.commit()
             except Exception as e:
                 logger.exception("Sandcastle run %s failed", run_id)
                 run.status = "failed"
                 run.error = str(e)
-                run.completed_at = datetime.now(timezone.utc)
+                run.completed_at = datetime.now(UTC)
                 await session.commit()
             finally:
                 _cleanup_run_config(config.project_path, f"run-config-{run_id}.json")
@@ -475,7 +474,7 @@ class SandcastleService:
             # Update status to running
             for run in runs:
                 run.status = "running"
-                run.started_at = datetime.now(timezone.utc)
+                run.started_at = datetime.now(UTC)
             await session.commit()
 
             try:
@@ -520,7 +519,7 @@ class SandcastleService:
                 for i, run in enumerate(runs):
                     run.stdout = stdout_text
                     run.stderr = stderr_text
-                    run.completed_at = datetime.now(timezone.utc)
+                    run.completed_at = datetime.now(UTC)
 
                     if i < len(parallel_results) and parallel_results[i].get("status") == "completed":
                         run.status = "completed"
@@ -537,14 +536,14 @@ class SandcastleService:
             except asyncio.CancelledError:
                 for run in runs:
                     run.status = "cancelled"
-                    run.completed_at = datetime.now(timezone.utc)
+                    run.completed_at = datetime.now(UTC)
                 await session.commit()
             except Exception as e:
                 logger.exception("Sandcastle parallel runs failed")
                 for run in runs:
                     run.status = "failed"
                     run.error = str(e)
-                    run.completed_at = datetime.now(timezone.utc)
+                    run.completed_at = datetime.now(UTC)
                 await session.commit()
             finally:
                 _cleanup_run_config(config.project_path, f"parallel-config-{runs[0].id}.json")
@@ -669,10 +668,10 @@ class SandcastleService:
             # SQLite round-trips DateTime(timezone=True) as naive even though it's
             # always written as UTC (see usage_service.py's cached_at handling for
             # the same idiom) -- reattach tzinfo before subtracting.
-            started = run.started_at.replace(tzinfo=timezone.utc)
+            started = run.started_at.replace(tzinfo=UTC)
             end = (
-                run.completed_at.replace(tzinfo=timezone.utc)
-                if run.completed_at else datetime.now(timezone.utc)
+                run.completed_at.replace(tzinfo=UTC)
+                if run.completed_at else datetime.now(UTC)
             )
             duration = (end - started).total_seconds()
         return {
@@ -757,7 +756,7 @@ class SandcastleService:
                 _release_budget_slot(run.branch)
 
             run.status = "cancelled"
-            run.completed_at = datetime.now(timezone.utc)
+            run.completed_at = datetime.now(UTC)
             await session.commit()
             return True
 
@@ -839,7 +838,7 @@ class SandcastleService:
                 log_path = Path(run.log_file_path)
                 if log_path.exists():
                     try:
-                        with open(log_path, "r") as f:
+                        with open(log_path) as f:
                             if offset > 0:
                                 f.seek(offset)
                             content = f.read()
@@ -946,7 +945,7 @@ class SandcastleService:
                                 "status": parts[3],
                                 "created_at": parts[4],
                             })
-            except (FileNotFoundError, asyncio.TimeoutError):
+            except (TimeoutError, FileNotFoundError):
                 pass
 
         return {"containers": containers}

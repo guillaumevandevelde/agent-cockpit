@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import AgentTeam, AgentTeamMember

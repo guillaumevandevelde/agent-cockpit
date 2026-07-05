@@ -4,7 +4,6 @@ Detects "You've hit your session limit" notifications, parses the reset time,
 and schedules a resume job at that time. When the job fires, spawns a new
 session (or resumes) and injects a continuation message.
 """
-import asyncio
 import logging
 import re
 from datetime import datetime, timedelta

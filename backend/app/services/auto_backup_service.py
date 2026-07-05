@@ -1,7 +1,6 @@
 """Service for scheduled automatic backups with a retention/rotation policy."""
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +15,7 @@ AUTO_BACKUP_NAME = "auto-backup"
 _VALID_SCOPES = {"user", "full"}
 
 
-def _parse_time_of_day(value: str) -> Tuple[int, int]:
+def _parse_time_of_day(value: str) -> tuple[int, int]:
     """Parse "HH:MM" into (hour, minute), raising ValueError when invalid."""
     parts = value.split(":")
     if len(parts) != 2:
@@ -74,7 +73,7 @@ async def update_settings(
 
 async def apply_rotation(db: AsyncSession, retention_days: int) -> int:
     """Delete automatic backups older than retention_days. Returns count removed."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
     rows = (
         await db.execute(
             select(Backup).where(
@@ -92,7 +91,7 @@ async def apply_rotation(db: AsyncSession, retention_days: int) -> int:
     return deleted
 
 
-async def run_auto_backup(db: AsyncSession) -> Optional[Backup]:
+async def run_auto_backup(db: AsyncSession) -> Backup | None:
     """Create an automatic backup (if enabled) and apply the rotation policy.
 
     Returns the created Backup, or None when auto-backups are disabled.
@@ -102,7 +101,7 @@ async def run_auto_backup(db: AsyncSession) -> Optional[Backup]:
     if not settings.enabled:
         return None
 
-    backup: Optional[Backup] = None
+    backup: Backup | None = None
     try:
         service = BackupService(db)
         backup, _ = await service.create_backup(
@@ -121,7 +120,7 @@ async def run_auto_backup(db: AsyncSession) -> Optional[Backup]:
         logger.exception("automatic backup failed")
         settings.last_status = f"error: {exc}"
     finally:
-        settings.last_run_at = datetime.now(timezone.utc)
+        settings.last_run_at = datetime.now(UTC)
         await db.commit()
 
     return backup

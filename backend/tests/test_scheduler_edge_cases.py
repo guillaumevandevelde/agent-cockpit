@@ -1,12 +1,12 @@
 """Edge cases for scheduled messages: invalid cron expressions, bad timezones,
 malformed fire-at timestamps, past trigger times, and malformed Pydantic input."""
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from pydantic import ValidationError
 
-from app.services.scheduling.scheduler import SchedulerService
 from app.models.scheduled_message_schemas import ScheduledMessageCreate
+from app.services.scheduling.scheduler import SchedulerService
 
 
 def test_schedule_cron_rejects_invalid_expression():
@@ -38,7 +38,7 @@ def test_schedule_once_in_the_past_still_registers_job():
     # A fire_at already in the past must not crash; misfire_grace_time lets the
     # job still deliver on the next scheduler pass instead of being dropped.
     svc = SchedulerService()
-    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     svc.schedule_once(message_id=42, fire_at_iso=past)
     assert svc.has_job(42) is True
     svc.remove(42)

@@ -1,6 +1,5 @@
 """Pydantic schemas + the fixed column set."""
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,14 +23,14 @@ class CardResponse(BaseModel):
     description: str
     column: str
     rank: str
-    priority: Optional[str] = None
-    labels: Optional[list] = None
-    agent: Optional[str] = None
-    transport: Optional[str] = None  # worktree | sandcastle | auto (null)
-    resume_session_id: Optional[str] = None
-    resume_project_folder: Optional[str] = None
-    claimed_by: Optional[str] = None
-    claimed_at: Optional[datetime] = None
+    priority: str | None = None
+    labels: list | None = None
+    agent: str | None = None
+    transport: str | None = None  # worktree | sandcastle | auto (null)
+    resume_session_id: str | None = None
+    resume_project_folder: str | None = None
+    claimed_by: str | None = None
+    claimed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     deliverables: list[DeliverableResponse] = []
@@ -42,29 +41,29 @@ class CardCreate(BaseModel):
     title: str
     description: str = ""
     column: str = "Backlog"
-    priority: Optional[str] = None
-    labels: Optional[list] = None
-    agent: Optional[str] = None
-    transport: Optional[str] = None  # worktree | sandcastle | auto (null)
-    resume_session_id: Optional[str] = None
-    resume_project_folder: Optional[str] = None
+    priority: str | None = None
+    labels: list | None = None
+    agent: str | None = None
+    transport: str | None = None  # worktree | sandcastle | auto (null)
+    resume_session_id: str | None = None
+    resume_project_folder: str | None = None
 
 
 class CardUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    column: Optional[str] = None
-    priority: Optional[str] = None
-    labels: Optional[list] = None
-    agent: Optional[str] = None
-    transport: Optional[str] = None  # worktree | sandcastle | auto (null)
-    resume_session_id: Optional[str] = None
-    resume_project_folder: Optional[str] = None
+    title: str | None = None
+    description: str | None = None
+    column: str | None = None
+    priority: str | None = None
+    labels: list | None = None
+    agent: str | None = None
+    transport: str | None = None  # worktree | sandcastle | auto (null)
+    resume_session_id: str | None = None
+    resume_project_folder: str | None = None
 
 
 class MoveRequest(BaseModel):
     column: str
-    rank: Optional[str] = None
+    rank: str | None = None
 
 
 class ReorderRequest(BaseModel):
@@ -97,7 +96,7 @@ class ActivityEntry(BaseModel):
 
 class EnableRequest(BaseModel):
     project_path: str
-    slug: Optional[str] = None  # override when no git remote
+    slug: str | None = None  # override when no git remote
 
 
 class AutodispatchRequest(BaseModel):
@@ -127,12 +126,12 @@ class DefaultTransportRequest(BaseModel):
 
 class DispatchRequest(BaseModel):
     project_path: str
-    agent: Optional[str] = None  # override: use this agent instead of card's agent
+    agent: str | None = None  # override: use this agent instead of card's agent
 
 
 class RedispatchRequest(BaseModel):
     project_path: str
-    agent: Optional[str] = None  # override: use this agent instead of card's current agent
+    agent: str | None = None  # override: use this agent instead of card's current agent
 
 
 # Column management schemas
@@ -144,7 +143,7 @@ class ColumnResponse(BaseModel):
     project_key: str
     name: str
     rank: str
-    default_agent: Optional[str] = None
+    default_agent: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -152,14 +151,14 @@ class ColumnResponse(BaseModel):
 class ColumnCreate(BaseModel):
     project_key: str
     name: str
-    rank: Optional[str] = None
-    default_agent: Optional[str] = None
+    rank: str | None = None
+    default_agent: str | None = None
 
 
 class ColumnUpdate(BaseModel):
-    name: Optional[str] = None
-    rank: Optional[str] = None
-    default_agent: Optional[str] = None
+    name: str | None = None
+    rank: str | None = None
+    default_agent: str | None = None
 
 
 class ColumnClearRequest(BaseModel):
@@ -170,7 +169,7 @@ class ColumnClearRequest(BaseModel):
 class ImpedimentResolveRequest(BaseModel):
     """Request to resolve an impediment."""
     project_path: str
-    target_agent: Optional[str] = None  # override auto-detection
+    target_agent: str | None = None  # override auto-detection
 
 
 # Decision gates
@@ -184,9 +183,9 @@ class GateResponse(BaseModel):
     question: str
     options: list[str]
     status: str
-    answer: Optional[str] = None
+    answer: str | None = None
     created_at: datetime
-    answered_at: Optional[datetime] = None
+    answered_at: datetime | None = None
 
 
 class GateOpenRequest(BaseModel):
@@ -207,9 +206,9 @@ class AgentStat(BaseModel):
     completed: int
     failed: int
     in_progress: int
-    success_rate: Optional[float] = None
-    avg_duration_seconds: Optional[float] = None
-    median_duration_seconds: Optional[float] = None
+    success_rate: float | None = None
+    avg_duration_seconds: float | None = None
+    median_duration_seconds: float | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     cache_creation_tokens: int = 0
@@ -222,12 +221,12 @@ class StatsTotals(BaseModel):
     completed: int
     failed: int
     in_progress: int
-    success_rate: Optional[float] = None
-    avg_duration_seconds: Optional[float] = None
+    success_rate: float | None = None
+    avg_duration_seconds: float | None = None
 
 
 class FailureStat(BaseModel):
-    agent: Optional[str] = None
+    agent: str | None = None
     reason: str
     count: int
 

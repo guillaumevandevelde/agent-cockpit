@@ -2,7 +2,7 @@
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import yaml
 
@@ -12,7 +12,6 @@ from app.utils.path_utils import (
     get_claude_user_config_dir,
     get_project_claude_dir,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -39,31 +38,31 @@ class MemoryService:
         return Path("/etc/claude-code/CLAUDE.md")
 
     @staticmethod
-    def _get_project_claude_md(project_path: Optional[str]) -> Path:
+    def _get_project_claude_md(project_path: str | None) -> Path:
         """Get project-level CLAUDE.md path."""
         if project_path:
             return Path(project_path) / "CLAUDE.md"
         return Path.cwd() / "CLAUDE.md"
 
     @staticmethod
-    def _get_project_alt_claude_md(project_path: Optional[str]) -> Path:
+    def _get_project_alt_claude_md(project_path: str | None) -> Path:
         """Get alternative project-level CLAUDE.md path (.claude/CLAUDE.md)."""
         return get_project_claude_dir(project_path) / "CLAUDE.md"
 
     @staticmethod
-    def _get_local_claude_md(project_path: Optional[str]) -> Path:
+    def _get_local_claude_md(project_path: str | None) -> Path:
         """Get local (personal project-specific) CLAUDE.md path."""
         if project_path:
             return Path(project_path) / "CLAUDE.local.md"
         return Path.cwd() / "CLAUDE.local.md"
 
     @staticmethod
-    def _get_rules_dir(project_path: Optional[str]) -> Path:
+    def _get_rules_dir(project_path: str | None) -> Path:
         """Get the .claude/rules/ directory path."""
         return get_project_claude_dir(project_path) / "rules"
 
     @staticmethod
-    def _parse_rule_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
+    def _parse_rule_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         """Parse YAML frontmatter from a rule file.
 
         Returns:
@@ -86,7 +85,7 @@ class MemoryService:
             return {}, content
 
     @staticmethod
-    def _extract_imports(content: str) -> List[str]:
+    def _extract_imports(content: str) -> list[str]:
         """Extract @import references from content.
 
         Supports:
@@ -102,8 +101,8 @@ class MemoryService:
 
     @classmethod
     def get_memory_hierarchy(
-        cls, project_path: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+        cls, project_path: str | None = None
+    ) -> list[dict[str, Any]]:
         """Get the full memory file hierarchy.
 
         Args:
@@ -216,7 +215,7 @@ class MemoryService:
     @classmethod
     def get_memory_file(
         cls, file_path: str, include_imports: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get a specific memory file with its content and metadata.
 
         Args:
@@ -257,7 +256,7 @@ class MemoryService:
     @classmethod
     def save_memory_file(
         cls, file_path: str, content: str, create_parents: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Save content to a memory file.
 
         Args:
@@ -296,7 +295,7 @@ class MemoryService:
             }
 
     @classmethod
-    def delete_memory_file(cls, file_path: str) -> Dict[str, Any]:
+    def delete_memory_file(cls, file_path: str) -> dict[str, Any]:
         """Delete a memory file.
 
         Args:
@@ -336,7 +335,7 @@ class MemoryService:
             }
 
     @classmethod
-    def list_rules(cls, project_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_rules(cls, project_path: str | None = None) -> list[dict[str, Any]]:
         """List all rules in the .claude/rules/ directory.
 
         Args:
@@ -378,12 +377,12 @@ class MemoryService:
     @classmethod
     def create_rule(
         cls,
-        project_path: Optional[str],
+        project_path: str | None,
         name: str,
         content: str,
-        paths: Optional[List[str]] = None,
-        description: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        paths: list[str] | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
         """Create a new rule file.
 
         Args:
@@ -418,7 +417,7 @@ class MemoryService:
         return cls.save_memory_file(str(rule_path), full_content)
 
     @classmethod
-    def list_auto_memory(cls, project_path: str) -> Dict[str, Any]:
+    def list_auto_memory(cls, project_path: str) -> dict[str, Any]:
         """List auto-memory files for a project.
 
         Args:
@@ -430,7 +429,7 @@ class MemoryService:
         folder_name = convert_path_to_folder_name(project_path)
         memory_dir = get_claude_projects_dir() / folder_name / "memory"
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "memory_dir": str(memory_dir),
             "files": [],
         }
@@ -453,8 +452,8 @@ class MemoryService:
 
     @classmethod
     def resolve_imports(
-        cls, file_path: str, visited: Optional[set] = None
-    ) -> Dict[str, Any]:
+        cls, file_path: str, visited: set | None = None
+    ) -> dict[str, Any]:
         """Resolve the import tree for a memory file.
 
         Args:

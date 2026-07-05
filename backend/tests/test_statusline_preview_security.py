@@ -1,9 +1,10 @@
 """Security tests for statusline preview_script execution hardening."""
 import os
-import pytest
 from unittest.mock import patch
 
-from app.services.statusline_service import StatusLineService, MAX_PREVIEW_SCRIPT_SIZE
+import pytest
+
+from app.services.statusline_service import MAX_PREVIEW_SCRIPT_SIZE, StatusLineService
 
 
 @pytest.fixture

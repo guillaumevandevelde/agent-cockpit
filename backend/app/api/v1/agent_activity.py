@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from app.services.agent_bridge.discovery import discover_agent_sessions, capture_pane_preview
+from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
 
 router = APIRouter(prefix="/agent-activity", tags=["Agent Activity"])
 

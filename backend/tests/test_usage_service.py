@@ -1,8 +1,10 @@
 """Tests for usage tracking services."""
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
+
 from app.services.pricing_service import PricingService
-from app.services.usage_service import UsageService, LoadedUsageEntry
+from app.services.usage_service import LoadedUsageEntry, UsageService
 
 
 class TestPricingService:

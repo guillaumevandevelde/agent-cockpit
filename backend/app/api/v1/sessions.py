@@ -1,16 +1,16 @@
 """Session transcript API endpoints."""
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.services.session_service import SessionService
 from app.models.schemas import (
+    SessionDetailResponse,
     SessionListResponse,
     SessionProjectListResponse,
-    SessionDetailResponse,
     SessionStatsResponse,
 )
+from app.services.session_service import SessionService
 
 router = APIRouter()
 
@@ -27,7 +27,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
-    project_folder: Optional[str] = Query(None, description="Filter by project"),
+    project_folder: str | None = Query(None, description="Filter by project"),
     limit: int = Query(50, ge=1, le=100, description="Max sessions to return"),
     sort_by: str = Query("date", pattern="^(date|size)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
@@ -68,8 +68,8 @@ async def get_session_detail(
         raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
 
 
+
 from pydantic import BaseModel
-from typing import List
 
 
 class PendingCardResponse(BaseModel):
@@ -83,7 +83,7 @@ class PendingCardResponse(BaseModel):
 class PendingQueueResponse(BaseModel):
     """Status of the pending retry queue."""
     size: int
-    cards: List[PendingCardResponse]
+    cards: list[PendingCardResponse]
 
 
 @router.get("/sessions/pending-queue", response_model=PendingQueueResponse)

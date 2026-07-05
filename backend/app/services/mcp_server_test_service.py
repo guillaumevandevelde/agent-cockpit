@@ -4,14 +4,13 @@ import hashlib
 import json
 import logging
 import shutil
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.credentials_service import CredentialsService
 from app.services.mcp_config_service import MCPConfigService
-
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +19,14 @@ class MCPServerTestService(MCPConfigService):
     """Tests connectivity to configured MCP servers (stdio, http, sse)."""
 
     @staticmethod
-    def _compute_config_hash(server_config: Dict[str, Any]) -> str:
+    def _compute_config_hash(server_config: dict[str, Any]) -> str:
         """Compute hash of server configuration for cache invalidation."""
         config_str = json.dumps(server_config, sort_keys=True)
         return hashlib.md5(config_str.encode()).hexdigest()
 
     async def test_connection(
-        self, name: str, scope: str, project_path: Optional[str] = None, db: Optional[AsyncSession] = None
-    ) -> Dict[str, Any]:
+        self, name: str, scope: str, project_path: str | None = None, db: AsyncSession | None = None
+    ) -> dict[str, Any]:
         """
         Test connection to an MCP server.
 
@@ -99,7 +98,7 @@ class MCPServerTestService(MCPConfigService):
                             stderr = await asyncio.wait_for(process.stderr.read(4096), timeout=0.3)
                             if stderr and b"running on stdio" in stderr.lower() or b"server" in stderr.lower():
                                 break
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             pass
                     await asyncio.sleep(0.5)  # Small delay after ready
 
@@ -280,7 +279,7 @@ class MCPServerTestService(MCPConfigService):
                         "message": f"Server responded (command: {server.command})",
                     }
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Check if process exited with error
                     if process.returncode is not None:
                         stderr_data = await process.stderr.read(1024)

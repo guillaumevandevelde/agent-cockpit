@@ -12,7 +12,6 @@ because it never observes the root_path prefixing that happens on the wire.
 """
 import asyncio
 
-import pytest
 from starlette.routing import Match, Mount
 
 

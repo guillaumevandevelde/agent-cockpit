@@ -1,5 +1,6 @@
 """Filesystem browsing endpoint for the file picker."""
 import os
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 

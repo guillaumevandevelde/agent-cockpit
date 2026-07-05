@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
-from typing import Iterable, Optional
+from collections.abc import Iterable
 
 from app.kanban.schemas import COLUMNS
 
@@ -39,20 +39,20 @@ def is_agent_column(name: str | None, agent_columns: set[str] | None = None) -> 
     return name not in COLUMNS
 
 
-def _seconds(start, end) -> Optional[float]:
+def _seconds(start, end) -> float | None:
     if start is None or end is None:
         return None
     delta = (end - start).total_seconds()
     return delta if delta >= 0 else None
 
 
-def _session_of(claimed_by: str | None) -> Optional[str]:
+def _session_of(claimed_by: str | None) -> str | None:
     if claimed_by and claimed_by.startswith(AGENT_CLAIM_PREFIX):
         return claimed_by[len(AGENT_CLAIM_PREFIX):]
     return None
 
 
-def session_of_folder(folder: str) -> Optional[str]:
+def session_of_folder(folder: str) -> str | None:
     """Recover the dispatch session name from a usage project-folder name."""
     if WORKTREE_MARKER in folder:
         return folder.split(WORKTREE_MARKER, 1)[1] or None
@@ -115,7 +115,7 @@ def _walk_card(card, ops, agent_columns: set[str] | None) -> dict:
     }
 
 
-def _round(value: Optional[float]) -> Optional[float]:
+def _round(value: float | None) -> float | None:
     return round(value, 1) if value is not None else None
 
 

@@ -4,7 +4,7 @@ import shlex
 import subprocess
 import zipfile
 from pathlib import Path
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from app.models.schemas import (
     BackupPluginInfo,
@@ -17,11 +17,11 @@ from app.models.schemas import (
     RestorePlanWarning,
     RestoreResult,
 )
-from app.utils.path_utils import get_user_home, get_claude_user_skills_dir
 from app.services.backup_shared import (
     CODEX_RESTORE_REFUSAL_MESSAGE,
     _get_current_platform,
 )
+from app.utils.path_utils import get_claude_user_skills_dir, get_user_home
 
 if TYPE_CHECKING:
     from app.services.backup_service import BackupService
@@ -37,8 +37,8 @@ class RestoreService:
         self.backup_service = backup_service
 
     async def get_restore_plan(
-        self, backup_id: int, project_path: Optional[str] = None
-    ) -> Optional[RestorePlan]:
+        self, backup_id: int, project_path: str | None = None
+    ) -> RestorePlan | None:
         """
         Analyze a backup and generate a restore plan.
 
@@ -140,10 +140,7 @@ class RestoreService:
             for mcp in manifest.contents.mcp_servers:
                 if mcp.requires_npm_install:
                     # Extract package name from npx command
-                    if mcp.args:
-                        pkg_name = mcp.args[0] if mcp.args else mcp.name
-                    else:
-                        pkg_name = mcp.name
+                    pkg_name = (mcp.args[0] if mcp.args else mcp.name) if mcp.args else mcp.name
                     plan.dependencies.append(
                         RestorePlanDependency(
                             kind="mcp_npm",
@@ -156,7 +153,7 @@ class RestoreService:
 
         return plan
 
-    async def validate_backup(self, backup_id: int) -> Tuple[bool, List[str]]:
+    async def validate_backup(self, backup_id: int) -> tuple[bool, list[str]]:
         """
         Validate a backup before restore.
 
@@ -191,7 +188,7 @@ class RestoreService:
 
         return len(issues) == 0, issues
 
-    def _install_skill_dependencies(self, skill_path: Path) -> Tuple[bool, str]:
+    def _install_skill_dependencies(self, skill_path: Path) -> tuple[bool, str]:
         """
         Install dependencies for a skill.
 
@@ -244,7 +241,7 @@ class RestoreService:
 
         return success, "\n".join(logs)
 
-    def _reinstall_plugin(self, plugin_info: BackupPluginInfo) -> Tuple[bool, str]:
+    def _reinstall_plugin(self, plugin_info: BackupPluginInfo) -> tuple[bool, str]:
         """
         Reinstall a plugin using its install command.
 
@@ -278,8 +275,8 @@ class RestoreService:
     async def restore_backup(
         self,
         backup_id: int,
-        project_path: Optional[str] = None,
-        options: Optional[RestoreOptions] = None,
+        project_path: str | None = None,
+        options: RestoreOptions | None = None,
     ) -> RestoreResult:
         """
         Restore from a backup.

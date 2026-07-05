@@ -1,16 +1,14 @@
 """Service for MCP OAuth 2.1 authentication flows."""
-import logging
-import hashlib
-import secrets
 import base64
+import hashlib
+import logging
+import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional
 
 import httpx
 
 from app.services.credentials_service import CredentialsService
-
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +21,7 @@ class PendingAuth:
     code_challenge: str
     token_endpoint: str
     client_id: str
-    client_secret: Optional[str]
+    client_secret: str | None
     redirect_uri: str
     created_at: float = field(default_factory=time.time)
 
@@ -35,7 +33,7 @@ class MCPOAuthService:
     PENDING_TTL = 300  # 5 minutes
 
     def __init__(self) -> None:
-        self._pending: Dict[str, PendingAuth] = {}
+        self._pending: dict[str, PendingAuth] = {}
         self._credentials = CredentialsService()
 
     def _cleanup_expired(self) -> None:

@@ -1,11 +1,11 @@
 """MCP tools package — registers all tools on the server."""
 from mcp.server.fastmcp import FastMCP
 
-from .sessions import register_session_tools
-from .scheduled import register_scheduled_tools
-from .mcp import register_mcp_tools
 from .config import register_config_tools
+from .mcp import register_mcp_tools
 from .projects import register_project_tools
+from .scheduled import register_scheduled_tools
+from .sessions import register_session_tools
 
 
 def register_all_tools(mcp: FastMCP) -> None:

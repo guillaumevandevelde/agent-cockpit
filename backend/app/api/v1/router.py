@@ -1,37 +1,38 @@
 """Main API router for v1 endpoints."""
 from fastapi import APIRouter
-from .config import router as config_router
-from .projects import router as projects_router
-from .cli import router as cli_router
-from .mcp import router as mcp_router
-from .commands import router as commands_router
-from .plugins import router as plugins_router
-from .hooks import router as hooks_router
-from .permissions import router as permissions_router
-from .agents import router as agents_router
-from .backup import router as backup_router
-from .output_styles import router as output_styles_router
-from .statusline import router as statusline_router
-from .sessions import router as sessions_router
-from .usage import router as usage_router
-from .memory import router as memory_router
-from .context import router as context_router
-from .plans import router as plans_router
-from .presence import router as presence_router
-from .cc_bridge.router import router as cc_bridge_router
-from .agent_bridge.router import router as agent_bridge_router
-from .providers import router as providers_router
-from .codex_config import router as codex_config_router
-from .status import router as status_router
-from .scheduled_messages.router import router as scheduled_messages_router
-from .kanban.router import router as kanban_router
+
 from .agent_activity import router as agent_activity_router
+from .agent_bridge.router import router as agent_bridge_router
+from .agents import router as agents_router
 from .apm import router as apm_router
+from .backup import router as backup_router
+from .cc_bridge.router import router as cc_bridge_router
+from .cli import router as cli_router
+from .codex_config import router as codex_config_router
+from .commands import router as commands_router
+from .config import router as config_router
+from .context import router as context_router
 from .files import router as files_router
-from .mcp_server import router as mcp_server_router
-from .sandcastle.router import router as sandcastle_router
+from .hooks import router as hooks_router
 from .hosts.router import router as hosts_router
+from .kanban.router import router as kanban_router
+from .mcp import router as mcp_router
+from .mcp_server import router as mcp_server_router
+from .memory import router as memory_router
+from .output_styles import router as output_styles_router
+from .permissions import router as permissions_router
+from .plans import router as plans_router
+from .plugins import router as plugins_router
+from .presence import router as presence_router
+from .projects import router as projects_router
+from .providers import router as providers_router
+from .sandcastle.router import router as sandcastle_router
+from .scheduled_messages.router import router as scheduled_messages_router
+from .sessions import router as sessions_router
+from .status import router as status_router
+from .statusline import router as statusline_router
 from .update.router import router as update_router
+from .usage import router as usage_router
 
 router = APIRouter()
 

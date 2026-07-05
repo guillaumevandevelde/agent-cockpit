@@ -1,7 +1,6 @@
 """Tests for auto-resume on session limit."""
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from app.services.scheduling.auto_resume import AutoResumeService

@@ -2,8 +2,8 @@
 import pytest
 import pytest_asyncio
 
-from tests.kanban_test_db import reset_test_tables
 from app.kanban import mcp_server as m
+from tests.kanban_test_db import reset_test_tables
 
 
 @pytest_asyncio.fixture(autouse=True)

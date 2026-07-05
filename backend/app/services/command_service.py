@@ -2,19 +2,17 @@
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import yaml
 
 from app.models.schemas import SlashCommand, SlashCommandCreate, SlashCommandUpdate
+from app.utils.file_utils import read_json_file
 from app.utils.path_utils import (
     ensure_directory_exists,
-    get_project_commands_dir,
     get_claude_user_commands_dir,
     get_claude_user_plugins_dir,
+    get_project_commands_dir,
 )
-from app.utils.file_utils import read_json_file
-
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +20,7 @@ class CommandService:
     """Service for managing slash commands."""
 
     @staticmethod
-    def _parse_frontmatter(content: str) -> Tuple[Dict, str]:
+    def _parse_frontmatter(content: str) -> tuple[dict, str]:
         """
         Parse YAML frontmatter from markdown content.
 
@@ -47,7 +45,7 @@ class CommandService:
             return {}, content.strip()
 
     @staticmethod
-    def _build_frontmatter(metadata: Dict) -> str:
+    def _build_frontmatter(metadata: dict) -> str:
         """
         Build YAML frontmatter string from metadata dict.
 
@@ -92,7 +90,7 @@ class CommandService:
         return base_dir / Path(*parts)
 
     @staticmethod
-    def list_commands(project_path: Optional[str] = None) -> List[SlashCommand]:
+    def list_commands(project_path: str | None = None) -> list[SlashCommand]:
         """
         List all commands from user, project, and plugin scopes.
 
@@ -127,7 +125,7 @@ class CommandService:
         return commands
 
     @staticmethod
-    def _scan_plugin_commands() -> List[SlashCommand]:
+    def _scan_plugin_commands() -> list[SlashCommand]:
         """
         Scan installed plugin directories for commands.
 
@@ -200,7 +198,7 @@ class CommandService:
         return commands
 
     @staticmethod
-    def _scan_commands_dir(base_dir: Path, scope: str) -> List[SlashCommand]:
+    def _scan_commands_dir(base_dir: Path, scope: str) -> list[SlashCommand]:
         """
         Scan a commands directory for .md files.
 
@@ -242,7 +240,7 @@ class CommandService:
         return commands
 
     @staticmethod
-    def get_command(scope: str, path: str, project_path: Optional[str] = None) -> Optional[SlashCommand]:
+    def get_command(scope: str, path: str, project_path: str | None = None) -> SlashCommand | None:
         """
         Get a specific command by scope and path.
 
@@ -294,7 +292,7 @@ class CommandService:
             return None
 
     @staticmethod
-    def _get_plugin_command(plugin_name: str, path: str) -> Optional[SlashCommand]:
+    def _get_plugin_command(plugin_name: str, path: str) -> SlashCommand | None:
         """
         Get a command from a plugin directory.
 
@@ -359,7 +357,7 @@ class CommandService:
 
     @staticmethod
     def create_command(
-        command: SlashCommandCreate, project_path: Optional[str] = None
+        command: SlashCommandCreate, project_path: str | None = None
     ) -> SlashCommand:
         """
         Create a new command file.
@@ -420,8 +418,8 @@ class CommandService:
         scope: str,
         path: str,
         command: SlashCommandUpdate,
-        project_path: Optional[str] = None,
-    ) -> Optional[SlashCommand]:
+        project_path: str | None = None,
+    ) -> SlashCommand | None:
         """
         Update an existing command file.
 
@@ -483,7 +481,7 @@ class CommandService:
 
     @staticmethod
     def delete_command(
-        scope: str, path: str, project_path: Optional[str] = None
+        scope: str, path: str, project_path: str | None = None
     ) -> bool:
         """
         Delete a command file.

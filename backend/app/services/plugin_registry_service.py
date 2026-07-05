@@ -2,24 +2,23 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..models.schemas import (
     Plugin,
     PluginComponent,
     PluginHook,
-    PluginLSPConfig,
     PluginListResponse,
+    PluginLSPConfig,
     PluginValidationResult,
 )
+from ..utils.file_utils import read_json_file
 from ..utils.path_utils import (
     get_claude_user_plugins_dir,
-    get_project_plugins_dir,
     get_claude_user_settings_file,
+    get_project_plugins_dir,
 )
-from ..utils.file_utils import read_json_file
 from .plugin_descriptions import get_plugin_info
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class PluginRegistry:
     """Discovers and lists locally installed Claude Code plugins."""
 
     def list_installed_plugins(
-        self, project_path: Optional[str] = None
+        self, project_path: str | None = None
     ) -> PluginListResponse:
         """
         List all installed plugins from user and project scopes.
@@ -70,7 +69,7 @@ class PluginRegistry:
 
         return PluginListResponse(plugins=plugins)
 
-    def _get_installed_plugins_map(self) -> Dict[str, Any]:
+    def _get_installed_plugins_map(self) -> dict[str, Any]:
         """
         Read installed_plugins.json to get install paths.
 
@@ -87,7 +86,7 @@ class PluginRegistry:
 
         return data.get("plugins", {})
 
-    def _get_enabled_plugins_from_settings(self) -> List[Plugin]:
+    def _get_enabled_plugins_from_settings(self) -> list[Plugin]:
         """
         Read enabled plugins from ~/.claude/settings.json.
 
@@ -229,7 +228,7 @@ class PluginRegistry:
 
         return plugins
 
-    def _scan_plugins_directory(self, plugins_dir: Path, scope: str = "user") -> List[Plugin]:
+    def _scan_plugins_directory(self, plugins_dir: Path, scope: str = "user") -> list[Plugin]:
         """
         Scan a plugins directory for installed plugins.
 
@@ -256,7 +255,7 @@ class PluginRegistry:
             plugin_json_path = plugin_dir / ".claude-plugin" / "plugin.json"
             if plugin_json_path.exists():
                 try:
-                    with open(plugin_json_path, "r", encoding="utf-8") as f:
+                    with open(plugin_json_path, encoding="utf-8") as f:
                         plugin_data = json.load(f)
 
                     # Parse components with better aggregation
@@ -340,7 +339,7 @@ class PluginRegistry:
             return 0
         return len([d for d in directory.iterdir() if d.is_dir() or d.suffix == ".md"])
 
-    def _parse_plugin_hooks(self, plugin_dir: Path) -> Optional[List[PluginHook]]:
+    def _parse_plugin_hooks(self, plugin_dir: Path) -> list[PluginHook] | None:
         """
         Parse hooks from a plugin's hooks/hooks.json file.
 
@@ -355,7 +354,7 @@ class PluginRegistry:
             return None
 
         try:
-            with open(hooks_json_path, "r", encoding="utf-8") as f:
+            with open(hooks_json_path, encoding="utf-8") as f:
                 hooks_data = json.load(f)
 
             hooks = []
@@ -389,7 +388,7 @@ class PluginRegistry:
             print(f"Warning: Failed to parse hooks.json: {e}")
             return None
 
-    def _parse_lsp_config(self, plugin_dir: Path) -> Optional[List[PluginLSPConfig]]:
+    def _parse_lsp_config(self, plugin_dir: Path) -> list[PluginLSPConfig] | None:
         """
         Parse LSP configuration from plugin's .lsp.json file.
 
@@ -407,7 +406,7 @@ class PluginRegistry:
                 return None
 
         try:
-            with open(lsp_json_path, "r", encoding="utf-8") as f:
+            with open(lsp_json_path, encoding="utf-8") as f:
                 lsp_data = json.load(f)
 
             configs = []
@@ -452,7 +451,7 @@ class PluginRegistry:
             print(f"Warning: Failed to parse .lsp.json: {e}")
             return None
 
-    def _read_plugin_readme(self, plugin_dir: Path) -> Optional[str]:
+    def _read_plugin_readme(self, plugin_dir: Path) -> str | None:
         """
         Read README.md from a plugin directory.
 
@@ -475,7 +474,7 @@ class PluginRegistry:
         for readme_path in readme_paths:
             if readme_path.exists():
                 try:
-                    with open(readme_path, "r", encoding="utf-8") as f:
+                    with open(readme_path, encoding="utf-8") as f:
                         return f.read()
                 except Exception:
                     continue
@@ -483,8 +482,8 @@ class PluginRegistry:
         return None
 
     def get_plugin_details(
-        self, name: str, project_path: Optional[str] = None
-    ) -> Optional[Plugin]:
+        self, name: str, project_path: str | None = None
+    ) -> Plugin | None:
         """
         Get detailed information about a specific plugin.
 
@@ -508,7 +507,7 @@ class PluginRegistry:
             return None
 
         try:
-            with open(plugin_path, "r", encoding="utf-8") as f:
+            with open(plugin_path, encoding="utf-8") as f:
                 plugin_data = json.load(f)
 
             # Parse components
@@ -563,7 +562,7 @@ class PluginRegistry:
         else:
             # Validate plugin.json structure
             try:
-                with open(plugin_json_path, "r", encoding="utf-8") as f:
+                with open(plugin_json_path, encoding="utf-8") as f:
                     plugin_data = json.load(f)
 
                 # Check required fields

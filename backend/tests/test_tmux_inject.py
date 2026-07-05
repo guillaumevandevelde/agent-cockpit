@@ -1,4 +1,5 @@
-from unittest.mock import patch, call
+from unittest.mock import call, patch
+
 from app.services.scheduling.tmux_inject import send_text
 
 

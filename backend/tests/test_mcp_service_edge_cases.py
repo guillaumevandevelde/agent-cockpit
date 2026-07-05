@@ -3,8 +3,8 @@ stdio/http servers, and network timeouts talking to remote MCP servers."""
 import httpx
 import pytest
 
-from app.services import mcp_service as mcp_mod
 from app.models.schemas import MCPServer
+from app.services import mcp_service as mcp_mod
 from app.services.mcp_service import MCPService
 
 

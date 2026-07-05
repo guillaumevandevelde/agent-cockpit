@@ -3,7 +3,7 @@ import json
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from tests.kanban_test_db import reset_test_tables
@@ -192,7 +192,6 @@ async def test_delete_card_without_worktree_succeeds():
 
 @pytest.mark.asyncio
 async def test_delete_card_warns_on_unmerged_worktree_then_force_deletes(monkeypatch):
-    from app.api.v1.kanban import router as kanban_router
 
     async def fake_warning(card):
         return {"worktree_path": "/tmp/fake", "branch": "feature",

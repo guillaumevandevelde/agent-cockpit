@@ -1,11 +1,9 @@
 """Service for interacting with skills.sh registry."""
-import json
 import logging
 import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import httpx
 
@@ -98,15 +96,15 @@ class SkillsRegistryService:
     """Service for browsing and installing skills from skills.sh."""
 
     # In-memory cache
-    _homepage_cache: Optional[Tuple[List[dict], float]] = None
-    _search_cache: Dict[str, Tuple[List[dict], float]] = {}
+    _homepage_cache: tuple[list[dict], float] | None = None
+    _search_cache: dict[str, tuple[list[dict], float]] = {}
 
     @classmethod
     def _is_cache_valid(cls, cache_time: float, ttl: float) -> bool:
         return (time.time() - cache_time) < ttl
 
     @classmethod
-    def get_homepage_skills(cls, force_refresh: bool = False) -> List[dict]:
+    def get_homepage_skills(cls, force_refresh: bool = False) -> list[dict]:
         """
         Fetch the full skills leaderboard from skills.sh homepage.
         Scrapes the embedded Next.js SSR data for the complete catalog.
@@ -144,7 +142,7 @@ class SkillsRegistryService:
             return []
 
     @classmethod
-    def _parse_homepage_skills(cls, html: str) -> List[dict]:
+    def _parse_homepage_skills(cls, html: str) -> list[dict]:
         """Parse skill data from Next.js SSR HTML."""
         skills = []
 
@@ -175,7 +173,7 @@ class SkillsRegistryService:
         return skills
 
     @classmethod
-    def search_skills(cls, query: str, limit: int = 20) -> List[dict]:
+    def search_skills(cls, query: str, limit: int = 20) -> list[dict]:
         """
         Search skills.sh via their API.
         Requires query >= 2 characters.
@@ -218,7 +216,7 @@ class SkillsRegistryService:
             return []
 
     @classmethod
-    def get_installed_skill_names(cls, project_path: Optional[str] = None) -> set:
+    def get_installed_skill_names(cls, project_path: str | None = None) -> set:
         """
         Get set of skill names that are currently installed locally.
         Uses AgentService.list_skills() which aggregates user, project,
@@ -259,9 +257,9 @@ class SkillsRegistryService:
     def install_skill(
         cls,
         source: str,
-        skill_names: Optional[List[str]] = None,
+        skill_names: list[str] | None = None,
         global_install: bool = True,
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
     ) -> dict:
         """
         Install a skill from the registry using `npx skills add`.
@@ -339,7 +337,7 @@ class SkillsRegistryService:
             }
 
     @classmethod
-    def list_available_skills_in_repo(cls, source: str) -> List[str]:
+    def list_available_skills_in_repo(cls, source: str) -> list[str]:
         """
         List available skill names in a remote repo using `npx skills add --list`.
 

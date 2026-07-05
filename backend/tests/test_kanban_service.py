@@ -2,9 +2,9 @@
 import pytest
 import pytest_asyncio
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
-from app.kanban.operations import apply_operation
 from app.kanban import service
+from app.kanban.operations import apply_operation
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 

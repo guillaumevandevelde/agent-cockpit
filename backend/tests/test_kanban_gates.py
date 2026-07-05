@@ -2,10 +2,10 @@
 """Decision gates: data model, service layer, and REST endpoints."""
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.main import app
 from app.kanban import service
+from app.main import app
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()

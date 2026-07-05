@@ -1,10 +1,9 @@
 """Service for context window analysis of Claude Code sessions."""
-import logging
 import json
+import logging
 import time
 from pathlib import Path
-from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any
 
 import aiofiles
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +23,6 @@ from app.models.schemas import (
     ToolConsumption,
 )
 from app.utils.path_utils import get_claude_projects_dir, get_project_display_name
-
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +107,11 @@ class ContextService:
     def __init__(self):
         self.projects_dir = get_claude_projects_dir()
 
-    async def _parse_jsonl_file(self, filepath: Path) -> List[dict[str, Any]]:
+    async def _parse_jsonl_file(self, filepath: Path) -> list[dict[str, Any]]:
         """Parse JSONL file into list of entries."""
         entries = []
         try:
-            async with aiofiles.open(filepath, "r", encoding="utf-8") as f:
+            async with aiofiles.open(filepath, encoding="utf-8") as f:
                 async for line in f:
                     line = line.strip()
                     if not line:
@@ -126,7 +124,7 @@ class ContextService:
             pass
         return entries
 
-    def _extract_usage(self, entry: dict) -> Optional[dict]:
+    def _extract_usage(self, entry: dict) -> dict | None:
         """Extract usage dict from an assistant entry."""
         if entry.get("type") != "assistant":
             return None
@@ -150,7 +148,7 @@ class ContextService:
 
     async def get_active_sessions(self) -> ActiveSessionsResponse:
         """Get context info for all recently active sessions."""
-        sessions: List[ActiveSessionContext] = []
+        sessions: list[ActiveSessionContext] = []
 
         if not self.projects_dir.exists():
             return ActiveSessionsResponse(sessions=[])
@@ -205,7 +203,7 @@ class ContextService:
         sessions.sort(key=lambda s: (not s.is_active, -s.context_percentage))
         return ActiveSessionsResponse(sessions=sessions)
 
-    async def _get_last_assistant_usage(self, filepath: Path) -> Optional[dict]:
+    async def _get_last_assistant_usage(self, filepath: Path) -> dict | None:
         """Read last assistant usage from a JSONL file efficiently.
 
         Reads the last 32KB of the file to find the most recent assistant message.
@@ -214,7 +212,7 @@ class ContextService:
             file_size = filepath.stat().st_size
             read_size = min(file_size, 32 * 1024)
 
-            async with aiofiles.open(filepath, "r", encoding="utf-8") as f:
+            async with aiofiles.open(filepath, encoding="utf-8") as f:
                 if file_size > read_size:
                     await f.seek(file_size - read_size)
                     # Skip partial first line
@@ -254,31 +252,31 @@ class ContextService:
         session_id: str,
         model: str,
         current_context_tokens: int,
-        db: Optional[AsyncSession] = None,
+        db: AsyncSession | None = None,
         message_chars: int = 0,
-    ) -> Optional[ContextComposition]:
+    ) -> ContextComposition | None:
         """Estimate context composition breakdown like /context CLI.
 
         Uses local estimation (chars // 4) from existing services.
         Messages are estimated from actual JSONL content; System & Tools
         is derived as the residual.
         """
-        from app.services.mcp_service import MCPService
         from app.services.agent_service import AgentService
+        from app.services.mcp_service import MCPService
         from app.services.memory_service import MemoryService
 
         context_limit = get_context_limit(model)
 
         # Derive project_path from folder name
         # Folder names are like '-home-user-project' → '/home/user/project'
-        project_path: Optional[str] = None
+        project_path: str | None = None
         if project_folder and project_folder.startswith("-"):
             project_path = "/" + project_folder[1:].replace("-", "/")
 
         autocompact_buffer = int(context_limit * 0.165)
 
         # --- MCP Tools ---
-        mcp_items: List[ContextCategoryItem] = []
+        mcp_items: list[ContextCategoryItem] = []
         mcp_total = 0
         try:
             mcp_service = MCPService()
@@ -309,7 +307,7 @@ class ContextService:
         # Per-agent numbers in /context cluster in the 200–510 range even
         # when the actual prompt is 6k+ tokens, so CC is loading a summary
         # or truncated representation. Cap per-agent at AGENT_MAX_TOKENS_PER_ITEM.
-        agent_items: List[ContextCategoryItem] = []
+        agent_items: list[ContextCategoryItem] = []
         agent_total = 0
         try:
             agents = AgentService.list_agents(project_path)
@@ -322,7 +320,7 @@ class ContextService:
             pass
 
         # --- Memory Files ---
-        memory_items: List[ContextCategoryItem] = []
+        memory_items: list[ContextCategoryItem] = []
         memory_total = 0
         try:
             hierarchy = MemoryService.get_memory_hierarchy(project_path)
@@ -349,7 +347,7 @@ class ContextService:
         # prompt at startup. Full bodies are pulled only when a skill is
         # invoked. Counting every installed skill's full content over-counts
         # this category by ~20x on a session with many skills installed.
-        skill_items: List[ContextCategoryItem] = []
+        skill_items: list[ContextCategoryItem] = []
         skill_total = 0
         try:
             skills = AgentService.list_skills(project_path)
@@ -387,9 +385,9 @@ class ContextService:
         free_space = max(0, context_limit - current_context_tokens - autocompact_buffer)
 
         # Build categories
-        categories: List[ContextCompositionCategory] = []
+        categories: list[ContextCompositionCategory] = []
 
-        def _add(name: str, tokens: int, color: str, items: Optional[List[ContextCategoryItem]] = None):
+        def _add(name: str, tokens: int, color: str, items: list[ContextCategoryItem] | None = None):
             pct = (tokens / context_limit * 100) if context_limit > 0 else 0
             if tokens > 0 or name in ("Free Space",):
                 categories.append(ContextCompositionCategory(
@@ -420,7 +418,7 @@ class ContextService:
         )
 
     async def analyze_session(
-        self, project_folder: str, session_id: str, db: Optional[AsyncSession] = None
+        self, project_folder: str, session_id: str, db: AsyncSession | None = None
     ) -> ContextAnalysisResponse:
         """Full context analysis for a session."""
         filepath = self.projects_dir / project_folder / f"{session_id}.jsonl"
@@ -431,10 +429,9 @@ class ContextService:
         entries = await self._parse_jsonl_file(filepath)
 
         # Build timeline snapshots
-        snapshots: List[ContextSnapshot] = []
+        snapshots: list[ContextSnapshot] = []
         turn_number = 0
         model = "unknown"
-        last_usage: Optional[dict] = None
 
         # Content categorization
         user_chars = 0
@@ -531,7 +528,6 @@ class ContextService:
                 if usage:
                     turn_number += 1
                     model = entry_model
-                    last_usage = usage
 
                     cache_read = usage.get("cache_read_input_tokens", 0)
                     cache_creation = usage.get("cache_creation_input_tokens", 0)
@@ -562,7 +558,7 @@ class ContextService:
 
         # Estimate file read chars from tool_result content
         # Match tool_use Read blocks with subsequent tool_result blocks
-        pending_read_path: Optional[str] = None
+        pending_read_path: str | None = None
         for entry in entries:
             entry_type = entry.get("type")
             message = entry.get("message", {})
@@ -597,7 +593,7 @@ class ContextService:
 
         # Build content categories
         total_chars = user_chars + assistant_chars + tool_result_chars + tool_call_chars + thinking_chars
-        categories: List[ContentCategory] = []
+        categories: list[ContentCategory] = []
         for name, chars in [
             ("User Messages", user_chars),
             ("Assistant Messages", assistant_chars),
@@ -621,7 +617,7 @@ class ContextService:
         categories.sort(key=lambda c: c.estimated_tokens, reverse=True)
 
         # Build file consumption list
-        file_consumptions: List[FileConsumption] = []
+        file_consumptions: list[FileConsumption] = []
         for fpath, data in file_reads.items():
             file_consumptions.append(
                 FileConsumption(
@@ -635,7 +631,7 @@ class ContextService:
         file_consumptions = file_consumptions[:50]  # Top 50
 
         # Build per-tool consumption list
-        tool_consumptions: List[ToolConsumption] = []
+        tool_consumptions: list[ToolConsumption] = []
         for name, stats in tool_stats.items():
             count = stats["count"]
             result_chars = stats["result_chars"]

@@ -1,14 +1,13 @@
 """Service for managing Claude Code OAuth credentials."""
-import logging
 import hashlib
 import json
+import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from app.utils.path_utils import get_claude_user_config_dir
-
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ class CredentialsService:
     def _get_credentials_path(self) -> Path:
         return get_claude_user_config_dir() / ".credentials.json"
 
-    def _read_credentials(self) -> Dict[str, Any]:
+    def _read_credentials(self) -> dict[str, Any]:
         path = self._get_credentials_path()
         if not path.exists():
             return {}
@@ -27,7 +26,7 @@ class CredentialsService:
         except (json.JSONDecodeError, OSError):
             return {}
 
-    def _write_credentials(self, data: Dict[str, Any]) -> None:
+    def _write_credentials(self, data: dict[str, Any]) -> None:
         path = self._get_credentials_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2))
@@ -40,7 +39,7 @@ class CredentialsService:
         url_hash = hashlib.sha256(server_url.encode()).hexdigest()[:16]
         return f"{server_name}|{url_hash}"
 
-    def _find_entries_for_server(self, mcp_oauth: Dict[str, Any], server_name: str) -> list:
+    def _find_entries_for_server(self, mcp_oauth: dict[str, Any], server_name: str) -> list:
         """Find all credential entries matching server_name prefix."""
         return [
             (key, mcp_oauth[key])
@@ -48,7 +47,7 @@ class CredentialsService:
             if key.startswith(f"{server_name}|")
         ]
 
-    def _find_entry(self, server_name: str, server_url: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _find_entry(self, server_name: str, server_url: str | None = None) -> dict[str, Any] | None:
         """Find the best credential entry for a server.
 
         Prefers entries with a non-empty accessToken. Among those,
@@ -77,7 +76,7 @@ class CredentialsService:
         # Fall back to any entry (e.g., client registration only)
         return matches[0][1]
 
-    def get_mcp_token(self, server_name: str, server_url: str) -> Optional[str]:
+    def get_mcp_token(self, server_name: str, server_url: str) -> str | None:
         """Find stored OAuth access_token for an MCP server."""
         entry = self._find_entry(server_name, server_url)
         if not entry:
@@ -94,7 +93,7 @@ class CredentialsService:
 
         return access_token
 
-    def get_client_registration(self, server_name: str) -> Optional[Dict[str, str]]:
+    def get_client_registration(self, server_name: str) -> dict[str, str] | None:
         """Get stored client_id/client_secret from a previous registration."""
         entry = self._find_entry(server_name)
         if not entry:
@@ -113,9 +112,9 @@ class CredentialsService:
         server_name: str,
         server_url: str,
         client_id: str,
-        client_secret: Optional[str],
+        client_secret: str | None,
         access_token: str,
-        refresh_token: Optional[str],
+        refresh_token: str | None,
         expires_at: int,
     ) -> None:
         """Store OAuth token in CLI-compatible format."""
@@ -135,7 +134,7 @@ class CredentialsService:
 
         self._write_credentials(creds)
 
-    def get_auth_status(self, server_name: str) -> Dict[str, Any]:
+    def get_auth_status(self, server_name: str) -> dict[str, Any]:
         """Return auth status for UI display."""
         entry = self._find_entry(server_name)
         if not entry:

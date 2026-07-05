@@ -63,7 +63,7 @@ async def resolve_pane_cwd(target: str) -> str | None:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=_TMUX_TIMEOUT)
     except FileNotFoundError:
         return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("tmux display-message timed out for %s", target)
         return None
     if proc.returncode != 0:
@@ -86,7 +86,7 @@ async def get_git_status(directory: str) -> dict[str, Any]:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=_GIT_TIMEOUT)
     except FileNotFoundError:
         return {"is_git_repo": False, **_EMPTY_STATUS}
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("git status timed out in %s", directory)
         return {"is_git_repo": False, **_EMPTY_STATUS}
     if proc.returncode != 0:

@@ -28,7 +28,39 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line-too-long — 300+ pre-existing violations, needs a wrapping pass; not in scope here
+    "B904",   # raise-without-from-inside-except — 150+ call sites need case-by-case `from err`/`from None` review
+    "E402",   # module-import-not-at-top-of-file — some files intentionally manipulate sys.path first
+    "E702",   # multiple-statements-on-one-line-semicolon
+    "SIM117", # multiple-with-statements
+    "B017",   # assert-raises-exception
+    "SIM102", # collapsible-if
+    "SIM105", # suppressible-exception
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Query()/etc. are meant to be called in argument
+# defaults — that's how the framework's dependency injection works. Without
+# this, B008 misflags every route handler that takes a dependency.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# `BuildImageRequest()` as a route parameter default is FastAPI's default-body
+# pattern, not a mutable-default-argument bug — B008 has no allowlist for
+# locally-defined Pydantic models the way `extend-immutable-calls` covers
+# fastapi.Depends()/Query()/etc.
+"app/api/v1/sandcastle/router.py" = ["B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

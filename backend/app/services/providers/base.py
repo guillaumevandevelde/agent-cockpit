@@ -1,7 +1,7 @@
 """Provider abstraction for local agent CLIs."""
 from __future__ import annotations
-import logging
 
+import logging
 import re
 import shutil
 import subprocess
@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from app.services.providers.capabilities import capability_flags, normalize_capability_matrix
-
 
 logger = logging.getLogger(__name__)
 

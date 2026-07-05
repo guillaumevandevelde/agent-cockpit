@@ -1,7 +1,9 @@
 import asyncio
-import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+
+import pytest
+
 from app.services.scheduling.scheduler import SchedulerService
 
 
@@ -15,7 +17,7 @@ async def test_once_job_fires_and_calls_delivery():
         fired.set()
 
     with patch.object(svc, "_run_delivery", side_effect=fake_run):
-        fire_at = (datetime.now(timezone.utc) + timedelta(seconds=0.3)).isoformat()
+        fire_at = (datetime.now(UTC) + timedelta(seconds=0.3)).isoformat()
         svc.schedule_once(message_id=1, fire_at_iso=fire_at)
         await asyncio.wait_for(fired.wait(), timeout=3)
     svc.shutdown()

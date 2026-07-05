@@ -1,34 +1,32 @@
 """Marketplace API, sync, and plugin-update operations."""
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.database import Marketplace
 from ..models.schemas import (
+    MarketplaceCreate,
+    MarketplaceListResponse,
     MarketplacePlugin,
     MarketplacePluginListResponse,
-    MarketplaceCreate,
     MarketplaceResponse,
-    MarketplaceListResponse,
-    PluginUpdateInfo,
-    PluginUpdatesResponse,
-    PluginUpdateResponse,
     PluginUpdateAllResponse,
+    PluginUpdateInfo,
+    PluginUpdateResponse,
+    PluginUpdatesResponse,
 )
+from ..utils.file_utils import read_json_file, write_json_file
 from ..utils.path_utils import (
+    ensure_directory_exists,
     get_claude_user_plugins_dir,
     get_known_marketplaces_file,
     get_marketplaces_dir,
-    ensure_directory_exists,
 )
-from ..utils.file_utils import read_json_file, write_json_file
 from .cli_executor import CLIExecutor
 from .plugin_registry_service import PluginRegistry
-
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +36,14 @@ class MarketplaceService:
 
     def __init__(
         self,
-        db: Optional[AsyncSession] = None,
-        cli_executor: Optional[CLIExecutor] = None,
-        registry: Optional[PluginRegistry] = None,
+        db: AsyncSession | None = None,
+        cli_executor: CLIExecutor | None = None,
+        registry: PluginRegistry | None = None,
     ):
         self.db = db
         self.cli_executor = cli_executor or CLIExecutor()
         self.registry = registry or PluginRegistry()
-        self._marketplace_cache: Dict[str, List[MarketplacePlugin]] = {}
+        self._marketplace_cache: dict[str, list[MarketplacePlugin]] = {}
 
     async def list_marketplaces(self) -> MarketplaceListResponse:
         """
@@ -159,7 +157,7 @@ class MarketplaceService:
             name=marketplace.name,
             url=marketplace.url,
             last_synced=None,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
         self.db.add(new_marketplace)
@@ -254,7 +252,7 @@ class MarketplaceService:
             self._marketplace_cache[name] = plugins
 
             # Update last_synced timestamp
-            marketplace.last_synced = datetime.now(timezone.utc)
+            marketplace.last_synced = datetime.now(UTC)
             await self.db.commit()
 
             return True
@@ -350,7 +348,7 @@ class MarketplaceService:
     # File-based Methods - Read marketplace data from Claude's config files
     # =========================================================================
 
-    def list_marketplaces_from_files(self) -> List[dict]:
+    def list_marketplaces_from_files(self) -> list[dict]:
         """
         List marketplaces from Claude's known_marketplaces.json.
 
@@ -383,7 +381,7 @@ class MarketplaceService:
 
         return marketplaces
 
-    def _load_marketplace_auto_update_settings(self) -> Dict[str, bool]:
+    def _load_marketplace_auto_update_settings(self) -> dict[str, bool]:
         """Load per-marketplace auto-update settings."""
         settings_file = get_claude_user_plugins_dir() / "marketplace_settings.json"
         if not settings_file.exists():
@@ -412,7 +410,7 @@ class MarketplaceService:
 
         return await write_json_file(settings_file, data)
 
-    def browse_marketplace_from_files(self, name: str) -> List[dict]:
+    def browse_marketplace_from_files(self, name: str) -> list[dict]:
         """
         Browse plugins from a marketplace's local clone.
 
@@ -428,7 +426,7 @@ class MarketplaceService:
         marketplace_data = read_json_file(marketplace_json) or {}
         return marketplace_data.get("plugins", [])
 
-    def get_marketplace_plugin_details(self, marketplace_name: str, plugin_name: str) -> Optional[dict]:
+    def get_marketplace_plugin_details(self, marketplace_name: str, plugin_name: str) -> dict | None:
         """
         Get detailed information about a plugin from a marketplace.
 
@@ -470,7 +468,7 @@ class MarketplaceService:
             readme_path = plugin_dir / readme_name
             if readme_path.exists():
                 try:
-                    with open(readme_path, "r", encoding="utf-8") as f:
+                    with open(readme_path, encoding="utf-8") as f:
                         readme_content = f.read()
                     break
                 except Exception:
@@ -674,7 +672,7 @@ class MarketplaceService:
             results=results,
         )
 
-    def get_all_available_plugins(self) -> List[MarketplacePlugin]:
+    def get_all_available_plugins(self) -> list[MarketplacePlugin]:
         """
         Get all plugins from all marketplaces.
 

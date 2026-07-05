@@ -1,12 +1,12 @@
 """File utilities for reading and writing JSON files."""
 import json
 import os
-from pathlib import Path
 import tempfile
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any
 
 
-def read_json_file(file_path: Path) -> Optional[dict[str, Any]]:
+def read_json_file(file_path: Path) -> dict[str, Any] | None:
     """
     Read a JSON file and return its contents.
 
@@ -20,7 +20,7 @@ def read_json_file(file_path: Path) -> Optional[dict[str, Any]]:
         return None
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             return json.load(f)
     except json.JSONDecodeError:
         return None
@@ -50,7 +50,7 @@ async def write_json_file(file_path: Path, data: dict[str, Any]) -> bool:
         return False
 
 
-async def read_text_file(file_path: Path) -> Optional[str]:
+async def read_text_file(file_path: Path) -> str | None:
     """
     Read a text file and return its contents.
 
@@ -64,7 +64,7 @@ async def read_text_file(file_path: Path) -> Optional[str]:
         return None
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             return f.read()
     except Exception:
         return None
@@ -120,7 +120,7 @@ def directory_exists(dir_path: Path) -> bool:
 def _atomic_write(file_path: Path, content: str) -> None:
     """Write a UTF-8 file atomically, preserving its existing mode."""
     existing_mode = file_path.stat().st_mode if file_path.exists() else None
-    temp_path: Optional[Path] = None
+    temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",

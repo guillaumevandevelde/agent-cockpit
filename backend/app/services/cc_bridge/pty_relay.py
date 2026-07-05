@@ -10,7 +10,6 @@ import signal
 import struct
 import subprocess
 import termios
-from typing import Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
@@ -34,7 +33,7 @@ def _child_preexec() -> None:
         pass
 
 
-def parse_control_message(text: str) -> Optional[dict]:
+def parse_control_message(text: str) -> dict | None:
     """Parse a text frame as a control message.
 
     Returns the parsed dict if it's valid JSON with a 'type' field,
@@ -53,7 +52,7 @@ def resize_pty(
     fd: int,
     rows: int,
     cols: int,
-    process: Optional[subprocess.Popen] = None,
+    process: subprocess.Popen | None = None,
 ) -> None:
     """Resize the pty and signal the tmux attach process."""
     try:
@@ -77,8 +76,8 @@ class PtyRelay:
     def __init__(self, target: str, read_only: bool = True):
         self.target = target
         self.read_only = read_only
-        self.master_fd: Optional[int] = None
-        self.process: Optional[subprocess.Popen] = None
+        self.master_fd: int | None = None
+        self.process: subprocess.Popen | None = None
         self._closed = False
 
     async def run(self, websocket: WebSocket) -> None:

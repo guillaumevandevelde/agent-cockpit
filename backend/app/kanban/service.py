@@ -1,6 +1,6 @@
 """Read-side queries over the materialized state + op-log activity feed."""
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -87,7 +87,7 @@ async def update_column(session, column_id: str, **kwargs):
     for k, v in kwargs.items():
         if v is not None:
             setattr(col, k, v)
-    col.updated_at = datetime.now(timezone.utc)
+    col.updated_at = datetime.now(UTC)
     await session.flush()
     return col
 
@@ -217,6 +217,6 @@ async def answer_gate(session, gate_id: str, answer: str) -> KanbanGate | None:
         raise ValueError("answer must be one of the gate's options")
     gate.answer = answer
     gate.status = "answered"
-    gate.answered_at = datetime.now(timezone.utc)
+    gate.answered_at = datetime.now(UTC)
     await session.flush()
     return gate

@@ -1,5 +1,6 @@
 """Pydantic schemas for API models."""
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -9,24 +10,24 @@ class ConfigFile(BaseModel):
     path: str
     scope: str  # "user" or "project"
     exists: bool
-    content: Optional[Dict[str, Any]] = None
+    content: dict[str, Any] | None = None
 
 
 class ConfigFileListResponse(BaseModel):
     """List of configuration files."""
 
-    files: List[ConfigFile]
+    files: list[ConfigFile]
 
 
 class MergedConfig(BaseModel):
     """Merged configuration from all scopes."""
 
-    settings: Dict[str, Any]
-    mcp_servers: Dict[str, Any]
-    hooks: Dict[str, List[Any]]
-    permissions: Dict[str, Any]
-    commands: List[str]
-    agents: List[str]
+    settings: dict[str, Any]
+    mcp_servers: dict[str, Any]
+    hooks: dict[str, list[Any]]
+    permissions: dict[str, Any]
+    commands: list[str]
+    agents: list[str]
 
 
 class RawFileContent(BaseModel):
@@ -45,7 +46,7 @@ class ProjectBase(BaseModel):
 
     name: str
     path: str
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -57,8 +58,8 @@ class ProjectCreate(ProjectBase):
 class ProjectUpdate(BaseModel):
     """Schema for updating a project."""
 
-    name: Optional[str] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    is_active: bool | None = None
 
 
 class ProjectResponse(ProjectBase):
@@ -75,7 +76,7 @@ class ProjectResponse(ProjectBase):
 class ProjectListResponse(BaseModel):
     """List of projects."""
 
-    projects: List[ProjectResponse]
+    projects: list[ProjectResponse]
 
 
 class ProjectDiscoveryRequest(BaseModel):
@@ -87,7 +88,7 @@ class ProjectDiscoveryRequest(BaseModel):
 class ProjectDiscoveryResponse(BaseModel):
     """Schema for project discovery response."""
 
-    discovered: List[ProjectBase]
+    discovered: list[ProjectBase]
 
 
 class SetActiveProjectRequest(BaseModel):
@@ -103,7 +104,7 @@ class CLIExecuteRequest(BaseModel):
     """Schema for CLI execution request."""
 
     command: str
-    args: List[str] = []
+    args: list[str] = []
     provider: str = "claude-code"
 
 
@@ -124,26 +125,26 @@ class MCPServer(BaseModel):
     name: str
     type: str  # "stdio", "http", or "sse"
     scope: str  # "user", "project", "plugin", or "managed"
-    source: Optional[str] = None  # Original source for display (e.g., plugin name)
-    disabled: Optional[bool] = None  # Whether server is disabled
-    command: Optional[str] = None  # For stdio type
-    args: Optional[List[str]] = None  # For stdio type
-    url: Optional[str] = None  # For http/sse type
-    headers: Optional[Dict[str, str]] = None  # For http/sse type
-    env: Optional[Dict[str, str]] = None  # Environment variables
+    source: str | None = None  # Original source for display (e.g., plugin name)
+    disabled: bool | None = None  # Whether server is disabled
+    command: str | None = None  # For stdio type
+    args: list[str] | None = None  # For stdio type
+    url: str | None = None  # For http/sse type
+    headers: dict[str, str] | None = None  # For http/sse type
+    env: dict[str, str] | None = None  # Environment variables
     # Cache fields
-    is_connected: Optional[bool] = None
-    last_tested_at: Optional[str] = None
-    last_error: Optional[str] = None
-    mcp_server_name: Optional[str] = None
-    mcp_server_version: Optional[str] = None
-    tools: Optional[List["MCPTool"]] = None
-    tool_count: Optional[int] = None
-    resources: Optional[List["MCPResource"]] = None
-    prompts: Optional[List["MCPPrompt"]] = None
-    resource_count: Optional[int] = None
-    prompt_count: Optional[int] = None
-    capabilities: Optional[Dict[str, Any]] = None
+    is_connected: bool | None = None
+    last_tested_at: str | None = None
+    last_error: str | None = None
+    mcp_server_name: str | None = None
+    mcp_server_version: str | None = None
+    tools: list["MCPTool"] | None = None
+    tool_count: int | None = None
+    resources: list["MCPResource"] | None = None
+    prompts: list["MCPPrompt"] | None = None
+    resource_count: int | None = None
+    prompt_count: int | None = None
+    capabilities: dict[str, Any] | None = None
 
 
 class MCPServerCreate(BaseModel):
@@ -152,22 +153,22 @@ class MCPServerCreate(BaseModel):
     name: str
     type: str  # "stdio", "http", or "sse"
     scope: str  # "user" or "project"
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    url: Optional[str] = None
-    headers: Optional[Dict[str, str]] = None
-    env: Optional[Dict[str, str]] = None
+    command: str | None = None
+    args: list[str] | None = None
+    url: str | None = None
+    headers: dict[str, str] | None = None
+    env: dict[str, str] | None = None
 
 
 class MCPServerUpdate(BaseModel):
     """Schema for updating an MCP server."""
 
-    type: Optional[str] = None
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    url: Optional[str] = None
-    headers: Optional[Dict[str, str]] = None
-    env: Optional[Dict[str, str]] = None
+    type: str | None = None
+    command: str | None = None
+    args: list[str] | None = None
+    url: str | None = None
+    headers: dict[str, str] | None = None
+    env: dict[str, str] | None = None
 
 
 # MCP Server Approval Settings Schemas
@@ -184,14 +185,14 @@ class MCPServerApprovalSettings(BaseModel):
     """MCP server approval settings for automatic tool permissions."""
 
     default_mode: str = "ask-every-time"  # "always-allow", "always-deny", "ask-every-time"
-    server_overrides: List[MCPServerApprovalMode] = []
+    server_overrides: list[MCPServerApprovalMode] = []
 
 
 class MCPServerApprovalSettingsUpdate(BaseModel):
     """Schema for updating MCP server approval settings."""
 
-    default_mode: Optional[str] = None
-    server_overrides: Optional[List[MCPServerApprovalMode]] = None
+    default_mode: str | None = None
+    server_overrides: list[MCPServerApprovalMode] | None = None
 
 
 class MCPServerToggleRequest(BaseModel):
@@ -212,7 +213,7 @@ class MCPServerToggleResponse(BaseModel):
 class MCPServerListResponse(BaseModel):
     """List of MCP servers."""
 
-    servers: List[MCPServer]
+    servers: list[MCPServer]
 
 
 class MCPTestConnectionRequest(BaseModel):
@@ -226,8 +227,8 @@ class MCPTool(BaseModel):
     """MCP tool information."""
 
     name: str
-    description: Optional[str] = None
-    inputSchema: Optional[Dict[str, Any]] = None
+    description: str | None = None
+    inputSchema: dict[str, Any] | None = None
 
 
 class MCPResource(BaseModel):
@@ -235,24 +236,24 @@ class MCPResource(BaseModel):
 
     uri: str
     name: str
-    description: Optional[str] = None
-    mimeType: Optional[str] = None
+    description: str | None = None
+    mimeType: str | None = None
 
 
 class MCPPromptArgument(BaseModel):
     """MCP prompt argument."""
 
     name: str
-    description: Optional[str] = None
-    required: Optional[bool] = None
+    description: str | None = None
+    required: bool | None = None
 
 
 class MCPPrompt(BaseModel):
     """MCP prompt information."""
 
     name: str
-    description: Optional[str] = None
-    arguments: Optional[List[MCPPromptArgument]] = None
+    description: str | None = None
+    arguments: list[MCPPromptArgument] | None = None
 
 
 class MCPAuthStatus(BaseModel):
@@ -260,8 +261,8 @@ class MCPAuthStatus(BaseModel):
 
     has_token: bool
     expired: bool
-    server_url: Optional[str] = None
-    has_client_registration: Optional[bool] = None
+    server_url: str | None = None
+    has_client_registration: bool | None = None
 
 
 class MCPAuthStartResponse(BaseModel):
@@ -276,14 +277,14 @@ class MCPTestConnectionResponse(BaseModel):
 
     success: bool
     message: str
-    server_name: Optional[str] = None
-    server_version: Optional[str] = None
-    tools: Optional[List[MCPTool]] = None
-    resources: Optional[List[MCPResource]] = None
-    prompts: Optional[List[MCPPrompt]] = None
-    resource_count: Optional[int] = None
-    prompt_count: Optional[int] = None
-    capabilities: Optional[Dict[str, Any]] = None
+    server_name: str | None = None
+    server_version: str | None = None
+    tools: list[MCPTool] | None = None
+    resources: list[MCPResource] | None = None
+    prompts: list[MCPPrompt] | None = None
+    resource_count: int | None = None
+    prompt_count: int | None = None
+    capabilities: dict[str, Any] | None = None
 
 
 class MCPTestAllResult(BaseModel):
@@ -293,15 +294,15 @@ class MCPTestAllResult(BaseModel):
     scope: str
     success: bool
     message: str
-    tool_count: Optional[int] = None
-    resource_count: Optional[int] = None
-    prompt_count: Optional[int] = None
+    tool_count: int | None = None
+    resource_count: int | None = None
+    prompt_count: int | None = None
 
 
 class MCPTestAllResponse(BaseModel):
     """Response from testing all MCP servers."""
 
-    results: List[MCPTestAllResult]
+    results: list[MCPTestAllResult]
 
 
 # Slash Command Schemas
@@ -313,8 +314,8 @@ class SlashCommand(BaseModel):
     name: str
     path: str  # File path relative to commands directory
     scope: str  # "user" or "project"
-    description: Optional[str] = None
-    allowed_tools: Optional[List[str]] = None
+    description: str | None = None
+    allowed_tools: list[str] | None = None
     content: str  # Markdown content (without frontmatter)
 
 
@@ -323,23 +324,23 @@ class SlashCommandCreate(BaseModel):
 
     name: str  # Can include namespace (e.g., "tools:analyze")
     scope: str  # "user" or "project"
-    description: Optional[str] = None
-    allowed_tools: Optional[List[str]] = None
+    description: str | None = None
+    allowed_tools: list[str] | None = None
     content: str
 
 
 class SlashCommandUpdate(BaseModel):
     """Schema for updating a slash command."""
 
-    description: Optional[str] = None
-    allowed_tools: Optional[List[str]] = None
-    content: Optional[str] = None
+    description: str | None = None
+    allowed_tools: list[str] | None = None
+    content: str | None = None
 
 
 class SlashCommandListResponse(BaseModel):
     """List of slash commands."""
 
-    commands: List[SlashCommand]
+    commands: list[SlashCommand]
 
 
 # Plugin Schemas
@@ -350,7 +351,7 @@ class PluginComponent(BaseModel):
 
     type: str  # "command", "agent", "hook", "mcp", "lsp", "skill"
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class PluginHook(BaseModel):
@@ -358,9 +359,9 @@ class PluginHook(BaseModel):
 
     event: str  # PreToolUse, PostToolUse, etc.
     type: str = "command"  # "command", "prompt", "agent"
-    matcher: Optional[str] = None
-    command: Optional[str] = None
-    prompt: Optional[str] = None
+    matcher: str | None = None
+    command: str | None = None
+    prompt: str | None = None
 
 
 class PluginLSPConfig(BaseModel):
@@ -369,22 +370,22 @@ class PluginLSPConfig(BaseModel):
     name: str
     language: str
     command: str
-    args: Optional[List[str]] = None
-    env: Optional[Dict[str, str]] = None
+    args: list[str] | None = None
+    env: dict[str, str] | None = None
 
 
 class Plugin(BaseModel):
     """Installed plugin configuration."""
 
     name: str
-    version: Optional[str] = None
-    description: Optional[str] = None
-    author: Optional[str] = None
-    category: Optional[str] = None
-    source: Optional[str] = None  # e.g., "anthropic-agent-skills", "claude-plugins-official", "local"
+    version: str | None = None
+    description: str | None = None
+    author: str | None = None
+    category: str | None = None
+    source: str | None = None  # e.g., "anthropic-agent-skills", "claude-plugins-official", "local"
     enabled: bool = True
-    scope: Optional[str] = None  # "user", "project", "local"
-    components: List[PluginComponent] = []
+    scope: str | None = None  # "user", "project", "local"
+    components: list[PluginComponent] = []
     # Component counts for quick display
     skill_count: int = 0
     agent_count: int = 0
@@ -392,34 +393,34 @@ class Plugin(BaseModel):
     mcp_count: int = 0
     lsp_count: int = 0
     # Extended information for plugin details
-    usage: Optional[str] = None  # Usage instructions
-    examples: Optional[List[str]] = None  # Example use cases
-    readme: Optional[str] = None  # README content (for local plugins)
+    usage: str | None = None  # Usage instructions
+    examples: list[str] | None = None  # Example use cases
+    readme: str | None = None  # README content (for local plugins)
     # Plugin-defined hooks (read-only)
-    hooks: Optional[List[PluginHook]] = None
+    hooks: list[PluginHook] | None = None
     # LSP configurations
-    lsp_configs: Optional[List[PluginLSPConfig]] = None
+    lsp_configs: list[PluginLSPConfig] | None = None
 
 
 class PluginListResponse(BaseModel):
     """List of installed plugins."""
 
-    plugins: List[Plugin]
+    plugins: list[Plugin]
 
 
 class MarketplacePlugin(BaseModel):
     """Plugin available in a marketplace."""
 
     name: str
-    description: Optional[str] = None
-    version: Optional[str] = None
+    description: str | None = None
+    version: str | None = None
     install_command: str
 
 
 class MarketplacePluginListResponse(BaseModel):
     """List of plugins in a marketplace."""
 
-    plugins: List[MarketplacePlugin]
+    plugins: list[MarketplacePlugin]
 
 
 class MarketplaceCreate(BaseModel):
@@ -430,9 +431,9 @@ class MarketplaceCreate(BaseModel):
     2. Smart: Provide input field with "owner/repo" or full URL
     """
 
-    name: Optional[str] = None  # Optional - derived from input if not provided
-    url: Optional[str] = None   # Optional - derived from input if not provided
-    input: Optional[str] = None  # Accepts "owner/repo" or full URL
+    name: str | None = None  # Optional - derived from input if not provided
+    url: str | None = None   # Optional - derived from input if not provided
+    input: str | None = None  # Accepts "owner/repo" or full URL
 
 
 class MarketplaceResponse(BaseModel):
@@ -441,7 +442,7 @@ class MarketplaceResponse(BaseModel):
     name: str
     repo: str
     install_location: str
-    last_updated: Optional[str] = None
+    last_updated: str | None = None
     plugin_count: int = 0
     auto_update: bool = False  # Per-marketplace auto-update setting
 
@@ -449,14 +450,14 @@ class MarketplaceResponse(BaseModel):
 class MarketplaceListResponse(BaseModel):
     """List of configured marketplaces."""
 
-    marketplaces: List[MarketplaceResponse]
+    marketplaces: list[MarketplaceResponse]
 
 
 class PluginInstallRequest(BaseModel):
     """Schema for installing a plugin."""
 
     name: str
-    marketplace_name: Optional[str] = None
+    marketplace_name: str | None = None
     scope: str = "user"  # "user", "project", "local"
 
 
@@ -465,15 +466,15 @@ class PluginInstallResponse(BaseModel):
 
     success: bool
     message: str
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
+    stdout: str | None = None
+    stderr: str | None = None
 
 
 class PluginToggleRequest(BaseModel):
     """Schema for toggling a plugin's enabled state."""
 
     enabled: bool
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class PluginToggleResponse(BaseModel):
@@ -491,16 +492,16 @@ class PluginUpdateInfo(BaseModel):
     """Information about a plugin update."""
 
     name: str
-    installed_version: Optional[str] = None
-    latest_version: Optional[str] = None
+    installed_version: str | None = None
+    latest_version: str | None = None
     has_update: bool = False
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class PluginUpdatesResponse(BaseModel):
     """Response containing plugins with available updates."""
 
-    plugins: List[PluginUpdateInfo]
+    plugins: list[PluginUpdateInfo]
     outdated_count: int
 
 
@@ -508,14 +509,14 @@ class PluginValidationResult(BaseModel):
     """Result of validating a plugin."""
 
     valid: bool
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
 
 class AvailablePluginsResponse(BaseModel):
     """Response containing all available plugins from all marketplaces."""
 
-    plugins: List[MarketplacePlugin]
+    plugins: list[MarketplacePlugin]
 
 
 class PluginValidateRequest(BaseModel):
@@ -529,8 +530,8 @@ class PluginUpdateResponse(BaseModel):
 
     success: bool
     message: str
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
+    stdout: str | None = None
+    stderr: str | None = None
 
 
 class PluginUpdateAllResponse(BaseModel):
@@ -540,7 +541,7 @@ class PluginUpdateAllResponse(BaseModel):
     message: str
     updated_count: int
     failed_count: int
-    results: List[PluginUpdateResponse] = []
+    results: list[PluginUpdateResponse] = []
 
 
 # Hook Schemas
@@ -567,18 +568,18 @@ class Hook(BaseModel):
 
     id: str
     event: str  # PreToolUse, PostToolUse, PostToolUseFailure, Stop, SessionStart, SessionEnd, UserPromptSubmit, PermissionRequest, Notification, SubagentStart, SubagentStop, PreCompact
-    matcher: Optional[str] = None  # Tool matcher pattern (e.g., "Write(*.py)")
+    matcher: str | None = None  # Tool matcher pattern (e.g., "Write(*.py)")
     type: str = "command"  # "command", "prompt", "agent", or "http"
-    command: Optional[str] = None  # Shell command to execute (for command type)
-    prompt: Optional[str] = None  # Prompt to append (for prompt/agent type)
-    model: Optional[str] = None  # Model to use (for agent type, e.g., "haiku")
-    async_: Optional[bool] = None  # Run in background (JSON field name: "async")
-    statusMessage: Optional[str] = None  # Custom spinner message
-    once: Optional[bool] = None  # Run only once per session
-    timeout: Optional[int] = None  # Timeout in seconds
-    url: Optional[str] = None  # URL for http-type hooks
-    headers: Optional[Dict[str, str]] = None  # Headers for http-type hooks
-    allowedEnvVars: Optional[List[str]] = None  # Env vars for http-type hooks
+    command: str | None = None  # Shell command to execute (for command type)
+    prompt: str | None = None  # Prompt to append (for prompt/agent type)
+    model: str | None = None  # Model to use (for agent type, e.g., "haiku")
+    async_: bool | None = None  # Run in background (JSON field name: "async")
+    statusMessage: str | None = None  # Custom spinner message
+    once: bool | None = None  # Run only once per session
+    timeout: int | None = None  # Timeout in seconds
+    url: str | None = None  # URL for http-type hooks
+    headers: dict[str, str] | None = None  # Headers for http-type hooks
+    allowedEnvVars: list[str] | None = None  # Env vars for http-type hooks
     scope: str  # "user" or "project"
 
     model_config = ConfigDict(populate_by_name=True)
@@ -588,43 +589,43 @@ class HookCreate(BaseModel):
     """Schema for creating a hook."""
 
     event: str
-    matcher: Optional[str] = None
+    matcher: str | None = None
     type: str = "command"  # "command", "prompt", "agent", or "http"
-    command: Optional[str] = None
-    prompt: Optional[str] = None
-    model: Optional[str] = None  # For agent hooks
-    async_: Optional[bool] = None  # Run in background
-    statusMessage: Optional[str] = None  # Custom spinner message
-    once: Optional[bool] = None  # Run only once per session
-    timeout: Optional[int] = None
-    url: Optional[str] = None  # URL for http-type hooks
-    headers: Optional[Dict[str, str]] = None  # Headers for http-type hooks
-    allowedEnvVars: Optional[List[str]] = None  # Env vars for http-type hooks
+    command: str | None = None
+    prompt: str | None = None
+    model: str | None = None  # For agent hooks
+    async_: bool | None = None  # Run in background
+    statusMessage: str | None = None  # Custom spinner message
+    once: bool | None = None  # Run only once per session
+    timeout: int | None = None
+    url: str | None = None  # URL for http-type hooks
+    headers: dict[str, str] | None = None  # Headers for http-type hooks
+    allowedEnvVars: list[str] | None = None  # Env vars for http-type hooks
     scope: str  # "user" or "project"
 
 
 class HookUpdate(BaseModel):
     """Schema for updating a hook."""
 
-    event: Optional[str] = None
-    matcher: Optional[str] = None
-    type: Optional[str] = None
-    command: Optional[str] = None
-    prompt: Optional[str] = None
-    model: Optional[str] = None
-    async_: Optional[bool] = None
-    statusMessage: Optional[str] = None
-    once: Optional[bool] = None
-    timeout: Optional[int] = None
-    url: Optional[str] = None
-    headers: Optional[Dict[str, str]] = None
-    allowedEnvVars: Optional[List[str]] = None
+    event: str | None = None
+    matcher: str | None = None
+    type: str | None = None
+    command: str | None = None
+    prompt: str | None = None
+    model: str | None = None
+    async_: bool | None = None
+    statusMessage: str | None = None
+    once: bool | None = None
+    timeout: int | None = None
+    url: str | None = None
+    headers: dict[str, str] | None = None
+    allowedEnvVars: list[str] | None = None
 
 
 class HookListResponse(BaseModel):
     """List of hooks."""
 
-    hooks: List[Hook]
+    hooks: list[Hook]
 
 
 # Permission Schemas
@@ -658,31 +659,31 @@ class PermissionRuleCreate(BaseModel):
 class PermissionRuleUpdate(BaseModel):
     """Schema for updating a permission rule."""
 
-    type: Optional[str] = None
-    pattern: Optional[str] = None
+    type: str | None = None
+    pattern: str | None = None
 
 
 class PermissionSettings(BaseModel):
     """Full permission settings including mode and directories."""
 
-    defaultMode: Optional[str] = "default"  # default/acceptEdits/dontAsk/plan
-    additionalDirectories: Optional[List[str]] = None  # Additional allowed directories
-    disableBypassPermissionsMode: Optional[bool] = False  # Disable bypass mode
+    defaultMode: str | None = "default"  # default/acceptEdits/dontAsk/plan
+    additionalDirectories: list[str] | None = None  # Additional allowed directories
+    disableBypassPermissionsMode: bool | None = False  # Disable bypass mode
 
 
 class PermissionListResponse(BaseModel):
     """List of permission rules with settings."""
 
-    rules: List[PermissionRule]
-    settings: Optional[PermissionSettings] = None
+    rules: list[PermissionRule]
+    settings: PermissionSettings | None = None
 
 
 class PermissionSettingsUpdate(BaseModel):
     """Schema for updating permission settings."""
 
-    defaultMode: Optional[str] = None
-    additionalDirectories: Optional[List[str]] = None
-    disableBypassPermissionsMode: Optional[bool] = None
+    defaultMode: str | None = None
+    additionalDirectories: list[str] | None = None
+    disableBypassPermissionsMode: bool | None = None
 
 
 # Agent and Skill Schemas
@@ -692,8 +693,8 @@ class AgentHook(BaseModel):
     """Agent lifecycle hook."""
 
     type: str  # "command" or "prompt"
-    command: Optional[str] = None
-    prompt: Optional[str] = None
+    command: str | None = None
+    prompt: str | None = None
 
 
 class Agent(BaseModel):
@@ -701,16 +702,16 @@ class Agent(BaseModel):
 
     name: str
     scope: str  # "user" or "project"
-    description: Optional[str] = None
-    tools: Optional[List[str]] = None
-    model: Optional[str] = None
+    description: str | None = None
+    tools: list[str] | None = None
+    model: str | None = None
     prompt: str  # Full prompt content
     # Subagent management fields
-    disallowed_tools: Optional[List[str]] = None  # Tools to deny
-    permission_mode: Optional[str] = None  # default/acceptEdits/dontAsk/bypassPermissions/plan
-    skills: Optional[List[str]] = None  # Preload skills into context
-    hooks: Optional[Dict[str, List[AgentHook]]] = None  # Lifecycle hooks scoped to subagent
-    memory: Optional[str] = None  # Persistent memory scope (user/project/local/none)
+    disallowed_tools: list[str] | None = None  # Tools to deny
+    permission_mode: str | None = None  # default/acceptEdits/dontAsk/bypassPermissions/plan
+    skills: list[str] | None = None  # Preload skills into context
+    hooks: dict[str, list[AgentHook]] | None = None  # Lifecycle hooks scoped to subagent
+    memory: str | None = None  # Persistent memory scope (user/project/local/none)
 
 
 class AgentCreate(BaseModel):
@@ -718,37 +719,37 @@ class AgentCreate(BaseModel):
 
     name: str
     scope: str  # "user" or "project"
-    description: Optional[str] = None
-    tools: Optional[List[str]] = None
-    model: Optional[str] = None
+    description: str | None = None
+    tools: list[str] | None = None
+    model: str | None = None
     prompt: str
     # Subagent management fields
-    disallowed_tools: Optional[List[str]] = None
-    permission_mode: Optional[str] = None
-    skills: Optional[List[str]] = None
-    hooks: Optional[Dict[str, List[AgentHook]]] = None
-    memory: Optional[str] = None
+    disallowed_tools: list[str] | None = None
+    permission_mode: str | None = None
+    skills: list[str] | None = None
+    hooks: dict[str, list[AgentHook]] | None = None
+    memory: str | None = None
 
 
 class AgentUpdate(BaseModel):
     """Schema for updating an agent."""
 
-    description: Optional[str] = None
-    tools: Optional[List[str]] = None
-    model: Optional[str] = None
-    prompt: Optional[str] = None
+    description: str | None = None
+    tools: list[str] | None = None
+    model: str | None = None
+    prompt: str | None = None
     # Subagent management fields
-    disallowed_tools: Optional[List[str]] = None
-    permission_mode: Optional[str] = None
-    skills: Optional[List[str]] = None
-    hooks: Optional[Dict[str, List[AgentHook]]] = None
-    memory: Optional[str] = None
+    disallowed_tools: list[str] | None = None
+    permission_mode: str | None = None
+    skills: list[str] | None = None
+    hooks: dict[str, list[AgentHook]] | None = None
+    memory: str | None = None
 
 
 class AgentListResponse(BaseModel):
     """List of agents."""
 
-    agents: List[Agent]
+    agents: list[Agent]
 
 
 class SkillDependency(BaseModel):
@@ -757,8 +758,8 @@ class SkillDependency(BaseModel):
     kind: str  # "bin", "npm", "pip", "script"
     name: str  # Binary name, package name, or script path
     installed: bool = False  # Whether the dependency is currently satisfied
-    version: Optional[str] = None  # Required version (if specified)
-    installed_version: Optional[str] = None  # Currently installed version
+    version: str | None = None  # Required version (if specified)
+    installed_version: str | None = None  # Currently installed version
 
 
 class SkillDependencyStatus(BaseModel):
@@ -766,9 +767,9 @@ class SkillDependencyStatus(BaseModel):
 
     skill_name: str
     all_satisfied: bool
-    dependencies: List[SkillDependency]
+    dependencies: list[SkillDependency]
     has_install_script: bool = False
-    install_script_path: Optional[str] = None
+    install_script_path: str | None = None
 
 
 class SkillInstallResult(BaseModel):
@@ -776,8 +777,8 @@ class SkillInstallResult(BaseModel):
 
     success: bool
     message: str
-    installed: List[str] = []  # Successfully installed deps
-    failed: List[str] = []  # Failed deps
+    installed: list[str] = []  # Successfully installed deps
+    failed: list[str] = []  # Failed deps
     logs: str = ""  # Combined stdout/stderr
 
 
@@ -794,51 +795,51 @@ class SkillFrontmatter(BaseModel):
     """All known skill frontmatter fields."""
 
     # Identity
-    name: Optional[str] = None
-    description: Optional[str] = None
-    version: Optional[str] = None
-    license: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
+    version: str | None = None
+    license: str | None = None
 
     # Execution context
-    context: Optional[str] = None  # "fork" to run in a subagent
-    agent: Optional[str] = None  # Subagent type: "Explore", "Plan", custom
-    model: Optional[str] = None  # Override model for this skill
+    context: str | None = None  # "fork" to run in a subagent
+    agent: str | None = None  # Subagent type: "Explore", "Plan", custom
+    model: str | None = None  # Override model for this skill
 
     # Tool control
-    allowed_tools: Optional[List[str]] = None  # Tools available without permission
+    allowed_tools: list[str] | None = None  # Tools available without permission
 
     # Visibility & invocability
-    user_invocable: Optional[bool] = None  # Show in / menu (default true)
-    disable_model_invocation: Optional[bool] = None  # Prevent auto-loading
+    user_invocable: bool | None = None  # Show in / menu (default true)
+    disable_model_invocation: bool | None = None  # Prevent auto-loading
 
     # UX
-    argument_hint: Optional[str] = None  # Autocomplete hint e.g. "[issue-number]"
+    argument_hint: str | None = None  # Autocomplete hint e.g. "[issue-number]"
 
     # Hooks
-    hooks: Optional[dict] = None  # Lifecycle hooks scoped to skill
+    hooks: dict | None = None  # Lifecycle hooks scoped to skill
 
     # Metadata (author, version, etc.)
-    metadata: Optional[dict] = None
+    metadata: dict | None = None
 
 
 class Skill(BaseModel):
     """Skill definition."""
 
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     location: str  # "user", "project", or plugin path
-    content: Optional[str] = None  # Full markdown content (optional)
+    content: str | None = None  # Full markdown content (optional)
     # Full frontmatter (populated on detail view)
-    frontmatter: Optional[SkillFrontmatter] = None
+    frontmatter: SkillFrontmatter | None = None
     # Dependency info (populated on detail view)
-    dependency_status: Optional[SkillDependencyStatus] = None
-    supporting_files: Optional[List[SkillSupportingFile]] = None
+    dependency_status: SkillDependencyStatus | None = None
+    supporting_files: list[SkillSupportingFile] | None = None
 
 
 class SkillListResponse(BaseModel):
     """List of skills."""
 
-    skills: List[Skill]
+    skills: list[Skill]
 
 
 class SkillUsageStat(BaseModel):
@@ -851,7 +852,7 @@ class SkillUsageStat(BaseModel):
 class SkillStatsResponse(BaseModel):
     """Aggregated skill usage stats for a project."""
 
-    stats: List[SkillUsageStat]
+    stats: list[SkillUsageStat]
 
 
 # Registry Skills (skills.sh)
@@ -873,7 +874,7 @@ class RegistrySkillResponse(BaseModel):
 class RegistrySearchResponse(BaseModel):
     """Response from registry search/browse."""
 
-    skills: List[RegistrySkillResponse]
+    skills: list[RegistrySkillResponse]
     total: int
     cached: bool = False
 
@@ -882,7 +883,7 @@ class RegistryInstallRequest(BaseModel):
     """Request to install a skill from the registry."""
 
     source: str  # GitHub repo path
-    skill_names: Optional[List[str]] = None  # Specific skills to install (None = all)
+    skill_names: list[str] | None = None  # Specific skills to install (None = all)
     global_install: bool = True  # User-level vs project-level
 
 
@@ -893,7 +894,7 @@ class RegistryInstallResponse(BaseModel):
     message: str
     logs: str
     source: str
-    skill_names: Optional[List[str]] = None
+    skill_names: list[str] | None = None
 
 
 # Backup Schemas
@@ -903,15 +904,15 @@ class BackupBase(BaseModel):
     """Base backup schema."""
 
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     scope: str  # "full", "user", "project", "codex"
 
 
 class BackupCreate(BackupBase):
     """Schema for creating a backup."""
 
-    project_path: Optional[str] = None  # Required for project/full scope
-    project_id: Optional[int] = None
+    project_path: str | None = None  # Required for project/full scope
+    project_id: int | None = None
 
 
 class BackupResponse(BackupBase):
@@ -919,7 +920,7 @@ class BackupResponse(BackupBase):
 
     id: int
     file_path: str
-    project_id: Optional[int] = None
+    project_id: int | None = None
     created_at: str
     size_bytes: int
     is_automatic: bool = False
@@ -930,7 +931,7 @@ class BackupResponse(BackupBase):
 class BackupListResponse(BaseModel):
     """List of backups."""
 
-    backups: List[BackupResponse]
+    backups: list[BackupResponse]
 
 
 class AutoBackupSettingsResponse(BaseModel):
@@ -938,24 +939,24 @@ class AutoBackupSettingsResponse(BaseModel):
 
     enabled: bool
     scope: str  # "user" or "full"
-    project_path: Optional[str] = None
+    project_path: str | None = None
     time_of_day: str  # "HH:MM"
     timezone: str
     retention_days: int
-    last_run_at: Optional[str] = None
-    last_status: Optional[str] = None
-    last_backup_id: Optional[int] = None
+    last_run_at: str | None = None
+    last_status: str | None = None
+    last_backup_id: int | None = None
 
 
 class AutoBackupSettingsUpdate(BaseModel):
     """Schema for updating automatic-backup settings."""
 
-    enabled: Optional[bool] = None
-    scope: Optional[str] = None  # "user" or "full"
-    project_path: Optional[str] = None
-    time_of_day: Optional[str] = None  # "HH:MM"
-    timezone: Optional[str] = None
-    retention_days: Optional[int] = None
+    enabled: bool | None = None
+    scope: str | None = None  # "user" or "full"
+    project_path: str | None = None
+    time_of_day: str | None = None  # "HH:MM"
+    timezone: str | None = None
+    retention_days: int | None = None
 
 
 class AutoBackupRunResult(BaseModel):
@@ -963,27 +964,27 @@ class AutoBackupRunResult(BaseModel):
 
     success: bool
     message: str
-    backup_id: Optional[int] = None
+    backup_id: int | None = None
     deleted_count: int = 0
 
 
 class BackupContentsResponse(BaseModel):
     """Backup contents response."""
 
-    files: List[str]
+    files: list[str]
 
 
 class RestoreRequest(BaseModel):
     """Schema for restore request."""
 
-    project_path: Optional[str] = None
+    project_path: str | None = None
 
 
 class ExportRequest(BaseModel):
     """Schema for export request."""
 
-    paths: List[str]
-    name: Optional[str] = "export"
+    paths: list[str]
+    name: str | None = "export"
 
 
 class ExportResponse(BaseModel):
@@ -1001,7 +1002,7 @@ class OutputStyle(BaseModel):
 
     name: str
     scope: str  # "user" or "project"
-    description: Optional[str] = None
+    description: str | None = None
     keep_coding_instructions: bool = False
     content: str  # Markdown instructions
 
@@ -1011,7 +1012,7 @@ class OutputStyleCreate(BaseModel):
 
     name: str
     scope: str  # "user" or "project"
-    description: Optional[str] = None
+    description: str | None = None
     keep_coding_instructions: bool = False
     content: str
 
@@ -1019,15 +1020,15 @@ class OutputStyleCreate(BaseModel):
 class OutputStyleUpdate(BaseModel):
     """Schema for updating an output style."""
 
-    description: Optional[str] = None
-    keep_coding_instructions: Optional[bool] = None
-    content: Optional[str] = None
+    description: str | None = None
+    keep_coding_instructions: bool | None = None
+    content: str | None = None
 
 
 class OutputStyleListResponse(BaseModel):
     """List of output styles."""
 
-    output_styles: List[OutputStyle]
+    output_styles: list[OutputStyle]
 
 
 # Status Line Schemas
@@ -1037,19 +1038,19 @@ class StatusLineConfig(BaseModel):
     """Status line configuration."""
 
     type: str = "command"  # Currently only "command" is supported
-    command: Optional[str] = None  # Path to script
-    padding: Optional[int] = None  # Optional padding (0 = edge)
+    command: str | None = None  # Path to script
+    padding: int | None = None  # Optional padding (0 = edge)
     enabled: bool = True
-    script_content: Optional[str] = None  # Current script file content
+    script_content: str | None = None  # Current script file content
 
 
 class StatusLineUpdate(BaseModel):
     """Schema for updating status line config."""
 
-    type: Optional[str] = None
-    command: Optional[str] = None
-    padding: Optional[int] = None
-    enabled: Optional[bool] = None
+    type: str | None = None
+    command: str | None = None
+    padding: int | None = None
+    enabled: bool | None = None
 
 
 class StatusLinePreset(BaseModel):
@@ -1064,7 +1065,7 @@ class StatusLinePreset(BaseModel):
 class StatusLinePresetsResponse(BaseModel):
     """List of available presets."""
 
-    presets: List[StatusLinePreset]
+    presets: list[StatusLinePreset]
 
 
 class StatusLineApplyPresetRequest(BaseModel):
@@ -1087,14 +1088,14 @@ class PowerlinePreset(BaseModel):
 class PowerlinePresetsResponse(BaseModel):
     """List of available powerline presets."""
 
-    presets: List[PowerlinePreset]
+    presets: list[PowerlinePreset]
 
 
 class NodejsCheckResponse(BaseModel):
     """Response from Node.js availability check."""
 
     available: bool
-    version: Optional[str] = None
+    version: str | None = None
 
 
 # Session Transcript Schemas
@@ -1104,14 +1105,14 @@ class ContentBlock(BaseModel):
     """A content block within a message."""
 
     type: str  # "text", "thinking", "tool_use", "tool_result", "image"
-    text: Optional[str] = None
-    thinking: Optional[str] = None
-    name: Optional[str] = None  # tool name for tool_use
-    id: Optional[str] = None
-    input: Optional[Dict[str, Any]] = None
-    content: Optional[Any] = None  # tool_result content
-    is_error: Optional[bool] = None
-    source: Optional[Dict[str, str]] = None  # for images
+    text: str | None = None
+    thinking: str | None = None
+    name: str | None = None  # tool name for tool_use
+    id: str | None = None
+    input: dict[str, Any] | None = None
+    content: Any | None = None  # tool_result content
+    is_error: bool | None = None
+    source: dict[str, str] | None = None  # for images
 
 
 class SessionMessage(BaseModel):
@@ -1119,9 +1120,9 @@ class SessionMessage(BaseModel):
 
     type: str  # "user" or "assistant"
     timestamp: str
-    content: List[ContentBlock]
-    model: Optional[str] = None  # Model used for this message
-    usage: Optional[Dict[str, Any]] = None  # Token usage (can have nested structures)
+    content: list[ContentBlock]
+    model: str | None = None  # Model used for this message
+    usage: dict[str, Any] | None = None  # Token usage (can have nested structures)
 
 
 class SessionConversation(BaseModel):
@@ -1129,9 +1130,9 @@ class SessionConversation(BaseModel):
 
     user_text: str  # Preview text from user prompt
     timestamp: str
-    messages: List[SessionMessage]
+    messages: list[SessionMessage]
     is_continuation: bool = False
-    token_count: Optional[int] = None
+    token_count: int | None = None
 
 
 class SessionSummary(BaseModel):
@@ -1156,7 +1157,7 @@ class ResumableSession(SessionSummary):
 class ResumableSessionListResponse(BaseModel):
     """Aggregated resumable sessions across a project and its worktrees."""
 
-    sessions: List[ResumableSession]
+    sessions: list[ResumableSession]
 
 
 class SessionDetail(BaseModel):
@@ -1165,11 +1166,11 @@ class SessionDetail(BaseModel):
     id: str
     project_folder: str
     project_name: str
-    conversations: List[SessionConversation]
+    conversations: list[SessionConversation]
     total_messages: int
     total_tool_calls: int
-    total_tokens: Optional[int] = None
-    models_used: List[str] = []
+    total_tokens: int | None = None
+    models_used: list[str] = []
 
 
 class SessionProject(BaseModel):
@@ -1184,14 +1185,14 @@ class SessionProject(BaseModel):
 class SessionListResponse(BaseModel):
     """List of session summaries."""
 
-    sessions: List[SessionSummary]
+    sessions: list[SessionSummary]
     total: int
 
 
 class SessionProjectListResponse(BaseModel):
     """List of projects with session counts."""
 
-    projects: List[SessionProject]
+    projects: list[SessionProject]
     total_sessions: int
 
 
@@ -1210,7 +1211,7 @@ class SessionStatsResponse(BaseModel):
     total_sessions: int
     sessions_today: int
     sessions_this_week: int
-    most_active_project: Optional[str] = None
+    most_active_project: str | None = None
     total_messages: int
 
 
@@ -1246,9 +1247,9 @@ class DailyUsage(BaseModel):
     cache_creation_tokens: int
     cache_read_tokens: int
     total_cost: float
-    models_used: List[str]
-    model_breakdowns: List[ModelBreakdown]
-    project: Optional[str] = None
+    models_used: list[str]
+    model_breakdowns: list[ModelBreakdown]
+    project: str | None = None
 
 
 class SessionUsage(BaseModel):
@@ -1262,9 +1263,9 @@ class SessionUsage(BaseModel):
     cache_read_tokens: int
     total_cost: float
     last_activity: str  # YYYY-MM-DD
-    versions: List[str]
-    models_used: List[str]
-    model_breakdowns: List[ModelBreakdown]
+    versions: list[str]
+    models_used: list[str]
+    model_breakdowns: list[ModelBreakdown]
 
 
 class MonthlyUsage(BaseModel):
@@ -1276,9 +1277,9 @@ class MonthlyUsage(BaseModel):
     cache_creation_tokens: int
     cache_read_tokens: int
     total_cost: float
-    models_used: List[str]
-    model_breakdowns: List[ModelBreakdown]
-    project: Optional[str] = None
+    models_used: list[str]
+    model_breakdowns: list[ModelBreakdown]
+    project: str | None = None
 
 
 class SessionBlock(BaseModel):
@@ -1287,7 +1288,7 @@ class SessionBlock(BaseModel):
     id: str  # ISO timestamp of block start
     start_time: str  # ISO timestamp
     end_time: str  # ISO timestamp (start + 5 hours)
-    actual_end_time: Optional[str] = None  # Last activity in block
+    actual_end_time: str | None = None  # Last activity in block
     is_active: bool
     is_gap: bool = False
     input_tokens: int
@@ -1295,13 +1296,13 @@ class SessionBlock(BaseModel):
     cache_creation_tokens: int
     cache_read_tokens: int
     cost_usd: float
-    models: List[str]
+    models: list[str]
     # Projections for active blocks
-    burn_rate_tokens_per_minute: Optional[float] = None
-    burn_rate_cost_per_hour: Optional[float] = None
-    projected_total_tokens: Optional[int] = None
-    projected_total_cost: Optional[float] = None
-    remaining_minutes: Optional[int] = None
+    burn_rate_tokens_per_minute: float | None = None
+    burn_rate_cost_per_hour: float | None = None
+    projected_total_tokens: int | None = None
+    projected_total_cost: float | None = None
+    remaining_minutes: int | None = None
 
 
 class UsageSummary(BaseModel):
@@ -1315,15 +1316,15 @@ class UsageSummary(BaseModel):
     total_tokens: int
     project_count: int
     session_count: int
-    models_used: List[str]
-    date_range_start: Optional[str] = None
-    date_range_end: Optional[str] = None
+    models_used: list[str]
+    date_range_start: str | None = None
+    date_range_end: str | None = None
 
 
 class DailyUsageListResponse(BaseModel):
     """List of daily usage data."""
 
-    data: List[DailyUsage]
+    data: list[DailyUsage]
     totals: TokenCounts
     total_cost: float
 
@@ -1331,7 +1332,7 @@ class DailyUsageListResponse(BaseModel):
 class SessionUsageListResponse(BaseModel):
     """List of session usage data."""
 
-    data: List[SessionUsage]
+    data: list[SessionUsage]
     totals: TokenCounts
     total_cost: float
     total: int
@@ -1340,7 +1341,7 @@ class SessionUsageListResponse(BaseModel):
 class MonthlyUsageListResponse(BaseModel):
     """List of monthly usage data."""
 
-    data: List[MonthlyUsage]
+    data: list[MonthlyUsage]
     totals: TokenCounts
     total_cost: float
 
@@ -1348,8 +1349,8 @@ class MonthlyUsageListResponse(BaseModel):
 class BlockUsageListResponse(BaseModel):
     """List of billing block usage data."""
 
-    data: List[SessionBlock]
-    active_block: Optional[SessionBlock] = None
+    data: list[SessionBlock]
+    active_block: SessionBlock | None = None
     totals: TokenCounts
     total_cost: float
 
@@ -1367,8 +1368,8 @@ class SettingsUpdateRequest(BaseModel):
     """Schema for updating settings."""
 
     scope: str  # "user", "project", or "local"
-    settings: Dict[str, Any]
-    project_path: Optional[str] = None  # Required for project/local scope
+    settings: dict[str, Any]
+    project_path: str | None = None  # Required for project/local scope
 
 
 class SettingsUpdateResponse(BaseModel):
@@ -1377,14 +1378,14 @@ class SettingsUpdateResponse(BaseModel):
     success: bool
     message: str
     path: str  # File path that was updated
-    migrated_patterns: Optional[List[Dict[str, str]]] = None
-    removed_patterns: Optional[List[Dict[str, str]]] = None
+    migrated_patterns: list[dict[str, str]] | None = None
+    removed_patterns: list[dict[str, str]] | None = None
 
 
 class SettingsValidationRequest(BaseModel):
     """Schema for validating settings without saving."""
 
-    settings: Dict[str, Any]
+    settings: dict[str, Any]
 
 
 class PatternIssue(BaseModel):
@@ -1393,14 +1394,14 @@ class PatternIssue(BaseModel):
     pattern: str
     category: str
     error: str
-    suggestion: Optional[str] = None
+    suggestion: str | None = None
 
 
 class SettingsValidationResponse(BaseModel):
     """Response from settings validation."""
 
     valid: bool
-    issues: List[PatternIssue] = []
+    issues: list[PatternIssue] = []
 
 
 # Backup Manifest & Dependency Schemas
@@ -1411,7 +1412,7 @@ class BackupSkillDependency(BaseModel):
 
     kind: str  # "npm", "pip", "bin", "script"
     name: str
-    version: Optional[str] = None
+    version: str | None = None
 
 
 class BackupSkillInfo(BaseModel):
@@ -1422,17 +1423,17 @@ class BackupSkillInfo(BaseModel):
     has_package_json: bool = False
     has_requirements_txt: bool = False
     has_install_script: bool = False
-    dependencies: List[BackupSkillDependency] = []
+    dependencies: list[BackupSkillDependency] = []
 
 
 class BackupPluginInfo(BaseModel):
     """Plugin information in backup manifest."""
 
     name: str
-    version: Optional[str] = None
-    source: Optional[str] = None
-    install_command: Optional[str] = None
-    marketplace: Optional[str] = None
+    version: str | None = None
+    source: str | None = None
+    install_command: str | None = None
+    marketplace: str | None = None
 
 
 class BackupMCPServerInfo(BaseModel):
@@ -1441,23 +1442,23 @@ class BackupMCPServerInfo(BaseModel):
     name: str
     type: str  # "stdio", "http", "sse"
     scope: str
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    url: Optional[str] = None
+    command: str | None = None
+    args: list[str] | None = None
+    url: str | None = None
     requires_npm_install: bool = False
 
 
 class BackupManifestContents(BaseModel):
     """Contents tracked in backup manifest."""
 
-    files: List[str] = []
-    skills: List[BackupSkillInfo] = []
-    plugins: List[BackupPluginInfo] = []
-    mcp_servers: List[BackupMCPServerInfo] = []
-    agents: List[str] = []
-    commands: List[str] = []
-    provider_inventory: Dict[str, Any] = {}
-    backup_policy: Dict[str, Any] = {}
+    files: list[str] = []
+    skills: list[BackupSkillInfo] = []
+    plugins: list[BackupPluginInfo] = []
+    mcp_servers: list[BackupMCPServerInfo] = []
+    agents: list[str] = []
+    commands: list[str] = []
+    provider_inventory: dict[str, Any] = {}
+    backup_policy: dict[str, Any] = {}
 
 
 class BackupManifest(BaseModel):
@@ -1465,7 +1466,7 @@ class BackupManifest(BaseModel):
 
     version: str = "1.0"
     created_at: str
-    claude_code_version: Optional[str] = None
+    claude_code_version: str | None = None
     platform: str  # "linux", "darwin", "win32"
     scope: str  # "full", "user", "project"
     contents: BackupManifestContents
@@ -1474,7 +1475,7 @@ class BackupManifest(BaseModel):
 class RestoreOptions(BaseModel):
     """Options for restore operation."""
 
-    selective_restore: Optional[List[str]] = None  # Specific paths to restore
+    selective_restore: list[str] | None = None  # Specific paths to restore
     install_dependencies: bool = False  # Auto-install deps after restore
     dry_run: bool = False  # Preview only, don't actually restore
     skip_plugins: bool = False
@@ -1488,7 +1489,7 @@ class DependencyInstallStatus(BaseModel):
     name: str
     kind: str  # "npm", "pip", "plugin", "skill"
     success: bool
-    message: Optional[str] = None
+    message: str | None = None
 
 
 class RestorePlanDependency(BaseModel):
@@ -1496,9 +1497,9 @@ class RestorePlanDependency(BaseModel):
 
     kind: str  # "npm", "pip", "plugin", "mcp_npm"
     name: str
-    version: Optional[str] = None
-    source: Optional[str] = None  # Skill/plugin name requiring this
-    install_command: Optional[str] = None
+    version: str | None = None
+    source: str | None = None  # Skill/plugin name requiring this
+    install_command: str | None = None
 
 
 class RestorePlanWarning(BaseModel):
@@ -1521,20 +1522,20 @@ class RestorePlan(BaseModel):
     platform_compatible: bool
 
     # What will be restored
-    files_to_restore: List[str] = []
-    skills_to_restore: List[BackupSkillInfo] = []
-    plugins_to_restore: List[BackupPluginInfo] = []
-    mcp_servers_to_restore: List[BackupMCPServerInfo] = []
+    files_to_restore: list[str] = []
+    skills_to_restore: list[BackupSkillInfo] = []
+    plugins_to_restore: list[BackupPluginInfo] = []
+    mcp_servers_to_restore: list[BackupMCPServerInfo] = []
 
     # Dependencies needed
-    dependencies: List[RestorePlanDependency] = []
+    dependencies: list[RestorePlanDependency] = []
     has_dependencies: bool = False
 
     # Warnings
-    warnings: List[RestorePlanWarning] = []
+    warnings: list[RestorePlanWarning] = []
 
     # Manual steps
-    manual_steps: List[str] = []
+    manual_steps: list[str] = []
 
 
 class RestoreResult(BaseModel):
@@ -1545,8 +1546,8 @@ class RestoreResult(BaseModel):
     files_restored: int = 0
     files_skipped: int = 0
     dry_run: bool = False
-    dependency_results: List[DependencyInstallStatus] = []
-    manual_steps: List[str] = []
+    dependency_results: list[DependencyInstallStatus] = []
+    manual_steps: list[str] = []
 
 
 class DependencyInstallRequest(BaseModel):
@@ -1555,8 +1556,8 @@ class DependencyInstallRequest(BaseModel):
     install_npm: bool = True
     install_pip: bool = True
     install_plugins: bool = True
-    skill_names: Optional[List[str]] = None  # Specific skills to install deps for
-    plugin_names: Optional[List[str]] = None  # Specific plugins to reinstall
+    skill_names: list[str] | None = None  # Specific skills to install deps for
+    plugin_names: list[str] | None = None  # Specific plugins to reinstall
 
 
 class DependencyInstallResult(BaseModel):
@@ -1564,8 +1565,8 @@ class DependencyInstallResult(BaseModel):
 
     success: bool
     message: str
-    installed: List[DependencyInstallStatus] = []
-    failed: List[DependencyInstallStatus] = []
+    installed: list[DependencyInstallStatus] = []
+    failed: list[DependencyInstallStatus] = []
     logs: str = ""
 
 
@@ -1637,13 +1638,13 @@ class ContextCompositionCategory(BaseModel):
     estimated_tokens: int
     percentage: float
     color: str  # Hex color for chart
-    items: Optional[List[ContextCategoryItem]] = None
+    items: list[ContextCategoryItem] | None = None
 
 
 class ContextComposition(BaseModel):
     """Full context composition matching /context CLI output."""
 
-    categories: List[ContextCompositionCategory]
+    categories: list[ContextCompositionCategory]
     total_tokens: int
     context_limit: int
     model: str
@@ -1659,16 +1660,16 @@ class ContextAnalysis(BaseModel):
     current_context_tokens: int
     max_context_tokens: int
     context_percentage: float
-    snapshots: List[ContextSnapshot]
-    content_categories: List[ContentCategory]
-    file_consumptions: List[FileConsumption]
-    tool_consumptions: List[ToolConsumption]
+    snapshots: list[ContextSnapshot]
+    content_categories: list[ContentCategory]
+    file_consumptions: list[FileConsumption]
+    tool_consumptions: list[ToolConsumption]
     cache_efficiency: CacheEfficiency
     avg_tokens_per_turn: int
     estimated_turns_remaining: int
     context_zone: str  # "green", "yellow", "orange", "red"
     total_turns: int
-    composition: Optional[ContextComposition] = None
+    composition: ContextComposition | None = None
 
 
 class ContextAnalysisResponse(BaseModel):
@@ -1694,7 +1695,7 @@ class ActiveSessionContext(BaseModel):
 class ActiveSessionsResponse(BaseModel):
     """List of active sessions with context info."""
 
-    sessions: List[ActiveSessionContext]
+    sessions: list[ActiveSessionContext]
 
 
 # Plan History Browser Schemas
@@ -1717,9 +1718,9 @@ class PlanLinkedSession(BaseModel):
     session_id: str
     project_folder: str
     project_name: str
-    git_branch: Optional[str] = None
-    first_seen: Optional[str] = None
-    last_seen: Optional[str] = None
+    git_branch: str | None = None
+    first_seen: str | None = None
+    last_seen: str | None = None
 
 
 class PlanDetail(BaseModel):
@@ -1731,10 +1732,10 @@ class PlanDetail(BaseModel):
     content: str
     modified_at: str
     size_bytes: int
-    headings: List[str]
+    headings: list[str]
     code_block_count: int
     table_count: int
-    linked_sessions: List[PlanLinkedSession]
+    linked_sessions: list[PlanLinkedSession]
 
 
 class PlanCreate(BaseModel):
@@ -1756,14 +1757,14 @@ class PlanSearchResult(BaseModel):
     filename: str
     slug: str
     title: str
-    matches: List[str]
+    matches: list[str]
     modified_at: str
 
 
 class PlanListResponse(BaseModel):
     """List of plan summaries."""
 
-    plans: List[PlanSummary]
+    plans: list[PlanSummary]
     total: int
 
 
@@ -1776,7 +1777,7 @@ class PlanDetailResponse(BaseModel):
 class PlanSearchResponse(BaseModel):
     """Plan search results."""
 
-    results: List[PlanSearchResult]
+    results: list[PlanSearchResult]
     query: str
     total: int
 
@@ -1785,8 +1786,8 @@ class PlanStatsResponse(BaseModel):
     """Plan statistics for dashboard."""
 
     total_plans: int
-    oldest_date: Optional[str] = None
-    newest_date: Optional[str] = None
+    oldest_date: str | None = None
+    newest_date: str | None = None
     total_size_bytes: int
 
 
@@ -1799,17 +1800,17 @@ class MCPRegistryInstallRequest(BaseModel):
     server_name: str  # User-chosen config name (e.g., "github")
     scope: str  # "user" or "project"
     # Package install fields (mutually exclusive with remote_*)
-    package_registry_type: Optional[str] = None  # "npm", "pypi", "oci"
-    package_identifier: Optional[str] = None
-    package_version: Optional[str] = None
-    package_runtime_hint: Optional[str] = None
-    package_arguments: Optional[Dict[str, str]] = None
+    package_registry_type: str | None = None  # "npm", "pypi", "oci"
+    package_identifier: str | None = None
+    package_version: str | None = None
+    package_runtime_hint: str | None = None
+    package_arguments: dict[str, str] | None = None
     # Remote install fields
-    remote_type: Optional[str] = None  # "streamable-http", "sse"
-    remote_url: Optional[str] = None
-    remote_headers: Optional[Dict[str, str]] = None
+    remote_type: str | None = None  # "streamable-http", "sse"
+    remote_url: str | None = None
+    remote_headers: dict[str, str] | None = None
     # Shared
-    env_values: Optional[Dict[str, str]] = None
+    env_values: dict[str, str] | None = None
 
 
 class MCPRegistryInstallResponse(BaseModel):
@@ -1817,7 +1818,7 @@ class MCPRegistryInstallResponse(BaseModel):
 
     success: bool
     server_name: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
     scope: str
 
 
@@ -1829,44 +1830,44 @@ class PresenceEventIn(BaseModel):
 
     session_id: str
     hook_event_name: str
-    tool_name: Optional[str] = None
-    tool_input: Optional[Dict[str, Any]] = None
-    tool_result: Optional[Dict[str, Any]] = None
-    message: Optional[str] = None
-    user_prompt: Optional[str] = None
-    cwd: Optional[str] = None
-    transcript_path: Optional[str] = None
-    permission_mode: Optional[str] = None
-    tmux_pane: Optional[str] = None
+    tool_name: str | None = None
+    tool_input: dict[str, Any] | None = None
+    tool_result: dict[str, Any] | None = None
+    message: str | None = None
+    user_prompt: str | None = None
+    cwd: str | None = None
+    transcript_path: str | None = None
+    permission_mode: str | None = None
+    tmux_pane: str | None = None
 
 
 class PresenceSessionResponse(BaseModel):
     """Single session state for API/WebSocket."""
 
     session_id: str
-    label: Optional[str] = None
-    project_path: Optional[str] = None
-    tmux_pane: Optional[str] = None
+    label: str | None = None
+    project_path: str | None = None
+    tmux_pane: str | None = None
     status: str = "active"
-    status_text: Optional[str] = None
-    last_narrative: Optional[str] = None
-    last_narrative_at: Optional[str] = None
-    modified_files: Optional[List[Union[str, dict]]] = None
-    last_user_prompt: Optional[str] = None
-    last_command: Optional[str] = None
-    last_command_exit: Optional[int] = None
-    activity_buckets: Optional[List[int]] = None
+    status_text: str | None = None
+    last_narrative: str | None = None
+    last_narrative_at: str | None = None
+    modified_files: list[str | dict] | None = None
+    last_user_prompt: str | None = None
+    last_command: str | None = None
+    last_command_exit: int | None = None
+    activity_buckets: list[int] | None = None
     total_events: int = 0
     error_count: int = 0
     started_at: str
     last_event_at: str
-    ended_at: Optional[str] = None
+    ended_at: str | None = None
 
 
 class PresenceSessionListResponse(BaseModel):
     """List of presence sessions with totals."""
 
-    sessions: List[PresenceSessionResponse]
+    sessions: list[PresenceSessionResponse]
     total: int = 0
     active: int = 0
     error: int = 0
@@ -1881,16 +1882,16 @@ class PresenceSessionUpdate(BaseModel):
 class PresenceConfigSnippet(BaseModel):
     """Generated setup snippet."""
 
-    snippet: Dict[str, Any]
+    snippet: dict[str, Any]
     instructions: str
 
 
 class SystemStatusResponse(BaseModel):
     """System status for header indicators."""
 
-    claude_code_version: Optional[str] = None
+    claude_code_version: str | None = None
     active_sessions: int = 0
-    providers: Dict[str, Any] = Field(default_factory=dict)
+    providers: dict[str, Any] = Field(default_factory=dict)
 
 
 # Shared generic response models
@@ -1905,29 +1906,29 @@ class MessageResponse(BaseModel):
 class ScopedSettingsResponse(BaseModel):
     """Settings for a single, non-merged scope."""
 
-    settings: Dict[str, Any]
+    settings: dict[str, Any]
     scope: str
 
 
 class AllScopedSettingsResponse(BaseModel):
     """Settings from every scope, kept separate (not merged)."""
 
-    scopes: Dict[str, Dict[str, Any]]
+    scopes: dict[str, dict[str, Any]]
 
 
 class ResolvedConfigEntry(BaseModel):
     """Effective value of one settings key plus its source scope."""
 
     effective_value: Any
-    source_scope: Optional[str]
-    values_by_scope: Dict[str, Any]
+    source_scope: str | None
+    values_by_scope: dict[str, Any]
 
 
 class ScopeConfigDetail(BaseModel):
     """Per-scope settings plus file metadata."""
 
-    settings: Dict[str, Any]
-    path: Optional[str]
+    settings: dict[str, Any]
+    path: str | None
     exists: bool
     readonly: bool
 
@@ -1944,7 +1945,7 @@ class ResolvedConfigScopes(BaseModel):
 class ResolvedConfigResponse(BaseModel):
     """Resolved configuration with effective values and their source scopes."""
 
-    resolved: Dict[str, ResolvedConfigEntry]
+    resolved: dict[str, ResolvedConfigEntry]
     scopes: ResolvedConfigScopes
 
 
@@ -1952,8 +1953,8 @@ class DirectoryBrowseResponse(BaseModel):
     """Subdirectories of a browsed path."""
 
     path: str
-    parent: Optional[str]
-    directories: List[str]
+    parent: str | None
+    directories: list[str]
 
 
 class ProjectConfigResponse(BaseModel):

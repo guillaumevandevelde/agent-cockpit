@@ -1,17 +1,17 @@
 # backend/tests/test_kanban_stats.py
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
-from app.kanban.operations import apply_operation
 from app.kanban import service, stats
+from app.kanban.operations import apply_operation
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 
-T0 = datetime(2026, 6, 22, 12, 0, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 6, 22, 12, 0, 0, tzinfo=UTC)
 
 
 def _op(card_id, seq, op_type, payload, *, minutes=0):

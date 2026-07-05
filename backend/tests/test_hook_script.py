@@ -1,5 +1,5 @@
-from app.services.scheduling.hook_script import render_hook_command, settings_hooks_block
 from app.models.scheduled_message_schemas import HookEvent
+from app.services.scheduling.hook_script import render_hook_command, settings_hooks_block
 
 
 def test_hook_command_posts_event():

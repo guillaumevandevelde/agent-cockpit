@@ -1,11 +1,11 @@
 # backend/tests/test_kanban_rematerialize.py
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban.models import KanbanCard, KanbanDeliverable
 from app.kanban.operations import apply_operation, rematerialize
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 

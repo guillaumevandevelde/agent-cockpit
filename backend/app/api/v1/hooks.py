@@ -1,5 +1,4 @@
 """API endpoints for hook management."""
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -11,7 +10,7 @@ router = APIRouter(prefix="/hooks", tags=["Hooks"])
 
 @router.get("", response_model=HookListResponse)
 async def list_hooks(
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     List all hooks from user and project settings files.
@@ -30,7 +29,7 @@ async def list_hooks(
 @router.get("/{event}", response_model=HookListResponse)
 async def get_hooks_by_event(
     event: str,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Get hooks for a specific event type.
@@ -50,7 +49,7 @@ async def get_hooks_by_event(
 @router.post("", response_model=Hook, status_code=201)
 async def create_hook(
     hook: HookCreate,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Create a new hook.
@@ -117,7 +116,7 @@ async def update_hook(
     hook_id: str,
     hook_update: HookUpdate,
     scope: str = Query(..., description="Scope (user or project)"),
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Update an existing hook.
@@ -169,7 +168,7 @@ async def update_hook(
 async def delete_hook(
     hook_id: str,
     scope: str = Query(..., description="Scope (user or project)"),
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Delete a hook.

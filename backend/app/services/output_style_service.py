@@ -2,7 +2,6 @@
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import yaml
 
@@ -13,14 +12,13 @@ from app.utils.path_utils import (
     get_project_output_styles_dir,
 )
 
-
 logger = logging.getLogger(__name__)
 
 class OutputStyleService:
     """Service for managing output styles."""
 
     @staticmethod
-    def _parse_frontmatter(content: str) -> Tuple[Dict, str]:
+    def _parse_frontmatter(content: str) -> tuple[dict, str]:
         """
         Parse YAML frontmatter from markdown content.
 
@@ -45,7 +43,7 @@ class OutputStyleService:
             return {}, content.strip()
 
     @staticmethod
-    def _build_frontmatter(metadata: Dict) -> str:
+    def _build_frontmatter(metadata: dict) -> str:
         """
         Build YAML frontmatter string from metadata dict.
 
@@ -62,7 +60,7 @@ class OutputStyleService:
         return f"---\n{yaml_content}---\n\n"
 
     @staticmethod
-    def list_output_styles(project_path: Optional[str] = None) -> List[OutputStyle]:
+    def list_output_styles(project_path: str | None = None) -> list[OutputStyle]:
         """
         List all output styles from user and project scopes.
 
@@ -90,7 +88,7 @@ class OutputStyleService:
         return styles
 
     @staticmethod
-    def _scan_styles_dir(base_dir: Path, scope: str) -> List[OutputStyle]:
+    def _scan_styles_dir(base_dir: Path, scope: str) -> list[OutputStyle]:
         """
         Scan an output styles directory for .md files.
 
@@ -128,8 +126,8 @@ class OutputStyleService:
 
     @staticmethod
     def get_output_style(
-        scope: str, name: str, project_path: Optional[str] = None
-    ) -> Optional[OutputStyle]:
+        scope: str, name: str, project_path: str | None = None
+    ) -> OutputStyle | None:
         """
         Get a specific output style by scope and name.
 
@@ -167,7 +165,7 @@ class OutputStyleService:
 
     @staticmethod
     def create_output_style(
-        style: OutputStyleCreate, project_path: Optional[str] = None
+        style: OutputStyleCreate, project_path: str | None = None
     ) -> OutputStyle:
         """
         Create a new output style file.
@@ -224,8 +222,8 @@ class OutputStyleService:
         scope: str,
         name: str,
         style: OutputStyleUpdate,
-        project_path: Optional[str] = None,
-    ) -> Optional[OutputStyle]:
+        project_path: str | None = None,
+    ) -> OutputStyle | None:
         """
         Update an existing output style file.
 
@@ -284,7 +282,7 @@ class OutputStyleService:
 
     @staticmethod
     def delete_output_style(
-        scope: str, name: str, project_path: Optional[str] = None
+        scope: str, name: str, project_path: str | None = None
     ) -> bool:
         """
         Delete an output style file.

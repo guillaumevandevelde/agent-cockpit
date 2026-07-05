@@ -8,7 +8,7 @@ become a fan-out batch, everything else is a standalone node.
 These use the same throwaway in-memory DB pattern as test_sandcastle_cleanup.py
 so they never touch the production claude_registry.db.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -146,9 +146,9 @@ async def test_pending_run_without_log_file_is_standalone(session_factory):
 @pytest.mark.asyncio
 async def test_independent_batches_do_not_cross_link(session_factory):
     cfg_id = await _seed_config(session_factory)
-    for i in range(2):
+    for _i in range(2):
         await _add_run(session_factory, cfg_id, status="completed", log_file_path="/p/logs/parallel-1.log")
-    for i in range(2):
+    for _i in range(2):
         await _add_run(session_factory, cfg_id, status="completed", log_file_path="/p/logs/parallel-2.log")
 
     svc = SandcastleService()
@@ -176,8 +176,8 @@ async def test_duration_survives_sqlite_datetime_round_trip(session_factory):
     # though it's always written as UTC -- the duration subtraction must not
     # blow up on offset-naive vs offset-aware datetimes after a real fetch.
     cfg_id = await _seed_config(session_factory)
-    started = datetime.now(timezone.utc) - timedelta(minutes=5)
-    completed = datetime.now(timezone.utc)
+    started = datetime.now(UTC) - timedelta(minutes=5)
+    completed = datetime.now(UTC)
     await _add_run(
         session_factory, cfg_id, status="completed",
         started_at=started, completed_at=completed,
@@ -192,7 +192,7 @@ async def test_duration_survives_sqlite_datetime_round_trip(session_factory):
 @pytest.mark.asyncio
 async def test_running_node_duration_computed_against_now(session_factory):
     cfg_id = await _seed_config(session_factory)
-    started = datetime.now(timezone.utc) - timedelta(seconds=10)
+    started = datetime.now(UTC) - timedelta(seconds=10)
     await _add_run(session_factory, cfg_id, status="running", started_at=started)
 
     svc = SandcastleService()

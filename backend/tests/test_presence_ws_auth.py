@@ -1,7 +1,7 @@
 """Tests for presence WebSocket one-time token authentication."""
 import pytest
-from httpx import ASGITransport, AsyncClient
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import settings
@@ -62,7 +62,7 @@ def test_presence_ws_connects_without_token_when_no_api_token_configured(monkeyp
     """WebSocket connects without any token when no api_token is configured."""
     monkeypatch.setattr(settings, "api_token", "")
     client = TestClient(app)
-    with client.websocket_connect("/api/v1/presence/ws") as ws:
+    with client.websocket_connect("/api/v1/presence/ws"):
         pass  # Connection accepted — no exception raised
 
 
@@ -86,7 +86,7 @@ def test_presence_ws_accepts_valid_one_time_token(monkeypatch):
     )
     assert resp.status_code == 200
     token = resp.json()["token"]
-    with client.websocket_connect(f"/api/v1/presence/ws?token={token}") as ws:
+    with client.websocket_connect(f"/api/v1/presence/ws?token={token}"):
         pass  # Connection accepted
 
 

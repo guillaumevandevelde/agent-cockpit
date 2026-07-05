@@ -1,12 +1,12 @@
 """APM (Agent Package Manager) service for managing dependencies per project."""
 from __future__ import annotations
-import logging
 
+import logging
 import subprocess
-import yaml
 from pathlib import Path
 from typing import Any
 
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class ApmService:
                 "project_path": project_path,
             }
 
-        with open(apm_yml, "r") as f:
+        with open(apm_yml) as f:
             content = yaml.safe_load(f) or {}
 
         return {
@@ -87,7 +87,7 @@ class ApmService:
 
         # Read existing or create new
         if apm_yml.exists():
-            with open(apm_yml, "r") as f:
+            with open(apm_yml) as f:
                 content = yaml.safe_load(f) or {}
         else:
             content = {
@@ -128,7 +128,7 @@ class ApmService:
         if not apm_yml.exists():
             return {"success": False, "message": "apm.yml not found"}
 
-        with open(apm_yml, "r") as f:
+        with open(apm_yml) as f:
             content = yaml.safe_load(f) or {}
 
         # Find and remove the dependency
@@ -139,7 +139,7 @@ class ApmService:
         for dep in apm_deps:
             if isinstance(dep, dict):
                 # Check if this is the dependency to remove
-                for key, value in dep.items():
+                for _key, value in dep.items():
                     if name in str(value):
                         removed = True
                         continue
@@ -205,12 +205,12 @@ class ApmService:
             return {"success": False, "message": f"Source apm.yml not found at {source_path}"}
 
         # Read source
-        with open(source_path, "r") as f:
+        with open(source_path) as f:
             source_content = yaml.safe_load(f) or {}
 
         # Read target or create new
         if target_path.exists():
-            with open(target_path, "r") as f:
+            with open(target_path) as f:
                 target_content = yaml.safe_load(f) or {}
         else:
             target_content = {

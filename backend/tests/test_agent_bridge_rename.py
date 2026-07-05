@@ -25,8 +25,9 @@ def test_rename_session_renames_tmux_and_moves_metadata(monkeypatch):
 
 
 def test_rename_session_rejects_empty_name(monkeypatch):
-    from app.services.agent_bridge import spawn
     import pytest
+
+    from app.services.agent_bridge import spawn
 
     monkeypatch.setattr(spawn, "_running_session_names", lambda: set())
 
@@ -35,8 +36,9 @@ def test_rename_session_rejects_empty_name(monkeypatch):
 
 
 def test_rename_session_rejects_collision(monkeypatch):
-    from app.services.agent_bridge import spawn
     import pytest
+
+    from app.services.agent_bridge import spawn
 
     monkeypatch.setattr(spawn, "_running_session_names", lambda: {"old-name", "taken"})
 

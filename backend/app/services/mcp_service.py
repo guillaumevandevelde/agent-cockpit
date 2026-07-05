@@ -11,7 +11,9 @@ instance (e.g. tests monkeypatch `svc.get_server` and expect
 """
 import httpx  # noqa: F401 - re-exported so tests can patch mcp_service.httpx.AsyncClient
 
-from app.services.credentials_service import CredentialsService  # noqa: F401 - re-exported for test patching
+from app.services.credentials_service import (
+    CredentialsService,  # noqa: F401 - re-exported for test patching
+)
 from app.services.mcp_cache_service import MCPCacheService  # noqa: F401
 from app.services.mcp_config_service import MCPConfigService  # noqa: F401
 from app.services.mcp_server_test_service import MCPServerTestService

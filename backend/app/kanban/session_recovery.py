@@ -15,8 +15,8 @@ the conversation back up in the original worktree — see ``dispatch.make_resume
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
 
 from app.kanban.dispatch import CLAIMANT_PREFIX
 from app.utils.path_utils import convert_path_to_folder_name, get_claude_projects_dir
@@ -24,9 +24,9 @@ from app.utils.path_utils import convert_path_to_folder_name, get_claude_project
 logger = logging.getLogger(__name__)
 
 # (project_path, session_name) -> (session_id, project_folder) | None
-ResolveFn = Callable[[str, str], Optional[tuple[str, str]]]
+ResolveFn = Callable[[str, str], tuple[str, str] | None]
 # (session, *, card_id, project_path) -> result dict | None
-RedispatchFn = Callable[..., Awaitable[Optional[dict]]]
+RedispatchFn = Callable[..., Awaitable[dict | None]]
 
 
 def _recoverable(card, live_sessions: set[str]) -> bool:
@@ -50,8 +50,8 @@ def _recoverable(card, live_sessions: set[str]) -> bool:
 
 
 def _resolve_resume_target(
-    project_path: str, session_name: str, *, projects_dir: Optional[Path] = None,
-) -> Optional[tuple[str, str]]:
+    project_path: str, session_name: str, *, projects_dir: Path | None = None,
+) -> tuple[str, str] | None:
     """Find the Claude session to resume for a dead agent session.
 
     A dispatched session runs in ``<project_path>/.claude/worktrees/<session_name>``
@@ -80,7 +80,7 @@ def _resolve_resume_target(
 async def recover_project(
     session, *, project_key: str, project_path: str, live_sessions: set[str],
     resolve: ResolveFn = _resolve_resume_target,
-    redispatch: Optional[RedispatchFn] = None,
+    redispatch: RedispatchFn | None = None,
 ) -> list[dict]:
     """Resume every recoverable interrupted session in one project.
 
@@ -137,7 +137,9 @@ async def recover_interrupted_sessions() -> int:
     """
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.dispatch import (
-        _live_sessions, _registered_project_paths, list_autodispatch_projects,
+        _live_sessions,
+        _registered_project_paths,
+        list_autodispatch_projects,
         match_project_paths,
     )
 

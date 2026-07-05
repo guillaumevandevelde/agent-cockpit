@@ -1,20 +1,18 @@
 """Service for managing agents and skills."""
-import logging
 import json
+import logging
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import yaml
 
-from app.models.schemas import Agent, AgentCreate, AgentUpdate, AgentHook, Skill, SkillFrontmatter
+from app.models.schemas import Agent, AgentCreate, AgentHook, AgentUpdate, Skill, SkillFrontmatter
 from app.utils.path_utils import (
     ensure_directory_exists,
     get_claude_user_agents_dir,
     get_claude_user_skills_dir,
     get_project_agents_dir,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +25,7 @@ class AgentService:
     """Service for managing agents and skills."""
 
     @staticmethod
-    def _get_installed_plugins() -> List[Dict]:
+    def _get_installed_plugins() -> list[dict]:
         """
         Read installed_plugins.json to get active plugin paths.
 
@@ -56,7 +54,7 @@ class AgentService:
             return []
 
     @staticmethod
-    def _metadata_to_frontmatter(metadata: Dict) -> SkillFrontmatter:
+    def _metadata_to_frontmatter(metadata: dict) -> SkillFrontmatter:
         """Convert raw frontmatter dict to SkillFrontmatter model."""
         # The "metadata" sub-dict can also contain some fields
         meta_sub = metadata.get("metadata") or {}
@@ -103,7 +101,7 @@ class AgentService:
         )
 
     @staticmethod
-    def _parse_frontmatter(content: str) -> Tuple[Dict, str]:
+    def _parse_frontmatter(content: str) -> tuple[dict, str]:
         """
         Parse YAML frontmatter from markdown content.
 
@@ -128,7 +126,7 @@ class AgentService:
             return {}, content.strip()
 
     @staticmethod
-    def _build_frontmatter(metadata: Dict) -> str:
+    def _build_frontmatter(metadata: dict) -> str:
         """
         Build YAML frontmatter string from metadata dict.
 
@@ -145,7 +143,7 @@ class AgentService:
         return f"---\n{yaml_content}---\n\n"
 
     @staticmethod
-    def list_agents(project_path: Optional[str] = None) -> List[Agent]:
+    def list_agents(project_path: str | None = None) -> list[Agent]:
         """
         List all agents from user, project, and plugin scopes.
 
@@ -184,7 +182,7 @@ class AgentService:
         return agents
 
     @staticmethod
-    def _parse_list_field(value) -> Optional[List[str]]:
+    def _parse_list_field(value) -> list[str] | None:
         """Parse a field that can be a list or comma-separated string."""
         if value is None:
             return None
@@ -193,7 +191,7 @@ class AgentService:
         return value
 
     @staticmethod
-    def _parse_hooks(hooks_raw: Optional[Dict]) -> Optional[Dict[str, List[AgentHook]]]:
+    def _parse_hooks(hooks_raw: dict | None) -> dict[str, list[AgentHook]] | None:
         """Parse hooks from frontmatter into AgentHook objects."""
         if not hooks_raw:
             return None
@@ -220,7 +218,7 @@ class AgentService:
         return result if result else None
 
     @staticmethod
-    def _scan_agents_dir(base_dir: Path, scope: str) -> List[Agent]:
+    def _scan_agents_dir(base_dir: Path, scope: str) -> list[Agent]:
         """
         Scan an agents directory for .md files.
 
@@ -272,8 +270,8 @@ class AgentService:
 
     @staticmethod
     def get_agent(
-        scope: str, name: str, project_path: Optional[str] = None
-    ) -> Optional[Agent]:
+        scope: str, name: str, project_path: str | None = None
+    ) -> Agent | None:
         """
         Get a specific agent by scope and name.
 
@@ -324,7 +322,7 @@ class AgentService:
             return None
 
     @staticmethod
-    def _hooks_to_dict(hooks: Optional[Dict[str, List[AgentHook]]]) -> Optional[Dict]:
+    def _hooks_to_dict(hooks: dict[str, list[AgentHook]] | None) -> dict | None:
         """Convert AgentHook objects back to dict for YAML serialization."""
         if not hooks:
             return None
@@ -337,7 +335,7 @@ class AgentService:
         return result
 
     @staticmethod
-    def _ensure_agent_memory_dir(agent_name: str, memory_scope: Optional[str]) -> None:
+    def _ensure_agent_memory_dir(agent_name: str, memory_scope: str | None) -> None:
         """Create agent memory directory if memory scope is set."""
         if memory_scope and memory_scope != "none":
             memory_dir = get_agent_memory_dir(agent_name)
@@ -345,7 +343,7 @@ class AgentService:
 
     @staticmethod
     def create_agent(
-        agent: AgentCreate, project_path: Optional[str] = None
+        agent: AgentCreate, project_path: str | None = None
     ) -> Agent:
         """
         Create a new agent file.
@@ -424,8 +422,8 @@ class AgentService:
         scope: str,
         name: str,
         agent: AgentUpdate,
-        project_path: Optional[str] = None,
-    ) -> Optional[Agent]:
+        project_path: str | None = None,
+    ) -> Agent | None:
         """
         Update an existing agent file.
 
@@ -531,7 +529,7 @@ class AgentService:
 
     @staticmethod
     def delete_agent(
-        scope: str, name: str, project_path: Optional[str] = None
+        scope: str, name: str, project_path: str | None = None
     ) -> bool:
         """
         Delete an agent file.
@@ -561,7 +559,7 @@ class AgentService:
             return False
 
     @staticmethod
-    def list_skills(project_path: Optional[str] = None) -> List[Skill]:
+    def list_skills(project_path: str | None = None) -> list[Skill]:
         """
         List all skills from user, project, and plugin directories.
 
@@ -612,7 +610,7 @@ class AgentService:
         return skills
 
     @staticmethod
-    def _scan_skills_dir(base_dir: Path, location: str) -> List[Skill]:
+    def _scan_skills_dir(base_dir: Path, location: str) -> list[Skill]:
         """
         Scan a skills directory for skill files.
 
@@ -631,7 +629,7 @@ class AgentService:
         skills = []
         seen_names = set()
 
-        def _make_skill(name: str, metadata: Dict) -> Skill:
+        def _make_skill(name: str, metadata: dict) -> Skill:
             return Skill(
                 name=name,
                 description=metadata.get("description"),
@@ -685,7 +683,7 @@ class AgentService:
         return skills
 
     @staticmethod
-    def _scan_plugin_skills_dir(base_dir: Path, location: str) -> List[Skill]:
+    def _scan_plugin_skills_dir(base_dir: Path, location: str) -> list[Skill]:
         """
         Scan a plugin skills directory for SKILL.md files in subdirectories.
 
@@ -730,7 +728,7 @@ class AgentService:
         return skills
 
     @staticmethod
-    def _find_skill_file(base_dir: Path, name: str) -> Optional[Path]:
+    def _find_skill_file(base_dir: Path, name: str) -> Path | None:
         """
         Find a skill file by name, checking both layouts:
         1. Flat: base_dir/name.md
@@ -758,8 +756,8 @@ class AgentService:
 
     @staticmethod
     def get_skill(
-        name: str, location: str, project_path: Optional[str] = None
-    ) -> Optional[Skill]:
+        name: str, location: str, project_path: str | None = None
+    ) -> Skill | None:
         """
         Get a specific skill by name and location with full content.
 

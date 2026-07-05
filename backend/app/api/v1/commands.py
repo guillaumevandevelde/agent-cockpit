@@ -1,5 +1,4 @@
 """API endpoints for slash command management."""
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -16,7 +15,7 @@ router = APIRouter(prefix="/commands", tags=["Commands"])
 
 @router.get("", response_model=SlashCommandListResponse)
 async def list_commands(
-    project_path: Optional[str] = Query(None, description="Project path for project-scoped commands")
+    project_path: str | None = Query(None, description="Project path for project-scoped commands")
 ):
     """
     List all commands from user and project scopes.
@@ -38,7 +37,7 @@ async def list_commands(
 async def get_command(
     scope: str,
     path: str,
-    project_path: Optional[str] = Query(None, description="Project path for project-scoped commands")
+    project_path: str | None = Query(None, description="Project path for project-scoped commands")
 ):
     """
     Get a specific command by scope and path.
@@ -72,7 +71,7 @@ async def get_command(
 @router.post("", response_model=SlashCommand, status_code=201)
 async def create_command(
     command: SlashCommandCreate,
-    project_path: Optional[str] = Query(None, description="Project path for project-scoped commands")
+    project_path: str | None = Query(None, description="Project path for project-scoped commands")
 ):
     """
     Create a new command.
@@ -107,7 +106,7 @@ async def update_command(
     scope: str,
     path: str,
     command: SlashCommandUpdate,
-    project_path: Optional[str] = Query(None, description="Project path for project-scoped commands")
+    project_path: str | None = Query(None, description="Project path for project-scoped commands")
 ):
     """
     Update an existing command.
@@ -142,7 +141,7 @@ async def update_command(
 async def delete_command(
     scope: str,
     path: str,
-    project_path: Optional[str] = Query(None, description="Project path for project-scoped commands")
+    project_path: str | None = Query(None, description="Project path for project-scoped commands")
 ):
     """
     Delete a command.

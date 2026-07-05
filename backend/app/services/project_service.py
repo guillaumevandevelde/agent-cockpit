@@ -1,9 +1,8 @@
 """Project management service for discovering and managing Claude Code projects."""
 import logging
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import List, Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,12 +10,11 @@ from app.models.database import Project
 from app.models.schemas import ProjectBase, ProjectCreate, ProjectResponse
 from app.services.config_service import ConfigService
 from app.utils.path_utils import (
+    convert_path_to_folder_name,
+    get_claude_projects_dir,
     get_project_claude_dir,
     get_project_mcp_config_file,
-    get_claude_projects_dir,
-    convert_path_to_folder_name,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +25,7 @@ class ProjectService:
         """Initialize the project service."""
         self.db = db
 
-    async def list_projects(self) -> List[ProjectResponse]:
+    async def list_projects(self) -> list[ProjectResponse]:
         """List all tracked projects from the database."""
         result = await self.db.execute(select(Project).order_by(Project.last_accessed.desc()))
         projects = result.scalars().all()
@@ -55,7 +53,7 @@ class ProjectService:
         if existing:
             # Update existing project
             existing.name = project_data.name
-            existing.last_accessed = datetime.now(timezone.utc)
+            existing.last_accessed = datetime.now(UTC)
             await self.db.commit()
             await self.db.refresh(existing)
 
@@ -73,8 +71,8 @@ class ProjectService:
             name=project_data.name,
             path=project_data.path,
             is_active=False,
-            last_accessed=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            last_accessed=datetime.now(UTC),
+            created_at=datetime.now(UTC),
         )
 
         self.db.add(new_project)
@@ -104,7 +102,7 @@ class ProjectService:
         await self.db.commit()
         return True
 
-    def discover_projects(self, base_path: str) -> List[ProjectBase]:
+    def discover_projects(self, base_path: str) -> list[ProjectBase]:
         """
         Scan a directory for Claude Code projects.
 
@@ -179,7 +177,7 @@ class ProjectService:
 
         return discovered
 
-    async def set_active_project(self, project_id: int) -> Optional[ProjectResponse]:
+    async def set_active_project(self, project_id: int) -> ProjectResponse | None:
         """Set a project as the active project context."""
         # First, deactivate all projects
         result = await self.db.execute(select(Project))
@@ -199,7 +197,7 @@ class ProjectService:
             return None
 
         project.is_active = True
-        project.last_accessed = datetime.now(timezone.utc)
+        project.last_accessed = datetime.now(UTC)
 
         await self.db.commit()
         await self.db.refresh(project)
@@ -224,7 +222,7 @@ class ProjectService:
         await self.db.commit()
         return True
 
-    async def get_project_config(self, project_id: int) -> Optional[dict]:
+    async def get_project_config(self, project_id: int) -> dict | None:
         """Get project-specific configuration."""
         result = await self.db.execute(
             select(Project).where(Project.id == project_id)
@@ -250,10 +248,10 @@ class ProjectService:
             "config": merged.model_dump(),
         }
 
-    async def get_active_project(self) -> Optional[ProjectResponse]:
+    async def get_active_project(self) -> ProjectResponse | None:
         """Get the currently active project."""
         result = await self.db.execute(
-            select(Project).where(Project.is_active == True)
+            select(Project).where(Project.is_active)
         )
         project = result.scalar_one_or_none()
 

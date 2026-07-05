@@ -1,20 +1,20 @@
 """Configuration service for reading and merging Claude Code configurations."""
-import logging
 import json
+import logging
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Literal
+
+from ..utils.file_utils import read_json_file
 from ..utils.path_utils import (
     ClaudePathUtils,
+    ensure_directory_exists,
     get_claude_user_settings_file,
     get_claude_user_settings_local_file,
+    get_managed_settings_file,
     get_project_settings_file,
     get_project_settings_local_file,
-    get_managed_settings_file,
-    ensure_directory_exists,
 )
-from ..utils.file_utils import read_json_file
 from ..utils.pattern_utils import sanitize_permission_rules
-
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class ConfigService:
     def __init__(self):
         self.path_utils = ClaudePathUtils()
 
-    def get_all_config_files(self, project_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_all_config_files(self, project_path: str | None = None) -> list[dict[str, Any]]:
         """
         List all configuration file paths with their status.
 
@@ -99,7 +99,7 @@ class ConfigService:
 
         return files
 
-    def get_merged_config(self, project_path: Optional[str] = None) -> Dict[str, Any]:
+    def get_merged_config(self, project_path: str | None = None) -> dict[str, Any]:
         """
         Get merged configuration from all scopes.
 
@@ -129,7 +129,7 @@ class ConfigService:
 
                 # Extract MCP servers from all projects in user config
                 projects = user_data.get("projects", {})
-                for path, project_config in projects.items():
+                for _path, project_config in projects.items():
                     if isinstance(project_config, dict):
                         project_servers = project_config.get("mcpServers", {})
                         if project_servers:
@@ -209,7 +209,7 @@ class ConfigService:
 
         return merged
 
-    def get_file_content(self, file_path: str) -> Optional[Dict[str, Any]]:
+    def get_file_content(self, file_path: str) -> dict[str, Any] | None:
         """
         Get raw file content.
 
@@ -233,7 +233,7 @@ class ConfigService:
                 content = read_json_file(path)
                 content_str = json.dumps(content, indent=2) if content else ""
             else:
-                with open(path, 'r', encoding='utf-8') as f:
+                with open(path, encoding='utf-8') as f:
                     content_str = f.read()
 
             return {
@@ -248,7 +248,7 @@ class ConfigService:
                 "exists": True
             }
 
-    def mask_sensitive_values(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def mask_sensitive_values(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         Mask sensitive values in configuration data.
 
@@ -284,8 +284,8 @@ class ConfigService:
         return masked
 
     def update_settings(
-        self, scope: str, settings: Dict[str, Any], project_path: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, scope: str, settings: dict[str, Any], project_path: str | None = None
+    ) -> dict[str, Any]:
         """
         Update settings for a given scope.
 
@@ -358,7 +358,7 @@ class ConfigService:
                 "path": str(file_path)
             }
 
-    def _deep_merge(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    def _deep_merge(self, base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
         """
         Deep merge two dictionaries.
 
@@ -387,7 +387,7 @@ class ConfigService:
 
         return result
 
-    def get_settings_by_scope(self, scope: str, project_path: Optional[str] = None) -> Dict[str, Any]:
+    def get_settings_by_scope(self, scope: str, project_path: str | None = None) -> dict[str, Any]:
         """
         Get settings for a specific scope (not merged).
 
@@ -419,7 +419,7 @@ class ConfigService:
             return read_json_file(file_path) or {}
         return {}
 
-    def get_all_scoped_settings(self, project_path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    def get_all_scoped_settings(self, project_path: str | None = None) -> dict[str, dict[str, Any]]:
         """
         Get settings from all scopes separately.
 
@@ -459,7 +459,7 @@ class ConfigService:
 
         return result
 
-    def get_resolved_config(self, project_path: Optional[str] = None) -> Dict[str, Any]:
+    def get_resolved_config(self, project_path: str | None = None) -> dict[str, Any]:
         """
         Get resolved configuration showing effective values and their source scopes.
         
@@ -520,7 +520,7 @@ class ConfigService:
             }
         }
 
-    def _flatten_keys(self, d: Dict[str, Any], parent_key: str = "") -> set:
+    def _flatten_keys(self, d: dict[str, Any], parent_key: str = "") -> set:
         """Flatten nested dict keys using dot notation."""
         keys = set()
         for k, v in d.items():
@@ -531,7 +531,7 @@ class ConfigService:
                 keys.add(new_key)
         return keys
 
-    def _get_nested_value(self, d: Dict[str, Any], key: str) -> Tuple[Any, bool]:
+    def _get_nested_value(self, d: dict[str, Any], key: str) -> tuple[Any, bool]:
         """Get a nested value by dot-notation key. Returns (value, found)."""
         parts = key.split(".")
         current = d
@@ -542,7 +542,7 @@ class ConfigService:
                 return None, False
         return current, True
 
-    def _resolve_key(self, key: str, scoped_settings: Dict[str, Dict[str, Any]]) -> Tuple[Any, str, Dict[str, Any]]:
+    def _resolve_key(self, key: str, scoped_settings: dict[str, dict[str, Any]]) -> tuple[Any, str, dict[str, Any]]:
         """
         Resolve a setting key across all scopes.
         

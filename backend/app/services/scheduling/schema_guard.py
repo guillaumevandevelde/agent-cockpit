@@ -5,8 +5,8 @@ we add columns to an existing install, we ALTER the table at startup so the
 user's existing data survives. SQLite supports ADD COLUMN with a default.
 """
 import logging
-from sqlalchemy.ext.asyncio import AsyncEngine
 
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
 _NEW_COLUMNS = {
@@ -52,14 +52,14 @@ async def ensure_model_columns(engine: AsyncEngine) -> None:
     Currently handles DateTime columns with a CURRENT_TIMESTAMP default, which
     covers the common case of adding updated_at (or similar) to existing tables.
     """
-    from app.database import Base
+    from sqlalchemy import DateTime
+
     # Trigger model registration (idempotent if already imported by main.py)
     import app.models.database  # noqa: F401
-    import app.models.scheduled_message  # noqa: F401
     import app.models.mcp_token  # noqa: F401
     import app.models.sandcastle  # noqa: F401
-
-    from sqlalchemy import DateTime
+    import app.models.scheduled_message  # noqa: F401
+    from app.database import Base
 
     async with engine.begin() as conn:
         for table_name, table in Base.metadata.tables.items():

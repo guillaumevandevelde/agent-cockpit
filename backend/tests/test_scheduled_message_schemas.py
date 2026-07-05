@@ -1,9 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
+
 from app.models.scheduled_message_schemas import (
-    ScheduledMessageCreate, DeliveryAttemptResponse,
+    DeliveryAttemptResponse,
+    ScheduledMessageCreate,
 )
 
 
@@ -21,7 +23,7 @@ def test_naive_utc_timestamps_serialize_with_offset():
 
 def test_aware_utc_timestamp_preserved():
     resp = DeliveryAttemptResponse(
-        id=1, fired_at=datetime(2026, 6, 14, 22, 50, tzinfo=timezone.utc),
+        id=1, fired_at=datetime(2026, 6, 14, 22, 50, tzinfo=UTC),
     )
     assert resp.model_dump(mode="json")["fired_at"] == "2026-06-14T22:50:00+00:00"
 

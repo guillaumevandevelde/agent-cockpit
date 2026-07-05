@@ -2,14 +2,13 @@
 import logging
 import secrets
 import time
-from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, WebSocket, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket
 from pydantic import BaseModel
 
 from app.config import settings
-from app.services.cc_bridge.discovery import discover_cc_sessions, capture_pane_preview
+from app.services.cc_bridge.discovery import capture_pane_preview, discover_cc_sessions
 from app.services.cc_bridge.pty_relay import PtyRelay
 
 logger = logging.getLogger(__name__)
@@ -23,9 +22,9 @@ _TOKEN_TTL = 30
 class SpawnRequest(BaseModel):
     directory: str
     mode: str  # "plain", "worktree", "resume"
-    worktree_name: Optional[str] = None
-    session_id: Optional[str] = None
-    project_folder: Optional[str] = None
+    worktree_name: str | None = None
+    session_id: str | None = None
+    project_folder: str | None = None
     skip_permissions: bool = False
 
 

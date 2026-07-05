@@ -2,20 +2,22 @@
 
 Uses an in-memory SQLite database so tests never touch the production DB.
 """
+from datetime import UTC
+
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base
 from app.models.host import Host  # noqa: F401 (register model)
 from app.services.host_service import (
     HostNotFoundError,
+    _host_to_dict,
     create_host,
     delete_host,
     get_host,
     list_hosts,
     update_host,
-    _host_to_dict,
 )
 
 # In-memory engine shared across tests
@@ -169,8 +171,8 @@ def test_host_to_dict_none_dates():
 
 
 def test_host_to_dict_with_dates():
-    from datetime import datetime, timezone
-    dt = datetime.now(timezone.utc)
+    from datetime import datetime
+    dt = datetime.now(UTC)
     host = Host(
         alias="test",
         hostname="localhost",

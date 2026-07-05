@@ -2,22 +2,22 @@
 import csv
 import io
 import json
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.services.usage_service import UsageService
 from app.models.schemas import (
-    UsageSummaryResponse,
-    DailyUsageListResponse,
-    SessionUsageListResponse,
-    MonthlyUsageListResponse,
     BlockUsageListResponse,
+    DailyUsageListResponse,
+    MonthlyUsageListResponse,
+    SessionUsageListResponse,
+    UsageSummaryResponse,
 )
+from app.services.usage_service import UsageService
 
 router = APIRouter(prefix="/usage")
 
@@ -27,7 +27,7 @@ _EXPORT_DATASETS = {"summary", "daily", "sessions", "monthly", "blocks"}
 
 @router.get("/summary", response_model=UsageSummaryResponse)
 async def get_usage_summary(
-    project_path: Optional[str] = Query(None, description="Filter by project path"),
+    project_path: str | None = Query(None, description="Filter by project path"),
     db: AsyncSession = Depends(get_db),
 ):
     """Get overall usage statistics."""
@@ -42,11 +42,11 @@ async def get_usage_summary(
 
 @router.get("/daily", response_model=DailyUsageListResponse)
 async def get_daily_usage(
-    project_path: Optional[str] = Query(None, description="Filter by project path"),
-    start_date: Optional[str] = Query(
+    project_path: str | None = Query(None, description="Filter by project path"),
+    start_date: str | None = Query(
         None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"
     ),
-    end_date: Optional[str] = Query(
+    end_date: str | None = Query(
         None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"
     ),
     db: AsyncSession = Depends(get_db),
@@ -63,7 +63,7 @@ async def get_daily_usage(
 
 @router.get("/sessions", response_model=SessionUsageListResponse)
 async def get_session_usage(
-    project_path: Optional[str] = Query(None, description="Filter by project path"),
+    project_path: str | None = Query(None, description="Filter by project path"),
     limit: int = Query(50, ge=1, le=500, description="Max sessions to return"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -79,11 +79,11 @@ async def get_session_usage(
 
 @router.get("/monthly", response_model=MonthlyUsageListResponse)
 async def get_monthly_usage(
-    project_path: Optional[str] = Query(None, description="Filter by project path"),
-    start_month: Optional[str] = Query(
+    project_path: str | None = Query(None, description="Filter by project path"),
+    start_month: str | None = Query(
         None, description="Start month (YYYY-MM)", pattern=r"^\d{4}-\d{2}$"
     ),
-    end_month: Optional[str] = Query(
+    end_month: str | None = Query(
         None, description="End month (YYYY-MM)", pattern=r"^\d{4}-\d{2}$"
     ),
     db: AsyncSession = Depends(get_db),
@@ -100,7 +100,7 @@ async def get_monthly_usage(
 
 @router.get("/blocks", response_model=BlockUsageListResponse)
 async def get_block_usage(
-    project_path: Optional[str] = Query(None, description="Filter by project path"),
+    project_path: str | None = Query(None, description="Filter by project path"),
     recent: bool = Query(True, description="Only recent blocks (last 3 days) + active"),
     active: bool = Query(False, description="Only active blocks"),
     db: AsyncSession = Depends(get_db),
@@ -141,7 +141,7 @@ def _flatten_for_csv(rows: list[dict[str, Any]]) -> tuple[list[str], list[dict[s
 
 
 async def _collect_export_rows(
-    service: UsageService, dataset: str, project_path: Optional[str]
+    service: UsageService, dataset: str, project_path: str | None
 ) -> list[dict[str, Any]]:
     """Dispatch to the appropriate service method and return plain dict rows."""
     if dataset == "summary":
@@ -167,7 +167,7 @@ async def _collect_export_rows(
 async def export_usage(
     dataset: str = Query("daily", description="Which dataset to export"),
     format: str = Query("json", description="json or csv"),
-    project_path: Optional[str] = Query(None, description="Filter by project path"),
+    project_path: str | None = Query(None, description="Filter by project path"),
     db: AsyncSession = Depends(get_db),
 ):
     """Download usage data as JSON or CSV with a descriptive filename."""
@@ -187,7 +187,7 @@ async def export_usage(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to collect export data: {e}")
 
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d")
     filename = f"claude-usage-{dataset}-{stamp}.{format}"
 
     if format == "json":
@@ -215,10 +215,10 @@ async def export_usage(
 
 @router.post("/cache/invalidate")
 async def invalidate_cache(
-    cache_type: Optional[str] = Query(
+    cache_type: str | None = Query(
         None, description="Cache type to invalidate (daily, session, monthly, block, summary)"
     ),
-    project_path: Optional[str] = Query(None, description="Filter by project path"),
+    project_path: str | None = Query(None, description="Filter by project path"),
     db: AsyncSession = Depends(get_db),
 ):
     """Invalidate usage cache."""

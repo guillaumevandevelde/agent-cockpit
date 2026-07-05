@@ -3,8 +3,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban import models
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 
@@ -29,8 +29,8 @@ async def test_can_persist_an_op_row():
         assert rows[0].payload["title"] == "x"
 
 
-from app.kanban.operations import apply_operation, get_device_id
 from app.kanban.models import KanbanCard
+from app.kanban.operations import apply_operation, get_device_id
 
 
 @pytest.mark.asyncio
@@ -146,8 +146,9 @@ async def test_release_clears_owner():
         assert card.claimed_by is None
 
 
-from app.kanban.models import KanbanDeliverable, KanbanOp
 from sqlalchemy import select as _select
+
+from app.kanban.models import KanbanDeliverable, KanbanOp
 
 
 @pytest.mark.asyncio

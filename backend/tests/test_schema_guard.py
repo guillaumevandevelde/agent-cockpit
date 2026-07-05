@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from app.services.scheduling.schema_guard import ensure_scheduled_message_columns
 
 NEW = {"target_kind", "target_session_id", "project_folder", "session_preview"}
@@ -20,4 +21,4 @@ async def test_adds_missing_columns_idempotently(tmp_path):
         result = await conn.exec_driver_sql("PRAGMA table_info(scheduled_messages)")
         cols = {row[1] for row in result.fetchall()}
     await engine.dispose()
-    assert NEW <= cols
+    assert cols >= NEW

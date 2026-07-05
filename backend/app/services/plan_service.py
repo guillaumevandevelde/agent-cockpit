@@ -1,14 +1,17 @@
 """Service for browsing Claude Code plan files."""
-import logging
 import json
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.services.config_service import ConfigService
-from app.utils.path_utils import get_claude_plans_dir, get_claude_projects_dir, get_project_display_name
-
+from app.utils.path_utils import (
+    get_claude_plans_dir,
+    get_claude_projects_dir,
+    get_project_display_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +19,7 @@ class PlanService:
     """Service for reading and searching Claude Code plan files."""
 
     @classmethod
-    def resolve_plans_dir(cls, project_path: Optional[str] = None) -> Path:
+    def resolve_plans_dir(cls, project_path: str | None = None) -> Path:
         """Resolve the plans directory from settings or use default.
 
         The plansDirectory setting can be:
@@ -80,7 +83,7 @@ class PlanService:
         return excerpt
 
     @classmethod
-    def _extract_headings(cls, content: str) -> List[str]:
+    def _extract_headings(cls, content: str) -> list[str]:
         """Extract h2/h3 headings for table of contents."""
         headings = []
         for line in content.split("\n"):
@@ -107,7 +110,7 @@ class PlanService:
         return count
 
     @classmethod
-    def list_plans(cls, plans_dir: Path) -> List[Dict[str, Any]]:
+    def list_plans(cls, plans_dir: Path) -> list[dict[str, Any]]:
         """List all plan files sorted by modification time (newest first)."""
         plans = []
 
@@ -155,7 +158,7 @@ class PlanService:
         return candidate
 
     @classmethod
-    def create_plan(cls, plans_dir: Path, filename: str, content: str) -> Dict[str, Any]:
+    def create_plan(cls, plans_dir: Path, filename: str, content: str) -> dict[str, Any]:
         """Create a new plan file. Raises ValueError if it already exists."""
         path = cls._resolve_plan_path(plans_dir, filename)
         if path.exists():
@@ -166,7 +169,7 @@ class PlanService:
         return cls.get_plan(plans_dir, path.name)
 
     @classmethod
-    def update_plan(cls, plans_dir: Path, filename: str, content: str) -> Optional[Dict[str, Any]]:
+    def update_plan(cls, plans_dir: Path, filename: str, content: str) -> dict[str, Any] | None:
         """Overwrite an existing plan's content. Returns None if not found."""
         path = cls._resolve_plan_path(plans_dir, filename)
         if not path.exists():
@@ -186,10 +189,10 @@ class PlanService:
         return True
 
     @classmethod
-    def get_plan(cls, plans_dir: Path, filename: str) -> Optional[Dict[str, Any]]:
+    def get_plan(cls, plans_dir: Path, filename: str) -> dict[str, Any] | None:
         """Get full plan content and metadata."""
         plan_file = plans_dir / filename
-        if not plan_file.exists() or not plan_file.suffix == ".md":
+        if not plan_file.exists() or plan_file.suffix != ".md":
             return None
 
         try:
@@ -211,7 +214,7 @@ class PlanService:
             return None
 
     @classmethod
-    def search_plans(cls, plans_dir: Path, query: str) -> List[Dict[str, Any]]:
+    def search_plans(cls, plans_dir: Path, query: str) -> list[dict[str, Any]]:
         """Search plans by title and content (case-insensitive)."""
         results = []
         query_lower = query.lower()
@@ -232,7 +235,7 @@ class PlanService:
 
                 # Extract match context snippets
                 matches = []
-                for i, line in enumerate(content.split("\n")):
+                for _i, line in enumerate(content.split("\n")):
                     if query_lower in line.lower():
                         snippet = line.strip()
                         if len(snippet) > 120:
@@ -258,7 +261,7 @@ class PlanService:
         return results
 
     @classmethod
-    def _empty_stats(cls) -> Dict[str, Any]:
+    def _empty_stats(cls) -> dict[str, Any]:
         return {
             "total_plans": 0,
             "oldest_date": None,
@@ -267,7 +270,7 @@ class PlanService:
         }
 
     @classmethod
-    def get_plan_stats(cls, plans_dir: Path) -> Dict[str, Any]:
+    def get_plan_stats(cls, plans_dir: Path) -> dict[str, Any]:
         """Get plan statistics."""
         if not plans_dir.exists():
             return cls._empty_stats()
@@ -288,7 +291,7 @@ class PlanService:
         }
 
     @classmethod
-    def get_plan_sessions(cls, slug: str) -> List[Dict[str, Any]]:
+    def get_plan_sessions(cls, slug: str) -> list[dict[str, Any]]:
         """Find sessions linked to a plan via the slug field in JSONL files."""
         sessions = []
         projects_dir = get_claude_projects_dir()
@@ -315,7 +318,7 @@ class PlanService:
     @classmethod
     def _scan_jsonl_for_slug(
         cls, filepath: Path, slug: str, project_folder: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Scan a JSONL file for entries matching the given slug.
 
         Reads all entries to get accurate first_seen/last_seen timestamps.
@@ -325,7 +328,7 @@ class PlanService:
         last_seen = None
         git_branch = None
 
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:

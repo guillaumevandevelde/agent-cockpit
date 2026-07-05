@@ -5,9 +5,8 @@ UserPromptSubmit, Stop, Notification, and SessionStart events. The hook reads
 the JSON CC passes on stdin (contains session_id + cwd) and forwards it.
 Requires `jq` and `curl` in the session environment (WSL Ubuntu has both).
 """
-import logging
 import json
-
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -15,14 +14,14 @@ def render_hook_command(event: str, port: int = 8000) -> str:
     url = f"http://localhost:{port}/api/v1/scheduled-messages/hook-event"
     if event == "Notification":
         return (
-            "jq -c --arg ev %s '{event:$ev, session_id:.session_id, cwd:.cwd, "
+            f"jq -c --arg ev {json.dumps(event)} '{{event:$ev, session_id:.session_id, cwd:.cwd, "
             "tmux_pane:env.TMUX_PANE, message:.message}' "
-            "| curl -s -X POST -H 'Content-Type: application/json' -d @- %s >/dev/null 2>&1 || true"
-        ) % (json.dumps(event), url)
+            f"| curl -s -X POST -H 'Content-Type: application/json' -d @- {url} >/dev/null 2>&1 || true"
+        )
     return (
-        "jq -c --arg ev %s '{event:$ev, session_id:.session_id, cwd:.cwd, tmux_pane:env.TMUX_PANE}' "
-        "| curl -s -X POST -H 'Content-Type: application/json' -d @- %s >/dev/null 2>&1 || true"
-    ) % (json.dumps(event), url)
+        f"jq -c --arg ev {json.dumps(event)} '{{event:$ev, session_id:.session_id, cwd:.cwd, tmux_pane:env.TMUX_PANE}}' "
+        f"| curl -s -X POST -H 'Content-Type: application/json' -d @- {url} >/dev/null 2>&1 || true"
+    )
 
 
 def settings_hooks_block(port: int = 8000) -> dict:

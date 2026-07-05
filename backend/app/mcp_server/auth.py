@@ -1,15 +1,13 @@
 """Bearer token authentication for the MCP server."""
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import bcrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.mcp_token import MCPAccessToken
-
 
 TOKEN_PREFIX = "ccp"
 
@@ -18,7 +16,7 @@ TOKEN_PREFIX = "ccp"
 class TokenContext:
     token_id: int
     scope: str  # "read" | "write"
-    agent_name: Optional[str]
+    agent_name: str | None
     name: str
 
 
@@ -40,7 +38,7 @@ def verify_secret(secret: str, token_hash: str) -> bool:
     return bcrypt.checkpw(secret.encode(), token_hash.encode())
 
 
-async def verify_bearer_token(authorization: Optional[str], db: AsyncSession) -> Optional[TokenContext]:
+async def verify_bearer_token(authorization: str | None, db: AsyncSession) -> TokenContext | None:
     """Verify a Bearer token and return the context.
 
     Token format: ccp_<prefix8>_<secret>
@@ -69,7 +67,7 @@ async def verify_bearer_token(authorization: Optional[str], db: AsyncSession) ->
         select(MCPAccessToken).where(
             MCPAccessToken.token_prefix == prefix8,
             MCPAccessToken.revoked_at.is_(None),
-            MCPAccessToken.enabled == True,
+            MCPAccessToken.enabled,
         )
     )
     row = result.scalar_one_or_none()
@@ -79,11 +77,11 @@ async def verify_bearer_token(authorization: Optional[str], db: AsyncSession) ->
     if not verify_secret(secret, row.token_hash):
         return None
 
-    if row.expires_at and row.expires_at < datetime.now(timezone.utc):
+    if row.expires_at and row.expires_at < datetime.now(UTC):
         return None
 
     # Update last_used_at (fire and forget)
-    row.last_used_at = datetime.now(timezone.utc)
+    row.last_used_at = datetime.now(UTC)
     await db.commit()
 
     return TokenContext(

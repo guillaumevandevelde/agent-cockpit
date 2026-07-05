@@ -1,16 +1,13 @@
 """Service for managing Claude Code hooks."""
-import logging
 import json
+import logging
 import uuid
-from pathlib import Path
-from typing import Dict, List, Optional
 
-from app.models.schemas import Hook, HookCreate, HookUpdate, VALID_HOOK_EVENTS
+from app.models.schemas import VALID_HOOK_EVENTS, Hook, HookCreate, HookUpdate
 from app.utils.path_utils import (
     get_claude_user_settings_file,
     get_project_settings_file,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +74,7 @@ class HookService:
                     # Flat format: entry is a hook definition itself
                     yield self._parse_hook_from_data(entry, event, scope)
 
-    def list_hooks(self, project_path: Optional[str] = None) -> List[Hook]:
+    def list_hooks(self, project_path: str | None = None) -> list[Hook]:
         """
         List all hooks from user and project settings files.
 
@@ -93,12 +90,12 @@ class HookService:
         user_settings_file = get_claude_user_settings_file()
         if user_settings_file.exists():
             try:
-                with open(user_settings_file, "r") as f:
+                with open(user_settings_file) as f:
                     user_settings = json.load(f)
                     hooks.extend(self._iter_hooks_from_settings(
                         user_settings.get("hooks", {}), "user"
                     ))
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
 
         # Read project-level hooks
@@ -106,19 +103,19 @@ class HookService:
             project_settings_file = get_project_settings_file(project_path)
             if project_settings_file.exists():
                 try:
-                    with open(project_settings_file, "r") as f:
+                    with open(project_settings_file) as f:
                         project_settings = json.load(f)
                         hooks.extend(self._iter_hooks_from_settings(
                             project_settings.get("hooks", {}), "project"
                         ))
-                except (json.JSONDecodeError, IOError):
+                except (OSError, json.JSONDecodeError):
                     pass
 
         return hooks
 
     def get_hooks_by_event(
-        self, event: str, project_path: Optional[str] = None
-    ) -> List[Hook]:
+        self, event: str, project_path: str | None = None
+    ) -> list[Hook]:
         """
         Get hooks filtered by event type.
 
@@ -133,7 +130,7 @@ class HookService:
         return [hook for hook in all_hooks if hook.event == event]
 
     def add_hook(
-        self, hook: HookCreate, project_path: Optional[str] = None
+        self, hook: HookCreate, project_path: str | None = None
     ) -> Hook:
         """
         Add a new hook to the appropriate settings file.
@@ -166,7 +163,7 @@ class HookService:
 
         # Read existing settings or create new
         if settings_file.exists():
-            with open(settings_file, "r") as f:
+            with open(settings_file) as f:
                 settings = json.load(f)
         else:
             settings = {}
@@ -253,8 +250,8 @@ class HookService:
         hook_id: str,
         hook_update: HookUpdate,
         scope: str,
-        project_path: Optional[str] = None
-    ) -> Optional[Hook]:
+        project_path: str | None = None
+    ) -> Hook | None:
         """
         Update an existing hook.
 
@@ -284,7 +281,7 @@ class HookService:
             return None
 
         # Read settings
-        with open(settings_file, "r") as f:
+        with open(settings_file) as f:
             settings = json.load(f)
 
         hooks_section = settings.get("hooks", {})
@@ -360,7 +357,7 @@ class HookService:
         return updated_hook
 
     def remove_hook(
-        self, hook_id: str, scope: str, project_path: Optional[str] = None
+        self, hook_id: str, scope: str, project_path: str | None = None
     ) -> bool:
         """
         Remove a hook from settings.
@@ -383,14 +380,14 @@ class HookService:
             return False
 
         # Read settings
-        with open(settings_file, "r") as f:
+        with open(settings_file) as f:
             settings = json.load(f)
 
         hooks_section = settings.get("hooks", {})
 
         # Find and remove hook (handles both nested and flat formats)
         removed = False
-        for event, event_hooks in hooks_section.items():
+        for _event, event_hooks in hooks_section.items():
             if not isinstance(event_hooks, list):
                 continue
             for gi, group in enumerate(event_hooks):

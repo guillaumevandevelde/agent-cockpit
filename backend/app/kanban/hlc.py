@@ -10,7 +10,7 @@ the replay order for rematerialize(), and a card's default rank. `update()` only
 once a second clock exists again, so it is frozen, not removed.
 """
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 
 def _default_now_ms() -> int:
@@ -61,7 +61,7 @@ class HLC:
         self._last_physical, self._last_logical = new_physical, new_logical
 
 
-def hlc_max(a: Optional[str], b: Optional[str]) -> Optional[str]:
+def hlc_max(a: str | None, b: str | None) -> str | None:
     """Return the later of two HLCs (None-safe)."""
     if a is None:
         return b

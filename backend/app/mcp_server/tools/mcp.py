@@ -1,6 +1,5 @@
 """MCP tools for MCP server management."""
 import json
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -13,7 +12,7 @@ def register_mcp_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def list_mcp_servers(
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
     ) -> str:
         """List all configured MCP servers with their status.
 

@@ -1,11 +1,11 @@
 """Tests for the global auto-dispatch pause triggered by Claude usage-limit hits."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban import dispatch_pause
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 
@@ -25,7 +25,7 @@ async def test_not_paused_by_default():
 
 @pytest.mark.asyncio
 async def test_future_deadline_pauses_dispatch():
-    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+    future = datetime.now(UTC) + timedelta(minutes=10)
     async with KanbanSessionLocal() as s:
         await dispatch_pause.set_paused_until(s, future)
         await s.commit()
@@ -39,7 +39,7 @@ async def test_future_deadline_pauses_dispatch():
 
 @pytest.mark.asyncio
 async def test_expired_deadline_self_clears_and_unpauses():
-    past = datetime.now(timezone.utc) - timedelta(minutes=1)
+    past = datetime.now(UTC) - timedelta(minutes=1)
     async with KanbanSessionLocal() as s:
         await dispatch_pause.set_paused_until(s, past)
         await s.commit()
@@ -55,7 +55,7 @@ async def test_expired_deadline_self_clears_and_unpauses():
 
 @pytest.mark.asyncio
 async def test_set_paused_until_none_clears_an_active_pause():
-    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+    future = datetime.now(UTC) + timedelta(minutes=10)
     async with KanbanSessionLocal() as s:
         await dispatch_pause.set_paused_until(s, future)
         await s.commit()

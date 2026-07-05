@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +67,7 @@ async def check_mcp_health(*, app=None, mcp=None, mount_prefix: str = _MOUNT_PRE
         advertised, status_code = await asyncio.wait_for(
             _message_roundtrip(app, f"{mount_prefix}/sse"), timeout=8.0
         )
-    except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001 - probe must not raise
+    except (TimeoutError, Exception) as e:  # noqa: BLE001 - probe must not raise
         advertised, status_code = None, 0
         result["error"] = f"could not probe MCP message endpoint: {e}"
     if advertised:
@@ -93,6 +92,7 @@ async def check_mcp_health(*, app=None, mcp=None, mount_prefix: str = _MOUNT_PRE
     # 4: kanban store answers.
     try:
         from sqlalchemy import text
+
         from app.kanban.db import KanbanSessionLocal
         async with KanbanSessionLocal() as s:
             await s.execute(text("SELECT 1"))
@@ -106,7 +106,7 @@ async def check_mcp_health(*, app=None, mcp=None, mount_prefix: str = _MOUNT_PRE
     return result
 
 
-async def _message_roundtrip(app, sse_path: str) -> tuple[Optional[str], int]:
+async def _message_roundtrip(app, sse_path: str) -> tuple[str | None, int]:
     """Open the SSE stream, read the advertised message endpoint, and POST a ping
     back to it using the session_id from the handshake -- all while the SSE task
     (and therefore the session) is still alive. Returns

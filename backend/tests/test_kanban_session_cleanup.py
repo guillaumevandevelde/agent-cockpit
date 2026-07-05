@@ -1,8 +1,9 @@
 import subprocess
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock
+
 from app.kanban import session_cleanup
 from app.kanban.models import KanbanCard
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables

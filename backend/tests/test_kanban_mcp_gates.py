@@ -4,9 +4,9 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 from app.kanban import mcp_server as m
 from app.kanban import service
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 

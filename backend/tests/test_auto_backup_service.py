@@ -1,5 +1,5 @@
 """Tests for the scheduled automatic-backup service."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -121,7 +121,7 @@ async def test_create_backup_survives_info_logging(db, monkeypatch, tmp_path, ca
 
 @pytest.mark.asyncio
 async def test_rotation_deletes_old_automatic_only(db):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_auto = Backup(
         name="auto-backup", file_path="/nonexistent/old_auto.zip", scope="user",
         size_bytes=1, is_automatic=True, created_at=now - timedelta(days=10),

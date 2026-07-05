@@ -1,5 +1,4 @@
 """API endpoints for output style management."""
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -16,7 +15,7 @@ router = APIRouter(prefix="/output-styles", tags=["Output Styles"])
 
 @router.get("", response_model=OutputStyleListResponse)
 async def list_output_styles(
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     List all output styles from user and project scopes.
@@ -35,7 +34,7 @@ async def list_output_styles(
 async def get_output_style(
     scope: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Get a specific output style by scope and name.
@@ -67,7 +66,7 @@ async def get_output_style(
 @router.post("", response_model=OutputStyle, status_code=201)
 async def create_output_style(
     style: OutputStyleCreate,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Create a new output style.
@@ -113,7 +112,7 @@ async def update_output_style(
     scope: str,
     name: str,
     style_update: OutputStyleUpdate,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Update an existing output style.
@@ -157,7 +156,7 @@ async def update_output_style(
 async def delete_output_style(
     scope: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Delete an output style.

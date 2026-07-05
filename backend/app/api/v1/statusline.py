@@ -1,14 +1,13 @@
 """API endpoints for status line configuration."""
 from fastapi import APIRouter, HTTPException
-
 from pydantic import BaseModel
 
 from app.models.schemas import (
+    NodejsCheckResponse,
+    PowerlinePresetsResponse,
     StatusLineConfig,
     StatusLinePresetsResponse,
     StatusLineUpdate,
-    PowerlinePresetsResponse,
-    NodejsCheckResponse,
 )
 from app.services.statusline_service import StatusLineService
 

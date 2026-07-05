@@ -1,8 +1,6 @@
 """Tests for session cleanup when cards complete."""
-import asyncio
 import subprocess
-from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

@@ -2,17 +2,15 @@
 import logging
 import re
 import uuid
-from pathlib import Path
-from typing import List, Optional
 
 from app.models.schemas import (
+    VALID_PERMISSION_MODES,
     PermissionListResponse,
     PermissionRule,
     PermissionRuleCreate,
     PermissionRuleUpdate,
     PermissionSettings,
     PermissionSettingsUpdate,
-    VALID_PERMISSION_MODES,
 )
 from app.utils.file_utils import read_json_file, write_json_file
 from app.utils.path_utils import (
@@ -20,14 +18,13 @@ from app.utils.path_utils import (
     get_project_settings_file,
 )
 
-
 logger = logging.getLogger(__name__)
 
 class PermissionService:
     """Service for managing permission rules."""
 
     @staticmethod
-    def list_permissions(project_path: Optional[str] = None) -> PermissionListResponse:
+    def list_permissions(project_path: str | None = None) -> PermissionListResponse:
         """
         List all permission rules from user and project scopes.
 
@@ -37,7 +34,7 @@ class PermissionService:
         Returns:
             PermissionListResponse with all rules and settings
         """
-        rules: List[PermissionRule] = []
+        rules: list[PermissionRule] = []
         settings = PermissionSettings()
 
         # Read user-level permissions
@@ -158,7 +155,7 @@ class PermissionService:
 
     @staticmethod
     async def add_permission(
-        rule: PermissionRuleCreate, project_path: Optional[str] = None
+        rule: PermissionRuleCreate, project_path: str | None = None
     ) -> PermissionRule:
         """
         Add a new permission rule to the appropriate settings file.
@@ -209,7 +206,7 @@ class PermissionService:
         # Write back to settings file
         success = await write_json_file(settings_path, settings)
         if not success:
-            raise IOError(f"Failed to write settings file: {settings_path}")
+            raise OSError(f"Failed to write settings file: {settings_path}")
 
         # Generate deterministic ID
         rule_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{rule.scope}-{rule.type}-{rule.pattern}"))
@@ -226,7 +223,7 @@ class PermissionService:
         rule_id: str,
         rule_update: PermissionRuleUpdate,
         scope: str,
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
     ) -> PermissionRule:
         """
         Update an existing permission rule.
@@ -270,7 +267,7 @@ class PermissionService:
 
     @staticmethod
     async def remove_permission(
-        rule_id: str, scope: str, project_path: Optional[str] = None
+        rule_id: str, scope: str, project_path: str | None = None
     ) -> None:
         """
         Remove a permission rule from settings.
@@ -303,7 +300,7 @@ class PermissionService:
         settings = read_json_file(settings_path) or {}
 
         if "permissions" not in settings or existing_rule.type not in settings["permissions"]:
-            raise ValueError(f"Permissions not found in settings")
+            raise ValueError("Permissions not found in settings")
 
         # Remove pattern from appropriate list
         if existing_rule.pattern in settings["permissions"][existing_rule.type]:
@@ -312,13 +309,13 @@ class PermissionService:
         # Write back to settings file
         success = await write_json_file(settings_path, settings)
         if not success:
-            raise IOError(f"Failed to write settings file: {settings_path}")
+            raise OSError(f"Failed to write settings file: {settings_path}")
 
     @staticmethod
     async def update_settings(
         settings_update: PermissionSettingsUpdate,
         scope: str,
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
     ) -> PermissionSettings:
         """
         Update permission settings (mode, directories, etc.).
@@ -364,7 +361,7 @@ class PermissionService:
         # Write back to settings file
         success = await write_json_file(settings_path, settings)
         if not success:
-            raise IOError(f"Failed to write settings file: {settings_path}")
+            raise OSError(f"Failed to write settings file: {settings_path}")
 
         # Return current settings
         result = PermissionService.list_permissions(project_path)
@@ -398,8 +395,8 @@ class PermissionService:
     @staticmethod
     def evaluate_permission(
         tool: str,
-        argument: Optional[str],
-        project_path: Optional[str] = None,
+        argument: str | None,
+        project_path: str | None = None,
     ) -> str:
         """
         Evaluate permission for a tool/argument combination.
@@ -418,10 +415,6 @@ class PermissionService:
         rules = rules_response.rules
 
         # Build the full pattern to match against
-        if argument:
-            full_pattern = f"{tool}({argument})"
-        else:
-            full_pattern = tool
 
         # Check deny rules first (highest priority)
         for rule in rules:
@@ -445,7 +438,7 @@ class PermissionService:
         return "ask"  # Default is to ask
 
     @staticmethod
-    def _matches_pattern(rule_pattern: str, tool: str, argument: Optional[str]) -> bool:
+    def _matches_pattern(rule_pattern: str, tool: str, argument: str | None) -> bool:
         """
         Check if a rule pattern matches the given tool and argument.
 

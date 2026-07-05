@@ -1,5 +1,4 @@
 """MCP server management endpoints."""
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -7,26 +6,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.schemas import (
-    MCPServer,
-    MCPServerCreate,
-    MCPServerListResponse,
-    MCPServerUpdate,
-    MCPServerToggleRequest,
-    MCPServerToggleResponse,
-    MCPTestConnectionRequest,
-    MCPTestConnectionResponse,
-    MCPTestAllResult,
-    MCPTestAllResponse,
-    MCPServerApprovalSettings,
-    MCPServerApprovalSettingsUpdate,
-    MCPAuthStatus,
     MCPAuthStartResponse,
+    MCPAuthStatus,
     MCPRegistryInstallRequest,
     MCPRegistryInstallResponse,
+    MCPServer,
+    MCPServerApprovalSettings,
+    MCPServerApprovalSettingsUpdate,
+    MCPServerCreate,
+    MCPServerListResponse,
+    MCPServerToggleRequest,
+    MCPServerToggleResponse,
+    MCPServerUpdate,
+    MCPTestAllResponse,
+    MCPTestAllResult,
+    MCPTestConnectionResponse,
 )
-from app.services.mcp_service import MCPService
-from app.services.mcp_registry_service import MCPRegistryService
 from app.services.credentials_service import CredentialsService
+from app.services.mcp_registry_service import MCPRegistryService
+from app.services.mcp_service import MCPService
 from app.services.oauth_service import MCPOAuthService
 
 router = APIRouter()
@@ -37,7 +35,7 @@ oauth_service = MCPOAuthService()
 
 @router.get("/servers", response_model=MCPServerListResponse)
 async def list_mcp_servers(
-    project_path: Optional[str] = Query(None, description="Optional project path"),
+    project_path: str | None = Query(None, description="Optional project path"),
     db: AsyncSession = Depends(get_db)
 ):
     """List all MCP servers from user and project scopes with cached data."""
@@ -49,7 +47,7 @@ async def list_mcp_servers(
 async def get_mcp_server(
     name: str,
     scope: str = Query(..., description="Server scope (user or project)"),
-    project_path: Optional[str] = Query(None, description="Optional project path"),
+    project_path: str | None = Query(None, description="Optional project path"),
 ):
     """Get a specific MCP server configuration."""
     server = await mcp_service.get_server(name, scope)
@@ -61,7 +59,7 @@ async def get_mcp_server(
 @router.post("/servers", response_model=MCPServer, status_code=201)
 async def create_mcp_server(
     server: MCPServerCreate,
-    project_path: Optional[str] = Query(None, description="Optional project path"),
+    project_path: str | None = Query(None, description="Optional project path"),
 ):
     """Add a new MCP server."""
     # Validate server type
@@ -92,7 +90,7 @@ async def update_mcp_server(
     name: str,
     server: MCPServerUpdate,
     scope: str = Query(..., description="Server scope (user or project)"),
-    project_path: Optional[str] = Query(None, description="Optional project path"),
+    project_path: str | None = Query(None, description="Optional project path"),
 ):
     """Update an existing MCP server configuration."""
     # Validate scope
@@ -114,7 +112,7 @@ async def update_mcp_server(
 async def delete_mcp_server(
     name: str,
     scope: str = Query(..., description="Server scope (user or project)"),
-    project_path: Optional[str] = Query(None, description="Optional project path"),
+    project_path: str | None = Query(None, description="Optional project path"),
 ):
     """Remove an MCP server from configuration."""
     # Validate scope
@@ -152,7 +150,7 @@ async def toggle_mcp_server(
 async def test_mcp_server_connection(
     name: str,
     scope: str = Query(..., description="Server scope (user, project, plugin, or managed)"),
-    project_path: Optional[str] = Query(None, description="Optional project path"),
+    project_path: str | None = Query(None, description="Optional project path"),
     db: AsyncSession = Depends(get_db)
 ):
     """Test connection to an MCP server and cache the results."""
@@ -177,7 +175,7 @@ async def test_mcp_server_connection(
 
 @router.post("/servers/test-all", response_model=MCPTestAllResponse)
 async def test_all_servers(
-    project_path: Optional[str] = Query(None, description="Optional project path"),
+    project_path: str | None = Query(None, description="Optional project path"),
     db: AsyncSession = Depends(get_db),
 ):
     """Test all MCP servers sequentially and return summary results."""
@@ -326,9 +324,9 @@ registry_service = MCPRegistryService()
 
 @router.get("/registry/search")
 async def search_registry(
-    q: Optional[str] = Query(None, description="Search query"),
+    q: str | None = Query(None, description="Search query"),
     limit: int = Query(20, ge=1, le=100, description="Results per page"),
-    cursor: Optional[str] = Query(None, description="Pagination cursor"),
+    cursor: str | None = Query(None, description="Pagination cursor"),
 ):
     """Search the MCP registry for servers."""
     try:
@@ -363,7 +361,7 @@ async def get_registry_server_versions(
 @router.post("/registry/install", response_model=MCPRegistryInstallResponse)
 async def install_registry_server(
     request: MCPRegistryInstallRequest,
-    project_path: Optional[str] = Query(None, description="Project path for project scope"),
+    project_path: str | None = Query(None, description="Project path for project scope"),
 ):
     """Install an MCP server from the registry into local config."""
     if request.scope not in ("user", "project"):

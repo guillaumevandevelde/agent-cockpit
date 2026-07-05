@@ -1,14 +1,11 @@
 """Service for managing configuration backups."""
-import logging
 import json
-import os
+import logging
 import re
-import shlex
-import subprocess
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,38 +20,33 @@ from app.models.schemas import (
     BackupSkillInfo,
     DependencyInstallRequest,
     DependencyInstallResult,
-    DependencyInstallStatus,
     RestoreOptions,
     RestorePlan,
-    RestorePlanDependency,
-    RestorePlanWarning,
     RestoreResult,
 )
-from app.utils.path_utils import (
-    get_user_home,
-    get_claude_user_config_dir,
-    get_claude_user_config_file,
-    get_claude_user_settings_file,
-    get_claude_user_settings_local_file,
-    get_claude_user_commands_dir,
-    get_claude_user_agents_dir,
-    get_claude_user_skills_dir,
-    get_claude_user_plugins_dir,
-    get_project_claude_dir,
-    get_project_mcp_config_file,
-    get_project_claude_md_file,
+from app.services.backup_shared import (
+    CODEX_RESTORE_REFUSAL_MESSAGE,  # noqa: F401  (re-exported for tests/backup_service consumers)
+    _get_claude_code_version,
+    _get_current_platform,
+    get_backup_storage_dir,
 )
 from app.services.cli_executor import ProviderCLIExecutor
 from app.services.providers import get_provider
 from app.services.providers.codex_cli import get_codex_home
 from app.services.restore_service import RestoreService
-from app.services.backup_shared import (
-    CODEX_RESTORE_REFUSAL_MESSAGE,
-    get_backup_storage_dir,
-    _get_current_platform,
-    _get_claude_code_version,
+from app.utils.path_utils import (
+    get_claude_user_agents_dir,
+    get_claude_user_commands_dir,
+    get_claude_user_config_file,
+    get_claude_user_plugins_dir,
+    get_claude_user_settings_file,
+    get_claude_user_settings_local_file,
+    get_claude_user_skills_dir,
+    get_project_claude_dir,
+    get_project_claude_md_file,
+    get_project_mcp_config_file,
+    get_user_home,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +69,12 @@ SENSITIVE_TOML_ASSIGNMENT_PATTERN = re.compile(
 class BackupService:
     """Service for managing configuration backups."""
 
-    def __init__(self, db: AsyncSession, codex_home: Optional[Path] = None):
+    def __init__(self, db: AsyncSession, codex_home: Path | None = None):
         self.db = db
         self.codex_home = codex_home or get_codex_home()
         self._restore = RestoreService(self)
 
-    def _get_user_config_paths(self) -> List[Path]:
+    def _get_user_config_paths(self) -> list[Path]:
         """Get all user-level configuration paths."""
         paths = []
 
@@ -111,7 +103,7 @@ class BackupService:
 
         return paths
 
-    def _get_project_config_paths(self, project_path: str) -> List[Path]:
+    def _get_project_config_paths(self, project_path: str) -> list[Path]:
         """Get all project-level configuration paths."""
         paths = []
 
@@ -134,9 +126,9 @@ class BackupService:
 
         return paths
 
-    def _get_codex_config_paths(self) -> List[Path]:
+    def _get_codex_config_paths(self) -> list[Path]:
         """Get safe Codex configuration files for export-only backups."""
-        paths: List[Path] = []
+        paths: list[Path] = []
         config_file = self.codex_home / "config.toml"
         if config_file.exists() and config_file.is_file():
             paths.append(config_file)
@@ -154,7 +146,7 @@ class BackupService:
 
         return paths
 
-    def _get_codex_backup_policy(self) -> Dict[str, Any]:
+    def _get_codex_backup_policy(self) -> dict[str, Any]:
         """Return the Codex export/restore policy used in manifests and status."""
         try:
             provider_policy = get_provider("codex-cli").get_backup_policy()
@@ -216,9 +208,9 @@ class BackupService:
         except UnicodeDecodeError:
             return self._redact_text_content(path.read_text(errors="replace"))
 
-    def _get_codex_provider_inventory(self, paths: List[Path]) -> Dict[str, Any]:
+    def _get_codex_provider_inventory(self, paths: list[Path]) -> dict[str, Any]:
         """Collect safe provider metadata for Codex export manifests."""
-        inventory: Dict[str, Any] = {
+        inventory: dict[str, Any] = {
             "provider": "codex-cli",
             "codex_home": str(self.codex_home),
             "backup_policy": self._get_codex_backup_policy(),
@@ -247,7 +239,7 @@ class BackupService:
         inventory["cli"] = {"installed": True, "binary_path": executor.binary_path}
 
         mcp_result = executor.execute("mcp", ["list", "--json"], timeout=30)
-        mcp_inventory: Dict[str, Any] = {
+        mcp_inventory: dict[str, Any] = {
             "exit_code": mcp_result.exit_code,
             "stderr": self._redact_value(mcp_result.stderr),
         }
@@ -354,7 +346,7 @@ class BackupService:
         return info
 
     def _detect_mcp_server_info(
-        self, name: str, config: Dict[str, Any], scope: str
+        self, name: str, config: dict[str, Any], scope: str
     ) -> BackupMCPServerInfo:
         """Extract MCP server info from config."""
         server_type = "stdio"
@@ -378,10 +370,10 @@ class BackupService:
 
     def _generate_manifest(
         self,
-        paths: List[Path],
+        paths: list[Path],
         scope: str,
-        extra_files: Optional[Dict[str, str]] = None,
-        provider_inventory: Optional[Dict[str, Any]] = None,
+        extra_files: dict[str, str] | None = None,
+        provider_inventory: dict[str, Any] | None = None,
     ) -> BackupManifest:
         """Generate a backup manifest with all dependency information."""
         contents = BackupManifestContents()
@@ -447,7 +439,7 @@ class BackupService:
                         contents.commands.append(cmd_file.stem)
 
         manifest = BackupManifest(
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             claude_code_version=None if scope == "codex" else _get_claude_code_version(),
             platform=_get_current_platform(),
             scope=scope,
@@ -459,13 +451,13 @@ class BackupService:
     def _create_archive(
         self,
         name: str,
-        paths: List[Path],
+        paths: list[Path],
         scope: str,
-        base_path: Optional[Path] = None,
-        extra_files: Optional[Dict[str, str]] = None,
-        file_overrides: Optional[Dict[Path, str]] = None,
-        provider_inventory: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Path, int, BackupManifest]:
+        base_path: Path | None = None,
+        extra_files: dict[str, str] | None = None,
+        file_overrides: dict[Path, str] | None = None,
+        provider_inventory: dict[str, Any] | None = None,
+    ) -> tuple[Path, int, BackupManifest]:
         """
         Create a zip archive from the given paths.
 
@@ -516,11 +508,11 @@ class BackupService:
         self,
         name: str,
         scope: str,
-        project_path: Optional[str] = None,
-        description: Optional[str] = None,
-        project_id: Optional[int] = None,
+        project_path: str | None = None,
+        description: str | None = None,
+        project_id: int | None = None,
         is_automatic: bool = False,
-    ) -> Tuple[Backup, BackupManifest]:
+    ) -> tuple[Backup, BackupManifest]:
         """
         Create a new backup.
 
@@ -537,9 +529,9 @@ class BackupService:
         """
         logger.info("Creating backup", extra={"backup_name": name, "scope": scope, "automatic": is_automatic})
         paths = []
-        extra_files: Dict[str, str] = {}
-        file_overrides: Dict[Path, str] = {}
-        provider_inventory: Optional[Dict[str, Any]] = None
+        extra_files: dict[str, str] = {}
+        file_overrides: dict[Path, str] = {}
+        provider_inventory: dict[str, Any] | None = None
 
         if scope in ["full", "user"]:
             paths.extend(self._get_user_config_paths())
@@ -600,14 +592,14 @@ class BackupService:
         logger.info("Backup created", extra={"backup_id": backup.id, "backup_name": name, "scope": scope, "size_bytes": size_bytes})
         return backup, manifest
 
-    async def list_backups(self) -> List[Backup]:
+    async def list_backups(self) -> list[Backup]:
         """List all backups."""
         result = await self.db.execute(
             select(Backup).order_by(Backup.created_at.desc())
         )
         return list(result.scalars().all())
 
-    async def get_backup(self, backup_id: int) -> Optional[Backup]:
+    async def get_backup(self, backup_id: int) -> Backup | None:
         """Get a backup by ID."""
         result = await self.db.execute(select(Backup).where(Backup.id == backup_id))
         return result.scalar_one_or_none()
@@ -639,7 +631,7 @@ class BackupService:
         logger.info("Backup deleted", extra={"backup_id": backup_id, "backup_name": backup.name})
         return True
 
-    def get_manifest_from_backup(self, file_path: str) -> Optional[BackupManifest]:
+    def get_manifest_from_backup(self, file_path: str) -> BackupManifest | None:
         """Extract manifest from a backup zip file."""
         archive_path = Path(file_path)
         if not archive_path.exists():
@@ -658,20 +650,20 @@ class BackupService:
     # Restore operations delegate to RestoreService (see restore_service.py).
 
     async def get_restore_plan(
-        self, backup_id: int, project_path: Optional[str] = None
-    ) -> Optional[RestorePlan]:
+        self, backup_id: int, project_path: str | None = None
+    ) -> RestorePlan | None:
         """Analyze a backup and generate a restore plan."""
         return await self._restore.get_restore_plan(backup_id, project_path)
 
-    async def validate_backup(self, backup_id: int) -> Tuple[bool, List[str]]:
+    async def validate_backup(self, backup_id: int) -> tuple[bool, list[str]]:
         """Validate a backup before restore."""
         return await self._restore.validate_backup(backup_id)
 
     async def restore_backup(
         self,
         backup_id: int,
-        project_path: Optional[str] = None,
-        options: Optional[RestoreOptions] = None,
+        project_path: str | None = None,
+        options: RestoreOptions | None = None,
     ) -> RestoreResult:
         """Restore from a backup."""
         return await self._restore.restore_backup(backup_id, project_path, options)
@@ -682,7 +674,7 @@ class BackupService:
         """Install dependencies from a backup."""
         return await self._restore.install_dependencies(backup_id, request)
 
-    def get_backup_contents(self, backup_id: int, file_path: str) -> List[str]:
+    def get_backup_contents(self, backup_id: int, file_path: str) -> list[str]:
         """
         Get the list of files in a backup.
 
@@ -701,8 +693,8 @@ class BackupService:
             return [f for f in zf.namelist() if f != "manifest.json"]
 
     async def export_config(
-        self, paths: List[str], name: str = "export"
-    ) -> Tuple[Path, int]:
+        self, paths: list[str], name: str = "export"
+    ) -> tuple[Path, int]:
         """
         Export specific configuration files.
 

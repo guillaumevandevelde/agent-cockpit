@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.services.scheduling import tmux_inject
-from app.services.scheduling.tmux_inject import send_text, wait_for_pane_ready, _capture_pane
+from app.services.scheduling.tmux_inject import _capture_pane, send_text, wait_for_pane_ready
 
 
 def test_send_text_returns_false_when_tmux_missing():

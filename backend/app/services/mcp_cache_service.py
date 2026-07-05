@@ -1,13 +1,12 @@
 """Caching of MCP server connectivity-test results."""
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import MCPServerCache
-
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class MCPCacheService:
 
     async def get_cached_server_info(
         self, name: str, scope: str, db: AsyncSession
-    ) -> Optional[MCPServerCache]:
+    ) -> MCPServerCache | None:
         """Retrieve cached data for a server."""
         result = await db.execute(
             select(MCPServerCache).where(
@@ -34,7 +33,7 @@ class MCPCacheService:
         self,
         name: str,
         scope: str,
-        test_result: Dict[str, Any],
+        test_result: dict[str, Any],
         config_hash: str,
         db: AsyncSession,
     ) -> None:
@@ -45,7 +44,7 @@ class MCPCacheService:
         resources_list = test_result.get("resources") or []
         prompts_list = test_result.get("prompts") or []
         is_success = test_result.get("success", False)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Prepare common cache data
         cache_data = {

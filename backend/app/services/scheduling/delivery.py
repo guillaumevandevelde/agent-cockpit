@@ -3,10 +3,15 @@ import logging
 import time
 from dataclasses import dataclass
 
-from app.services.scheduling.idle_state import IdleState, idle_state as default_idle
+from app.services.scheduling.idle_state import IdleState
+from app.services.scheduling.idle_state import idle_state as default_idle
 from app.services.scheduling.session_registry import SessionRegistry, session_registry
 from app.services.scheduling.session_resolver import (
-    resolve_target, spawn_for, resolve_session_target, resume_spawn_for, AMBIGUOUS,
+    AMBIGUOUS,
+    resolve_session_target,
+    resolve_target,
+    resume_spawn_for,
+    spawn_for,
 )
 from app.services.scheduling.tmux_inject import send_text, wait_for_pane_ready
 
@@ -131,10 +136,11 @@ class DeliveryEngine:
     async def _deliver_sandcastle(self, *, project_dir: str, message: str,
                                   sandcastle_config_id: int | None) -> DeliveryResult:
         """Deliver message via sandcastle run."""
-        from app.services.sandcastle_service import sandcastle_service
+        from sqlalchemy import select
+
         from app.database import AsyncSessionLocal
         from app.models.sandcastle import SandcastleConfig
-        from sqlalchemy import select
+        from app.services.sandcastle_service import sandcastle_service
 
         wait_start = time.monotonic()
 

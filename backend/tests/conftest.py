@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 
 import app.kanban.db as _kanban_db
-from tests.kanban_test_db import test_engine, TestSessionLocal
+from tests.kanban_test_db import TestSessionLocal, test_engine
 
 _test_sf = TestSessionLocal()
 
@@ -56,6 +56,7 @@ async def _cleanup_test_projects():
     yield
 
     from sqlalchemy import delete, or_
+
     from app.database import AsyncSessionLocal, Base, engine
     from app.models.database import Project
 

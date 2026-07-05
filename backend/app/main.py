@@ -2,23 +2,25 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.logging_config import configure_logging
+
 configure_logging()
 
-from app.config import settings
-from app.database import init_db
-from app.api.v1.router import router as api_v1_router
-from app.middleware.correlation_id import CorrelationIdMiddleware
 from fastapi.staticfiles import StaticFiles
-import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
 
+import app.models.host  # noqa: F401  (register tables for create_all)
 import app.models.mcp_token  # noqa: F401  (register tables for create_all)
 import app.models.sandcastle  # noqa: F401  (register tables for create_all)
-import app.models.host  # noqa: F401  (register tables for create_all)
+import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
+from app.api.v1.router import router as api_v1_router
+from app.config import settings
+from app.database import init_db
+from app.middleware.correlation_id import CorrelationIdMiddleware
 
 
 @asynccontextmanager
@@ -28,27 +30,29 @@ async def lifespan(app: FastAPI):
     await init_db()
     from app.kanban.db import init_kanban_db
     await init_kanban_db()
+    from app.database import engine
     from app.services.scheduling.schema_guard import (
-        ensure_scheduled_message_columns,
         ensure_backup_columns,
         ensure_model_columns,
+        ensure_scheduled_message_columns,
     )
-    from app.database import engine
     await ensure_scheduled_message_columns(engine)
     await ensure_backup_columns(engine)
     await ensure_model_columns(engine)
     # Clean up any orphaned relay processes from previous runs
-    from app.services.cc_bridge.pty_relay import close_all_relays, cleanup_orphaned_relays
+    from app.services.cc_bridge.pty_relay import cleanup_orphaned_relays, close_all_relays
     cleanup_orphaned_relays()
     # Start the scheduler and reschedule persisted, enabled jobs
-    from app.services.scheduling.scheduler import scheduler_service
-    from app.database import AsyncSessionLocal
     from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
     from app.models.scheduled_message import ScheduledMessage
+    from app.services.scheduling.scheduler import scheduler_service
     scheduler_service.start()
     # Resume agent sessions interrupted by a host/backend restart. Runs before the
     # dispatch scheduler so the reaper can't release (and orphan) their claims first.
     import logging
+
     from app.kanban.session_recovery import recover_interrupted_sessions
     try:
         await recover_interrupted_sessions()
@@ -125,6 +129,7 @@ app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 # .mcp.json at <base_url>/kanban-mcp/sse, where base_url is derived per-request
 # (or PUBLIC_BASE_URL when set) — see app/api/v1/kanban/router.py::enable.
 from app.kanban.mcp_server import mcp as kanban_mcp  # noqa: E402
+
 # Do NOT pass mount_path here. The SSE transport already prepends the ASGI
 # scope's root_path (the "/kanban-mcp" supplied by app.mount) to the advertised
 # message endpoint. Passing mount_path="/kanban-mcp" bakes the prefix into the

@@ -4,24 +4,41 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from app.config import settings
-from app.utils.url_utils import resolve_base_url
 
-from app.kanban.db import KanbanSessionLocal
+from app.config import settings
 from app.kanban import service
-from app.kanban.operations import apply_operation, ClaimRejected
+from app.kanban.db import KanbanSessionLocal
+from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
-    CardResponse, CardCreate, CardUpdate, MoveRequest, ReorderRequest, ClaimRequest,
-    CommentRequest, AttachRequest, ActivityEntry, EnableRequest,
-    AutodispatchRequest, ShipModeRequest, SkipPermissionsRequest,
-    MaxSessionsRequest, DefaultTransportRequest,
-    DispatchRequest, RedispatchRequest,
-    ColumnResponse, ColumnCreate, ColumnUpdate, ColumnClearRequest,
-    ImpedimentResolveRequest,
+    ActivityEntry,
     AgentStatsResponse,
-    GateResponse, GateOpenRequest, GateAnswerRequest,
+    AttachRequest,
+    AutodispatchRequest,
+    CardCreate,
+    CardResponse,
+    CardUpdate,
+    ClaimRequest,
+    ColumnClearRequest,
+    ColumnCreate,
+    ColumnResponse,
+    ColumnUpdate,
+    CommentRequest,
+    DefaultTransportRequest,
+    DispatchRequest,
+    EnableRequest,
+    GateAnswerRequest,
+    GateOpenRequest,
+    GateResponse,
+    ImpedimentResolveRequest,
+    MaxSessionsRequest,
+    MoveRequest,
+    RedispatchRequest,
+    ReorderRequest,
+    ShipModeRequest,
+    SkipPermissionsRequest,
 )
+from app.utils.url_utils import resolve_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -321,8 +338,9 @@ async def enable(payload: EnableRequest, request: Request):
         # Move cards from orphaned columns to Backlog before removing columns
         orphaned = [c.name for c in existing if c.name not in valid_names]
         if orphaned:
+            from sqlalchemy import update
+
             from app.kanban.models import KanbanCard
-            from sqlalchemy import select, update
             for col_name in orphaned:
                 await s.execute(
                     update(KanbanCard)

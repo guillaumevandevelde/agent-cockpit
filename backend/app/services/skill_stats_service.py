@@ -1,14 +1,13 @@
 """Service for aggregating skill invocation stats from JSONL session files."""
-import logging
 import json
+import logging
 from collections import defaultdict
 from pathlib import Path
 
 import aiofiles
 
 from app.models.schemas import SkillUsageStat
-from app.utils.path_utils import get_claude_projects_dir, convert_path_to_folder_name
-
+from app.utils.path_utils import convert_path_to_folder_name, get_claude_projects_dir
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class SkillStatsService:
     @staticmethod
     async def _parse_file(path: Path, counts: dict[str, int]) -> None:
         try:
-            async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            async with aiofiles.open(path, encoding="utf-8") as f:
                 async for line in f:
                     line = line.strip()
                     if not line:

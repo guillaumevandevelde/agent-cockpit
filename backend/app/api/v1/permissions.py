@@ -1,17 +1,16 @@
 """Permission management API endpoints."""
 import asyncio
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.schemas import (
+    VALID_PERMISSION_MODES,
     PermissionListResponse,
     PermissionRule,
     PermissionRuleCreate,
     PermissionRuleUpdate,
     PermissionSettings,
     PermissionSettingsUpdate,
-    VALID_PERMISSION_MODES,
 )
 from app.services.permission_service import PermissionService
 
@@ -20,7 +19,7 @@ router = APIRouter(prefix="/permissions", tags=["Permissions"])
 
 @router.get("", response_model=PermissionListResponse)
 async def list_permissions(
-    project_path: Optional[str] = Query(None, description="Path to project directory"),
+    project_path: str | None = Query(None, description="Path to project directory"),
 ) -> PermissionListResponse:
     """
     Get all permission rules from user and project scopes.
@@ -40,7 +39,7 @@ async def list_permissions(
 @router.get("/scope/{scope}", response_model=PermissionListResponse)
 async def list_permissions_by_scope(
     scope: str,
-    project_path: Optional[str] = Query(None, description="Path to project directory"),
+    project_path: str | None = Query(None, description="Path to project directory"),
 ) -> PermissionListResponse:
     """
     Get permission rules for a specific scope.
@@ -69,7 +68,7 @@ async def list_permissions_by_scope(
 async def update_settings(
     settings_update: PermissionSettingsUpdate,
     scope: str = Query("user", description="Scope to update (user or project)"),
-    project_path: Optional[str] = Query(None, description="Path to project directory"),
+    project_path: str | None = Query(None, description="Path to project directory"),
 ) -> PermissionSettings:
     """
     Update permission settings (mode, directories, etc.).
@@ -104,7 +103,7 @@ async def update_settings(
         return await PermissionService.update_settings(settings_update, scope, project_path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except IOError as e:
+    except OSError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")
@@ -113,7 +112,7 @@ async def update_settings(
 @router.post("", response_model=PermissionRule, status_code=201)
 async def add_permission(
     rule: PermissionRuleCreate,
-    project_path: Optional[str] = Query(None, description="Path to project directory"),
+    project_path: str | None = Query(None, description="Path to project directory"),
 ) -> PermissionRule:
     """
     Add a new permission rule.
@@ -144,7 +143,7 @@ async def add_permission(
         return await PermissionService.add_permission(rule, project_path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except IOError as e:
+    except OSError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to add permission: {str(e)}")
@@ -155,7 +154,7 @@ async def update_permission(
     rule_id: str,
     rule_update: PermissionRuleUpdate,
     scope: str = Query(..., description="Scope of the rule (user or project)"),
-    project_path: Optional[str] = Query(None, description="Path to project directory"),
+    project_path: str | None = Query(None, description="Path to project directory"),
 ) -> PermissionRule:
     """
     Update an existing permission rule.
@@ -190,7 +189,7 @@ async def update_permission(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except IOError as e:
+    except OSError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update permission: {str(e)}")
@@ -200,7 +199,7 @@ async def update_permission(
 async def remove_permission(
     rule_id: str,
     scope: str = Query(..., description="Scope of the rule (user or project)"),
-    project_path: Optional[str] = Query(None, description="Path to project directory"),
+    project_path: str | None = Query(None, description="Path to project directory"),
 ) -> None:
     """
     Remove a permission rule.
@@ -225,7 +224,7 @@ async def remove_permission(
         await PermissionService.remove_permission(rule_id, scope, project_path)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except IOError as e:
+    except OSError as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to remove permission: {str(e)}")

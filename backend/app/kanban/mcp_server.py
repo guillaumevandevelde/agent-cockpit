@@ -11,9 +11,9 @@ import time
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import text
 
-from app.kanban.db import KanbanSessionLocal
 from app.kanban import service
-from app.kanban.operations import apply_operation, ClaimRejected
+from app.kanban.db import KanbanSessionLocal
+from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.schemas import CardResponse
 
 logger = logging.getLogger(__name__)

@@ -7,16 +7,16 @@ to skip every future fire forever).
 """
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from unittest.mock import AsyncMock, patch
 
 import app.models.sandcastle  # noqa: F401  (register FK target for create_all)
 from app.database import Base
-from app.models.scheduled_message import ScheduledMessage, DeliveryAttempt
+from app.models.scheduled_message import DeliveryAttempt, ScheduledMessage
 from app.services.scheduling import crud
 
 

@@ -1,7 +1,7 @@
 """System status endpoint for header indicators."""
 import asyncio
 import time
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -10,19 +10,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.constants import SessionStatus
 from app.models.schemas import SystemStatusResponse
-from app.services.memory_monitor import get_memory_status_cached, get_dynamic_limits
+from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
 from app.services.presence_service import PresenceService
 from app.services.providers import get_provider, get_providers
 
 router = APIRouter()
 
 # Cache CC version for 5 minutes
-_version_cache: tuple[Optional[str], float] = (None, 0.0)
+_version_cache: tuple[str | None, float] = (None, 0.0)
 _version_lock = asyncio.Lock()
 _CACHE_TTL = 300  # seconds
 
 
-async def _get_claude_code_version() -> Optional[str]:
+async def _get_claude_code_version() -> str | None:
     global _version_cache
     cached_version, cached_at = _version_cache
     if time.time() - cached_at < _CACHE_TTL:

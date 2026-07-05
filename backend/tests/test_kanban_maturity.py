@@ -3,11 +3,11 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
+from app.kanban import dispatch
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card
-from app.kanban import dispatch
 from app.main import app
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 pytestmark = pytest.mark.asyncio
 

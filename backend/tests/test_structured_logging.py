@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 from fastapi import FastAPI
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 from app.logging_config import configure_logging, get_correlation_id, set_correlation_id
 from app.middleware.correlation_id import CorrelationIdMiddleware

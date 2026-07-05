@@ -1,13 +1,14 @@
 """SQLAlchemy Host model for the host registry."""
-from datetime import datetime, timezone
-from sqlalchemy import String, Integer, DateTime
+from datetime import UTC, datetime
+
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Host(Base):

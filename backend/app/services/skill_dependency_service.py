@@ -1,11 +1,10 @@
 """Service for managing skill dependencies and installation."""
-import logging
 import json
+import logging
 import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import yaml
 
@@ -17,14 +16,13 @@ from app.models.schemas import (
 )
 from app.utils.path_utils import get_claude_user_skills_dir
 
-
 logger = logging.getLogger(__name__)
 
 class SkillDependencyService:
     """Service for checking and installing skill dependencies."""
 
     @staticmethod
-    def _parse_frontmatter(content: str) -> Dict:
+    def _parse_frontmatter(content: str) -> dict:
         """Parse YAML frontmatter from skill content."""
         import re
 
@@ -38,7 +36,7 @@ class SkillDependencyService:
         return {}
 
     @staticmethod
-    def _resolve_skill_dir(base: Path, name: str) -> Optional[Path]:
+    def _resolve_skill_dir(base: Path, name: str) -> Path | None:
         """
         Find a skill directory by name, checking:
         1. Direct: base/name/SKILL.md
@@ -58,7 +56,7 @@ class SkillDependencyService:
         return None
 
     @staticmethod
-    def _get_skill_dir(name: str, location: str, project_path: Optional[str] = None) -> Optional[Path]:
+    def _get_skill_dir(name: str, location: str, project_path: str | None = None) -> Path | None:
         """
         Resolve the skill directory path.
 
@@ -108,7 +106,7 @@ class SkillDependencyService:
         return None
 
     @staticmethod
-    def _get_skill_file(name: str, location: str, project_path: Optional[str] = None) -> Optional[Path]:
+    def _get_skill_file(name: str, location: str, project_path: str | None = None) -> Path | None:
         """Get the SKILL.md or flat .md file path for a skill."""
         skill_dir = SkillDependencyService._get_skill_dir(name, location, project_path)
         if skill_dir:
@@ -125,7 +123,7 @@ class SkillDependencyService:
         return None
 
     @staticmethod
-    def _check_binary(name: str) -> Tuple[bool, Optional[str]]:
+    def _check_binary(name: str) -> tuple[bool, str | None]:
         """Check if a binary is available in PATH."""
         path = shutil.which(name)
         if not path:
@@ -150,7 +148,7 @@ class SkillDependencyService:
         return True, version
 
     @staticmethod
-    def _check_npm_package(name: str) -> Tuple[bool, Optional[str]]:
+    def _check_npm_package(name: str) -> tuple[bool, str | None]:
         """Check if an npm package is globally installed."""
         try:
             result = subprocess.run(
@@ -169,7 +167,7 @@ class SkillDependencyService:
             return False, None
 
     @staticmethod
-    def _check_pip_package(name: str) -> Tuple[bool, Optional[str]]:
+    def _check_pip_package(name: str) -> tuple[bool, str | None]:
         """Check if a pip package is installed."""
         try:
             result = subprocess.run(
@@ -204,7 +202,7 @@ class SkillDependencyService:
 
     @staticmethod
     def check_dependencies(
-        name: str, location: str, project_path: Optional[str] = None
+        name: str, location: str, project_path: str | None = None
     ) -> SkillDependencyStatus:
         """
         Check dependency status for a skill.
@@ -232,7 +230,7 @@ class SkillDependencyService:
 
         Also checks for scripts/install.sh in the skill directory.
         """
-        dependencies: List[SkillDependency] = []
+        dependencies: list[SkillDependency] = []
         has_install_script = False
         install_script_path = None
 
@@ -361,8 +359,8 @@ class SkillDependencyService:
 
     @staticmethod
     def list_supporting_files(
-        name: str, location: str, project_path: Optional[str] = None
-    ) -> List[SkillSupportingFile]:
+        name: str, location: str, project_path: str | None = None
+    ) -> list[SkillSupportingFile]:
         """List supporting files in a skill directory (excluding SKILL.md)."""
         skill_dir = SkillDependencyService._get_skill_dir(name, location, project_path)
         if not skill_dir or not skill_dir.is_dir():
@@ -395,7 +393,7 @@ class SkillDependencyService:
 
     @staticmethod
     def install_dependencies(
-        name: str, location: str, project_path: Optional[str] = None
+        name: str, location: str, project_path: str | None = None
     ) -> SkillInstallResult:
         """
         Install missing dependencies for a skill.
@@ -447,7 +445,7 @@ class SkillDependencyService:
                     failed.append(f"script:{script_path.name} (exit code {result.returncode})")
             except subprocess.TimeoutExpired:
                 failed.append(f"script:{script_path.name} (timeout)")
-                all_logs.append(f"Install script timed out after 120s")
+                all_logs.append("Install script timed out after 120s")
             except Exception as e:
                 failed.append(f"script:{script_path.name} ({str(e)})")
                 all_logs.append(f"Error running install script: {e}")

@@ -1,6 +1,5 @@
 """Edge cases for PluginService: install conflicts, marketplace timeouts,
 duplicate/invalid marketplace input, and invalid plugin manifests."""
-import json
 
 import httpx
 import pytest
@@ -9,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database import Base
 from app.models.database import Marketplace
-from app.models.schemas import MarketplaceCreate, PluginInstallRequest, CLIResult
+from app.models.schemas import CLIResult, MarketplaceCreate, PluginInstallRequest
 from app.services.plugin_service import PluginService
 
 

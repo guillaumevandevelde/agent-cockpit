@@ -1,10 +1,17 @@
 """Tests for the Claude Cockpit MCP server."""
 import json
+from datetime import UTC
 
 import pytest
 
-from app.database import Base, engine, AsyncSessionLocal
-from app.mcp_server.auth import generate_token, hash_secret, verify_secret, verify_bearer_token, TOKEN_PREFIX
+from app.database import AsyncSessionLocal, Base, engine
+from app.mcp_server.auth import (
+    TOKEN_PREFIX,
+    generate_token,
+    hash_secret,
+    verify_bearer_token,
+    verify_secret,
+)
 from app.models.mcp_token import MCPAccessToken
 
 
@@ -71,7 +78,7 @@ async def test_verify_bearer_token_revoked():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     full_token, prefix, secret = generate_token()
     hashed = hash_secret(secret)
@@ -82,7 +89,7 @@ async def test_verify_bearer_token_revoked():
             token_hash=hashed,
             name="revoked-token",
             scope="read",
-            revoked_at=datetime.now(timezone.utc),
+            revoked_at=datetime.now(UTC),
         )
         db.add(token_row)
         await db.commit()
@@ -136,6 +143,7 @@ async def test_mcp_tools_registered():
 @pytest.mark.asyncio
 async def test_mcp_tool_list_projects():
     import uuid
+
     from app.mcp_server.server import mcp
 
     async with engine.begin() as conn:

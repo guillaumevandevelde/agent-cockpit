@@ -6,14 +6,13 @@ explain the current unsupported state without exposing raw prompts or cache
 payloads.
 """
 from __future__ import annotations
-import logging
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from app.services.providers.codex_cli import get_codex_home
-
 
 logger = logging.getLogger(__name__)
 

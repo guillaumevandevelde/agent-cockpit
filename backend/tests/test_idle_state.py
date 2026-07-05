@@ -1,5 +1,7 @@
 import asyncio
+
 import pytest
+
 from app.services.scheduling.idle_state import IdleState
 
 

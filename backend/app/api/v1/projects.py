@@ -7,15 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.schemas import (
+    DirectoryBrowseResponse,
+    MessageResponse,
+    ProjectConfigResponse,
     ProjectCreate,
     ProjectDiscoveryRequest,
     ProjectDiscoveryResponse,
     ProjectListResponse,
     ProjectResponse,
     SetActiveProjectRequest,
-    DirectoryBrowseResponse,
-    MessageResponse,
-    ProjectConfigResponse,
 )
 from app.services.project_service import ProjectService
 

@@ -1,7 +1,6 @@
 """FastAPI endpoint for the Claude Cockpit MCP server (Streamable HTTP)."""
-import json
 import logging
-from typing import Optional
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
@@ -154,7 +153,7 @@ async def handle_mcp_delete():
 class TokenCreateRequest(BaseModel):
     name: str
     scope: str = "read"
-    agent_name: Optional[str] = None
+    agent_name: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -162,21 +161,21 @@ class TokenResponse(BaseModel):
     token: str
     name: str
     scope: str
-    agent_name: Optional[str] = None
-    created_at: Optional[str] = None
+    agent_name: str | None = None
+    created_at: str | None = None
 
 
 class TokenInfo(BaseModel):
     id: int
     name: str
     scope: str
-    agent_name: Optional[str] = None
+    agent_name: str | None = None
     enabled: bool
     token_prefix: str
-    last_used_at: Optional[str] = None
-    expires_at: Optional[str] = None
-    created_at: Optional[str] = None
-    revoked_at: Optional[str] = None
+    last_used_at: str | None = None
+    expires_at: str | None = None
+    created_at: str | None = None
+    revoked_at: str | None = None
 
 
 class TokenListResponse(BaseModel):
@@ -245,7 +244,7 @@ async def list_tokens(db: AsyncSession = Depends(get_db)):
 @router.delete("/mcp-server/tokens/{token_id}", response_model=TokenRevokeResponse)
 async def revoke_token(token_id: int, db: AsyncSession = Depends(get_db)):
     """Revoke an MCP access token."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     result = await db.execute(
         select(MCPAccessToken).where(MCPAccessToken.id == token_id)
@@ -254,7 +253,7 @@ async def revoke_token(token_id: int, db: AsyncSession = Depends(get_db)):
     if not row:
         return JSONResponse(status_code=404, content={"error": "Token not found"})
 
-    row.revoked_at = datetime.now(timezone.utc)
+    row.revoked_at = datetime.now(UTC)
     row.enabled = False
     await db.commit()
 

@@ -160,7 +160,7 @@ async def run_update(request: Request):
                 proc.terminate()
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=5)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     proc.kill()
 
     return StreamingResponse(

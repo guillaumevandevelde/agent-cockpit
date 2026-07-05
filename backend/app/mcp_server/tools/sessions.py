@@ -1,11 +1,9 @@
 """MCP tools for Claude Code sessions."""
 import json
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
 from app.database import AsyncSessionLocal
-from app.models.constants import SessionStatus
 from app.services.presence_service import PresenceService
 
 
@@ -14,7 +12,7 @@ def register_session_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def list_sessions(
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
     ) -> str:
         """List all Claude Code sessions with their current status.

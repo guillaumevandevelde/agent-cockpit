@@ -1,4 +1,5 @@
 import pytest
+
 from app.services.scheduling.session_registry import SessionRegistry
 
 

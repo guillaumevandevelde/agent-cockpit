@@ -7,8 +7,8 @@ the host resolves actual creds; for MiniMax the API key must be resolved by
 the caller (e.g. a secrets store) and passed in as ``minimax_api_key``.
 """
 from __future__ import annotations
-import logging
 
+import logging
 
 logger = logging.getLogger(__name__)
 PLATFORM_ANTHROPIC = "anthropic"

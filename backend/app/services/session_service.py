@@ -4,25 +4,31 @@ Session parsing logic adapted from claude-code-transcripts by Simon Willison
 https://github.com/simonw/claude-code-transcripts
 Licensed under Apache 2.0
 """
-import logging
-import json
 import hashlib
+import json
+import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, func
+from typing import Any
+
 import aiofiles
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import SessionCache
 from app.models.schemas import (
-    SessionSummary, SessionDetail, SessionProject,
-    SessionConversation, SessionMessage, ContentBlock,
-    SessionStatsResponse, SessionListResponse, SessionProjectListResponse,
-    SessionDetailResponse
+    ContentBlock,
+    SessionConversation,
+    SessionDetail,
+    SessionDetailResponse,
+    SessionListResponse,
+    SessionMessage,
+    SessionProject,
+    SessionProjectListResponse,
+    SessionStatsResponse,
+    SessionSummary,
 )
 from app.utils.path_utils import get_claude_projects_dir, get_project_display_name
-
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +38,7 @@ class SessionService:
     CACHE_TTL_MINUTES = 60  # file_hash handles invalidation; TTL is just a safety net
     PROMPTS_PER_PAGE = 5
 
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: AsyncSession | None = None):
         self.db = db
         self.projects_dir = get_claude_projects_dir()
 
@@ -46,7 +52,7 @@ class SessionService:
             usedforsecurity=False,
         ).hexdigest()
 
-    async def get_cached_summary(self, session_id: str, project_folder: str) -> Optional[SessionSummary]:
+    async def get_cached_summary(self, session_id: str, project_folder: str) -> SessionSummary | None:
         """Get session summary from cache if valid."""
         if not self.db:
             return None
@@ -62,8 +68,8 @@ class SessionService:
             return None
 
         # Check if cache is stale (cached_at is stored naive-UTC in SQLite)
-        cached_at = cache_entry.cached_at.replace(tzinfo=timezone.utc) if cache_entry.cached_at.tzinfo is None else cache_entry.cached_at
-        if datetime.now(timezone.utc) - cached_at > timedelta(minutes=self.CACHE_TTL_MINUTES):
+        cached_at = cache_entry.cached_at.replace(tzinfo=UTC) if cache_entry.cached_at.tzinfo is None else cache_entry.cached_at
+        if datetime.now(UTC) - cached_at > timedelta(minutes=self.CACHE_TTL_MINUTES):
             return None
 
         # Check if file changed
@@ -112,7 +118,7 @@ class SessionService:
             cache_entry.size_bytes = summary.size_bytes
             cache_entry.total_messages = summary.total_messages
             cache_entry.total_tool_calls = summary.total_tool_calls
-            cache_entry.cached_at = datetime.now(timezone.utc)
+            cache_entry.cached_at = datetime.now(UTC)
             cache_entry.file_hash = file_hash
         else:
             # Check cache size limit before adding
@@ -146,7 +152,7 @@ class SessionService:
                 size_bytes=summary.size_bytes,
                 total_messages=summary.total_messages,
                 total_tool_calls=summary.total_tool_calls,
-                cached_at=datetime.now(timezone.utc),
+                cached_at=datetime.now(UTC),
                 file_hash=file_hash,
             )
             self.db.add(cache_entry)
@@ -169,10 +175,10 @@ class SessionService:
             return " ".join(texts).strip()
         return ""
 
-    async def parse_jsonl_file(self, filepath: Path) -> List[Dict[str, Any]]:
+    async def parse_jsonl_file(self, filepath: Path) -> list[dict[str, Any]]:
         """Parse JSONL file into list of entry objects."""
         entries = []
-        async with aiofiles.open(filepath, 'r', encoding='utf-8') as f:
+        async with aiofiles.open(filepath, encoding='utf-8') as f:
             async for line in f:
                 line = line.strip()
                 if not line:
@@ -184,7 +190,7 @@ class SessionService:
                     continue
         return entries
 
-    async def scan_for_listing(self, filepath: Path) -> Dict[str, Any]:
+    async def scan_for_listing(self, filepath: Path) -> dict[str, Any]:
         """Lightweight scan: extract summary + counts without loading the full file into memory.
 
         For listing purposes we need: summary text, message count, and tool call count.
@@ -196,7 +202,7 @@ class SessionService:
         total_messages = 0
         total_tool_calls = 0
 
-        async with aiofiles.open(filepath, 'r', encoding='utf-8') as f:
+        async with aiofiles.open(filepath, encoding='utf-8') as f:
             async for line in f:
                 line = line.strip()
                 if not line:
@@ -239,7 +245,7 @@ class SessionService:
             "total_tool_calls": total_tool_calls,
         }
 
-    async def parse_session_to_conversations(self, entries: List[Dict]) -> List[SessionConversation]:
+    async def parse_session_to_conversations(self, entries: list[dict]) -> list[SessionConversation]:
         """Convert JSONL entries to conversation objects."""
         conversations = []
         current_convo = None
@@ -272,7 +278,7 @@ class SessionService:
 
         return [SessionConversation(**c) for c in conversations]
 
-    def _build_session_message(self, obj: Dict) -> SessionMessage:
+    def _build_session_message(self, obj: dict) -> SessionMessage:
         """Build SessionMessage from JSONL entry."""
         message_data = obj.get("message", {})
         content = message_data.get("content", [])
@@ -332,7 +338,7 @@ class SessionService:
 
     async def list_sessions(
         self,
-        project_folder: Optional[str] = None,
+        project_folder: str | None = None,
         limit: int = 50,
         sort_by: str = "date",
         sort_order: str = "desc",
@@ -355,7 +361,7 @@ class SessionService:
         # Phase 1: collect lightweight file metadata without parsing content.
         # Skip subagent directories — they're internal and shouldn't appear as
         # top-level sessions.
-        file_entries: List[Dict[str, Any]] = []
+        file_entries: list[dict[str, Any]] = []
         for folder in folders:
             if not folder.exists():
                 continue
@@ -472,7 +478,7 @@ class SessionService:
         instead of parsing every JSONL file. Falls back to filesystem counts
         when the cache doesn't have full coverage.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today_start - timedelta(days=7)
 
@@ -487,7 +493,7 @@ class SessionService:
         sessions_today = 0
         sessions_this_week = 0
         total_messages = 0
-        project_counts: Dict[str, int] = {}
+        project_counts: dict[str, int] = {}
         most_active = None
 
         if self.db:
@@ -497,7 +503,7 @@ class SessionService:
             for entry in cached_entries:
                 modified = entry.modified_at
                 if modified.tzinfo is None:
-                    modified = modified.replace(tzinfo=timezone.utc)
+                    modified = modified.replace(tzinfo=UTC)
                 if modified >= today_start:
                     sessions_today += 1
                 if modified >= week_start:

@@ -1,6 +1,5 @@
 """MCP tools for scheduled messages."""
 import json
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
@@ -26,7 +25,7 @@ def register_scheduled_tools(mcp: FastMCP) -> None:
         async with AsyncSessionLocal() as db:
             stmt = select(ScheduledMessage).order_by(ScheduledMessage.id.desc())
             if enabled_only:
-                stmt = stmt.where(ScheduledMessage.enabled == True)
+                stmt = stmt.where(ScheduledMessage.enabled)
             rows = (await db.execute(stmt.limit(limit))).scalars().all()
 
         items = []

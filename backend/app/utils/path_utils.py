@@ -1,7 +1,6 @@
 """Path utilities for Claude Code configuration file locations."""
 import platform
 from pathlib import Path
-from typing import Optional
 
 
 def get_managed_settings_file() -> Path:
@@ -53,32 +52,32 @@ class ClaudePathUtils:
     """Utility class for managing Claude Code configuration paths."""
 
     @staticmethod
-    def get_user_claude_json() -> Optional[Path]:
+    def get_user_claude_json() -> Path | None:
         """Get user-level claude.json path."""
         return get_claude_user_config_file()
 
     @staticmethod
-    def get_user_settings_json() -> Optional[Path]:
+    def get_user_settings_json() -> Path | None:
         """Get user-level settings.json path."""
         return get_claude_user_settings_file()
 
     @staticmethod
-    def get_user_settings_local_json() -> Optional[Path]:
+    def get_user_settings_local_json() -> Path | None:
         """Get user-level settings.local.json path."""
         return get_claude_user_settings_local_file()
 
     @staticmethod
-    def get_user_commands_dir() -> Optional[Path]:
+    def get_user_commands_dir() -> Path | None:
         """Get user-level commands directory path."""
         return get_claude_user_commands_dir()
 
     @staticmethod
-    def get_user_agents_dir() -> Optional[Path]:
+    def get_user_agents_dir() -> Path | None:
         """Get user-level agents directory path."""
         return get_claude_user_agents_dir()
 
     @staticmethod
-    def get_user_skills_dir() -> Optional[Path]:
+    def get_user_skills_dir() -> Path | None:
         """Get user-level skills directory path."""
         return get_claude_user_skills_dir()
 
@@ -153,61 +152,61 @@ def get_claude_user_output_styles_dir() -> Path:
     return get_claude_user_config_dir() / "output-styles"
 
 
-def get_project_claude_dir(project_path: Optional[str] = None) -> Path:
+def get_project_claude_dir(project_path: str | None = None) -> Path:
     """Get the project-level Claude configuration directory (.claude/)."""
     if project_path:
         return Path(project_path) / ".claude"
     return Path.cwd() / ".claude"
 
 
-def get_project_settings_file(project_path: Optional[str] = None) -> Path:
+def get_project_settings_file(project_path: str | None = None) -> Path:
     """Get the project-level Claude settings file (.claude/settings.json)."""
     return get_project_claude_dir(project_path) / "settings.json"
 
 
-def get_project_settings_local_file(project_path: Optional[str] = None) -> Path:
+def get_project_settings_local_file(project_path: str | None = None) -> Path:
     """Get the project-level Claude local settings file (.claude/settings.local.json)."""
     return get_project_claude_dir(project_path) / "settings.local.json"
 
 
-def get_project_commands_dir(project_path: Optional[str] = None) -> Path:
+def get_project_commands_dir(project_path: str | None = None) -> Path:
     """Get the project-level Claude commands directory (.claude/commands/)."""
     return get_project_claude_dir(project_path) / "commands"
 
 
-def get_project_agents_dir(project_path: Optional[str] = None) -> Path:
+def get_project_agents_dir(project_path: str | None = None) -> Path:
     """Get the project-level Claude agents directory (.claude/agents/)."""
     return get_project_claude_dir(project_path) / "agents"
 
 
-def get_project_hooks_dir(project_path: Optional[str] = None) -> Path:
+def get_project_hooks_dir(project_path: str | None = None) -> Path:
     """Get the project-level Claude hooks directory (.claude/hooks/)."""
     return get_project_claude_dir(project_path) / "hooks"
 
 
-def get_project_skills_dir(project_path: Optional[str] = None) -> Path:
+def get_project_skills_dir(project_path: str | None = None) -> Path:
     """Get the project-level Claude skills directory (.claude/skills/)."""
     return get_project_claude_dir(project_path) / "skills"
 
 
-def get_project_plugins_dir(project_path: Optional[str] = None) -> Path:
+def get_project_plugins_dir(project_path: str | None = None) -> Path:
     """Get the project-level Claude plugins directory (.claude/plugins/)."""
     return get_project_claude_dir(project_path) / "plugins"
 
 
-def get_project_output_styles_dir(project_path: Optional[str] = None) -> Path:
+def get_project_output_styles_dir(project_path: str | None = None) -> Path:
     """Get the project-level Claude output styles directory (.claude/output-styles/)."""
     return get_project_claude_dir(project_path) / "output-styles"
 
 
-def get_project_mcp_config_file(project_path: Optional[str] = None) -> Path:
+def get_project_mcp_config_file(project_path: str | None = None) -> Path:
     """Get the project-level MCP config file (.mcp.json)."""
     if project_path:
         return Path(project_path) / ".mcp.json"
     return Path.cwd() / ".mcp.json"
 
 
-def get_project_claude_md_file(project_path: Optional[str] = None) -> Path:
+def get_project_claude_md_file(project_path: str | None = None) -> Path:
     """Get the project-level CLAUDE.md file."""
     if project_path:
         return Path(project_path) / "CLAUDE.md"

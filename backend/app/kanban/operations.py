@@ -13,10 +13,9 @@ pruned. See docs/cockpit/sync-hlc-freeze-vs-prune.md.
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from sqlalchemy import select, func, delete
+from sqlalchemy import delete, func, select
 
 from app.kanban.hlc import HLC, hlc_max
 from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanMeta, KanbanOp
@@ -34,12 +33,12 @@ class ClaimRejected(Exception):
 # One in-process clock per backend. node_id is bound lazily to the device_id.
 # The lock serializes clock acquisition + tick so concurrent requests (UI + an
 # MCP agent, or two agents) get distinct, monotonic HLCs.
-_clock: Optional[HLC] = None
+_clock: HLC | None = None
 _clock_lock = asyncio.Lock()
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def get_device_id(session) -> str:
@@ -72,7 +71,7 @@ async def _next_seq(session, device_id: str) -> int:
 
 async def apply_operation(
     session, *, op_type: str, entity_type: str, project_key: str,
-    entity_id: Optional[str], payload: dict,
+    entity_id: str | None, payload: dict,
 ) -> str:
     """Append an op and fold it into materialized state. Returns entity_id."""
     async with _clock_lock:

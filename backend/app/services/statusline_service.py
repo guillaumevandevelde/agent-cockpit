@@ -1,18 +1,17 @@
 """Service for managing Claude Code status line configuration."""
-import logging
 import json
+import logging
 import os
 import stat
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 from app.models.schemas import (
+    PowerlinePreset,
     StatusLineConfig,
     StatusLinePreset,
     StatusLineUpdate,
-    PowerlinePreset,
 )
 from app.utils.path_utils import get_claude_user_settings_file
 
@@ -38,7 +37,7 @@ MOCK_PREVIEW_DATA = {
 
 
 # Preset status line scripts
-STATUSLINE_PRESETS: List[StatusLinePreset] = [
+STATUSLINE_PRESETS: list[StatusLinePreset] = [
     StatusLinePreset(
         id="simple",
         name="Simple",
@@ -112,7 +111,7 @@ echo "[$MODEL_DISPLAY] 📁 ${CURRENT_DIR##*/}$GIT_BRANCH | 📊 ${PERCENT}%"
 
 
 # Powerline presets (uses npx command, requires Node.js)
-POWERLINE_PRESETS: List[PowerlinePreset] = [
+POWERLINE_PRESETS: list[PowerlinePreset] = [
     PowerlinePreset(
         id="powerline-dark",
         name="Dark Powerline",
@@ -183,7 +182,7 @@ class StatusLineService:
 
         if settings_file.exists():
             try:
-                with open(settings_file, "r") as f:
+                with open(settings_file) as f:
                     settings = json.load(f)
                     status_line = settings.get("statusLine", {})
 
@@ -192,7 +191,7 @@ class StatusLineService:
                         config.type = status_line.get("type", "command")
                         config.command = status_line.get("command")
                         config.padding = status_line.get("padding")
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
 
         # Read script content if command is set
@@ -200,9 +199,9 @@ class StatusLineService:
             script_path = Path(config.command).expanduser()
             if script_path.exists():
                 try:
-                    with open(script_path, "r") as f:
+                    with open(script_path) as f:
                         config.script_content = f.read()
-                except IOError:
+                except OSError:
                     pass
 
         return config
@@ -224,7 +223,7 @@ class StatusLineService:
 
         # Read existing settings or create new
         if settings_file.exists():
-            with open(settings_file, "r") as f:
+            with open(settings_file) as f:
                 settings = json.load(f)
         else:
             settings = {}
@@ -256,7 +255,7 @@ class StatusLineService:
 
         return self.get_config()
 
-    def get_presets(self) -> List[StatusLinePreset]:
+    def get_presets(self) -> list[StatusLinePreset]:
         """
         Get available status line presets.
 
@@ -325,7 +324,7 @@ class StatusLineService:
 
         return str(self.default_script_path)
 
-    def get_script_content(self) -> Optional[str]:
+    def get_script_content(self) -> str | None:
         """
         Get the current script content.
 
@@ -337,15 +336,15 @@ class StatusLineService:
             script_path = Path(config.command).expanduser()
             if script_path.exists():
                 try:
-                    with open(script_path, "r") as f:
+                    with open(script_path) as f:
                         return f.read()
-                except IOError:
+                except OSError:
                     pass
         return None
 
     def preview_script(
         self, script_content: str, timeout: int = 5
-    ) -> Tuple[bool, str, Optional[str]]:
+    ) -> tuple[bool, str, str | None]:
         """
         Execute a status line script with mock data and return the output.
 
@@ -402,7 +401,7 @@ class StatusLineService:
             except OSError:
                 pass
 
-    def get_powerline_presets(self) -> List[PowerlinePreset]:
+    def get_powerline_presets(self) -> list[PowerlinePreset]:
         """
         Get available powerline presets.
 
@@ -411,7 +410,7 @@ class StatusLineService:
         """
         return POWERLINE_PRESETS
 
-    def check_nodejs(self) -> Tuple[bool, Optional[str]]:
+    def check_nodejs(self) -> tuple[bool, str | None]:
         """
         Check if Node.js is available on the system.
 

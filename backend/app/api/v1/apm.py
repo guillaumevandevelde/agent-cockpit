@@ -1,8 +1,6 @@
 """APM (Agent Package Manager) API endpoints."""
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -36,7 +34,7 @@ class ApmSyncRequest(BaseModel):
 
 @router.get("/status")
 async def get_apm_status(
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """Get APM status for a project."""
     return ApmService.get_status(project_path)
@@ -44,7 +42,7 @@ async def get_apm_status(
 
 @router.get("/deps")
 async def list_dependencies(
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """List APM dependencies for a project."""
     return ApmService.list_dependencies(project_path)
@@ -53,7 +51,7 @@ async def list_dependencies(
 @router.post("/deps")
 async def add_dependency(
     request: ApmDependencyAddRequest,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """Add a dependency to apm.yml."""
     result = ApmService.add_dependency(
@@ -70,7 +68,7 @@ async def add_dependency(
 @router.delete("/deps/{name}")
 async def remove_dependency(
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """Remove a dependency from apm.yml."""
     result = ApmService.remove_dependency(name, project_path)
@@ -82,7 +80,7 @@ async def remove_dependency(
 @router.post("/install")
 async def install_dependencies(
     request: ApmInstallRequest,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """Run APM install for a project."""
     result = ApmService.install_dependencies(project_path, request.frozen)
@@ -105,7 +103,7 @@ async def sync_dependencies(request: ApmSyncRequest):
 
 @router.get("/modules")
 async def list_modules(
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """List installed APM modules."""
     return ApmService.get_installed_modules(project_path)

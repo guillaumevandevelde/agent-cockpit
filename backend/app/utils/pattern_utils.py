@@ -3,9 +3,9 @@
 Validates permission patterns against Claude Code's current rules and
 provides migration for deprecated pattern formats.
 """
-import re
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ TOOL_SUBCOMMAND_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*):\*$")
 DEPRECATED_COLON_STAR_RE = re.compile(r":\*$")
 
 
-def validate_permission_pattern(pattern: str) -> Tuple[bool, Optional[str]]:
+def validate_permission_pattern(pattern: str) -> tuple[bool, str | None]:
     """
     Validate a permission pattern against Claude Code's current rules.
 
@@ -69,7 +69,7 @@ def validate_permission_pattern(pattern: str) -> Tuple[bool, Optional[str]]:
     return False, f"Invalid pattern format: {pattern}"
 
 
-def migrate_deprecated_pattern(pattern: str) -> Optional[str]:
+def migrate_deprecated_pattern(pattern: str) -> str | None:
     """
     Attempt to migrate a deprecated pattern to the current valid format.
 
@@ -100,7 +100,7 @@ def migrate_deprecated_pattern(pattern: str) -> Optional[str]:
     return None
 
 
-def sanitize_permission_rules(settings: Dict[str, Any]) -> Dict[str, Any]:
+def sanitize_permission_rules(settings: dict[str, Any]) -> dict[str, Any]:
     """
     Validate and sanitize all permission patterns in a settings dict.
 
@@ -117,8 +117,8 @@ def sanitize_permission_rules(settings: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dict with migrated, removed, and sanitized_settings keys.
     """
-    migrated: List[Dict[str, str]] = []
-    removed: List[Dict[str, str]] = []
+    migrated: list[dict[str, str]] = []
+    removed: list[dict[str, str]] = []
 
     permissions = settings.get("permissions")
     if not isinstance(permissions, dict):
@@ -135,7 +135,7 @@ def sanitize_permission_rules(settings: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(rules, list):
             continue
 
-        clean_rules: List[str] = []
+        clean_rules: list[str] = []
         for pattern in rules:
             if not isinstance(pattern, str):
                 removed.append({

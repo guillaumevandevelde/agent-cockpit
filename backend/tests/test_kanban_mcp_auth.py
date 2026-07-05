@@ -1,5 +1,6 @@
 """Auth tests for the kanban MCP endpoint and the enable endpoint."""
 import json
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 

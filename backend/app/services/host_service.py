@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.host import Host
@@ -71,7 +71,7 @@ async def update_host(
     for field in ("alias", "hostname", "port", "username", "ssh_key_path", "status"):
         if field in data:
             setattr(host, field, data[field])
-    host.updated_at = datetime.now(timezone.utc)
+    host.updated_at = datetime.now(UTC)
     await db.flush()
     await db.refresh(host)
     return _host_to_dict(host)
@@ -132,7 +132,7 @@ async def execute_remote_tmux(
                 stdout.decode("utf-8", errors="replace"),
                 stderr.decode("utf-8", errors="replace"),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return (-1, "", f"SSH command timed out after {timeout}s")

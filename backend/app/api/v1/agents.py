@@ -1,5 +1,4 @@
 """API endpoints for agent and skill management."""
-from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -29,7 +28,7 @@ router = APIRouter(prefix="/agents", tags=["Agents"])
 
 @router.get("", response_model=AgentListResponse)
 async def list_agents(
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     List all agents from user and project scopes.
@@ -46,7 +45,7 @@ async def list_agents(
 
 @router.get("/skills", response_model=SkillListResponse)
 async def list_skills(
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     List all skills from user, project, and plugin directories.
@@ -63,7 +62,7 @@ async def list_skills(
 
 @router.get("/skills/stats", response_model=SkillStatsResponse)
 async def get_skill_stats(
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """
     Get skill invocation stats for the active project.
@@ -82,7 +81,7 @@ async def get_skill_stats(
 async def get_skill(
     location: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
     include_deps: bool = Query(True, description="Include dependency status"),
 ):
     """
@@ -123,7 +122,7 @@ async def get_skill(
 async def check_skill_dependencies(
     location: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """
     Check dependency status for a skill.
@@ -157,7 +156,7 @@ async def check_skill_dependencies(
 async def install_skill_dependencies(
     location: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """
     Install missing dependencies for a skill.
@@ -185,12 +184,12 @@ async def install_skill_dependencies(
 
 @router.get(
     "/skills/{location}/{name}/files",
-    response_model=List[SkillSupportingFile],
+    response_model=list[SkillSupportingFile],
 )
 async def list_skill_files(
     location: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """
     List supporting files in a skill directory.
@@ -216,9 +215,9 @@ async def list_skill_files(
 
 @router.get("/skills/registry", response_model=RegistrySearchResponse)
 async def browse_registry_skills(
-    query: Optional[str] = Query(None, description="Search query (min 2 chars)"),
+    query: str | None = Query(None, description="Search query (min 2 chars)"),
     limit: int = Query(50, description="Max results", ge=1, le=100),
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
     force_refresh: bool = Query(False, description="Force cache refresh"),
 ):
     """
@@ -254,7 +253,7 @@ async def browse_registry_skills(
 @router.post("/skills/registry/install", response_model=RegistryInstallResponse)
 async def install_registry_skill(
     request: RegistryInstallRequest,
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """
     Install a skill from the skills.sh registry.
@@ -275,7 +274,7 @@ async def install_registry_skill(
 async def get_agent(
     scope: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Get a specific agent by scope and name.
@@ -307,7 +306,7 @@ async def get_agent(
 @router.post("", response_model=Agent, status_code=201)
 async def create_agent(
     agent: AgentCreate,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Create a new agent.
@@ -353,7 +352,7 @@ async def update_agent(
     scope: str,
     name: str,
     agent_update: AgentUpdate,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Update an existing agent.
@@ -397,7 +396,7 @@ async def update_agent(
 async def delete_agent(
     scope: str,
     name: str,
-    project_path: Optional[str] = Query(None, description="Project path")
+    project_path: str | None = Query(None, description="Project path")
 ):
     """
     Delete an agent.

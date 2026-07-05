@@ -1,13 +1,13 @@
 """Read and update Codex CLI TOML configuration."""
 from __future__ import annotations
-import logging
 
+import copy
+import logging
+import re
 import shutil
 import tempfile
 import tomllib
-import re
-import copy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,6 @@ from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import Table
 
 from app.services.providers.codex_cli import get_codex_home
-
 
 logger = logging.getLogger(__name__)
 
@@ -303,9 +302,7 @@ class CodexConfigService:
             return True
         if path.parent == root and path.name.endswith(".config.toml"):
             return True
-        if path.parent == root / "rules" and path.suffix == ".rules":
-            return True
-        return False
+        return bool(path.parent == root / "rules" and path.suffix == ".rules")
 
     def get_config(self) -> dict[str, Any]:
         config, parse_error = self.parse_toml_file(self.config_file)
@@ -375,7 +372,7 @@ class CodexConfigService:
     def _create_backup(self, path: Path) -> Path | None:
         if not path.exists():
             return None
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_path = path.with_name(f"{path.name}.{timestamp}.bak")
         counter = 1
         while backup_path.exists():

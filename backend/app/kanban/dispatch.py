@@ -13,8 +13,9 @@ import logging
 import re
 import subprocess
 import uuid
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Protocol
+from typing import Protocol
 
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
@@ -133,10 +134,11 @@ async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
     """Keep SandcastleConfig.enabled aligned with the project's default transport so
     the two never drift. Resolves the project path from the registry; no-op if the
     project isn't locally registered."""
+    from sqlalchemy import select
+
     from app.database import AsyncSessionLocal
     from app.models.database import Project
     from app.models.sandcastle import SandcastleConfig
-    from sqlalchemy import select
 
     try:
         async with AsyncSessionLocal() as db:
@@ -161,7 +163,7 @@ async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
         logger.exception("failed to sync sandcastle enabled for %s", project_key)
 
 
-def _safe_resolve_key(path: str) -> Optional[str]:
+def _safe_resolve_key(path: str) -> str | None:
     try:
         return resolve_project_key(path)
     except Exception:
@@ -192,7 +194,7 @@ async def set_ship_mode(session, project_key: str, mode: str) -> None:
 _PERSONA_BY_COLUMN = {}  # Dynamic - loaded from project agents
 
 
-def _persona_filename(column: str) -> Optional[str]:
+def _persona_filename(column: str) -> str | None:
     """Get the persona filename for a column. For agent columns, the column name IS the agent name."""
     # Fixed columns don't have personas
     if column in ("Backlog", "Impediment", "Done", "To Resume"):
@@ -201,7 +203,7 @@ def _persona_filename(column: str) -> Optional[str]:
     return f"{column}.md"
 
 
-def _resolve_agent_from_persona(persona: Optional[str]) -> Optional[str]:
+def _resolve_agent_from_persona(persona: str | None) -> str | None:
     """Extract agent name from persona filename (e.g., 'developer.md' -> 'developer')."""
     if persona and persona.endswith(".md"):
         return persona[:-3]
@@ -216,14 +218,14 @@ def _strip_frontmatter(text: str) -> str:
     return text
 
 
-def _read_persona(project_path: str, column: str) -> Optional[str]:
+def _read_persona(project_path: str, column: str) -> str | None:
     filename = _persona_filename(column)
     if not filename:
         return None
     return _read_persona_file(project_path, filename)
 
 
-def _read_persona_file(project_path: str, filename: str) -> Optional[str]:
+def _read_persona_file(project_path: str, filename: str) -> str | None:
     path = Path(project_path) / ".claude" / "agents" / filename
     try:
         return _strip_frontmatter(path.read_text()).strip()
@@ -231,7 +233,7 @@ def _read_persona_file(project_path: str, filename: str) -> Optional[str]:
         return None
 
 
-def _persona_for_card(project_path: str, card, column: str) -> Optional[str]:
+def _persona_for_card(project_path: str, card, column: str) -> str | None:
     """Resolve persona for a card. `column` is passed explicitly because the card
     may already have been moved to a non-persona column."""
     agent = getattr(card, "agent", None)
@@ -245,8 +247,8 @@ def _persona_for_card(project_path: str, card, column: str) -> Optional[str]:
 
 # ---- prompt ----------------------------------------------------------------
 
-def build_card_prompt(card, *, persona: Optional[str], ship_mode: str,
-                      impediment_question: Optional[str] = None) -> str:
+def build_card_prompt(card, *, persona: str | None, ship_mode: str,
+                      impediment_question: str | None = None) -> str:
     preamble = (persona.strip() + "\n\n") if persona else ""
     impediment_section = ""
     if impediment_question:
@@ -359,7 +361,7 @@ def _known_provider_ids() -> set[str]:
     return {p.id for p in get_providers()}
 
 
-def make_worktree_transport(skip_permissions: bool = True) -> "SpawnTransport":
+def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass."""
     def _transport(*, directory: str, prompt: str, session_name: str,
                    provider_id: str = "claude-code") -> dict:
@@ -430,6 +432,7 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
     Raises MemoryLimitExceeded if hardware memory limits are reached.
     """
     import asyncio
+
     from app.services.scheduling.session_registry import session_registry
 
     # Check memory limits before spawning
@@ -537,7 +540,7 @@ def _active_session_count(cards: Iterable[KanbanCard]) -> int:
     )
 
 
-def _claimant_session(card: KanbanCard) -> Optional[str]:
+def _claimant_session(card: KanbanCard) -> str | None:
     """The tmux session name behind an `agent:` claim, or None for unclaimed cards
     and human (`me@ui`) claims — those are never reaped."""
     claimant = card.claimed_by or ""
@@ -546,7 +549,7 @@ def _claimant_session(card: KanbanCard) -> Optional[str]:
     return None
 
 
-def _live_sessions() -> Optional[set[str]]:
+def _live_sessions() -> set[str] | None:
     """Names of tmux sessions alive on this device, or None when tmux cannot be
     queried. Returning None (not an empty set) on an *ambiguous* failure is the
     whole point: the reaper must never mistake a transient `tmux` hiccup for "every
@@ -570,7 +573,7 @@ _DISPATCH_COLUMNS = ("Backlog", "To Resume")  # new cards from Backlog, resumed 
 _PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
 
 
-def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
+def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     cards = list(cards)
     for col in _DISPATCH_COLUMNS:
         col_cards = [c for c in cards if c.column == col and not c.claimed_by]
@@ -598,9 +601,9 @@ def _next_card(cards: Iterable[KanbanCard]) -> Optional[KanbanCard]:
 
 async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
-    impediment_question: Optional[str] = None,
-    agent_override: Optional[str] = None,
-) -> Optional[dict]:
+    impediment_question: str | None = None,
+    agent_override: str | None = None,
+) -> dict | None:
     """Claim+move-to-agent-column+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column.
     
@@ -727,7 +730,7 @@ async def _move_to_resume(
     return True
 
 
-def _resume_target_from_cwd(cwd: str) -> Optional[tuple[str, str]]:
+def _resume_target_from_cwd(cwd: str) -> tuple[str, str] | None:
     """Derive (project_path, session_name) from a dispatched session's cwd.
 
     Kanban-dispatched sessions run in `<project_path>/.claude/worktrees/<session_name>`
@@ -833,10 +836,10 @@ async def reap_stale_claims(
 
 
 async def dispatch_project(
-    session, *, project_key: str, project_path: str, transport: Optional[SpawnTransport] = None,
-    live_sessions: Optional[set[str]] = None,
-    sandcastle_live: Optional[set[str]] = None,
-) -> Optional[dict]:
+    session, *, project_key: str, project_path: str, transport: SpawnTransport | None = None,
+    live_sessions: set[str] | None = None,
+    sandcastle_live: set[str] | None = None,
+) -> dict | None:
     """Claim+move+spawn the next card for one project. Returns a result dict or
     None when there is nothing to do (no candidate card, or project is busy).
 
@@ -856,7 +859,7 @@ async def dispatch_project(
             cards = await list_cards(session, project_key)
 
     cap = await get_max_sessions(session, project_key)
-    last_result: Optional[dict] = None
+    last_result: dict | None = None
 
     # Fill every free slot in this tick, re-listing after each dispatch so the
     # claim just made counts toward the cap.
@@ -881,9 +884,9 @@ async def dispatch_project(
 
 async def dispatch_card(
     session, *, card_id: str, project_path: str,
-    transport: Optional[SpawnTransport] = None,
-    agent_override: Optional[str] = None,
-) -> Optional[dict]:
+    transport: SpawnTransport | None = None,
+    agent_override: str | None = None,
+) -> dict | None:
     """Manually dispatch one specific card now, regardless of the auto-pick toggle or
     the busy cap. Returns the result dict or None if the card is missing or its claim
     was lost. If agent_override is provided, use that agent instead of the card's agent."""
@@ -904,8 +907,8 @@ async def dispatch_card(
 async def dispatch_impediment_card(
     session, *, card_id: str, project_path: str, target_agent: str,
     impediment_question: str,
-    transport: Optional[SpawnTransport] = None,
-) -> Optional[dict]:
+    transport: SpawnTransport | None = None,
+) -> dict | None:
     """Dispatch an impediment card to a specific agent for resolution.
     
     Args:
@@ -946,9 +949,9 @@ async def dispatch_impediment_card(
 
 async def redispatch_card(
     session, *, card_id: str, project_path: str,
-    transport: Optional[SpawnTransport] = None,
-    agent_override: Optional[str] = None,
-) -> Optional[dict]:
+    transport: SpawnTransport | None = None,
+    agent_override: str | None = None,
+) -> dict | None:
     """Release a stuck card, optionally kill its session, and re-dispatch.
 
     This is the human override for cards that are stuck on agent columns —
@@ -1021,7 +1024,7 @@ async def redispatch_card(
 
 async def dispatch_all_pending(
     session, *, project_key: str, project_path: str,
-    transport: Optional[SpawnTransport] = None,
+    transport: SpawnTransport | None = None,
 ) -> list[dict]:
     """Dispatch all unclaimed Backlog cards for a project at once.
 
@@ -1051,7 +1054,7 @@ async def dispatch_all_pending(
 
 async def redispatch_all_orphans(
     session, *, project_key: str, project_path: str,
-    transport: Optional[SpawnTransport] = None,
+    transport: SpawnTransport | None = None,
 ) -> list[dict]:
     """Re-dispatch all orphaned cards (unclaimed on agent columns) for a project.
 
@@ -1096,7 +1099,7 @@ def match_project_paths(
     return out
 
 
-async def run_dispatch_tick(*, transport: Optional[SpawnTransport] = None) -> None:
+async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
     """One poll cycle: dispatch the next Analysis/Todo card for every enabled project
     that maps to a local path on this device.
     
@@ -1107,7 +1110,6 @@ async def run_dispatch_tick(*, transport: Optional[SpawnTransport] = None) -> No
     """
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.dispatch_pause import is_dispatch_paused
-    from app.services.scheduling.pending_queue import pending_queue
 
     async with KanbanSessionLocal() as ks:
         if await is_dispatch_paused(ks):
@@ -1192,8 +1194,8 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
     return make_worktree_transport(skip_permissions=skip)
 
 
-def make_resume_transport(session_id: str, project_folder: Optional[str] = None,
-                          skip_permissions: bool = True) -> "SpawnTransport":
+def make_resume_transport(session_id: str, project_folder: str | None = None,
+                          skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a transport that resumes an existing session.
 
     Unlike the worktree transport, this does NOT create a new git worktree.

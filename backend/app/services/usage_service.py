@@ -4,21 +4,21 @@ Usage tracking algorithms adapted from ccusage by ryoppippi
 https://github.com/ryoppippi/ccusage
 Licensed under MIT
 """
-import logging
-import hashlib
 import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiofiles
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import UsageCache
 from app.models.schemas import (
+    BlockUsageListResponse,
     DailyUsage,
     DailyUsageListResponse,
     ModelBreakdown,
@@ -27,14 +27,15 @@ from app.models.schemas import (
     SessionBlock,
     SessionUsage,
     SessionUsageListResponse,
-    BlockUsageListResponse,
     TokenCounts,
     UsageSummary,
     UsageSummaryResponse,
 )
 from app.services.pricing_service import PricingService
-from app.utils.path_utils import get_claude_projects_dir, get_project_display_name, convert_path_to_folder_name
-
+from app.utils.path_utils import (
+    convert_path_to_folder_name,
+    get_claude_projects_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,10 @@ class LoadedUsageEntry:
     output_tokens: int
     cache_creation_tokens: int
     cache_read_tokens: int
-    cost_usd: Optional[float]
+    cost_usd: float | None
     model: str
-    session_id: Optional[str]
-    version: Optional[str]
+    session_id: str | None
+    version: str | None
     project_path: str
 
 
@@ -61,7 +62,7 @@ class UsageService:
     SESSION_DURATION_HOURS = 5  # Claude billing block duration
     DEFAULT_RECENT_DAYS = 3
 
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: AsyncSession | None = None):
         self.db = db
         self.pricing = PricingService()
         self.projects_dir = get_claude_projects_dir()
@@ -70,15 +71,15 @@ class UsageService:
     def _as_utc(dt: datetime) -> datetime:
         """Treat naive datetimes as UTC and normalize aware datetimes to UTC."""
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
 
     # === Cache Management ===
 
     async def get_cache_key(
         self,
         cache_type: str,
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
         **params: Any,
     ) -> str:
         """Generate cache key for query."""
@@ -90,7 +91,7 @@ class UsageService:
                 key_parts.append(f"{k}:{v}")
         return ":".join(key_parts)
 
-    async def get_from_cache(self, cache_key: str) -> Optional[dict]:
+    async def get_from_cache(self, cache_key: str) -> dict | None:
         """Get data from cache if valid."""
         if not self.db:
             return None
@@ -104,7 +105,7 @@ class UsageService:
             return None
 
         # Check if cache is stale
-        if datetime.now(timezone.utc) - cache_entry.cached_at.replace(tzinfo=timezone.utc) > timedelta(
+        if datetime.now(UTC) - cache_entry.cached_at.replace(tzinfo=UTC) > timedelta(
             minutes=self.CACHE_TTL_MINUTES
         ):
             return None
@@ -116,7 +117,7 @@ class UsageService:
         cache_key: str,
         cache_type: str,
         data: dict,
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
     ):
         """Save data to cache."""
         if not self.db:
@@ -130,7 +131,7 @@ class UsageService:
 
         if cache_entry:
             cache_entry.data = data
-            cache_entry.cached_at = datetime.now(timezone.utc)
+            cache_entry.cached_at = datetime.now(UTC)
         else:
             cache_entry = UsageCache(
                 cache_key=cache_key,
@@ -144,8 +145,8 @@ class UsageService:
 
     async def invalidate_cache(
         self,
-        cache_type: Optional[str] = None,
-        project_path: Optional[str] = None,
+        cache_type: str | None = None,
+        project_path: str | None = None,
     ):
         """Invalidate cache entries."""
         if not self.db:
@@ -163,7 +164,7 @@ class UsageService:
     # === JSONL Parsing ===
 
     async def discover_jsonl_files(
-        self, project_path: Optional[str] = None
+        self, project_path: str | None = None
     ) -> list[Path]:
         """Discover all JSONL files in projects directory."""
         files = []
@@ -194,7 +195,7 @@ class UsageService:
         project_folder = filepath.parent.name
 
         try:
-            async with aiofiles.open(filepath, "r", encoding="utf-8") as f:
+            async with aiofiles.open(filepath, encoding="utf-8") as f:
                 async for line in f:
                     line = line.strip()
                     if not line:
@@ -269,7 +270,7 @@ class UsageService:
         return entries
 
     async def get_all_usage_entries(
-        self, project_path: Optional[str] = None
+        self, project_path: str | None = None
     ) -> list[LoadedUsageEntry]:
         """Load all usage entries from JSONL files."""
         files = await self.discover_jsonl_files(project_path)
@@ -461,9 +462,9 @@ class UsageService:
         blocks = []
         sorted_entries = sorted(entries, key=lambda e: e.timestamp)
 
-        current_block_start: Optional[datetime] = None
+        current_block_start: datetime | None = None
         current_block_entries: list[LoadedUsageEntry] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for entry in sorted_entries:
             entry_time = entry.timestamp
@@ -545,11 +546,11 @@ class UsageService:
         models = list(set(e.model for e in entries))
 
         # Calculate burn rate and projections for active blocks
-        burn_rate_tokens: Optional[float] = None
-        burn_rate_cost: Optional[float] = None
-        projected_tokens: Optional[int] = None
-        projected_cost: Optional[float] = None
-        remaining_minutes: Optional[int] = None
+        burn_rate_tokens: float | None = None
+        burn_rate_cost: float | None = None
+        projected_tokens: int | None = None
+        projected_cost: float | None = None
+        remaining_minutes: int | None = None
 
         if is_active and len(entries) > 1:
             first_entry = entries[0]
@@ -596,7 +597,7 @@ class UsageService:
 
     def _create_gap_block(
         self, last_activity: datetime, next_activity: datetime
-    ) -> Optional[SessionBlock]:
+    ) -> SessionBlock | None:
         """Create a gap block for periods with no activity."""
         session_duration = timedelta(hours=self.SESSION_DURATION_HOURS)
         gap_duration = next_activity - last_activity
@@ -625,7 +626,7 @@ class UsageService:
         self, blocks: list[SessionBlock], days: int = DEFAULT_RECENT_DAYS
     ) -> list[SessionBlock]:
         """Filter blocks to recent ones and active blocks."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cutoff = now - timedelta(days=days)
 
         def parse_block_start(block: SessionBlock) -> datetime:
@@ -641,7 +642,7 @@ class UsageService:
     # === Public API Methods ===
 
     async def get_usage_summary(
-        self, project_path: Optional[str] = None
+        self, project_path: str | None = None
     ) -> UsageSummaryResponse:
         """Get overall usage statistics."""
         cache_key = await self.get_cache_key("summary", project_path)
@@ -704,9 +705,9 @@ class UsageService:
 
     async def get_daily_usage(
         self,
-        project_path: Optional[str] = None,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        project_path: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> DailyUsageListResponse:
         """Get daily usage breakdown."""
         cache_key = await self.get_cache_key(
@@ -751,7 +752,7 @@ class UsageService:
 
     async def get_session_usage(
         self,
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
         limit: int = 50,
     ) -> SessionUsageListResponse:
         """Get session-based usage breakdown."""
@@ -792,9 +793,9 @@ class UsageService:
 
     async def get_monthly_usage(
         self,
-        project_path: Optional[str] = None,
-        start_month: Optional[str] = None,
-        end_month: Optional[str] = None,
+        project_path: str | None = None,
+        start_month: str | None = None,
+        end_month: str | None = None,
     ) -> MonthlyUsageListResponse:
         """Get monthly usage breakdown."""
         cache_key = await self.get_cache_key(
@@ -847,7 +848,7 @@ class UsageService:
 
     async def get_block_usage(
         self,
-        project_path: Optional[str] = None,
+        project_path: str | None = None,
         recent: bool = True,
         active: bool = False,
     ) -> BlockUsageListResponse:

@@ -1,8 +1,9 @@
 """Tests for SkillStatsService."""
 import json
-import pytest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from app.services.skill_stats_service import SkillStatsService
 

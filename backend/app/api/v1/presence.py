@@ -6,9 +6,8 @@ import time
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
 from app.config import settings
-from app.utils.url_utils import resolve_base_url
+from app.database import get_db
 from app.models.constants import SessionStatus
 from app.models.schemas import (
     PresenceConfigSnippet,
@@ -19,6 +18,7 @@ from app.models.schemas import (
 )
 from app.services.presence_service import PresenceService, manager
 from app.services.scheduling.idle_state import idle_state
+from app.utils.url_utils import resolve_base_url
 
 router = APIRouter()
 service = PresenceService()

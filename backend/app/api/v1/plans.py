@@ -1,8 +1,7 @@
 """Plan history browser API endpoints."""
-from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query
 
-from app.services.plan_service import PlanService
 from app.models.schemas import (
     PlanCreate,
     PlanDetailResponse,
@@ -11,13 +10,14 @@ from app.models.schemas import (
     PlanStatsResponse,
     PlanUpdate,
 )
+from app.services.plan_service import PlanService
 
 router = APIRouter()
 
 
 @router.get("/plans", response_model=PlanListResponse)
 async def list_plans(
-    project_path: Optional[str] = Query(None, description="Active project path for settings resolution"),
+    project_path: str | None = Query(None, description="Active project path for settings resolution"),
 ):
     """List all plan files sorted by modification time (newest first)."""
     try:
@@ -30,7 +30,7 @@ async def list_plans(
 
 @router.get("/plans/stats", response_model=PlanStatsResponse)
 async def get_plan_stats(
-    project_path: Optional[str] = Query(None, description="Active project path"),
+    project_path: str | None = Query(None, description="Active project path"),
 ):
     """Get plan statistics for dashboard."""
     try:
@@ -43,7 +43,7 @@ async def get_plan_stats(
 @router.get("/plans/search", response_model=PlanSearchResponse)
 async def search_plans(
     q: str = Query(..., min_length=1, description="Search query"),
-    project_path: Optional[str] = Query(None, description="Active project path"),
+    project_path: str | None = Query(None, description="Active project path"),
 ):
     """Search plans by title and content."""
     try:
@@ -57,7 +57,7 @@ async def search_plans(
 @router.get("/plans/{filename}", response_model=PlanDetailResponse)
 async def get_plan_detail(
     filename: str,
-    project_path: Optional[str] = Query(None, description="Active project path"),
+    project_path: str | None = Query(None, description="Active project path"),
 ):
     """Get full plan detail with linked sessions."""
     try:
@@ -79,7 +79,7 @@ async def get_plan_detail(
 @router.post("/plans", response_model=PlanDetailResponse, status_code=201)
 async def create_plan(
     payload: PlanCreate,
-    project_path: Optional[str] = Query(None, description="Active project path"),
+    project_path: str | None = Query(None, description="Active project path"),
 ):
     """Create a new plan file."""
     try:
@@ -99,7 +99,7 @@ async def create_plan(
 async def update_plan(
     filename: str,
     payload: PlanUpdate,
-    project_path: Optional[str] = Query(None, description="Active project path"),
+    project_path: str | None = Query(None, description="Active project path"),
 ):
     """Update an existing plan's content."""
     try:
@@ -120,7 +120,7 @@ async def update_plan(
 @router.delete("/plans/{filename}", status_code=204)
 async def delete_plan(
     filename: str,
-    project_path: Optional[str] = Query(None, description="Active project path"),
+    project_path: str | None = Query(None, description="Active project path"),
 ):
     """Delete a plan file."""
     try:

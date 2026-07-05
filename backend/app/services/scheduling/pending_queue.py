@@ -4,11 +4,9 @@ When a card cannot be dispatched because of hardware-aware session limits,
 it's placed in this queue. A periodic retry mechanism attempts to dispatch
 queued cards when memory becomes available.
 """
-import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +17,11 @@ class PendingCard:
     card_id: str
     project_key: str
     project_path: str
-    agent_override: Optional[str] = None
-    impediment_question: Optional[str] = None
+    agent_override: str | None = None
+    impediment_question: str | None = None
     queued_at: float = field(default_factory=time.monotonic)
     retry_count: int = 0
-    last_retry_at: Optional[float] = None
+    last_retry_at: float | None = None
 
 
 class PendingQueue:
@@ -40,8 +38,8 @@ class PendingQueue:
         card_id: str,
         project_key: str,
         project_path: str,
-        agent_override: Optional[str] = None,
-        impediment_question: Optional[str] = None,
+        agent_override: str | None = None,
+        impediment_question: str | None = None,
     ) -> bool:
         """Add a card to the pending queue.
         
@@ -64,7 +62,7 @@ class PendingQueue:
         )
         return True
 
-    def dequeue(self, card_id: str) -> Optional[PendingCard]:
+    def dequeue(self, card_id: str) -> PendingCard | None:
         """Remove and return a card from the queue."""
         return self._queue.pop(card_id, None)
 

@@ -323,8 +323,9 @@ async def test_codex_plugin_remove_uses_cli_remove(monkeypatch):
 
 
 async def test_codex_plugin_mutation_rejects_unsafe_selectors():
-    from app.api.v1 import providers as providers_api
     from pydantic import ValidationError
+
+    from app.api.v1 import providers as providers_api
 
     with pytest.raises(ValidationError):
         providers_api.CodexPluginMutationRequest(name="../bad")

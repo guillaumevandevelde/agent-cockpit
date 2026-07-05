@@ -1,10 +1,9 @@
 """Central provider capability matrix."""
 from __future__ import annotations
-import logging
 
+import logging
 from copy import deepcopy
 from typing import Any
-
 
 logger = logging.getLogger(__name__)
 

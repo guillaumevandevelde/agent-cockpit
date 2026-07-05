@@ -1,5 +1,6 @@
 from unittest.mock import patch
-from app.services.scheduling.session_resolver import resolve_target, permission_flags, spawn_for
+
+from app.services.scheduling.session_resolver import permission_flags, resolve_target, spawn_for
 
 
 def test_permission_flags_mapping():

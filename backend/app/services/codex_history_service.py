@@ -1,15 +1,14 @@
 """Read-only diagnostics for Codex history and model cache files."""
 from __future__ import annotations
-import logging
 
 import hashlib
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from app.services.providers.codex_cli import get_codex_home
-
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +102,7 @@ class CodexHistoryService:
                         continue
 
                     summary["valid_rows"] += 1
-                    observed_keys.update(str(key) for key in row.keys())
+                    observed_keys.update(str(key) for key in row)
                     if isinstance(row.get("text"), str):
                         summary["text_rows"] += 1
 
@@ -208,7 +207,7 @@ class CodexHistoryService:
             summary["parse_error"] = "models_cache.json root is not an object"
             return summary
 
-        summary["root_keys"] = sorted(str(key) for key in data.keys())
+        summary["root_keys"] = sorted(str(key) for key in data)
         summary["fetched_at"] = data.get("fetched_at") if isinstance(data.get("fetched_at"), str) else None
         summary["client_version"] = (
             data.get("client_version") if isinstance(data.get("client_version"), str) else None

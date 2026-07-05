@@ -1,7 +1,7 @@
 """OpenCode provider implementation."""
 from __future__ import annotations
-import logging
 
+import logging
 import os
 import re
 import shutil
@@ -14,7 +14,6 @@ from app.services.providers.base import (
     argv0_name,
     has_binary_descendant,
 )
-
 
 logger = logging.getLogger(__name__)
 

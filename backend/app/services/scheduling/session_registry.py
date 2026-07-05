@@ -7,7 +7,6 @@ Enforces hardware-aware session limits via memory_monitor.
 """
 import asyncio
 import logging
-from typing import Optional
 
 from app.services.memory_monitor import get_memory_status_cached
 
@@ -18,7 +17,7 @@ _BUSY_EVENTS = {"UserPromptSubmit", "SessionStart", "Notification"}
 
 
 class SessionRegistry:
-    def __init__(self, max_sessions: Optional[int] = None) -> None:
+    def __init__(self, max_sessions: int | None = None) -> None:
         self._panes: dict[str, str] = {}
         self._idle: dict[str, bool] = {}
         self._waiters: dict[str, list[asyncio.Event]] = {}
@@ -87,8 +86,7 @@ class SessionRegistry:
         Returns the number of sessions removed.
         """
         import time
-        now = time.monotonic()
-        stale = []
+        time.monotonic()
         # Sessions only get idle flag set on Stop events, so we track that
         # For now, just report the count - actual cleanup needs timestamp tracking
         return 0
@@ -107,7 +105,7 @@ class SessionRegistry:
         try:
             await asyncio.wait_for(ev.wait(), timeout=timeout_s)
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
         finally:
             self._waiters.get(session_id, []).remove(ev)

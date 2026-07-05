@@ -3,7 +3,6 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Optional
 
 from ..models.schemas import (
     Plugin,
@@ -11,11 +10,10 @@ from ..models.schemas import (
     PluginInstallResponse,
     PluginToggleResponse,
 )
-from ..utils.path_utils import get_claude_user_plugins_dir, get_claude_user_settings_file
 from ..utils.file_utils import read_json_file, write_json_file
+from ..utils.path_utils import get_claude_user_plugins_dir, get_claude_user_settings_file
 from .cli_executor import CLIExecutor
 from .plugin_descriptions import get_plugin_info
-
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +21,7 @@ logger = logging.getLogger(__name__)
 class PluginInstaller:
     """Installs, uninstalls, and toggles Claude Code plugins."""
 
-    def __init__(self, cli_executor: Optional[CLIExecutor] = None):
+    def __init__(self, cli_executor: CLIExecutor | None = None):
         self.cli_executor = cli_executor or CLIExecutor()
 
     def _enhance_git_error_message(self, stderr: str, stdout: str) -> str:
@@ -123,7 +121,7 @@ class PluginInstaller:
             )
 
     async def uninstall_plugin(
-        self, name: str, project_path: Optional[str] = None
+        self, name: str, project_path: str | None = None
     ) -> bool:
         """
         Uninstall a plugin by removing its directory and updating config files.
@@ -143,13 +141,13 @@ class PluginInstaller:
         installed_plugins_file = get_claude_user_plugins_dir() / "installed_plugins.json"
         if installed_plugins_file.exists():
             try:
-                with open(installed_plugins_file, "r") as f:
+                with open(installed_plugins_file) as f:
                     data = json.load(f)
 
                 plugins = data.get("plugins", {})
 
                 # Find matching plugin key
-                for key in plugins.keys():
+                for key in plugins:
                     if key == name or key.startswith(f"{name}@"):
                         matching_key = key
                         break
@@ -173,7 +171,7 @@ class PluginInstaller:
                     with open(installed_plugins_file, "w") as f:
                         json.dump(data, f, indent=2)
                     removed_any = True
-            except Exception as e:
+            except Exception:
                 logger.exception("Error processing installed_plugins.json", extra={"plugin": name})
 
         # ALWAYS try to remove from settings.json (enabledPlugins)
@@ -185,8 +183,8 @@ class PluginInstaller:
 
                 # Remove matching entries from enabledPlugins
                 keys_to_remove = [
-                    k for k in enabled_plugins.keys()
-                    if k == name or k == matching_key or k.startswith(f"{name}@")
+                    k for k in enabled_plugins
+                    if k in (name, matching_key) or k.startswith(f"{name}@")
                 ]
                 for key in keys_to_remove:
                     del enabled_plugins[key]
@@ -194,14 +192,14 @@ class PluginInstaller:
                 if keys_to_remove:
                     await write_json_file(settings_file, settings_data)
                     removed_any = True
-            except Exception as e:
+            except Exception:
                 logger.exception("Error updating settings.json", extra={"plugin": name})
 
         logger.info("Plugin uninstall complete", extra={"plugin": name, "removed": removed_any})
         return removed_any
 
     async def toggle_plugin(
-        self, name: str, enabled: bool, source: Optional[str] = None
+        self, name: str, enabled: bool, source: str | None = None
     ) -> PluginToggleResponse:
         """
         Toggle a plugin's enabled state in settings.json.
@@ -230,7 +228,7 @@ class PluginInstaller:
         else:
             # Try to find existing key with this name
             existing_key = None
-            for key in settings_data["enabledPlugins"].keys():
+            for key in settings_data["enabledPlugins"]:
                 if key == name or key.startswith(f"{name}@"):
                     existing_key = key
                     break
@@ -246,7 +244,7 @@ class PluginInstaller:
             logger.warning("Failed to write settings file for plugin toggle", extra={"plugin": name})
             return PluginToggleResponse(
                 success=False,
-                message=f"Failed to write settings file",
+                message="Failed to write settings file",
                 plugin=None,
             )
 

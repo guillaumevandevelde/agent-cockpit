@@ -2,7 +2,6 @@
 import platform
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from app.utils.path_utils import get_user_home
 
@@ -29,7 +28,7 @@ def _get_current_platform() -> str:
     return "linux"
 
 
-def _get_claude_code_version() -> Optional[str]:
+def _get_claude_code_version() -> str | None:
     """Try to get Claude Code version."""
     try:
         result = subprocess.run(

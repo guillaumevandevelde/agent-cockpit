@@ -4,8 +4,8 @@ import pytest
 from app.models.database import (
     AutoBackupSettings,
     Backup,
-    MCPServerCache,
     Marketplace,
+    MCPServerCache,
     PresenceEvent,
     PresenceSession,
     Project,

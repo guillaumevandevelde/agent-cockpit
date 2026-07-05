@@ -3,37 +3,32 @@ Plugin API endpoints for Claude Cockpit
 """
 
 import asyncio
-from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...database import get_db
-from ...services.plugin_service import PluginService
+from fastapi import APIRouter, HTTPException, Query
+
 from ...models.schemas import (
-    PluginListResponse,
+    AvailablePluginsResponse,
+    MarketplaceCreate,
     Plugin,
     PluginInstallRequest,
     PluginInstallResponse,
+    PluginListResponse,
     PluginToggleRequest,
     PluginToggleResponse,
-    MarketplaceCreate,
-    MarketplaceResponse,
-    MarketplaceListResponse,
-    MarketplacePluginListResponse,
-    PluginUpdatesResponse,
-    PluginUpdateResponse,
     PluginUpdateAllResponse,
-    PluginValidationResult,
+    PluginUpdateResponse,
+    PluginUpdatesResponse,
     PluginValidateRequest,
-    AvailablePluginsResponse,
+    PluginValidationResult,
 )
+from ...services.plugin_service import PluginService
 
 router = APIRouter()
 
 
 @router.get("/plugins", response_model=PluginListResponse)
 async def list_plugins(
-    project_path: Optional[str] = Query(None, description="Optional project path")
+    project_path: str | None = Query(None, description="Optional project path")
 ):
     """
     List all installed plugins from user and project scopes.
@@ -337,7 +332,7 @@ async def toggle_plugin(name: str, request: PluginToggleRequest):
 @router.get("/plugins/{name}", response_model=Plugin)
 async def get_plugin(
     name: str,
-    project_path: Optional[str] = Query(None, description="Optional project path")
+    project_path: str | None = Query(None, description="Optional project path")
 ):
     """
     Get details about a specific installed plugin.
@@ -363,7 +358,7 @@ async def get_plugin(
 @router.delete("/plugins/{name}", status_code=204)
 async def uninstall_plugin(
     name: str,
-    project_path: Optional[str] = Query(None, description="Optional project path")
+    project_path: str | None = Query(None, description="Optional project path")
 ):
     """
     Uninstall a plugin by removing its directory.

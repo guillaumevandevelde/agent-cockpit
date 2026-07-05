@@ -1,6 +1,5 @@
 """Tests for CC Bridge pty relay."""
 import json
-import pytest
 
 
 def test_parse_control_message_resize():

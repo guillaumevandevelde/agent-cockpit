@@ -103,7 +103,7 @@ def test_codex_backup_exports_config_rules_and_redacted_inventory(monkeypatch, t
 
 
 def test_codex_backup_restore_is_export_only(tmp_path):
-    from app.services.backup_service import BackupService, CODEX_RESTORE_REFUSAL_MESSAGE
+    from app.services.backup_service import CODEX_RESTORE_REFUSAL_MESSAGE, BackupService
 
     archive_path = tmp_path / "codex.zip"
     with zipfile.ZipFile(archive_path, "w") as zf:
@@ -128,7 +128,7 @@ def test_codex_backup_restore_is_export_only(tmp_path):
 
 
 def test_codex_backup_restore_plan_reports_explicit_refusal(tmp_path):
-    from app.services.backup_service import BackupService, CODEX_RESTORE_REFUSAL_MESSAGE
+    from app.services.backup_service import CODEX_RESTORE_REFUSAL_MESSAGE, BackupService
 
     archive_path = tmp_path / "codex.zip"
     manifest = {

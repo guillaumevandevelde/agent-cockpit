@@ -5,8 +5,6 @@ https://github.com/ryoppippi/ccusage
 Licensed under MIT
 """
 import logging
-from typing import Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +110,7 @@ class PricingService:
                 normalized = normalized[len(prefix):]
         return normalized
 
-    def get_model_pricing(self, model_name: str) -> Optional[dict]:
+    def get_model_pricing(self, model_name: str) -> dict | None:
         """Get pricing data for a model.
 
         Args:
@@ -147,8 +145,8 @@ class PricingService:
     def calculate_tiered_cost(
         self,
         total_tokens: int,
-        base_price: Optional[float],
-        tiered_price: Optional[float],
+        base_price: float | None,
+        tiered_price: float | None,
         threshold: int = TIERED_THRESHOLD,
     ) -> float:
         """Calculate cost with tiered pricing.
@@ -188,7 +186,7 @@ class PricingService:
         output_tokens: int,
         cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> float:
         """Calculate total cost for token usage.
 

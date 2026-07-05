@@ -3,16 +3,16 @@
 - KanbanCard / KanbanDeliverable: materialized, derived state for fast reads.
 - KanbanMeta: small key/value store (device_id, per-project flags).
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import String, Text, Integer, DateTime, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.kanban.db import KanbanBase
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class KanbanOp(KanbanBase):

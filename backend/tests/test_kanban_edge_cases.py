@@ -5,10 +5,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
+from app.kanban.models import KanbanCard, KanbanOp
 from app.kanban.operations import apply_operation
 from app.kanban.service import list_cards
-from app.kanban.models import KanbanCard, KanbanOp
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 

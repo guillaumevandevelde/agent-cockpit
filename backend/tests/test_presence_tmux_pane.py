@@ -1,6 +1,6 @@
 import pytest
 
-from app.database import Base, engine, AsyncSessionLocal
+from app.database import AsyncSessionLocal, Base, engine
 from app.services.presence_service import PresenceService
 
 
@@ -53,7 +53,8 @@ async def test_absent_tmux_pane_does_not_overwrite_existing():
 
 @pytest.mark.asyncio
 async def test_config_snippet_is_command_hook_with_tmux_pane():
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     transport = ASGITransport(app=app)
@@ -73,7 +74,8 @@ async def test_config_snippet_is_command_hook_with_tmux_pane():
 
 @pytest.mark.asyncio
 async def test_config_snippet_derives_events_url_from_request():
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     from app.main import app
 
     transport = ASGITransport(app=app)
@@ -86,9 +88,10 @@ async def test_config_snippet_derives_events_url_from_request():
 
 @pytest.mark.asyncio
 async def test_config_snippet_honours_public_base_url(monkeypatch):
-    from httpx import AsyncClient, ASGITransport
-    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+
     from app.config import settings
+    from app.main import app
 
     monkeypatch.setattr(settings, "public_base_url", "https://cockpit.example.com")
     transport = ASGITransport(app=app)

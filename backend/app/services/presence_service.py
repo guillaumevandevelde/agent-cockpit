@@ -8,11 +8,10 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from datetime import UTC, datetime, timedelta
 
 from fastapi import WebSocket
-from sqlalchemy import select, delete, func
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.constants import SessionStatus
@@ -82,7 +81,7 @@ class PresenceService:
     """Processes webhook events and maintains aggregated session state."""
 
     async def process_event(self, payload: dict, db: AsyncSession) -> PresenceSessionResponse:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         session_id = payload["session_id"]
         event_type = payload.get("hook_event_name", "Unknown")
 
@@ -278,8 +277,8 @@ class PresenceService:
 
         return self._to_response(session)
 
-    async def get_all_sessions(self, db: AsyncSession) -> List[PresenceSessionResponse]:
-        now = datetime.now(timezone.utc)
+    async def get_all_sessions(self, db: AsyncSession) -> list[PresenceSessionResponse]:
+        now = datetime.now(UTC)
         await self._mark_idle_sessions(db, now)
 
         result = await db.execute(
@@ -288,7 +287,7 @@ class PresenceService:
         sessions = result.scalars().all()
         return [self._to_response(s) for s in sessions]
 
-    async def update_label(self, session_id: str, label: str, db: AsyncSession) -> Optional[PresenceSessionResponse]:
+    async def update_label(self, session_id: str, label: str, db: AsyncSession) -> PresenceSessionResponse | None:
         result = await db.execute(
             select(PresenceSession).where(PresenceSession.session_id == session_id)
         )
@@ -407,7 +406,7 @@ class PresenceService:
 
         # Make bucket_start timezone-aware if it isn't
         if bucket_start.tzinfo is None:
-            bucket_start = bucket_start.replace(tzinfo=timezone.utc)
+            bucket_start = bucket_start.replace(tzinfo=UTC)
 
         offset = int((now - bucket_start).total_seconds() / 60)
 
@@ -446,7 +445,7 @@ class PresenceService:
             return entry
         return entry.get("path", "")
 
-    def _extract_exit_code(self, tool_result: dict) -> Optional[int]:
+    def _extract_exit_code(self, tool_result: dict) -> int | None:
         if not tool_result:
             return None
         if "exit_code" in tool_result:
@@ -477,7 +476,7 @@ class PresenceService:
             activity_buckets=session.activity_buckets,
             total_events=session.total_events or 0,
             error_count=session.error_count or 0,
-            started_at=session.started_at.isoformat() if session.started_at else datetime.now(timezone.utc).isoformat(),
-            last_event_at=session.last_event_at.isoformat() if session.last_event_at else datetime.now(timezone.utc).isoformat(),
+            started_at=session.started_at.isoformat() if session.started_at else datetime.now(UTC).isoformat(),
+            last_event_at=session.last_event_at.isoformat() if session.last_event_at else datetime.now(UTC).isoformat(),
             ended_at=session.ended_at.isoformat() if session.ended_at else None,
         )

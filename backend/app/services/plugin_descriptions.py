@@ -6,8 +6,7 @@ for known official plugins from Anthropic.
 """
 
 import logging
-from typing import TypedDict, List, Optional
-
+from typing import TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ class PluginInfo(TypedDict, total=False):
     """Plugin information structure."""
     description: str
     usage: str
-    examples: List[str]
+    examples: list[str]
 
 
 # Mapping of plugin names to their descriptions
@@ -173,7 +172,7 @@ OFFICIAL_PLUGIN_DESCRIPTIONS: dict[str, PluginInfo] = {
 }
 
 
-def get_plugin_info(plugin_name: str) -> Optional[PluginInfo]:
+def get_plugin_info(plugin_name: str) -> PluginInfo | None:
     """
     Get detailed information for a known official plugin.
 
@@ -186,7 +185,7 @@ def get_plugin_info(plugin_name: str) -> Optional[PluginInfo]:
     return OFFICIAL_PLUGIN_DESCRIPTIONS.get(plugin_name)
 
 
-def get_all_known_plugins() -> List[str]:
+def get_all_known_plugins() -> list[str]:
     """
     Get list of all known official plugin names.
 

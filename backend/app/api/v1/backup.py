@@ -1,31 +1,31 @@
 """API endpoints for backup management."""
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from pathlib import Path
 
 from app.database import get_db
 from app.models.schemas import (
-    BackupCreate,
-    BackupManifest,
-    BackupResponse,
-    BackupListResponse,
-    BackupContentsResponse,
+    AutoBackupRunResult,
     AutoBackupSettingsResponse,
     AutoBackupSettingsUpdate,
-    AutoBackupRunResult,
+    BackupContentsResponse,
+    BackupCreate,
+    BackupListResponse,
+    BackupManifest,
+    BackupResponse,
     DependencyInstallRequest,
     DependencyInstallResult,
+    ExportRequest,
+    ExportResponse,
     RestoreOptions,
     RestorePlan,
     RestoreResult,
-    ExportRequest,
-    ExportResponse,
 )
-from app.services.backup_service import BackupService
 from app.services import auto_backup_service
+from app.services.backup_service import BackupService
 from app.services.scheduling.scheduler import scheduler_service
 
 router = APIRouter(prefix="/backup", tags=["Backup"])
@@ -44,10 +44,10 @@ class ValidationResponse(BaseModel):
     """Backup validation result."""
 
     valid: bool
-    issues: List[str] = []
+    issues: list[str] = []
 
 
-def _backup_to_response(backup, manifest: Optional[BackupManifest] = None) -> BackupCreateResponse:
+def _backup_to_response(backup, manifest: BackupManifest | None = None) -> BackupCreateResponse:
     """Convert a Backup model to BackupCreateResponse."""
     response = BackupCreateResponse(
         id=backup.id,
@@ -292,7 +292,7 @@ async def get_backup_manifest(
 @router.get("/{backup_id}/plan", response_model=RestorePlan)
 async def get_restore_plan(
     backup_id: int,
-    project_path: Optional[str] = None,
+    project_path: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -375,8 +375,8 @@ async def download_backup(
 @router.post("/{backup_id}/restore", response_model=RestoreResult, status_code=200)
 async def restore_backup(
     backup_id: int,
-    options: Optional[RestoreOptions] = None,
-    project_path: Optional[str] = None,
+    options: RestoreOptions | None = None,
+    project_path: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     """

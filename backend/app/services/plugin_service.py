@@ -7,30 +7,29 @@ responsibilities behind the original PluginService public API.
 """
 
 import logging
-from typing import List, Optional, Dict, Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.schemas import (
-    Plugin,
-    PluginListResponse,
+    MarketplaceCreate,
+    MarketplaceListResponse,
     MarketplacePlugin,
     MarketplacePluginListResponse,
-    MarketplaceCreate,
     MarketplaceResponse,
-    MarketplaceListResponse,
+    Plugin,
     PluginInstallRequest,
     PluginInstallResponse,
+    PluginListResponse,
     PluginToggleResponse,
+    PluginUpdateAllResponse,
+    PluginUpdateResponse,
     PluginUpdatesResponse,
     PluginValidationResult,
-    PluginUpdateResponse,
-    PluginUpdateAllResponse,
 )
 from .cli_executor import CLIExecutor
-from .plugin_registry_service import PluginRegistry
-from .plugin_installer_service import PluginInstaller
 from .marketplace_service import MarketplaceService
-
+from .plugin_installer_service import PluginInstaller
+from .plugin_registry_service import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 class PluginService:
     """Service for managing Claude Code plugins."""
 
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: AsyncSession | None = None):
         """Initialize plugin service."""
         self.db = db
         self.cli_executor = CLIExecutor()
@@ -47,19 +46,19 @@ class PluginService:
         self.marketplace = MarketplaceService(db, self.cli_executor, self.registry)
 
     @property
-    def _marketplace_cache(self) -> Dict[str, List[MarketplacePlugin]]:
+    def _marketplace_cache(self) -> dict[str, list[MarketplacePlugin]]:
         return self.marketplace._marketplace_cache
 
     # -- Registry (discovery/listing) ---------------------------------------
 
     def list_installed_plugins(
-        self, project_path: Optional[str] = None
+        self, project_path: str | None = None
     ) -> PluginListResponse:
         return self.registry.list_installed_plugins(project_path)
 
     def get_plugin_details(
-        self, name: str, project_path: Optional[str] = None
-    ) -> Optional[Plugin]:
+        self, name: str, project_path: str | None = None
+    ) -> Plugin | None:
         return self.registry.get_plugin_details(name, project_path)
 
     def validate_plugin(self, path: str) -> PluginValidationResult:
@@ -73,12 +72,12 @@ class PluginService:
         return self.installer.install_plugin(request)
 
     async def uninstall_plugin(
-        self, name: str, project_path: Optional[str] = None
+        self, name: str, project_path: str | None = None
     ) -> bool:
         return await self.installer.uninstall_plugin(name, project_path)
 
     async def toggle_plugin(
-        self, name: str, enabled: bool, source: Optional[str] = None
+        self, name: str, enabled: bool, source: str | None = None
     ) -> PluginToggleResponse:
         return await self.installer.toggle_plugin(name, enabled, source)
 
@@ -113,16 +112,16 @@ class PluginService:
     def update_marketplace_via_cli(self, name: str) -> dict:
         return self.marketplace.update_marketplace_via_cli(name)
 
-    def list_marketplaces_from_files(self) -> List[dict]:
+    def list_marketplaces_from_files(self) -> list[dict]:
         return self.marketplace.list_marketplaces_from_files()
 
     async def set_marketplace_auto_update(self, name: str, enabled: bool) -> bool:
         return await self.marketplace.set_marketplace_auto_update(name, enabled)
 
-    def browse_marketplace_from_files(self, name: str) -> List[dict]:
+    def browse_marketplace_from_files(self, name: str) -> list[dict]:
         return self.marketplace.browse_marketplace_from_files(name)
 
-    def get_marketplace_plugin_details(self, marketplace_name: str, plugin_name: str) -> Optional[dict]:
+    def get_marketplace_plugin_details(self, marketplace_name: str, plugin_name: str) -> dict | None:
         return self.marketplace.get_marketplace_plugin_details(marketplace_name, plugin_name)
 
     def check_for_updates(self) -> PluginUpdatesResponse:
@@ -134,5 +133,5 @@ class PluginService:
     def update_all_plugins(self) -> PluginUpdateAllResponse:
         return self.marketplace.update_all_plugins()
 
-    def get_all_available_plugins(self) -> List[MarketplacePlugin]:
+    def get_all_available_plugins(self) -> list[MarketplacePlugin]:
         return self.marketplace.get_all_available_plugins()

@@ -4,10 +4,8 @@ Reads /proc/meminfo on Linux to determine available memory and adjusts
 session limits accordingly. Falls back to conservative defaults on other
 platforms or when memory info is unavailable.
 """
-import os
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +45,10 @@ class SessionLimits:
     cleanup_threshold_percent: float
 
 
-def _read_proc_meminfo() -> Optional[dict[str, int]]:
+def _read_proc_meminfo() -> dict[str, int] | None:
     """Read /proc/meminfo on Linux. Returns None on other platforms."""
     try:
-        with open("/proc/meminfo", "r") as f:
+        with open("/proc/meminfo") as f:
             meminfo = {}
             for line in f:
                 parts = line.split()
@@ -158,7 +156,7 @@ def get_dynamic_limits(
 
 
 # Module-level cache to avoid per-request system calls
-_cached_status: Optional[MemoryStatus] = None
+_cached_status: MemoryStatus | None = None
 _cache_timestamp: float = 0
 _CACHE_TTL_SECONDS = 30  # Refresh every 30 seconds
 

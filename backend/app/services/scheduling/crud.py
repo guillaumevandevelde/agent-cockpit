@@ -1,11 +1,10 @@
 """DB CRUD + the function APScheduler calls on fire."""
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.database import AsyncSessionLocal
-from app.models.scheduled_message import ScheduledMessage, DeliveryAttempt
+from app.models.scheduled_message import DeliveryAttempt, ScheduledMessage
 from app.services.scheduling.delivery import DeliveryEngine
-
 
 logger = logging.getLogger(__name__)
 _engine = DeliveryEngine()
@@ -21,7 +20,7 @@ async def run_scheduled_delivery(message_id: int) -> None:
         if msg.status == "pending_delivery":
             return
         msg.status = "pending_delivery"
-        msg.last_fired_at = datetime.now(timezone.utc)
+        msg.last_fired_at = datetime.now(UTC)
         attempt = DeliveryAttempt(scheduled_message_id=msg.id, fired_at=msg.last_fired_at)
         s.add(attempt)
         await s.commit()
@@ -52,7 +51,7 @@ async def run_scheduled_delivery(message_id: int) -> None:
             attempt.error = f"{type(exc).__name__}: {exc}"
 
         succeeded = attempt.outcome == "success"
-        attempt.delivered_at = datetime.now(timezone.utc) if succeeded else None
+        attempt.delivered_at = datetime.now(UTC) if succeeded else None
         # once -> terminal; cron -> back to scheduled for next run
         if msg.trigger_type == "cron":
             msg.status = "scheduled"

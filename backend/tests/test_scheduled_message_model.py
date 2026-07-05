@@ -1,7 +1,7 @@
 import pytest
 
-from app.database import Base, engine, AsyncSessionLocal
-from app.models.scheduled_message import ScheduledMessage, DeliveryAttempt
+from app.database import AsyncSessionLocal, Base, engine
+from app.models.scheduled_message import DeliveryAttempt, ScheduledMessage
 
 
 @pytest.mark.asyncio

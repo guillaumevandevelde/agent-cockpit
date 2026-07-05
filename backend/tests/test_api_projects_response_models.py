@@ -3,7 +3,6 @@
 Uses a fake ProjectService (rather than the real DB-backed one) so these tests
 never touch the shared claude_registry.db that other project rows/state live in.
 """
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest

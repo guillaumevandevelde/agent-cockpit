@@ -1,5 +1,5 @@
 """API endpoints for memory management (CLAUDE.md, rules, etc.)."""
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -15,10 +15,10 @@ class MemoryFileResponse(BaseModel):
 
     path: str
     exists: bool
-    content: Optional[str] = None
-    imports: List[str] = []
-    frontmatter: Dict[str, Any] = {}
-    error: Optional[str] = None
+    content: str | None = None
+    imports: list[str] = []
+    frontmatter: dict[str, Any] = {}
+    error: str | None = None
 
 
 class MemoryHierarchyItem(BaseModel):
@@ -30,14 +30,14 @@ class MemoryHierarchyItem(BaseModel):
     exists: bool
     readonly: bool
     description: str
-    name: Optional[str] = None
-    relative_path: Optional[str] = None
+    name: str | None = None
+    relative_path: str | None = None
 
 
 class MemoryHierarchyResponse(BaseModel):
     """Response for memory hierarchy."""
 
-    files: List[MemoryHierarchyItem]
+    files: list[MemoryHierarchyItem]
 
 
 class RuleInfo(BaseModel):
@@ -46,8 +46,8 @@ class RuleInfo(BaseModel):
     name: str
     path: str
     relative_path: str
-    frontmatter: Dict[str, Any] = {}
-    scoped_paths: List[str] = []
+    frontmatter: dict[str, Any] = {}
+    scoped_paths: list[str] = []
     description: str = ""
     content_preview: str = ""
 
@@ -55,7 +55,7 @@ class RuleInfo(BaseModel):
 class RulesListResponse(BaseModel):
     """Response for rules list."""
 
-    rules: List[RuleInfo]
+    rules: list[RuleInfo]
     rules_dir: str
 
 
@@ -70,7 +70,7 @@ class SaveMemoryResponse(BaseModel):
 
     success: bool
     path: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class CreateRuleRequest(BaseModel):
@@ -78,8 +78,8 @@ class CreateRuleRequest(BaseModel):
 
     name: str
     content: str
-    paths: Optional[List[str]] = None
-    description: Optional[str] = None
+    paths: list[str] | None = None
+    description: str | None = None
 
 
 class AutoMemoryFileInfo(BaseModel):
@@ -95,7 +95,7 @@ class AutoMemoryListResponse(BaseModel):
     """Response for auto-memory file listing."""
 
     memory_dir: str
-    files: List[AutoMemoryFileInfo]
+    files: list[AutoMemoryFileInfo]
 
 
 class ImportTreeNode(BaseModel):
@@ -104,8 +104,8 @@ class ImportTreeNode(BaseModel):
     path: str
     exists: bool
     cycle: bool = False
-    imports: List["ImportTreeNode"] = []
-    error: Optional[str] = None
+    imports: list["ImportTreeNode"] = []
+    error: str | None = None
 
 
 # Make the self-reference work
@@ -123,7 +123,7 @@ class ImportTreeResponse(BaseModel):
 
 @router.get("/hierarchy", response_model=MemoryHierarchyResponse)
 async def get_memory_hierarchy(
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """
     Get the memory file hierarchy.
@@ -187,7 +187,7 @@ async def delete_memory_file(
 
 @router.get("/rules", response_model=RulesListResponse)
 async def list_rules(
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
 ):
     """
     List all rules in the .claude/rules/ directory.
@@ -202,7 +202,7 @@ async def list_rules(
 
 @router.post("/rules", response_model=SaveMemoryResponse)
 async def create_rule(
-    project_path: Optional[str] = Query(None, description="Project path"),
+    project_path: str | None = Query(None, description="Project path"),
     request: CreateRuleRequest = ...,
 ):
     """

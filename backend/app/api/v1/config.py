@@ -1,29 +1,30 @@
 """Configuration API endpoints."""
+
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional
-from ...services.config_service import ConfigService
+
 from ...models.schemas import (
+    AllScopedSettingsResponse,
+    ConfigFile,
     ConfigFileListResponse,
     MergedConfig,
+    PatternIssue,
     RawFileContent,
-    ConfigFile,
+    ResolvedConfigResponse,
+    ScopedSettingsResponse,
     SettingsUpdateRequest,
     SettingsUpdateResponse,
     SettingsValidationRequest,
     SettingsValidationResponse,
-    PatternIssue,
-    ScopedSettingsResponse,
-    ResolvedConfigResponse,
-    AllScopedSettingsResponse,
 )
-from ...utils.pattern_utils import validate_permission_pattern, migrate_deprecated_pattern
+from ...services.config_service import ConfigService
+from ...utils.pattern_utils import migrate_deprecated_pattern, validate_permission_pattern
 
 router = APIRouter(prefix="/config", tags=["config"])
 config_service = ConfigService()
 
 
 @router.get("/files", response_model=ConfigFileListResponse)
-async def list_config_files(project_path: Optional[str] = Query(None)):
+async def list_config_files(project_path: str | None = Query(None)):
     """
     List all configuration file paths with their status.
 
@@ -42,7 +43,7 @@ async def list_config_files(project_path: Optional[str] = Query(None)):
 
 
 @router.get("", response_model=MergedConfig)
-async def get_merged_config(project_path: Optional[str] = Query(None)):
+async def get_merged_config(project_path: str | None = Query(None)):
     """
     Get merged configuration from all scopes.
 
@@ -151,7 +152,7 @@ async def validate_settings(request: SettingsValidationRequest):
 @router.get("/settings/{scope}", response_model=ScopedSettingsResponse)
 async def get_settings_by_scope(
     scope: str,
-    project_path: Optional[str] = Query(None)
+    project_path: str | None = Query(None)
 ):
     """
     Get settings for a specific scope (not merged).
@@ -171,7 +172,7 @@ async def get_settings_by_scope(
 
 
 @router.get("/resolved", response_model=ResolvedConfigResponse)
-async def get_resolved_config(project_path: Optional[str] = Query(None)):
+async def get_resolved_config(project_path: str | None = Query(None)):
     """
     Get resolved configuration with effective values and source scopes.
     
@@ -191,7 +192,7 @@ async def get_resolved_config(project_path: Optional[str] = Query(None)):
 
 
 @router.get("/scopes", response_model=AllScopedSettingsResponse)
-async def get_all_scoped_settings(project_path: Optional[str] = Query(None)):
+async def get_all_scoped_settings(project_path: str | None = Query(None)):
     """
     Get settings from all scopes separately (not merged).
     

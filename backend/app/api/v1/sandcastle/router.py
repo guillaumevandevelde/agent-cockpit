@@ -1,7 +1,9 @@
 """Sandcastle API endpoints."""
+
+from datetime import UTC
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
-from typing import Any
 
 from app.services.sandcastle_service import sandcastle_service
 
@@ -141,6 +143,7 @@ async def list_configs():
 async def get_stats():
     """Get sandcastle run statistics."""
     from sqlalchemy import func, select
+
     from app.database import AsyncSessionLocal
     from app.models.sandcastle import SandcastleRun
     
@@ -159,8 +162,8 @@ async def get_stats():
         runs_by_status = {row[0]: row[1] for row in status_result.all()}
         
         # Recent runs (last 24 hours)
-        from datetime import datetime, timezone, timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        from datetime import datetime, timedelta
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
         recent_result = await session.execute(
             select(func.count(SandcastleRun.id))
             .where(SandcastleRun.created_at >= cutoff)
@@ -307,10 +310,10 @@ async def get_run_logs(run_id: int, offset: int = 0):
     return logs
 
 
-from fastapi.responses import StreamingResponse
 import asyncio
 import json
 
+from fastapi.responses import StreamingResponse
 
 # Absolute cap so a wedged run (e.g. one stuck in "running") can't keep an SSE
 # connection — and its server task — alive forever. 2h at 1s/poll.

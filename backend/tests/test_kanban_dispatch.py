@@ -2,11 +2,11 @@
 import pytest
 import pytest_asyncio
 
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
-from app.kanban.operations import apply_operation
-from app.kanban.service import get_card, list_cards
 from app.kanban import dispatch, service
 from app.kanban.models import KanbanCard
+from app.kanban.operations import apply_operation
+from app.kanban.service import get_card, list_cards
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
 
@@ -317,9 +317,10 @@ async def test_retry_queued_cards_respects_per_project_cap(monkeypatch):
     hardware/memory limit, so queued cards could push a project past its cap (e.g.
     3 running from the normal loop + 3 retried = 6 sessions)."""
     from types import SimpleNamespace
-    from app.services.scheduling.pending_queue import PendingQueue
-    import app.services.scheduling.pending_queue as pq_mod
+
     import app.kanban.db as kdb
+    import app.services.scheduling.pending_queue as pq_mod
+    from app.services.scheduling.pending_queue import PendingQueue
 
     fresh_queue = PendingQueue()
     monkeypatch.setattr(pq_mod, "pending_queue", fresh_queue)
@@ -354,9 +355,10 @@ async def test_retry_queued_cards_dispatches_queued_orphan(monkeypatch):
     # fallback in _next_card) that got memory-queued must be retried like any
     # other queued card, not silently dropped for not being in "Backlog".
     from types import SimpleNamespace
-    from app.services.scheduling.pending_queue import PendingQueue
-    import app.services.scheduling.pending_queue as pq_mod
+
     import app.kanban.db as kdb
+    import app.services.scheduling.pending_queue as pq_mod
+    from app.services.scheduling.pending_queue import PendingQueue
 
     fresh_queue = PendingQueue()
     monkeypatch.setattr(pq_mod, "pending_queue", fresh_queue)
@@ -957,6 +959,7 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
     set yet) should resume the existing Claude conversation when redispatched, not
     discard it and spawn a brand new worktree session."""
     import unittest.mock as mock
+
     from app.kanban import session_recovery
 
     resume_calls = []
@@ -1003,6 +1006,7 @@ async def test_redispatch_no_resumable_transcript_falls_back_to_fresh_session():
     """When the old session's worktree has no resumable transcript, redispatch still
     falls back to a fresh session (existing behaviour)."""
     import unittest.mock as mock
+
     from app.kanban import session_recovery
 
     transport = RecordingTransport()
@@ -1126,6 +1130,8 @@ async def test_dispatch_all_pending_empty():
 
 
 # ---- count consistency: frontend vs backend vs actual dispatch ------------
+
+from datetime import UTC
 
 from app.kanban.schemas import COLUMNS as _COLUMNS
 
@@ -1298,6 +1304,7 @@ async def test_empty_string_claimed_by_causes_mismatch():
         await s.commit()
 
         from sqlalchemy import update
+
         from app.kanban.models import KanbanCard as KCModel
         await s.execute(
             update(KCModel).where(KCModel.id == cid).values(claimed_by="")
@@ -1424,7 +1431,7 @@ async def test_card_transport_sandcastle_uses_sandcastle_transport():
 
     with mock.patch.object(dispatch, "sandcastle_transport", side_effect=fake_sandcastle):
         async with KanbanSessionLocal() as s:
-            result = await dispatch.dispatch_card(
+            await dispatch.dispatch_card(
                 s, card_id=cid, project_path="/p", transport=worktree,
             )
             await s.commit()
@@ -1461,7 +1468,7 @@ async def test_card_transport_worktree_overrides_sandcastle_project_default():
          mock.patch.object(dispatch, "worktree_transport", side_effect=fake_worktree):
         async with KanbanSessionLocal() as s:
             # project default is sandcastle, but card overrides to worktree
-            result = await dispatch.dispatch_card(
+            await dispatch.dispatch_card(
                 s, card_id=cid, project_path="/p", transport=fake_sandcastle,
             )
             await s.commit()
@@ -1601,6 +1608,7 @@ async def test_move_to_resume_moves_card_to_to_resume():
 async def test_move_to_resume_returns_false_when_no_resume_target():
     """_move_to_resume returns False when no resumable transcript is found."""
     import unittest.mock as mock
+
     from app.kanban import session_recovery
 
     async with KanbanSessionLocal() as s:
@@ -1628,6 +1636,7 @@ async def test_move_to_resume_returns_false_when_no_resume_target():
 async def test_move_to_resume_returns_false_for_fixed_column_card():
     """_move_to_resume returns False immediately for cards already on fixed columns."""
     import unittest.mock as mock
+
     from app.kanban import session_recovery
 
     async with KanbanSessionLocal() as s:
@@ -1650,6 +1659,7 @@ async def test_move_to_resume_returns_false_for_fixed_column_card():
 async def test_reaper_moves_resumable_dead_session_to_to_resume():
     """reap_stale_claims with project_path moves resumable dead sessions to To Resume."""
     import unittest.mock as mock
+
     from app.kanban import session_recovery
 
     async with KanbanSessionLocal() as s:
@@ -1682,6 +1692,7 @@ async def test_reaper_moves_resumable_dead_session_to_to_resume():
 async def test_reaper_without_project_path_plain_release():
     """reap_stale_claims without project_path falls back to plain release for dead sessions."""
     import unittest.mock as mock
+
     from app.kanban import session_recovery
 
     async with KanbanSessionLocal() as s:
@@ -1718,6 +1729,7 @@ async def test_move_limited_session_to_resume_moves_matching_card(monkeypatch):
     To Resume and kills the (still alive) tmux session, same as the dead-session
     reaper does for a crashed one."""
     import unittest.mock as mock
+
     import app.kanban.db as kdb
     from app.kanban import session_recovery
 
@@ -1763,6 +1775,7 @@ async def test_move_limited_session_to_resume_ignores_non_worktree_cwd():
 async def test_move_limited_session_to_resume_returns_false_when_no_matching_card(monkeypatch):
     """No card claimed by that session -> no-op, even if the cwd shape matches."""
     import unittest.mock as mock
+
     import app.kanban.db as kdb
 
     monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
@@ -1999,7 +2012,7 @@ async def test_run_dispatch_tick_skips_everything_when_paused(monkeypatch):
     respawning while the account-wide limit is still active would just bounce
     the card straight back to "To Resume" and re-trigger the same limit."""
     import unittest.mock as mock
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     import app.kanban.db as kdb
     from app.kanban.dispatch_pause import set_paused_until
@@ -2007,7 +2020,7 @@ async def test_run_dispatch_tick_skips_everything_when_paused(monkeypatch):
     monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
 
     async with KanbanSessionLocal() as s:
-        await set_paused_until(s, datetime.now(timezone.utc) + timedelta(minutes=5))
+        await set_paused_until(s, datetime.now(UTC) + timedelta(minutes=5))
         await s.commit()
 
     with mock.patch.object(dispatch, "_retry_queued_cards") as retry_mock, \

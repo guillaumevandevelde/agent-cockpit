@@ -1,13 +1,12 @@
 """Service for proxying MCP Registry API and generating install configs."""
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import quote
 
 import httpx
 
 from app.models.schemas import MCPServerCreate
 from app.services.mcp_service import MCPService
-
 
 logger = logging.getLogger(__name__)
 REGISTRY_BASE_URL = "https://registry.modelcontextprotocol.io/v0.1"
@@ -19,12 +18,12 @@ class MCPRegistryService:
 
     @staticmethod
     async def search_servers(
-        query: Optional[str] = None,
+        query: str | None = None,
         limit: int = 20,
-        cursor: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
         """Search the MCP registry for servers."""
-        params: Dict[str, Any] = {"limit": limit, "version": "latest"}
+        params: dict[str, Any] = {"limit": limit, "version": "latest"}
         if query:
             params["search"] = query
         if cursor:
@@ -38,7 +37,7 @@ class MCPRegistryService:
     @staticmethod
     async def get_server_detail(
         server_name: str, version: str = "latest"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get detail for a specific server version."""
         encoded_name = quote(server_name, safe="")
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
@@ -49,7 +48,7 @@ class MCPRegistryService:
             return resp.json()
 
     @staticmethod
-    async def get_server_versions(server_name: str) -> Dict[str, Any]:
+    async def get_server_versions(server_name: str) -> dict[str, Any]:
         """Get all versions for a server."""
         encoded_name = quote(server_name, safe="")
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
@@ -62,21 +61,21 @@ class MCPRegistryService:
     @staticmethod
     def generate_install_config(
         *,
-        package_registry_type: Optional[str] = None,
-        package_identifier: Optional[str] = None,
-        package_version: Optional[str] = None,
-        package_runtime_hint: Optional[str] = None,
-        package_arguments: Optional[Dict[str, str]] = None,
-        remote_type: Optional[str] = None,
-        remote_url: Optional[str] = None,
-        remote_headers: Optional[Dict[str, str]] = None,
-        env_values: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        package_registry_type: str | None = None,
+        package_identifier: str | None = None,
+        package_version: str | None = None,
+        package_runtime_hint: str | None = None,
+        package_arguments: dict[str, str] | None = None,
+        remote_type: str | None = None,
+        remote_url: str | None = None,
+        remote_headers: dict[str, str] | None = None,
+        env_values: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Generate an mcpServers config entry from registry package/remote data.
 
         Returns a dict suitable for writing to ~/.claude.json or .mcp.json.
         """
-        config: Dict[str, Any] = {}
+        config: dict[str, Any] = {}
 
         if package_registry_type and package_identifier:
             config = MCPRegistryService._generate_package_config(
@@ -103,13 +102,13 @@ class MCPRegistryService:
         *,
         registry_type: str,
         identifier: str,
-        version: Optional[str],
-        runtime_hint: Optional[str],
-        arguments: Optional[Dict[str, str]],
-    ) -> Dict[str, Any]:
+        version: str | None,
+        runtime_hint: str | None,
+        arguments: dict[str, str] | None,
+    ) -> dict[str, Any]:
         """Generate stdio config for a package-based server."""
-        config: Dict[str, Any] = {"type": "stdio"}
-        args: List[str] = []
+        config: dict[str, Any] = {"type": "stdio"}
+        args: list[str] = []
 
         if registry_type == "npm":
             command = runtime_hint or "npx"
@@ -146,12 +145,12 @@ class MCPRegistryService:
         *,
         remote_type: str,
         url: str,
-        headers: Optional[Dict[str, str]],
-    ) -> Dict[str, Any]:
+        headers: dict[str, str] | None,
+    ) -> dict[str, Any]:
         """Generate http/sse config for a remote server."""
         # Map registry transport types to Claude Code types
         config_type = "http" if remote_type == "streamable-http" else remote_type
-        config: Dict[str, Any] = {"type": config_type, "url": url}
+        config: dict[str, Any] = {"type": config_type, "url": url}
 
         if headers:
             config["headers"] = headers
@@ -163,9 +162,9 @@ class MCPRegistryService:
         *,
         server_name: str,
         scope: str,
-        config: Dict[str, Any],
-        project_path: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        config: dict[str, Any],
+        project_path: str | None = None,
+    ) -> dict[str, Any]:
         """Install a registry server by writing config via MCPService.
 
         Returns the generated config entry.

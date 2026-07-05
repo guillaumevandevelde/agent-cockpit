@@ -1,6 +1,7 @@
 """Pydantic schemas for scheduled messages."""
-from datetime import datetime, timezone
-from typing import Literal, Optional
+from datetime import UTC, datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
 
 TriggerType = Literal["once", "cron"]
@@ -9,7 +10,7 @@ Status = Literal["scheduled", "pending_delivery", "delivered", "failed", "cancel
 TargetKind = Literal["project", "session", "sandcastle"]
 
 
-def _as_utc_iso(dt: Optional[datetime]) -> Optional[str]:
+def _as_utc_iso(dt: datetime | None) -> str | None:
     """Serialize a naive-UTC datetime as an unambiguous UTC instant.
 
     Stored timestamps are naive (SQLite drops tzinfo) but always represent UTC.
@@ -19,7 +20,7 @@ def _as_utc_iso(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
 
 
@@ -27,17 +28,17 @@ class ScheduledMessageCreate(BaseModel):
     target_project: str
     message: str
     trigger_type: TriggerType
-    fire_at: Optional[str] = None       # ISO8601, for once
-    cron_expr: Optional[str] = None     # for cron
+    fire_at: str | None = None       # ISO8601, for once
+    cron_expr: str | None = None     # for cron
     timezone: str = "Europe/Brussels"
     permission_mode: PermissionMode = "acceptEdits"
     on_missing_session: Literal["spawn", "skip"] = "spawn"
     when_busy: Literal["wait_until_idle", "send_now"] = "wait_until_idle"
     target_kind: TargetKind = "project"
-    target_session_id: Optional[str] = None
-    project_folder: Optional[str] = None
-    session_preview: Optional[str] = None
-    sandcastle_config_id: Optional[int] = None
+    target_session_id: str | None = None
+    project_folder: str | None = None
+    session_preview: str | None = None
+    sandcastle_config_id: int | None = None
 
     @model_validator(mode="after")
     def _check_trigger(self):
@@ -59,11 +60,11 @@ class ScheduledMessageCreate(BaseModel):
 
 
 class ScheduledMessageUpdate(BaseModel):
-    message: Optional[str] = None
-    fire_at: Optional[str] = None
-    cron_expr: Optional[str] = None
-    permission_mode: Optional[PermissionMode] = None
-    enabled: Optional[bool] = None
+    message: str | None = None
+    fire_at: str | None = None
+    cron_expr: str | None = None
+    permission_mode: PermissionMode | None = None
+    enabled: bool | None = None
 
 
 class DeliveryAttemptResponse(BaseModel):
@@ -71,15 +72,15 @@ class DeliveryAttemptResponse(BaseModel):
 
     id: int
     fired_at: datetime
-    resolved_session: Optional[str] = None
-    action: Optional[str] = None
-    wait_duration_s: Optional[int] = None
-    delivered_at: Optional[datetime] = None
-    outcome: Optional[str] = None
-    error: Optional[str] = None
+    resolved_session: str | None = None
+    action: str | None = None
+    wait_duration_s: int | None = None
+    delivered_at: datetime | None = None
+    outcome: str | None = None
+    error: str | None = None
 
     @field_serializer("fired_at", "delivered_at")
-    def _ser_dt(self, dt: Optional[datetime]) -> Optional[str]:
+    def _ser_dt(self, dt: datetime | None) -> str | None:
         return _as_utc_iso(dt)
 
 
@@ -90,23 +91,23 @@ class ScheduledMessageResponse(BaseModel):
     target_project: str
     message: str
     trigger_type: TriggerType
-    fire_at: Optional[str] = None
-    cron_expr: Optional[str] = None
+    fire_at: str | None = None
+    cron_expr: str | None = None
     timezone: str
     permission_mode: PermissionMode
     enabled: bool
     status: Status
     target_kind: TargetKind = "project"
-    target_session_id: Optional[str] = None
-    project_folder: Optional[str] = None
-    session_preview: Optional[str] = None
-    sandcastle_config_id: Optional[int] = None
+    target_session_id: str | None = None
+    project_folder: str | None = None
+    session_preview: str | None = None
+    sandcastle_config_id: int | None = None
     created_at: datetime
     updated_at: datetime
-    last_fired_at: Optional[datetime] = None
+    last_fired_at: datetime | None = None
 
     @field_serializer("created_at", "updated_at", "last_fired_at")
-    def _ser_dt(self, dt: Optional[datetime]) -> Optional[str]:
+    def _ser_dt(self, dt: datetime | None) -> str | None:
         return _as_utc_iso(dt)
 
 
@@ -115,5 +116,5 @@ class HookEvent(BaseModel):
     event: Literal["UserPromptSubmit", "Stop", "Notification", "SessionStart"]
     session_id: str
     cwd: str
-    tmux_pane: Optional[str] = None
-    message: Optional[str] = None
+    tmux_pane: str | None = None
+    message: str | None = None

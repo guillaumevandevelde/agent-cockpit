@@ -1,14 +1,13 @@
 """Provider-aware CLI executor service."""
 
 import logging
-import subprocess
-import shutil
 import re
-from typing import List, Optional, Dict
+import shutil
+import subprocess
+
 from ..models.schemas import CLIResult
 from .providers import get_provider
 from .providers.base import AgentProvider
-
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ class ProviderCLIExecutor:
         # Compatibility for existing callers that check claude_binary directly.
         self.claude_binary = self.binary_path if self.provider_id == "claude-code" else None
 
-    def _find_binary(self, provider: AgentProvider) -> Optional[str]:
+    def _find_binary(self, provider: AgentProvider) -> str | None:
         return shutil.which(provider.binary_name)
 
     def validate_command(self, command: str) -> bool:
@@ -41,7 +40,7 @@ class ProviderCLIExecutor:
         """
         return command in self.provider.get_allowed_cli_commands()
 
-    def _validate_args(self, args: List[str]) -> List[str]:
+    def _validate_args(self, args: list[str]) -> list[str]:
         safe_args = []
         for arg in args:
             if not isinstance(arg, str):
@@ -56,9 +55,9 @@ class ProviderCLIExecutor:
     def execute(
         self,
         command: str,
-        args: List[str],
+        args: list[str],
         timeout: int = 30,
-        env: Optional[Dict[str, str]] = None
+        env: dict[str, str] | None = None
     ) -> CLIResult:
         """
         Execute a provider CLI command

@@ -3,10 +3,9 @@
 State is keyed by resolved project cwd. A session is 'idle' after a Stop with no
 later UserPromptSubmit. Unknown => treated as busy (caller should not assume idle).
 """
-import logging
 import asyncio
+import logging
 import os
-
 
 logger = logging.getLogger(__name__)
 _IDLE_EVENTS = {"Stop"}
@@ -43,7 +42,7 @@ class IdleState:
         try:
             await asyncio.wait_for(ev.wait(), timeout=timeout_s)
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return False
         finally:
             self._waiters.get(key, []).remove(ev)

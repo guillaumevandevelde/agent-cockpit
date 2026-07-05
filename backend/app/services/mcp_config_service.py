@@ -1,20 +1,21 @@
 """Reading and writing MCP server configuration files."""
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schemas import (
+    MCPPrompt,
+    MCPResource,
     MCPServer,
+    MCPServerApprovalMode,
+    MCPServerApprovalSettings,
     MCPServerCreate,
     MCPServerUpdate,
     MCPTool,
-    MCPResource,
-    MCPPrompt,
-    MCPServerApprovalSettings,
-    MCPServerApprovalMode,
 )
+from app.services.mcp_cache_service import MCPCacheService
 from app.utils.file_utils import read_json_file, write_json_file
 from app.utils.path_utils import (
     get_claude_user_config_file,
@@ -23,8 +24,6 @@ from app.utils.path_utils import (
     get_managed_mcp_config_file,
     get_project_mcp_config_file,
 )
-from app.services.mcp_cache_service import MCPCacheService
-
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class MCPConfigService(MCPCacheService):
     SENSITIVE_PATTERNS = ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"]
 
     @staticmethod
-    def _mask_sensitive_env(env: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    def _mask_sensitive_env(env: dict[str, str] | None) -> dict[str, str] | None:
         """Mask sensitive environment variables containing KEY, TOKEN, or SECRET."""
         if not env:
             return env
@@ -50,7 +49,7 @@ class MCPConfigService(MCPCacheService):
         return masked
 
     def _create_mcp_server(
-        self, name: str, config: Dict[str, Any], scope: str
+        self, name: str, config: dict[str, Any], scope: str
     ) -> MCPServer:
         """Create an MCPServer instance from configuration."""
         return MCPServer(
@@ -65,7 +64,7 @@ class MCPConfigService(MCPCacheService):
         )
 
     @staticmethod
-    def _read_user_mcp_config(project_path: Optional[str] = None) -> Dict[str, Any]:
+    def _read_user_mcp_config(project_path: str | None = None) -> dict[str, Any]:
         """
         Read MCP configuration from user-level ~/.claude.json.
 
@@ -103,7 +102,7 @@ class MCPConfigService(MCPCacheService):
         return servers
 
     @staticmethod
-    def _read_project_mcp_config(project_path: Optional[str] = None) -> Dict[str, Any]:
+    def _read_project_mcp_config(project_path: str | None = None) -> dict[str, Any]:
         """Read MCP configuration from project-level .mcp.json."""
         project_config_path = get_project_mcp_config_file(project_path)
         config = read_json_file(project_config_path)
@@ -114,7 +113,7 @@ class MCPConfigService(MCPCacheService):
         return config.get("mcpServers", {})
 
     @staticmethod
-    def _read_plugin_mcp_servers() -> List[Dict[str, Any]]:
+    def _read_plugin_mcp_servers() -> list[dict[str, Any]]:
         """
         Read MCP servers from installed plugins.
 
@@ -202,7 +201,7 @@ class MCPConfigService(MCPCacheService):
         return plugin_servers
 
     @staticmethod
-    def _read_managed_mcp_config() -> Dict[str, Any]:
+    def _read_managed_mcp_config() -> dict[str, Any]:
         """
         Read MCP configuration from managed config file (read-only).
 
@@ -222,7 +221,7 @@ class MCPConfigService(MCPCacheService):
         return config.get("mcpServers", {})
 
     @staticmethod
-    async def _write_user_mcp_config(servers: Dict[str, Any]) -> bool:
+    async def _write_user_mcp_config(servers: dict[str, Any]) -> bool:
         """Write MCP configuration to user-level ~/.claude.json."""
         user_config_path = get_claude_user_config_file()
         config = read_json_file(user_config_path) or {}
@@ -232,7 +231,7 @@ class MCPConfigService(MCPCacheService):
 
     @staticmethod
     async def _write_project_mcp_config(
-        servers: Dict[str, Any], project_path: Optional[str] = None
+        servers: dict[str, Any], project_path: str | None = None
     ) -> bool:
         """Write MCP configuration to project-level .mcp.json."""
         project_config_path = get_project_mcp_config_file(project_path)
@@ -242,8 +241,8 @@ class MCPConfigService(MCPCacheService):
         return await write_json_file(project_config_path, config)
 
     async def list_servers(
-        self, project_path: Optional[str] = None, db: Optional[AsyncSession] = None
-    ) -> List[MCPServer]:
+        self, project_path: str | None = None, db: AsyncSession | None = None
+    ) -> list[MCPServer]:
         """
         List all MCP servers from user, project, plugin, and managed scopes.
 
@@ -311,7 +310,7 @@ class MCPConfigService(MCPCacheService):
 
         return servers
 
-    async def get_server(self, name: str, scope: str) -> Optional[MCPServer]:
+    async def get_server(self, name: str, scope: str) -> MCPServer | None:
         """
         Get a specific MCP server configuration.
 
@@ -351,7 +350,7 @@ class MCPConfigService(MCPCacheService):
             return None
 
     async def add_server(
-        self, server: MCPServerCreate, project_path: Optional[str] = None
+        self, server: MCPServerCreate, project_path: str | None = None
     ) -> MCPServer:
         """
         Add a new MCP server to the appropriate config file.
@@ -389,8 +388,8 @@ class MCPConfigService(MCPCacheService):
         name: str,
         server: MCPServerUpdate,
         scope: str,
-        project_path: Optional[str] = None,
-    ) -> Optional[MCPServer]:
+        project_path: str | None = None,
+    ) -> MCPServer | None:
         """
         Update an existing MCP server configuration.
 
@@ -433,7 +432,7 @@ class MCPConfigService(MCPCacheService):
         return self._create_mcp_server(name, config, scope)
 
     async def remove_server(
-        self, name: str, scope: str, project_path: Optional[str] = None
+        self, name: str, scope: str, project_path: str | None = None
     ) -> bool:
         """
         Remove an MCP server from configuration.

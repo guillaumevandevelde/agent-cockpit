@@ -7,9 +7,9 @@ This is the signal the UI surfaces.
 """
 import asyncio
 
-from starlette.applications import Starlette
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
 
 from app.kanban.mcp_health import check_mcp_health
 

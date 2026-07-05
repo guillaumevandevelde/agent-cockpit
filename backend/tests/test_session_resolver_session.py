@@ -1,7 +1,8 @@
 from unittest.mock import patch
+
 from app.services.scheduling import session_resolver as sr
-from app.services.scheduling.session_resolver import resolve_session_target, AMBIGUOUS
 from app.services.scheduling.session_registry import SessionRegistry
+from app.services.scheduling.session_resolver import AMBIGUOUS, resolve_session_target
 
 
 def _panes(*items):
