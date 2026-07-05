@@ -28,6 +28,8 @@ jobs:
       - run: bandit -r app -f txt
         working-directory: backend
         continue-on-error: true
+      - run: python scripts/check_openapi_snapshot.py
+        working-directory: backend
       - run: pytest -q
         working-directory: backend
 
