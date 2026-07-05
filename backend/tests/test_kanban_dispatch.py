@@ -1960,6 +1960,15 @@ class TestBuildShipInstructions:
         assert "gh pr merge --auto --squash" in instructions
         assert "mergeStateStatus" in instructions
         assert "report_impediment" in instructions
+        # Regression guard: BLOCKED (and other mergeStateStatus values) can mean
+        # "checks still pending", not "checks failed" — a naive case-match that
+        # treats *BLOCKED* as failure would false-fail on every PR the instant
+        # CI starts running. Failure detection must instead be based on actual
+        # check conclusions.
+        assert "*BLOCKED*) echo" not in instructions
+        assert "statusCheckRollup" in instructions
+        # A wedged PR must not poll forever.
+        assert "ITER" in instructions and "40" in instructions
 
 
 class TestBuildCardPromptSessionEnd:

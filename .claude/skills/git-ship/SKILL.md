@@ -76,22 +76,40 @@ Then **poll until the PR actually merges** — `master` requires the `quality.ym
 checks to pass, so this can take a few minutes:
 
 ```bash
+ITER=0
 while true; do
-  STATE=$(gh pr view --json state,mergeStateStatus -q '.state + " " + .mergeStateStatus')
-  echo "PR state: $STATE"
-  case "$STATE" in
-    MERGED*) break ;;
-    *DIRTY*|*BLOCKED*|CLOSED*) echo 'PR did not merge'; exit 1 ;;
-  esac
+  DATA=$(gh pr view --json state,mergeStateStatus,statusCheckRollup)
+  STATE=$(echo "$DATA" | jq -r '.state')
+  MERGE_STATUS=$(echo "$DATA" | jq -r '.mergeStateStatus')
+  echo "PR state: $STATE mergeStateStatus=$MERGE_STATUS"
+  if [ "$STATE" = "MERGED" ]; then
+    break
+  fi
+  if [ "$STATE" = "CLOSED" ]; then
+    echo 'PR was closed without merging'; exit 1
+  fi
+  # mergeStateStatus=BLOCKED also just means "checks still running" — only a
+  # genuinely failed/cancelled/timed-out check is a real failure.
+  FAILED=$(echo "$DATA" | jq '[.statusCheckRollup[]? | select((.conclusion // .status // "") | test("FAILURE|ERROR|CANCELLED|TIMED_OUT|ACTION_REQUIRED"; "i"))] | length')
+  if [ "$FAILED" -gt 0 ]; then
+    echo 'A required check failed'; exit 1
+  fi
+  if [ "$MERGE_STATUS" = "DIRTY" ]; then
+    echo 'PR has merge conflicts with the base branch'; exit 1
+  fi
+  ITER=$((ITER + 1))
+  if [ "$ITER" -ge 40 ]; then
+    echo 'Timed out after ~20 minutes waiting for PR to merge'; exit 1
+  fi
   sleep 30
 done
 ```
 
 If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `move_card` to `Done`.
 
-If the loop exited because a check failed or the PR was closed: `attach_deliverable`
-(kind `pr`, ref=`<PR-URL>`), then `report_impediment` instead of moving to Done —
-a human needs to look at the failing PR.
+If the loop exited because a check failed, the PR was closed, or the wait timed
+out: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `report_impediment`
+instead of moving to Done — a human needs to look at the failing/stuck PR.
 
 **gh unavailable:** if `gh auth status` fails, do not merge. Push the branch
 (`git push -u origin HEAD`), `comment` "gh unavailable — manual PR needed from <branch>",
