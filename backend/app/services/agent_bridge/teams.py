@@ -81,7 +81,7 @@ def discover_teams(
         name = Path(cwd).name or cwd
         import hashlib
 
-        team_id = "auto-" + hashlib.md5(cwd.encode()).hexdigest()[:8]
+        team_id = "auto-" + hashlib.md5(cwd.encode(), usedforsecurity=False).hexdigest()[:8]
         teams.append({
             "team_id": team_id,
             "name": name,

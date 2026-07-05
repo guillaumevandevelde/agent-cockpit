@@ -22,7 +22,7 @@ class MCPServerTestService(MCPConfigService):
     def _compute_config_hash(server_config: dict[str, Any]) -> str:
         """Compute hash of server configuration for cache invalidation."""
         config_str = json.dumps(server_config, sort_keys=True)
-        return hashlib.md5(config_str.encode()).hexdigest()
+        return hashlib.md5(config_str.encode(), usedforsecurity=False).hexdigest()
 
     async def test_connection(
         self, name: str, scope: str, project_path: str | None = None, db: AsyncSession | None = None
