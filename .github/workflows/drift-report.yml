@@ -1,0 +1,59 @@
+name: Drift Report
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'  # Monday 7am UTC
+  workflow_dispatch: {}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+        working-directory: backend
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Backend coverage
+        run: pytest -q --co -q > /tmp/backend_tests.txt; wc -l < /tmp/backend_tests.txt
+        working-directory: backend
+
+      - name: Frontend coverage
+        run: npm run test:coverage -- --reporter=json --outputFile=/tmp/frontend_coverage.json || true
+        working-directory: frontend
+
+      - name: OpenAPI contract check
+        id: contract
+        run: |
+          if python scripts/check_openapi_snapshot.py; then
+            echo "status=matches snapshot" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=DRIFTED — snapshot needs updating" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: backend
+
+      - name: TODO/FIXME count
+        id: todos
+        run: echo "count=$(grep -rEl 'TODO|FIXME' backend/app frontend/src | wc -l)" >> "$GITHUB_OUTPUT"
+
+      - name: Write summary
+        run: |
+          {
+            echo "## Weekly drift report"
+            echo ""
+            echo "- OpenAPI contract: ${{ steps.contract.outputs.status }}"
+            echo "- Files containing TODO/FIXME: ${{ steps.todos.outputs.count }}"
+            echo ""
+            echo "See the Quality and Security workflow runs for lint/type/coverage/security detail."
+          } >> "$GITHUB_STEP_SUMMARY"

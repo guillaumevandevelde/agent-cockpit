@@ -1,5 +1,7 @@
 # Claude Cockpit
 
+[![Quality](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/quality.yml/badge.svg)](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/quality.yml)
+[![Security](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/security.yml/badge.svg)](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/security.yml)
 
 A self-hosted web application for visualizing and managing local AI coding agents. Provides a unified interface for Claude Code configuration, Codex CLI configuration, MCP servers, plugins, slash commands, hooks, agents, permissions, usage tracking, session transcripts, Agent Bridge, and other local agent extensions.
 
