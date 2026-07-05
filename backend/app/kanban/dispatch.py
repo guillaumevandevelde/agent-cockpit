@@ -294,12 +294,14 @@ def _build_ship_instructions(ship_mode: str) -> str:
         "1. **Sync** — `git fetch origin` so you are up to date with the remote.\n"
     )
     tests = (
-        "2. **Tests run at push, automatically** — the pre-push gate runs the full "
-        "backend pytest suite + frontend lint/build for you, serialized across "
-        "sessions and against an isolated temp DB.  Don't run them again by hand as "
-        "a ship step — that doubles the load on the shared box.  If the gate blocks "
-        "your push, read its output, ``comment`` on the card with the failure, fix "
-        "it, and push again.  Never bypass a red gate with ``--no-verify``.\n"
+        "2. **Run tests yourself before shipping** — there is no pre-push gate; "
+        "nothing blocks a red push.  Run them in this worktree: "
+        "``cd backend && source venv/bin/activate && pytest -q`` and "
+        "``cd frontend && npm run lint && npm run build``.  Only proceed once both "
+        "are green.  GitHub Actions (``quality.yml``) re-runs the same checks after "
+        "you push as a backstop, but by then the work may already be merged — it is "
+        "not a substitute for checking yourself first.  If a test fails, fix it, "
+        "re-run, and only ship once green.  Never ship red tests.\n"
     )
     commit = (
         "3. **Commit your work** — make sure every change is committed to the "

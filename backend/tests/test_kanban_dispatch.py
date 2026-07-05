@@ -1906,7 +1906,7 @@ class TestBuildShipInstructions:
         assert "git merge --no-ff" in instructions
         assert "git push origin HEAD:master" in instructions
         assert "git fetch origin" in instructions
-        assert "pytest backend/tests/" not in instructions  # gate runs tests, no double-run
+        assert "pytest -q" in instructions  # no gate — agent runs tests itself
         assert "attach_deliverable" in instructions
         assert 'kind="branch"' in instructions
         assert 'move_card' in instructions
@@ -1918,18 +1918,22 @@ class TestBuildShipInstructions:
         assert "gh pr create --draft" in instructions
         assert "git push -u origin HEAD" in instructions
         assert "git fetch origin" in instructions
-        assert "pytest backend/tests/" not in instructions  # gate runs tests, no double-run
+        assert "pytest -q" in instructions  # no gate — agent runs tests itself
         assert "attach_deliverable" in instructions
         assert 'kind="pr"' in instructions
         assert 'move_card' in instructions
         assert '"Done"' in instructions
         assert "git merge --no-ff" not in instructions
 
-    def test_both_modes_rely_on_pre_push_gate(self):
+    def test_both_modes_instruct_running_tests_before_shipping(self):
         for mode in ("direct", "pull-request"):
             instructions = dispatch._build_ship_instructions(mode)
-            assert "pre-push gate" in instructions
-            assert "--no-verify" in instructions   # told never to bypass a red gate
+            assert "no pre-push gate" in instructions
+            assert "pytest -q" in instructions
+            assert "npm run lint" in instructions
+            assert "npm run build" in instructions
+            assert "quality.yml" in instructions  # CI backstop, mentioned as such
+            assert "Never ship red tests" in instructions
             assert "commit your work" in instructions.lower() or "Commit your work" in instructions
 
     def test_both_modes_include_sync_step(self):

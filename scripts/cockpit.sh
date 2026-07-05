@@ -250,25 +250,6 @@ ensure_deps() {
     fi
 }
 
-# Ensure the repo's pre-push test gate is active (core.hooksPath -> .githooks).
-# A fresh clone ships the hook files but git won't auto-activate repo-controlled
-# hooks (clone-time code execution risk), so we self-heal it here the same way we
-# auto-install deps. Idempotent and quiet when already correct; never fatal.
-ensure_git_hooks() {
-    [ -d "$PROJECT_ROOT/.githooks" ] || return 0
-    command -v git >/dev/null 2>&1 || return 0
-    local have
-    have="$(git -C "$PROJECT_ROOT" config --local --get core.hooksPath 2>/dev/null || true)"
-    if [ "$have" != ".githooks" ]; then
-        if git -C "$PROJECT_ROOT" config core.hooksPath .githooks 2>/dev/null; then
-            chmod +x "$PROJECT_ROOT"/.githooks/* 2>/dev/null || true
-            echo "Git pre-push test-gate geactiveerd (core.hooksPath -> .githooks)."
-        else
-            echo "Waarschuwing: kon de pre-push test-gate niet activeren — draai 'bash scripts/install-hooks.sh' handmatig."
-        fi
-    fi
-}
-
 # --- default service commands (overridable via env for tests) ---
 default_backend_cmd() {
     # --reload-dir app: only watch our own source, not venv/. Watching the whole
@@ -372,7 +353,6 @@ cmd_start() {
     # Auto-install missing or stale dependencies. Skipped in test mode.
     if [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ]; then
         ensure_deps || return 1
-        ensure_git_hooks
         run_worktree_gc
         run_doctor
     fi

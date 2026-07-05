@@ -109,13 +109,14 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 
 - **Finishing a branch**: The default is to **merge back to `master` and push** — no need to ask. Skip the merge/PR/cleanup menu. If the main checkout's `master` is dirty (concurrent sessions share one working copy), do the merge in a temporary worktree.
 - **Worktree hygiene**: After merging, the finished worktree + branch should be removed so `.claude/worktrees/` doesn't accumulate leftovers. Kanban dispatch auto-removes on card→Done; for everything else run `scripts/worktree-gc.sh` (dry-run) then `--apply`. It only removes worktrees whose branch is fully merged into `master` **and** whose tree is clean — dirty or unmerged worktrees are always kept. `cockpit.sh start` nudges when leftovers exist.
-- **Repo safeguards** (hardening): The `.githooks/pre-push` gate refuses any push that collapses a branch's file tree (a test git-fixture once wiped `master` down to `a.txt` and it got pushed). A deliberate tree-shrinking push must set `ALLOW_TREE_WIPE=1 git push …`. Run `scripts/cockpit-doctor.sh` (or `cockpit.sh doctor`) for a read-only health check — clobbered/tiny tree, `core.bare` mismatch, stale checkout, leftover worktrees, hook drift; it also runs (non-blocking) on `cockpit.sh start`.
+- **No local pre-push gate**: removed 2026-07-05 — a shared box running many concurrent dispatched agents made the old `.githooks/pre-push` test gate (full backend pytest + frontend lint/build on every push, serialized via flock) a recurring source of multi-minute stalls and SSH idle-disconnects under contention. Backend pytest + ruff and frontend lint/test/build now run in CI (`quality.yml`) instead — push freely, watch the Actions run. Note: the old hook also refused any push that collapsed a branch's file tree (a test git-fixture once wiped `master` down to `a.txt` and it got pushed); that preventive check is gone too. `scripts/cockpit-doctor.sh` (or `cockpit.sh doctor`) still gives a read-only, *after-the-fact* health check for the same clobbered-tree scenario plus `core.bare` mismatch, stale checkout, and leftover worktrees.
 
 ## CI/CD
 
 GitHub Actions workflows in `.github/workflows/`:
 - `claude.yml` — Claude Code integration (triggers on @claude mentions)
 - `codeql.yml` — CodeQL security analysis
+- `quality.yml` — backend (ruff + pytest) and frontend (lint + test + build), on push/PR to `master`
 - `release.yml` — Manual release (builds frontend, creates GitHub release)
 
 ## Gotchas
@@ -123,5 +124,4 @@ GitHub Actions workflows in `.github/workflows/`:
 - No `.env` file needed — all config has defaults in `backend/app/config.py`
 - Database lives at `backend/claude_registry.db`, created automatically on first run
 - No database migration system — schema changes require deleting the db
-- Frontend tests not yet set up
 - Backups stored in `~/.claude-registry/backups/`

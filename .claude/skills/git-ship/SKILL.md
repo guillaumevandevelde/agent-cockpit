@@ -19,16 +19,22 @@ the workflow works even when the agent cannot read `.claude/skills/`.
 git fetch origin
 ```
 
-## 2. Tests run at push — don't double-run them
+## 2. Run tests yourself before shipping
 
-The pre-push gate (`.githooks/pre-push`) runs the full backend pytest suite +
-frontend lint/build **automatically when you push** — serialized across sessions and
-against an isolated temp DB. You don't need to run them yourself as a ship step;
-doing so doubles the load on the shared box.
+There is no local pre-push gate — nothing blocks a red push. Run the checks
+yourself in this worktree before merging/pushing:
 
-If the gate blocks your push: **stop**. Do not retry with `--no-verify`. Read the
-gate's output, `comment` on the card with the failing output, fix the issue, and
-push again. The card stays in `Doing` until the push succeeds.
+```bash
+cd backend && source venv/bin/activate && pytest -q
+cd frontend && npm run lint && npm run build
+```
+
+Only proceed to shipping once both are green. GitHub Actions (`quality.yml`)
+re-runs the same checks after you push as a backstop, but by then the work may
+already be merged — it's not a substitute for checking yourself first.
+
+If a test fails: fix the issue, re-run, and only ship once green. Never ship red
+tests.
 
 ## 3. Commit your work
 
