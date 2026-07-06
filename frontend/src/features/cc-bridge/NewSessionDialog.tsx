@@ -682,8 +682,8 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
               {minimaxConfigured === false && (
                 <p className="text-xs text-muted-foreground">
                   MiniMax API key not configured.{' '}
-                  <Link to="/providers" className="underline hover:text-foreground">
-                    Set it up on the Providers page
+                  <Link to="/subscriptions" className="underline hover:text-foreground">
+                    Set it up on the Subscriptions page
                   </Link>
                   .
                 </p>

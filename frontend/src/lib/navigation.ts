@@ -51,7 +51,7 @@ const commonNavigation: NavGroup[] = [
       { name: 'Dashboard', href: '/', icon: LayoutDashboard },
       { name: 'Projects', href: '/projects', icon: FolderOpen },
       { name: 'Agent Bridge', href: '/agent-bridge', icon: MonitorPlay, capability: 'sessions' },
-      { name: 'Providers', href: '/providers', icon: KeyRound },
+      { name: 'Subscriptions', href: '/subscriptions', icon: KeyRound },
     ],
   },
   {
