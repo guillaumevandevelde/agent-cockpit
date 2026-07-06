@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Kanban**: Dispatch board for handing work to Claude Code/Codex agents — cards move through columns as agents claim, work, and hand them off, with per-agent performance stats, impediment reporting, and scheduling a card for a future time
+- **Scheduled Messages**: Schedule a message for future delivery into a running or resumable tmux session, including auto-resume of sessions that hit their rate limit
+- **Context**: Session context-window visualizer showing usage over time, cache efficiency, and content breakdown
+- **Presence**: At-a-glance view of which tmux panes are active across agent sessions
+- **Agent Performance (APM)**: Per-agent throughput and reliability tracking
+
+### Fixed
+- **Security**: Session transcript endpoints (`/api/v1/sessions/...`) now reject path-traversal sequences in `project_folder`/`session_id` instead of resolving them against the filesystem
+
 ## [1.3.0] - 2026-06-08
 
 ### Added

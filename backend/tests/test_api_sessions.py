@@ -69,6 +69,27 @@ async def test_get_session_detail_not_found_returns_404():
 
 
 @pytest.mark.asyncio
+async def test_get_session_detail_rejects_path_traversal_in_project_folder():
+    async with _client() as ac:
+        r = await ac.get("/api/v1/sessions/%2e%2e/some-session")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_session_detail_rejects_path_traversal_in_session_id():
+    async with _client() as ac:
+        r = await ac.get("/api/v1/sessions/some-project/%2e%2e")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_rejects_path_traversal_in_project_folder():
+    async with _client() as ac:
+        r = await ac.get("/api/v1/sessions", params={"project_folder": "../.."})
+    assert r.status_code == 500
+
+
+@pytest.mark.asyncio
 async def test_pending_queue_happy_path():
     async with _client() as ac:
         r = await ac.get("/api/v1/sessions/pending-queue")

@@ -2088,6 +2088,17 @@
             ],
             "title": "Resume Session Id"
           },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2225,6 +2236,17 @@
             ],
             "title": "Resume Session Id"
           },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
           "title": {
             "title": "Title",
             "type": "string"
@@ -2338,6 +2360,17 @@
               }
             ],
             "title": "Resume Session Id"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
           },
           "title": {
             "anyOf": [
@@ -12930,6 +12963,23 @@
     }
   },
   "paths": {
+    "/": {
+      "get": {
+        "description": "Root endpoint fallback when frontend is not built.",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root"
+      }
+    },
     "/api/v1/agent-activity/live": {
       "get": {
         "description": "Return currently running agent sessions with optional pane preview.",
@@ -16787,9 +16837,15 @@
             "name": "path",
             "required": false,
             "schema": {
-              "default": "/home/vdvgu",
-              "title": "Path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
             }
           }
         ],
