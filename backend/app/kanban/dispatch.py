@@ -140,6 +140,7 @@ async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
     from app.database import AsyncSessionLocal
     from app.models.database import Project
     from app.models.sandcastle import SandcastleConfig
+    from app.services.sandcastle_service import _pick_default_sandbox_provider, sandcastle_service
 
     try:
         async with AsyncSessionLocal() as db:
@@ -154,7 +155,11 @@ async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
             )).scalar_one_or_none()
             if cfg is None:
                 if enabled:
-                    db.add(SandcastleConfig(project_path=target, enabled=True))
+                    # Model default is "no-sandbox", but choosing the sandcastle
+                    # transport means the user wants container isolation — pick a
+                    # real runtime when the host actually has one.
+                    provider = _pick_default_sandbox_provider(await sandcastle_service.check_health())
+                    db.add(SandcastleConfig(project_path=target, enabled=True, sandbox_provider=provider))
                     await db.commit()
                 return
             if cfg.enabled != enabled:

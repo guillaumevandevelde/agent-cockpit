@@ -8,14 +8,20 @@ interface HealthStatusCardProps {
 }
 
 export function HealthStatusCard({ health, onBuildImage }: HealthStatusCardProps) {
+  // A podman-only host never has docker_available, so gating the build button on
+  // docker alone hid it entirely there — check both runtimes independently.
+  const imageMissing =
+    (health.docker_available && !health.docker_image_exists) ||
+    (health.podman_available && !health.podman_image_exists)
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">System Health</CardTitle>
-          {health.docker_available && !health.docker_image_exists && (
+          {imageMissing && (
             <Button variant="outline" size="sm" onClick={onBuildImage}>
-              Build Docker Image
+              Build Sandcastle Image
             </Button>
           )}
         </div>
@@ -38,6 +44,12 @@ export function HealthStatusCard({ health, onBuildImage }: HealthStatusCardProps
             <div className="flex items-center gap-2">
               <div className={`h-2 w-2 rounded-full ${health.docker_image_exists ? 'bg-green-500' : 'bg-yellow-500'}`} />
               <span className="text-sm">Docker Image {health.docker_image_exists ? '(built)' : '(not built)'}</span>
+            </div>
+          )}
+          {health.podman_available && (
+            <div className="flex items-center gap-2">
+              <div className={`h-2 w-2 rounded-full ${health.podman_image_exists ? 'bg-green-500' : 'bg-yellow-500'}`} />
+              <span className="text-sm">Podman Image {health.podman_image_exists ? '(built)' : '(not built)'}</span>
             </div>
           )}
           <div className="flex items-center gap-2">

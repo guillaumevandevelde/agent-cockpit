@@ -22,6 +22,10 @@ RUNNER_SCRIPT = SCRIPT_DIR / "sandcastle_runner.mjs"
 # Container providers that need a concrete image name.
 _CONTAINER_PROVIDERS = {"docker", "podman"}
 DEFAULT_DOCKER_IMAGE = "sandcastle:local"
+# Every sandcastle-spawned container is named with this prefix (see the docker/podman
+# sandbox providers in @ai-hero/sandcastle) — used both to filter `ps` and to refuse
+# to tail logs for a container this feature didn't spawn.
+_CONTAINER_NAME_PREFIX = "sandcastle-"
 
 # Absolute wall-clock ceiling for a run, regardless of idle activity.
 _OVERALL_TIMEOUT_FLOOR = 1800  # 30 min
@@ -45,6 +49,20 @@ def _resolve_docker_image(sandbox_provider: str, docker_image: str | None) -> st
     if sandbox_provider in _CONTAINER_PROVIDERS and not docker_image:
         return DEFAULT_DOCKER_IMAGE
     return docker_image
+
+
+def _pick_default_sandbox_provider(health: dict[str, Any]) -> str:
+    """Pick a sandbox provider for a freshly auto-created SandcastleConfig.
+
+    The ORM column defaults to "no-sandbox", but auto-creating a config only
+    happens when a project explicitly opts into the sandcastle transport —
+    the whole point of which is container isolation. Prefer a real container
+    runtime whenever the host actually has one available."""
+    if health.get("docker_available"):
+        return "docker"
+    if health.get("podman_available"):
+        return "podman"
+    return "no-sandbox"
 
 
 # Grace window between asking the runner to shut down (SIGTERM, which it turns into
@@ -900,16 +918,23 @@ class SandcastleService:
         except FileNotFoundError:
             pass
 
-        # Check if sandcastle Docker image exists
-        if health["docker_available"]:
+        # Check if the sandcastle image exists under each available runtime — a
+        # podman-only host never has docker_available, so it must be checked
+        # independently or the "not built yet" state can never be surfaced.
+        for runtime, available_key, exists_key in (
+            ("docker", "docker_available", "docker_image_exists"),
+            ("podman", "podman_available", "podman_image_exists"),
+        ):
+            if not health[available_key]:
+                continue
             try:
                 process = await asyncio.create_subprocess_exec(
-                    "docker", "image", "inspect", "sandcastle:local",
+                    runtime, "image", "inspect", DEFAULT_DOCKER_IMAGE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
                 await process.communicate()
-                health["docker_image_exists"] = process.returncode == 0
+                health[exists_key] = process.returncode == 0
             except FileNotFoundError:
                 pass
 
@@ -927,7 +952,7 @@ class SandcastleService:
             try:
                 process = await asyncio.create_subprocess_exec(
                     runtime, "ps",
-                    "--filter", "name=sandcastle-",
+                    "--filter", f"name={_CONTAINER_NAME_PREFIX}",
                     "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.CreatedAt}}",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -950,26 +975,67 @@ class SandcastleService:
 
         return {"containers": containers}
 
-    async def build_docker_image(self, image_name: str = "sandcastle:local") -> dict[str, Any]:
-        """Build the sandcastle Docker image."""
+    async def stream_container_logs(self, name: str, runtime: str):
+        """Tail a running sandcastle container's own stdout/stderr via `logs -f`.
+
+        This is a live view into the container itself — distinct from a run's SSE
+        log stream, which tails the sandcastle library's own log *file* and only
+        exists for runs started through this feature's `/runs` endpoints."""
+        if runtime not in _CONTAINER_PROVIDERS:
+            raise ValueError(f"unsupported runtime: {runtime}")
+        if not name.startswith(_CONTAINER_NAME_PREFIX):
+            raise ValueError("not a sandcastle container")
+
+        process = await asyncio.create_subprocess_exec(
+            runtime, "logs", "-f", "--tail", "200", name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                yield line.decode(errors="replace")
+        finally:
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+
+    async def build_docker_image(
+        self, image_name: str = DEFAULT_DOCKER_IMAGE, runtime: str | None = None
+    ) -> dict[str, Any]:
+        """Build the sandcastle image with the given (or auto-detected) container runtime.
+
+        `docker build` and `podman build` take identical arguments for this Dockerfile,
+        so a podman-only host (no `docker` binary at all) can build the same image —
+        it just needs the right binary name on the command line instead of a
+        hardcoded "docker"."""
         dockerfile_path = Path(__file__).parent.parent.parent.parent / ".sandcastle" / "Dockerfile"
         if not dockerfile_path.exists():
             return {"success": False, "error": f"Dockerfile not found at {dockerfile_path}"}
 
+        if runtime is None:
+            runtime = _pick_default_sandbox_provider(await self.check_health())
+        if runtime not in _CONTAINER_PROVIDERS:
+            return {"success": False, "error": "Neither Docker nor Podman is available"}
+
         try:
             process = await asyncio.create_subprocess_exec(
-                "docker", "build", "-t", image_name, "-f", str(dockerfile_path), str(dockerfile_path.parent),
+                runtime, "build", "-t", image_name, "-f", str(dockerfile_path), str(dockerfile_path.parent),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode == 0:
                 return {"success": True, "message": f"Image {image_name} built successfully"}
             else:
                 return {"success": False, "error": stderr.decode() if stderr else "Build failed"}
         except FileNotFoundError:
-            return {"success": False, "error": "Docker not found"}
+            return {"success": False, "error": f"{runtime} not found"}
 
 
 # Module-level singleton

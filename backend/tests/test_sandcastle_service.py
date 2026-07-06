@@ -9,7 +9,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.services.sandcastle_service import SandcastleService, _overall_timeout
+import pytest
+
+from app.services.sandcastle_service import (
+    SandcastleService,
+    _overall_timeout,
+    _pick_default_sandbox_provider,
+)
 
 
 def _config(tmp_path, **overrides):
@@ -102,3 +108,173 @@ def test_build_parallel_command_defaults_docker_image(tmp_path):
     svc._build_parallel_run_command(config, runs, use_shared_sandbox=False)
     data = json.loads((Path(tmp_path) / ".sandcastle" / "parallel-config-9.json").read_text())
     assert data["docker_image"] == "sandcastle:local"
+
+
+# ---- default sandbox provider selection ------------------------------------
+#
+# Auto-creating a SandcastleConfig (e.g. when a project's kanban transport is
+# switched to "sandcastle") must not silently fall back to "no-sandbox" just
+# because that's the ORM column default — the entire point of the sandcastle
+# transport is container isolation, so it should pick a real container runtime
+# whenever one is actually available on the host.
+
+def test_pick_default_sandbox_provider_prefers_docker():
+    health = {"docker_available": True, "podman_available": True}
+    assert _pick_default_sandbox_provider(health) == "docker"
+
+
+def test_pick_default_sandbox_provider_falls_back_to_podman():
+    health = {"docker_available": False, "podman_available": True}
+    assert _pick_default_sandbox_provider(health) == "podman"
+
+
+def test_pick_default_sandbox_provider_falls_back_to_no_sandbox_when_neither_available():
+    health = {"docker_available": False, "podman_available": False}
+    assert _pick_default_sandbox_provider(health) == "no-sandbox"
+
+
+# ---- runtime-aware image build ---------------------------------------------
+#
+# build_docker_image() used to hardcode the "docker" binary, so it always
+# failed with "Docker not found" on a podman-only host even though podman can
+# build the identical image. These tests fake asyncio.create_subprocess_exec
+# so no real container runtime is invoked.
+
+class _FakeProcess:
+    def __init__(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+
+    async def communicate(self):
+        return self._stdout, self._stderr
+
+
+@pytest.mark.asyncio
+async def test_build_docker_image_auto_detects_podman_when_docker_unavailable(monkeypatch):
+    svc = SandcastleService()
+
+    async def fake_check_health():
+        return {"docker_available": False, "podman_available": True}
+    monkeypatch.setattr(svc, "check_health", fake_check_health)
+
+    calls = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        return _FakeProcess(returncode=0)
+    monkeypatch.setattr("app.services.sandcastle_service.asyncio.create_subprocess_exec", fake_exec)
+
+    result = await svc.build_docker_image()
+
+    assert result["success"] is True
+    assert calls[0][0] == "podman"
+
+
+@pytest.mark.asyncio
+async def test_build_docker_image_honors_explicit_runtime(monkeypatch):
+    svc = SandcastleService()
+    calls = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        return _FakeProcess(returncode=0)
+    monkeypatch.setattr("app.services.sandcastle_service.asyncio.create_subprocess_exec", fake_exec)
+
+    result = await svc.build_docker_image(runtime="podman")
+
+    assert result["success"] is True
+    assert calls[0][0] == "podman"
+
+
+@pytest.mark.asyncio
+async def test_build_docker_image_errors_when_no_runtime_available(monkeypatch):
+    svc = SandcastleService()
+
+    async def fake_check_health():
+        return {"docker_available": False, "podman_available": False}
+    monkeypatch.setattr(svc, "check_health", fake_check_health)
+
+    result = await svc.build_docker_image()
+
+    assert result["success"] is False
+    assert "docker" in result["error"].lower() and "podman" in result["error"].lower()
+
+
+# ---- podman image existence in health check --------------------------------
+
+@pytest.mark.asyncio
+async def test_check_health_reports_podman_image_exists(monkeypatch):
+    svc = SandcastleService()
+
+    async def fake_exec(*args, **kwargs):
+        binary = args[0]
+        if binary == "node":
+            return _FakeProcess(0, b"v24.0.0")
+        if binary == "docker":
+            raise FileNotFoundError()
+        if binary == "podman":
+            return _FakeProcess(0, b"podman version 5.0")
+        raise AssertionError(f"unexpected binary {binary}")
+    monkeypatch.setattr("app.services.sandcastle_service.asyncio.create_subprocess_exec", fake_exec)
+
+    health = await svc.check_health()
+
+    assert health["podman_available"] is True
+    assert health["docker_available"] is False
+    assert health["podman_image_exists"] is True
+
+
+# ---- live container log streaming (visualization) --------------------------
+
+class _FakeStdout:
+    def __init__(self, lines: list[bytes]):
+        self._lines = list(lines)
+
+    async def readline(self) -> bytes:
+        if self._lines:
+            return self._lines.pop(0)
+        return b""
+
+
+class _FakeStreamingProcess:
+    def __init__(self, lines: list[bytes]):
+        self.stdout = _FakeStdout(lines)
+        self.returncode = None
+        self.terminated = False
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+
+
+@pytest.mark.asyncio
+async def test_stream_container_logs_yields_decoded_lines(monkeypatch):
+    svc = SandcastleService()
+    fake_proc = _FakeStreamingProcess([b"line one\n", b"line two\n"])
+
+    async def fake_exec(*args, **kwargs):
+        assert args[:2] == ("docker", "logs")
+        return fake_proc
+    monkeypatch.setattr("app.services.sandcastle_service.asyncio.create_subprocess_exec", fake_exec)
+
+    lines = [line async for line in svc.stream_container_logs("sandcastle-abc123", "docker")]
+
+    assert lines == ["line one\n", "line two\n"]
+    assert fake_proc.terminated is True  # generator tears the process down when exhausted
+
+
+@pytest.mark.asyncio
+async def test_stream_container_logs_rejects_container_without_sandcastle_prefix():
+    svc = SandcastleService()
+    with pytest.raises(ValueError):
+        async for _ in svc.stream_container_logs("some-other-container", "docker"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_stream_container_logs_rejects_unknown_runtime():
+    svc = SandcastleService()
+    with pytest.raises(ValueError):
+        async for _ in svc.stream_container_logs("sandcastle-abc123", "vercel"):
+            pass

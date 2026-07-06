@@ -40,12 +40,13 @@ async def check_health():
 class BuildImageRequest(BaseModel):
     """Request to build Docker image."""
     image_name: str = "sandcastle:local"
+    runtime: str | None = None  # "docker" | "podman" | None (auto-detect)
 
 
 @router.post("/build-image")
 async def build_image(request: BuildImageRequest = BuildImageRequest()):
-    """Build the sandcastle Docker image."""
-    return await sandcastle_service.build_docker_image(request.image_name)
+    """Build the sandcastle image with the given (or auto-detected) container runtime."""
+    return await sandcastle_service.build_docker_image(request.image_name, request.runtime)
 
 
 @router.get("/config")
@@ -396,3 +397,26 @@ async def delete_run(run_id: int):
 async def list_containers():
     """List running Docker/Podman sandcastle containers."""
     return await sandcastle_service.list_running_containers()
+
+
+@router.get("/containers/{name}/logs/stream")
+async def stream_container_logs(name: str, request: Request, runtime: str = Query(...)):
+    """Stream a running sandcastle container's own stdout/stderr via SSE (`logs -f`)."""
+    async def event_generator():
+        try:
+            async for line in sandcastle_service.stream_container_logs(name, runtime):
+                if await request.is_disconnected():
+                    break
+                yield f"data: {json.dumps({'line': line})}\n\n"
+        except ValueError as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
