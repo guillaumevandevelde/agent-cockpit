@@ -562,14 +562,34 @@ def _slug(name: str) -> str:
     return s or "project"
 
 
-def _mint_session_name(project_path: str, card_title: str = "") -> str:
+def _mint_session_name(
+    project_path: str, card_title: str = "", live_sessions: set[str] | None = None,
+) -> str:
     # Keep the whole name <= 20 chars so the tmux-bridge sanitizer never truncates
     # it: a truncated session name would diverge from the claimant label and the
     # worktree branch, breaking cleanup. "k-" + slug(<=13) + "-" + 4 hex = <=20.
     # Prefer card title over project path for clarity.
+    #
+    # Must also avoid colliding with a currently-live tmux session: the claim,
+    # git worktree and git branch are all committed under this exact name before
+    # spawn_session runs. If it happened to already be a running session, spawn's
+    # own collision fallback (agent_bridge.spawn._session_name_for) would silently
+    # rename just the tmux session -- leaving cleanup_session_for_card looking up
+    # a name that never existed, assuming the agent "already exited", and
+    # orphaning the real session forever (see kanban card "session termination").
+    # `live_sessions` mirrors the None-means-skip convention used for reaping
+    # (see dispatch_project): callers that already queried tmux this tick pass
+    # their snapshot; callers/tests with no snapshot skip the check rather than
+    # each minting triggering its own tmux subprocess call.
     source = card_title if card_title else Path(project_path).name
     slug = (_slug(source)[:13].rstrip("-")) or "card"
-    return f"k-{slug}-{uuid.uuid4().hex[:4]}"
+    if live_sessions is None:
+        return f"k-{slug}-{uuid.uuid4().hex[:4]}"
+    for _ in range(20):
+        name = f"k-{slug}-{uuid.uuid4().hex[:4]}"
+        if name not in live_sessions:
+            return name
+    return name
 
 
 def _active_session_count(cards: Iterable[KanbanCard]) -> int:
@@ -663,14 +683,17 @@ async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
     impediment_question: str | None = None,
     agent_override: str | None = None,
+    live_sessions: set[str] | None = None,
 ) -> dict | None:
     """Claim+move-to-agent-column+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column.
-    
+
     The transport parameter is the project default. If the card has an explicit transport
-    setting, that takes precedence."""
+    setting, that takes precedence. `live_sessions`, when the caller already has a fresh
+    tmux snapshot, is used to keep the minted session name from colliding with a running
+    session (see _mint_session_name)."""
     source_column = card.column
-    name = _mint_session_name(project_path, card.title)
+    name = _mint_session_name(project_path, card.title, live_sessions=live_sessions)
     claimant = CLAIMANT_PREFIX + name
 
     # Get the actual transport for this card (card transport > project default)
@@ -934,6 +957,7 @@ async def dispatch_project(
         last_result = await _run_card(
             session, card=card, project_key=project_key,
             project_path=project_path, transport=transport,
+            live_sessions=live_sessions,
         )
         if last_result is None:
             break  # dispatch failed (e.g. memory) — let the tick queue/retry
@@ -1328,6 +1352,7 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
         return
 
     logger.info(f"Memory available ({status.usage_percent:.0%} used), retrying {len(retryable)} queued cards")
+    live_sessions = _live_sessions()
 
     for card in retryable:
         try:
@@ -1372,6 +1397,7 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                     project_path=card.project_path, transport=transport,
                     agent_override=card.agent_override,
                     impediment_question=card.impediment_question,
+                    live_sessions=live_sessions,
                 )
                 await ks.commit()
 

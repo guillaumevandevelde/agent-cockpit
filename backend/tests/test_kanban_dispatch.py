@@ -870,6 +870,53 @@ def test_mint_session_name_falls_back_to_project_path():
     assert "my-project" in name
 
 
+def test_mint_session_name_avoids_collision_with_live_tmux_session(monkeypatch):
+    # If the minted name happens to already be a running tmux session,
+    # spawn_session's own collision fallback (agent_bridge.spawn._session_name_for)
+    # silently renames the *actual* tmux session -- but the kanban claim, git
+    # worktree and git branch were already committed under the original name.
+    # cleanup_session_for_card then looks up a tmux session that never existed
+    # under that name, assumes the agent "already exited", and releases the
+    # claim -- orphaning the real, still-running tmux session forever. Minting
+    # must therefore never hand out a name that's already live when the caller
+    # has a fresh liveness snapshot.
+    import itertools
+    import uuid as uuid_mod
+
+    colliding_hex = "aaaa"
+    free_hex = "bbbb"
+    fake_hexes = itertools.chain([colliding_hex, free_hex], itertools.repeat(free_hex))
+
+    class FakeUUID:
+        def __init__(self, hex_val):
+            self.hex = hex_val
+
+    monkeypatch.setattr(
+        uuid_mod, "uuid4", lambda: FakeUUID(next(fake_hexes))
+    )
+
+    name = dispatch._mint_session_name(
+        "/home/me/proj", live_sessions={f"k-proj-{colliding_hex}"},
+    )
+
+    assert name != f"k-proj-{colliding_hex}"
+    assert name == f"k-proj-{free_hex}"
+
+
+def test_mint_session_name_skips_collision_check_when_live_sessions_unknown(monkeypatch):
+    # live_sessions=None (the default) means "no snapshot" -- e.g. a caller/test
+    # that doesn't have a fresh tmux query. Minting must not shell out to tmux
+    # itself in that case (that would turn every unit test that mints a session
+    # name into an integration test hitting the real tmux binary).
+    def boom():
+        raise AssertionError("must not query tmux when live_sessions is None")
+
+    monkeypatch.setattr(dispatch, "_live_sessions", boom)
+
+    name = dispatch._mint_session_name("/home/me/proj")
+    assert name.startswith("k-proj-")
+
+
 @pytest.mark.asyncio
 async def test_spawn_failure_returns_analysis_card_to_analysis():
     transport = RecordingTransport(fail=True)
