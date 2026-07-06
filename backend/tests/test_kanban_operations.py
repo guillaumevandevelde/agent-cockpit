@@ -102,6 +102,37 @@ async def test_update_title_and_description():
         assert card.description == "desc"
 
 
+@pytest.mark.asyncio
+async def test_create_card_with_scheduled_at():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None,
+            payload={"title": "t", "scheduled_at": "2099-01-01T00:00:00+00:00"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.scheduled_at == "2099-01-01T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_update_scheduled_at():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t"})
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="p", entity_id=cid,
+            payload={"scheduled_at": "2099-06-01T12:00:00+00:00"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.scheduled_at == "2099-06-01T12:00:00+00:00"
+
+        # Clearing the schedule (explicit None) removes it.
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="p", entity_id=cid, payload={"scheduled_at": None})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.scheduled_at is None
+
+
 from app.kanban.operations import ClaimRejected
 
 

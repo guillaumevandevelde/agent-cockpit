@@ -20,10 +20,12 @@ async def _tables():
 PK = "git:example.com/me/repo"
 
 
-async def _make_card(s, title="Task", column="Backlog", priority=None):
+async def _make_card(s, title="Task", column="Backlog", priority=None, scheduled_at=None):
     payload = {"title": title, "column": column}
     if priority is not None:
         payload["priority"] = priority
+    if scheduled_at is not None:
+        payload["scheduled_at"] = scheduled_at
     cid = await apply_operation(
         s, op_type="create", entity_type="card", project_key=PK,
         entity_id=None, payload=payload,
@@ -1890,6 +1892,92 @@ async def test_dispatch_orders_by_priority_high_medium_low_none():
         next_card = dispatch._next_card(cards)
     assert next_card is not None
     assert next_card.title == "high-card"
+
+
+class _FakeCard:
+    def __init__(self, scheduled_at=None):
+        self.scheduled_at = scheduled_at
+
+
+def test_is_due_none_and_empty_are_due():
+    assert dispatch._is_due(_FakeCard(None)) is True
+    assert dispatch._is_due(_FakeCard("")) is True
+
+
+def test_is_due_malformed_value_fails_open():
+    assert dispatch._is_due(_FakeCard("not-a-date")) is True
+
+
+def test_is_due_naive_datetime_is_treated_as_utc():
+    assert dispatch._is_due(_FakeCard("2000-01-01T00:00:00")) is True
+    assert dispatch._is_due(_FakeCard("2099-01-01T00:00:00")) is False
+
+
+def test_is_due_future_and_past():
+    assert dispatch._is_due(_FakeCard("2099-01-01T00:00:00+00:00")) is False
+    assert dispatch._is_due(_FakeCard("2000-01-01T00:00:00+00:00")) is True
+
+
+@pytest.mark.asyncio
+async def test_next_card_skips_future_scheduled_card():
+    """A card with a future scheduled_at is invisible to auto-dispatch until due."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="later", column="Backlog",
+                          scheduled_at="2099-01-01T00:00:00+00:00")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is None
+
+
+@pytest.mark.asyncio
+async def test_next_card_picks_up_due_scheduled_card():
+    """Once scheduled_at is in the past, the card becomes a normal dispatch candidate."""
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="ready", column="Backlog",
+                          scheduled_at="2000-01-01T00:00:00+00:00")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.title == "ready"
+
+
+@pytest.mark.asyncio
+async def test_next_card_prefers_unscheduled_over_future_scheduled():
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="later", column="Backlog",
+                          scheduled_at="2099-01-01T00:00:00+00:00")
+        await _make_card(s, title="now", column="Backlog")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.title == "now"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_skips_future_scheduled_card():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="later", column="Backlog",
+                          scheduled_at="2099-01-01T00:00:00+00:00")
+        await _make_card(s, title="now", column="Backlog")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 1
+    assert len(transport.calls) == 1
 
 
 @pytest.mark.asyncio

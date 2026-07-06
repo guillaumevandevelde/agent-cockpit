@@ -36,6 +36,14 @@ function parseLabels(raw: string): string[] {
 
 const AUTO = "__auto__"; // sentinel: null agent (dispatch resolves the provider at run time)
 
+/** ISO datetime -> local "YYYY-MM-DDTHH:mm" for a native datetime-local input. */
+function toDatetimeLocalValue(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function CardEditDialog({
   open,
   initial,
@@ -55,6 +63,7 @@ export function CardEditDialog({
     transport?: string | null;
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
+    scheduled_at?: string | null;
   };
   columns: string[];
   defaultAgent?: string | null;
@@ -70,6 +79,7 @@ export function CardEditDialog({
     transport: string | null;
     resume_session_id: string | null;
     resume_project_folder: string | null;
+    scheduled_at: string | null;
   }) => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -83,6 +93,9 @@ export function CardEditDialog({
   );
   const [agent, setAgent] = useState<string>(defaultAgent ?? AUTO);
   const [transport, setTransport] = useState<string>(initial?.transport ?? "auto");
+  const [scheduledAt, setScheduledAt] = useState<string>(
+    initial?.scheduled_at ? toDatetimeLocalValue(initial.scheduled_at) : ""
+  );
   const { providers } = useProviderContext();
   const installedProviders = providers.filter((p) => p.installed);
 
@@ -227,6 +240,32 @@ export function CardEditDialog({
             </p>
           </div>
 
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="card-scheduled-at">Schedule for</Label>
+              {scheduledAt && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-destructive"
+                  onClick={() => setScheduledAt("")}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <Input
+              id="card-scheduled-at"
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              {scheduledAt
+                ? "Auto-dispatch won't pick up this card until the scheduled time."
+                : "Optional — leave empty to make the card available immediately."}
+            </p>
+          </div>
+
           {/* Resume session picker */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -361,6 +400,7 @@ export function CardEditDialog({
                 transport: transport === "auto" ? null : transport,
                 resume_session_id,
                 resume_project_folder,
+                scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
               })
             }
           >

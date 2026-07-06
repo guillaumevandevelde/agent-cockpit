@@ -34,6 +34,7 @@ export interface Card {
   transport?: string | null;  // worktree | sandcastle | auto (null)
   resume_session_id?: string | null;
   resume_project_folder?: string | null;
+  scheduled_at?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
   created_at: string;

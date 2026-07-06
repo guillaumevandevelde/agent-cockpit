@@ -29,6 +29,7 @@ class CardResponse(BaseModel):
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
+    scheduled_at: str | None = None  # ISO8601; auto-dispatch ignores the card until this time
     claimed_by: str | None = None
     claimed_at: datetime | None = None
     created_at: datetime
@@ -47,6 +48,7 @@ class CardCreate(BaseModel):
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
+    scheduled_at: str | None = None
 
 
 class CardUpdate(BaseModel):
@@ -59,6 +61,7 @@ class CardUpdate(BaseModel):
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
+    scheduled_at: str | None = None
 
 
 class MoveRequest(BaseModel):
