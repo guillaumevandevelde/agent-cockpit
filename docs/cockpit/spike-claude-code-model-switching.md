@@ -227,3 +227,139 @@ Aangemaakt in de `Backlog`-kolom van dit project, gelinkt aan deze spike:
 - "Claude Code Router (CCR) headless-haalbaarheid verifiëren in WSL"
 - "CCR als gedeeld achtergrondproces opzetten voor scenario-routing"
 - "Adaptief-switch-gedrag (auto-failover bij sessielimiet) valideren via CCR — medium prioriteit"
+
+## 11. Verificatieresultaat vervolgkaart 2 — CCR headless-haalbaarheid (2026-07-06)
+
+Hands-on getest in de WSL-omgeving met `@musistudio/claude-code-router` op
+npm-versies 1.0.73, 2.0.0 én 3.0.0 (huidige `latest`, niet meer 2.0.0 zoals in
+§4 verondersteld — het package is inmiddels opnieuw gepivot).
+
+### 11.1 Headless-CLI: bevestigd voor 1.0.73 en 2.0.0
+
+Beide starten via `ccr start` een pure Node/Fastify-gateway, geen Electron,
+geen browser-open. Geverifieerd: `ccr --help` toont `start`/`stop`/`code`/`ui`
+als losse commando's; `ccr start` laadt `~/.claude-code-router/config.json`,
+opent de geconfigureerde poort (`127.0.0.1:8080` in de test), en `curl
+http://127.0.0.1:8080/providers` retourneert de geconfigureerde providers
+exact zoals in `config.json` opgegeven. `ccr code` zet `ANTHROPIC_BASE_URL=
+http://127.0.0.1:${port}` en start de echte `claude`-CLI — precies het
+`platform_env.py`-patroon. Voor deze twee versies raakt niets buiten het eigen
+`~/.claude-code-router/`-mapje aan.
+
+### 11.2 config.json-schema (1.0.73/2.0.0, zoals het vandaag werkt)
+
+```json
+{
+  "PORT": 8080,
+  "HOST": "127.0.0.1",
+  "APIKEY": "shared-secret-for-the-gateway-itself",
+  "Providers": [
+    {
+      "name": "anthropic-direct",
+      "api_base_url": "https://api.anthropic.com/v1/messages",
+      "api_key": "sk-ant-...",
+      "models": ["claude-sonnet-5"]
+    },
+    {
+      "name": "minimax",
+      "api_base_url": "https://api.minimax.io/anthropic/v1/messages",
+      "api_key": "<minimax-api-key>",
+      "models": ["MiniMax-M3"]
+    }
+  ],
+  "Router": {
+    "default": "anthropic-direct,claude-sonnet-5",
+    "background": "minimax,MiniMax-M3",
+    "think": "anthropic-direct,claude-sonnet-5",
+    "longContext": "anthropic-direct,claude-sonnet-5",
+    "webSearch": "anthropic-direct,claude-sonnet-5"
+  }
+}
+```
+
+Bevestigd via een live start + `curl /providers`: `Providers[].name`/
+`api_base_url`/`api_key`/`models` zijn de enige verplichte velden. `Router`
+scenario-keys (`default`/`background`/`think`/`longContext`/`webSearch`) zijn
+strings van de vorm `"<provider-name>,<model>"`.
+
+### 11.3 MiniMax zonder transformer — bevestigd
+
+`@musistudio/llms` (de onderliggende gateway-library) registreert transformers
+voor met naam genoemde protocollen (`anthropic`, `gemini`, `deepseek`,
+`openai`, `openrouter`, `groq`, ...) — **geen enkele met "minimax" in de naam**.
+Een Provider-entry zonder `transformer`-veld wordt als natief
+Anthropic-Messages-formaat (`/v1/messages`) behandeld. Omdat MiniMax's
+endpoint al Anthropic-Messages-compatible is (bevestigd in §2), is een kale
+Provider-entry zoals hierboven voldoende — geen custom transformer-script
+nodig, exact zoals verwacht.
+
+### 11.4 ⚠️ Belangrijkste bevinding: 3.0.0 patcht ongevraagd live configs van andere tools
+
+`3.0.0` is **geen Electron-app** (geen `electron`-dependency; wél nieuw:
+`better-sqlite3`) — het is nog steeds een Node-CLI + optionele web-UI
+(`ccr ui`), dus in die zin ook headless-bruikbaar. Maar het introduceert een
+**auto-onboarding-mechanisme** dat niet in enige README staat en dat tijdens
+dit onderzoek per ongeluk de echte `~/.claude/settings.json` en
+`~/.codex/config.toml` van deze machine heeft aangepast:
+
+- **Trigger, exact gereproduceerd**: als `~/.claude-code-router/config.sqlite`
+  nog niet bestaat (dus de allereerste `ccr start` van v3 op die `$HOME`) **én**
+  er al een legacy `~/.claude-code-router/config.json` met geconfigureerde
+  `Providers` aanwezig is (bv. achtergelaten door een eerdere 1.x/2.x-test),
+  dan migreert 3.0.0 dit automatisch naar een SQLite-"profile" **en activeert
+  dat profiel meteen voor elke gedetecteerde client-CLI** (`~/.claude` →
+  Claude Code, `~/.codex` → Codex CLI) — zonder bevestigingsvraag.
+- Reproductie: met een lege `$HOME` (geen legacy `config.json`) blijft `ccr
+  start` volledig passief (alleen management-API op poort 3458, geen
+  gateway-poort, geen configs aangeraakt) — ook op de allereerste start. Zodra
+  een legacy `config.json` met providers vooraf aanwezig is op een verse
+  `$HOME`, triggert dezelfde `ccr start` wél de auto-patch (herhaald
+  bevestigd in een geïsoleerde `$HOME` in de scratchpad).
+- Gepatcht werd: `~/.claude/settings.json` kreeg een `env`-blok
+  (`ANTHROPIC_BASE_URL`/`ANTHROPIC_API_BASE_URL`/
+  `CLAUDE_AGENT_API_BASE_URL=http://127.0.0.1:8080`) plus een `apiKeyHelper`
+  die naar een door CCR gegenereerd script wijst; `~/.codex/config.toml` kreeg
+  een `[model_providers.claude-code-router]`-blok en
+  `model_provider = "claude-code-router"`. Beide bestanden zijn **de live,
+  gedeelde configs** die elke Claude Code- / Codex-sessie op deze machine
+  gebruikt — dus elke sessie die in dat venster gestart werd, zou
+  geauthenticeerd hebben tegen de (placeholder-key) gateway in plaats van de
+  echte Anthropic-/Codex-auth, en gefaald zijn. Dit is wat de "kapotte sessie"
+  tijdens dit onderzoek veroorzaakte.
+- **Geen blijvende schade**: `~/.claude/.credentials.json` (de echte
+  OAuth-subscriptietokens) is nooit aangeraakt — alleen de routing-configuratie
+  werd tijdelijk omgezet. `~/.claude/settings.json` bleek zelf al terug te zijn
+  gezet naar de originele inhoud tegen de tijd dat dit werd opgemerkt
+  (vermoedelijk CCR's eigen shutdown/toggle-logica); de overige
+  `*.ccr-*`-backupbestanden en de volledig door CCR aangemaakte
+  `~/.codex/config.toml`/`~/.claude-code-router/`-boel zijn nadien opgeruimd.
+
+**Consequentie voor kaart 3 ("CCR als gedeeld achtergrondproces opzetten")**:
+als CCR daadwerkelijk als gedeeld achtergrondproces gaat draaien op deze
+multi-agent-machine, moet vervolgkaart 3 expliciet omgaan met dit
+auto-onboarding-gedrag — bv. door **nooit een legacy `config.json` met
+providers achter te laten voordat 3.0.0 voor het eerst start**, door 3.0.0's
+auto-integratie met andere CLI's expliciet uit te zetten (nog te vinden of
+zo'n vlag bestaat), of door bewust op 1.0.73/2.0.0 te blijven zitten — die
+raken audit-baar niets aan buiten hun eigen configmap.
+
+### 11.5 Werkt dit met een Anthropic-abonnement, of alleen met API-keys?
+
+**Alleen API-keys — geen enkele laag hier ondersteunt het delen van een
+Anthropic Pro/Max-abonnement.** Claude Code's abonnement authenticeert via
+OAuth-browser-login (`~/.claude/.credentials.json`); zodra
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`apiKeyHelper` gezet wordt (wat
+zowel CCR als de kale MiniMax-switch uit §2 doen) slaat Claude Code de
+OAuth-abonnementsroute voor die sessie volledig over en authenticeert in
+plaats daarvan met de opgegeven token als kale API-key tegen het opgegeven
+endpoint. Bevestigd via code-search: CCR's bundel bevat geen enkele
+Anthropic-OAuth-logica (de enige OAuth-code erin is Google's, voor de
+Gemini-provider) en de npm-omschrijving van het package luidt letterlijk *"Use
+Claude Code without an Anthropics account and route it to another LLM
+provider"*. MiniMax-toegang loopt via MiniMax's eigen API-key/account (zie
+§2) — volledig los van de Anthropic-subscriptie. Conclusie: het bestaande
+Anthropic-abonnement blijft gewoon werken zolang een sessie geen
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` override heeft; er is geen manier
+om abonnements-"credits" te delen tussen Anthropic en MiniMax via CCR of de
+directe switch — beide vervangen de auth-methode volledig in plaats van hem
+te bemiddelen.
