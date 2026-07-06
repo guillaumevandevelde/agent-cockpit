@@ -62,6 +62,7 @@ export interface SandcastleHealth {
   podman_available: boolean;
   runner_script_exists: boolean;
   docker_image_exists?: boolean;
+  podman_image_exists?: boolean;
   npm_dependencies_installed?: boolean;
   node_version?: string;
   docker_version?: string;

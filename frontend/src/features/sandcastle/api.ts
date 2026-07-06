@@ -179,6 +179,33 @@ export async function listSandcastleContainers(): Promise<SandcastleContainersRe
   return apiClient<SandcastleContainersResponse>(`${BASE}/containers`);
 }
 
+/** Live-tail a running sandcastle container's own stdout/stderr (`logs -f`) via SSE */
+export function streamContainerLogs(
+  name: string,
+  runtime: 'docker' | 'podman',
+  onLine: (line: string) => void,
+  onError?: (error: Event) => void
+): EventSource {
+  const eventSource = new EventSource(
+    buildEndpoint(`/api/v1/${BASE}/containers/${encodeURIComponent(name)}/logs/stream`, { runtime })
+  );
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data) as { line?: string; error?: string };
+      if (data.line) onLine(data.line);
+    } catch {
+      // Ignore parse errors
+    }
+  };
+
+  eventSource.onerror = (error) => {
+    onError?.(error);
+  };
+
+  return eventSource;
+}
+
 /** Create a streaming connection for run logs */
 export function streamSandcastleRunLogs(
   runId: number,

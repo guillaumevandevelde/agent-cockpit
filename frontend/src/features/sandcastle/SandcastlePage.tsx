@@ -213,7 +213,7 @@ export function SandcastlePage() {
 
   const handleBuildImage = async () => {
     try {
-      toast.info('Building Docker image...')
+      toast.info('Building sandcastle image...')
       const result = await buildSandcastleImage()
       if (result.success) {
         toast.success(result.message || 'Image built successfully')
