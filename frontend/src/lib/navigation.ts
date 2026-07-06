@@ -51,6 +51,7 @@ const commonNavigation: NavGroup[] = [
       { name: 'Dashboard', href: '/', icon: LayoutDashboard },
       { name: 'Projects', href: '/projects', icon: FolderOpen },
       { name: 'Agent Bridge', href: '/agent-bridge', icon: MonitorPlay, capability: 'sessions' },
+      { name: 'Providers', href: '/providers', icon: KeyRound },
     ],
   },
   {
@@ -79,7 +80,6 @@ const providerNavigation: Record<AgentProviderId, NavGroup[]> = {
         { name: 'Config', href: '/config', icon: Settings, capability: 'config' },
         { name: 'Sessions', href: '/sessions', icon: MessageSquare, capability: 'sessions' },
         { name: 'MCP Servers', href: '/mcp', icon: Server, capability: 'mcp' },
-        { name: 'Providers', href: '/providers', icon: KeyRound },
         { name: 'Plugins', href: '/plugins', icon: Package, capability: 'plugins' },
         { name: 'Permissions / Trust', href: '/permissions', icon: Shield, capability: 'permissions' },
       ],
