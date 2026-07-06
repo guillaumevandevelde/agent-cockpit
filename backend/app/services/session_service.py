@@ -42,6 +42,17 @@ class SessionService:
         self.db = db
         self.projects_dir = get_claude_projects_dir()
 
+    @staticmethod
+    def _ensure_safe_path_component(value: str, label: str) -> None:
+        """Reject path separators / traversal sequences in user-supplied path segments.
+
+        project_folder and session_id are interpolated directly into filesystem
+        paths under self.projects_dir; without this check a value like ".." or
+        "../../etc/passwd" would let a caller read files outside that directory.
+        """
+        if not value or value in (".", "..") or "/" in value or "\\" in value or "\x00" in value:
+            raise FileNotFoundError(f"Invalid {label}: {value!r}")
+
     # === Cache Management ===
 
     async def get_file_hash(self, filepath: Path) -> str:
@@ -354,6 +365,7 @@ class SessionService:
 
         # Determine which project folders to scan
         if project_folder:
+            self._ensure_safe_path_component(project_folder, "project_folder")
             folders = [self.projects_dir / project_folder]
         else:
             folders = [f for f in self.projects_dir.iterdir() if f.is_dir()]
@@ -424,6 +436,8 @@ class SessionService:
         page: int = 1,
     ) -> SessionDetailResponse:
         """Get full session detail with pagination."""
+        self._ensure_safe_path_component(project_folder, "project_folder")
+        self._ensure_safe_path_component(session_id, "session_id")
         filepath = self.projects_dir / project_folder / f"{session_id}.jsonl"
 
         if not filepath.exists():

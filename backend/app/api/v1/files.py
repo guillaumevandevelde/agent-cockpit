@@ -20,8 +20,8 @@ class DirectoryListing(BaseModel):
 
 
 @router.get("/files", response_model=DirectoryListing, tags=["Files"])
-async def list_directory(path: str = Query(default=str(os.path.expanduser("~")))):
-    resolved = os.path.realpath(os.path.expanduser(path))
+async def list_directory(path: str | None = Query(default=None)):
+    resolved = os.path.realpath(os.path.expanduser(path or "~"))
     if not os.path.isdir(resolved):
         raise HTTPException(status_code=400, detail="Not a directory")
 

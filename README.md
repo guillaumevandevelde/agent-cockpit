@@ -3,6 +3,12 @@
 [![Quality](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/quality.yml/badge.svg)](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/quality.yml)
 [![Security](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/security.yml/badge.svg)](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/security.yml)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="cockpit-rebrand-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="cockpit-rebrand-light.png">
+  <img alt="Claude Cockpit dashboard" src="cockpit-rebrand-light.png">
+</picture>
+
 A self-hosted web application for visualizing and managing local AI coding agents. Provides a unified interface for Claude Code configuration, Codex CLI configuration, MCP servers, plugins, slash commands, hooks, agents, permissions, usage tracking, session transcripts, Agent Bridge, and other local agent extensions.
 
 ## Credits — Forked from claude-deck
@@ -53,6 +59,11 @@ If you only use Claude Code casually with mostly default config, Claude Cockpit 
 - **Backup & Restore** — Create and manage Claude Code backups with selective restore, plus redacted export-only Codex backups
 - **Projects** — Discover and manage project directories
 - **Sandcastle** — Run AI coding agents in isolated sandboxes (Docker, Podman, Vercel) with [sandcastle](https://github.com/mattpocock/sandcastle). Supports parallel execution, kanban integration, scheduled messages, and real-time log streaming
+- **Kanban** — Dispatch work to Claude Code/Codex agents from a kanban board; cards move through columns as agents claim, work, and hand them off, with per-agent performance stats
+- **Scheduled Messages** — Schedule a message for future delivery into a running (or resumable) tmux session, including auto-resume when a session hits its rate limit
+- **Context** — Visualize a session's context window usage over time, including cache efficiency and content breakdown
+- **Presence** — See which tmux panes are active across your agent sessions at a glance
+- **Agent Performance (APM)** — Track per-agent throughput and reliability over time
 
 ## What's New for the Next Release
 
