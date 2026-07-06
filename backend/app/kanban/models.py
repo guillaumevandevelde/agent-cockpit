@@ -45,6 +45,7 @@ class KanbanCard(KanbanBase):
     transport: Mapped[str | None] = mapped_column(String(16), nullable=True)  # worktree | sandcastle | auto (null)
     resume_session_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     resume_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    scheduled_at: Mapped[str | None] = mapped_column(String(40), nullable=True)  # ISO8601; auto-dispatch ignores the card until this time
     claimed_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

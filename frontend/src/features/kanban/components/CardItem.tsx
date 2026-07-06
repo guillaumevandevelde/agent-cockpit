@@ -9,9 +9,15 @@ const PRIORITY_VARIANT: Record<string, BadgeProps["variant"]> = {
   high: "destructive",
 };
 
+function isFutureSchedule(scheduledAt: string | null): boolean {
+  return !!scheduledAt && new Date(scheduledAt).getTime() > Date.now();
+}
+
 export function CardItem({ card, onOpen }: { card: Card; onOpen: (c: Card) => void }) {
   const priority = card.priority && card.priority !== "none" ? card.priority : null;
   const labels = card.labels ?? [];
+  const scheduledAt = card.scheduled_at ?? null;
+  const isPendingSchedule = isFutureSchedule(scheduledAt);
 
   return (
     <UiCard
@@ -44,6 +50,11 @@ export function CardItem({ card, onOpen }: { card: Card; onOpen: (c: Card) => vo
         {card.agent && (
           <Badge variant="secondary" className="text-[10px] font-normal">
             &#129302; {card.agent}
+          </Badge>
+        )}
+        {isPendingSchedule && (
+          <Badge variant="outline" className="text-[10px] font-normal">
+            &#8987; {new Date(scheduledAt!).toLocaleString()}
           </Badge>
         )}
         {card.claimed_by && <span>&#128100; {card.claimed_by}</span>}

@@ -14,6 +14,7 @@ import re
 import subprocess
 import uuid
 from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -614,10 +615,28 @@ _DISPATCH_COLUMNS = ("Backlog", "To Resume")  # new cards from Backlog, resumed 
 _PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
 
 
+def _is_due(card: KanbanCard) -> bool:
+    """True unless `card.scheduled_at` names a not-yet-reached future time.
+
+    A missing or unparseable value is treated as due (fail open) rather than
+    silently hiding a card from auto-dispatch forever over a bad timestamp.
+    """
+    scheduled_at = getattr(card, "scheduled_at", None)
+    if not scheduled_at:
+        return True
+    try:
+        fire_at = datetime.fromisoformat(scheduled_at)
+    except ValueError:
+        return True
+    if fire_at.tzinfo is None:
+        fire_at = fire_at.replace(tzinfo=UTC)
+    return fire_at <= datetime.now(UTC)
+
+
 def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     cards = list(cards)
     for col in _DISPATCH_COLUMNS:
-        col_cards = [c for c in cards if c.column == col and not c.claimed_by]
+        col_cards = [c for c in cards if c.column == col and not c.claimed_by and _is_due(c)]
         if col_cards:
             # list_cards is ordered by rank; stable-sort by priority on top of that
             # so higher-priority cards jump the queue within the same column.
@@ -631,7 +650,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     # human notices and hits "redispatch" by hand (see kanban card "auto dispatch
     # nakijken": auto-dispatch looked stuck even though it was enabled).
     from app.kanban.schemas import COLUMNS
-    orphans = [c for c in cards if c.column not in COLUMNS and not c.claimed_by]
+    orphans = [c for c in cards if c.column not in COLUMNS and not c.claimed_by and _is_due(c)]
     if orphans:
         orphans.sort(key=lambda c: _PRIORITY_RANK.get(c.priority, 0), reverse=True)
         return orphans[0]
@@ -1077,7 +1096,7 @@ async def dispatch_all_pending(
     if transport is None:
         transport = await get_transport_for_project(project_path)
     from app.kanban.service import list_pending_cards
-    pending = await list_pending_cards(session, project_key)
+    pending = [c for c in await list_pending_cards(session, project_key) if _is_due(c)]
     results = []
     for card in pending:
         try:
