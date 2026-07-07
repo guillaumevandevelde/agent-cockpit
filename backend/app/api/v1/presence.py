@@ -3,11 +3,12 @@ import json
 import secrets
 import time
 
+import anyio
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import AsyncSessionLocal, get_db
 from app.models.constants import SessionStatus
 from app.models.schemas import (
     PresenceConfigSnippet,
@@ -169,7 +170,6 @@ async def get_presence_ws_token():
 async def presence_websocket(
     ws: WebSocket,
     token: str = Query(default=""),
-    db: AsyncSession = Depends(get_db),
 ):
     """WebSocket for live presence updates. On connect, sends all current sessions."""
     if settings.api_token:
@@ -178,8 +178,18 @@ async def presence_websocket(
             return
     await manager.connect(ws)
     try:
-        # Send initial state
-        sessions = await service.get_all_sessions(db)
+        # Fetch initial state through a short-lived session — this connection
+        # can stay open indefinitely (it then just idles on receive_text), and
+        # must not hold a pooled DB session/transaction for its whole lifetime.
+        # Shielded: an immediate client disconnect cancels this coroutine, and
+        # if that cancellation lands mid-close it leaks the pooled connection —
+        # whose GC finalizer can then deadlock a *later* asyncio worker thread
+        # (the greenlet-based sync bridge SQLAlchemy uses for aiosqlite isn't
+        # safe to resume from an arbitrary GC callback). Shielding guarantees
+        # the session always finishes closing before the cancellation lands.
+        with anyio.CancelScope(shield=True):
+            async with AsyncSessionLocal() as db:
+                sessions = await service.get_all_sessions(db)
         for s in sessions:
             await ws.send_text(
                 json.dumps({"type": "session_update", "session": s.model_dump()})
