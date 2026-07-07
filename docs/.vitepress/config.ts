@@ -9,6 +9,12 @@ export default defineConfig({
     ['link', { rel: 'icon', href: '/docs/favicon.ico' }],
   ],
 
+  srcExclude: [
+    'plans/**',
+    'superpowers/**',
+    'cockpit/**',
+  ],
+
   themeConfig: {
     logo: '/logo-dark.png',
     siteTitle: 'Claude Cockpit',
@@ -87,12 +93,6 @@ export default defineConfig({
         },
       ],
     },
-
-    srcExclude: [
-      'plans/**',
-      'superpowers/**',
-      'cockpit/**',
-    ],
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/guillaumevandevelde/claude-cockpit' },
