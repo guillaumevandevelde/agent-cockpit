@@ -42,7 +42,6 @@ bash scripts/test_cockpit.sh     # Test the supervisor (bash harness)
 cd frontend && npm run build     # Same as above
 
 # Test
-cd backend && source venv/bin/activate && pytest tests/  # Python tests
 bash backend/test_commands_api.sh                         # Curl-based API tests
 
 # Lint
