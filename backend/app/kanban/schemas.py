@@ -30,6 +30,7 @@ class CardResponse(BaseModel):
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
     scheduled_at: str | None = None  # ISO8601; auto-dispatch ignores the card until this time
+    dispatch_failures: int = 0
     claimed_by: str | None = None
     claimed_at: datetime | None = None
     created_at: datetime

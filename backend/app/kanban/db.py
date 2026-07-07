@@ -109,6 +109,10 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN resume_project_folder VARCHAR(512)")
     if "scheduled_at" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN scheduled_at VARCHAR(40)")
+    if "dispatch_failures" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN dispatch_failures INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 async def _ensure_column_table(conn) -> None:

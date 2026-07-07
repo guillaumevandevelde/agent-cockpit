@@ -40,6 +40,18 @@ DEFAULT_MAX_SESSIONS = 3
 TRANSPORT_PREFIX = "transport:"
 TRANSPORTS = ("worktree", "sandcastle")
 DEFAULT_TRANSPORT = "worktree"
+# A card whose session dies within seconds of being dispatched, this many times in a
+# row with no successful run in between, is flagged to Impediment instead of being
+# retried again — see _release_dead_claim. Without this, a card with a persistently
+# broken spawn target (stale --resume worktree, missing sandcastle config, ...) loops
+# forever: claimed, dead in seconds, reaped, re-claimed by the very next tick.
+MAX_DISPATCH_FAILURES = 3
+# A claim reaped younger than this counts as "dead on arrival" toward
+# MAX_DISPATCH_FAILURES. Observed real spawn failures die in ~4-6s; a session that
+# survived past this age did real work before dying (crash, OOM, manual kill), which
+# says nothing about whether the dispatch *target* itself is broken — see
+# _release_dead_claim.
+DEAD_ON_ARRIVAL_SECONDS = 30
 
 
 # ---- enablement: device-local, stored in KanbanMeta (not part of the op-log) ----
@@ -756,10 +768,25 @@ async def _run_card(
             session, op_type="release", entity_type="card", project_key=project_key,
             entity_id=card.id, payload={},
         )
-        await apply_operation(
-            session, op_type="move", entity_type="card", project_key=project_key,
-            entity_id=card.id, payload={"column": source_column},
-        )
+        # A spawn that fails synchronously (before any session existed — e.g.
+        # resolve_directory raising because a --resume worktree was merged and
+        # GC'd) is unconditionally a dispatch-target failure, same as a tmux
+        # session that dies within seconds (see _release_dead_claim). Counting it
+        # and clearing any stale resume pointer stops the exact same card from
+        # looping forever: move to source_column, immediately re-picked up next
+        # tick, same exception again.
+        await _clear_stale_resume_fields(session, card=card, project_key=project_key)
+        failures = await _bump_dispatch_failures(session, card=card, project_key=project_key)
+        if failures >= MAX_DISPATCH_FAILURES:
+            await _move_to_impediment_after_repeated_failures(
+                session, card=card, project_key=project_key,
+                session_name=name, failures=failures,
+            )
+        else:
+            await apply_operation(
+                session, op_type="move", entity_type="card", project_key=project_key,
+                entity_id=card.id, payload={"column": source_column},
+            )
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
         raise
 
@@ -914,13 +941,139 @@ async def reap_stale_claims(
                 continue
 
         # Fallback: plain release for non-resumable dead sessions
-        await apply_operation(
-            session, op_type="release", entity_type="card",
-            project_key=project_key, entity_id=card.id, payload={},
-        )
-        logger.info("reaped stale claim on card %s (dead session %s)", card.id, name)
+        await _release_dead_claim(session, card=card, project_key=project_key, session_name=name)
         reaped += 1
     return reaped
+
+
+def _claim_age_seconds(card) -> float | None:
+    claimed_at = card.claimed_at
+    if claimed_at is None:
+        return None
+    if claimed_at.tzinfo is None:
+        claimed_at = claimed_at.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - claimed_at).total_seconds()
+
+
+async def _clear_stale_resume_fields(session, *, card, project_key: str) -> None:
+    """Clear a `resume_session_id`/`resume_project_folder` pointer that just failed.
+
+    That pointer can only have survived from an *earlier* dispatch (this attempt's
+    own resolution already failed, or it wouldn't be here) — usually because the
+    worktree it pointed at was since merged and garbage-collected. Left in place,
+    `get_transport_for_card` gives it priority forever, so every future tick retries
+    the exact same broken `--resume <id>` and fails again — permanently wedging the
+    card (this was the actual cause of the "cards starting with 'Create' never
+    start" report: dead-on-arrival tmux sessions AND synchronous spawn failures both
+    stem from this, via two different code paths — see _release_dead_claim and
+    _run_card's except block).
+    """
+    if not (card.resume_session_id or card.resume_project_folder):
+        return
+    await apply_operation(
+        session, op_type="update", entity_type="card",
+        project_key=project_key, entity_id=card.id,
+        payload={"resume_session_id": None, "resume_project_folder": None},
+    )
+
+
+async def _bump_dispatch_failures(session, *, card, project_key: str) -> int:
+    """Increment card.dispatch_failures by one and return the new count.
+
+    Shared by both dispatch-failure paths: a session that dies within seconds in
+    tmux (see _release_dead_claim) and a synchronous spawn exception before any
+    session existed (see _run_card). Both mean the dispatch *target* is broken, not
+    the task itself.
+    """
+    failures = (card.dispatch_failures or 0) + 1
+    await apply_operation(
+        session, op_type="update", entity_type="card",
+        project_key=project_key, entity_id=card.id,
+        payload={"dispatch_failures": failures},
+    )
+    return failures
+
+
+async def _reset_dispatch_failures(session, *, card, project_key: str) -> None:
+    if card.dispatch_failures:
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key=project_key, entity_id=card.id,
+            payload={"dispatch_failures": 0},
+        )
+
+
+async def _move_to_impediment_after_repeated_failures(
+    session, *, card, project_key: str, session_name: str, failures: int,
+) -> None:
+    """Once a card hits MAX_DISPATCH_FAILURES with no successful run in between,
+    move it to Impediment instead of retrying again — a card that can never
+    actually start (bad transport config, missing sandcastle setup, a stale
+    --resume worktree, ...) needs a human, not an infinite retry loop burning
+    dispatch ticks."""
+    await apply_operation(
+        session, op_type="comment", entity_type="comment",
+        project_key=project_key, entity_id=card.id,
+        payload={"text": (
+            f"Session `{session_name}` failed to dispatch {failures} times in a "
+            "row — moved to Impediment instead of retrying again. This usually "
+            "means the dispatch target is broken (a stale --resume worktree, a "
+            "missing sandcastle config, ...) rather than the task itself failing. "
+            "Check the backend logs for the actual spawn error, fix the underlying "
+            "issue, then redispatch."
+        )},
+    )
+    await apply_operation(
+        session, op_type="move", entity_type="card",
+        project_key=project_key, entity_id=card.id, payload={"column": "Impediment"},
+    )
+    await _reset_dispatch_failures(session, card=card, project_key=project_key)
+    logger.warning(
+        "card %s failed to dispatch %d times in a row (session %s) -> moved to Impediment",
+        card.id, failures, session_name,
+    )
+
+
+async def _release_dead_claim(session, *, card, project_key: str, session_name: str) -> None:
+    """Release a claim whose session is gone, with no resumable transcript.
+
+    Gated on the claim having died within DEAD_ON_ARRIVAL_SECONDS of being claimed:
+    a session that ran for a while first proved the dispatch target works, so a
+    later crash is treated as a normal one-off — just release it and clear any
+    prior failure streak. A session dead within that window counts toward
+    MAX_DISPATCH_FAILURES (see _bump_dispatch_failures /
+    _move_to_impediment_after_repeated_failures) and has its resume pointer
+    cleared (see _clear_stale_resume_fields) so a stale one can't be retried
+    forever.
+    """
+    age = _claim_age_seconds(card)
+    dead_on_arrival = age is None or age < DEAD_ON_ARRIVAL_SECONDS
+
+    if not dead_on_arrival:
+        await _reset_dispatch_failures(session, card=card, project_key=project_key)
+        await _clear_stale_resume_fields(session, card=card, project_key=project_key)
+        logger.info(
+            "reaped stale claim on card %s (dead session %s, ran ~%.0fs — not dead-on-arrival)",
+            card.id, session_name, age,
+        )
+    else:
+        await _clear_stale_resume_fields(session, card=card, project_key=project_key)
+        failures = await _bump_dispatch_failures(session, card=card, project_key=project_key)
+        if failures >= MAX_DISPATCH_FAILURES:
+            await _move_to_impediment_after_repeated_failures(
+                session, card=card, project_key=project_key,
+                session_name=session_name, failures=failures,
+            )
+        else:
+            logger.info(
+                "reaped stale claim on card %s (dead session %s, %d/%d consecutive failures)",
+                card.id, session_name, failures, MAX_DISPATCH_FAILURES,
+            )
+
+    await apply_operation(
+        session, op_type="release", entity_type="card",
+        project_key=project_key, entity_id=card.id, payload={},
+    )
 
 
 async def dispatch_project(
@@ -1243,6 +1396,17 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
                 )
             except Exception:
                 logger.exception("dispatch tick failed for %s", project_key)
+                # _run_card's except block already applied compensating ops (release
+                # the claim, clear a stale resume pointer, bump dispatch_failures,
+                # move back / to Impediment) before re-raising -- those are flushed
+                # to this session but NOT yet committed. Without this commit, `async
+                # with`'s implicit close-without-commit silently discards every one
+                # of them, so the card comes back exactly as it started: still
+                # claimable, resume pointer still stale, failure count still zero.
+                # That turned a designed one-shot compensation into a true infinite
+                # loop -- the actual mechanism behind the "cards starting with
+                # 'Create' never start" report for synchronous spawn failures.
+                await ks.commit()
 
 
 def _kill_agent_session(session_name: str) -> None:

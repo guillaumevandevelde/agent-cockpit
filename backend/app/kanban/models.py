@@ -46,6 +46,11 @@ class KanbanCard(KanbanBase):
     resume_session_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     resume_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
     scheduled_at: Mapped[str | None] = mapped_column(String(40), nullable=True)  # ISO8601; auto-dispatch ignores the card until this time
+    # Consecutive dispatch-target failures (spawn died within seconds, or raised
+    # synchronously before any session existed). Reset once a dispatch runs long
+    # enough to prove the target works, or when the streak trips the Impediment
+    # move. See dispatch.MAX_DISPATCH_FAILURES / dispatch._release_dead_claim.
+    dispatch_failures: Mapped[int] = mapped_column(Integer, default=0)
     claimed_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

@@ -2199,3 +2199,231 @@ async def test_run_dispatch_tick_runs_normally_when_not_paused(monkeypatch):
 
     retry_mock.assert_called_once()
     list_mock.assert_called_once()
+
+
+# ---- dead-on-arrival circuit breaker (dispatch_failures -> Impediment) ----
+#
+# A session that dies within seconds of being claimed (stale --resume worktree,
+# missing sandcastle config, ...) used to loop forever: claimed, reaped as dead,
+# re-claimed by the very next tick, dead again. reap_stale_claims now counts
+# consecutive dead-on-arrival reaps per card and moves it to Impediment after
+# MAX_DISPATCH_FAILURES instead of retrying forever.
+
+async def _backdate_claim(s, card_id: str, seconds_ago: float) -> None:
+    """Rewrite a card's claimed_at directly (bypassing the op-log) to simulate a
+    session that ran for a while before dying, rather than dying on arrival."""
+    from datetime import datetime, timedelta
+
+    card = await s.get(KanbanCard, card_id)
+    card.claimed_at = datetime.now(UTC) - timedelta(seconds=seconds_ago)
+    await s.flush()
+
+
+@pytest.mark.asyncio
+async def test_reap_increments_dispatch_failures_on_dead_on_arrival():
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="doa", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-doa-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK), live_sessions=set())
+        await s.commit()
+        card = await get_card(s, cid)
+    assert reaped == 1
+    assert card.claimed_by is None
+    assert card.dispatch_failures == 1
+    assert card.column == "engineer"  # still under MAX_DISPATCH_FAILURES, not moved
+
+
+@pytest.mark.asyncio
+async def test_reap_moves_to_impediment_after_max_dispatch_failures():
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="doa", column="engineer")
+        await s.commit()
+
+    for _ in range(dispatch.MAX_DISPATCH_FAILURES):
+        async with KanbanSessionLocal() as s:
+            await apply_operation(
+                s, op_type="claim", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"claimed_by": "agent:k-doa-0002"},
+            )
+            await s.commit()
+            await dispatch.reap_stale_claims(
+                s, project_key=PK, cards=await list_cards(s, PK), live_sessions=set())
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    assert card.column == "Impediment"
+    assert card.claimed_by is None
+    assert card.dispatch_failures == 0  # reset so a future redispatch starts fresh
+
+
+@pytest.mark.asyncio
+async def test_reap_clears_stale_resume_fields_on_dead_on_arrival():
+    # A resume_session_id/resume_project_folder pointing at a worktree that was
+    # since merged and GC'd would otherwise be retried forever by
+    # get_transport_for_card, dying in seconds every time.
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stale-resume", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"resume_session_id": "old-session",
+                                     "resume_project_folder": "-old-worktree"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-stale-0001"},
+        )
+        await s.commit()
+        await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK), live_sessions=set())
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.resume_session_id is None
+    assert card.resume_project_folder is None
+    assert card.dispatch_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_reap_does_not_count_failure_for_long_running_claim():
+    # A session that ran for a while before dying (real crash, OOM, manual kill)
+    # proved the dispatch target itself works -- must not count toward the
+    # dead-on-arrival circuit breaker.
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="ran-a-while", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-ran-0001"},
+        )
+        await s.commit()
+        await _backdate_claim(s, cid, dispatch.DEAD_ON_ARRIVAL_SECONDS + 10)
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK), live_sessions=set())
+        await s.commit()
+        card = await get_card(s, cid)
+    assert reaped == 1
+    assert card.claimed_by is None
+    assert card.dispatch_failures == 0
+    assert card.column == "engineer"
+
+
+@pytest.mark.asyncio
+async def test_repeated_synchronous_spawn_failures_move_to_impediment():
+    # A synchronous spawn exception (e.g. resolve_directory raising because a
+    # --resume worktree was merged and GC'd -- the "voorbereiding public repo"
+    # case) is a different code path from the tmux dead-session reaper, but must
+    # trip the same MAX_DISPATCH_FAILURES circuit breaker instead of looping
+    # forever between source_column and a fresh claim.
+    transport = RecordingTransport(fail=True)
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="always-fails", column="To Resume")
+        await s.commit()
+
+    for _ in range(dispatch.MAX_DISPATCH_FAILURES):
+        async with KanbanSessionLocal() as s:
+            with pytest.raises(RuntimeError):
+                await dispatch.dispatch_project(
+                    s, project_key=PK, project_path="/p", transport=transport,
+                )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    assert card.column == "Impediment"
+    assert card.claimed_by is None
+    assert card.dispatch_failures == 0
+    assert len(transport.calls) == dispatch.MAX_DISPATCH_FAILURES
+
+
+@pytest.mark.asyncio
+async def test_synchronous_spawn_failure_clears_stale_resume_fields():
+    transport = RecordingTransport(fail=True)
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stale-resume-spawn", column="To Resume")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"resume_session_id": "old-session",
+                                     "resume_project_folder": "-old-worktree"},
+        )
+        await s.commit()
+        with pytest.raises(RuntimeError):
+            await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p", transport=transport,
+            )
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.resume_session_id is None
+    assert card.resume_project_folder is None
+    assert card.dispatch_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_reap_resets_failure_streak_after_long_running_claim():
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="recovering", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"dispatch_failures": 2},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-recover-0001"},
+        )
+        await s.commit()
+        await _backdate_claim(s, cid, dispatch.DEAD_ON_ARRIVAL_SECONDS + 10)
+        await s.commit()
+        await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK), live_sessions=set())
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.dispatch_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_run_dispatch_tick_commits_compensating_ops_on_spawn_failure(monkeypatch):
+    """Regression test for a real bug found live on this project's own board: a card
+    stuck in "To Resume" with a resume_session_id pointing at a merged/GC'd worktree
+    kept failing to spawn (ValueError from resolve_directory) every ~10s tick,
+    forever, with the card ending each cycle in *exactly* the state it started --
+    no failure count, no cleared resume pointer, not even the claim released.
+
+    Root cause: run_dispatch_tick's per-project `except Exception:` branch logged
+    the failure but never called `ks.commit()`. _run_card's except block *does*
+    apply compensating ops (release the claim, clear the stale resume pointer, bump
+    dispatch_failures, move back / to Impediment) before re-raising, but those were
+    only flushed, not committed -- the `async with KanbanSessionLocal()` block's
+    implicit close-without-commit silently discarded all of them. This test exercises
+    the real run_dispatch_tick entrypoint (not dispatch_project directly, which is
+    what the other spawn-failure tests use and why this bug went unnoticed) and
+    asserts the compensating ops actually persist."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    monkeypatch.setattr(dispatch, "list_autodispatch_projects",
+                        mock.AsyncMock(return_value=[PK]))
+    monkeypatch.setattr(dispatch, "match_project_paths", lambda *a, **kw: {PK: "/p"})
+    monkeypatch.setattr(dispatch, "_live_sessions", lambda: set())
+    monkeypatch.setattr(dispatch, "_live_sandcastle_sessions",
+                        mock.AsyncMock(return_value=set()))
+
+    transport = RecordingTransport(fail=True)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="always-fails", column="Backlog")
+        await s.commit()
+
+    await dispatch.run_dispatch_tick(transport=transport)
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    assert card.column == "Backlog"        # compensating move-back was committed
+    assert card.claimed_by is None         # compensating release was committed
+    assert card.dispatch_failures == 1     # circuit-breaker counter was committed
+    assert len(transport.calls) == 1

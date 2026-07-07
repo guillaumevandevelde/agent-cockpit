@@ -169,7 +169,8 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 if f in payload and payload[f] is not None:
                     _lww_set(card, f, payload[f], hlc)
             for f in ("priority", "labels", "agent", "transport",
-                      "resume_session_id", "resume_project_folder", "scheduled_at"):
+                      "resume_session_id", "resume_project_folder", "scheduled_at",
+                      "dispatch_failures"):
                 if f in payload:
                     setattr(card, f, payload[f])
         card.updated_at = _utcnow()
