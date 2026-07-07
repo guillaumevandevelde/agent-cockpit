@@ -95,6 +95,26 @@ Codex support is explicit about provider boundaries: usage/context parity and se
 | ![Agent Bridge](screenshots/cc-bridge.png) | ![Skills](screenshots/skills.png) |
 | Monitor and interact with Claude Code and Codex tmux sessions | Browse installed skills and discover new ones |
 
+| Kanban | Scheduled Messages |
+|--------|---------------------|
+| ![Kanban](screenshots/kanban.png) | ![Scheduled Messages](screenshots/scheduled-messages.png) |
+| Dispatch cards to agents, track progress across Backlog/Impediment/Done | Schedule messages to be injected into Claude Code sessions on a timer or cron |
+
+| Sandcastle | Codex Config |
+|------------|--------------|
+| ![Sandcastle](screenshots/sandcastle.png) | ![Codex Config](screenshots/codex-config.png) |
+| Run coding agents in isolated Docker/Podman containers, with live container status | View and edit Codex CLI's TOML configuration |
+
+| Presence | Context |
+|----------|---------|
+| ![Presence](screenshots/presence.png) | ![Context](screenshots/context.png) |
+| Real-time monitoring of Claude Code session activity | Visualize context window usage and cache efficiency over a session |
+
+| Agent Performance |
+|--------------------|
+| ![Agent Performance](screenshots/agent-performance.png) |
+| Time per task, success rate, and token use per agent, derived from the kanban op-log |
+
 ## Tech Stack
 
 | Layer | Technology |
