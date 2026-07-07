@@ -30,7 +30,7 @@ Resterend:
 
 ## Omgeving
 
-- **WSL Ubuntu 25.10**, user `guillaume` (non-root, sudo).
+- **WSL Ubuntu 25.10**, non-root user with sudo.
 - Geïnstalleerd: **tmux 3.6**, **Node 20.20**, **git 2.53**, **claude CLI 2.1.173**.
 - **Docker** via Docker Desktop WSL-integratie — moet aan staan voor deze distro.
 - `claude` moet ingelogd zijn (run `claude` eenmalig en volg browser-auth).
