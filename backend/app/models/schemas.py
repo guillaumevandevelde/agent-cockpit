@@ -1892,6 +1892,7 @@ class SystemStatusResponse(BaseModel):
     claude_code_version: str | None = None
     active_sessions: int = 0
     providers: dict[str, Any] = Field(default_factory=dict)
+    scheduling_hooks_installed: bool = False
 
 
 # Shared generic response models
