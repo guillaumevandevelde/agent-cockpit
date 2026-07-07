@@ -67,13 +67,15 @@ async def get_column(session, column_id: str):
 
 
 async def create_column(session, project_key: str, name: str,
-                        rank: str | None = None, default_agent: str | None = None):
+                        rank: str | None = None, default_agent: str | None = None,
+                        default_platform: str | None = None):
     col = KanbanColumn(
         id=uuid.uuid4().hex,
         project_key=project_key,
         name=name,
         rank=rank or uuid.uuid4().hex,
         default_agent=default_agent,
+        default_platform=default_platform,
     )
     session.add(col)
     await session.flush()
@@ -110,6 +112,19 @@ async def get_column_default_agent(session, project_key: str, column_name: str) 
     )
     col = (await session.execute(stmt)).scalar_one_or_none()
     return col.default_agent if col else None
+
+
+async def get_column_default_platform(session, project_key: str, column_name: str) -> str | None:
+    """Look up the default platform (anthropic | bedrock | minimax) for a column
+    name within a project. None means no override — the dispatcher falls back to
+    the Anthropic subscription."""
+    stmt = (
+        select(KanbanColumn)
+        .where(KanbanColumn.project_key == project_key)
+        .where(KanbanColumn.name == column_name)
+    )
+    col = (await session.execute(stmt)).scalar_one_or_none()
+    return col.default_platform if col else None
 
 
 async def list_pending_cards(session, project_key: str) -> list[KanbanCard]:

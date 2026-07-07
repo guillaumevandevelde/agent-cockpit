@@ -42,6 +42,34 @@ async def test_card_activity_returns_oplog_for_card():
         feed = await service.card_activity(s, cid)
         assert [e.op_type for e in feed] == ["create", "comment"]
 
+
+@pytest.mark.asyncio
+async def test_column_default_platform_roundtrip():
+    async with KanbanSessionLocal() as s:
+        col = await service.create_column(
+            s, project_key="A", name="engineer", default_agent="engineer",
+            default_platform="minimax",
+        )
+        await s.commit()
+        assert col.default_platform == "minimax"
+        assert await service.get_column_default_platform(s, "A", "engineer") == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_column_default_platform_missing_column_returns_none():
+    async with KanbanSessionLocal() as s:
+        assert await service.get_column_default_platform(s, "A", "no-such-column") is None
+
+
+@pytest.mark.asyncio
+async def test_update_column_can_set_default_platform():
+    async with KanbanSessionLocal() as s:
+        col = await service.create_column(s, project_key="A", name="engineer")
+        await s.commit()
+        updated = await service.update_column(s, col.id, default_platform="minimax")
+        await s.commit()
+        assert updated.default_platform == "minimax"
+
 # NOTE: the sync-seam tests (ops_since / ingest_ops convergence + idempotent replay)
 # were removed when sync.py was pruned. See docs/cockpit/sync-hlc-freeze-vs-prune.md.
 # Idempotent HLC-ordered replay of the *local* op-log stays covered by
