@@ -84,7 +84,16 @@ export default function KanbanPage() {
       if (document.hidden || draggingRef.current || mutatingRef.current > 0) return;
       void reload();
     }, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    const handleVisibility = () => {
+      if (!document.hidden && !draggingRef.current && mutatingRef.current === 0) {
+        void reload();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [projectKey, reload]);
 
   const orphanCount = useMemo(
