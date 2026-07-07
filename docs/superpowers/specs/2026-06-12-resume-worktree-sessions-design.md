@@ -14,14 +14,14 @@ Two root causes:
 
 1. **Picker is scoped to one project folder.** The resume picker fetches sessions
    for `claudeProjectFolderFromPath(directory)`, where `directory` defaults to the
-   active/main project (`/home/guillaume/dev/claude-cockpit`). Claude stores
+   active/main project (`/home/user/dev/claude-cockpit`). Claude stores
    transcripts per working directory, so a worktree lives under a *separate*
    folder, e.g.:
 
    | Started in | Claude project folder |
    |---|---|
-   | main repo | `-home-guillaume-dev-claude-cockpit` |
-   | worktree `Kanban-plan` | `-home-guillaume-dev-claude-cockpit--claude-worktrees-Kanban-plan` |
+   | main repo | `-home-user-dev-claude-cockpit` |
+   | worktree `Kanban-plan` | `-home-user-dev-claude-cockpit--claude-worktrees-Kanban-plan` |
 
    Worktree directories are not offered in the project dropdown either (project
    discovery ignores `.claude/worktrees/`), so they can only be reached by typing
@@ -35,7 +35,7 @@ Two root causes:
 
 The backend transcript-based resolver (`_resolve_project_directory`) already reads
 the recorded `cwd` correctly — confirmed it returns
-`/home/guillaume/dev/claude-cockpit/.claude/worktrees/Kanban-plan` for the real
+`/home/user/dev/claude-cockpit/.claude/worktrees/Kanban-plan` for the real
 `Kanban-plan` session. The gap is purely in surfacing and selecting the session,
 plus the directory-resolution precedence for resume.
 
@@ -129,7 +129,7 @@ No change to `SpawnRequest`/`SpawnCommandOptions` — they already carry
 
 **Manual:**
 - Resume the real `Kanban-plan` session through the dialog; confirm the tmux
-  session opens in `/home/guillaume/dev/claude-cockpit/.claude/worktrees/Kanban-plan`
+  session opens in `/home/user/dev/claude-cockpit/.claude/worktrees/Kanban-plan`
   and Claude resumes the transcript.
 - Rebuild frontend (`npm run build`) since the app is served from `frontend/dist`.
 

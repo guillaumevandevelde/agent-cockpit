@@ -177,9 +177,9 @@ def test_encode_project_folder_matches_claude_layout():
     from app.services.agent_bridge.resumable import _encode_project_folder
 
     encoded = _encode_project_folder(
-        "/home/guillaume/dev/claude-cockpit/.claude/worktrees/Kanban-plan"
+        "/home/user/dev/claude-cockpit/.claude/worktrees/Kanban-plan"
     )
-    assert encoded == "-home-guillaume-dev-claude-cockpit--claude-worktrees-Kanban-plan"
+    assert encoded == "-home-user-dev-claude-cockpit--claude-worktrees-Kanban-plan"
 
 
 @pytest.mark.asyncio
@@ -390,7 +390,7 @@ async def list_resumable_sessions_endpoint(
 
 Start the backend if not running (`cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000`), then in another shell:
 
-Run: `curl -s "http://localhost:8000/api/v1/agent-bridge/resumable-sessions?directory=/home/guillaume/dev/claude-cockpit&limit=20" | python3 -m json.tool | head -40`
+Run: `curl -s "http://localhost:8000/api/v1/agent-bridge/resumable-sessions?directory=/home/user/dev/claude-cockpit&limit=20" | python3 -m json.tool | head -40`
 Expected: JSON `{"sessions": [...]}` that includes at least one session with `"worktree_label": "Kanban-plan"` (the real worktree session), alongside `"main"` sessions.
 
 - [ ] **Step 4: Run the full backend test suite**
@@ -570,7 +570,7 @@ Ensure backend is running on :8000 (it serves `frontend/dist`). Open the app and
 
 - [ ] **Step 2: Open New Session → Resume**
 
-- Provider: Claude Code. Mode: Resume. Directory: `/home/guillaume/dev/claude-cockpit` (the main project).
+- Provider: Claude Code. Mode: Resume. Directory: `/home/user/dev/claude-cockpit` (the main project).
 - Expected: the picker lists sessions from the main repo **and** the worktrees, each with a badge: `main`, `Kanban-plan`, `containerized-option`, `notification-long-task`.
 
 - [ ] **Step 3: Resume the real worktree session**
@@ -581,7 +581,7 @@ Ensure backend is running on :8000 (it serves `frontend/dist`). Open the app and
 - [ ] **Step 4: Confirm it launched in the worktree directory**
 
 Run: `tmux list-panes -a -F "#{session_name} #{pane_current_path}" | grep -i kanban`
-Expected: the pane's current path is `/home/guillaume/dev/claude-cockpit/.claude/worktrees/Kanban-plan` (not the main repo).
+Expected: the pane's current path is `/home/user/dev/claude-cockpit/.claude/worktrees/Kanban-plan` (not the main repo).
 
 - [ ] **Step 5: Final commit if any verification tweaks were needed**
 
