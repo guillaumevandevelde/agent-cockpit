@@ -19,7 +19,7 @@ export default defineConfig({
       { text: 'API Reference', link: '/api/' },
       {
         text: 'v1.3.0',
-        link: 'https://github.com/adrirubio/claude-deck/blob/master/CHANGELOG.md',
+        link: 'https://github.com/guillaumevandevelde/claude-cockpit/blob/master/CHANGELOG.md',
       },
     ],
 
@@ -91,10 +91,11 @@ export default defineConfig({
     srcExclude: [
       'plans/**',
       'superpowers/**',
+      'cockpit/**',
     ],
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/adrirubio/claude-deck' },
+      { icon: 'github', link: 'https://github.com/guillaumevandevelde/claude-cockpit' },
     ],
 
     search: {
@@ -102,7 +103,7 @@ export default defineConfig({
     },
 
     editLink: {
-      pattern: 'https://github.com/adrirubio/claude-deck/edit/master/docs/:path',
+      pattern: 'https://github.com/guillaumevandevelde/claude-cockpit/edit/master/docs/:path',
       text: 'Edit this page on GitHub',
     },
 
