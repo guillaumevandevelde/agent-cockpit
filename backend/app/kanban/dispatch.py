@@ -21,8 +21,9 @@ from typing import Protocol
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
-from app.kanban.service import get_card, list_cards
+from app.kanban.service import get_card, get_column_default_platform, list_cards
 from app.services.memory_monitor import get_memory_status_cached
+from app.services.providers.platform_env import PLATFORM_ANTHROPIC
 
 logger = logging.getLogger(__name__)
 
@@ -408,7 +409,7 @@ def _build_ship_instructions(ship_mode: str) -> str:
 
 class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str,
-                 provider_id: str = "claude-code") -> dict: ...
+                 provider_id: str = "claude-code", platform: str = "anthropic") -> dict: ...
 
 
 def _known_provider_ids() -> set[str]:
@@ -423,8 +424,9 @@ def _known_provider_ids() -> set[str]:
 def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass."""
     def _transport(*, directory: str, prompt: str, session_name: str,
-                   provider_id: str = "claude-code") -> dict:
-        """Create a worktree off origin/master, then spawn a `provider_id` session in it.
+                   provider_id: str = "claude-code", platform: str = "anthropic") -> dict:
+        """Create a worktree off origin/master, then spawn a `provider_id` session in it,
+        against the given `platform` subscription (anthropic | bedrock | minimax).
 
         Raises MemoryLimitExceeded if hardware memory limits are reached.
         """
@@ -452,6 +454,7 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
             skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
+            platform=platform,
         )
         try:
             return spawn_session(provider_id, options, session_name=session_name)
@@ -474,11 +477,12 @@ _sandcastle_start_tasks: set = set()
 
 
 def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
-                         provider_id: str = "claude-code") -> dict:
+                         provider_id: str = "claude-code", platform: str = "anthropic") -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
 
-    `provider_id` is accepted for transport-signature parity but ignored: sandcastle
-    runs use the per-project sandcastle config's `agent_provider`, not the card's.
+    `provider_id` and `platform` are accepted for transport-signature parity but
+    ignored: sandcastle runs use the per-project sandcastle config's `agent_provider`,
+    not the card's or column's.
 
     Runs the agent in a Docker/Podman container. The actual run is kicked off
     asynchronously; this function returns immediately after scheduling it.
@@ -758,11 +762,15 @@ async def _run_card(
     # Load persona for the target agent
     persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
+    # The target column decides which subscription/vendor the spawn authenticates
+    # against (see KanbanColumn.default_platform); unset means the dispatcher's own
+    # default, the Anthropic subscription.
+    platform = await get_column_default_platform(session, project_key, target_agent) or PLATFORM_ANTHROPIC
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         impediment_question=impediment_question)
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
-                                 provider_id=provider_id)
+                                 provider_id=provider_id, platform=platform)
     except Exception:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
@@ -1456,7 +1464,7 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
     recorded cwd (via project_folder), and spawns with ``--resume session_id``.
     """
     def _transport(*, directory: str, prompt: str, session_name: str,
-                   provider_id: str = "claude-code") -> dict:
+                   provider_id: str = "claude-code", platform: str = "anthropic") -> dict:
         from app.services.agent_bridge.spawn import spawn_session
         from app.services.providers.base import SpawnCommandOptions
         from app.services.scheduling.session_registry import session_registry
@@ -1475,6 +1483,7 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             project_folder=project_folder,
             prompt=prompt,
             skip_permissions=skip_permissions,
+            platform=platform,
         )
         return spawn_session(provider_id, options, session_name=session_name)
 

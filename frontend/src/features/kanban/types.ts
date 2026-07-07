@@ -4,12 +4,16 @@ export type Column = string;
 export const PRIORITIES = ["none", "low", "medium", "high"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
+export const PLATFORMS = ["anthropic", "bedrock", "minimax"] as const;
+export type Platform = (typeof PLATFORMS)[number];
+
 export interface KanbanColumn {
   id: string;
   project_key: string;
   name: string;
   rank: string;
   default_agent: string | null;
+  default_platform: string | null;
   created_at: string;
   updated_at: string;
 }

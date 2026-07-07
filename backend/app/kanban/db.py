@@ -132,3 +132,8 @@ async def _ensure_column_table(conn) -> None:
             )
         """)
         await conn.exec_driver_sql("CREATE INDEX ix_kanban_columns_project_key ON kanban_columns (project_key)")
+
+    rows = (await conn.exec_driver_sql("PRAGMA table_info(kanban_columns)")).fetchall()
+    cols = {r[1] for r in rows}
+    if "default_platform" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN default_platform VARCHAR(16)")

@@ -90,6 +90,11 @@ class KanbanColumn(KanbanBase):
     name: Mapped[str] = mapped_column(String(128))
     rank: Mapped[str] = mapped_column(String(64), default="")
     default_agent: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Which subscription/vendor cards dispatched into this column spawn against
+    # (anthropic | bedrock | minimax, see platform_env.py). None means the
+    # dispatcher's own default (anthropic). Orthogonal to default_agent, which
+    # picks the CLI/persona, not the backend the CLI authenticates against.
+    default_platform: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
