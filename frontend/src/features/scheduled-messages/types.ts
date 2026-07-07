@@ -80,3 +80,8 @@ export interface AutoResumeStatus {
   cwd: string
   enabled: boolean
 }
+
+export interface HooksStatus {
+  events: Record<string, boolean>
+  installed: boolean
+}

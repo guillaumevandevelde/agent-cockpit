@@ -26,6 +26,7 @@ import { CLICKABLE_CARD, MODAL_SIZES } from '@/lib/constants'
 import { listScheduledMessages, deleteScheduledMessage, updateScheduledMessage, deleteScheduledMessageHistory } from './api'
 import { ScheduledMessageForm } from './components/ScheduledMessageForm'
 import { DeliveryLog } from './components/DeliveryLog'
+import { HooksStatusBanner } from './components/HooksStatusBanner'
 import type { ScheduledMessage, MessageStatus } from './types'
 
 function StatusBadge({ status }: { status: MessageStatus }) {
@@ -196,6 +197,8 @@ export function ScheduledMessagesPage() {
           </Button>
         </div>
       </div>
+
+      <HooksStatusBanner />
 
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-3">

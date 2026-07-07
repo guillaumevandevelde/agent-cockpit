@@ -15,6 +15,7 @@ from app.models.scheduled_message_schemas import (
     ScheduledMessageUpdate,
 )
 from app.services.scheduling.auto_resume import auto_resume_service
+from app.services.scheduling.hook_installer import get_hooks_status, install_missing_hooks
 from app.services.scheduling.idle_state import idle_state
 from app.services.scheduling.scheduler import scheduler_service
 from app.services.scheduling.session_registry import session_registry
@@ -191,3 +192,22 @@ async def hook_event(ev: HookEvent):
             )
 
     return {"ok": True}
+
+
+@router.get("/hooks-status")
+async def hooks_status():
+    """Whether the four CC hooks that feed this pipeline are installed.
+
+    Without them, ``/hook-event`` above is never called, so limit detection
+    and auto-resume are silently dead — see
+    docs/cockpit/analyse-sessie-limieten-claude-code.md.
+    """
+    events = get_hooks_status()
+    return {"events": events, "installed": all(events.values())}
+
+
+@router.post("/hooks-install")
+async def hooks_install():
+    """Additively install any missing scheduling hooks in ~/.claude/settings.json."""
+    events = install_missing_hooks()
+    return {"events": events, "installed": all(events.values())}

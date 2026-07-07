@@ -13,6 +13,7 @@ from app.models.schemas import SystemStatusResponse
 from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
 from app.services.presence_service import PresenceService
 from app.services.providers import get_provider, get_providers
+from app.services.scheduling.hook_installer import get_hooks_status
 
 router = APIRouter()
 
@@ -53,19 +54,26 @@ async def _get_provider_statuses() -> dict[str, Any]:
     return {status["id"]: status for status in statuses}
 
 
+async def _get_scheduling_hooks_installed() -> bool:
+    hooks = await asyncio.to_thread(get_hooks_status)
+    return all(hooks.values())
+
+
 @router.get("/status", response_model=SystemStatusResponse)
 async def get_system_status(db: AsyncSession = Depends(get_db)):
     """Return system status for header indicators."""
-    version, active_count, provider_statuses = await asyncio.gather(
+    version, active_count, provider_statuses, hooks_installed = await asyncio.gather(
         _get_claude_code_version(),
         _get_active_count(db),
         _get_provider_statuses(),
+        _get_scheduling_hooks_installed(),
     )
 
     return SystemStatusResponse(
         claude_code_version=version,
         active_sessions=active_count,
         providers=provider_statuses,
+        scheduling_hooks_installed=hooks_installed,
     )
 
 
