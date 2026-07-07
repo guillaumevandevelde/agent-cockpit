@@ -2341,8 +2341,13 @@ async def test_repeated_synchronous_spawn_failures_move_to_impediment():
 
 
 @pytest.mark.asyncio
-async def test_synchronous_spawn_failure_clears_stale_resume_fields():
+async def test_synchronous_spawn_failure_clears_stale_resume_fields(monkeypatch):
+    # The card has resume_session_id set, so get_transport_for_card always picks
+    # the resume transport over the `transport` passed to dispatch_project (see
+    # get_transport_for_card) -- patch make_resume_transport itself so the failure
+    # is deterministic instead of depending on real ~/.claude/projects contents.
     transport = RecordingTransport(fail=True)
+    monkeypatch.setattr(dispatch, "make_resume_transport", lambda *a, **k: transport)
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="stale-resume-spawn", column="To Resume")
         await apply_operation(
