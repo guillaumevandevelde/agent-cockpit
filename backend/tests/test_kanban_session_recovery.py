@@ -5,6 +5,7 @@ import os
 import pytest
 import pytest_asyncio
 
+from app.kanban import dispatch
 from app.kanban import session_recovery as recovery
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card
@@ -187,6 +188,72 @@ async def test_recover_project_ignores_live_human_and_fixed_columns():
 
     assert recovered == []
     assert called == []
+
+
+@pytest.mark.asyncio
+async def test_recover_project_respects_max_sessions_cap():
+    """Startup recovery must never resume more sessions than the project's
+    configured cap allows -- otherwise a project that accumulated more dead
+    claims than its cap (e.g. via repeated dev-server restarts) bursts all of
+    them back to life at once, blowing straight past "Max sessions: N"."""
+    calls = []
+
+    async def fake_redispatch(session, *, card_id, project_path):
+        calls.append(card_id)
+        return {"card_id": card_id, "session_name": f"k-new-{card_id}"}
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 2)
+        dead_cards = [
+            await _make_card(s, title=f"wip-{i}", column="engineer")
+            for i in range(3)
+        ]
+        for i, cid in enumerate(dead_cards):
+            await _claim(s, cid, f"agent:k-dead-{i}")
+        await s.commit()
+
+        recovered = await recovery.recover_project(
+            s, project_key=PK, project_path="/p", live_sessions=set(),
+            resolve=lambda p, n: ("s", "f"), redispatch=fake_redispatch,
+        )
+        await s.commit()
+
+    # Cap is 2 -> only 2 of the 3 dead sessions may be resumed this pass.
+    assert len(recovered) == 2
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_recover_project_counts_live_sessions_against_cap_budget():
+    """A card whose session is already live still occupies a cap slot, so
+    recovery must leave that slot out of its budget for resuming dead ones."""
+    calls = []
+
+    async def fake_redispatch(session, *, card_id, project_path):
+        calls.append(card_id)
+        return {"card_id": card_id, "session_name": f"k-new-{card_id}"}
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 2)
+        alive = await _make_card(s, title="alive", column="engineer")
+        await _claim(s, alive, "agent:k-alive-0001")
+        dead_cards = [
+            await _make_card(s, title=f"wip-{i}", column="engineer")
+            for i in range(2)
+        ]
+        for i, cid in enumerate(dead_cards):
+            await _claim(s, cid, f"agent:k-dead-{i}")
+        await s.commit()
+
+        recovered = await recovery.recover_project(
+            s, project_key=PK, project_path="/p", live_sessions={"k-alive-0001"},
+            resolve=lambda p, n: ("s", "f"), redispatch=fake_redispatch,
+        )
+        await s.commit()
+
+    # Cap is 2, one slot already taken by the live session -> only 1 free slot.
+    assert len(recovered) == 1
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
