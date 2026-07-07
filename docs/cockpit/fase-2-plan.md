@@ -94,7 +94,7 @@ async def test_create_scheduled_message():
         await conn.run_sync(Base.metadata.create_all)
     async with AsyncSessionLocal() as s:
         msg = ScheduledMessage(
-            target_project="/home/guillaume/dev/x",
+            target_project="/home/dev/project-x",
             message="run tests",
             trigger_type="once",
             fire_at="2026-06-12T09:00:00+02:00",

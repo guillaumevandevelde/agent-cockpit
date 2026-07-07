@@ -62,7 +62,7 @@ async def test_process_event_stores_and_exposes_tmux_pane():
             {
                 "session_id": "sess-pane-1",
                 "hook_event_name": "UserPromptSubmit",
-                "cwd": "/home/guillaume/dev/x",
+                "cwd": "/home/dev/project-x",
                 "tmux_pane": "%7",
             },
             db,
@@ -81,7 +81,7 @@ async def test_absent_tmux_pane_does_not_overwrite_existing():
             {
                 "session_id": "sess-pane-2",
                 "hook_event_name": "UserPromptSubmit",
-                "cwd": "/home/guillaume/dev/y",
+                "cwd": "/home/dev/project-y",
                 "tmux_pane": "%3",
             },
             db,
@@ -91,7 +91,7 @@ async def test_absent_tmux_pane_does_not_overwrite_existing():
             {
                 "session_id": "sess-pane-2",
                 "hook_event_name": "Stop",
-                "cwd": "/home/guillaume/dev/y",
+                "cwd": "/home/dev/project-y",
             },
             db,
         )

@@ -7,7 +7,7 @@ Dit is een **fork** van claude-deck, hernoemd naar **Claude Cockpit**. We bouwen
 - **NU bezig — FASE 1 VALIDATIE:** `docs/cockpit/fase-1-validation.md`
   (bevestigen dat claude-deck's CC Bridge werkt onder WSL; **bouw nog niets van fase 2**).
 - **Fase 2-ontwerp (na validatie):** `docs/cockpit/fase-2-spec.md`
-- **Omgeving:** WSL Ubuntu, user `guillaume`, Docker (`docker compose up -d` → :8000), tmux, claude CLI.
+- **Omgeving:** WSL Ubuntu, Docker (`docker compose up -d` → :8000), tmux, claude CLI.
 
 Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur etc.).
 
