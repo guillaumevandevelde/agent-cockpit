@@ -7,6 +7,7 @@ import type {
   DeliveryAttempt,
   ResumableSession,
   AutoResumeStatus,
+  HooksStatus,
 } from './types'
 
 const BASE = 'scheduled-messages'
@@ -62,4 +63,12 @@ export async function cancelAutoResume(cwd: string): Promise<{ cwd: string; canc
   return apiClient<{ cwd: string; cancelled: boolean }>(`${BASE}/auto-resume/${encodeURIComponent(cwd)}`, {
     method: 'DELETE',
   })
+}
+
+export async function getHooksStatus(): Promise<HooksStatus> {
+  return apiClient<HooksStatus>(`${BASE}/hooks-status`)
+}
+
+export async function installHooks(): Promise<HooksStatus> {
+  return apiClient<HooksStatus>(`${BASE}/hooks-install`, { method: 'POST' })
 }

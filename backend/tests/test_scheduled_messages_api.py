@@ -216,3 +216,29 @@ async def test_hook_event_limit_notification_without_reset_time_does_not_pause()
 
     async with KanbanSessionLocal() as s:
         assert await dispatch_pause.is_dispatch_paused(s) is False
+
+
+@pytest.mark.asyncio
+async def test_hooks_status_and_install_roundtrip(tmp_path, monkeypatch):
+    """The hooks-status/hooks-install endpoints drive hook_installer directly."""
+    from app.services.scheduling import hook_installer
+
+    settings_file = tmp_path / "settings.json"
+    monkeypatch.setattr(hook_installer, "get_claude_user_settings_file", lambda: settings_file)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.get("/api/v1/scheduled-messages/hooks-status")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["installed"] is False
+        assert body["events"]["Notification"] is False
+
+        r = await ac.post("/api/v1/scheduled-messages/hooks-install")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["installed"] is True
+        assert all(body["events"].values())
+
+        r = await ac.get("/api/v1/scheduled-messages/hooks-status")
+        assert r.json()["installed"] is True

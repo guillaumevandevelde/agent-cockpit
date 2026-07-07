@@ -26,6 +26,7 @@ async def test_system_status_happy_path():
     body = r.json()
     assert "active_sessions" in body
     assert "providers" in body
+    assert isinstance(body["scheduling_hooks_installed"], bool)
 
 
 @pytest.mark.asyncio
