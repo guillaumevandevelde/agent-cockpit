@@ -100,7 +100,7 @@ async def test_full_lifecycle():
     card = await m.create_card("proj", "Build X", "desc")
     cid = card["id"]
 
-    moved = await m.move_card(cid, "Done")
+    moved = await m.move_card(cid, "Done", summary="Built X and shipped it.")
     assert moved["column"] == "Done"
 
     attached = await m.attach_deliverable(cid, "branch", "main")
@@ -108,3 +108,56 @@ async def test_full_lifecycle():
 
     comment_result = await m.comment(cid, "shipped!")
     assert comment_result["ok"] is True
+
+
+# --- move_card requires a summary when landing on Done/Impediment ---
+
+@pytest.mark.asyncio
+async def test_move_card_to_done_without_summary_is_rejected():
+    cid = (await m.create_card("P", "t", ""))["id"]
+    result = await m.move_card(cid, "Done")
+    assert result.get("error") == "summary_required"
+    # card must stay put — the rejected move must not have applied
+    card = await m.get_card(cid)
+    assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_card_to_impediment_without_summary_is_rejected():
+    cid = (await m.create_card("P", "t", ""))["id"]
+    result = await m.move_card(cid, "Impediment")
+    assert result.get("error") == "summary_required"
+    card = await m.get_card(cid)
+    assert card["column"] != "Impediment"
+
+
+@pytest.mark.asyncio
+async def test_move_card_to_done_with_blank_summary_is_rejected():
+    cid = (await m.create_card("P", "t", ""))["id"]
+    result = await m.move_card(cid, "Done", summary="   ")
+    assert result.get("error") == "summary_required"
+
+
+@pytest.mark.asyncio
+async def test_move_card_to_done_with_summary_posts_it_as_a_comment():
+    cid = (await m.create_card("P", "t", ""))["id"]
+    moved = await m.move_card(cid, "Done", summary="Implemented the thing and tested it.")
+    assert moved["column"] == "Done"
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.service import card_activity
+
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, cid)
+    comment_ops = [o for o in ops if o.op_type == "comment"]
+    assert len(comment_ops) == 1
+    assert "Implemented the thing and tested it." in comment_ops[0].payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_move_card_to_other_columns_does_not_require_summary():
+    cid = (await m.create_card("P", "t", ""))["id"]
+    moved = await m.move_card(cid, "Doing")
+    assert moved["column"] == "Doing"
+    moved = await m.move_card(cid, "To Resume")
+    assert moved["column"] == "To Resume"

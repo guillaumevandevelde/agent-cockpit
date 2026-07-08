@@ -146,7 +146,7 @@ Tools:
 | `get_card(id)` | lees (incl. activiteiten-feed + deliverables) |
 | `create_card(project, title, description, column=Backlog)` | `create`-op |
 | `claim_card(id)` | conditionele `claim`-op |
-| `move_card(id, column)` | `move`-op |
+| `move_card(id, column, summary?)` | `move`-op; `summary` verplicht bij `column="Done"`/`"Impediment"`, gepost als comment |
 | `update_card(id, fields)` | `update`-op |
 | `comment(id, text)` | `comment`-op |
 | `attach_deliverable(id, kind, ref)` | `attach`-op |

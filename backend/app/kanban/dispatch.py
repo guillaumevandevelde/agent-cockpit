@@ -341,8 +341,11 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "   ```\n"
             "5. **Attach the deliverable** — ``attach_deliverable`` with "
             "``kind=\"branch\"`` and ``ref=<your-branch-name>``.\n"
-            "6. **Move the card to Done** — ``move_card`` to ``\"Done\"``.  "
-            "The backend will kill this session and remove the worktree.\n"
+            "6. **Move the card to Done** — ``move_card`` with ``column=\"Done\"`` "
+            "and ``summary=<what you did>``, a few sentences on the work you "
+            "completed.  ``summary`` is required for this move; the call is "
+            "rejected without it.  The backend will kill this session and remove "
+            "the worktree.\n"
         )
     else:
         shipping = (
@@ -396,10 +399,13 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "   ```\n"
             "6. **Attach the deliverable** — ``attach_deliverable`` with "
             "``kind=\"pr\"`` and ``ref=<PR-URL>`` (or ``kind=\"branch\"`` if no PR).\n"
-            "7. **Move the card** — if the PR merged, ``move_card`` to "
-            "``\"Done\"``.  If the poll loop exited because a check failed, the "
-            "PR was closed, or the wait timed out, call ``report_impediment`` "
-            "instead so a human can look at it — do not move to Done.\n"
+            "7. **Move the card** — if the PR merged, ``move_card`` with "
+            "``column=\"Done\"`` and ``summary=<what you did>``, a few sentences "
+            "on the work you completed (``summary`` is required for this move; "
+            "the call is rejected without it).  If the poll loop exited because a "
+            "check failed, the PR was closed, or the wait timed out, call "
+            "``report_impediment`` instead so a human can look at it — do not "
+            "move to Done.\n"
         )
 
     return sync + tests + commit + shipping

@@ -2141,6 +2141,15 @@ class TestBuildShipInstructions:
         # A wedged PR must not poll forever.
         assert "ITER" in instructions and "40" in instructions
 
+    def test_both_modes_require_a_summary_when_moving_to_done(self):
+        """move_card requires `summary` on Done/Impediment (see mcp_server.py);
+        the instructions must tell the agent to actually pass it, otherwise every
+        move_card("Done") call in the wild fails on summary_required."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            assert "summary=" in instructions
+            assert "summary_required" not in instructions  # not the agent's problem to debug
+
 
 class TestBuildCardPromptSessionEnd:
     """build_card_prompt includes the Session-end workflow section."""
