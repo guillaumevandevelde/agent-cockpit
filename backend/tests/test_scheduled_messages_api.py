@@ -258,14 +258,18 @@ async def test_hook_event_limit_notification_pauses_global_dispatch():
 
 
 @pytest.mark.asyncio
-async def test_hook_event_limit_notification_without_reset_time_does_not_pause():
-    """If the reset time can't be parsed from the message, we don't know how
-    long to pause for -- better to leave dispatch running than guess."""
+async def test_hook_event_limit_notification_without_reset_time_falls_back_to_conservative_pause():
+    """If the reset time can't be parsed from the message (e.g. a weekly/model
+    cap with different wording), we still must not skip the pause -- guessing a
+    conservative fallback beats leaving dispatch running to immediately re-hit
+    the same account-wide wall."""
+    from datetime import UTC, datetime, timedelta
     from unittest import mock
 
     import app.kanban.dispatch as dispatch
     from app.kanban import dispatch_pause
     from app.kanban.db import KanbanSessionLocal
+    from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
 
     transport = ASGITransport(app=app)
     with mock.patch.object(dispatch, "move_limited_session_to_resume", return_value=False):
@@ -279,7 +283,11 @@ async def test_hook_event_limit_notification_without_reset_time_does_not_pause()
             assert r.status_code == 200
 
     async with KanbanSessionLocal() as s:
-        assert await dispatch_pause.is_dispatch_paused(s) is False
+        assert await dispatch_pause.is_dispatch_paused(s) is True
+        paused_until = await dispatch_pause.get_paused_until(s)
+        assert paused_until is not None
+        expected = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+        assert abs((paused_until - expected).total_seconds()) < 30
 
 
 @pytest.mark.asyncio

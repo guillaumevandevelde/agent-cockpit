@@ -197,15 +197,29 @@ async def hook_event(ev: HookEvent):
         # project on this device) until then, so it doesn't keep respawning "To
         # Resume" cards every ~10s only to immediately re-hit the same limit.
         if parsed:
-            reset_time, _tz_name = parsed
-            from app.kanban.db import KanbanSessionLocal
-            from app.kanban.dispatch_pause import set_paused_until
-            try:
-                async with KanbanSessionLocal() as ks:
-                    await set_paused_until(ks, reset_time)
-                    await ks.commit()
-            except Exception:
-                logger.exception("failed to set global dispatch pause for %s", ev.cwd)
+            pause_until, _tz_name = parsed
+        else:
+            # Recognized as a limit hit but the reset time didn't match the known
+            # clock-time format (e.g. a weekly/model cap with different wording).
+            # Fall back to a conservative fixed pause instead of skipping it --
+            # skipping just re-triggers the same spin-and-burn loop the pause
+            # exists to prevent.
+            from datetime import UTC, datetime, timedelta
+            pause_until = datetime.now(UTC) + timedelta(hours=auto_resume_service.FALLBACK_PAUSE_HOURS)
+            logger.warning(
+                "unrecognized usage-limit message format for %s, falling back to a "
+                "%sh dispatch pause: %r",
+                ev.cwd, auto_resume_service.FALLBACK_PAUSE_HOURS, ev.message,
+            )
+
+        from app.kanban.db import KanbanSessionLocal
+        from app.kanban.dispatch_pause import set_paused_until
+        try:
+            async with KanbanSessionLocal() as ks:
+                await set_paused_until(ks, pause_until)
+                await ks.commit()
+        except Exception:
+            logger.exception("failed to set global dispatch pause for %s", ev.cwd)
 
         # Auto-resume: schedule a resume job for the scheduled-messages feature,
         # for projects that opted in explicitly (independent of the kanban path).
