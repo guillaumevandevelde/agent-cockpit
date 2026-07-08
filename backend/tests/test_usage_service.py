@@ -1,5 +1,5 @@
 """Tests for usage tracking services."""
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -498,3 +498,62 @@ class TestSessionBlocks:
         # Active block should be included
         assert len(filtered) == 1
         assert filtered[0].is_active
+
+
+class TestAggregateWeekly:
+    """Tests for UsageService.aggregate_weekly helper."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.service = UsageService(db=None)
+
+    @pytest.mark.asyncio
+    async def test_aggregate_weekly_sums_tokens_in_rolling_window(self):
+        """Sum input + output + cache tokens over the rolling 7-day window."""
+        now = datetime(2026, 7, 8, 12, 0, tzinfo=UTC)
+        entries = [
+            LoadedUsageEntry(
+                timestamp=now - timedelta(days=1),
+                input_tokens=100,
+                output_tokens=50,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=None,
+                model="m",
+                session_id="s1",
+                version="v",
+                project_path="p",
+            ),
+            LoadedUsageEntry(
+                timestamp=now - timedelta(days=10),
+                input_tokens=9999,
+                output_tokens=0,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=None,
+                model="m",
+                session_id="s2",
+                version="v",
+                project_path="p",
+            ),
+            LoadedUsageEntry(
+                timestamp=now,
+                input_tokens=200,
+                output_tokens=20,
+                cache_creation_tokens=10,
+                cache_read_tokens=5,
+                cost_usd=None,
+                model="m",
+                session_id="s3",
+                version="v",
+                project_path="p",
+            ),
+        ]
+        total, reset_at = await self.service.aggregate_weekly(entries, now=now)
+
+        # Only the day-1 and now entries are inside the 7-day window.
+        assert total == 100 + 50 + 200 + 20 + 10 + 5
+        assert reset_at.weekday() == 0  # Monday
+        assert reset_at.hour == 0 and reset_at.minute == 0
+        # Wednesday 2026-07-08 → next Monday is 2026-07-13
+        assert reset_at == datetime(2026, 7, 13, 0, 0, tzinfo=UTC)
