@@ -17,7 +17,6 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.subscriptions import register_usage_provider
 from app.services.subscriptions.base import (
     PeriodUsage,
     SubscriptionUsageProvider,
@@ -123,32 +122,9 @@ def build_anthropic_provider(db: AsyncSession) -> AnthropicUsageProvider:
 
     AnthropicUsageProvider needs a per-request AsyncSession, so it does NOT
     participate in the singleton registry like MinimaxUsageProvider does.
-    The endpoint in Task 7 calls this factory directly. We do still call
-    register_usage_provider with the placeholder so the registry does not
-    404 on anthropic in the brief window between this module's import and
-    the endpoint getting called — that placeholder is overwritten in Task 7
-    with the per-request wiring. If you remove the placeholder, the
-    placeholder provider from Task 3 stays active until the endpoint
-    special-cases anthropic.
+    The endpoint in Task 7 calls this factory directly.
     """
     return AnthropicUsageProvider(db=db)
-
-
-# Register a placeholder so the registry has SOMETHING for "anthropic" before
-# Task 7's endpoint is in place. The endpoint in Task 7 bypasses the registry
-# for anthropic (because it needs a per-request db) and calls
-# build_anthropic_provider(db) directly.
-
-
-class _Placeholder:
-    """Placeholder registered in the registry while Task 7's endpoint wiring
-    isn't yet in place. Never reaches the response — the endpoint
-    special-cases 'anthropic' to use build_anthropic_provider(db)."""
-
-    provider_id = "anthropic"
-
-    async def get_snapshot(self) -> SubscriptionUsageSnapshot:  # pragma: no cover
-        raise NotImplementedError("Task 7 endpoint bypasses the registry for anthropic")
 
 
 

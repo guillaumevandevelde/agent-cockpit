@@ -46,4 +46,4 @@ def get_usage_provider(provider_id: str) -> SubscriptionUsageProvider:
 # overwrite. Last-registration-wins semantics of `register_usage_provider`.
 from app.services.subscriptions import placeholders  # noqa: F401, E402
 from app.services.subscriptions import minimax       # noqa: F401, E402
-from app.services.subscriptions import anthropic     # noqa: F401, E402  (registers _Placeholder)
+from app.services.subscriptions import anthropic     # noqa: F401, E402  (provides build_anthropic_provider factory)

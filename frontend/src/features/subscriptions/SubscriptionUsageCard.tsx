@@ -98,7 +98,9 @@ export function SubscriptionUsageCard({
 function StaleFooter({ fetchedAt }: { fetchedAt: string }) {
   const fetchedMs = new Date(fetchedAt).getTime()
   const ageMin = Math.round((Date.now() - fetchedMs) / 60_000)
-  if (ageMin <= 5) return null
+  // Threshold is 4 min (not 5) so the footer can appear *before* the backend's
+  // 5-min cache TTL fires — gives the user a "this is cached" hint to refresh.
+  if (ageMin < 4) return null
   return (
     <p className="text-xs text-muted-foreground">
       refreshed {ageMin} min ago — open another tab or click refresh to get a live number.
