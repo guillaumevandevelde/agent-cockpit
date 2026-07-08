@@ -85,6 +85,28 @@ def _phase_target_agent(card, *, project_path: str, phase: str, source_column: s
     return _resolve_agent_from_persona(persona) or "engineer"
 
 
+def resolve_phase(card) -> str:
+    """Decide which phase to dispatch a card in.
+
+    Returns ``"analyst"`` when the card has an ``analyst_agent_id`` configured
+    but has not yet been analysed (no ``analyst_run_id``). Returns
+    ``"executor"`` otherwise — covering both the multi-agent path (the
+    analyst already finished, executor is next) and the legacy single-agent
+    path (no analyst configured at all).
+
+    Both the dispatch tick (dispatch_project) and redispatch_card must call
+    this so a user hitting "redispatch" on a stuck analyst card re-spawns the
+    analyst — not the executor. See spec §8 "analyst sessie crasht halverwege
+    → gebruiker kan redispatch_card aanroepen".
+
+    Lives in this module (not dep_resolver) because it has no DB / session
+    dependencies and is a pure function over the card row.
+    """
+    if getattr(card, "analyst_agent_id", None) and not getattr(card, "analyst_run_id", None):
+        return "analyst"
+    return "executor"
+
+
 META_PREFIX = "autodispatch:"
 CLAIMANT_PREFIX = "agent:"
 SHIPMODE_PREFIX = "shipmode:"
@@ -1280,7 +1302,8 @@ async def dispatch_project(
         # tick — _next_card will pick this card again once it has analyst_run_id
         # set but no executor claim, and on that pass we fall through to the
         # executor branch.
-        if card.analyst_agent_id and not card.analyst_run_id:
+        phase = resolve_phase(card)
+        if phase == "analyst":
             last_result = await _run_card(
                 session, card=card, project_key=project_key,
                 project_path=project_path, transport=transport,
@@ -1332,9 +1355,15 @@ async def dispatch_card(
     if transport is None:
         transport = await get_transport_for_project(project_path)
     transport = get_transport_for_card(card, transport)
+    # Manual "dispatch" on a multi-agent card must also pick the right phase:
+    # a card with analyst_agent_id + no analyst_run_id is in analyst phase,
+    # not executor. Otherwise the human override silently drops the
+    # analyst step on first dispatch.
+    phase = resolve_phase(card)
     return await _run_card(
         session, card=card, project_key=card.project_key,
         project_path=project_path, transport=transport,
+        phase=phase,
         agent_override=agent_override,
     )
 
@@ -1449,10 +1478,17 @@ async def redispatch_card(
         transport = await get_transport_for_project(project_path)
     transport = get_transport_for_card(card, transport)
 
+    # Pick the right phase: a multi-agent card with no analyst_run_id yet
+    # must be re-spawned as the analyst (spec §8: crashed analyst
+    # → user can redispatch_card), not the executor. resolve_phase is the
+    # single source of truth shared with the dispatch tick.
+    phase = resolve_phase(card)
+
     # Re-dispatch (bypasses busy cap since we just freed the project)
     return await _run_card(
         session, card=card, project_key=card.project_key,
         project_path=project_path, transport=transport,
+        phase=phase,
         agent_override=agent_override,
     )
 

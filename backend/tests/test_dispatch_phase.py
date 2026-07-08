@@ -410,3 +410,200 @@ async def test_dispatch_project_analyst_branch_persists_analyst_run_id(monkeypat
             f"This is the Critical C1 regression: the dispatch tick looked at "
             f"the wrong key."
         )
+
+
+# ---- Final review: resolve_phase helper + redispatch phase routing (I1) ---
+
+class _PhaseCard:
+    """Minimal duck-typed card with the fields resolve_phase reads."""
+    def __init__(self, *, analyst_agent_id=None, analyst_run_id=None):
+        self.analyst_agent_id = analyst_agent_id
+        self.analyst_run_id = analyst_run_id
+
+
+def test_resolve_phase_analyst_when_analyst_agent_and_no_run_id():
+    card = _PhaseCard(analyst_agent_id="claude-code", analyst_run_id=None)
+    assert dispatch.resolve_phase(card) == "analyst"
+
+
+def test_resolve_phase_executor_when_analyst_already_ran():
+    card = _PhaseCard(analyst_agent_id="claude-code", analyst_run_id="tmux-x")
+    assert dispatch.resolve_phase(card) == "executor"
+
+
+def test_resolve_phase_executor_for_legacy_single_agent_card():
+    """No analyst_agent_id at all → legacy single-agent path → executor."""
+    card = _PhaseCard(analyst_agent_id=None, analyst_run_id=None)
+    assert dispatch.resolve_phase(card) == "executor"
+
+
+def test_resolve_phase_executor_when_analyst_agent_set_but_card_has_no_phase():
+    """A card with analyst_agent_id cleared back to None must dispatch as
+    executor — only the analyst_agent_id AND no analyst_run_id combination
+    picks analyst. This prevents an old analyst config from leaking through
+    after a user clears it."""
+    card = _PhaseCard(analyst_agent_id=None, analyst_run_id="tmux-stale")
+    assert dispatch.resolve_phase(card) == "executor"
+
+
+@pytest.mark.asyncio
+async def test_redispatch_card_runs_analyst_phase_when_analyst_run_id_missing(monkeypatch):
+    """Regression test for I1: a crashed analyst re-dispatched via
+    redispatch_card must re-spawn the analyst, not the executor.
+
+    Without the resolve_phase call inside redispatch_card, _run_card defaults
+    to phase="executor" and silently skips the analyst step — violating spec
+    §8 ("analyst sessie crasht halverwege → gebruiker kan redispatch_card
+    aanroepen").
+    """
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    spawns = []
+
+    async def fake_run_card(session, **kwargs):
+        spawns.append((kwargs["phase"], kwargs["card"].id))
+        # Mirror real shape; mirror claim+move side effects so the
+        # redispatch path's release/release-flow doesn't break.
+        card = kwargs["card"]
+        card.claimed_by = "agent:tmux-rd"
+        card.column = "analyst" if kwargs["phase"] == "analyst" else "engineer"
+        await session.flush()
+        return {
+            "card_id": card.id,
+            "session_name": "tmux-rd",
+            "claimant": "agent:tmux-rd",
+            "source_column": "Backlog",
+            "spawned": True,
+        }
+
+    monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        # Multi-agent parent stuck mid-plan: analyst_agent_id set, but the
+        # analyst session crashed before writing analyst_run_id.
+        parent_id = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "stuck parent", "column": "Doing",
+                     "analyst_agent_id": "claude-code",
+                     "executor_agent_id": "mimo-code",
+                     "claimed_by": "agent:tmux-old"},
+        )
+        await s.commit()
+
+        # The user hits "redispatch" — must re-spawn the analyst.
+        await dispatch.redispatch_card(s, card_id=parent_id, project_path="/tmp/none")
+        await s.commit()
+
+        # Verify the analyst phase was picked (the card has analyst_agent_id
+        # and no analyst_run_id, so resolve_phase returns "analyst").
+        assert spawns == [("analyst", parent_id)], (
+            f"redispatch_card must pick phase=analyst when analyst_run_id is "
+            f"missing, got {spawns!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_redispatch_card_runs_executor_phase_when_analyst_already_ran(monkeypatch):
+    """A multi-agent card past the analyst phase must re-spawn the executor
+    when re-dispatched — not the analyst a second time. Covers the case
+    where the executor crashed (analyst_run_id is set)."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    spawns = []
+
+    async def fake_run_card(session, **kwargs):
+        spawns.append((kwargs["phase"], kwargs["card"].id))
+        card = kwargs["card"]
+        card.claimed_by = "agent:tmux-rd2"
+        card.column = "analyst" if kwargs["phase"] == "analyst" else "engineer"
+        await session.flush()
+        return {
+            "card_id": card.id,
+            "session_name": "tmux-rd2",
+            "claimant": "agent:tmux-rd2",
+            "source_column": "Doing",
+            "spawned": True,
+        }
+
+    monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "past analyst", "column": "Doing",
+                     "analyst_agent_id": "claude-code",
+                     "executor_agent_id": "mimo-code",
+                     "analyst_run_id": "tmux-analyst-old",
+                     "claimed_by": "agent:tmux-exec-old"},
+        )
+        await s.commit()
+
+        await dispatch.redispatch_card(s, card_id=parent_id, project_path="/tmp/none")
+        await s.commit()
+
+        assert spawns == [("executor", parent_id)], (
+            f"redispatch_card must pick phase=executor when analyst_run_id is "
+            f"already set, got {spawns!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_card_runs_analyst_phase_when_analyst_run_id_missing(monkeypatch):
+    """Manual dispatch on a multi-agent card (the CardDrawer "Dispatch"
+    button) must also pick the analyst phase when analyst_run_id is missing.
+    Without resolve_phase, the manual path would silently dispatch the
+    executor, dropping the analyst step on first dispatch.
+    """
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    spawns = []
+
+    async def fake_run_card(session, **kwargs):
+        spawns.append((kwargs["phase"], kwargs["card"].id))
+        card = kwargs["card"]
+        card.claimed_by = "agent:tmux-m"
+        card.column = "analyst" if kwargs["phase"] == "analyst" else "engineer"
+        await session.flush()
+        return {
+            "card_id": card.id,
+            "session_name": "tmux-m",
+            "claimant": "agent:tmux-m",
+            "source_column": "Backlog",
+            "spawned": True,
+        }
+
+    monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "fresh multi-agent", "column": "Backlog",
+                     "analyst_agent_id": "claude-code",
+                     "executor_agent_id": "mimo-code"},
+        )
+        await s.commit()
+
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/tmp/none")
+        await s.commit()
+
+        assert spawns == [("analyst", cid)], (
+            f"dispatch_card must pick phase=analyst when analyst_run_id is "
+            f"missing, got {spawns!r}"
+        )
