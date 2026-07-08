@@ -18,9 +18,16 @@ import {
 } from "@/components/ui/select";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
+import { PLATFORMS } from "../types";
 import type { KanbanColumn } from "../types";
 
 const BACKLOG_COLUMN = "Backlog";
+const DEFAULT_PLATFORM_SENTINEL = "__default__";
+const PLATFORM_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  bedrock: "Bedrock",
+  minimax: "MiniMax",
+};
 
 export function ColumnSettingsDialog({
   open,
@@ -42,6 +49,7 @@ export function ColumnSettingsDialog({
   const [selectedAgent, setSelectedAgent] = useState<string>("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAgent, setEditAgent] = useState<string>("");
+  const [editPlatform, setEditPlatform] = useState<string>(DEFAULT_PLATFORM_SENTINEL);
 
   useEffect(() => {
     setItems(columns);
@@ -78,9 +86,11 @@ export function ColumnSettingsDialog({
 
   const handleUpdate = async (id: string) => {
     const agent = editAgent.trim() || null;
+    const platform = editPlatform === DEFAULT_PLATFORM_SENTINEL ? null : editPlatform;
     try {
       const col = await kanbanApi.updateColumn(id, {
         default_agent: agent,
+        default_platform: platform,
       });
       setItems((prev) => prev.map((c) => (c.id === id ? col : c)));
       setEditingId(null);
@@ -145,6 +155,22 @@ export function ColumnSettingsDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Select
+                    value={editPlatform}
+                    onValueChange={setEditPlatform}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Platform" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_PLATFORM_SENTINEL}>Default (Anthropic)</SelectItem>
+                      {PLATFORMS.map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {PLATFORM_LABELS[p]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button size="sm" onClick={() => handleUpdate(col.id)}>
                     Save
                   </Button>
@@ -161,6 +187,11 @@ export function ColumnSettingsDialog({
                         Agent: {col.default_agent}
                       </div>
                     )}
+                    {col.default_platform && (
+                      <div className="text-xs text-muted-foreground">
+                        Platform: {PLATFORM_LABELS[col.default_platform] ?? col.default_platform}
+                      </div>
+                    )}
                   </div>
                   {!isBacklog(col.name) && (
                     <>
@@ -170,6 +201,7 @@ export function ColumnSettingsDialog({
                         onClick={() => {
                           setEditingId(col.id);
                           setEditAgent(col.default_agent ?? "");
+                          setEditPlatform(col.default_platform ?? DEFAULT_PLATFORM_SENTINEL);
                         }}
                       >
                         Edit

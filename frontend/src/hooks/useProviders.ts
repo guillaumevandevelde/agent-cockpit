@@ -5,6 +5,7 @@ import type {
   AgentProviderStatus,
   CodexConfigUpdateRequest,
   CodexFeatureInventoryResponse,
+  CodexLaunchOptionsResponse,
   CodexMcpAddRequest,
   CodexMcpInventoryResponse,
   CodexMcpMutationResponse,
@@ -90,4 +91,8 @@ export async function removeCodexPlugin(name: string): Promise<CodexPluginMutati
   return apiClient<CodexPluginMutationResponse>(`providers/codex-cli/plugins/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   })
+}
+
+export async function fetchCodexLaunchOptions(): Promise<CodexLaunchOptionsResponse> {
+  return apiClient<CodexLaunchOptionsResponse>('providers/codex-cli/launch-options')
 }

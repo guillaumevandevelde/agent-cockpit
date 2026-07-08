@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { fetchTerminalToken, buildTerminalWsUrl } from './api'
+import { isNativeCopyShortcut } from './terminalCopyShortcut'
 
 export function useTerminal(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -43,6 +44,10 @@ export function useTerminal(
     term.loadAddon(new WebLinksAddon())
 
     term.open(containerRef.current)
+
+    // Let the browser handle Ctrl+C/Cmd+C natively when text is selected,
+    // instead of xterm swallowing it and forwarding it to the PTY.
+    term.attachCustomKeyEventHandler((event) => !isNativeCopyShortcut(event, term.hasSelection()))
 
     try {
       term.loadAddon(new WebglAddon())

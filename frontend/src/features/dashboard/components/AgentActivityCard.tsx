@@ -42,6 +42,7 @@ const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'claude-code', label: 'Claude Code' },
   { value: 'codex-cli', label: 'Codex' },
+  { value: 'copilot-cli', label: 'Copilot' },
   { value: 'mimo-code', label: 'MiMoCode' },
   { value: 'open-code', label: 'OpenCode' },
 ]
@@ -61,6 +62,7 @@ export function AgentActivityCard() {
     all: agents.length,
     'claude-code': agents.filter((a) => a.provider === 'claude-code').length,
     'codex-cli': agents.filter((a) => a.provider === 'codex-cli').length,
+    'copilot-cli': agents.filter((a) => a.provider === 'copilot-cli').length,
     'mimo-code': agents.filter((a) => a.provider === 'mimo-code').length,
     'open-code': agents.filter((a) => a.provider === 'open-code').length,
   }

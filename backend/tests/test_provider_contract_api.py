@@ -44,6 +44,33 @@ async def test_provider_mcp_inventory_wrong_provider_returns_contract_error():
     assert exc_info.value.detail["supported_providers"] == ["codex-cli"]
 
 
+async def test_provider_launch_options_wrong_provider_returns_contract_error():
+    from app.api.v1 import providers as providers_api
+
+    with pytest.raises(providers_api.HTTPException) as exc_info:
+        await providers_api.get_provider_launch_options("copilot-cli")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == "unsupported_provider_operation"
+    assert exc_info.value.detail["operation"] == "launch options"
+    assert exc_info.value.detail["supported_providers"] == ["codex-cli"]
+
+
+async def test_provider_launch_options_returns_codex_launch_options(monkeypatch, tmp_path):
+    from app.api.v1 import providers as providers_api
+    from app.services.codex_config_service import CodexConfigService
+
+    (tmp_path / "config.toml").write_text('model = "gpt-5.1-codex"\n', encoding="utf-8")
+    monkeypatch.setattr(providers_api, "CodexConfigService", lambda: CodexConfigService(codex_home=tmp_path))
+
+    response = await providers_api.get_provider_launch_options("codex-cli")
+
+    assert response["provider"] == "codex-cli"
+    assert response["provider_display_name"] == "Codex"
+    assert response["default_model"] == "gpt-5.1-codex"
+    assert response["config_exists"] is True
+
+
 async def test_provider_cli_disallowed_command_returns_contract_error(monkeypatch):
     from app.api.v1 import providers as providers_api
     from app.models.schemas import CLIExecuteRequest

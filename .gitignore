@@ -82,3 +82,6 @@ apm_modules/
 
 # superpowers subagent-driven-development scratch (briefs/reports/diffs/ledger)
 .superpowers/
+
+# Personal/business notes not meant for the public repo (see docs/cockpit history)
+.local-notes/

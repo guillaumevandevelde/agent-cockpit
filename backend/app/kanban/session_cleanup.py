@@ -28,20 +28,43 @@ def _extract_session_name(claimed_by: str | None) -> str | None:
 
 
 def _kill_tmux_session(session_name: str) -> bool:
-    """Kill a tmux session by name."""
-    try:
-        result = subprocess.run(
-            ["tmux", "kill-session", "-t", session_name],
-            capture_output=True, text=True, timeout=10,
-        )
+    """Kill a tmux session by name.
+
+    Retries once on a genuine failure (tmux/filesystem can be transiently
+    unavailable, e.g. under WSL/DrvFs contention). Returns True if the
+    session was killed or was already gone (tmux reports "can't find
+    session"); False only if a live session could not be confirmed dead
+    after the retry.
+    """
+    last_stderr = ""
+    for attempt in range(2):
+        try:
+            result = subprocess.run(
+                ["tmux", "kill-session", "-t", session_name],
+                capture_output=True, text=True, timeout=10,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            logger.warning("Error killing session %s: %s", session_name, e)
+            return False
+
         if result.returncode == 0:
             logger.info("Killed tmux session: %s", session_name)
             return True
-        logger.warning("Failed to kill session %s: %s", session_name, result.stderr)
-        return False
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        logger.warning("Error killing session %s: %s", session_name, e)
-        return False
+        if "can't find session" in result.stderr:
+            logger.info("tmux session %s already gone", session_name)
+            return True
+
+        last_stderr = result.stderr
+        if attempt == 0:
+            logger.warning(
+                "Failed to kill session %s, retrying: %s", session_name, last_stderr
+            )
+
+    logger.error(
+        "Failed to kill session %s after retry — it may still be running: %s",
+        session_name, last_stderr,
+    )
+    return False
 
 
 async def _get_project_path(project_key: str) -> str | None:
@@ -275,15 +298,18 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
             logger.info("Cancelled sandcastle run for completed card %s", card_id)
             return result
 
-        # Try to kill the tmux session. A failure here is non-fatal — the agent
-        # may already have exited naturally after finishing its prompt, or may
-        # have been killed by the user. We continue with worktree removal and
-        # claim release regardless.
+        # Try to kill the tmux session. _kill_tmux_session already treats
+        # "already gone" as success and retries genuine failures once, so a
+        # False here means a live session could not be confirmed dead. We
+        # still continue with worktree removal and claim release, since a
+        # stuck claim on an otherwise-Done card is worse than a possibly
+        # lingering process.
         tmux_killed = _kill_tmux_session(session_name)
         if not tmux_killed:
-            logger.info(
-                "tmux session %s already dead (agent likely exited) — "
-                "continuing cleanup for card %s", session_name, card_id
+            logger.warning(
+                "Could not confirm tmux session %s is dead — continuing "
+                "cleanup for card %s, but the agent process may still be "
+                "running", session_name, card_id
             )
 
         project_path = await _get_project_path(project_key)
@@ -309,12 +335,19 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
     return result
 
 
+# Strong references to in-flight cleanup tasks. asyncio only holds a weak
+# reference to a scheduled task, so a task with no other reference can be
+# garbage-collected before it runs (see asyncio.create_task docs). Mirrors
+# the _sandcastle_start_tasks pattern in dispatch.py.
+_cleanup_tasks: set = set()
+
+
 def on_card_moved_to_done(card_id: str, project_key: str) -> None:
     """Schedule session cleanup when a card moves to Done.
 
     Always called from within a running async context (the kanban operations
     pipeline), so we schedule the cleanup as a background task via the
-    already-running event loop.
+    already-running event loop, keeping a strong reference until it completes.
     """
     import asyncio
 
@@ -323,6 +356,8 @@ def on_card_moved_to_done(card_id: str, project_key: str) -> None:
 
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_cleanup())
+        task = loop.create_task(_cleanup())
+        _cleanup_tasks.add(task)
+        task.add_done_callback(_cleanup_tasks.discard)
     except RuntimeError:
         asyncio.run(_cleanup())

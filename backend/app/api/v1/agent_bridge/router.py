@@ -58,6 +58,13 @@ class SpawnRequest(BaseModel):
     bedrock_model: str | None = None
     minimax_base_url: str | None = None
     host_id: int | None = None
+    agent: str | None = None
+    context_tier: str | None = None
+    reasoning_effort: str | None = None
+    plan: bool = False
+    remote: bool | None = None
+    allow_all: bool = False
+    no_ask_user: bool = False
 
 
 @router.get("/sessions")
@@ -228,6 +235,13 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             bedrock_model=request.bedrock_model,
             minimax_base_url=request.minimax_base_url,
             host_id=request.host_id,
+            agent=request.agent,
+            context_tier=request.context_tier,
+            reasoning_effort=request.reasoning_effort,
+            plan=request.plan,
+            remote=request.remote,
+            allow_all=request.allow_all,
+            no_ask_user=request.no_ask_user,
         )
         return spawn_session(request.provider, options, session_name=request.session_name, host_data=host_data)
     except ValueError as exc:

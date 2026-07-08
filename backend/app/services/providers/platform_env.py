@@ -15,6 +15,9 @@ PLATFORM_ANTHROPIC = "anthropic"
 PLATFORM_BEDROCK = "bedrock"
 PLATFORM_MINIMAX = "minimax"
 
+PROVIDER_CLAUDE_CODE = "claude-code"
+PROVIDER_CODEX_CLI = "codex-cli"
+
 MINIMAX_BASE_URL_INTERNATIONAL = "https://api.minimax.io/anthropic"
 MINIMAX_BASE_URL_CHINA = "https://api.minimaxi.com/anthropic"
 MINIMAX_DEFAULT_MODEL = "MiniMax-M3[1m]"
@@ -40,20 +43,32 @@ def build_platform_env(
     model: str | None = None,
     minimax_api_key: str | None = None,
     minimax_base_url: str | None = None,
+    provider_id: str = PROVIDER_CLAUDE_CODE,
 ) -> dict[str, str]:
     """Return the env vars for a platform selection (empty for Anthropic).
 
     ``minimax_api_key`` is the caller-resolved credential (e.g. from a secrets
     store); this function never hardcodes or looks up secrets itself.
+
+    Codex CLI selects Bedrock via its own ``--config model_provider=`` flag
+    (see ``codex_cli.py``), so for ``provider_id="codex-cli"`` only the shared
+    AWS_REGION/AWS_PROFILE env is set here — CLAUDE_CODE_USE_BEDROCK and
+    ANTHROPIC_MODEL are Claude-Code-specific and would be meaningless (or
+    actively wrong) for Codex.
     """
     if platform == PLATFORM_BEDROCK:
-        env: dict[str, str] = {"CLAUDE_CODE_USE_BEDROCK": "1"}
+        env: dict[str, str] = {}
         cleaned_region = _clean(region)
         if cleaned_region:
             env["AWS_REGION"] = cleaned_region
         cleaned_profile = _clean(aws_profile)
         if cleaned_profile:
             env["AWS_PROFILE"] = cleaned_profile
+
+        if provider_id == PROVIDER_CODEX_CLI:
+            return env
+
+        env = {"CLAUDE_CODE_USE_BEDROCK": "1", **env}
         cleaned_model = _clean(model)
         if cleaned_model:
             env["ANTHROPIC_MODEL"] = cleaned_model

@@ -40,9 +40,11 @@ class RecordingTransport:
         self.calls = []
         self.fail = fail
 
-    def __call__(self, *, directory, prompt, session_name, provider_id="claude-code"):
+    def __call__(self, *, directory, prompt, session_name, provider_id="claude-code",
+                 platform="anthropic"):
         self.calls.append({"directory": directory, "prompt": prompt,
-                           "session_name": session_name, "provider_id": provider_id})
+                           "session_name": session_name, "provider_id": provider_id,
+                           "platform": platform})
         if self.fail:
             raise RuntimeError("tmux exploded")
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
@@ -154,6 +156,39 @@ async def test_dispatch_threads_card_provider_to_transport():
     assert len(transport.calls) == 1
     assert transport.calls[0]["provider_id"] == "mimo-code"
     assert card.column == "engineer"  # provider id is NOT used as the column
+
+
+@pytest.mark.asyncio
+async def test_dispatch_defaults_to_anthropic_platform():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["platform"] == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_uses_column_default_platform():
+    """A column configured with default_platform="minimax" (e.g. an "engineer"
+    column meant for bulk coding work) routes its cards' spawn to that platform,
+    while columns without one keep the default Anthropic subscription."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_platform="minimax",
+        )
+        cid = await _make_card(s)
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+        card = await get_card(s, cid)
+    assert card.column == "engineer"
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["platform"] == "minimax"
 
 
 @pytest.mark.asyncio
@@ -1029,7 +1064,7 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code"):
+    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic"):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -1277,7 +1312,7 @@ async def test_dispatch_all_pending_resumes_to_resume_cards():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code"):
+    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic"):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -1481,7 +1516,7 @@ async def test_card_transport_sandcastle_uses_sandcastle_transport():
     worktree = RecordingTransport()
     sc_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code"):
+    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic"):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
@@ -1512,11 +1547,11 @@ async def test_card_transport_worktree_overrides_sandcastle_project_default():
     sc_calls = []
     wt_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code"):
+    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic"):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
-    def fake_worktree(*, directory, prompt, session_name, provider_id="claude-code"):
+    def fake_worktree(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic"):
         wt_calls.append(session_name)
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
@@ -1594,7 +1629,7 @@ async def test_redispatch_with_resume_session_id_uses_resume_transport():
     """When card has resume_session_id, redispatch calls resume transport, not worktree."""
     calls = []
 
-    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code"):
+    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic"):
         calls.append({"mode": "resume", "session_name": session_name})
         return {"session_name": session_name}
 
@@ -2121,6 +2156,15 @@ class TestBuildShipInstructions:
         assert "statusCheckRollup" in instructions
         # A wedged PR must not poll forever.
         assert "ITER" in instructions and "40" in instructions
+
+    def test_both_modes_require_a_summary_when_moving_to_done(self):
+        """move_card requires `summary` on Done/Impediment (see mcp_server.py);
+        the instructions must tell the agent to actually pass it, otherwise every
+        move_card("Done") call in the wild fails on summary_required."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            assert "summary=" in instructions
+            assert "summary_required" not in instructions  # not the agent's problem to debug
 
 
 class TestBuildCardPromptSessionEnd:

@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Folder, FolderOpen, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, ArrowLeft, Search } from 'lucide-react';
 import { apiClient } from '@/lib/api';
 import { MODAL_SIZES } from '@/lib/constants';
 
@@ -30,6 +32,14 @@ export function DirectoryBrowserDialog({
   const [result, setResult] = useState<BrowseResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
+
+  const filteredDirectories = useMemo(() => {
+    if (!result) return [];
+    const query = filter.trim().toLowerCase();
+    if (!query) return result.directories;
+    return result.directories.filter((dir) => dir.toLowerCase().includes(query));
+  }, [result, filter]);
 
   const browseTo = async (path: string) => {
     setLoading(true);
@@ -39,6 +49,7 @@ export function DirectoryBrowserDialog({
         `projects/browse?path=${encodeURIComponent(path)}`
       );
       setResult(r);
+      setFilter('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to read directory');
     } finally {
@@ -91,6 +102,22 @@ export function DirectoryBrowserDialog({
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
+          {result && (
+            <div className="space-y-2">
+              <Label htmlFor="directory-filter">Filter directories</Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="directory-filter"
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value)}
+                  placeholder="Type a directory name"
+                  className="pl-9"
+                />
+              </div>
+            </div>
+          )}
+
           {loading && (
             <p className="text-sm text-muted-foreground text-center py-4">Loading…</p>
           )}
@@ -101,14 +128,18 @@ export function DirectoryBrowserDialog({
               <p className="text-sm text-muted-foreground text-center py-4">
                 No subdirectories
               </p>
+            ) : filteredDirectories.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No directories match this filter
+              </p>
             ) : (
               <ScrollArea className="h-64 rounded-md border">
                 <div className="p-1">
-                  {result.directories.map((dir) => (
+                  {filteredDirectories.map((dir) => (
                     <button
                       key={dir}
                       type="button"
-                      className="w-full flex items-center gap-2 px-3 py-2 rounded text-sm hover:bg-accent hover:text-accent-foreground transition-colors text-left"
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded text-sm hover:bg-accent hover:text-accent-foreground transition-colors text-left cursor-pointer"
                       onClick={() => browseTo(`${result.path}/${dir}`)}
                     >
                       <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />

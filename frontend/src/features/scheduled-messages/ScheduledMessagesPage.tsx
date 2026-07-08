@@ -3,6 +3,7 @@ import { CalendarClock, Plus, Trash2, ToggleLeft, ToggleRight, ChevronDown, Chev
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import {
   Dialog,
@@ -23,7 +24,13 @@ import {
 } from '@/components/ui/alert-dialog'
 import { RefreshButton } from '@/components/shared/RefreshButton'
 import { CLICKABLE_CARD, MODAL_SIZES } from '@/lib/constants'
-import { listScheduledMessages, deleteScheduledMessage, updateScheduledMessage, deleteScheduledMessageHistory } from './api'
+import {
+  listScheduledMessages,
+  deleteScheduledMessage,
+  updateScheduledMessage,
+  deleteScheduledMessageHistory,
+  bulkDeleteScheduledMessages,
+} from './api'
 import { ScheduledMessageForm } from './components/ScheduledMessageForm'
 import { DeliveryLog } from './components/DeliveryLog'
 import { HooksStatusBanner } from './components/HooksStatusBanner'
@@ -59,9 +66,11 @@ interface RowProps {
   msg: ScheduledMessage
   onToggle: (msg: ScheduledMessage) => void
   onDelete: (id: number) => void
+  selected: boolean
+  onSelectChange: (id: number, selected: boolean) => void
 }
 
-function MessageRow({ msg, onToggle, onDelete }: RowProps) {
+function MessageRow({ msg, onToggle, onDelete, selected, onSelectChange }: RowProps) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -73,6 +82,13 @@ function MessageRow({ msg, onToggle, onDelete }: RowProps) {
         onClick={() => setExpanded((e) => !e)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setExpanded((v) => !v) }}
       >
+        <span onClick={(e) => e.stopPropagation()} className="mt-1">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={(checked) => onSelectChange(msg.id, checked === true)}
+            aria-label={`Select message ${msg.id}`}
+          />
+        </span>
         <span className="mt-1 text-muted-foreground">
           {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </span>
@@ -129,12 +145,15 @@ export function ScheduledMessagesPage() {
   const [messages, setMessages] = useState<ScheduledMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const res = await listScheduledMessages()
       setMessages(res.items)
+      const liveIds = new Set(res.items.map((m) => m.id))
+      setSelectedIds((prev) => new Set([...prev].filter((id) => liveIds.has(id))))
     } catch {
       toast.error('Failed to load scheduled messages')
     } finally {
@@ -174,6 +193,27 @@ export function ScheduledMessagesPage() {
     }
   }
 
+  const handleSelectChange = (id: number, selected: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (selected) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds]
+    try {
+      const { deleted } = await bulkDeleteScheduledMessages(ids)
+      toast.success(`Deleted ${deleted} message${deleted === 1 ? '' : 's'}`)
+      setSelectedIds(new Set())
+      await load()
+    } catch {
+      toast.error('Failed to delete selected messages')
+    }
+  }
+
   const scheduled = messages.filter((m) => m.status === 'scheduled' || m.status === 'pending_delivery')
   const done = messages.filter((m) => !['scheduled', 'pending_delivery'].includes(m.status))
 
@@ -199,6 +239,41 @@ export function ScheduledMessagesPage() {
       </div>
 
       <HooksStatusBanner />
+
+      {/* Bulk selection bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+          <span className="text-sm text-muted-foreground">
+            {selectedIds.size} selected
+          </span>
+          <div className="flex-1" />
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+            Clear selection
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm" className="gap-1">
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete selected
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {selectedIds.size} message{selectedIds.size === 1 ? '' : 's'}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete the selected message{selectedIds.size === 1 ? '' : 's'}. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -231,7 +306,14 @@ export function ScheduledMessagesPage() {
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Pending</h2>
           {scheduled.map((m) => (
-            <MessageRow key={m.id} msg={m} onToggle={handleToggle} onDelete={handleDelete} />
+            <MessageRow
+              key={m.id}
+              msg={m}
+              onToggle={handleToggle}
+              onDelete={handleDelete}
+              selected={selectedIds.has(m.id)}
+              onSelectChange={handleSelectChange}
+            />
           ))}
         </div>
       )}
@@ -266,7 +348,14 @@ export function ScheduledMessagesPage() {
             </AlertDialog>
           </div>
           {done.map((m) => (
-            <MessageRow key={m.id} msg={m} onToggle={handleToggle} onDelete={handleDelete} />
+            <MessageRow
+              key={m.id}
+              msg={m}
+              onToggle={handleToggle}
+              onDelete={handleDelete}
+              selected={selectedIds.has(m.id)}
+              onSelectChange={handleSelectChange}
+            />
           ))}
         </div>
       )}

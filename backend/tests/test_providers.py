@@ -8,10 +8,11 @@ def test_provider_registry_contains_initial_providers():
 
     provider_ids = {provider.id for provider in get_providers()}
 
-    assert provider_ids == {"claude-code", "codex-cli", "mimo-code", "open-code"}
+    assert provider_ids == {"claude-code", "codex-cli", "copilot-cli", "mimo-code", "open-code"}
     assert get_provider("claude-code").display_name == "Claude Code"
     assert get_provider("codex-cli").binary_name == "codex"
     assert get_provider("open-code").display_name == "OpenCode"
+    assert get_provider("copilot-cli").binary_name == "copilot"
 
 
 def test_provider_status_includes_central_capability_matrix():
@@ -62,3 +63,176 @@ def test_codex_process_detection_matches_node_wrapper_descendant():
     with patch("app.services.providers.base.subprocess.run") as run:
         run.return_value = SimpleNamespace(stdout="456 /usr/local/bin/codex\n")
         assert provider.is_process_match("node", "123") is True
+
+
+def test_codex_bedrock_spawn_command_sets_model_provider_and_bedrock_model():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("codex-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(
+            directory="/tmp/project",
+            mode="plain",
+            platform="bedrock",
+            bedrock_model="openai.gpt-5.5",
+            model="ignored-when-bedrock-model-set",
+        )
+    )
+
+    assert command == [
+        "codex",
+        "--cd",
+        "/tmp/project",
+        "--config",
+        'model_provider="amazon-bedrock"',
+        "--model",
+        "openai.gpt-5.5",
+    ]
+
+
+def test_codex_bedrock_spawn_command_falls_back_to_model_without_bedrock_model():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("codex-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="plain", platform="bedrock", model="fallback-model")
+    )
+
+    assert "--config" in command
+    assert command[command.index("--model") + 1] == "fallback-model"
+
+
+def test_codex_anthropic_platform_spawn_command_omits_bedrock_config():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("codex-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="plain", model="gpt-5.1-codex")
+    )
+
+    assert "--config" not in command
+    assert command == ["codex", "--cd", "/tmp/project", "--model", "gpt-5.1-codex"]
+
+
+def test_copilot_status_and_capabilities():
+    from app.services.providers import get_provider
+
+    provider = get_provider("copilot-cli")
+    status = provider.get_status()
+
+    assert status["display_name"] == "GitHub Copilot CLI"
+    assert status["capability_matrix"]["sessions"]["state"] == "write_capable"
+    assert status["capability_matrix"]["config"]["state"] == "unsupported"
+    assert status["capabilities"]["sessions"] is True
+    assert status["capabilities"]["config"] is False
+
+
+def test_copilot_process_detection():
+    from app.services.providers import get_provider
+
+    provider = get_provider("copilot-cli")
+
+    assert provider.is_process_match("copilot", "123") is True
+    assert provider.is_process_match("/usr/local/bin/copilot", "123") is True
+    assert provider.is_process_match("copilot-language-server", "123") is False
+
+
+def test_copilot_process_detection_matches_node_wrapper_descendant():
+    from app.services.providers import get_provider
+
+    provider = get_provider("copilot-cli")
+
+    with patch("app.services.providers.base.subprocess.run") as run:
+        run.return_value = SimpleNamespace(stdout="789 /usr/local/bin/copilot\n")
+        assert provider.is_process_match("node", "123") is True
+
+
+def test_copilot_spawn_command_new_session():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("copilot-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(
+            directory="/tmp/project",
+            mode="plain",
+            model="claude-sonnet-5",
+            agent="reviewer",
+            context_tier="large",
+            reasoning_effort="high",
+            plan=True,
+            remote=False,
+            allow_all=True,
+            no_ask_user=True,
+            prompt="do the thing",
+        )
+    )
+
+    assert command == [
+        "copilot",
+        "-C",
+        "/tmp/project",
+        "--model",
+        "claude-sonnet-5",
+        "--agent",
+        "reviewer",
+        "--context",
+        "large",
+        "--effort",
+        "high",
+        "--plan",
+        "--no-remote",
+        "--allow-all",
+        "--no-ask-user",
+        "-i",
+        "do the thing",
+    ]
+
+
+def test_copilot_spawn_command_resume_uses_continue_when_use_last():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("copilot-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="resume", use_last=True)
+    )
+
+    assert command == ["copilot", "-C", "/tmp/project", "--continue"]
+
+
+def test_copilot_spawn_command_resume_uses_session_id():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("copilot-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="resume", session_id="abc123")
+    )
+
+    assert command == ["copilot", "-C", "/tmp/project", "--resume=abc123"]
+
+
+def test_copilot_spawn_command_resume_requires_session_id_or_use_last():
+    import pytest
+
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("copilot-cli")
+    with pytest.raises(ValueError):
+        provider.build_spawn_command(SpawnCommandOptions(directory="/tmp/project", mode="resume"))
+
+
+def test_copilot_spawn_command_rejects_unsupported_mode():
+    import pytest
+
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("copilot-cli")
+    with pytest.raises(ValueError):
+        provider.build_spawn_command(SpawnCommandOptions(directory="/tmp/project", mode="worktree"))

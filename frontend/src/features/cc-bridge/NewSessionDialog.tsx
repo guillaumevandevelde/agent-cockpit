@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -24,13 +24,15 @@ import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
 import { fetchHosts } from '@/features/hosts/api'
 import { spawnSession, fetchResumableSessions, bulkResumeSessions, fetchMinimaxPlatformStatus } from './api'
+import { fetchCodexLaunchOptions } from '@/hooks/useProviders'
 import { Link } from 'react-router-dom'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
-import type { AgentProviderId } from '@/types/providers'
+import type { AgentProviderId, CodexLaunchOptionsResponse } from '@/types/providers'
 import type { SpawnSessionRequest } from './types'
 import type { ResumableSession } from '@/types/sessions'
 import type { Host } from '@/features/hosts/types'
+import type { ProjectResponse } from '@/types/projects'
 
 type Mode = 'plain' | 'worktree' | 'resume' | 'fork'
 
@@ -53,7 +55,12 @@ const CODEX_MODE_OPTIONS: { value: Mode; label: string }[] = [
   { value: 'fork', label: 'Fork' },
 ]
 
-const CUSTOM_PROJECT_VALUE = '__custom__'
+const COPILOT_MODE_OPTIONS: { value: Mode; label: string }[] = [
+  { value: 'plain', label: 'New' },
+  { value: 'resume', label: 'Resume' },
+]
+
+type CopilotRemote = 'default' | 'remote' | 'local'
 
 const PLATFORM_STORAGE_KEY = 'cc-bridge.platform'
 
@@ -97,11 +104,25 @@ function loadRememberedPlatform(): RememberedPlatform {
   }
 }
 
+function matchesProjectSearch(project: ProjectResponse, query: string) {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+
+  if (terms.length === 0) return true
+
+  const searchable = `${project.name} ${project.path}`.toLowerCase()
+  return terms.every((term) => searchable.includes(term))
+}
+
 export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvider }: NewSessionDialogProps) {
   const { providers, selectedProviderId } = useProviderContext()
   const defaultProvider = initialProvider ?? selectedProviderId
   const [provider, setProvider] = useState<AgentProviderId>(defaultProvider)
   const [directory, setDirectory] = useState('')
+  const [projectSearch, setProjectSearch] = useState('')
   const [mode, setMode] = useState<Mode>('plain')
   const [worktreeName, setWorktreeName] = useState('')
   const [sessionName, setSessionName] = useState('')
@@ -122,6 +143,14 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [bedrockModel, setBedrockModel] = useState('')
   const [minimaxBaseUrl, setMinimaxBaseUrl] = useState(MINIMAX_BASE_URL_INTERNATIONAL)
   const [minimaxConfigured, setMinimaxConfigured] = useState<boolean | null>(null)
+  const [codexLaunchOptions, setCodexLaunchOptions] = useState<CodexLaunchOptionsResponse | null>(null)
+  const [copilotAgent, setCopilotAgent] = useState('')
+  const [copilotContextTier, setCopilotContextTier] = useState('')
+  const [copilotReasoningEffort, setCopilotReasoningEffort] = useState('')
+  const [copilotPlan, setCopilotPlan] = useState(false)
+  const [copilotRemote, setCopilotRemote] = useState<CopilotRemote>('default')
+  const [copilotAllowAll, setCopilotAllowAll] = useState(false)
+  const [copilotNoAskUser, setCopilotNoAskUser] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -132,13 +161,57 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [hosts, setHosts] = useState<Host[]>([])
   const [loadingHosts, setLoadingHosts] = useState(false)
   const [selectedHostId, setSelectedHostId] = useState<number | null>(null)
+  const projectSearchRef = useRef<HTMLInputElement>(null)
+  const projectOptionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const { projects, activeProject } = useProjectContext()
   const isCodex = provider === 'codex-cli'
-  const modeOptions = isCodex ? CODEX_MODE_OPTIONS : MODE_OPTIONS
-  const selectedProjectPath = projects.some((project) => project.path === directory.trim())
-    ? directory.trim()
-    : CUSTOM_PROJECT_VALUE
+  const isCopilot = provider === 'copilot-cli'
+  const modeOptions = isCodex ? CODEX_MODE_OPTIONS : isCopilot ? COPILOT_MODE_OPTIONS : MODE_OPTIONS
+  const filteredProjects = useMemo(
+    () => projects.filter((project) => matchesProjectSearch(project, projectSearch)),
+    [projects, projectSearch],
+  )
+
+  function selectProject(project: ProjectResponse) {
+    setDirectory(project.path)
+    setSelectedSessionIds(new Set())
+    setError(null)
+  }
+
+  function focusProjectOption(index: number) {
+    projectOptionRefs.current[index]?.focus()
+  }
+
+  function handleProjectSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown' && filteredProjects.length > 0) {
+      event.preventDefault()
+      focusProjectOption(0)
+      return
+    }
+
+    if (event.key === 'Enter' && filteredProjects.length === 1) {
+      event.preventDefault()
+      selectProject(filteredProjects[0])
+    }
+  }
+
+  function handleProjectOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      focusProjectOption(Math.min(index + 1, filteredProjects.length - 1))
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (index === 0) {
+        projectSearchRef.current?.focus()
+      } else {
+        focusProjectOption(index - 1)
+      }
+    }
+  }
 
   useEffect(() => {
     if (open && !directory.trim() && activeProject?.path) {
@@ -181,9 +254,20 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     return () => { cancelled = true }
   }, [open])
 
+  // Fetch Codex's known models/profiles once per dialog open, to back the
+  // model/profile datalists with real values instead of pure free text.
+  useEffect(() => {
+    if (!open || !isCodex) return
+    let cancelled = false
+    fetchCodexLaunchOptions()
+      .then((data) => { if (!cancelled) setCodexLaunchOptions(data) })
+      .catch(() => { if (!cancelled) setCodexLaunchOptions(null) })
+    return () => { cancelled = true }
+  }, [open, isCodex])
+
   // Fetch sessions for the selected project AND its git worktrees in resume mode.
   useEffect(() => {
-    if (mode !== 'resume' || isCodex) return
+    if (mode !== 'resume' || isCodex || isCopilot) return
     let cancelled = false
     setSelectedSessionIds(new Set())
     setRecentSessions([])
@@ -198,13 +282,14 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       .catch(() => { if (!cancelled) setRecentSessions([]) })
       .finally(() => { if (!cancelled) setLoadingSessions(false) })
     return () => { cancelled = true }
-  }, [mode, isCodex, directory])
+  }, [mode, isCodex, isCopilot, directory])
 
   // Reset state when dialog closes
   useEffect(() => {
     if (!open) {
       setDirectory('')
       setProvider(defaultProvider)
+      setProjectSearch('')
       setMode('plain')
       setWorktreeName('')
       setSessionName('')
@@ -226,15 +311,23 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setSelectedHostId(null)
       setHosts([])
       setMinimaxConfigured(null)
+      setCodexLaunchOptions(null)
+      setCopilotAgent('')
+      setCopilotContextTier('')
+      setCopilotReasoningEffort('')
+      setCopilotPlan(false)
+      setCopilotRemote('default')
+      setCopilotAllowAll(false)
+      setCopilotNoAskUser(false)
     }
   }, [open, defaultProvider])
 
   const canLaunch = (() => {
     if (submitting) return false
-    if (isCodex && (mode === 'resume' || mode === 'fork')) {
+    if ((isCodex || isCopilot) && (mode === 'resume' || mode === 'fork')) {
       return directory.trim().length > 0 && (useLast || codexSessionId.trim().length > 0)
     }
-    if (!isCodex && mode === 'resume') return directory.trim().length > 0 && selectedSessionIds.size > 0
+    if (!isCodex && !isCopilot && mode === 'resume') return directory.trim().length > 0 && selectedSessionIds.size > 0
     return directory.trim().length > 0
   })()
 
@@ -243,13 +336,13 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     setSubmitting(true)
 
     try {
-      const isBedrock = !isCodex && platform === 'bedrock'
-      const isMinimax = !isCodex && platform === 'minimax'
+      const isBedrock = !isCopilot && platform === 'bedrock'
+      const isMinimax = !isCodex && !isCopilot && platform === 'minimax'
       try {
         localStorage.setItem(
           PLATFORM_STORAGE_KEY,
           JSON.stringify({
-            platform: isCodex ? 'anthropic' : platform,
+            platform: isCopilot ? 'anthropic' : platform,
             aws_region: awsRegion,
             aws_profile: awsProfile,
             bedrock_model: bedrockModel,
@@ -295,18 +388,25 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
         ...(sessionName.trim() && { session_name: sessionName.trim() }),
         ...(provider === 'claude-code' && mode === 'worktree' && worktreeName.trim() && { worktree_name: worktreeName.trim() }),
         ...(provider === 'claude-code' && skipPermissions && { skip_permissions: true }),
-        ...(isCodex && prompt.trim() && { prompt: prompt.trim() }),
-        ...(isCodex && model.trim() && { model: model.trim() }),
+        ...((isCodex || isCopilot) && prompt.trim() && { prompt: prompt.trim() }),
+        ...((isCodex || isCopilot) && model.trim() && { model: model.trim() }),
         ...(isCodex && profile.trim() && { profile: profile.trim() }),
         ...(isCodex && sandbox && { sandbox }),
         ...(isCodex && approvalPolicy && { approval_policy: approvalPolicy }),
         ...(isCodex && search && { search: true }),
         ...(isCodex && { no_alt_screen: noAltScreen }),
         ...(isCodex && dangerousBypass && { dangerously_bypass_approvals_and_sandbox: true }),
-        ...(isCodex && (mode === 'resume' || mode === 'fork') && {
+        ...((isCodex || isCopilot) && (mode === 'resume' || mode === 'fork') && {
           use_last: useLast,
           ...(!useLast && codexSessionId.trim() && { session_id: codexSessionId.trim() }),
         }),
+        ...(isCopilot && copilotAgent.trim() && { agent: copilotAgent.trim() }),
+        ...(isCopilot && copilotContextTier.trim() && { context_tier: copilotContextTier.trim() }),
+        ...(isCopilot && copilotReasoningEffort.trim() && { reasoning_effort: copilotReasoningEffort.trim() }),
+        ...(isCopilot && copilotPlan && { plan: true }),
+        ...(isCopilot && copilotRemote !== 'default' && { remote: copilotRemote === 'remote' }),
+        ...(isCopilot && copilotAllowAll && { allow_all: true }),
+        ...(isCopilot && copilotNoAskUser && { no_ask_user: true }),
         ...(isBedrock && { platform: 'bedrock' as const }),
         ...(isBedrock && awsRegion.trim() && { aws_region: awsRegion.trim() }),
         ...(isBedrock && awsProfile.trim() && { aws_profile: awsProfile.trim() }),
@@ -436,31 +536,56 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
           <div className="space-y-2">
             {projects.length > 0 && (
               <div className="space-y-1.5">
-                <Label>Project</Label>
-                <Select
-                  value={selectedProjectPath}
-                  onValueChange={(value) => {
-                    if (value === CUSTOM_PROJECT_VALUE) {
-                      setDirectory('')
-                    } else {
-                      setDirectory(value)
-                    }
-                    setSelectedSessionIds(new Set())
-                    setError(null)
-                  }}
+                <Label htmlFor="session-project-search">Project</Label>
+                <Input
+                  ref={projectSearchRef}
+                  id="session-project-search"
+                  type="search"
+                  value={projectSearch}
+                  onChange={(event) => setProjectSearch(event.target.value)}
+                  onKeyDown={handleProjectSearchKeyDown}
+                  placeholder="Search projects by name or path"
+                  autoComplete="off"
+                  aria-controls="session-project-results"
+                />
+                <div
+                  id="session-project-results"
+                  aria-label="Projects"
+                  className="max-h-48 overflow-y-auto rounded-md border border-border bg-background"
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.path}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={CUSTOM_PROJECT_VALUE}>Custom path</SelectItem>
-                  </SelectContent>
-                </Select>
+                  {filteredProjects.length === 0 ? (
+                    <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                      No projects match.
+                    </div>
+                  ) : (
+                    filteredProjects.map((project, index) => {
+                      const selected = project.path === directory.trim()
+                      return (
+                        <button
+                          key={project.id}
+                          ref={(element) => {
+                            projectOptionRefs.current[index] = element
+                          }}
+                          type="button"
+                          aria-pressed={selected}
+                          className={cn(
+                            'block w-full min-w-0 border-b px-3 py-2 text-left transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                            selected ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/50',
+                          )}
+                          onClick={() => selectProject(project)}
+                          onKeyDown={(event) => handleProjectOptionKeyDown(event, index)}
+                        >
+                          <span className="block truncate text-sm font-medium">
+                            {project.name}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {project.path}
+                          </span>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
               </div>
             )}
             <Label htmlFor="session-directory">Project Directory</Label>
@@ -494,7 +619,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
           )}
 
           {/* Resume session picker (multi-select — resumes each in its own pane) */}
-          {!isCodex && mode === 'resume' && (
+          {!isCodex && !isCopilot && mode === 'resume' && (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <Label>Recent Sessions</Label>
@@ -569,7 +694,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             </div>
           )}
 
-          {isCodex && (mode === 'resume' || mode === 'fork') && (
+          {(isCodex || isCopilot) && (mode === 'resume' || mode === 'fork') && (
             <div className="space-y-2">
               <div className="flex items-center space-x-2">
                 <Checkbox
@@ -578,12 +703,12 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                   onCheckedChange={(checked) => setUseLast(checked === true)}
                 />
                 <Label htmlFor="codex-use-last" className="cursor-pointer">
-                  Use last Codex session
+                  Use last {isCodex ? 'Codex' : 'Copilot'} session
                 </Label>
               </div>
               {!useLast && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="codex-session-id">Codex Session ID</Label>
+                  <Label htmlFor="codex-session-id">{isCodex ? 'Codex' : 'Copilot'} Session ID</Label>
                   <Input
                     id="codex-session-id"
                     value={codexSessionId}
@@ -599,11 +724,33 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="codex-model">Model</Label>
-                <Input id="codex-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="default" />
+                <Input
+                  id="codex-model"
+                  list="codex-model-options"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder={codexLaunchOptions?.default_model || 'default'}
+                />
+                <datalist id="codex-model-options">
+                  {codexLaunchOptions?.model_options.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </datalist>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="codex-profile">Profile</Label>
-                <Input id="codex-profile" value={profile} onChange={(e) => setProfile(e.target.value)} placeholder="default" />
+                <Input
+                  id="codex-profile"
+                  list="codex-profile-options"
+                  value={profile}
+                  onChange={(e) => setProfile(e.target.value)}
+                  placeholder={codexLaunchOptions?.default_profile || 'default'}
+                />
+                <datalist id="codex-profile-options">
+                  {codexLaunchOptions?.profile_options.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </datalist>
               </div>
               <div className="space-y-1.5">
                 <Label>Sandbox</Label>
@@ -637,7 +784,43 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             </div>
           )}
 
-          {!isCodex && (
+          {isCopilot && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="copilot-model">Model</Label>
+                <Input id="copilot-model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="default" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="copilot-agent">Agent</Label>
+                <Input id="copilot-agent" value={copilotAgent} onChange={(e) => setCopilotAgent(e.target.value)} placeholder="default" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="copilot-context-tier">Context</Label>
+                <Input id="copilot-context-tier" value={copilotContextTier} onChange={(e) => setCopilotContextTier(e.target.value)} placeholder="default" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="copilot-reasoning-effort">Reasoning effort</Label>
+                <Input id="copilot-reasoning-effort" value={copilotReasoningEffort} onChange={(e) => setCopilotReasoningEffort(e.target.value)} placeholder="default" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Remote</Label>
+                <Select value={copilotRemote} onValueChange={(value) => setCopilotRemote(value as CopilotRemote)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">Default</SelectItem>
+                    <SelectItem value="remote">Remote</SelectItem>
+                    <SelectItem value="local">Local</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label htmlFor="copilot-prompt">Initial Prompt</Label>
+                <Input id="copilot-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Optional prompt" />
+              </div>
+            </div>
+          )}
+
+          {!isCopilot && (
             <div className="space-y-1.5">
               <Label>Platform</Label>
               <Select value={platform} onValueChange={(value) => setPlatform(value as Platform)}>
@@ -647,13 +830,13 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                 <SelectContent>
                   <SelectItem value="anthropic">Anthropic (default)</SelectItem>
                   <SelectItem value="bedrock">Amazon Bedrock</SelectItem>
-                  <SelectItem value="minimax">MiniMax</SelectItem>
+                  {!isCodex && <SelectItem value="minimax">MiniMax</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
           )}
 
-          {!isCodex && platform === 'bedrock' && (
+          {!isCopilot && platform === 'bedrock' && (
             <div className="space-y-3 rounded-md border border-border p-3">
               <p className="text-xs text-muted-foreground">
                 Uses AWS credentials from the server environment. Region is usually required.
@@ -673,7 +856,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             </div>
           )}
 
-          {!isCodex && platform === 'minimax' && (
+          {!isCodex && !isCopilot && platform === 'minimax' && (
             <div className="space-y-3 rounded-md border border-border p-3">
               {minimaxConfigured === null && (
                 <p className="text-xs text-muted-foreground">Checking configuration...</p>
@@ -704,7 +887,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             </div>
           )}
 
-          {!isCodex && (
+          {!isCodex && !isCopilot && (
             <div className="space-y-1">
               <div className="flex items-center space-x-2">
                 <Checkbox
@@ -735,6 +918,23 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
               <div className="flex items-center space-x-2">
                 <Checkbox id="codex-dangerous" checked={dangerousBypass} onCheckedChange={(checked) => setDangerousBypass(checked === true)} />
                 <Label htmlFor="codex-dangerous" className="cursor-pointer text-destructive">Bypass approvals and sandbox</Label>
+              </div>
+            </div>
+          )}
+
+          {isCopilot && (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox id="copilot-plan" checked={copilotPlan} onCheckedChange={(checked) => setCopilotPlan(checked === true)} />
+                <Label htmlFor="copilot-plan" className="cursor-pointer">Plan before executing</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="copilot-no-ask-user" checked={copilotNoAskUser} onCheckedChange={(checked) => setCopilotNoAskUser(checked === true)} />
+                <Label htmlFor="copilot-no-ask-user" className="cursor-pointer">Don't ask for user input</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox id="copilot-allow-all" checked={copilotAllowAll} onCheckedChange={(checked) => setCopilotAllowAll(checked === true)} />
+                <Label htmlFor="copilot-allow-all" className="cursor-pointer text-destructive">Allow all tools without confirmation</Label>
               </div>
             </div>
           )}

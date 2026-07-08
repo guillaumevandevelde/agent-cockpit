@@ -56,7 +56,8 @@ git push origin HEAD:master
 git checkout "$BRANCH"   # back so the worktree stays valid
 ```
 
-Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`) and `move_card` to `Done`.
+Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`) and `move_card` to
+`Done` with a `summary` of the work you did (required — the move is rejected without it).
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
 
@@ -105,7 +106,8 @@ while true; do
 done
 ```
 
-If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `move_card` to `Done`.
+If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `move_card` to `Done`
+with a `summary` of the work you did (required — the move is rejected without it).
 
 If the loop exited because a check failed, the PR was closed, or the wait timed
 out: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `report_impediment`
@@ -123,7 +125,8 @@ Once the card reaches `Done`, the backend automatically:
 - Removes the git worktree.
 - Releases the `agent:` claim.
 
-You do **not** need to clean up tmux or worktrees yourself. Just `move_card` to `Done`.
+You do **not** need to clean up tmux or worktrees yourself. Just `move_card` to `Done`
+(with `summary`).
 
 **Safety net:** the auto-cleanup only fires for cards that actually reach `Done`.
 Worktrees that are merged-but-never-Done, or created outside the kanban flow, leak.
@@ -139,3 +142,5 @@ when leftovers exist.
 - Never merge or open a PR when tests are red.
 - A new worktree always branches from `origin/master`.
 - `attach_deliverable` before `move_card` so the deliverable is on the card.
+- `move_card` into `Done` or `Impediment` requires `summary` — the server rejects the
+  move without it (`report_impediment` already supplies one via its `question` arg).

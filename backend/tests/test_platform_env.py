@@ -65,6 +65,40 @@ def test_bedrock_rejects_null_byte_in_value():
         build_platform_env(PLATFORM_BEDROCK, model="bad\x00value")
 
 
+def test_codex_bedrock_only_sets_shared_aws_env():
+    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+
+    env = build_platform_env(
+        PLATFORM_BEDROCK,
+        region="us-east-2",
+        aws_profile="codex-bedrock",
+        model="openai.gpt-5.5",
+        provider_id="codex-cli",
+    )
+
+    assert env == {
+        "AWS_REGION": "us-east-2",
+        "AWS_PROFILE": "codex-bedrock",
+    }
+
+
+def test_codex_bedrock_without_region_or_profile_has_no_env():
+    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+
+    assert build_platform_env(PLATFORM_BEDROCK, provider_id="codex-cli") == {}
+
+
+def test_claude_code_bedrock_still_sets_claude_flags_by_default():
+    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+
+    env = build_platform_env(PLATFORM_BEDROCK, model="arn:aws:bedrock:us-east-1:123:x")
+
+    assert env == {
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "ANTHROPIC_MODEL": "arn:aws:bedrock:us-east-1:123:x",
+    }
+
+
 def test_minimax_minimal_uses_international_defaults():
     from app.services.providers.platform_env import (
         MINIMAX_AUTO_COMPACT_WINDOW,

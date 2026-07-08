@@ -59,6 +59,10 @@ class ScheduledMessageCreate(BaseModel):
         return self
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[int]
+
+
 class ScheduledMessageUpdate(BaseModel):
     message: str | None = None
     fire_at: str | None = None

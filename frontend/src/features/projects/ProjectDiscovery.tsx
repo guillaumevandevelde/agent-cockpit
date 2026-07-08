@@ -52,7 +52,7 @@ export function ProjectDiscovery({ onProjectsDiscovered }: ProjectDiscoveryProps
       const discovered = await discoverProjects(searchPath);
       setDiscoveredProjects(discovered);
       if (discovered.length === 0) {
-        setError('No Claude Code projects found in this directory');
+        setError('No project folders found in this directory');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to discover projects');
@@ -85,7 +85,7 @@ export function ProjectDiscovery({ onProjectsDiscovered }: ProjectDiscoveryProps
       <CardHeader>
         <CardTitle>Discover Projects</CardTitle>
         <CardDescription>
-          Enter a directory path to scan for Claude Code projects
+          Enter a directory path to find project folders
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -144,6 +144,8 @@ export function ProjectDiscovery({ onProjectsDiscovered }: ProjectDiscoveryProps
                             <Badge variant="outline" className="border-green-500 text-green-600">Configured</Badge>
                           ) : project.source === "session_history" ? (
                             <Badge variant="outline" className="border-blue-500 text-blue-600">Session History</Badge>
+                          ) : project.source === "directory" ? (
+                            <Badge variant="outline">Folder</Badge>
                           ) : (
                             <Badge variant="outline">Discovered</Badge>
                           )}

@@ -22,6 +22,13 @@ _LIMIT_PATTERN = re.compile(
 # Default continuation message when auto-resuming
 DEFAULT_RESUME_MESSAGE = "Continue where you left off."
 
+# Conservative dispatch-pause duration when a limit notification is recognized
+# but its reset time can't be parsed (e.g. a weekly/model cap with different
+# wording). Same as usage_service.UsageService.SESSION_DURATION_HOURS, the
+# length of a Claude billing block -- guessing too short just re-triggers the
+# same spin-and-burn loop the pause exists to prevent.
+FALLBACK_PAUSE_HOURS = 5
+
 
 class AutoResumeService:
     def __init__(self) -> None:

@@ -190,6 +190,73 @@ def test_codex_profile_resolution_handles_default_config_without_profile(tmp_pat
     assert resolution["effective_summary"]["features"]["search"] is True
 
 
+def test_codex_launch_options_include_models_and_profiles(tmp_path):
+    from app.services.codex_config_service import CodexConfigService
+
+    (tmp_path / "config.toml").write_text(
+        '\n'.join([
+            'model = "configured-model"',
+            'profile = "work"',
+            '',
+            '[profiles.work]',
+            'model = "profile-model"',
+            '',
+            '[profiles.review]',
+            'approval_policy = "on-request"',
+        ]),
+        encoding="utf-8",
+    )
+    (tmp_path / "work.config.toml").write_text('sandbox_mode = "workspace-write"\n', encoding="utf-8")
+    (tmp_path / "models_cache.json").write_text(
+        """{
+          "models": [
+            {
+              "slug": "gpt-5.1-codex",
+              "display_name": "GPT-5.1 Codex",
+              "description": "Code model",
+              "priority": 10
+            },
+            {"slug": "profile-model", "display_name": "Profile Model"}
+          ]
+        }""",
+        encoding="utf-8",
+    )
+
+    options = CodexConfigService(codex_home=tmp_path).get_launch_options()
+
+    assert options["provider"] == "codex-cli"
+    assert options["default_model"] == "profile-model"
+    assert options["default_profile"] == "work"
+    assert options["config_exists"] is True
+    assert options["models_cache_exists"] is True
+
+    model_values = {opt["value"] for opt in options["model_options"]}
+    assert "gpt-5.1-codex" in model_values
+    assert "profile-model" in model_values
+    gpt_option = next(opt for opt in options["model_options"] if opt["value"] == "gpt-5.1-codex")
+    assert gpt_option["label"] == "GPT-5.1 Codex"
+    assert gpt_option["description"] == "Code model"
+    assert gpt_option["priority"] == 10
+
+    profile_values = {opt["value"]: opt for opt in options["profile_options"]}
+    assert profile_values["work"]["active"] is True
+    assert "review" in profile_values
+    assert profile_values["review"]["active"] is False
+
+
+def test_codex_launch_options_empty_when_no_config_or_cache(tmp_path):
+    from app.services.codex_config_service import CodexConfigService
+
+    options = CodexConfigService(codex_home=tmp_path).get_launch_options()
+
+    assert options["config_exists"] is False
+    assert options["models_cache_exists"] is False
+    assert options["default_model"] is None
+    assert options["default_profile"] is None
+    assert options["model_options"] == []
+    assert options["profile_options"] == []
+
+
 def test_codex_profile_resolution_does_not_build_paths_for_unsafe_references(tmp_path):
     from app.services.codex_config_service import CodexConfigService
 

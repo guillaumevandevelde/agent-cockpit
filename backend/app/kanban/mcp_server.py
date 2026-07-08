@@ -103,16 +103,50 @@ async def claim_card(card_id: str, claimed_by: str) -> dict:
         return _card_dict(await service.get_card(s, card_id))
 
 
+# Landing a card here without a word of what happened makes the board useless as a
+# record: Done just says "it's done", Impediment just says "it's stuck". Requiring
+# `summary` on move_card into either one guarantees every card that reaches a
+# terminal column carries a human-readable account of the work, regardless of which
+# coding agent/provider drove the session — enforced once here rather than per-agent
+# prompt text that could be skipped. report_impediment already gets this for free
+# (its mandatory `question` arg is posted the same way), so this only closes the gap
+# for the Done path and for a raw move_card("Impediment", ...) bypassing that tool.
+_SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary", "Impediment": "Impediment"}
+
+
 @mcp.tool()
-async def move_card(card_id: str, column: str) -> dict:
-    """Move a card to a different column."""
+async def move_card(card_id: str, column: str, summary: str | None = None) -> dict:
+    """Move a card to a different column.
+
+    Moving into "Done" or "Impediment" requires `summary` — a short account of the
+    work that was done (or why it couldn't be finished). It's posted to the card's
+    activity feed as a comment so the outcome is visible without opening a
+    transcript. Returns {"error": "summary_required"} without moving the card if
+    summary is missing/blank for those two columns.
+    """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
         if card is None:
             logger.debug("move_card: %s not found", card_id)
             return {"error": _NOT_FOUND, "card_id": card_id}
+
+        label = _SUMMARY_REQUIRED_COLUMNS.get(column)
+        summary = (summary or "").strip()
+        if label and not summary:
+            return {
+                "error": "summary_required",
+                "message": (
+                    f'Add a `summary` describing the work done before moving to "{column}" '
+                    "— it's posted to the card's activity feed."
+                ),
+            }
+
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=card_id, payload={"column": column})
+        if label:
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=card_id,
+                payload={"text": f"**{label}:** {summary}"})
         await s.commit()
         logger.info("move_card: %s → %s", card_id, column)
         return _card_dict(await service.get_card(s, card_id))
