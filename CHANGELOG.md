@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Models**: Claude Sonnet 5 is now selectable as a model, with correct context-window and usage-cost calculation
 - **Kanban**: Dispatch board for handing work to Claude Code/Codex agents — cards move through columns as agents claim, work, and hand them off, with per-agent performance stats, impediment reporting, and scheduling a card for a future time
 - **Scheduled Messages**: Schedule a message for future delivery into a running or resumable tmux session, including auto-resume of sessions that hit their rate limit
 - **Context**: Session context-window visualizer showing usage over time, cache efficiency, and content breakdown

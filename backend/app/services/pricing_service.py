@@ -17,6 +17,13 @@ class PricingService:
     # Model pricing data (costs per token)
     # Based on LiteLLM pricing data
     MODEL_PRICING = {
+        # Claude Sonnet 5 (June 2026)
+        "claude-sonnet-5": {
+            "input": 3.00 / 1_000_000,
+            "output": 15.00 / 1_000_000,
+            "cache_creation": 3.75 / 1_000_000,
+            "cache_read": 0.30 / 1_000_000,
+        },
         # Claude Sonnet 4 (May 2025)
         "claude-sonnet-4-20250514": {
             "input": 3.00 / 1_000_000,
