@@ -21,6 +21,7 @@ from app.services.subscriptions import (  # noqa: F401
     placeholders,  # noqa: F401
     put_snapshot_cache,
 )
+from app.services.subscriptions.anthropic import build_anthropic_provider
 from app.services.subscriptions.storage import VALID_TIERS, get_pref, set_pref
 
 router = APIRouter()
@@ -49,7 +50,15 @@ def _to_response(snap) -> SubscriptionUsageResponse:
 
 
 @router.get("/subscriptions/{provider_id}/usage", response_model=SubscriptionUsageResponse)
-async def get_usage(provider_id: str):
+async def get_usage(provider_id: str, db: AsyncSession = Depends(get_db)):
+    if provider_id == "anthropic":
+        cached = await get_snapshot_cache("anthropic")
+        if cached is not None:
+            return _to_response(cached)
+        snap = await build_anthropic_provider(db).get_snapshot()
+        await put_snapshot_cache(snap)
+        return _to_response(snap)
+
     try:
         provider = get_usage_provider(provider_id)
     except ValueError as exc:

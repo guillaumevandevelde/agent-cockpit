@@ -109,12 +109,27 @@ async def test_plan_tier_put_rejects_unknown_tier():
 @pytest.mark.asyncio
 async def test_plan_tier_put_invalidates_cached_snapshot(monkeypatch):
     """After PUT, the next /usage call must NOT return the cached pre-PUT snapshot."""
-    # Wire a fake provider that returns a known snapshot, then verify cache
-    # invalidation flips it back to plan_unknown when the tier is cleared.
-    from app.services.subscriptions import placeholders
-    async def _fake(_: object) -> dict:
-        return {"snapshots_seen": []}
-    # The above is a no-op; the real assertion is in the next task
-    # (test_subscription_usage_anthropic). This test remains as a stub
-    # because we don't yet have a registered concrete provider.
-    assert placeholders is not None
+    async with _client() as ac:
+        r = await ac.put(
+            "/api/v1/agent-bridge/subscriptions/anthropic/plan-tier",
+            json={"tier": "max_5x"},
+        )
+        assert r.status_code == 200
+
+        # First /usage call populates the cache.
+        r = await ac.get("/api/v1/agent-bridge/subscriptions/anthropic/usage")
+        assert r.status_code == 200
+        first = r.json()
+        assert first["error_code"] is None
+        assert any(p["label"] == "5h rate" for p in first["periods"])
+
+        # PUT a different tier -> should invalidate cache.
+        r = await ac.put(
+            "/api/v1/agent-bridge/subscriptions/anthropic/plan-tier",
+            json={"tier": "pro"},
+        )
+        assert r.status_code == 200
+
+        # Next /usage call should reflect pro (plan_label=pro) not max_5x.
+        r = await ac.get("/api/v1/agent-bridge/subscriptions/anthropic/usage")
+        assert r.json()["plan_label"] == "pro"
