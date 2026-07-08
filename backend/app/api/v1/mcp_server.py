@@ -88,8 +88,16 @@ async def handle_mcp_post(request: Request, db: AsyncSession = Depends(get_db)):
             tool_name = params.get("name")
             arguments = params.get("arguments", {})
             result = await mcp.call_tool(tool_name, arguments)
+            # FastMCP's call_tool(..., convert_result=True) returns a
+            # (content_blocks, structured_result) tuple when the tool has an
+            # output schema (every @mcp.tool() here does, since they return a
+            # plain str). Iterating the tuple directly (as if it were the
+            # content list) yields the two tuple elements themselves, not
+            # content blocks, and neither has `.text` -- str(item) then dumps
+            # a mangled repr instead of the tool's actual output.
+            items = result[0] if isinstance(result, tuple) else result
             content = []
-            for item in result:
+            for item in items:
                 if hasattr(item, "text"):
                     content.append({"type": "text", "text": item.text})
                 else:
