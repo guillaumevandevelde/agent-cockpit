@@ -113,6 +113,19 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql(
             "ALTER TABLE kanban_cards ADD COLUMN dispatch_failures INTEGER NOT NULL DEFAULT 0"
         )
+    if "analyst_agent_id" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN analyst_agent_id VARCHAR(64)")
+    if "executor_agent_id" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN executor_agent_id VARCHAR(64)")
+    if "parent_card_id" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN parent_card_id VARCHAR(64)")
+        await conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_kanban_cards_parent_card_id ON kanban_cards (parent_card_id)"
+        )
+    if "analyst_run_id" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN analyst_run_id VARCHAR(64)")
+    if "depends_on" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN depends_on JSON")
 
 
 async def _ensure_column_table(conn) -> None:
