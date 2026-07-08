@@ -704,6 +704,22 @@ def test_live_sessions_none_when_tmux_missing(monkeypatch):
     assert d._live_sessions() is None
 
 
+def test_live_sessions_empty_set_on_tmux_3_6_no_server_wording(monkeypatch):
+    # tmux 3.6 dropped the "no server running" wording in favour of a generic
+    # "error connecting to <socket> (No such file or directory)" message for the
+    # exact same "no server ever started" case. This must still map to an empty
+    # set, not None, or the reaper/session-recovery permanently refuses to touch
+    # any claim whenever no tmux server has been started yet on this host.
+    import app.kanban.dispatch as d
+
+    class R:
+        returncode = 1
+        stdout = ""
+        stderr = "error connecting to /tmp/tmux-1000/default (No such file or directory)"
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **k: R())
+    assert d._live_sessions() == set()
+
+
 # ---- project_key -> local path matching -----------------------------------
 
 def test_match_project_paths_maps_enabled_keys_to_local_paths():

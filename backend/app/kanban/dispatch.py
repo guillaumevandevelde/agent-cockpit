@@ -633,7 +633,14 @@ def _live_sessions() -> set[str] | None:
     queried. Returning None (not an empty set) on an *ambiguous* failure is the
     whole point: the reaper must never mistake a transient `tmux` hiccup for "every
     session is dead" and release live claims. A clean "no server running" maps to
-    an empty set, since that genuinely means zero live sessions."""
+    an empty set, since that genuinely means zero live sessions.
+
+    tmux's wording for "no server has ever been started" varies by version: older
+    releases say "no server running on <socket>"; tmux 3.6 says "error connecting
+    to <socket> (No such file or directory)" instead. Both mean the same thing --
+    no socket file exists yet -- so both must map to an empty set, or a host that
+    has never opened a tmux server (e.g. right after a restart) permanently blocks
+    the reaper and session-recovery from ever touching a claim."""
     try:
         result = subprocess.run(
             ["tmux", "list-sessions", "-F", "#{session_name}"],
@@ -642,7 +649,12 @@ def _live_sessions() -> set[str] | None:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0:
-        if "no server running" in (result.stderr or "").lower():
+        stderr = (result.stderr or "").lower()
+        no_server = (
+            "no server running" in stderr
+            or ("error connecting to" in stderr and "no such file or directory" in stderr)
+        )
+        if no_server:
             return set()
         return None
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
