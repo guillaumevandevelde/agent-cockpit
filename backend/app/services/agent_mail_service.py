@@ -185,5 +185,166 @@ class AgentMailService:
             return "offline"
         return session.mailbox_status
 
+    async def sync_observed_sessions(self, db: AsyncSession) -> None:
+        """Upsert Agent Bridge tmux discoveries as observed sessions."""
+        try:
+            discovered = discover_agent_sessions()
+        except Exception as exc:
+            logger.warning("agent bridge discovery failed: %s", exc)
+            return
+        active_observed_keys: set[str] = set()
+        for info in discovered:
+            pane_id = info.get("pane_id")
+            cwd = info.get("cwd")
+            if not pane_id or not cwd:
+                continue
+            session_key = f"tmux:{pane_id}"
+            active_observed_keys.add(session_key)
+            result = await db.execute(
+                select(MailAgentSession).where(MailAgentSession.session_key == session_key)
+            )
+            session = result.scalar_one_or_none()
+            member = await self._member_for_observed_session(db, info)
+            if session is None:
+                session = MailAgentSession(member_id=member.id, source="observed", session_key=session_key)
+                db.add(session)
+            session.member_id = member.id
+            session.provider = info.get("provider", "unknown")
+            session.cwd = cwd
+            session.tmux_target = info.get("tmux_target")
+            session.pane_id = pane_id
+            try:
+                session.pid = int(info.get("pid") or 0) or None
+            except (TypeError, ValueError):
+                session.pid = None
+            session.mailbox_status = "observed"
+            session.last_seen_at = datetime.utcnow()
+        await self._remove_stale_observed_sessions(db, active_observed_keys)
+        await db.commit()
+
+    async def _member_for_observed_session(self, db: AsyncSession, info: dict) -> MailTeamMember:
+        """Match an observed tmux pane to an already-registered hook/MCP session
+        of the same provider via PID ancestry, so one logical agent doesn't get
+        two member rows (a hook-registered session plus a tmux-observed one)."""
+        cwd = str(info.get("cwd") or "")
+        provider = str(info.get("provider") or "unknown")
+        try:
+            pid = int(info.get("pid") or 0) or None
+        except (TypeError, ValueError):
+            pid = None
+
+        if pid is not None:
+            now = datetime.utcnow()
+            result = await db.execute(
+                select(MailAgentSession).where(
+                    MailAgentSession.source != "observed",
+                    MailAgentSession.provider == provider,
+                    MailAgentSession.pid.is_not(None),
+                    MailAgentSession.last_seen_at >= now - timedelta(seconds=HEARTBEAT_TTL_SECONDS),
+                ).order_by(MailAgentSession.last_seen_at.desc())
+            )
+            for registered in result.scalars().all():
+                if not registered.pid or not self._pids_related(pid, int(registered.pid)):
+                    continue
+                if self._registered_session_matches_observed(registered, info, now):
+                    member = await db.get(MailTeamMember, registered.member_id)
+                    if member is not None:
+                        return member
+
+        return await self._get_or_create_repo_member(db, cwd)
+
+    def _pids_related(self, left_pid: int, right_pid: int) -> bool:
+        return (
+            left_pid == right_pid
+            or self._pid_is_descendant(left_pid, right_pid)
+            or self._pid_is_descendant(right_pid, left_pid)
+        )
+
+    def _pid_is_descendant(self, child_pid: int, ancestor_pid: int) -> bool:
+        current = child_pid
+        visited: set[int] = set()
+        for _ in range(8):
+            if current == ancestor_pid:
+                return True
+            if current in visited:
+                return False
+            visited.add(current)
+            try:
+                result = subprocess.run(
+                    ["ps", "-o", "ppid=", "-p", str(current)], capture_output=True, text=True, timeout=1,
+                )
+            except (OSError, subprocess.SubprocessError):
+                return False
+            if result.returncode != 0:
+                return False
+            try:
+                current = int(result.stdout.strip() or "0")
+            except ValueError:
+                return False
+            if current <= 1:
+                return False
+        return False
+
+    def _registered_session_matches_observed(self, session: MailAgentSession, info: dict, now: datetime) -> bool:
+        cwd = str(info.get("cwd") or "")
+        if not session.cwd or not cwd:
+            return False
+        try:
+            if derive_repo_identity(session.cwd)["repo_id"] != derive_repo_identity(cwd)["repo_id"]:
+                return False
+        except Exception:
+            if os.path.realpath(session.cwd) != os.path.realpath(cwd):
+                return False
+        if session.last_seen_at < now - timedelta(seconds=HEARTBEAT_TTL_SECONDS):
+            return False
+        return self._effective_status(session, now) != "offline"
+
+    async def _remove_stale_observed_sessions(self, db: AsyncSession, active_observed_keys: set[str]) -> None:
+        """Drop tmux-only sessions no longer discoverable, and empty auto-created members."""
+        result = await db.execute(select(MailAgentSession).where(MailAgentSession.source == "observed"))
+        affected_member_ids: set[int] = set()
+        for session in result.scalars().all():
+            if session.session_key in active_observed_keys:
+                continue
+            affected_member_ids.add(session.member_id)
+            await db.delete(session)
+        if not affected_member_ids:
+            return
+        await db.flush()
+        for member_id in affected_member_ids:
+            await self._remove_empty_observed_member(db, member_id)
+
+    async def _remove_empty_observed_member(self, db: AsyncSession, member_id: int) -> None:
+        """Remove auto-observed members only when they have no durable user/mail state."""
+        member = await db.get(MailTeamMember, member_id)
+        if member is None:
+            return
+        if member.role or member.charter or member.display_name != member.repo_name:
+            return
+        session_count = (await db.execute(
+            select(func.count()).select_from(MailAgentSession).where(MailAgentSession.member_id == member_id)
+        )).scalar_one()
+        if session_count:
+            return
+        message_count = (await db.execute(
+            select(func.count()).select_from(MailMessage).where(
+                or_(MailMessage.sender_member_id == member_id, MailMessage.recipient_member_id == member_id)
+            )
+        )).scalar_one()
+        receipt_count = (await db.execute(
+            select(func.count()).select_from(MailReceipt).where(MailReceipt.member_id == member_id)
+        )).scalar_one()
+        if message_count or receipt_count:
+            return
+        await db.delete(member)
+
+    def _session_can_nudge(self, session: MailAgentSession, now: datetime) -> bool:
+        return bool(
+            session.source == "observed"
+            and session.provider in TMUX_WAKE_PROVIDERS
+            and session.tmux_target
+            and self._effective_status(session, now) == "observed"
+        )
+
 
 agent_mail_service = AgentMailService()
