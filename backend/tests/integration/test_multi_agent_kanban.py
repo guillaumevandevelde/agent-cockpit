@@ -33,7 +33,13 @@ async def test_multi_agent_flow(monkeypatch):
         side effects are what stop ``_next_card`` from re-picking the same card
         on the next iteration of the dispatcher's tick loop. The stub omits the
         actual ``spawn_session`` call (no tmux / no worktree) but still returns
-        a session dict so ``dispatch_project`` writes ``analyst_run_id`` itself.
+        a result dict so ``dispatch_project`` writes ``analyst_run_id`` itself.
+
+        IMPORTANT: the dict MUST mirror the real ``_run_card`` return shape
+        (see dispatch.py: ``{"card_id", "session_name", "claimant",
+        "source_column", "spawned"}``) — NOT the old ``{"session": ...}`` shape
+        that the buggy dispatch tick used to read. Using the old shape would
+        silently re-introduce the Critical C1 regression.
         """
         card = kwargs["card"]
         spawned.append((kwargs["phase"], card.id))
@@ -41,9 +47,18 @@ async def test_multi_agent_flow(monkeypatch):
         target_col = "analyst" if kwargs["phase"] == "analyst" else "engineer"
         card.claimed_by = dispatch.CLAIMANT_PREFIX + session_name
         card.column = target_col
-        card.claimed_at = card.claimed_at  # leave timestamp undefined for the stub
+        # Leave claimed_at undefined for the stub: a real claim op stamps
+        # claimed_at server-side, and the integration test only inspects
+        # analyst_run_id / spawn order — asserting on the timestamp would
+        # couple this test to internal claim-side-effects.
         await session.flush()
-        return {"session": session_name}
+        return {
+            "card_id": card.id,
+            "session_name": session_name,
+            "claimant": dispatch.CLAIMANT_PREFIX + session_name,
+            "source_column": "Backlog",
+            "spawned": True,
+        }
 
     monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
 

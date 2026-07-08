@@ -338,3 +338,75 @@ async def test_run_card_prepends_placeholder_for_child_with_missing_plan(monkeyp
         f"{captured['prompt'][:200]!r}"
     )
     assert "report_impediment" in captured["prompt"]
+
+
+# ---- Final review: regression for analyst_run_id write-back (Critical C1) --
+
+@pytest.mark.asyncio
+async def test_dispatch_project_analyst_branch_persists_analyst_run_id(monkeypatch):
+    """Regression test for Critical C1 in the final review.
+
+    The dispatch tick writes ``card.analyst_run_id`` from the result dict that
+    ``_run_card`` returned. The real ``_run_card`` returns
+    ``{"card_id": ..., "session_name": name, ...}`` (see dispatch.py:947), NOT
+    ``{"session": ...}``. The dispatch tick must read the real key. This test
+    exercises the real ``dispatch_project`` analyst branch with a stub that
+    mirrors the real ``_run_card`` shape exactly — so a regression in either
+    direction (stub drift or read-key bug) is caught.
+
+    Buggy code: ``if "session" in last_result:`` is always False, so
+    ``analyst_run_id`` is never written. The card would silently stay in
+    Backlog/analyst with no ``analyst_run_id`` and the dispatcher would re-spawn
+    the analyst every tick until ``MAX_DISPATCH_FAILURES`` trips.
+    """
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    async def fake_run_card(session, **kwargs):
+        """Mirror the real ``_run_card`` return shape exactly.
+
+        Real shape (dispatch.py:947): ``{"card_id", "session_name", "claimant",
+        "source_column", "spawned"}``. Importantly, NOT ``"session"`` — that's
+        the buggy key the dispatch tick was looking for.
+        """
+        card = kwargs["card"]
+        # Mirror the claim+move side effects so _next_card doesn't re-pick this
+        # card on the next tick iteration (see test_multi_agent_kanban).
+        card.claimed_by = dispatch.CLAIMANT_PREFIX + "tmux-abc"
+        card.column = "analyst" if kwargs["phase"] == "analyst" else "engineer"
+        await session.flush()
+        return {
+            "card_id": card.id,
+            "session_name": "tmux-abc",
+            "claimant": "agent:tmux-abc",
+            "source_column": "Backlog",
+            "spawned": True,
+        }
+
+    monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "parent", "column": "Backlog",
+                     "analyst_agent_id": "claude-code"},
+        )
+        await s.commit()
+
+        # Drive the real dispatcher — no inline-branch shortcut. This is the
+        # exact code path that hit the bug.
+        await dispatch.dispatch_project(s, project_key=PK, project_path="/tmp/none")
+        await s.commit()
+
+        parent = await s.get(KanbanCard, parent_id)
+        assert parent.analyst_run_id == "tmux-abc", (
+            f"analyst_run_id must be set from the real _run_card shape "
+            f"(session_name key); got {parent.analyst_run_id!r}. "
+            f"This is the Critical C1 regression: the dispatch tick looked at "
+            f"the wrong key."
+        )
