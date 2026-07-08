@@ -19,6 +19,7 @@ export function AnthropicCredentialsCard({ onTierChanged }: AnthropicCredentials
   const [tier, setTier] = useState<PlanTier | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -39,11 +40,14 @@ export function AnthropicCredentialsCard({ onTierChanged }: AnthropicCredentials
 
   async function handleChange(next: string) {
     const newTier = next as PlanTier
+    setError(null)
     setSaving(true)
     try {
       const res = await setAnthropicPlanTier(newTier)
       setTier(res.tier)
       onTierChanged?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save plan tier')
     } finally {
       setSaving(false)
     }
@@ -74,6 +78,9 @@ export function AnthropicCredentialsCard({ onTierChanged }: AnthropicCredentials
           These limits may have shifted since the last Anthropic plan change — verify at
           anthropic.com before trusting the percentages.
         </p>
+        {error && (
+          <p className="text-xs text-destructive">{error}</p>
+        )}
       </CardContent>
     </Card>
   )
