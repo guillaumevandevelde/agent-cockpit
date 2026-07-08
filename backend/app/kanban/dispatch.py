@@ -27,6 +27,31 @@ from app.services.providers.platform_env import PLATFORM_ANTHROPIC
 
 logger = logging.getLogger(__name__)
 
+# Known provider IDs are registered in app.services.providers; re-derived here
+# so the phase router doesn't depend on that module being imported at typing time.
+def _phase_provider_id(card, *, phase: str) -> str:
+    if phase == "analyst":
+        return getattr(card, "analyst_agent_id", None) or "claude-code"
+    # phase == "executor"
+    return (getattr(card, "executor_agent_id", None)
+            or getattr(card, "agent", None)
+            or "claude-code")
+
+
+def _phase_target_agent(card, *, project_path: str, phase: str, source_column: str) -> str:
+    """Persona for the spawned session. Analyst phase is fixed to 'analyst';
+    executor phase reuses the existing overload-resolution logic in _run_card."""
+    if phase == "analyst":
+        return "analyst"
+    agents_dir = Path(project_path) / ".claude" / "agents"
+    known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
+    card_agent = getattr(card, "agent", None)
+    if card_agent and card_agent in known_agents:
+        return card_agent
+    persona = _persona_for_card(project_path, card, source_column)
+    return _resolve_agent_from_persona(persona) or "engineer"
+
+
 META_PREFIX = "autodispatch:"
 CLAIMANT_PREFIX = "agent:"
 SHIPMODE_PREFIX = "shipmode:"
@@ -720,6 +745,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
 
 async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
+    phase: str = "executor",
     impediment_question: str | None = None,
     agent_override: str | None = None,
     live_sessions: set[str] | None = None,
@@ -751,26 +777,11 @@ async def _run_card(
     #   - a persona name (engineer, developer, …)  → which column + role prompt
     # Resolve them separately so a provider id is never mistaken for a column.
     known_providers = _known_provider_ids()
-    card_agent = getattr(card, "agent", None)
-
-    # Provider selection (which CLI to spawn). Override wins over the card's own value.
-    provider_id = next(
-        (v for v in (agent_override, card_agent) if v in known_providers),
-        "claude-code",
-    )
-
-    # Persona/column resolution: agent_override (if a persona) > card.agent (if a known
-    # persona) > persona from source column > "engineer". Provider ids are skipped here.
-    agents_dir = Path(project_path) / ".claude" / "agents"
-    known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
-
-    if agent_override and agent_override not in known_providers:
-        target_agent = agent_override
-    elif card_agent and card_agent in known_agents:
-        target_agent = card_agent
-    else:
-        persona = _persona_for_card(project_path, card, source_column)
-        target_agent = _resolve_agent_from_persona(persona) or "engineer"
+    provider_id = _phase_provider_id(card, phase=phase) if not agent_override \
+        else next((v for v in (agent_override, _phase_provider_id(card, phase=phase)) if v in known_providers),
+                  _phase_provider_id(card, phase=phase))
+    target_agent = _phase_target_agent(card, project_path=project_path, phase=phase,
+                                       source_column=source_column)
 
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=project_key,
