@@ -104,6 +104,41 @@ def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
     assert spawn.get_spawned_sessions()["repo-abcd"]["platform"] == "bedrock"
 
 
+def test_codex_bedrock_platform_omits_claude_specific_env(monkeypatch, tmp_path):
+    from app.services.agent_bridge import spawn
+    from app.services.providers.base import SpawnCommandOptions
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    spawn.spawn_session(
+        "codex-cli",
+        SpawnCommandOptions(
+            directory=str(tmp_path),
+            mode="plain",
+            platform="bedrock",
+            aws_region="us-east-2",
+            aws_profile="codex-bedrock",
+            bedrock_model="openai.gpt-5.5",
+        ),
+    )
+
+    argv = calls[0]
+    assert "AWS_REGION=us-east-2" in argv
+    assert "AWS_PROFILE=codex-bedrock" in argv
+    assert not any(flag.startswith("CLAUDE_CODE_USE_BEDROCK=") for flag in argv)
+    assert not any(flag.startswith("ANTHROPIC_MODEL=") for flag in argv)
+    assert 'model_provider="amazon-bedrock"' in argv[-1]
+    assert "--model openai.gpt-5.5" in argv[-1]
+
+
 def test_minimax_platform_injects_configured_key_and_default_base_url(monkeypatch, tmp_path):
     from app.config import settings
     from app.services.agent_bridge import spawn

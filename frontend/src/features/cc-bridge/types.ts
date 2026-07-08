@@ -65,6 +65,13 @@ export interface SpawnSessionRequest {
   bedrock_model?: string
   minimax_base_url?: string
   host_id?: number
+  agent?: string
+  context_tier?: string
+  reasoning_effort?: string
+  plan?: boolean
+  remote?: boolean
+  allow_all?: boolean
+  no_ask_user?: boolean
 }
 
 export interface SpawnSessionResponse {

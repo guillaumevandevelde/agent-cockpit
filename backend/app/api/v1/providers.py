@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.config import settings
 from app.models.schemas import CLIExecuteRequest, CLIResult
 from app.services.cli_executor import ProviderCLIExecutor
+from app.services.codex_config_service import CodexConfigService
 from app.services.codex_history_service import CodexHistoryService
 from app.services.codex_usage_context_service import CodexUsageContextService
 from app.services.providers import get_provider, get_providers
@@ -215,6 +216,37 @@ class ProviderUsageContextDiagnosticsResponse(BaseModel):
     history: dict[str, Any]
     models_cache: dict[str, Any]
     metric_findings: dict[str, Any]
+
+
+class ProviderModelOption(BaseModel):
+    value: str
+    label: str
+    source: str
+    description: str | None = None
+    priority: int | None = None
+
+
+class ProviderProfileOption(BaseModel):
+    value: str
+    label: str
+    sources: list[str]
+    active: bool
+    parse_error: str | None = None
+
+
+class ProviderLaunchOptionsResponse(BaseModel):
+    provider: str
+    provider_display_name: str
+    config_path: str
+    models_cache_path: str
+    config_exists: bool
+    config_parse_error: str | None = None
+    models_cache_exists: bool
+    models_cache_parse_error: str | None = None
+    default_model: str | None = None
+    default_profile: str | None = None
+    model_options: list[ProviderModelOption]
+    profile_options: list[ProviderProfileOption]
 
 
 class CodexPluginMutationRequest(BaseModel):
@@ -754,4 +786,15 @@ async def get_provider_usage_context_diagnostics(provider_id: str):
         "provider": provider.id,
         "provider_display_name": provider.display_name,
         **diagnostics,
+    }
+
+
+@router.get("/providers/{provider_id}/launch-options", response_model=ProviderLaunchOptionsResponse)
+async def get_provider_launch_options(provider_id: str):
+    provider = _require_codex_provider(provider_id, "launch options")
+    launch_options = await asyncio.to_thread(CodexConfigService().get_launch_options)
+    return {
+        "provider": provider.id,
+        "provider_display_name": provider.display_name,
+        **{key: value for key, value in launch_options.items() if key != "provider"},
     }

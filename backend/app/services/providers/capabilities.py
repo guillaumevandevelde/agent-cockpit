@@ -128,6 +128,28 @@ PROVIDER_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "backup": capability("read_only", "Backup", "OpenCode export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic OpenCode restore is refused without a stable provider-owned restore API."),
     },
+    "copilot-cli": {
+        "config": capability("unsupported", "Configuration", "Copilot CLI configuration is detected but not editable in this build."),
+        "sessions": capability("write_capable", "Agent Bridge Sessions", "Agent Bridge can discover and launch Copilot CLI sessions."),
+        "spawn": capability("write_capable", "Spawn Sessions", "Agent Bridge can launch Copilot CLI sessions."),
+        "resume": capability("write_capable", "Resume Sessions", "Copilot CLI resume and continue flags are available."),
+        "fork": capability("unsupported", "Fork Sessions", "Copilot CLI does not expose a fork workflow."),
+        "mcp": capability("unsupported", "MCP Servers", "Copilot CLI MCP servers are not managed in this build."),
+        "plugins": capability("unsupported", "Plugins", "Copilot CLI does not expose plugin management."),
+        "permissions": capability("unsupported", "Permissions", "Copilot CLI permissions are launch flags, not a managed page."),
+        "commands": capability("unsupported", "Commands", "Copilot CLI does not expose slash commands."),
+        "agents": capability("unsupported", "Agents", "Copilot CLI custom agents are not managed in this build."),
+        "skills": capability("unsupported", "Skills", "Copilot CLI skills are not surfaced in this build."),
+        "hooks": capability("unsupported", "Hooks", "Copilot CLI hooks are not surfaced in this build."),
+        "memory": capability("unsupported", "Memory", "Copilot CLI memory configuration is not surfaced in this build."),
+        "output_styles": capability("unsupported", "Output Styles", "Copilot CLI output styles are not surfaced in this build."),
+        "statusline": capability("unsupported", "Status Line", "Copilot CLI status line settings are not surfaced in this build."),
+        "usage": capability("unsupported", "Usage", "Copilot CLI usage data is not available with stable local semantics."),
+        "context": capability("unsupported", "Context", "Copilot CLI context diagnostics are not surfaced in this build."),
+        "doctor": capability("unsupported", "Doctor", "Copilot CLI does not expose provider doctor diagnostics."),
+        "backup": capability("unsupported", "Backup", "Copilot CLI backup/export is not supported in this build."),
+        "restore": capability("unsupported", "Restore", "Copilot CLI restore is not supported in this build."),
+    },
 }
 
 

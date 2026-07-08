@@ -112,6 +112,7 @@ const providerNavigation: Record<AgentProviderId, NavGroup[]> = {
       ],
     },
   ],
+  'copilot-cli': [],
   'mimo-code': [
     {
       name: 'MiMoCode',

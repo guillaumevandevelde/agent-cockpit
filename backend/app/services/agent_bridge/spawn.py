@@ -134,6 +134,7 @@ def spawn_session(
         model=options.bedrock_model,
         minimax_api_key=settings.minimax_api_key,
         minimax_base_url=options.minimax_base_url or settings.minimax_base_url,
+        provider_id=provider.id,
     )
     env_flags: list[str] = []
     for key, value in platform_env.items():
