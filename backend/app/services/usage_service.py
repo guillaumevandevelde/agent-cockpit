@@ -516,6 +516,43 @@ class UsageService:
 
         return blocks
 
+    # === Weekly Aggregation (Anthropic Pro/Max weekly roll-over) ===
+
+    async def aggregate_weekly(
+        self,
+        entries: list[LoadedUsageEntry],
+        *,
+        now: datetime | None = None,
+    ) -> tuple[int, datetime]:
+        """Sum tokens over the rolling 7-day window ending at `now`.
+
+        Returns `(total_tokens, reset_at)` where `reset_at` is the next Monday
+        00:00 UTC after `now` (the canonical weekly roll-over point used by
+        Anthropic Pro/Max). If no entries have a usable timestamp,
+        `total_tokens` is 0 and `reset_at` is the next Monday from `now`.
+        """
+        if now is None:
+            now = datetime.now(UTC)
+        cutoff = now - timedelta(days=7)
+        total = 0
+        for entry in entries:
+            ts = self._as_utc(entry.timestamp)
+            if ts >= cutoff and ts <= now:
+                total += (
+                    entry.input_tokens
+                    + entry.output_tokens
+                    + entry.cache_creation_tokens
+                    + entry.cache_read_tokens
+                )
+        # Next Monday at 00:00 UTC after `now`.
+        days_ahead = (7 - now.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        reset_at = (now + timedelta(days=days_ahead)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        return total, reset_at
+
     def _create_block(
         self,
         start_time: datetime,
