@@ -1313,17 +1313,19 @@ async def dispatch_project(
             if last_result is None:
                 break  # dispatch failed (e.g. memory) — let the tick queue/retry
             if "session_name" in last_result:
-                # analyst_run_id is internal bookkeeping, not a CRDT-managed
-                # field — set it synchronously so the next tick sees it without
-                # HLC ordering. ``_run_card`` returns the session under
-                # ``"session_name"`` (see dispatch.py return-shape at the bottom
-                # of _run_card), not ``"session"`` — the membership check must
-                # match the real key, otherwise this branch is a silent no-op
-                # and the dispatcher would re-spawn the analyst every tick
-                # until MAX_DISPATCH_FAILURES trips.
-                card.analyst_run_id = last_result["session_name"]
-                session.add(card)
-                await session.flush()
+                # Persist the analyst's run id via the op-log (not a direct
+                # ORM setattr) so a future rematerialize() replay doesn't
+                # silently drop this field. _run_card returns the session
+                # under ``"session_name"`` (see dispatch.py return-shape at
+                # the bottom of _run_card), not ``"session"`` — the
+                # membership check must match the real key, otherwise this
+                # branch is a silent no-op and the dispatcher would re-spawn
+                # the analyst every tick until MAX_DISPATCH_FAILURES trips.
+                await apply_operation(
+                    session, op_type="update", entity_type="card",
+                    project_key=project_key, entity_id=card.id,
+                    payload={"analyst_run_id": last_result["session_name"]},
+                )
             cards = await list_cards(session, project_key)
             continue
 

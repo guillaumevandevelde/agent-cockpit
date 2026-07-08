@@ -607,3 +607,78 @@ async def test_dispatch_card_runs_analyst_phase_when_analyst_run_id_missing(monk
             f"dispatch_card must pick phase=analyst when analyst_run_id is "
             f"missing, got {spawns!r}"
         )
+
+
+# ---- Final review: analyst_run_id write-back must go through op-log (I2) --
+
+@pytest.mark.asyncio
+async def test_dispatch_project_analyst_run_id_persisted_via_op_log(monkeypatch):
+    """Regression test for I2: the analyst_run_id write-back must go through
+    apply_operation (not a direct ORM setattr) so a future rematerialize()
+    replay doesn't drop the field.
+
+    Asserts both observable surfaces:
+    - the materialized card row has analyst_run_id set
+    - the op-log carries a corresponding ``update`` op with the field in its
+      payload (which rematerialize() would replay)
+    """
+    from app.kanban.models import KanbanCard, KanbanOp
+    from app.kanban.operations import apply_operation
+    from sqlalchemy import select
+    from tests.kanban_test_db import TestSessionLocal
+
+    async def fake_run_card(session, **kwargs):
+        card = kwargs["card"]
+        card.claimed_by = "agent:tmux-op"
+        card.column = "analyst"
+        await session.flush()
+        return {
+            "card_id": card.id,
+            "session_name": "tmux-op",
+            "claimant": "agent:tmux-op",
+            "source_column": "Backlog",
+            "spawned": True,
+        }
+
+    monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "parent", "column": "Backlog",
+                     "analyst_agent_id": "claude-code"},
+        )
+        await s.commit()
+
+        await dispatch.dispatch_project(s, project_key=PK, project_path="/tmp/none")
+        await s.commit()
+
+        parent = await s.get(KanbanCard, parent_id)
+        assert parent.analyst_run_id == "tmux-op"
+
+        # Verify the op-log carries the analyst_run_id update so a future
+        # rematerialize() replay will re-apply it. Look for any op on this
+        # card whose payload contains analyst_run_id.
+        ops = (await s.execute(
+            select(KanbanOp)
+            .where(KanbanOp.entity_id == parent_id)
+            .order_by(KanbanOp.hlc.asc())
+        )).scalars().all()
+        analyst_run_id_ops = [
+            o for o in ops
+            if (o.payload or {}).get("analyst_run_id") == "tmux-op"
+        ]
+        assert analyst_run_id_ops, (
+            f"analyst_run_id must be persisted via apply_operation (so a "
+            f"rematerialize() replay carries it). Found op-log entries: "
+            f"{[(o.op_type, o.payload) for o in ops]!r}"
+        )
+        # And the op_type must be 'update' (or 'create', for the initial op).
+        assert any(o.op_type == "update" for o in analyst_run_id_ops), (
+            f"the analyst_run_id write-back must be an 'update' op, got: "
+            f"{[o.op_type for o in analyst_run_id_ops]!r}"
+        )
