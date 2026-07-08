@@ -26,7 +26,7 @@ from app.services.agent_bridge import minimax_credentials
 from app.services.agent_bridge import teams as teams_service
 from app.services.agent_bridge.attachments import agent_bridge_attachment_service
 from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
-from app.services.agent_bridge.pty_relay import PtyRelay
+from app.services.agent_bridge.pty_relay import PtyRelay, is_target_interactive
 from app.services.agent_bridge.resumable import list_resumable_sessions
 from app.services.agent_bridge.spawn import kill_session, rename_session, spawn_session
 from app.services.host_service import HostNotFoundError
@@ -276,6 +276,8 @@ async def paste_session_attachment(
     db: AsyncSession = Depends(get_db),
 ):
     _require_attachment_access(request, token)
+    if paste_request.require_interactive_relay and not is_target_interactive(target):
+        raise HTTPException(status_code=409, detail="Terminal relay is read-only or not attached")
     try:
         return await agent_bridge_attachment_service.paste_attachment(
             db,

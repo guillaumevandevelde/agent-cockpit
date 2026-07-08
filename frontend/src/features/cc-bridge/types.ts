@@ -143,6 +143,7 @@ export interface BridgeAttachmentPasteRequest {
   submit?: boolean
   prefix?: string
   suffix?: string
+  require_interactive_relay?: boolean
 }
 
 export interface BridgeAttachmentPasteResponse {
