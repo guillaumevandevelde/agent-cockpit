@@ -13,7 +13,7 @@ async def _create_tables():
 
 @pytest.mark.asyncio
 async def test_install_status_reports_missing_when_nothing_installed(tmp_path, monkeypatch):
-    from app.services.agent_mail import hook_installer, codex_hooks
+    from app.services.agent_mail import codex_hooks, hook_installer
     monkeypatch.setattr(hook_installer, "get_claude_user_settings_file", lambda: tmp_path / "settings.json")
     monkeypatch.setattr(codex_hooks, "get_codex_home", lambda: tmp_path / "codex")
 

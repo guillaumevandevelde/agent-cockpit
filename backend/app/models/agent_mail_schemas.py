@@ -1,7 +1,7 @@
 """Pydantic schemas for Agent Mail. No team_preset_id/team_slot_id fields —
 identity is repo-scoped only, see docs/cockpit/agent-mail-spec.md."""
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -14,11 +14,11 @@ class MailSessionResponse(BaseModel):
     provider: str
     source: str
     session_key: str
-    cwd: Optional[str] = None
-    tmux_target: Optional[str] = None
+    cwd: str | None = None
+    tmux_target: str | None = None
     mailbox_status: str
-    activity: Optional[str] = None
-    last_seen_at: Optional[datetime] = None
+    activity: str | None = None
+    last_seen_at: datetime | None = None
 
 
 class MailMemberResponse(BaseModel):
@@ -28,8 +28,8 @@ class MailMemberResponse(BaseModel):
     repo_path: str
     repo_name: str
     display_name: str
-    role: Optional[str] = None
-    charter: Optional[str] = None
+    role: str | None = None
+    charter: str | None = None
     status: str
     unread_count: int = 0
     pending_count: int = 0
@@ -38,7 +38,7 @@ class MailMemberResponse(BaseModel):
     can_nudge: bool = False
     wake_methods: list[str] = Field(default_factory=list)
     wake_state: str = "delivered_waiting"
-    last_inbox_checked_at: Optional[datetime] = None
+    last_inbox_checked_at: datetime | None = None
     sessions: list[MailSessionResponse] = Field(default_factory=list)
 
 
@@ -47,38 +47,38 @@ class TeamListResponse(BaseModel):
 
 
 class MailMemberUpdate(BaseModel):
-    display_name: Optional[str] = None
-    role: Optional[str] = None
-    charter: Optional[str] = None
+    display_name: str | None = None
+    role: str | None = None
+    charter: str | None = None
 
 
 class MailMessageCreate(BaseModel):
     kind: str = "message"
-    sender_member_id: Optional[int] = None
-    recipient_member_id: Optional[int] = None
-    thread_root_id: Optional[int] = None
-    subject: Optional[str] = None
+    sender_member_id: int | None = None
+    recipient_member_id: int | None = None
+    thread_root_id: int | None = None
+    subject: str | None = None
     body_markdown: str
-    payload: Optional[dict[str, Any]] = None
+    payload: dict[str, Any] | None = None
 
 
 class MailMessageResponse(BaseModel):
     id: int
-    thread_root_id: Optional[int] = None
+    thread_root_id: int | None = None
     kind: str
-    sender_member_id: Optional[int] = None
-    sender_actor_id: Optional[int] = None
+    sender_member_id: int | None = None
+    sender_actor_id: int | None = None
     sender_type: str = "director"
-    sender_actor_kind: Optional[str] = None
+    sender_actor_kind: str | None = None
     sender_name: str
-    recipient_member_id: Optional[int] = None
-    subject: Optional[str] = None
+    recipient_member_id: int | None = None
+    subject: str | None = None
     body_markdown: str
-    payload: Optional[dict[str, Any]] = None
-    request_status: Optional[str] = None
+    payload: dict[str, Any] | None = None
+    request_status: str | None = None
     is_stale: bool = False
-    read_at: Optional[datetime] = None
-    acked_at: Optional[datetime] = None
+    read_at: datetime | None = None
+    acked_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -100,7 +100,7 @@ class MailExternalActorCreate(BaseModel):
     actor_key: str
     display_name: str
     kind: str = "external_tool"
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class MailExternalActorResponse(BaseModel):
@@ -108,9 +108,9 @@ class MailExternalActorResponse(BaseModel):
     actor_key: str
     display_name: str
     kind: str
-    description: Optional[str] = None
+    description: str | None = None
     created_at: datetime
-    last_used_at: Optional[datetime] = None
+    last_used_at: datetime | None = None
 
 
 class MailExternalActorCreateResponse(BaseModel):
@@ -119,23 +119,23 @@ class MailExternalActorCreateResponse(BaseModel):
 
 
 class ExternalAgentMailMessageRequest(BaseModel):
-    recipient_member_id: Optional[int] = None
-    subject: Optional[str] = None
+    recipient_member_id: int | None = None
+    subject: str | None = None
     body_markdown: str
-    payload: Optional[dict[str, Any]] = None
+    payload: dict[str, Any] | None = None
 
 
 class ExternalAgentMailContextRequest(BaseModel):
     recipient_member_id: int
-    subject: Optional[str] = None
+    subject: str | None = None
     body_markdown: str
-    why_needed: Optional[str] = None
+    why_needed: str | None = None
     files_or_symbols: list[str] = Field(default_factory=list)
 
 
 class ExternalAgentMailHandoffRequest(BaseModel):
     recipient_member_id: int
-    subject: Optional[str] = None
+    subject: str | None = None
     body_markdown: str
     files: list[str] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
@@ -149,8 +149,8 @@ class ExternalAgentMailDeliveryRecipient(BaseModel):
     wake_state: str
     wake_attempted: bool = False
     wake_succeeded: bool = False
-    wake_method: Optional[str] = None
-    wake_error: Optional[str] = None
+    wake_method: str | None = None
+    wake_error: str | None = None
 
 
 class ExternalAgentMailSendResponse(BaseModel):
@@ -163,7 +163,7 @@ class ExternalAgentMailSendResponse(BaseModel):
 class ExternalAgentMailRequestStatus(BaseModel):
     message_id: int
     kind: str
-    request_status: Optional[str] = None
+    request_status: str | None = None
     is_stale: bool = False
     answered: bool = False
     acknowledged: bool = False
@@ -176,7 +176,7 @@ class MailAgentRegisterRequest(BaseModel):
     provider: str = "unknown"
     cwd: str
     session_key: str
-    pid: Optional[int] = None
+    pid: int | None = None
 
 
 class MailAgentRegisterResponse(BaseModel):
@@ -194,8 +194,8 @@ class AgentMailInstallStatus(BaseModel):
     codex_hook_shim_path: str
     python_path: str
     cockpit_url: str
-    claude_settings_path: Optional[str] = None
-    codex_hooks_path: Optional[str] = None
+    claude_settings_path: str | None = None
+    codex_hooks_path: str | None = None
     mcp_server_hint: str = "Register agent-mail tools via the MCP Server page (Bearer token) — not managed by this installer."
 
 

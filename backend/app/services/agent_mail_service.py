@@ -11,13 +11,18 @@ import logging
 import os
 import subprocess
 from datetime import datetime, timedelta
-from typing import List, Optional
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.agent_mail import MailAgentSession, MailExternalActor, MailMessage, MailReceipt, MailTeamMember
+from app.models.agent_mail import (
+    MailAgentSession,
+    MailExternalActor,
+    MailMessage,
+    MailReceipt,
+    MailTeamMember,
+)
 from app.models.agent_mail_schemas import (
     MAIL_MESSAGE_KINDS,
     MAIL_REQUEST_KINDS,
@@ -115,8 +120,8 @@ class AgentMailService:
         return member, session
 
     async def heartbeat_session(
-        self, db: AsyncSession, session_key: str, activity: Optional[str] = None
-    ) -> Optional[MailAgentSession]:
+        self, db: AsyncSession, session_key: str, activity: str | None = None
+    ) -> MailAgentSession | None:
         result = await db.execute(
             select(MailAgentSession).where(MailAgentSession.session_key == session_key)
         )
@@ -154,7 +159,7 @@ class AgentMailService:
         session.mailbox_status = "connected"
         await db.commit()
 
-    def _pid_is_running(self, pid: Optional[int]) -> bool:
+    def _pid_is_running(self, pid: int | None) -> bool:
         if not pid:
             return False
         try:
@@ -352,7 +357,7 @@ class AgentMailService:
         request: MailMessageCreate,
         *,
         auto_nudge: bool = True,
-        sender_actor_id: Optional[int] = None,
+        sender_actor_id: int | None = None,
     ) -> MailMessageResponse:
         if request.kind not in MAIL_MESSAGE_KINDS:
             raise ValueError(f"Invalid message kind: {request.kind}")
@@ -413,7 +418,7 @@ class AgentMailService:
         return await self._message_response(db, message, for_member_id=None)
 
     async def _sender_identity(
-        self, db: AsyncSession, sender_member_id: Optional[int], sender_actor_id: Optional[int],
+        self, db: AsyncSession, sender_member_id: int | None, sender_actor_id: int | None,
     ) -> tuple[str, str, str | None]:
         if sender_actor_id is not None:
             actor = await db.get(MailExternalActor, sender_actor_id)
@@ -426,7 +431,7 @@ class AgentMailService:
         return (member.display_name if member else "unknown", "member", None)
 
     async def _message_response(
-        self, db: AsyncSession, message: MailMessage, for_member_id: Optional[int]
+        self, db: AsyncSession, message: MailMessage, for_member_id: int | None
     ) -> MailMessageResponse:
         read_at = acked_at = None
         if for_member_id is not None:
@@ -561,7 +566,7 @@ class AgentMailService:
         await db.commit()
 
     async def get_thread(
-        self, db: AsyncSession, root_id: int, for_member_id: Optional[int] = None
+        self, db: AsyncSession, root_id: int, for_member_id: int | None = None
     ) -> MailThreadResponse:
         root = await db.get(MailMessage, root_id)
         if root is None:
@@ -574,7 +579,7 @@ class AgentMailService:
             replies=[await self._message_response(db, reply, for_member_id) for reply in replies],
         )
 
-    async def list_root_messages(self, db: AsyncSession, limit: int = 100) -> List[MailMessageResponse]:
+    async def list_root_messages(self, db: AsyncSession, limit: int = 100) -> list[MailMessageResponse]:
         roots = (await db.execute(
             select(MailMessage).where(MailMessage.thread_root_id.is_(None))
             .order_by(MailMessage.created_at.desc()).limit(limit)
@@ -671,7 +676,7 @@ class AgentMailService:
             last_seen_at=session.last_seen_at,
         )
 
-    async def list_team(self, db: AsyncSession) -> List[MailMemberResponse]:
+    async def list_team(self, db: AsyncSession) -> list[MailMemberResponse]:
         now = datetime.utcnow()
         members = (await db.execute(select(MailTeamMember))).scalars().all()
         sessions = (await db.execute(select(MailAgentSession))).scalars().all()
@@ -679,7 +684,7 @@ class AgentMailService:
         for session in sessions:
             by_member.setdefault(session.member_id, []).append(session)
 
-        responses: List[MailMemberResponse] = []
+        responses: list[MailMemberResponse] = []
         for member in members:
             member_sessions = by_member.get(member.id, [])
             session_responses = [self._session_response(s, now) for s in member_sessions]
@@ -740,7 +745,7 @@ class AgentMailService:
         )
         return "\n".join(lines)
 
-    async def build_prompt_submit_context(self, db: AsyncSession, member_id: int) -> Optional[str]:
+    async def build_prompt_submit_context(self, db: AsyncSession, member_id: int) -> str | None:
         unread, pending = await self.counts_for_member(db, member_id)
         if not unread and not pending:
             return None

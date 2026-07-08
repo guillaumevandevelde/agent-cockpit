@@ -1,7 +1,6 @@
 """External local Agent Mail orchestration endpoints — bearer-token
 authenticated, for same-machine tools that aren't first-party Cockpit
 integrations (e.g. OpenClaw). Ported near-verbatim from upstream."""
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +28,7 @@ from app.services.external_agent_mail_service import (
 router = APIRouter()
 
 
-def _bearer_token(authorization: Optional[str]) -> Optional[str]:
+def _bearer_token(authorization: str | None) -> str | None:
     if not authorization or not authorization.startswith("Bearer "):
         return None
     return authorization[len("Bearer "):].strip() or None
@@ -41,7 +40,7 @@ def _is_loopback_request(request: Request) -> bool:
 
 
 async def external_actor(
-    authorization: Optional[str] = Header(default=None), db: AsyncSession = Depends(get_db),
+    authorization: str | None = Header(default=None), db: AsyncSession = Depends(get_db),
 ) -> MailExternalActor:
     try:
         return await external_agent_mail_service.authenticate_actor(db, _bearer_token(authorization))

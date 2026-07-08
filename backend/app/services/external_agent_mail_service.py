@@ -9,7 +9,6 @@ import re
 import secrets
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Deque
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +54,7 @@ class ExternalAgentMailService:
     """Token-bound external actor helpers for Agent Mail orchestration."""
 
     def __init__(self) -> None:
-        self._send_windows: dict[int, Deque[datetime]] = {}
+        self._send_windows: dict[int, deque[datetime]] = {}
 
     def _hash_token(self, token: str) -> str:
         return hashlib.sha256(token.encode("utf-8")).hexdigest()

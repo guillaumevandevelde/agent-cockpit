@@ -2,7 +2,7 @@
 import logging
 import os
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,7 +71,7 @@ async def list_messages(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/messages/{message_id}/thread", response_model=MailThreadResponse)
-async def get_thread(message_id: int, member_id: Optional[int] = None, db: AsyncSession = Depends(get_db)):
+async def get_thread(message_id: int, member_id: int | None = None, db: AsyncSession = Depends(get_db)):
     try:
         return await agent_mail_service.get_thread(db, message_id, for_member_id=member_id)
     except ValueError as exc:
@@ -123,7 +123,7 @@ def _hook_provider(payload: dict) -> str:
     return provider if provider in {"claude-code", "codex-cli"} else "unknown"
 
 
-def _hook_session_key(payload: dict) -> Optional[str]:
+def _hook_session_key(payload: dict) -> str | None:
     session_id = payload.get("session_id")
     if not session_id:
         return None

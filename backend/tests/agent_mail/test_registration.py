@@ -55,6 +55,7 @@ async def test_mark_session_offline(tmp_path):
         await agent_mail_service.mark_session_offline(s, "cc:off")
 
         from sqlalchemy import select
+
         from app.models.agent_mail import MailAgentSession
         row = (await s.execute(
             select(MailAgentSession).where(MailAgentSession.session_key == "cc:off")

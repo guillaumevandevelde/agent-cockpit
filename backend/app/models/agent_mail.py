@@ -4,7 +4,7 @@ per repo (no team-preset/slot integration — see docs/cockpit/agent-mail-spec.m
 for why that upstream extension is out of scope)."""
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base

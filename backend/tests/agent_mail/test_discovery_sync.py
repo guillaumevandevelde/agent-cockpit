@@ -2,12 +2,11 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import select
 
 from app.database import AsyncSessionLocal, Base, engine
 from app.models.agent_mail import MailAgentSession
-from app.models.agent_mail_schemas import MailAgentRegisterRequest
 from app.services.agent_mail_service import agent_mail_service
-from sqlalchemy import select
 
 
 @pytest.fixture(autouse=True)
