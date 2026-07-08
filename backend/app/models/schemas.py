@@ -1969,17 +1969,17 @@ class ProjectConfigResponse(BaseModel):
 class BridgeAttachmentResponse(BaseModel):
     id: int
     target: str
-    session_name: Optional[str] = None
-    provider: Optional[str] = None
-    original_filename: Optional[str] = None
+    session_name: str | None = None
+    provider: str | None = None
+    original_filename: str | None = None
     mime_type: str
     size_bytes: int
     sha256: str
     agent_path: str
     prompt_text: str
-    created_by: Optional[str] = None
+    created_by: str | None = None
     created_at: datetime
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
 
 
 class BridgeAttachmentListResponse(BaseModel):
