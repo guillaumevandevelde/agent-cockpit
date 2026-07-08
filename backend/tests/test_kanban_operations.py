@@ -295,3 +295,27 @@ async def test_create_card_persists_multi_agent_fields():
         assert card.parent_card_id is None
         assert card.analyst_run_id is None
         assert card.depends_on == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_update_card_persists_multi_agent_fields():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "x", "column": "Backlog"},
+        )
+        await apply_operation(
+            s, op_type="update", entity_type="card",
+            project_key="git:example", entity_id=cid,
+            payload={"analyst_agent_id": "claude-code",
+                     "executor_agent_id": "mimo-code",
+                     "parent_card_id": "parent-1",
+                     "depends_on": ["c1", "c2"]},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.analyst_agent_id == "claude-code"
+        assert card.executor_agent_id == "mimo-code"
+        assert card.parent_card_id == "parent-1"
+        assert card.depends_on == ["c1", "c2"]
