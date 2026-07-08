@@ -663,5 +663,95 @@ class AgentMailService:
             raise ValueError("No Agent Mail wake path is available for this member")
         return result
 
+    def _session_response(self, session: MailAgentSession, now: datetime) -> MailSessionResponse:
+        return MailSessionResponse(
+            id=session.id, provider=session.provider, source=session.source,
+            session_key=session.session_key, cwd=session.cwd, tmux_target=session.tmux_target,
+            mailbox_status=self._effective_status(session, now), activity=session.activity,
+            last_seen_at=session.last_seen_at,
+        )
+
+    async def list_team(self, db: AsyncSession) -> List[MailMemberResponse]:
+        now = datetime.utcnow()
+        members = (await db.execute(select(MailTeamMember))).scalars().all()
+        sessions = (await db.execute(select(MailAgentSession))).scalars().all()
+        by_member: dict[int, list[MailAgentSession]] = {}
+        for session in sessions:
+            by_member.setdefault(session.member_id, []).append(session)
+
+        responses: List[MailMemberResponse] = []
+        for member in members:
+            member_sessions = by_member.get(member.id, [])
+            session_responses = [self._session_response(s, now) for s in member_sessions]
+            statuses = {s.mailbox_status for s in session_responses}
+            if "connected" in statuses:
+                status = "connected"
+            elif "observed" in statuses:
+                status = "observed"
+            else:
+                status = "offline"
+            unread, pending, unseen_pending, stale_pending = await self.delivery_counts_for_member(db, member.id)
+            wake_methods = ["tmux"] if any(self._session_can_nudge(s, now) for s in member_sessions) else []
+            if status == "offline":
+                wake_state = "offline"
+            elif wake_methods:
+                wake_state = "wakeable"
+            else:
+                wake_state = "delivered_waiting"
+            responses.append(MailMemberResponse(
+                id=member.id, identity_key=member.identity_key, repo_id=member.repo_id,
+                repo_path=member.repo_path, repo_name=member.repo_name, display_name=member.display_name,
+                role=member.role, charter=member.charter, status=status,
+                unread_count=unread, pending_count=pending, unseen_pending_count=unseen_pending,
+                stale_pending_count=stale_pending, can_nudge=bool(wake_methods), wake_methods=wake_methods,
+                wake_state=wake_state, last_inbox_checked_at=member.last_inbox_checked_at,
+                sessions=session_responses,
+            ))
+        responses.sort(key=lambda m: (m.status != "connected", m.display_name.lower()))
+        return responses
+
+    async def build_session_start_context(
+        self, db: AsyncSession, member_id: int, session_key: str | None = None,
+    ) -> str:
+        member = await db.get(MailTeamMember, member_id)
+        if member is None:
+            return ""
+        team = await self.list_team(db)
+        me = next((c for c in team if c.id == member_id), None)
+        others = [c for c in team if c.id != member_id]
+
+        lines = ["[Claude Cockpit Agent Mail]"]
+        role = f" ({member.role})" if member.role else ""
+        lines.append(f'You are "{member.display_name}"{role} - repo: {member.repo_name}.')
+        if member.charter:
+            lines.append(f"Charter: {member.charter}")
+        if others:
+            roster = " | ".join(
+                f"{c.display_name} ({c.role or c.repo_name}, {c.status})" for c in others[:8]
+            )
+            lines.append(f"Team: {roster}")
+        if me is not None and (me.unread_count or me.pending_count):
+            lines.append(
+                f"Inbox: {me.unread_count} unread, {me.pending_count} pending request(s) awaiting your answer."
+            )
+        lines.append(
+            "Coordinate via MCP tools: agent_mail_check_inbox, agent_mail_request_context, "
+            "agent_mail_send_message, agent_mail_create_handoff."
+        )
+        return "\n".join(lines)
+
+    async def build_prompt_submit_context(self, db: AsyncSession, member_id: int) -> Optional[str]:
+        unread, pending = await self.counts_for_member(db, member_id)
+        if not unread and not pending:
+            return None
+        parts = []
+        if unread:
+            parts.append(f"{unread} unread message(s)")
+        if pending:
+            parts.append(f"{pending} pending request(s)")
+        return (
+            f"[Agent Mail] You have {' and '.join(parts)}. Call agent_mail_check_inbox when convenient."
+        )
+
 
 agent_mail_service = AgentMailService()
