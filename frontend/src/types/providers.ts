@@ -1,4 +1,4 @@
-export type AgentProviderId = 'claude-code' | 'codex-cli' | 'mimo-code' | 'open-code'
+export type AgentProviderId = 'claude-code' | 'codex-cli' | 'copilot-cli' | 'mimo-code' | 'open-code'
 
 export interface AgentProviderCapabilities {
   config: boolean
@@ -231,4 +231,35 @@ export interface CodexFeatureInventoryResponse {
   features: CodexFeatureInventoryRow[]
   stderr: string
   raw_stdout: string
+}
+
+export interface CodexModelOption {
+  value: string
+  label: string
+  source: string
+  description?: string
+  priority?: number
+}
+
+export interface CodexProfileOption {
+  value: string
+  label: string
+  sources: string[]
+  active: boolean
+  parse_error?: string | null
+}
+
+export interface CodexLaunchOptionsResponse {
+  provider: 'codex-cli'
+  provider_display_name: string
+  config_path: string
+  models_cache_path: string
+  config_exists: boolean
+  config_parse_error: string | null
+  models_cache_exists: boolean
+  models_cache_parse_error: string | null
+  default_model: string | null
+  default_profile: string | null
+  model_options: CodexModelOption[]
+  profile_options: CodexProfileOption[]
 }

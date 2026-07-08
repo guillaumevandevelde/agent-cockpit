@@ -8,8 +8,8 @@ async def test_provider_registry_smoke_exposes_claude_and_codex_statuses():
     response = await providers_api.list_providers()
 
     provider_ids = {provider["id"] for provider in response["providers"]}
-    assert response["count"] == 4
-    assert provider_ids == {"claude-code", "codex-cli", "mimo-code", "open-code"}
+    assert response["count"] == 5
+    assert provider_ids == {"claude-code", "codex-cli", "copilot-cli", "mimo-code", "open-code"}
 
     claude_status = await providers_api.get_provider_status("claude-code")
     codex_status = await providers_api.get_provider_status("codex-cli")

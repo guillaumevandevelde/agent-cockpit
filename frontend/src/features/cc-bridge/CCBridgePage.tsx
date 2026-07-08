@@ -21,6 +21,7 @@ const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
   { value: 'all', label: 'All agents' },
   { value: 'claude-code', label: 'Claude Code' },
   { value: 'codex-cli', label: 'Codex' },
+  { value: 'copilot-cli', label: 'Copilot' },
   { value: 'mimo-code', label: 'MiMoCode' },
   { value: 'open-code', label: 'OpenCode' },
 ]
@@ -86,6 +87,7 @@ export function CCBridgePage() {
     all: sessions.length,
     'claude-code': sessions.filter((session) => session.provider === 'claude-code').length,
     'codex-cli': sessions.filter((session) => session.provider === 'codex-cli').length,
+    'copilot-cli': sessions.filter((session) => session.provider === 'copilot-cli').length,
     'mimo-code': sessions.filter((session) => session.provider === 'mimo-code').length,
     'open-code': sessions.filter((session) => session.provider === 'open-code').length,
   }

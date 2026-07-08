@@ -45,6 +45,13 @@ class SpawnCommandOptions:
     bedrock_model: str | None = None
     minimax_base_url: str | None = None
     host_id: int | None = None
+    agent: str | None = None
+    context_tier: str | None = None
+    reasoning_effort: str | None = None
+    plan: bool = False
+    remote: bool | None = None
+    allow_all: bool = False
+    no_ask_user: bool = False
 
 
 def argv0_name(command: str) -> str:
