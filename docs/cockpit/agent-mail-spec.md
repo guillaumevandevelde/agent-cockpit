@@ -223,3 +223,36 @@ features in dit fork behalve `*.test.tsx` waar aanwezig — volg dat waar zinvol
 - Wakeability werkt alleen voor `source=="observed"` tmux-sessies van `claude-code`/
   `codex-cli`; niet-tmux-sessies (bv. Sandcastle-containers) blijven pull-only
   (`check_inbox`).
+
+## Implementatienotities (na de bouw)
+
+- **`mcp.call_tool()` retourneert een tuple, geen platte lijst.** De bestaande
+  `/api/v1/mcp-server`-route (`handle_mcp_post`, `tools/call`) itereerde
+  `mcp.call_tool(...)`'s resultaat rechtstreeks alsof het de content-lijst was. De
+  geïnstalleerde FastMCP-versie retourneert met `convert_result=True` (wat elke
+  `@mcp.tool()` hier impliciet gebruikt, want ze retourneren allemaal een platte
+  `str`) een `(content_blocks, structured_result)`-tuple. Dat brak `tools/call` voor
+  **elke** tool op de server, niet alleen Agent Mail's — pas ontdekt tijdens een
+  live smoke-test van de MCP-tools via de echte HTTP-route (de bestaande testsuite
+  testte alleen `mcp.call_tool()` in-process, nooit via `tools/call` over HTTP).
+  Gefixt in een aparte, expliciet gelabelde commit (`fix(mcp-server): ...`) met een
+  regressietest die de bug reproduceert.
+- **Test-DB is niet per-test geïsoleerd.** `Base.metadata.create_all` reset niets;
+  rijen accumuleren over de hele pytest-run (en zelfs over herhaalde losse
+  `pytest`-aanroepen binnen dezelfde sessie, want de SQLite-file blijft bestaan).
+  Assertions die "alle rijen in tabel X" tellen zijn dus fragiel — scope ze op
+  specifieke, `tmp_path`-afgeleide of `uuid4`-afgeleide identiteiten in plaats van
+  op een verwachte absolute lijst-lengte.
+- **`npm install` was nodig** — deze worktree had geen `node_modules`, in
+  tegenstelling tot wat de sessie-eind-instructies impliceren. `npm run build`/`lint`
+  falen anders meteen met `tsc: not found`.
+- **Live smoke-test i.p.v. browser-UI-test.** De standaard dev-poorten (8000/5173)
+  waren bezet door een andere gelijktijdige sessie; die is bewust niet aangeraakt.
+  In plaats daarvan draaide een geïsoleerde `uvicorn`-instantie op poort 8099 voor
+  een live curl-smoke-test van de volledige REST- en MCP-flow (register → send →
+  inbox → team-roster, plus `agent_mail_whoami`/`send_message`/`check_inbox` via
+  `tools/call`), en een `GET /agent-mail`/`GET /`-check dat de SPA-route correct
+  resolvet via de production static-serving-pad. Geen browser-automatisering
+  beschikbaar in deze omgeving voor een visuele check.
+- Verder geen afwijkingen van het plan — alle 23 taken zijn geïmplementeerd zoals
+  gespecificeerd in `docs/superpowers/plans/2026-07-08-agent-mail-implementation.md`.
