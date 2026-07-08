@@ -46,6 +46,13 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup: Initialize database
     await init_db()
+    from app.database import AsyncSessionLocal
+    from app.services.agent_bridge.attachments import agent_bridge_attachment_service
+    try:
+        async with AsyncSessionLocal() as db:
+            await agent_bridge_attachment_service.cleanup_expired(db)
+    except Exception:
+        logger.exception("Failed to clean up expired Agent Bridge attachments")
     from app.kanban.db import init_kanban_db
     await init_kanban_db()
     from app.database import engine
