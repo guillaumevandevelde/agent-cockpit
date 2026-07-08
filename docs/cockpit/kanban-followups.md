@@ -55,3 +55,22 @@ explicit OpenCode rejection of `reasoning_effort`).
 build on the existing `backend/app/services/agent_bridge/teams.py` model (auto-detect +
 manual grouping of already-running sessions) — there is no preset/slot API, and that's
 intentional, not an oversight.
+
+**Update (2026-07-08) — that card was picked up and the cluster was split, not built
+as-is.** `ebecf1c`/`ba50de8`/`1840c05`/`ded4f35`/`6577a87` (team lanes, team filter, team
+roles, slot colors, the fullscreen design spec) all read `session.team_preset_id` /
+`team_slot_name` / `team_slot_role`, which upstream's `discovery.py` only populates from
+`CLAUDE_DECK_TEAM_PRESET_*` tmux env vars set by the rejected preset launch-orchestration
+— our sessions never get those vars, so the fields are always empty and the UI would be
+dead weight. `465d354`/`ae5562e` (terminal contrast/light-theme fixes) exclusively patch
+`TeamLanesView.tsx` and `frontend/src/lib/agentTeamColors.ts`, neither of which exist here.
+`2b77891`/`0352e21` (keyboard shortcuts + their discoverability overlay) implement a
+leader-key (Ctrl+Space) scheme whose only real actions are "prev/next/jump to *displayed
+pane*" — i.e. navigating between `TeamLanesView` panes; without that view there's nothing
+to navigate between. None of these nine commits were ported.
+
+What *was* independent and got cherry-picked onto `master`: `e6756a7`/`efe0755` (Agent
+Bridge image attachments — paste/drag-drop an image into a tmux session, with the paste
+endpoint enforcing an attached interactive relay). Adapted to drop upstream's MCP shim
+integration (`agent_mail_server.py` doesn't exist in this fork) and to fit our
+already-diverged `TerminalView.tsx` (no team-slot theming, no `instance`/`session` props).
