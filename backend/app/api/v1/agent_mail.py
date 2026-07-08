@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.agent_mail import MailTeamMember
 from app.models.agent_mail_schemas import (
+    AgentMailInstallStatus,
+    AgentMailSnippets,
     MailAgentRegisterRequest,
     MailAgentRegisterResponse,
     MailInboxResponse,
@@ -20,6 +22,7 @@ from app.models.agent_mail_schemas import (
     MailThreadResponse,
     TeamListResponse,
 )
+from app.services.agent_mail import install_status
 from app.services.agent_mail_service import agent_mail_service
 
 logger = logging.getLogger(__name__)
@@ -208,3 +211,45 @@ async def hook_post_tool_use(payload: dict[str, Any] = Body(...), db: AsyncSessi
     except Exception as exc:
         logger.warning("post-tool-use hook failed: %s", exc)
     return {}
+
+
+def _require_confirmed(body: dict[str, Any] | None) -> None:
+    if not body or not body.get("confirmed"):
+        raise HTTPException(status_code=400, detail='Pass {"confirmed": true} to mutate config')
+
+
+@router.get("/install/status", response_model=AgentMailInstallStatus)
+async def install_status_route():
+    return await install_status.get_install_status()
+
+
+@router.post("/install/claude-code/apply", response_model=AgentMailInstallStatus)
+async def install_claude_code(body: dict[str, Any] | None = Body(default=None)):
+    _require_confirmed(body)
+    return await install_status.apply_claude_code_install()
+
+
+@router.post("/install/claude-code/uninstall", response_model=AgentMailInstallStatus)
+async def uninstall_claude_code_route(body: dict[str, Any] | None = Body(default=None)):
+    _require_confirmed(body)
+    return await install_status.uninstall_claude_code()
+
+
+@router.post("/install/codex/apply", response_model=AgentMailInstallStatus)
+async def install_codex(body: dict[str, Any] | None = Body(default=None)):
+    _require_confirmed(body)
+    try:
+        return await install_status.apply_codex_install()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/install/codex/uninstall", response_model=AgentMailInstallStatus)
+async def uninstall_codex_route(body: dict[str, Any] | None = Body(default=None)):
+    _require_confirmed(body)
+    return await install_status.uninstall_codex()
+
+
+@router.get("/install/snippets", response_model=AgentMailSnippets)
+async def install_snippets():
+    return install_status.get_snippets()
