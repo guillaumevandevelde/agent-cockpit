@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
 import { MODAL_SIZES } from "@/lib/constants";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -37,6 +38,69 @@ import type { Card, ActivityEntry, KanbanColumn, Gate } from "../types";
 const GATE_POLL_INTERVAL_MS = 3000;
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
+
+function PlanTabContent({ card }: { card: Card }) {
+  // Parent case: a "plan" deliverable carries the markdown directly in `ref`.
+  const planDeliverable = card.deliverables.find((d) => d.kind === "plan");
+  if (planDeliverable) {
+    return <MarkdownRenderer content={planDeliverable.ref} />;
+  }
+
+  // Child case: a "plan_ref" deliverable's `ref` is a JSON string with the
+  // parent's card id and plan deliverable id.
+  const planRef = card.deliverables.find((d) => d.kind === "plan_ref");
+  if (planRef) {
+    let parsed: { parent_card_id?: string } = {};
+    try {
+      parsed = JSON.parse(planRef.ref) as { parent_card_id?: string };
+    } catch {
+      // fall through — treat as missing parent id
+    }
+    const parentId = parsed.parent_card_id ?? card.parent_card_id ?? null;
+    const dependsOn = card.depends_on ?? [];
+    return (
+      <div className="space-y-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground">Parent plan:</span>
+          {parentId ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                void kanbanApi
+                  .getCard(parentId)
+                  .then((parent) => {
+                    toast.info(`Open parent "${parent.title}" in the board`);
+                  })
+                  .catch(() => toast.error("Failed to load parent card"));
+              }}
+            >
+              {parentId.slice(0, 8)}
+            </Button>
+          ) : (
+            <Badge variant="outline">unknown</Badge>
+          )}
+        </div>
+        {dependsOn.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-muted-foreground">Depends on:</span>
+            {dependsOn.map((depId) => (
+              <Badge key={depId} variant="secondary">
+                {depId.slice(0, 8)}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-xs text-muted-foreground">
+      Geen plan &mdash; dit is een single-agent kaart of het plan is nog niet opgeslagen.
+    </div>
+  );
+}
 
 export function CardDrawer({
   card,
@@ -274,6 +338,7 @@ export function CardDrawer({
           <TabsList>
             <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
+            <TabsTrigger value="plan">Plan</TabsTrigger>
             {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
           </TabsList>
 
@@ -297,6 +362,10 @@ export function CardDrawer({
                   : ""}
               </div>
             ))}
+          </TabsContent>
+
+          <TabsContent value="plan">
+            <PlanTabContent card={card} />
           </TabsContent>
 
           {runSession && (
