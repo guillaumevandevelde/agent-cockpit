@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     # with KANBAN_DATABASE_URL (e.g. a mounted volume in Docker).
     kanban_database_url: str = _default_kanban_database_url()
 
+    # Agent Bridge attachment settings
+    bridge_attachment_dir: str = "~/.claude-registry/bridge-attachments"
+    bridge_attachment_agent_root: str | None = None
+    bridge_attachment_max_bytes: int = 10 * 1024 * 1024
+    bridge_attachment_retention_days: int = 7
+    bridge_attachment_max_per_session_per_day: int = 100
+
     # Server settings
     host: str = "127.0.0.1"
     port: int = 8000
