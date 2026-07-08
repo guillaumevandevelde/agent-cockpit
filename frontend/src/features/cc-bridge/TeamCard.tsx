@@ -7,6 +7,7 @@ import { CLICKABLE_CARD } from '@/lib/constants'
 import { SessionCard } from './SessionCard'
 import type { AgentTeam, CCSession } from './types'
 import type { AttentionKind } from './attention'
+import type { InstanceIdentity } from '@/types/status'
 
 interface TeamCardProps {
   team: AgentTeam
@@ -15,6 +16,7 @@ interface TeamCardProps {
   onKillSession: (session: CCSession) => void
   onRename: (session: CCSession, newName: string) => Promise<void>
   attentionByPane: Map<string, AttentionKind>
+  instance?: InstanceIdentity | null
 }
 
 export function TeamCard({
@@ -24,6 +26,7 @@ export function TeamCard({
   onKillSession,
   onRename,
   attentionByPane,
+  instance,
 }: TeamCardProps) {
   const [collapsed, setCollapsed] = useState(false)
   const allAttached = team.members.every((m) => activeTargets.includes(m.tmux_target))
@@ -87,6 +90,7 @@ export function TeamCard({
                       onKill={onKillSession}
                       onRename={onRename}
                       attention={session.pane_id ? attentionByPane.get(session.pane_id) ?? null : null}
+                      instance={instance}
                     />
                   </div>
                 )

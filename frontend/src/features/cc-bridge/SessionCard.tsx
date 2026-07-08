@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils'
 import { fetchSessionGitStatus } from './api'
 import type { CCSession, GitStatusResponse } from './types'
 import type { AttentionKind } from './attention'
+import type { InstanceIdentity } from '@/types/status'
 
 interface SessionCardProps {
   session: CCSession
@@ -16,9 +17,10 @@ interface SessionCardProps {
   onKill: (session: CCSession) => void
   onRename: (session: CCSession, newName: string) => Promise<void>
   attention?: AttentionKind | null
+  instance?: InstanceIdentity | null
 }
 
-export function SessionCard({ session, gridPosition, onClick, onKill, onRename, attention }: SessionCardProps) {
+export function SessionCard({ session, gridPosition, onClick, onKill, onRename, attention, instance }: SessionCardProps) {
   const projectName = session.cwd.split('/').pop() || session.cwd
   const isActive = gridPosition !== null
 
@@ -158,8 +160,11 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
         <p className="text-xs text-muted-foreground truncate mt-1" title={session.cwd}>
           {projectName}
         </p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {session.tmux_target}
+        <p
+          className="text-xs text-muted-foreground mt-0.5 truncate"
+          title={instance ? `${instance.name} · tmux: ${session.tmux_target}` : session.tmux_target}
+        >
+          {instance ? `${instance.name} · ` : ''}tmux: {session.tmux_target}
         </p>
         {gitStatus?.is_git_repo && (
           <div
