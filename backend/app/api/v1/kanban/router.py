@@ -147,6 +147,10 @@ async def create_card(payload: CardCreate):
         cid = await apply_operation(s, op_type="create", entity_type="card",
             project_key=payload.project_key, entity_id=None,
             payload=payload.model_dump(exclude={"project_key"}))
+        # If the caller set analyst_agent_id at create time, ensure the
+        # analyst column exists for this project. Matches the PATCH path.
+        if payload.analyst_agent_id:
+            await service.ensure_analyst_column(s, payload.project_key)
         await s.commit()
         return await _reload(s, cid)
 
@@ -203,8 +207,27 @@ async def update_card(cid: str, payload: CardUpdate):
             await apply_operation(s, op_type="update", entity_type="card",
                 project_key="", entity_id=cid, payload=data)
 
+        # If the card now has analyst_agent_id set, ensure the 'analyst'
+        # kanban_columns row exists for this project. Idempotent. Without
+        # this, the analyst session's move-to-analyst-column op lands the
+        # card in a phantom column that doesn't render in the UI.
+        updated = await service.get_card(s, cid)
+        if updated is not None and updated.analyst_agent_id:
+            project_key = updated.project_key or _project_key_from_card(s, updated)
+            await service.ensure_analyst_column(s, project_key)
+
         await s.commit()
         return await _reload(s, cid)
+
+
+def _project_key_from_card(s, card) -> str:
+    """Resolve project_key for a card whose project_key column may be empty
+    (legacy rows). Falls back to the card's project_key; otherwise to a
+    slug key derived from the card's title. Used only by the PATCH path
+    where we just modified the card."""
+    if card.project_key:
+        return card.project_key
+    return f"slug:{card.id[:8]}"
 
 
 @router.post("/cards/{cid}/move", response_model=CardResponse)

@@ -161,23 +161,23 @@ async def list_orphaned_cards(session, project_key: str) -> list[KanbanCard]:
 
 async def sync_agent_columns(session, project_key: str, agents: list[str]) -> None:
     """Sync agent columns with the list of agents for a project.
-    
+
     Creates columns for agents that don't have one yet.
     Does not remove columns for agents that are no longer in the list
     (to preserve card references).
     """
     from app.kanban.schemas import COLUMNS
-    
+
     existing = await list_columns(session, project_key)
     existing_names = {c.name for c in existing}
-    
+
     # Find the rank of "Done" column to insert agent columns before it
     done_rank = "9999"
     for col in existing:
         if col.name == "Done":
             done_rank = col.rank
             break
-    
+
     # Create columns for agents that don't have one yet
     for i, agent_name in enumerate(agents):
         if agent_name not in existing_names:
@@ -186,6 +186,33 @@ async def sync_agent_columns(session, project_key: str, agents: list[str]) -> No
             await create_column(session, project_key, name=agent_name, rank=rank, default_agent=agent_name)
 
     await session.flush()
+
+
+async def ensure_analyst_column(session, project_key: str) -> bool:
+    """Idempotent: create the 'analyst' kanban_columns row for this project
+    if one doesn't already exist. Returns True iff a new column was created.
+
+    Called from PATCH /cards/{cid} when analyst_agent_id is set, so the
+    dispatcher can move a multi-agent card to the analyst column AND the
+    UI renders the column immediately. Without this, the card lands in a
+    phantom column (string set on the card but no kanban_columns row) that
+    doesn't show up in the board.
+    """
+    existing = await list_columns(session, project_key)
+    if any(c.name == "analyst" for c in existing):
+        return False
+    # Same rank policy as sync_agent_columns: insert before Done.
+    from app.kanban.schemas import COLUMNS
+    done_rank = "9999"
+    for col in existing:
+        if col.name == "Done":
+            done_rank = col.rank
+            break
+    rank = f"{int(done_rank) - 1:04d}" if done_rank != "9999" else f"0{len(COLUMNS):03d}"
+    await create_column(session, project_key, name="analyst",
+                       rank=rank, default_agent="analyst")
+    await session.flush()
+    return True
 
 
 # Decision gates

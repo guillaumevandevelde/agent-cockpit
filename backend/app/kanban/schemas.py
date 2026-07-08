@@ -55,6 +55,10 @@ class CardCreate(BaseModel):
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
     scheduled_at: str | None = None
+    analyst_agent_id: str | None = None
+    executor_agent_id: str | None = None
+    parent_card_id: str | None = None
+    depends_on: list[str] | None = None
 
 
 class CardUpdate(BaseModel):
