@@ -94,3 +94,75 @@ kaart in **Doing** verschijnen.
   `executor_agent_id` accepteren alleen provider-ids
   (`claude-code`, `mimo-code`, `codex-cli`, `open-code`, `copilot-cli`), geen
   vrije persona-namen.
+
+## 6. Bij analyst-crash: herstel-pad
+
+Een analyst-sessie kan halverwege crashen — net als elke andere sessie. De
+dispatcher heeft een automatisch vangnet, maar soms is menselijk ingrijpen
+nodig. Dit is het stappenplan.
+
+### 6.1 Hoe herken je een vastgelopen analyst?
+
+Een analyst-kaart is "vastgelopen" als **alle drie** kloppen:
+
+1. De kaart staat al lange tijd in de `analyst`-kolom (langer dan een
+   normale sessie duurt — een paar uur, niet een paar minuten).
+2. `analyst_run_id` is **niet** gezet op de kaart (controleer via de
+   CardEditDialog of de REST API).
+3. Er is geen levende tmux-sessie meer die aan de kaart-claim hangt
+   (`claimed_by` start met `agent:` maar de sessie bestaat niet meer).
+
+Het typische gevolg: de dispatcher blijft de analyst proberen te spawnen
+bij elke tick tot `MAX_DISPATCH_FAILURES` wordt bereikt; dan verplaatst de
+kaart zich naar `Impediment`.
+
+### 6.2 Herstarten met `redispatch_card`
+
+Voor kaarten met `analyst_agent_id` gezet en geen `analyst_run_id` is de
+juiste reactie **`mcp__cockpit-kanban__redispatch_card`** (of de UI-actie
+"Redispatch" op de kaart). De dispatcher bepaalt automatisch de juiste
+fase:
+
+- Kaart heeft `analyst_agent_id` en geen `analyst_run_id` → er wordt een
+  **analyst**-sessie gespawnd (geen executor — die stap is nog niet
+  geweest).
+- Kaart heeft al een `analyst_run_id` (analyst is klaar) → er wordt een
+  **executor**-sessie gespawnd.
+- Kaart heeft geen `analyst_agent_id` (legacy single-agent) → er wordt een
+  executor-sessie gespawnd via de oude logica.
+
+`redispatch_card` doodt eerst de bestaande tmux-sessie (als die er nog
+is), geeft de claim vrij, en spawnt dan opnieuw. De bestaande worktree
+wordt hergebruikt als er een resumable Claude-transcript in staat
+(dezelfde logica die de dead-session reaper gebruikt).
+
+### 6.3 Forceren: plan helemaal opnieuw
+
+Soms is de analyst wel klaar maar is het plan corrupt, of zijn de
+kind-kaarten half aangemaakt. In dat geval wil je niet "opnieuw
+dispatchen" maar "opnieuw plannen vanaf nul". Twee opties:
+
+- **Handmatig via de REST API** — wis `analyst_run_id` met
+  `PATCH /api/v1/kanban/cards/{card_id}` en payload
+  `{"analyst_run_id": null}`. De volgende tick ziet de lege
+  `analyst_run_id` en spawnt opnieuw een analyst. Verwijder de
+  bestaande `plan`/`plan_ref` deliverables apart als je ook het plan
+  zelf wilt wissen (de Plan-tab in de drawer laat die zien).
+- **Wachten op een dedicated endpoint** — een toekomstige
+  `mcp__cockpit-kanban__reset_plan` tool kan dit in één aanroep doen.
+  Tot die tijd is de REST PATCH de canonieke escape-hatch.
+
+### 6.4 Wat NIET te doen
+
+- **Handmatig kind-kaarten aanmaken zonder plan.** Zonder
+  `add_plan_attachment` (en dus zonder `plan_ref` deliverables) zien de
+  kind-kaarten de "Plan niet beschikbaar"-placeholder in hun prompt. De
+  executor weet dan niet wat hij moet doen.
+- **Parent-kaart direct naar `Done` verplaatsen zonder plan.** De
+  kind-kaarten worden dan als zelfstandige Backlog-kaarten behandeld
+  zonder `parent_card_id`-binding; ze verliezen hun koppeling aan het
+  plan.
+- **`analyst_run_id` op een niet-lege waarde zetten om de dispatcher
+  over te slaan.** De analyst is dan niet écht gedraaid; de kind-kaarten
+  ontvangen een corrupt of leeg plan. Gebruik in plaats daarvan de
+  REST PATCH om `analyst_run_id` juist op `null` te zetten.
