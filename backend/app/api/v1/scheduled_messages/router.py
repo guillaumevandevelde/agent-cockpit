@@ -15,7 +15,7 @@ from app.models.scheduled_message_schemas import (
     ScheduledMessageResponse,
     ScheduledMessageUpdate,
 )
-from app.services.scheduling.auto_resume import auto_resume_service
+from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS, auto_resume_service
 from app.services.scheduling.hook_installer import get_hooks_status, install_missing_hooks
 from app.services.scheduling.idle_state import idle_state
 from app.services.scheduling.scheduler import scheduler_service
@@ -205,11 +205,11 @@ async def hook_event(ev: HookEvent):
             # skipping just re-triggers the same spin-and-burn loop the pause
             # exists to prevent.
             from datetime import UTC, datetime, timedelta
-            pause_until = datetime.now(UTC) + timedelta(hours=auto_resume_service.FALLBACK_PAUSE_HOURS)
+            pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
             logger.warning(
                 "unrecognized usage-limit message format for %s, falling back to a "
                 "%sh dispatch pause: %r",
-                ev.cwd, auto_resume_service.FALLBACK_PAUSE_HOURS, ev.message,
+                ev.cwd, FALLBACK_PAUSE_HOURS, ev.message,
             )
 
         from app.kanban.db import KanbanSessionLocal
