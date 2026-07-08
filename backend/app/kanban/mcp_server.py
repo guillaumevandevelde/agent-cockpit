@@ -5,14 +5,17 @@ Each tool is a thin wrapper over apply_operation/service, returning plain
 dicts (JSON-serializable) for the MCP layer.
 """
 import asyncio
+import json
 import logging
 import time
 
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import text
+from sqlalchemy import select, text
 
+from app.kanban import dep_resolver as mcp_kanban_deps
 from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
+from app.kanban.models import KanbanDeliverable
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.schemas import CardResponse
 
@@ -357,4 +360,89 @@ async def redispatch_card(card_id: str, project_path: str, agent: str | None = N
             "ok": True,
             "card_id": card_id,
             "session_name": result.get("session_name"),
+        }
+
+
+MAX_CHILDREN_PER_PLAN = 50
+
+
+@mcp.tool()
+async def add_plan_attachment(
+    card_id: str,
+    plan_markdown: str,
+    child_card_ids: list[str],
+    depends_on_graph: dict[str, list[str]] | None = None,
+) -> dict:
+    """Persist a plan on a parent card and wire `plan_ref` deliverables to each child.
+
+    Args:
+        card_id: The parent card id. Must be the parent of every id in
+            `child_card_ids` (i.e. each child's `parent_card_id` equals this).
+        plan_markdown: The plan as a markdown document.
+        child_card_ids: The list of child cards the analyst is delegating to.
+        depends_on_graph: A dict {child_card_id: [parent_card_ids_this_depends_on]}
+            describing the dependency DAG. Must be acyclic. Each child gets its
+            own `depends_on` column set to that list.
+
+    Returns the parent card on success, or an error dict:
+        {error: "not_found"} / {error: "parent_mismatch"} /
+        {error: "child_not_found"} / {error: "cycle_detected", cycle: [...]} /
+        {error: "too_many_children", max: 50}.
+    """
+    if len(child_card_ids) > MAX_CHILDREN_PER_PLAN:
+        return {"error": "too_many_children", "max": MAX_CHILDREN_PER_PLAN}
+
+    deps = depends_on_graph or {}
+    cycle = mcp_kanban_deps.detect_cycle(
+        {c: list(deps.get(c, []) or []) for c in child_card_ids}
+    )
+    if cycle is not None:
+        return {"error": "cycle_detected", "cycle": cycle}
+
+    async with KanbanSessionLocal() as s:
+        from app.kanban.models import KanbanCard
+        parent = await s.get(KanbanCard, card_id)
+        if parent is None:
+            return {"error": _NOT_FOUND, "card_id": card_id}
+
+        # Validate every child exists + has this parent.
+        for cid in child_card_ids:
+            child = await s.get(KanbanCard, cid)
+            if child is None:
+                return {"error": "child_not_found", "card_id": cid}
+            if child.parent_card_id != card_id:
+                return {"error": "parent_mismatch",
+                        "card_id": cid, "expected_parent": card_id}
+
+        # Materialize the plan deliverable on the parent.
+        project_key = parent.project_key
+        await apply_operation(
+            s, op_type="add_plan_attachment", entity_type="deliverable",
+            project_key=project_key, entity_id=card_id,
+            payload={"plan_markdown": plan_markdown},
+        )
+        plan_deliverable_id = (
+            await s.execute(
+                select(KanbanDeliverable)
+                .where(KanbanDeliverable.card_id == card_id,
+                       KanbanDeliverable.kind == "plan")
+                .order_by(KanbanDeliverable.created_at.desc())
+            )
+        ).scalars().first().id
+
+        # Link plan_ref on each child + fan out depends_on.
+        for cid in child_card_ids:
+            await apply_operation(
+                s, op_type="link_plan_ref", entity_type="deliverable",
+                project_key=project_key, entity_id=cid,
+                payload={"ref_json": json.dumps({
+                    "parent_card_id": card_id,
+                    "plan_deliverable_id": plan_deliverable_id,
+                }), "depends_on": list(deps.get(cid, []) or [])},
+            )
+        await s.commit()
+        return {
+            "parent_card_id": card_id,
+            "plan_deliverable_id": plan_deliverable_id,
+            "child_card_ids": list(child_card_ids),
         }

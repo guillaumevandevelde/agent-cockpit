@@ -235,6 +235,28 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         ))
         await session.flush()
         return
+    if entity_type == "deliverable" and op_type == "add_plan_attachment":
+        session.add(KanbanDeliverable(
+            id=uuid.uuid4().hex, card_id=entity_id,
+            kind="plan", ref=payload["plan_markdown"],
+        ))
+        # Persist the JSON graph as part of the same deliverable row (we
+        # already stored the markdown above; use the JSON column on KanbanCard
+        # to mark on each child via the follow-up ops).
+        await session.flush()
+        return
+    if entity_type == "deliverable" and op_type == "link_plan_ref":
+        session.add(KanbanDeliverable(
+            id=uuid.uuid4().hex, card_id=entity_id,
+            kind="plan_ref",
+            ref=payload["ref_json"],
+        ))
+        # Set the per-child depends_on column for fast dispatcher reads.
+        card = await session.get(KanbanCard, entity_id)
+        if card is not None and "depends_on" in payload:
+            card.depends_on = payload["depends_on"]
+            await session.flush()
+        return
     # comment ops are pure log entries; nothing to materialize.
 
 
