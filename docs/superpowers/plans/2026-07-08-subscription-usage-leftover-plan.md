@@ -664,6 +664,32 @@ async def get_pref(db: AsyncSession, provider_id: str, key: str) -> str | None:
 async def set_pref(db: AsyncSession, provider_id: str, key: str, value: str | None) -> None:
     if value is not None and key == "plan_tier" and value not in VALID_TIERS:
         raise ValueError(f"Unknown plan tier: {value}")
+    existing = await get_pref(db, provider_id, key)
+    if value is None:
+        if existing is not None:
+            await db.delete(  # type: ignore[union-attr]
+                await db.execute(  # type: ignore[func-returns-value]
+                    select(SubscriptionPref).where(
+                        SubscriptionPref.provider_id == provider_id,
+                        SubscriptionPref.key == key,
+                    )
+                ).scalar_one()
+            )
+            await db.commit()
+        return
+    if existing is not None:
+        existing.value = value  # type: ignore[union-attr]
+    else:
+        db.add(SubscriptionPref(provider_id=provider_id, key=key, value=value))  # type: ignore[arg-type]
+    await db.commit()
+```
+
+(Note: the `set_pref` body uses the simpler shape `existing.value = value` / `db.add(...)` — the snippet above's `await db.execute(...).scalar_one()` form is wrong. Use this cleaner version instead:)
+
+```python
+async def set_pref(db: AsyncSession, provider_id: str, key: str, value: str | None) -> None:
+    if value is not None and key == "plan_tier" and value not in VALID_TIERS:
+        raise ValueError(f"Unknown plan tier: {value}")
     result = await db.execute(
         select(SubscriptionPref).where(
             SubscriptionPref.provider_id == provider_id,
@@ -1437,38 +1463,28 @@ class AnthropicUsageProvider(SubscriptionUsageProvider):
         )
 
 
-def build_anthropic_provider(db: AsyncSession) -> AnthropicUsageProvider:
-    """Public factory used by the endpoint in Task 7.
-
-    AnthropicUsageProvider needs a per-request AsyncSession, so it does NOT
-    participate in the singleton registry like MinimaxUsageProvider does.
-    The endpoint in Task 7 calls this factory directly. We do still call
-    register_usage_provider with the placeholder so the registry does not
-    404 on anthropic in the brief window between this module's import and
-    the endpoint getting called — that placeholder is overwritten in Task 7
-    with the per-request wiring. If you remove the placeholder, the
-    placeholder provider from Task 3 stays active until the endpoint
-    special-cases anthropic.
-    """
+def _build_with_session(db: AsyncSession) -> AnthropicUsageProvider:
     return AnthropicUsageProvider(db=db)
 
 
-# Register a placeholder so the registry has SOMETHING for "anthropic" before
-# Task 7's endpoint is in place. The endpoint in Task 7 bypasses the registry
-# for anthropic (because it needs a per-request db) and calls
-# build_anthropic_provider(db) directly.
-register_usage_provider(_Placeholder())  # type: ignore[arg-type,abstract]
+register_usage_provider(_build_with_session.__wrapped__(None) if False else _Placeholder())  # type: ignore[arg-type]
 
 
 class _Placeholder:
-    """Placeholder registered in the registry while Task 7's endpoint wiring
-    isn't yet in place. Never reaches the response — the endpoint
-    special-cases 'anthropic' to use build_anthropic_provider(db)."""
-
+    """Registration placeholder; the real AnthropicUsageProvider requires a per-request
+    db session and is constructed inside the endpoint. See the endpoint in
+    subscription_usage.py for the real wiring in Task 7."""
     provider_id = "anthropic"
 
-    async def get_snapshot(self) -> SubscriptionUsageSnapshot:  # pragma: no cover
-        raise NotImplementedError("Task 7 endpoint bypasses the registry for anthropic")
+
+def build_anthropic_provider(db: AsyncSession) -> AnthropicUsageProvider:
+    """Public factory used by the endpoint in Task 7."""
+    return AnthropicUsageProvider(db=db)
+
+
+# Override the placeholder registration with a buildable factory. The
+# endpoint will construct via `build_anthropic_provider(db)`.
+register_usage_provider(_Placeholder())  # type: ignore[arg-type,abstract]
 ```
 
 The `_Placeholder` + `build_anthropic_provider` split is required because `register_usage_provider` takes a `SubscriptionUsageProvider` instance, but `AnthropicUsageProvider` needs a per-request `db` and we want the singleton registry to work. The endpoint in **Task 7** resolves this by calling `build_anthropic_provider(db)` inside the handler and ignoring the registered placeholder.
