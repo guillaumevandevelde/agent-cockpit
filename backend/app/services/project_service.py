@@ -1,4 +1,4 @@
-"""Project management service for discovering and managing Claude Code projects."""
+"""Project management service for discovering and managing local projects."""
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,7 +19,7 @@ from app.utils.path_utils import (
 logger = logging.getLogger(__name__)
 
 class ProjectService:
-    """Service for managing Claude Code projects."""
+    """Service for managing local projects."""
 
     def __init__(self, db: AsyncSession):
         """Initialize the project service."""
@@ -104,12 +104,13 @@ class ProjectService:
 
     def discover_projects(self, base_path: str) -> list[ProjectBase]:
         """
-        Scan a directory for Claude Code projects.
+        Scan a directory for project candidates.
 
-        A project is identified by the presence of:
+        Claude Code metadata is preserved when present:
         - .claude/ directory (source="configured")
         - .mcp.json file (source="configured")
         - A matching entry in ~/.claude/projects/ (source="session_history")
+        Otherwise, regular directories are returned with source="directory".
         """
         discovered = []
         discovered_paths: set[str] = set()
@@ -117,6 +118,19 @@ class ProjectService:
 
         if not base_dir.exists() or not base_dir.is_dir():
             return []
+
+        def add_discovered(directory: Path, source: str) -> None:
+            dir_str = str(directory)
+            if dir_str in discovered_paths:
+                return
+            discovered.append(
+                ProjectBase(
+                    name=directory.name,
+                    path=dir_str,
+                    source=source,
+                )
+            )
+            discovered_paths.add(dir_str)
 
         # Scan the base directory and its immediate subdirectories
         dirs_to_check = [base_dir]
@@ -136,15 +150,7 @@ class ProjectService:
                 mcp_file = get_project_mcp_config_file(str(directory))
 
                 if claude_dir.exists() or mcp_file.exists():
-                    project_name = directory.name
-                    discovered.append(
-                        ProjectBase(
-                            name=project_name,
-                            path=str(directory),
-                            source="configured",
-                        )
-                    )
-                    discovered_paths.add(str(directory))
+                    add_discovered(directory, "configured")
             except (PermissionError, OSError):
                 continue
 
@@ -165,15 +171,13 @@ class ProjectService:
 
                     encoded = convert_path_to_folder_name(dir_str)
                     if encoded in global_entries:
-                        discovered.append(
-                            ProjectBase(
-                                name=directory.name,
-                                path=dir_str,
-                                source="session_history",
-                            )
-                        )
+                        add_discovered(directory, "session_history")
         except (PermissionError, OSError):
             pass
+
+        # Phase 3: Include ordinary folders so projects are provider-agnostic.
+        for directory in dirs_to_check:
+            add_discovered(directory, "directory")
 
         return discovered
 
