@@ -8,6 +8,7 @@ from app.services.subscriptions.base import (
     SubscriptionUsageSnapshot,
     get_snapshot_cache,
     invalidate_snapshot_cache,
+    put_snapshot_cache,
 )
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "SubscriptionUsageSnapshot",
     "get_snapshot_cache",
     "invalidate_snapshot_cache",
+    "put_snapshot_cache",
+    "register_usage_provider",
     "get_usage_provider",
 ]
 
