@@ -1,4 +1,6 @@
 """FastAPI application entry point."""
+import asyncio
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -21,6 +23,22 @@ from app.api.v1.router import router as api_v1_router
 from app.config import settings
 from app.database import init_db
 from app.middleware.correlation_id import CorrelationIdMiddleware
+
+logger = logging.getLogger(__name__)
+
+
+async def ensure_scheduling_hooks_installed() -> None:
+    """Additively install the scheduling hooks into ~/.claude/settings.json.
+
+    Non-fatal: a shared settings file some other process is mid-write to
+    shouldn't block backend startup, it just means the hooks stay uninstalled
+    until the next restart.
+    """
+    from app.services.scheduling.hook_installer import install_missing_hooks
+    try:
+        await asyncio.to_thread(install_missing_hooks)
+    except Exception:
+        logger.exception("failed to install scheduling hooks at startup")
 
 
 @asynccontextmanager
@@ -51,13 +69,16 @@ async def lifespan(app: FastAPI):
     scheduler_service.start()
     # Resume agent sessions interrupted by a host/backend restart. Runs before the
     # dispatch scheduler so the reaper can't release (and orphan) their claims first.
-    import logging
-
     from app.kanban.session_recovery import recover_interrupted_sessions
     try:
         await recover_interrupted_sessions()
     except Exception:
-        logging.getLogger(__name__).exception("session recovery failed at startup")
+        logger.exception("session recovery failed at startup")
+    # Install the Notification/Stop/UserPromptSubmit/SessionStart hooks that feed
+    # the usage-limit auto-resume pipeline. These used to require a manual click
+    # on the Scheduled Messages page, which meant the whole pipeline stayed dead
+    # code on any machine where nobody happened to visit that page first.
+    await ensure_scheduling_hooks_installed()
     # Start kanban auto-dispatch polling
     scheduler_service.schedule_kanban_dispatch(
         interval_seconds=settings.kanban_dispatch_interval_seconds
