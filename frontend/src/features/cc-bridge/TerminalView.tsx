@@ -5,10 +5,12 @@ import { useTerminal } from './useTerminal'
 import { ImageAttachmentDialog } from './ImageAttachmentDialog'
 import { pasteBridgeAttachment, uploadBridgeAttachment } from './api'
 import { Button } from '@/components/ui/button'
+import { getInstanceAccentClasses } from '@/lib/instanceAccent'
 import { cn } from '@/lib/utils'
 import { FileBrowserPopover } from './FileBrowserPopover'
 import type { AttentionKind } from './attention'
 import type { BridgeAttachment } from './types'
+import type { InstanceIdentity } from '@/types/status'
 
 interface TerminalViewProps {
   target: string | null
@@ -16,6 +18,7 @@ interface TerminalViewProps {
   onToggleFullscreen?: () => void
   onClose?: () => void
   attention?: AttentionKind | null
+  instance?: InstanceIdentity | null
 }
 
 interface ImageAttachmentState {
@@ -51,12 +54,14 @@ function imageFromClipboard(event: React.ClipboardEvent<HTMLDivElement>): File |
   return null
 }
 
-export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, attention }: TerminalViewProps) {
+export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, attention, instance }: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [draggingImage, setDraggingImage] = useState(false)
   const [imageAttachment, setImageAttachment] = useState<ImageAttachmentState | null>(null)
   const { connected, readOnly, setReadOnly, attach, detach, sendText } = useTerminal(containerRef, wrapperRef)
+  const accentClasses = getInstanceAccentClasses(instance?.accent)
+  const modeLabel = readOnly ? 'Read-only' : 'Interactive'
 
   useEffect(() => {
     if (target) {
@@ -185,8 +190,8 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
       </div>
 
       {target && (
-        <div className="flex items-center justify-between px-3 py-2 border-t bg-background">
-          <div className="flex items-center gap-3">
+        <div className={cn("flex items-center justify-between gap-3 px-3 py-2 border-t bg-background", accentClasses.terminal)}>
+          <div className="flex items-center gap-3 min-w-0">
             {attention && (
               <span
                 className={cn(
@@ -221,13 +226,19 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
               </button>
             </div>
             <span className={cn(
-              'text-xs',
+              'text-xs shrink-0',
               connected ? 'text-green-500' : 'text-muted-foreground'
             )}>
               {connected ? 'Connected' : 'Disconnected'}
             </span>
+            <span
+              className="text-xs text-muted-foreground truncate"
+              title={instance ? `${modeLabel} on ${instance.name} (${instance.hostname}) · ${target}` : target}
+            >
+              {instance ? `${modeLabel} on ${instance.name}` : target}
+            </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <FileBrowserPopover onSelect={sendText} />
             {onToggleFullscreen && (
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onToggleFullscreen} title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}>

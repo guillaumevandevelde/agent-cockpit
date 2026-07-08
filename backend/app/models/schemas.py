@@ -1,6 +1,6 @@
 """Pydantic schemas for API models."""
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1887,6 +1887,20 @@ class PresenceConfigSnippet(BaseModel):
     instructions: str
 
 
+InstanceAccent = Literal["blue", "green", "purple", "orange", "red", "pink", "cyan", "slate"]
+
+
+class InstanceIdentity(BaseModel):
+    """Runtime identity for the Claude Cockpit backend instance."""
+
+    id: str
+    name: str
+    hostname: str
+    short_hostname: str
+    accent: InstanceAccent
+    started_at: datetime
+
+
 class SystemStatusResponse(BaseModel):
     """System status for header indicators."""
 
@@ -1894,6 +1908,7 @@ class SystemStatusResponse(BaseModel):
     active_sessions: int = 0
     providers: dict[str, Any] = Field(default_factory=dict)
     scheduling_hooks_installed: bool = False
+    instance: InstanceIdentity | None = None
 
 
 # Shared generic response models

@@ -6,6 +6,7 @@ import { TeamCard } from './TeamCard'
 import type { CCSession, AgentTeam } from './types'
 import type { AttentionKind } from './attention'
 import type { AgentProviderId } from '@/types/providers'
+import type { InstanceIdentity } from '@/types/status'
 
 type ProviderFilter = 'all' | AgentProviderId
 
@@ -25,6 +26,7 @@ interface SessionListProps {
   canCreateSession: boolean
   createDisabledReason: string | null
   attentionByPane: Map<string, AttentionKind>
+  instance?: InstanceIdentity | null
 }
 
 export function SessionList({
@@ -43,6 +45,7 @@ export function SessionList({
   canCreateSession,
   createDisabledReason,
   attentionByPane,
+  instance,
 }: SessionListProps) {
   const totalCount = sessions.length
   const emptyName = providerFilter === 'all'
@@ -112,6 +115,7 @@ export function SessionList({
             onKillSession={onKillSession}
             onRename={onRename}
             attentionByPane={attentionByPane}
+            instance={instance}
           />
         ))}
 
@@ -127,6 +131,7 @@ export function SessionList({
               onKill={onKillSession}
               onRename={onRename}
               attention={session.pane_id ? attentionByPane.get(session.pane_id) ?? null : null}
+              instance={instance}
             />
           )
         })}

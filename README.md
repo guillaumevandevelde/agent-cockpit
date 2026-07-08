@@ -188,6 +188,18 @@ API_TOKEN='replace-with-a-long-random-value' ./scripts/dev.sh --host 0.0.0.0
 
 Both servers will then bind to all interfaces. The browser asks for the API token on its first protected request and keeps it in session storage. Configure `CORS_ORIGINS` explicitly when using a reverse proxy or a different frontend origin.
 
+### Naming a Claude Cockpit instance
+
+When running Claude Cockpit on several machines, set a display name and accent color so each browser window clearly identifies the backend it controls:
+
+```bash
+CLAUDE_COCKPIT_INSTANCE_NAME="Studio Mac" \
+CLAUDE_COCKPIT_INSTANCE_ACCENT="blue" \
+./scripts/dev.sh --host 0.0.0.0
+```
+
+Supported accents are `blue`, `green`, `purple`, `orange`, `red`, `pink`, `cyan`, and `slate`. The name appears in the header, browser tab title, Agent Bridge terminal panes, and kill-session confirmations.
+
 To preview the documentation site:
 
 ```bash

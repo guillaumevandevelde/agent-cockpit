@@ -12,6 +12,7 @@ import { useAttentionByPane } from './useAttentionByPane'
 import { renameSession } from './api'
 import type { CCSession } from './types'
 import { useProviderContext } from '@/contexts/ProviderContext'
+import { useSystemStatus } from '@/hooks/useSystemStatus'
 import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
 
 const MAX_GRID_PANES = 4
@@ -35,6 +36,8 @@ function addTarget(prev: string[], target: string): string[] {
 export function CCBridgePage() {
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>('all')
   const { providers, selectedProviderId } = useProviderContext()
+  const status = useSystemStatus()
+  const instance = status?.instance ?? null
   const { sessions, loading, error, refresh } = useCCSessions()
   const { teams, ungrouped, loading: teamsLoading, refresh: refreshTeams } = useTeams()
   const attentionByPane = useAttentionByPane()
@@ -234,6 +237,7 @@ export function CCBridgePage() {
               canCreateSession={canCreateSession}
               createDisabledReason={canCreateSession ? null : createDisabledReason}
               attentionByPane={attentionByPane}
+              instance={instance}
             />
           </div>
         )}
@@ -280,6 +284,7 @@ export function CCBridgePage() {
                           const pane = paneByTarget.get(target)
                           return pane ? attentionByPane.get(pane) ?? null : null
                         })()}
+                        instance={instance}
                       />
                     </div>
                   </div>
@@ -303,6 +308,7 @@ export function CCBridgePage() {
         session={killSession}
         isWorktreeSession={false}
         onKilled={handleKilled}
+        instance={instance}
       />
     </div>
   )

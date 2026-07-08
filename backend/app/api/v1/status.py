@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.constants import SessionStatus
 from app.models.schemas import SystemStatusResponse
+from app.services.instance_identity import get_instance_identity
 from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
 from app.services.presence_service import PresenceService
 from app.services.providers import get_provider, get_providers
@@ -74,6 +75,7 @@ async def get_system_status(db: AsyncSession = Depends(get_db)):
         active_sessions=active_count,
         providers=provider_statuses,
         scheduling_hooks_installed=hooks_installed,
+        instance=get_instance_identity(),
     )
 
 
