@@ -2,13 +2,44 @@
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 
+from app.config import settings
+from app.database import AsyncSessionLocal
 from app.main import app
+from app.models.database import SubscriptionPref
 
 
 def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_minimax_api_key(monkeypatch):
+    """Ensure settings.minimax_api_key is None at the start and end of each test.
+
+    The minimax unconfigured test depends on this being None; the
+    minimax mocked-httpx tests will override per-test.
+    """
+    monkeypatch.setattr(settings, "minimax_api_key", None)
+    yield
+    monkeypatch.setattr(settings, "minimax_api_key", None)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_subscription_prefs():
+    """Clear subscription_prefs table before each test.
+
+    Some tests (e.g. test_plan_tier_put_then_get_round_trips) write rows
+    that must not leak into later tests. This makes the suite
+    deterministic regardless of run order.
+    """
+    async with AsyncSessionLocal() as db:
+        await db.execute(delete(SubscriptionPref))
+        await db.commit()
+    yield
 
 
 @pytest.mark.asyncio

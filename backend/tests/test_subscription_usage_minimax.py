@@ -5,8 +5,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.config import settings
 from app.services.subscriptions.base import SubscriptionUsageSnapshot
 from app.services.subscriptions.minimax import MinimaxUsageProvider
+
+
+@pytest.fixture(autouse=True)
+def _set_minimax_api_key(monkeypatch):
+    """The mocked-httpx tests need a configured key; restore None after."""
+    monkeypatch.setattr(settings, "minimax_api_key", "test-key")
+    yield
+    monkeypatch.setattr(settings, "minimax_api_key", None)
 
 
 class _FakeAsyncClient:
