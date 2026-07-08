@@ -1,84 +1,102 @@
 """End-to-end integration test for the multi-agent kanban flow (Task 14).
 
-Stubs ``_run_card`` so no real tmux session is spawned. Exercises the full
-sequence a parent → analyst → plan → executor-child flow would traverse in a
-real run, and asserts the call ordering matches what a future real-tick would
-see:
+Drives the real ``dispatch_project`` entry point with a stubbed ``_run_card``
+that records every spawn and mirrors ``_run_card``'s claim+move side effects so
+the dispatcher's tick loop can make its own decisions about picking the next
+card (rather than re-picking the same card forever). No real tmux session is
+spawned.
 
-  1. Tick 1: analyst spawns on parent (analyst_run_id set).
-  2. Analyst calls add_plan_attachment (2 children, dep c2 -> c1).
-  3. Parent moves to Done. Children inherit plan_ref + depends_on.
+  1. Tick 1: analyst spawns on parent (analyst_run_id set by dispatcher).
+  2. Analyst ops attach a plan deliverable + plan_ref + depends_on (Task 8 ops).
+  3. Parent moves to Done.
   4. Tick 2: child 1 dispatched (executor); child 2 skipped (deps unmet).
-  5. Move child 1 to Done by hand.
+  5. Move child 1 to Done.
   6. Tick 3: child 2 dispatched (executor).
 """
-import json
-
 import pytest
-from sqlalchemy import select
 
 from app.kanban import dispatch
-from app.kanban.dep_resolver import meets_dep_prerequisites
-from app.kanban.models import KanbanCard, KanbanDeliverable
+from app.kanban.models import KanbanCard
 from app.kanban.operations import apply_operation
-from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 
 @pytest.mark.asyncio
 async def test_multi_agent_flow(monkeypatch):
-    """End-to-end multi-agent flow with a stubbed ``_run_card``."""
+    """End-to-end multi-agent flow driven through ``dispatch_project``."""
     spawned = []
 
     async def fake_run_card(session, **kwargs):
-        spawned.append((kwargs["phase"], kwargs["card"].id))
-        return {"session": f"tmux-{kwargs['phase']}-{kwargs['card'].id[:6]}"}
+        """Record the dispatch and mirror ``_run_card``'s claim + column move.
+
+        The real ``_run_card`` claims the card with ``agent:<session_name>`` and
+        moves it from the dispatch column to the target agent column. Those two
+        side effects are what stop ``_next_card`` from re-picking the same card
+        on the next iteration of the dispatcher's tick loop. The stub omits the
+        actual ``spawn_session`` call (no tmux / no worktree) but still returns
+        a session dict so ``dispatch_project`` writes ``analyst_run_id`` itself.
+        """
+        card = kwargs["card"]
+        spawned.append((kwargs["phase"], card.id))
+        session_name = f"tmux-{kwargs['phase']}-{card.id[:6]}"
+        target_col = "analyst" if kwargs["phase"] == "analyst" else "engineer"
+        card.claimed_by = dispatch.CLAIMANT_PREFIX + session_name
+        card.column = target_col
+        card.claimed_at = card.claimed_at  # leave timestamp undefined for the stub
+        await session.flush()
+        return {"session": session_name}
 
     monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
 
-    await reset_test_tables()
+    from tests.kanban_test_db import TestSessionLocal
+
     KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
 
     async with KanbanSessionLocal() as s:
-        # --- Setup: parent with analyst + executor config -----------------
+        # --- Setup: parent with analyst + executor agent config -----------
         parent_id = await apply_operation(
             s, op_type="create", entity_type="card",
-            project_key="git:example", entity_id=None,
+            project_key=PK, entity_id=None,
             payload={"title": "parent", "column": "Backlog",
                      "analyst_agent_id": "claude-code",
                      "executor_agent_id": "mimo-code"},
         )
-
-        # --- Tick 1: spawn analyst ----------------------------------------
-        parent = await s.get(KanbanCard, parent_id)
-        if parent.analyst_agent_id and not parent.analyst_run_id:
-            await fake_run_card(
-                s, card=parent, project_key="git:example",
-                project_path="/tmp/x", transport=None, phase="analyst",
-            )
-            parent.analyst_run_id = "run-1"
-            await s.flush()
         await s.commit()
-        assert ("analyst", parent_id) in spawned
 
-        # --- Analyst does the planning -----------------------------------
-        # Create the child cards the analyst plans to delegate to.
+        # --- Tick 1: drive the real dispatcher ----------------------------
+        # dispatch_project picks the only Backlog card, sees analyst_agent_id
+        # + no analyst_run_id, calls _run_card (faked), then sets
+        # analyst_run_id itself. Verifying here proves the dispatcher's own
+        # branch ran -- we never assign analyst_run_id by hand.
+        await dispatch.dispatch_project(s, project_key=PK, project_path="/tmp/x")
+        await s.commit()
+
+        parent = await s.get(KanbanCard, parent_id)
+        assert parent.analyst_run_id, "dispatcher did not set analyst_run_id"
+        assert spawned == [("analyst", parent_id)]
+
+        # --- Analyst ops: plan deliverable + child plan_refs + depends_on -
+        from sqlalchemy import select
+
+        from app.kanban.models import KanbanDeliverable
+        import json as _json
+
         c1 = await apply_operation(
             s, op_type="create", entity_type="card",
-            project_key="git:example", entity_id=None,
+            project_key=PK, entity_id=None,
             payload={"title": "c1", "column": "Backlog",
                      "parent_card_id": parent_id},
         )
         c2 = await apply_operation(
             s, op_type="create", entity_type="card",
-            project_key="git:example", entity_id=None,
+            project_key=PK, entity_id=None,
             payload={"title": "c2", "column": "Backlog",
                      "parent_card_id": parent_id},
         )
 
-        # Attach a plan deliverable on the parent.
         await apply_operation(
             s, op_type="add_plan_attachment", entity_type="deliverable",
-            project_key="git:example", entity_id=parent_id,
+            project_key=PK, entity_id=parent_id,
             payload={"plan_markdown": "# Plan\nc1 first, then c2"},
         )
         plan_id = (await s.execute(
@@ -87,13 +105,12 @@ async def test_multi_agent_flow(monkeypatch):
                    KanbanDeliverable.kind == "plan")
         )).scalars().first().id
 
-        # Wire each child to its plan_ref + depends_on via link_plan_ref.
         for cid, deps in ((c1, []), (c2, [c1])):
             await apply_operation(
                 s, op_type="link_plan_ref", entity_type="deliverable",
-                project_key="git:example", entity_id=cid,
+                project_key=PK, entity_id=cid,
                 payload={
-                    "ref_json": json.dumps({
+                    "ref_json": _json.dumps({
                         "parent_card_id": parent_id,
                         "plan_deliverable_id": plan_id,
                     }),
@@ -101,52 +118,35 @@ async def test_multi_agent_flow(monkeypatch):
                 },
             )
 
-        # Move parent to Done; this is what the analyst would do once the
-        # plan is written and the children are spawned.
+        # Move parent to Done (the analyst signals handoff this way once the
+        # plan + children are wired up).
         await apply_operation(
             s, op_type="move", entity_type="card",
-            project_key="git:example", entity_id=parent_id,
+            project_key=PK, entity_id=parent_id,
             payload={"column": "Done"},
         )
         await s.commit()
 
-        # Refresh from DB so we observe the depends_on column the materialize
-        # step just wrote.
-        c1_card = await s.get(KanbanCard, c1)
-        c2_card = await s.get(KanbanCard, c2)
-        cards_by_id = {c1: c1_card, c2: c2_card}
+        # --- Tick 2: dispatcher should pick c1 (no deps); c2 is gated -----
+        await dispatch.dispatch_project(s, project_key=PK, project_path="/tmp/x")
+        await s.commit()
+        # Drop the analyst/parent claim cleanup latch: now c1 is dispatched.
+        assert ("executor", c1) in spawned
+        assert ("executor", c2) not in spawned, "c2 must be gated on c1"
 
-        # --- Tick 2: dispatcher reads children ----------------------------
-        # c1 has no deps -> dispatch.
-        assert meets_dep_prerequisites(c1_card, cards_by_id) is True
-        # c2 depends on c1 (not Done yet) -> skip.
-        assert meets_dep_prerequisites(c2_card, cards_by_id) is False
-        if meets_dep_prerequisites(c1_card, cards_by_id):
-            await fake_run_card(
-                s, card=c1_card, project_key="git:example",
-                project_path="/tmp/x", transport=None, phase="executor",
-            )
-
-        # --- c1 finishes -> mark Done -------------------------------------
+        # --- c1 done: clear the way for c2 --------------------------------
         await apply_operation(
             s, op_type="move", entity_type="card",
-            project_key="git:example", entity_id=c1,
+            project_key=PK, entity_id=c1,
             payload={"column": "Done"},
         )
         await s.commit()
-        c1_card = await s.get(KanbanCard, c1)
-        c2_card = await s.get(KanbanCard, c2)
-        cards_by_id = {c1: c1_card, c2: c2_card}
 
-        # --- Tick 3: c2 deps met -> dispatch ------------------------------
-        assert meets_dep_prerequisites(c2_card, cards_by_id) is True
-        if meets_dep_prerequisites(c2_card, cards_by_id):
-            await fake_run_card(
-                s, card=c2_card, project_key="git:example",
-                project_path="/tmp/x", transport=None, phase="executor",
-            )
+        # --- Tick 3: c2 deps now met -> dispatch ---------------------------
+        await dispatch.dispatch_project(s, project_key=PK, project_path="/tmp/x")
+        await s.commit()
 
-    # Verify spawn order: analyst(parent), executor(c1), executor(c2).
+    # Source of truth: the exact spawn order across all three ticks.
     assert spawned == [
         ("analyst", parent_id),
         ("executor", c1),
