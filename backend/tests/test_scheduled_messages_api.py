@@ -101,6 +101,70 @@ async def test_delete_history_when_nothing_to_clean():
 
 
 @pytest.mark.asyncio
+async def test_bulk_delete_removes_selected_messages():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        payload = {"target_project": "/tmp", "message": "x",
+                   "trigger_type": "once", "fire_at": "2999-01-01T09:00:00+00:00"}
+        r1 = await ac.post("/api/v1/scheduled-messages", json=payload)
+        r2 = await ac.post("/api/v1/scheduled-messages", json=payload)
+        r3 = await ac.post("/api/v1/scheduled-messages", json=payload)
+        id1, id2, id3 = r1.json()["id"], r2.json()["id"], r3.json()["id"]
+
+        r = await ac.post("/api/v1/scheduled-messages/bulk-delete", json={"ids": [id1, id2]})
+        assert r.status_code == 200, r.text
+        assert r.json()["deleted"] == 2
+
+        remaining_ids = [m["id"] for m in (await ac.get("/api/v1/scheduled-messages")).json()["items"]]
+        assert id1 not in remaining_ids
+        assert id2 not in remaining_ids
+        assert id3 in remaining_ids
+
+        await ac.delete(f"/api/v1/scheduled-messages/{id3}")
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_ignores_unknown_ids():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/scheduled-messages/bulk-delete", json={"ids": [999999]})
+        assert r.status_code == 200
+        assert r.json()["deleted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_with_empty_ids_is_noop():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/scheduled-messages/bulk-delete", json={"ids": []})
+        assert r.status_code == 200
+        assert r.json()["deleted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_unregisters_from_scheduler():
+    from unittest import mock
+
+    from app.services.scheduling.scheduler import scheduler_service
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        payload = {"target_project": "/tmp", "message": "cron-me",
+                   "trigger_type": "cron", "cron_expr": "0 9 * * 1-5"}
+        r = await ac.post("/api/v1/scheduled-messages", json=payload)
+        mid = r.json()["id"]
+
+        with mock.patch.object(scheduler_service, "remove") as remove_mock:
+            r = await ac.post("/api/v1/scheduled-messages/bulk-delete", json={"ids": [mid]})
+            assert r.status_code == 200
+            assert r.json()["deleted"] == 1
+        remove_mock.assert_called_once_with(mid)
+
+        remaining_ids = [m["id"] for m in (await ac.get("/api/v1/scheduled-messages")).json()["items"]]
+        assert mid not in remaining_ids
+
+
+@pytest.mark.asyncio
 async def test_hook_event_updates_idle_state():
     from app.services.scheduling.idle_state import idle_state
     transport = ASGITransport(app=app)
