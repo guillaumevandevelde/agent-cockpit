@@ -47,6 +47,11 @@ export function CardItem({ card, onOpen }: { card: Card; onOpen: (c: Card) => vo
             {l}
           </Badge>
         ))}
+        {card.analyst_agent_id && (
+          <span className="inline-flex items-center gap-1 rounded bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
+            🪄 Multi-agent
+          </span>
+        )}
         {card.agent && (
           <Badge variant="secondary" className="text-[10px] font-normal">
             &#129302; {card.agent}
