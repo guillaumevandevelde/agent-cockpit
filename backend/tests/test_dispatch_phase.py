@@ -156,3 +156,185 @@ def test_plan_context_unresolvable_returns_placeholder():
     )
     assert "Plan niet beschikbaar" in section
     assert "report_impediment" in section
+
+
+# ---- Task 7 follow-up: gate plan-context prepend on parent_card_id --------
+
+@pytest.mark.asyncio
+async def test_run_card_skips_plan_context_for_legacy_cards(monkeypatch):
+    """Regression test for Task 7 critical defect (end-to-end-ish).
+
+    Legacy single-agent cards (no parent_card_id) must NOT have the
+    PLAN CONTEXT — Plan niet beschikbaar placeholder prepended to their
+    executor prompt. The gate in _run_card must check
+    `card.parent_card_id is not None` before calling
+    _resolve_plan_for_child + _plan_context_section.
+
+    Runs the actual _run_card against the kanban test DB with a captured
+    transport, asserting that:
+      - _resolve_plan_for_child is never called for the legacy card
+      - _plan_context_section is never called for the legacy card
+      - the captured prompt does not contain the placeholder text
+    """
+    from app.kanban.dispatch import _run_card
+    from app.kanban.models import KanbanCard
+    from tests.kanban_test_db import TestSessionLocal
+
+    section_calls = []
+    resolve_calls = []
+
+    async def fake_resolve(session, card):
+        resolve_calls.append(card.id)
+        return (None, None, None)
+
+    def fake_section(*, plan_markdown, plan_deliverable_id, parent_card_id):
+        section_calls.append((plan_markdown, plan_deliverable_id, parent_card_id))
+        return _plan_context_section(plan_markdown=plan_markdown,
+                                     plan_deliverable_id=plan_deliverable_id,
+                                     parent_card_id=parent_card_id)
+
+    monkeypatch.setattr(dispatch, "_resolve_plan_for_child", fake_resolve)
+    monkeypatch.setattr(dispatch, "_plan_context_section", fake_section)
+
+    captured = {}
+
+    def fake_transport(directory, prompt, session_name, provider_id, platform):
+        captured["prompt"] = prompt
+        captured["session_name"] = session_name
+        return {"session": session_name, "prompt": prompt}
+
+    KanbanSessionLocal = TestSessionLocal()
+    async with KanbanSessionLocal() as s:
+        from app.kanban.operations import apply_operation
+        legacy_cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "legacy card", "column": "Doing"},
+        )
+        await s.commit()
+        legacy_card = await s.get(KanbanCard, legacy_cid)
+        # Sanity: legacy cards have no parent.
+        assert legacy_card.parent_card_id is None
+
+        await _run_card(
+            s, card=legacy_card, project_key="git:example",
+            project_path="/tmp/none", transport=fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+    assert resolve_calls == [], (
+        f"_resolve_plan_for_child must not be called for legacy cards "
+        f"(got calls for {resolve_calls!r})"
+    )
+    assert section_calls == [], (
+        f"_plan_context_section must not be called for legacy cards "
+        f"(got calls for {section_calls!r})"
+    )
+    assert "Plan niet beschikbaar" not in captured["prompt"], (
+        f"Legacy executor prompt must not contain the placeholder, but got: "
+        f"{captured['prompt'][:200]!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_card_prepends_plan_context_for_child_with_parent(monkeypatch):
+    """Child cards (parent_card_id set) whose plan_ref resolves to a real
+    plan should see the full PLAN CONTEXT section prepended to the prompt."""
+    from app.kanban.dispatch import _run_card
+    from app.kanban.models import KanbanCard
+    from tests.kanban_test_db import TestSessionLocal
+
+    resolve_calls = []
+
+    async def fake_resolve(session, card):
+        resolve_calls.append(card.id)
+        return ("# My Plan\n\n- Step 1\n- Step 2", "d1", "parent-1")
+
+    monkeypatch.setattr(dispatch, "_resolve_plan_for_child", fake_resolve)
+
+    captured = {}
+
+    def fake_transport(directory, prompt, session_name, provider_id, platform):
+        captured["prompt"] = prompt
+        captured["session_name"] = session_name
+        return {"session": session_name, "prompt": prompt}
+
+    KanbanSessionLocal = TestSessionLocal()
+    async with KanbanSessionLocal() as s:
+        from app.kanban.operations import apply_operation
+        child_cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "child card", "column": "Doing",
+                     "parent_card_id": "parent-1"},
+        )
+        await s.commit()
+        child_card = await s.get(KanbanCard, child_cid)
+        assert child_card.parent_card_id == "parent-1"
+
+        await _run_card(
+            s, card=child_card, project_key="git:example",
+            project_path="/tmp/none", transport=fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+    assert resolve_calls == [child_card.id], (
+        f"_resolve_plan_for_child should be called once for child cards "
+        f"(got {resolve_calls!r})"
+    )
+    assert "PLAN CONTEXT" in captured["prompt"], (
+        f"Child executor prompt must contain the PLAN CONTEXT section, "
+        f"but got: {captured['prompt'][:200]!r}"
+    )
+    assert "Step 1" in captured["prompt"]
+    assert "Step 2" in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_run_card_prepends_placeholder_for_child_with_missing_plan(monkeypatch):
+    """Child cards whose plan_ref fails to resolve should still see the
+    Plan niet beschikbaar placeholder — that's the desired signal that
+    something is off (parent deleted / plan never written)."""
+    from app.kanban.dispatch import _run_card
+    from app.kanban.models import KanbanCard
+    from tests.kanban_test_db import TestSessionLocal
+
+    async def fake_resolve(session, card):
+        # Simulate parent deleted or plan never written.
+        return (None, None, "parent-1")
+
+    monkeypatch.setattr(dispatch, "_resolve_plan_for_child", fake_resolve)
+
+    captured = {}
+
+    def fake_transport(directory, prompt, session_name, provider_id, platform):
+        captured["prompt"] = prompt
+        return {"session": session_name, "prompt": prompt}
+
+    KanbanSessionLocal = TestSessionLocal()
+    async with KanbanSessionLocal() as s:
+        from app.kanban.operations import apply_operation
+        child_cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "orphan child", "column": "Doing",
+                     "parent_card_id": "parent-1"},
+        )
+        await s.commit()
+        child_card = await s.get(KanbanCard, child_cid)
+        assert child_card.parent_card_id == "parent-1"
+
+        await _run_card(
+            s, card=child_card, project_key="git:example",
+            project_path="/tmp/none", transport=fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+    assert "Plan niet beschikbaar" in captured["prompt"], (
+        f"Child with missing plan_ref must see the placeholder, but got: "
+        f"{captured['prompt'][:200]!r}"
+    )
+    assert "report_impediment" in captured["prompt"]

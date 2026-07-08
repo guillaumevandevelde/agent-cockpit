@@ -896,7 +896,15 @@ async def _run_card(
     platform = await get_column_default_platform(session, project_key, target_agent) or PLATFORM_ANTHROPIC
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         impediment_question=impediment_question)
-    if phase == "executor":
+    if phase == "executor" and card.parent_card_id is not None:
+        # Only child cards (parent_card_id set) get the PLAN CONTEXT section.
+        # Legacy single-agent cards never have a parent; prepending the
+        # "Plan niet beschikbaar" placeholder to those would silently
+        # downgrade every existing kanban executor prompt. When a child
+        # card has a parent but its plan_ref is missing/unresolvable,
+        # _resolve_plan_for_child returns (None, None, None) and the
+        # helper surfaces the placeholder — that's the desired signal
+        # to the executor that something is off.
         plan_md, plan_id, parent_id = await _resolve_plan_for_child(session, card)
         plan_section = _plan_context_section(plan_markdown=plan_md,
                                              plan_deliverable_id=plan_id,
