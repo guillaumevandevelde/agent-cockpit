@@ -25,6 +25,10 @@ from app.kanban.service import get_card, get_column_default_platform, list_cards
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.providers.platform_env import PLATFORM_ANTHROPIC
 
+# Local import so the dep-filter check inside the dispatch tick stays a pure
+# helper (no DB / session state — see app.kanban.dep_resolver).
+from app.kanban.dep_resolver import meets_dep_prerequisites
+
 logger = logging.getLogger(__name__)
 
 # Known provider IDs are registered in app.services.providers; re-derived here
@@ -1179,12 +1183,50 @@ async def dispatch_project(
         if card is None:
             break
 
+        # Skip child cards whose parents aren't Done yet — _next_card is rank/
+        # priority-aware but doesn't know about depends_on, so the dep filter
+        # is the dispatcher's responsibility (see app.kanban.dep_resolver).
+        cards_by_id = {c.id: c for c in cards}
+        if not meets_dep_prerequisites(card, cards_by_id):
+            # Mark the card as 'skipped this tick' by removing it from the
+            # working set so _next_card doesn't pick it again on the next
+            # iteration of the same tick — _next_card would otherwise loop on
+            # it until the cap is filled or we run out of cards.
+            cards = [c for c in cards if c.id != card.id]
+            continue
+
         if transport is None:
             transport = await get_transport_for_project(project_path)
+
+        # Two-phase dispatch: when the card has an analyst_agent_id and no
+        # analyst_run_id yet, spawn the analyst first and persist the run id
+        # so the next tick doesn't re-spawn. The executor waits for a later
+        # tick — _next_card will pick this card again once it has analyst_run_id
+        # set but no executor claim, and on that pass we fall through to the
+        # executor branch.
+        if card.analyst_agent_id and not card.analyst_run_id:
+            last_result = await _run_card(
+                session, card=card, project_key=project_key,
+                project_path=project_path, transport=transport,
+                phase="analyst",
+                live_sessions=live_sessions,
+            )
+            if last_result is None:
+                break  # dispatch failed (e.g. memory) — let the tick queue/retry
+            if "session" in last_result:
+                # analyst_run_id is internal bookkeeping, not a CRDT-managed
+                # field — set it synchronously so the next tick sees it without
+                # HLC ordering.
+                card.analyst_run_id = last_result["session"]
+                session.add(card)
+                await session.flush()
+            cards = await list_cards(session, project_key)
+            continue
 
         last_result = await _run_card(
             session, card=card, project_key=project_key,
             project_path=project_path, transport=transport,
+            phase="executor",
             live_sessions=live_sessions,
         )
         if last_result is None:
