@@ -21,6 +21,7 @@ import {
   ClipboardList,
   MonitorPlay,
   Radio,
+  Mail,
   CalendarClock,
   KanbanSquare,
   Boxes,
@@ -59,6 +60,7 @@ const commonNavigation: NavGroup[] = [
     items: [
       { name: 'APM', href: '/apm', icon: Boxes },
       { name: 'Presence', href: '/presence', icon: Radio },
+      { name: 'Agent Mail', href: '/agent-mail', icon: Mail },
       { name: 'Scheduled Messages', href: '/scheduled-messages', icon: CalendarClock },
       { name: 'Kanban', href: '/kanban', icon: KanbanSquare },
       { name: 'Agent Performance', href: '/agent-performance', icon: TrendingUp },

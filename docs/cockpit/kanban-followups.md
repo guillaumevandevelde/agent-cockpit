@@ -74,3 +74,17 @@ Bridge image attachments — paste/drag-drop an image into a tmux session, with 
 endpoint enforcing an attached interactive relay). Adapted to drop upstream's MCP shim
 integration (`agent_mail_server.py` doesn't exist in this fork) and to fit our
 already-diverged `TerminalView.tsx` (no team-slot theming, no `instance`/`session` props).
+
+## Upstream removed legacy Presence — deliberately NOT adopted (2026-07-08)
+
+Decision: **keep Presence as-is.** See the trade-off in
+`upstream-presence-removal-decision.md`. Upstream's `588cf6c`/`b4e3e87` disable-then-remove
+Presence on `upstream/master`, but that history diverged from ours after the fork point
+(`42429f3`) — it's not a cleanup we missed, it's a consequence of upstream's own,
+independent direction. Our fork kept building on Presence after the fork (attention
+notifications, `tmux_pane` plumbing, cascade-delete, flaky-test fixes, most recently
+2026-07-02), and CC Bridge's attention indicator
+(`frontend/src/features/cc-bridge/useAttentionByPane.ts`,
+`frontend/src/hooks/useAttentionNotifications.ts`) reads live off the Presence websocket —
+removing it would break that feature with no replacement. No code or `CLAUDE.md` change
+needed; `CLAUDE.md` already correctly lists Presence as a current feature/route.
