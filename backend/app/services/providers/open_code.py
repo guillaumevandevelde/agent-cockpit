@@ -106,6 +106,12 @@ class OpenCodeProvider(AgentProvider):
         return False
 
     def build_spawn_command(self, options: SpawnCommandOptions) -> list[str]:
+        if options.reasoning_effort:
+            raise ValueError(
+                "OpenCode does not support pinning a reasoning/thinking effort "
+                "(no --variant or --effort flag exists in the CLI)"
+            )
+
         binary = _find_opencode_binary() or "opencode"
         command = [binary]
 

@@ -41,3 +41,17 @@ arbitration). To revive sync when a 2nd device is real:
   `rematerialize()`).
 - Add the optional **push-on-idle** initiative layer (reuse the scheduled-messages delivery
   engine to inject the next card on the `Stop` hook).
+
+## Upstream Agent Team Presets — deliberately NOT adopted (2026-07-08)
+
+Decision: **don't port upstream's Agent Team Presets/launch-orchestration/second Agent
+Mail MCP shim** — see the trade-off in `upstream-agent-teams-decision.md`. It's a
+competing orchestration paradigm to our kanban-dispatch + kanban-based Agent Mail, not a
+complement. Only the universal provider-correctness bugs it surfaced were cherry-picked
+(Codex `reasoning_effort` support, the Bedrock-env fallthrough in `platform_env.py`,
+explicit OpenCode rejection of `reasoning_effort`).
+
+**If you're picking up the "Agent Bridge UI-cluster" card (team lanes/filter/roles):**
+build on the existing `backend/app/services/agent_bridge/teams.py` model (auto-detect +
+manual grouping of already-running sessions) — there is no preset/slot API, and that's
+intentional, not an oversight.

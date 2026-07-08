@@ -88,6 +88,54 @@ def test_codex_bedrock_without_region_or_profile_has_no_env():
     assert build_platform_env(PLATFORM_BEDROCK, provider_id="codex-cli") == {}
 
 
+def test_opencode_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
+    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+
+    env = build_platform_env(
+        PLATFORM_BEDROCK,
+        region="us-east-2",
+        aws_profile="opencode-bedrock",
+        model="anthropic.claude-opus-4-8",
+        provider_id="open-code",
+    )
+
+    assert env == {
+        "AWS_REGION": "us-east-2",
+        "AWS_PROFILE": "opencode-bedrock",
+    }
+    assert "CLAUDE_CODE_USE_BEDROCK" not in env
+    assert "ANTHROPIC_MODEL" not in env
+
+
+def test_copilot_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
+    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+
+    env = build_platform_env(
+        PLATFORM_BEDROCK,
+        region="us-east-2",
+        aws_profile="copilot-bedrock",
+        model="some-model",
+        provider_id="copilot-cli",
+    )
+
+    assert "CLAUDE_CODE_USE_BEDROCK" not in env
+    assert "ANTHROPIC_MODEL" not in env
+
+
+def test_mimo_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
+    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+
+    env = build_platform_env(
+        PLATFORM_BEDROCK,
+        region="us-east-2",
+        model="some-model",
+        provider_id="mimo-code",
+    )
+
+    assert "CLAUDE_CODE_USE_BEDROCK" not in env
+    assert "ANTHROPIC_MODEL" not in env
+
+
 def test_claude_code_bedrock_still_sets_claude_flags_by_default():
     from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
 

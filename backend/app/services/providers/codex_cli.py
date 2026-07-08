@@ -93,6 +93,8 @@ class CodexCliProvider(AgentProvider):
         )
         if effective_model:
             command += ["--model", effective_model]
+        if options.reasoning_effort:
+            command += ["--config", f'model_reasoning_effort="{options.reasoning_effort}"']
         if options.profile:
             command += ["--profile", options.profile]
         if options.profile_v2:

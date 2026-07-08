@@ -117,6 +117,96 @@ def test_codex_anthropic_platform_spawn_command_omits_bedrock_config():
     assert command == ["codex", "--cd", "/tmp/project", "--model", "gpt-5.1-codex"]
 
 
+def test_codex_spawn_command_sets_reasoning_effort():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("codex-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(
+            directory="/tmp/project",
+            mode="plain",
+            model="gpt-5.1-codex",
+            reasoning_effort="xhigh",
+        )
+    )
+
+    assert command == [
+        "codex",
+        "--cd",
+        "/tmp/project",
+        "--model",
+        "gpt-5.1-codex",
+        "--config",
+        'model_reasoning_effort="xhigh"',
+    ]
+
+
+def test_codex_spawn_command_omits_reasoning_effort_config_when_unset():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("codex-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="plain", model="gpt-5.1-codex")
+    )
+
+    assert not any("model_reasoning_effort" in part for part in command)
+
+
+def test_codex_bedrock_spawn_command_combines_model_provider_and_reasoning_effort_config():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("codex-cli")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(
+            directory="/tmp/project",
+            mode="plain",
+            platform="bedrock",
+            bedrock_model="openai.gpt-5.5",
+            reasoning_effort="xhigh",
+        )
+    )
+
+    assert command == [
+        "codex",
+        "--cd",
+        "/tmp/project",
+        "--config",
+        'model_provider="amazon-bedrock"',
+        "--model",
+        "openai.gpt-5.5",
+        "--config",
+        'model_reasoning_effort="xhigh"',
+    ]
+
+
+def test_opencode_spawn_command_rejects_reasoning_effort():
+    import pytest
+
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("open-code")
+    with pytest.raises(ValueError):
+        provider.build_spawn_command(
+            SpawnCommandOptions(directory="/tmp/project", mode="plain", reasoning_effort="xhigh")
+        )
+
+
+def test_opencode_spawn_command_without_reasoning_effort_still_works():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("open-code")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="plain", model="claude-opus-4-8")
+    )
+
+    assert command[-2:] == ["--model", "claude-opus-4-8"]
+
+
 def test_copilot_status_and_capabilities():
     from app.services.providers import get_provider
 

@@ -135,6 +135,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [search, setSearch] = useState(false)
   const [noAltScreen, setNoAltScreen] = useState(true)
   const [dangerousBypass, setDangerousBypass] = useState(false)
+  const [codexReasoningEffort, setCodexReasoningEffort] = useState('')
   const [codexSessionId, setCodexSessionId] = useState('')
   const [useLast, setUseLast] = useState(true)
   const [platform, setPlatform] = useState<Platform>('anthropic')
@@ -302,6 +303,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setSearch(false)
       setNoAltScreen(true)
       setDangerousBypass(false)
+      setCodexReasoningEffort('')
       setCodexSessionId('')
       setUseLast(true)
       setError(null)
@@ -396,6 +398,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
         ...(isCodex && search && { search: true }),
         ...(isCodex && { no_alt_screen: noAltScreen }),
         ...(isCodex && dangerousBypass && { dangerously_bypass_approvals_and_sandbox: true }),
+        ...(isCodex && codexReasoningEffort.trim() && { reasoning_effort: codexReasoningEffort.trim() }),
         ...((isCodex || isCopilot) && (mode === 'resume' || mode === 'fork') && {
           use_last: useLast,
           ...(!useLast && codexSessionId.trim() && { session_id: codexSessionId.trim() }),
@@ -776,6 +779,15 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                     <SelectItem value="never">Never</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="codex-reasoning-effort">Reasoning effort</Label>
+                <Input
+                  id="codex-reasoning-effort"
+                  value={codexReasoningEffort}
+                  onChange={(e) => setCodexReasoningEffort(e.target.value)}
+                  placeholder="default"
+                />
               </div>
               <div className="col-span-2 space-y-1.5">
                 <Label htmlFor="codex-prompt">Initial Prompt</Label>
