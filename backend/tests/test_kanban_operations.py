@@ -275,3 +275,23 @@ async def test_op_ids_are_unique_across_many_ops():
         op_ids = [o.op_id for o in (await s.execute(_select(KanbanOp))).scalars().all()]
         assert len(op_ids) == 25
         assert len(set(op_ids)) == 25  # no collisions
+
+
+@pytest.mark.asyncio
+async def test_create_card_persists_multi_agent_fields():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "split-task", "column": "Backlog",
+                     "analyst_agent_id": "claude-code",
+                     "executor_agent_id": "mimo-code",
+                     "depends_on": ["c1"]},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.analyst_agent_id == "claude-code"
+        assert card.executor_agent_id == "mimo-code"
+        assert card.parent_card_id is None
+        assert card.analyst_run_id is None
+        assert card.depends_on == ["c1"]

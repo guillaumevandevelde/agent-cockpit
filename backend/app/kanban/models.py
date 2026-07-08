@@ -46,6 +46,11 @@ class KanbanCard(KanbanBase):
     resume_session_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     resume_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
     scheduled_at: Mapped[str | None] = mapped_column(String(40), nullable=True)  # ISO8601; auto-dispatch ignores the card until this time
+    analyst_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    executor_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    parent_card_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    analyst_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Consecutive dispatch-target failures (spawn died within seconds, or raised
     # synchronously before any session existed). Reset once a dispatch runs long
     # enough to prove the target works, or when the streak trips the Impediment

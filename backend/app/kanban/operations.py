@@ -130,6 +130,11 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 resume_session_id=payload.get("resume_session_id"),
                 resume_project_folder=payload.get("resume_project_folder"),
                 scheduled_at=payload.get("scheduled_at"),
+                analyst_agent_id=payload.get("analyst_agent_id"),
+                executor_agent_id=payload.get("executor_agent_id"),
+                parent_card_id=payload.get("parent_card_id"),
+                analyst_run_id=payload.get("analyst_run_id"),
+                depends_on=payload.get("depends_on"),
                 title_hlc=hlc, description_hlc=hlc, column_hlc=hlc, rank_hlc=hlc,
             ))
             await session.flush()
