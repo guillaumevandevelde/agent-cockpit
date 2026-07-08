@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -31,6 +31,7 @@ import type { AgentProviderId } from '@/types/providers'
 import type { SpawnSessionRequest } from './types'
 import type { ResumableSession } from '@/types/sessions'
 import type { Host } from '@/features/hosts/types'
+import type { ProjectResponse } from '@/types/projects'
 
 type Mode = 'plain' | 'worktree' | 'resume' | 'fork'
 
@@ -52,8 +53,6 @@ const CODEX_MODE_OPTIONS: { value: Mode; label: string }[] = [
   { value: 'resume', label: 'Resume' },
   { value: 'fork', label: 'Fork' },
 ]
-
-const CUSTOM_PROJECT_VALUE = '__custom__'
 
 const PLATFORM_STORAGE_KEY = 'cc-bridge.platform'
 
@@ -97,11 +96,25 @@ function loadRememberedPlatform(): RememberedPlatform {
   }
 }
 
+function matchesProjectSearch(project: ProjectResponse, query: string) {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+
+  if (terms.length === 0) return true
+
+  const searchable = `${project.name} ${project.path}`.toLowerCase()
+  return terms.every((term) => searchable.includes(term))
+}
+
 export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvider }: NewSessionDialogProps) {
   const { providers, selectedProviderId } = useProviderContext()
   const defaultProvider = initialProvider ?? selectedProviderId
   const [provider, setProvider] = useState<AgentProviderId>(defaultProvider)
   const [directory, setDirectory] = useState('')
+  const [projectSearch, setProjectSearch] = useState('')
   const [mode, setMode] = useState<Mode>('plain')
   const [worktreeName, setWorktreeName] = useState('')
   const [sessionName, setSessionName] = useState('')
@@ -132,13 +145,56 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [hosts, setHosts] = useState<Host[]>([])
   const [loadingHosts, setLoadingHosts] = useState(false)
   const [selectedHostId, setSelectedHostId] = useState<number | null>(null)
+  const projectSearchRef = useRef<HTMLInputElement>(null)
+  const projectOptionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const { projects, activeProject } = useProjectContext()
   const isCodex = provider === 'codex-cli'
   const modeOptions = isCodex ? CODEX_MODE_OPTIONS : MODE_OPTIONS
-  const selectedProjectPath = projects.some((project) => project.path === directory.trim())
-    ? directory.trim()
-    : CUSTOM_PROJECT_VALUE
+  const filteredProjects = useMemo(
+    () => projects.filter((project) => matchesProjectSearch(project, projectSearch)),
+    [projects, projectSearch],
+  )
+
+  function selectProject(project: ProjectResponse) {
+    setDirectory(project.path)
+    setSelectedSessionIds(new Set())
+    setError(null)
+  }
+
+  function focusProjectOption(index: number) {
+    projectOptionRefs.current[index]?.focus()
+  }
+
+  function handleProjectSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown' && filteredProjects.length > 0) {
+      event.preventDefault()
+      focusProjectOption(0)
+      return
+    }
+
+    if (event.key === 'Enter' && filteredProjects.length === 1) {
+      event.preventDefault()
+      selectProject(filteredProjects[0])
+    }
+  }
+
+  function handleProjectOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      focusProjectOption(Math.min(index + 1, filteredProjects.length - 1))
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (index === 0) {
+        projectSearchRef.current?.focus()
+      } else {
+        focusProjectOption(index - 1)
+      }
+    }
+  }
 
   useEffect(() => {
     if (open && !directory.trim() && activeProject?.path) {
@@ -205,6 +261,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     if (!open) {
       setDirectory('')
       setProvider(defaultProvider)
+      setProjectSearch('')
       setMode('plain')
       setWorktreeName('')
       setSessionName('')
@@ -436,31 +493,56 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
           <div className="space-y-2">
             {projects.length > 0 && (
               <div className="space-y-1.5">
-                <Label>Project</Label>
-                <Select
-                  value={selectedProjectPath}
-                  onValueChange={(value) => {
-                    if (value === CUSTOM_PROJECT_VALUE) {
-                      setDirectory('')
-                    } else {
-                      setDirectory(value)
-                    }
-                    setSelectedSessionIds(new Set())
-                    setError(null)
-                  }}
+                <Label htmlFor="session-project-search">Project</Label>
+                <Input
+                  ref={projectSearchRef}
+                  id="session-project-search"
+                  type="search"
+                  value={projectSearch}
+                  onChange={(event) => setProjectSearch(event.target.value)}
+                  onKeyDown={handleProjectSearchKeyDown}
+                  placeholder="Search projects by name or path"
+                  autoComplete="off"
+                  aria-controls="session-project-results"
+                />
+                <div
+                  id="session-project-results"
+                  aria-label="Projects"
+                  className="max-h-48 overflow-y-auto rounded-md border border-border bg-background"
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.path}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={CUSTOM_PROJECT_VALUE}>Custom path</SelectItem>
-                  </SelectContent>
-                </Select>
+                  {filteredProjects.length === 0 ? (
+                    <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                      No projects match.
+                    </div>
+                  ) : (
+                    filteredProjects.map((project, index) => {
+                      const selected = project.path === directory.trim()
+                      return (
+                        <button
+                          key={project.id}
+                          ref={(element) => {
+                            projectOptionRefs.current[index] = element
+                          }}
+                          type="button"
+                          aria-pressed={selected}
+                          className={cn(
+                            'block w-full min-w-0 border-b px-3 py-2 text-left transition-colors last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                            selected ? 'bg-primary/10 text-foreground' : 'hover:bg-muted/50',
+                          )}
+                          onClick={() => selectProject(project)}
+                          onKeyDown={(event) => handleProjectOptionKeyDown(event, index)}
+                        >
+                          <span className="block truncate text-sm font-medium">
+                            {project.name}
+                          </span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {project.path}
+                          </span>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
               </div>
             )}
             <Label htmlFor="session-directory">Project Directory</Label>
