@@ -40,3 +40,9 @@ def get_usage_provider(provider_id: str) -> SubscriptionUsageProvider:
         return _PROVIDERS[provider_id]
     except KeyError as exc:
         raise ValueError(f"Unknown subscription usage provider: {provider_id}") from exc
+
+
+# Import order matters: placeholders register first, then concrete providers
+# overwrite. Last-registration-wins semantics of `register_usage_provider`.
+from app.services.subscriptions import placeholders  # noqa: F401, E402
+from app.services.subscriptions import minimax  # noqa: F401, E402
