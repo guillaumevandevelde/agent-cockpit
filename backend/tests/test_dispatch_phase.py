@@ -130,3 +130,29 @@ async def test_tick_spawns_analyst_when_set(monkeypatch):
             card = await s.get(KanbanCard, cid)
             assert card.analyst_run_id == "run-1"
             assert calls == [("analyst", cid)]
+
+
+# ---- Task 7: plan-aware executor prompt -----------------------------------
+
+def test_plan_context_prepend_resolved_plan():
+    from app.kanban.dispatch import _plan_context_section
+    section = _plan_context_section(
+        plan_markdown="# plan\n\nStep 1: do X\nStep 2: do Y",
+        plan_deliverable_id="d1",
+        parent_card_id="p1",
+    )
+    assert "PLAN CONTEXT" in section
+    assert "read this first" in section
+    assert "Step 1" in section
+    assert "d1" in section or "p1" in section
+
+
+def test_plan_context_unresolvable_returns_placeholder():
+    from app.kanban.dispatch import _plan_context_section
+    section = _plan_context_section(
+        plan_markdown=None,
+        plan_deliverable_id=None,
+        parent_card_id=None,
+    )
+    assert "Plan niet beschikbaar" in section
+    assert "report_impediment" in section

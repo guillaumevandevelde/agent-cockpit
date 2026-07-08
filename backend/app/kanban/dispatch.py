@@ -10,6 +10,7 @@ and retried automatically when resources become available.
 from __future__ import annotations
 
 import logging
+import json
 import re
 import subprocess
 import uuid
@@ -358,6 +359,67 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         "When your work on this card is complete, follow these steps in order:\n\n"
         f"{ship_instructions}"
     )
+
+
+def _plan_context_section(*, plan_markdown: str | None, plan_deliverable_id: str | None,
+                          parent_card_id: str | None) -> str:
+    """Build the PLAN CONTEXT preamble that the executor sees in its prompt.
+
+    Resolves the plan via the child's `plan_ref` deliverable. If the ref
+    is missing (parent deleted, plan never written), returns a placeholder
+    that nudges the executor to surface the issue via report_impediment.
+    """
+    if not plan_markdown:
+        return (
+            "PLAN CONTEXT — Plan niet beschikbaar: het plan-attachment "
+            "voor deze kaart kon niet worden geladen (mogelijk is de "
+            "parent-kaart verwijderd of is het plan nooit opgeslagen). "
+            "Gebruik mcp__cockpit-kanban__report_impediment om dit te "
+            "signaleren.\n"
+        )
+    return (
+        f"PLAN CONTEXT — read this first\n"
+        f"Plan deliverable: {plan_deliverable_id}\n"
+        f"Parent card: {parent_card_id}\n\n"
+        f"{plan_markdown}\n\n"
+        f"---\n"
+        f"Bovenstaande is het plan van de analyst. Volg deze stappen, "
+        f"tenzij je tijdens het werk ontdekt dat het plan niet klopt — "
+        f"gebruik dan report_impediment.\n"
+    )
+
+
+async def _resolve_plan_for_child(session, card) -> tuple[str | None, str | None, str | None]:
+    """Return (plan_markdown, plan_deliverable_id, parent_card_id) for a child
+    card that holds a `plan_ref` deliverable, or (None, None, None).
+
+    Looks up the `plan_ref` deliverable on the child, parses it for the
+    parent_card_id and plan_deliverable_id, fetches the parent, and pulls
+    the actual plan markdown from the parent's `plan` deliverable. Returns
+    (None, None, None) when the child has no plan_ref, the ref is malformed,
+    the parent/plan is missing, or the plan deliverable's kind isn't "plan".
+
+    Async because resolving the plan needs a DB roundtrip (parent card
+    lookup) — the brief's draft had this as a sync helper, which would
+    have crashed the first time an executor session was dispatched.
+    """
+    for d in getattr(card, "deliverables", []) or []:
+        if d.kind == "plan_ref":
+            try:
+                ref = json.loads(d.ref)
+            except (TypeError, ValueError):
+                return (None, None, None)
+            parent_id = ref.get("parent_card_id")
+            plan_id = ref.get("plan_deliverable_id")
+            if not parent_id or not plan_id:
+                return (None, None, None)
+            parent = await get_card(session, parent_id)
+            if parent is None:
+                return (None, None, None)
+            for pd in parent.deliverables:
+                if pd.id == plan_id and pd.kind == "plan":
+                    return (pd.ref, plan_id, parent_id)
+    return (None, None, None)
 
 
 def _build_ship_instructions(ship_mode: str) -> str:
@@ -834,6 +896,12 @@ async def _run_card(
     platform = await get_column_default_platform(session, project_key, target_agent) or PLATFORM_ANTHROPIC
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         impediment_question=impediment_question)
+    if phase == "executor":
+        plan_md, plan_id, parent_id = await _resolve_plan_for_child(session, card)
+        plan_section = _plan_context_section(plan_markdown=plan_md,
+                                             plan_deliverable_id=plan_id,
+                                             parent_card_id=parent_id)
+        prompt = plan_section + prompt
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
                                  provider_id=provider_id, platform=platform)
