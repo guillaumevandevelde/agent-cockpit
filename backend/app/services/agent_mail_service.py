@@ -346,5 +346,240 @@ class AgentMailService:
             and self._effective_status(session, now) == "observed"
         )
 
+    async def send_message(
+        self,
+        db: AsyncSession,
+        request: MailMessageCreate,
+        *,
+        auto_nudge: bool = True,
+        sender_actor_id: Optional[int] = None,
+    ) -> MailMessageResponse:
+        if request.kind not in MAIL_MESSAGE_KINDS:
+            raise ValueError(f"Invalid message kind: {request.kind}")
+        if request.sender_member_id is not None and sender_actor_id is not None:
+            raise ValueError("messages cannot have both sender_member_id and sender_actor_id")
+        if request.kind == "answer" and request.thread_root_id is None:
+            raise ValueError("answer messages require thread_root_id")
+        if request.kind == "answer":
+            root = await db.get(MailMessage, request.thread_root_id)
+            if root is None:
+                raise ValueError("answer messages require an existing thread root")
+            if root.kind != "context_request":
+                raise ValueError("answer messages can only resolve context requests")
+            if root.recipient_member_id != request.sender_member_id:
+                raise ValueError("only the context request recipient can answer it")
+        if request.kind in MAIL_REQUEST_KINDS and request.recipient_member_id is None:
+            raise ValueError(f"{request.kind} requires recipient_member_id")
+
+        message = MailMessage(
+            thread_root_id=request.thread_root_id,
+            kind=request.kind,
+            sender_member_id=request.sender_member_id,
+            sender_actor_id=sender_actor_id,
+            recipient_member_id=request.recipient_member_id,
+            subject=request.subject,
+            body_markdown=request.body_markdown,
+            payload=request.payload,
+            request_status="pending" if request.kind in MAIL_REQUEST_KINDS else None,
+        )
+        db.add(message)
+        await db.flush()
+
+        recipients: set[int] = set()
+        if request.recipient_member_id is not None:
+            recipients.add(request.recipient_member_id)
+        elif request.thread_root_id is not None:
+            root = await db.get(MailMessage, request.thread_root_id)
+            if root is not None:
+                for member_id in (root.sender_member_id, root.recipient_member_id):
+                    if member_id is not None and member_id != request.sender_member_id:
+                        recipients.add(member_id)
+        else:
+            members = (await db.execute(select(MailTeamMember))).scalars().all()
+            recipients = {member.id for member in members if member.id != request.sender_member_id}
+
+        for member_id in recipients:
+            db.add(MailReceipt(message_id=message.id, member_id=member_id))
+
+        if request.kind == "answer":
+            root = await db.get(MailMessage, request.thread_root_id)
+            if root is not None and root.request_status == "pending":
+                root.request_status = "answered"
+
+        await db.commit()
+        await db.refresh(message)
+        if auto_nudge:
+            await self.auto_nudge_members(db, recipients)
+        return await self._message_response(db, message, for_member_id=None)
+
+    async def _sender_identity(
+        self, db: AsyncSession, sender_member_id: Optional[int], sender_actor_id: Optional[int],
+    ) -> tuple[str, str, str | None]:
+        if sender_actor_id is not None:
+            actor = await db.get(MailExternalActor, sender_actor_id)
+            if actor is not None:
+                return actor.display_name, "external_actor", actor.kind
+            return "unknown external actor", "external_actor", None
+        if sender_member_id is None:
+            return "Director", "director", None
+        member = await db.get(MailTeamMember, sender_member_id)
+        return (member.display_name if member else "unknown", "member", None)
+
+    async def _message_response(
+        self, db: AsyncSession, message: MailMessage, for_member_id: Optional[int]
+    ) -> MailMessageResponse:
+        read_at = acked_at = None
+        if for_member_id is not None:
+            result = await db.execute(
+                select(MailReceipt).where(
+                    MailReceipt.message_id == message.id, MailReceipt.member_id == for_member_id,
+                )
+            )
+            receipt = result.scalar_one_or_none()
+            if receipt is not None:
+                read_at, acked_at = receipt.read_at, receipt.acked_at
+        is_stale = (
+            message.kind in MAIL_REQUEST_KINDS
+            and message.request_status == "pending"
+            and message.created_at < datetime.utcnow() - timedelta(minutes=STALE_REQUEST_MINUTES)
+        )
+        sender_name, sender_type, sender_actor_kind = await self._sender_identity(
+            db, message.sender_member_id, message.sender_actor_id,
+        )
+        return MailMessageResponse(
+            id=message.id, thread_root_id=message.thread_root_id, kind=message.kind,
+            sender_member_id=message.sender_member_id, sender_actor_id=message.sender_actor_id,
+            sender_type=sender_type, sender_actor_kind=sender_actor_kind, sender_name=sender_name,
+            recipient_member_id=message.recipient_member_id, subject=message.subject,
+            body_markdown=message.body_markdown, payload=message.payload,
+            request_status=message.request_status, is_stale=is_stale,
+            read_at=read_at, acked_at=acked_at, created_at=message.created_at,
+        )
+
+    async def counts_for_member(self, db: AsyncSession, member_id: int) -> tuple[int, int]:
+        unread = (await db.execute(
+            select(func.count()).select_from(MailReceipt).where(
+                MailReceipt.member_id == member_id, MailReceipt.read_at.is_(None),
+            )
+        )).scalar_one()
+        pending = (await db.execute(
+            select(func.count()).select_from(MailMessage).where(
+                MailMessage.recipient_member_id == member_id,
+                MailMessage.kind.in_(MAIL_REQUEST_KINDS),
+                MailMessage.request_status == "pending",
+            )
+        )).scalar_one()
+        return unread, pending
+
+    async def delivery_counts_for_member(self, db: AsyncSession, member_id: int) -> tuple[int, int, int, int]:
+        unread, pending = await self.counts_for_member(db, member_id)
+        unseen_pending = (await db.execute(
+            select(func.count()).select_from(MailMessage)
+            .join(MailReceipt, MailReceipt.message_id == MailMessage.id)
+            .where(
+                MailReceipt.member_id == member_id, MailReceipt.read_at.is_(None),
+                MailMessage.kind.in_(MAIL_REQUEST_KINDS), MailMessage.request_status == "pending",
+            )
+        )).scalar_one()
+        stale_cutoff = datetime.utcnow() - timedelta(minutes=STALE_REQUEST_MINUTES)
+        stale_pending = (await db.execute(
+            select(func.count()).select_from(MailMessage).where(
+                MailMessage.recipient_member_id == member_id,
+                MailMessage.kind.in_(MAIL_REQUEST_KINDS), MailMessage.request_status == "pending",
+                MailMessage.created_at < stale_cutoff,
+            )
+        )).scalar_one()
+        return unread, pending, unseen_pending, stale_pending
+
+    async def get_inbox(
+        self, db: AsyncSession, member_id: int, unread_only: bool = False,
+        mark_read: bool = False, limit: int = 50, refresh_mcp_session: bool = False,
+    ) -> MailInboxResponse:
+        if refresh_mcp_session:
+            await self.heartbeat_member_mcp_session(db, member_id)
+        query = (
+            select(MailMessage, MailReceipt)
+            .join(MailReceipt, MailReceipt.message_id == MailMessage.id)
+            .where(MailReceipt.member_id == member_id)
+            .order_by(MailMessage.created_at.desc())
+            .limit(limit)
+        )
+        if unread_only:
+            query = query.where(MailReceipt.read_at.is_(None))
+        rows = (await db.execute(query)).all()
+        messages = []
+        now = datetime.utcnow()
+        if mark_read:
+            member = await db.get(MailTeamMember, member_id)
+            if member is not None:
+                member.last_inbox_checked_at = now
+        for message, receipt in rows:
+            if mark_read and receipt.read_at is None:
+                receipt.read_at = now
+            messages.append(await self._message_response(db, message, for_member_id=member_id))
+        if mark_read:
+            await db.commit()
+        unread, pending = await self.counts_for_member(db, member_id)
+        return MailInboxResponse(member_id=member_id, unread_count=unread, pending_count=pending, messages=messages)
+
+    async def recipient_ids_for_message(self, db: AsyncSession, message_id: int) -> set[int]:
+        rows = (await db.execute(
+            select(MailReceipt.member_id).where(MailReceipt.message_id == message_id)
+        )).scalars().all()
+        return set(rows)
+
+    async def mark_read(self, db: AsyncSession, message_id: int, member_id: int) -> None:
+        result = await db.execute(
+            select(MailReceipt).where(MailReceipt.message_id == message_id, MailReceipt.member_id == member_id)
+        )
+        receipt = result.scalar_one_or_none()
+        if receipt is not None and receipt.read_at is None:
+            receipt.read_at = datetime.utcnow()
+            await db.commit()
+
+    async def ack_message(self, db: AsyncSession, message_id: int, member_id: int) -> None:
+        result = await db.execute(
+            select(MailReceipt).where(MailReceipt.message_id == message_id, MailReceipt.member_id == member_id)
+        )
+        receipt = result.scalar_one_or_none()
+        if receipt is None:
+            return
+        now = datetime.utcnow()
+        receipt.read_at = receipt.read_at or now
+        receipt.acked_at = receipt.acked_at or now
+
+        message = await db.get(MailMessage, message_id)
+        if (
+            message is not None and message.kind == "handoff" and message.thread_root_id is None
+            and message.recipient_member_id == member_id and message.request_status == "pending"
+        ):
+            message.request_status = "acknowledged"
+        if message is not None and message.kind == "answer" and message.thread_root_id:
+            root = await db.get(MailMessage, message.thread_root_id)
+            if root is not None and root.sender_member_id == member_id and root.request_status == "answered":
+                root.request_status = "acknowledged"
+        await db.commit()
+
+    async def get_thread(
+        self, db: AsyncSession, root_id: int, for_member_id: Optional[int] = None
+    ) -> MailThreadResponse:
+        root = await db.get(MailMessage, root_id)
+        if root is None:
+            raise ValueError(f"Message {root_id} not found")
+        replies = (await db.execute(
+            select(MailMessage).where(MailMessage.thread_root_id == root_id).order_by(MailMessage.created_at.asc())
+        )).scalars().all()
+        return MailThreadResponse(
+            root=await self._message_response(db, root, for_member_id),
+            replies=[await self._message_response(db, reply, for_member_id) for reply in replies],
+        )
+
+    async def list_root_messages(self, db: AsyncSession, limit: int = 100) -> List[MailMessageResponse]:
+        roots = (await db.execute(
+            select(MailMessage).where(MailMessage.thread_root_id.is_(None))
+            .order_by(MailMessage.created_at.desc()).limit(limit)
+        )).scalars().all()
+        return [await self._message_response(db, root, for_member_id=None) for root in roots]
+
 
 agent_mail_service = AgentMailService()
