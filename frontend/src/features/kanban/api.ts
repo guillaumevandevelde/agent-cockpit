@@ -254,3 +254,26 @@ export const kanbanApi = {
       body: JSON.stringify({ answer }),
     }),
 };
+
+export async function addPlanAttachment(
+  cardId: string,
+  planMarkdown: string,
+  childCardIds: string[],
+  dependsOnGraph: Record<string, string[]> = {},
+): Promise<
+  | { parent_card_id: string; plan_deliverable_id: string; child_card_ids: string[] }
+  | { error: string; max?: number; cycle?: string[]; card_id?: string }
+> {
+  return apiClient<
+    | { parent_card_id: string; plan_deliverable_id: string; child_card_ids: string[] }
+    | { error: string; max?: number; cycle?: string[]; card_id?: string }
+  >(`${BASE}/cards/${cardId}/plan-attachment`, {
+    method: "POST",
+    body: JSON.stringify({
+      card_id: cardId,
+      plan_markdown: planMarkdown,
+      child_card_ids: childCardIds,
+      depends_on_graph: dependsOnGraph,
+    }),
+  });
+}

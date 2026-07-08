@@ -25,6 +25,11 @@ export interface Deliverable {
   created_at: string;
 }
 
+export interface PlanAttachmentPayload {
+  parent_card_id: string;
+  plan_deliverable_id: string;
+}
+
 export interface Card {
   id: string;
   project_key: string;
@@ -41,6 +46,11 @@ export interface Card {
   scheduled_at?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
+  analyst_agent_id?: string | null;
+  executor_agent_id?: string | null;
+  parent_card_id?: string | null;
+  analyst_run_id?: string | null;
+  depends_on?: string[] | null;
   created_at: string;
   updated_at: string;
   deliverables: Deliverable[];
