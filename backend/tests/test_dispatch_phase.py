@@ -44,3 +44,16 @@ def test_phase_target_agent_analyst_is_analyst():
     card = _FakeCard()
     assert _phase_target_agent(card, project_path="/tmp", phase="analyst",
                                source_column="Backlog") == "analyst"
+
+
+def test_phase_target_agent_executor_honors_agent_override_persona(tmp_path):
+    """An agent_override that's a persona name (not a registered provider id)
+    wins over card.agent and the column-derived fallback — preserves the legacy
+    `dispatch_card(..., agent_override='developer')` path that maps the card to
+    the developer column."""
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "developer.md").write_text("# developer persona")
+    card = _FakeCard()
+    assert _phase_target_agent(card, project_path=str(tmp_path), phase="executor",
+                               source_column="Backlog",
+                               agent_override="developer") == "developer"

@@ -29,20 +29,48 @@ logger = logging.getLogger(__name__)
 
 # Known provider IDs are registered in app.services.providers; re-derived here
 # so the phase router doesn't depend on that module being imported at typing time.
-def _phase_provider_id(card, *, phase: str) -> str:
+def _phase_provider_id(card, *, phase: str, known_providers: set | None = None) -> str:
+    """Resolve which spawn transport/provider id the card picks for `phase`.
+
+    For analyst: the card's analyst_agent_id, or "claude-code" when unset.
+    For executor: the card's executor_agent_id first; if that's unset, fall
+    back to card.agent — but only when it is itself a registered provider id.
+    A legacy `card.agent` like "engineer" (a persona/column name, not a
+    provider) must NOT leak into the spawn transport, so when `known_providers`
+    is supplied, only matching values are accepted as a fallback; when it is
+    None (tests / pre-resolution callers), `card.agent` is taken at face value.
+    Without that filter the executor branch would pass `"engineer"` to a
+    transport that expects a registered provider id."""
     if phase == "analyst":
         return getattr(card, "analyst_agent_id", None) or "claude-code"
     # phase == "executor"
-    return (getattr(card, "executor_agent_id", None)
-            or getattr(card, "agent", None)
-            or "claude-code")
+    executor_id = getattr(card, "executor_agent_id", None)
+    if executor_id:
+        return executor_id
+    fallback = getattr(card, "agent", None)
+    if fallback and (known_providers is None or fallback in known_providers):
+        return fallback
+    return "claude-code"
 
 
-def _phase_target_agent(card, *, project_path: str, phase: str, source_column: str) -> str:
-    """Persona for the spawned session. Analyst phase is fixed to 'analyst';
-    executor phase reuses the existing overload-resolution logic in _run_card."""
+def _phase_target_agent(card, *, project_path: str, phase: str, source_column: str,
+                        agent_override: str | None = None,
+                        known_providers: set | None = None) -> str:
+    """Persona/column for the spawned session. Analyst phase is fixed to
+    'analyst'; executor phase reuses the legacy overload-resolution rules from
+    `_run_card` (the pre-`_phase_*` lines 767-768 of this module), so an
+    explicit non-provider `agent_override` — e.g. "developer" — still wins over
+    card.agent and the column-derived fallback.
+
+    `known_providers` is passed in so the agent_override short-circuit can tell
+    a provider id apart from a persona/column name (mirrors the provider-id
+    resolution on the spawn side). When it's None, `agent_override` is taken
+    at face value, which preserves the pre-refactor semantics for tests that
+    don't populate the providers registry."""
     if phase == "analyst":
         return "analyst"
+    if agent_override and (known_providers is None or agent_override not in known_providers):
+        return agent_override
     agents_dir = Path(project_path) / ".claude" / "agents"
     known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
     card_agent = getattr(card, "agent", None)
@@ -777,11 +805,16 @@ async def _run_card(
     #   - a persona name (engineer, developer, …)  → which column + role prompt
     # Resolve them separately so a provider id is never mistaken for a column.
     known_providers = _known_provider_ids()
-    provider_id = _phase_provider_id(card, phase=phase) if not agent_override \
-        else next((v for v in (agent_override, _phase_provider_id(card, phase=phase)) if v in known_providers),
-                  _phase_provider_id(card, phase=phase))
-    target_agent = _phase_target_agent(card, project_path=project_path, phase=phase,
-                                       source_column=source_column)
+    provider_id = next(
+        (v for v in (agent_override, _phase_provider_id(card, phase=phase,
+                                                       known_providers=known_providers))
+         if v in known_providers),
+        "claude-code",
+    )
+    target_agent = _phase_target_agent(
+        card, project_path=project_path, phase=phase, source_column=source_column,
+        agent_override=agent_override, known_providers=known_providers,
+    )
 
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=project_key,
