@@ -137,7 +137,15 @@ async def test_mcp_tools_registered():
     assert "get_config" in names
     assert "list_config_files" in names
     assert "list_projects" in names
-    assert len(tools) == 9
+    assert "agent_mail_whoami" in names
+    assert "agent_mail_list_team" in names
+    assert "agent_mail_check_inbox" in names
+    assert "agent_mail_send_message" in names
+    assert "agent_mail_reply" in names
+    assert "agent_mail_ack_message" in names
+    assert "agent_mail_request_context" in names
+    assert "agent_mail_create_handoff" in names
+    assert len(tools) == 17
 
 
 @pytest.mark.asyncio

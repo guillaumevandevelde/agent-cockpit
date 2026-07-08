@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 
 from app.database import AsyncSessionLocal, Base, engine
@@ -15,10 +17,11 @@ async def test_create_member_session_message_receipt():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    unique = uuid.uuid4().hex[:12]
     async with AsyncSessionLocal() as s:
         member = MailTeamMember(
-            identity_key="repo:abc123",
-            repo_id="abc123",
+            identity_key=f"repo:{unique}",
+            repo_id=unique,
             repo_path="/home/x/repo",
             repo_name="repo",
             display_name="repo",
@@ -32,7 +35,7 @@ async def test_create_member_session_message_receipt():
         session = MailAgentSession(
             member_id=member.id,
             source="hook",
-            session_key="cc:sess-1",
+            session_key=f"cc:sess-{unique}",
             provider="claude-code",
         )
         s.add(session)
@@ -41,7 +44,7 @@ async def test_create_member_session_message_receipt():
         assert session.mailbox_status == "connected"
 
         actor = MailExternalActor(
-            actor_key="openclaw",
+            actor_key=f"openclaw-{unique}",
             display_name="OpenClaw",
             token_hash="hash",
         )
