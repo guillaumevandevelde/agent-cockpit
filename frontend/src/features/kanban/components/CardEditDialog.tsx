@@ -64,6 +64,8 @@ export function CardEditDialog({
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
     scheduled_at?: string | null;
+    analyst_agent_id?: string | null;
+    executor_agent_id?: string | null;
   };
   columns: string[];
   defaultAgent?: string | null;
@@ -80,6 +82,8 @@ export function CardEditDialog({
     resume_session_id: string | null;
     resume_project_folder: string | null;
     scheduled_at: string | null;
+    analyst_agent_id: string | null;
+    executor_agent_id: string | null;
   }) => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -92,6 +96,8 @@ export function CardEditDialog({
     (initial?.labels ?? []).join(", ")
   );
   const [agent, setAgent] = useState<string>(defaultAgent ?? AUTO);
+  const [analystAgentId, setAnalystAgentId] = useState<string>(initial?.analyst_agent_id ?? AUTO);
+  const [executorAgentId, setExecutorAgentId] = useState<string>(initial?.executor_agent_id ?? AUTO);
   const [transport, setTransport] = useState<string>(initial?.transport ?? "auto");
   const [scheduledAt, setScheduledAt] = useState<string>(
     initial?.scheduled_at ? toDatetimeLocalValue(initial.scheduled_at) : ""
@@ -215,6 +221,42 @@ export function CardEditDialog({
                     {p.display_name}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="analyst_agent_id">Analyst-agent (multi-agent split)</Label>
+            <Select value={analystAgentId}
+                    onValueChange={(v) => setAnalystAgentId(v === AUTO ? AUTO : v)}>
+              <SelectTrigger id="analyst_agent_id">
+                <SelectValue placeholder="Geen (single-agent)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO}>Geen (single-agent)</SelectItem>
+                <SelectItem value="claude-code">Claude Code</SelectItem>
+                <SelectItem value="mimo-code">MiniMax (mimo-code)</SelectItem>
+                <SelectItem value="codex-cli">Codex CLI</SelectItem>
+                <SelectItem value="open-code">OpenCode</SelectItem>
+                <SelectItem value="copilot-cli">Copilot CLI</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="executor_agent_id">Executor-agent</Label>
+            <Select value={executorAgentId}
+                    onValueChange={(v) => setExecutorAgentId(v === AUTO ? AUTO : v)}>
+              <SelectTrigger id="executor_agent_id">
+                <SelectValue placeholder="Auto (= card.agent)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO}>Auto (= card.agent)</SelectItem>
+                <SelectItem value="claude-code">Claude Code</SelectItem>
+                <SelectItem value="mimo-code">MiniMax (mimo-code)</SelectItem>
+                <SelectItem value="codex-cli">Codex CLI</SelectItem>
+                <SelectItem value="open-code">OpenCode</SelectItem>
+                <SelectItem value="copilot-cli">Copilot CLI</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -401,6 +443,8 @@ export function CardEditDialog({
                 resume_session_id,
                 resume_project_folder,
                 scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+                analyst_agent_id: analystAgentId === AUTO ? null : analystAgentId,
+                executor_agent_id: executorAgentId === AUTO ? null : executorAgentId,
               })
             }
           >
