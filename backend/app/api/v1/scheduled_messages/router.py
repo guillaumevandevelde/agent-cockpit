@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models.scheduled_message import DeliveryAttempt, ScheduledMessage
 from app.models.scheduled_message_schemas import (
+    BulkDeleteRequest,
     DeliveryAttemptResponse,
     HookEvent,
     ScheduledMessageCreate,
@@ -90,6 +91,32 @@ async def delete_history():
         id_rows = await s.execute(
             select(ScheduledMessage.id)
             .where(ScheduledMessage.status.in_(_TERMINAL_STATUSES))
+        )
+        ids = id_rows.scalars().all()
+        if ids:
+            await s.execute(
+                sa_delete(DeliveryAttempt)
+                .where(DeliveryAttempt.scheduled_message_id.in_(ids))
+            )
+            await s.execute(
+                sa_delete(ScheduledMessage)
+                .where(ScheduledMessage.id.in_(ids))
+            )
+            await s.commit()
+    for mid in ids:
+        scheduler_service.remove(mid)
+    return {"deleted": len(ids)}
+
+
+@router.post("/bulk-delete")
+async def bulk_delete(payload: BulkDeleteRequest):
+    """Delete an arbitrary set of messages (any status) by id."""
+    if not payload.ids:
+        return {"deleted": 0}
+    async with AsyncSessionLocal() as s:
+        id_rows = await s.execute(
+            select(ScheduledMessage.id)
+            .where(ScheduledMessage.id.in_(payload.ids))
         )
         ids = id_rows.scalars().all()
         if ids:

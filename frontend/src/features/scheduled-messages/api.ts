@@ -38,6 +38,13 @@ export async function deleteScheduledMessageHistory(): Promise<{ deleted: number
   return apiClient<{ deleted: number }>(`${BASE}/history`, { method: 'DELETE' })
 }
 
+export async function bulkDeleteScheduledMessages(ids: number[]): Promise<{ deleted: number }> {
+  return apiClient<{ deleted: number }>(`${BASE}/bulk-delete`, {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  })
+}
+
 export async function listDeliveryAttempts(id: number): Promise<DeliveryAttempt[]> {
   return apiClient<DeliveryAttempt[]>(`${BASE}/${id}/attempts`)
 }
