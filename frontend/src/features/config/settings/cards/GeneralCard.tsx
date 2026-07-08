@@ -55,7 +55,7 @@ export function GeneralCard({ getSetting, updateSetting }: SettingsCardProps) {
           <ListEditor
             value={getSetting<string[]>('availableModels', [])}
             onChange={(v) => updateSetting('availableModels', v)}
-            placeholder="e.g., claude-sonnet-4-6"
+            placeholder="e.g., claude-sonnet-5"
           />
         </div>
 

@@ -89,11 +89,24 @@ class TestPricingService:
         # The fuzzy matching should find it
         assert pricing is not None or self.pricing.get_model_pricing("claude-sonnet-4-20250514") is not None
 
+    def test_calculate_cost_claude_sonnet_5(self):
+        """Test cost calculation for the claude-sonnet-5 alias."""
+        cost = self.pricing.calculate_cost(
+            input_tokens=1000,
+            output_tokens=500,
+            model="claude-sonnet-5",
+        )
+        # Input: 1000 * 3e-6 = 0.003
+        # Output: 500 * 15e-6 = 0.0075
+        # Total: 0.0105
+        assert cost == pytest.approx(0.0105, rel=1e-3)
+
     def test_get_supported_models(self):
         """Test listing supported models."""
         models = self.pricing.get_supported_models()
         assert len(models) > 0
         assert "claude-sonnet-4-20250514" in models
+        assert "claude-sonnet-5" in models
 
     def test_calculate_tiered_cost_boundary(self):
         """Test tiered cost calculation at boundary."""
