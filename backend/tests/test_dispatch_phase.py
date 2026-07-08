@@ -682,3 +682,41 @@ async def test_dispatch_project_analyst_run_id_persisted_via_op_log(monkeypatch)
             f"the analyst_run_id write-back must be an 'update' op, got: "
             f"{[o.op_type for o in analyst_run_id_ops]!r}"
         )
+
+
+# ---- Fix A: analyst persona fallback -----------------------------------------
+# When a project has no .claude/agents/analyst.md, the analyst session must
+# still receive a clear, scoped role prompt from backend/app/kanban/analyst_prompt.py
+# (the hardcoded ANALYST_PROMPT). Otherwise the analyst session lands in the
+# spawned tmux pane with an empty preamble and behaves like a generic engineer
+# — implementing the whole task instead of planning + splitting.
+
+
+def test_resolve_analyst_persona_prefers_project_analyst_md(tmp_path):
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text(
+        "---\nmodel: claude-opus-4-8\n---\n\n# Project-specific analyst"
+    )
+    body = dispatch._resolve_analyst_persona(str(tmp_path))
+    assert body.startswith("# Project-specific analyst")
+
+
+def test_resolve_analyst_persona_falls_back_when_no_md(tmp_path):
+    """No .claude/agents directory at all — must return the hardcoded fallback."""
+    body = dispatch._resolve_analyst_persona(str(tmp_path))
+    from app.kanban.analyst_prompt import ANALYST_PROMPT
+    assert body == ANALYST_PROMPT.strip()
+    # And the fallback must be the strict "verboden zelf code wijzigen" version:
+    assert "Verboden" in body
+    assert "Zelf code wijzigen" in body
+
+
+def test_resolve_analyst_persona_falls_back_when_md_empty(tmp_path):
+    """analyst.md exists but is empty (frontmatter only) — fall back, don't pass blank."""
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text(
+        "---\nmodel: claude-opus-4-8\n---\n"
+    )
+    body = dispatch._resolve_analyst_persona(str(tmp_path))
+    from app.kanban.analyst_prompt import ANALYST_PROMPT
+    assert body == ANALYST_PROMPT.strip()

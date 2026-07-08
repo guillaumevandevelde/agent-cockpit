@@ -309,6 +309,23 @@ def _resolve_agent_from_persona(persona: str | None) -> str | None:
     return None
 
 
+def _resolve_analyst_persona(project_path: str) -> str:
+    """Persona body for the analyst phase.
+
+    Prefers `.claude/agents/analyst.md` in the project (so a user can tune the
+    analyst role locally); falls back to the hardcoded `ANALYST_PROMPT` in
+    `analyst_prompt.py` when no project-local file exists, or when it exists
+    but is empty (only frontmatter). Without this fallback, an analyst
+    session gets an empty preamble and behaves like a generic engineer card —
+    implementing the whole task instead of planning + splitting.
+    """
+    from app.kanban.analyst_prompt import ANALYST_PROMPT
+    project_body = _read_persona_file(project_path, "analyst.md")
+    if project_body:
+        return project_body
+    return ANALYST_PROMPT.strip()
+
+
 def _strip_frontmatter(text: str) -> str:
     if text.startswith("---\n"):
         end = text.find("\n---\n", 4)
@@ -909,8 +926,14 @@ async def _run_card(
         entity_id=card.id, payload={"column": target_agent},
     )
 
-    # Load persona for the target agent
-    persona = _read_persona_file(project_path, f"{target_agent}.md")
+    # Load persona for the target agent. Analyst phase uses a dedicated
+    # helper that falls back to the hardcoded ANALYST_PROMPT when no
+    # `analyst.md` exists in the project — otherwise the analyst session
+    # gets an empty preamble and behaves like a generic engineer.
+    if phase == "analyst":
+        persona = _resolve_analyst_persona(project_path)
+    else:
+        persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
     # The target column decides which subscription/vendor the spawn authenticates
     # against (see KanbanColumn.default_platform); unset means the dispatcher's own
