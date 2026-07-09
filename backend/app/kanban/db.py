@@ -126,6 +126,8 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN analyst_run_id VARCHAR(64)")
     if "depends_on" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN depends_on JSON")
+    if "work_type" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN work_type VARCHAR(16)")
 
 
 async def _ensure_column_table(conn) -> None:

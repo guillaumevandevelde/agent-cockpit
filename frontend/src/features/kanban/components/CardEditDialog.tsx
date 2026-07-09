@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
 import { fetchResumableSessions } from "@/features/cc-bridge/api";
 import { useProviderContext } from "@/contexts/ProviderContext";
-import { PRIORITIES, type Priority } from "../types";
+import { PRIORITIES, WORK_TYPES, type Priority, type WorkType } from "../types";
 import type { ResumableSession } from "@/types/sessions";
 
 function parseLabels(raw: string): string[] {
@@ -35,6 +35,7 @@ function parseLabels(raw: string): string[] {
 }
 
 const AUTO = "__auto__"; // sentinel: null agent (dispatch resolves the provider at run time)
+const NO_WORK_TYPE = ""; // sentinel: no work_type set (routing hint is purely optional)
 
 /** ISO datetime -> local "YYYY-MM-DDTHH:mm" for a native datetime-local input. */
 function toDatetimeLocalValue(iso: string): string {
@@ -60,6 +61,7 @@ export function CardEditDialog({
     column?: string;
     priority?: string | null;
     labels?: string[] | null;
+    work_type?: string | null;
     transport?: string | null;
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
@@ -77,6 +79,7 @@ export function CardEditDialog({
     column: string;
     priority: string | null;
     labels: string[];
+    work_type: string | null;
     agent: string | null;
     transport: string | null;
     resume_session_id: string | null;
@@ -94,6 +97,9 @@ export function CardEditDialog({
   );
   const [labelsInput, setLabelsInput] = useState(
     (initial?.labels ?? []).join(", ")
+  );
+  const [workType, setWorkType] = useState<WorkType | "">(
+    (initial?.work_type as WorkType) ?? ""
   );
   const [agent, setAgent] = useState<string>(defaultAgent ?? AUTO);
   const [analystAgentId, setAnalystAgentId] = useState<string>(initial?.analyst_agent_id ?? AUTO);
@@ -423,6 +429,30 @@ export function CardEditDialog({
               </div>
             )}
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="card-work-type">Work type</Label>
+            <Select
+              value={workType || NO_WORK_TYPE}
+              onValueChange={(v) => setWorkType(v === NO_WORK_TYPE ? "" : (v as WorkType))}
+            >
+              <SelectTrigger id="card-work-type">
+                <SelectValue placeholder="(unset — dispatcher falls back)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_WORK_TYPE}>(unset)</SelectItem>
+                {WORK_TYPES.map((w) => (
+                  <SelectItem key={w} value={w}>
+                    {w}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Structured routing hint used by auto-dispatch (analysis → analyst,
+              feature/bug/chore → engineer). Free-form labels above are unaffected.
+            </p>
+          </div>
         </div>
 
         <DialogFooter>
@@ -438,6 +468,7 @@ export function CardEditDialog({
                 column,
                 priority: priority === "none" ? null : priority,
                 labels,
+                work_type: workType || null,
                 agent: agent === AUTO ? null : agent,
                 transport: transport === "auto" ? null : transport,
                 resume_session_id,

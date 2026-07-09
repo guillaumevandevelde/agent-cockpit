@@ -309,7 +309,7 @@ export default function KanbanPage() {
           defaultAgent={selectedProviderId}
           projectPath={projectPath}
           onClose={() => setCreating(false)}
-          onSubmit={async ({ title, description, column, priority, labels, agent, transport, resume_session_id, resume_project_folder, scheduled_at }) => {
+          onSubmit={async ({ title, description, column, priority, labels, work_type, agent, transport, resume_session_id, resume_project_folder, scheduled_at }) => {
             try {
               await kanbanApi.createCard({
                 project_key: projectKey,
@@ -318,6 +318,7 @@ export default function KanbanPage() {
                 column,
                 priority,
                 labels: labels.length ? labels : null,
+                work_type,
                 agent,
                 transport,
                 resume_session_id,

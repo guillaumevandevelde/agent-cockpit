@@ -5,6 +5,10 @@ from pydantic import BaseModel, ConfigDict
 
 COLUMNS = ["Backlog", "Impediment", "Done", "To Resume"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
+# Structured routing hint for auto-dispatch. Distinct from `labels` (free-form
+# tags). Add new values here AND in frontend/src/features/kanban/types.ts
+# WORK_TYPES. See docs/cockpit/work-type-routing-analysis.md §2A.
+WORK_TYPES = ["analysis", "feature", "bug", "chore"]
 
 
 class DeliverableResponse(BaseModel):
@@ -25,6 +29,7 @@ class CardResponse(BaseModel):
     rank: str
     priority: str | None = None
     labels: list | None = None
+    work_type: str | None = None
     agent: str | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
@@ -50,6 +55,7 @@ class CardCreate(BaseModel):
     column: str = "Backlog"
     priority: str | None = None
     labels: list | None = None
+    work_type: str | None = None
     agent: str | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
@@ -67,6 +73,7 @@ class CardUpdate(BaseModel):
     column: str | None = None
     priority: str | None = None
     labels: list | None = None
+    work_type: str | None = None
     agent: str | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
