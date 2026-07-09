@@ -499,14 +499,17 @@ def _build_ship_instructions(ship_mode: str) -> str:
         "1. **Sync** — `git fetch origin` so you are up to date with the remote.\n"
     )
     tests = (
-        "2. **Run tests yourself before shipping** — there is no pre-push gate; "
-        "nothing blocks a red push.  Run them in this worktree: "
-        "``cd backend && source venv/bin/activate && pytest -q`` and "
-        "``cd frontend && npm run lint && npm run build``.  Only proceed once both "
-        "are green.  GitHub Actions (``quality.yml``) re-runs the same checks after "
-        "you push as a backstop, but by then the work may already be merged — it is "
-        "not a substitute for checking yourself first.  If a test fails, fix it, "
-        "re-run, and only ship once green.  Never ship red tests.\n"
+        "2. **Run frontend checks yourself before shipping** — there is no pre-push "
+        "gate; nothing blocks a red push.  Run them in this worktree: "
+        "``cd frontend && npm run lint && npm run build``.  Only proceed once green.  "
+        "Do **not** run backend pytest locally in this repo — that step was removed "
+        "deliberately (shared box; concurrent dispatched sessions running full pytest "
+        "caused multi-minute stalls / SSH idle-disconnects).  GitHub Actions "
+        "(``quality.yml``) runs ruff + pytest against your push and is the backend "
+        "gate; it also re-runs the frontend checks as a backstop, but by then the "
+        "work may already be merged — it is not a substitute for checking the "
+        "frontend yourself first.  If a frontend check fails, fix it, re-run, and "
+        "only ship once green.  Never ship a known-red frontend check.\n"
     )
     commit = (
         "3. **Commit your work** — make sure every change is committed to the "

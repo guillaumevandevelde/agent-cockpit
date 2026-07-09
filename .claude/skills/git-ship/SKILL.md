@@ -19,22 +19,25 @@ the workflow works even when the agent cannot read `.claude/skills/`.
 git fetch origin
 ```
 
-## 2. Run tests yourself before shipping
+## 2. Run frontend checks yourself before shipping
 
-There is no local pre-push gate — nothing blocks a red push. Run the checks
-yourself in this worktree before merging/pushing:
+There is no local pre-push gate — nothing blocks a red push. Run the frontend
+checks yourself in this worktree before merging/pushing:
 
 ```bash
-cd backend && source venv/bin/activate && pytest -q
 cd frontend && npm run lint && npm run build
 ```
 
-Only proceed to shipping once both are green. GitHub Actions (`quality.yml`)
-re-runs the same checks after you push as a backstop, but by then the work may
-already be merged — it's not a substitute for checking yourself first.
+Do **not** run backend pytest locally in this repo — that step was removed
+deliberately: this is a shared box, and concurrent dispatched sessions each
+running the full pytest suite caused multi-minute stalls / SSH
+idle-disconnects. GitHub Actions (`quality.yml`) runs ruff + pytest against
+your push and is the backend gate; it also re-runs the frontend checks as a
+backstop, but by then the work may already be merged — it's not a substitute
+for checking the frontend yourself first.
 
-If a test fails: fix the issue, re-run, and only ship once green. Never ship red
-tests.
+If a frontend check fails: fix the issue, re-run, and only ship once green.
+Never ship a known-red frontend check.
 
 ## 3. Commit your work
 

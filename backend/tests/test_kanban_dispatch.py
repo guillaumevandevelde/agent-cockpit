@@ -2118,7 +2118,8 @@ class TestBuildShipInstructions:
         assert "git merge --no-ff" in instructions
         assert "git push origin HEAD:master" in instructions
         assert "git fetch origin" in instructions
-        assert "pytest -q" in instructions  # no gate — agent runs tests itself
+        assert "venv/bin/activate" not in instructions  # local pytest dropped, see feedback_no_local_pytest memory
+        assert "pytest -q" not in instructions
         assert "attach_deliverable" in instructions
         assert 'kind="branch"' in instructions
         assert 'move_card' in instructions
@@ -2130,7 +2131,8 @@ class TestBuildShipInstructions:
         assert "gh pr create --draft" in instructions
         assert "git push -u origin HEAD" in instructions
         assert "git fetch origin" in instructions
-        assert "pytest -q" in instructions  # no gate — agent runs tests itself
+        assert "venv/bin/activate" not in instructions  # local pytest dropped, see feedback_no_local_pytest memory
+        assert "pytest -q" not in instructions
         assert "attach_deliverable" in instructions
         assert 'kind="pr"' in instructions
         assert 'move_card' in instructions
@@ -2141,11 +2143,12 @@ class TestBuildShipInstructions:
         for mode in ("direct", "pull-request"):
             instructions = dispatch._build_ship_instructions(mode)
             assert "no pre-push gate" in instructions
-            assert "pytest -q" in instructions
+            assert "venv/bin/activate" not in instructions  # backend gate is quality.yml CI only, not local
+            assert "pytest -q" not in instructions
             assert "npm run lint" in instructions
             assert "npm run build" in instructions
-            assert "quality.yml" in instructions  # CI backstop, mentioned as such
-            assert "Never ship red tests" in instructions
+            assert "quality.yml" in instructions  # backend gate, mentioned as such
+            assert "Never ship" in instructions
             assert "commit your work" in instructions.lower() or "Commit your work" in instructions
 
     def test_both_modes_include_sync_step(self):
