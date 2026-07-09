@@ -41,6 +41,10 @@ class KanbanCard(KanbanBase):
     rank: Mapped[str] = mapped_column(String(64), default="")
     priority: Mapped[str | None] = mapped_column(String(16), nullable=True)
     labels: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Structured routing hint (analysis | feature | bug | chore). Distinct from
+    # `labels`: an enum is unambiguous to map to a persona; free-form labels are
+    # not. See docs/cockpit/work-type-routing-analysis.md §2A.
+    work_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
     agent: Mapped[str | None] = mapped_column(String(64), nullable=True)
     transport: Mapped[str | None] = mapped_column(String(16), nullable=True)  # worktree | sandcastle | auto (null)
     resume_session_id: Mapped[str | None] = mapped_column(String(256), nullable=True)

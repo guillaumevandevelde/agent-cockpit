@@ -58,6 +58,7 @@ export const kanbanApi = {
     column?: string;
     priority?: string | null;
     labels?: string[] | null;
+    work_type?: string | null;
     agent?: string | null;
     transport?: string | null;
     resume_session_id?: string | null;
@@ -78,6 +79,7 @@ export const kanbanApi = {
       agent?: string | null;
       priority?: string | null;
       labels?: string[] | null;
+      work_type?: string | null;
       transport?: string | null;
       resume_session_id?: string | null;
       resume_project_folder?: string | null;

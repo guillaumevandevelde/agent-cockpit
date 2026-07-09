@@ -4,6 +4,12 @@ export type Column = string;
 export const PRIORITIES = ["none", "low", "medium", "high"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 
+// Structured routing hint for auto-dispatch. Distinct from `labels` (free-form
+// tags). Mirrors backend/app/kanban/schemas.py WORK_TYPES. See
+// docs/cockpit/work-type-routing-analysis.md §2A.
+export const WORK_TYPES = ["analysis", "feature", "bug", "chore"] as const;
+export type WorkType = (typeof WORK_TYPES)[number];
+
 export const PLATFORMS = ["anthropic", "bedrock", "minimax"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
@@ -39,6 +45,7 @@ export interface Card {
   rank: string;
   priority?: string | null;
   labels?: string[] | null;
+  work_type?: string | null;
   agent?: string | null;
   transport?: string | null;  // worktree | sandcastle | auto (null)
   resume_session_id?: string | null;
