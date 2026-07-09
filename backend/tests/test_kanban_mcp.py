@@ -190,3 +190,43 @@ async def test_resolve_project_key_matches_what_create_card_should_use(monkeypat
     cid = (await m.create_card(resolved["project_key"], "t", ""))["id"]
     listed = await m.list_cards(resolved["project_key"])
     assert any(c["id"] == cid for c in listed)
+
+
+# --- work_type auto-fill on create_card -------------------------------------
+# Regression: the REST create_card path applies resolve_create_agent to auto-fill
+# card.agent from work_type (commit 80e139e). The MCP create_card tool didn't,
+# so MCP-created cards ended up with agent=None and — when work_type was
+# 'analysis' — the dispatcher routed them to 'engineer' (the hardcoded
+# fallback in _phase_target_agent). This regressed kanban card 9cf106e7
+# ("Card with analysis work type got picked up by an engineer"). The fix is
+# for MCP create_card to accept work_type and apply the same auto-fill.
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_accepts_work_type_and_auto_fills_agent():
+    """work_type='analysis' + no explicit agent → card.agent == 'analyst'."""
+    card = await m.create_card("P", "Investigate X", "", "Backlog", "analysis")
+    assert card["work_type"] == "analysis"
+    assert card["agent"] == "analyst", (
+        "MCP create_card must apply resolve_create_agent so work_type='analysis' "
+        "auto-fills agent='analyst' (mirrors the REST path post-80e139e). "
+        "Otherwise the dispatcher routes it to engineer."
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_explicit_agent_overrides_work_type():
+    """Explicit agent still wins, same as the REST contract."""
+    card = await m.create_card(
+        "P", "Force engineer", "", "Backlog", "analysis", "engineer",
+    )
+    assert card["work_type"] == "analysis"
+    assert card["agent"] == "engineer"
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_no_work_type_leaves_agent_empty():
+    """No work_type, no agent → card.agent stays None (no mapping to apply)."""
+    card = await m.create_card("P", "Plain card")
+    assert card["agent"] is None
+    assert card["work_type"] is None

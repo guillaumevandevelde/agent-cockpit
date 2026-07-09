@@ -60,7 +60,8 @@ def _phase_provider_id(card, *, phase: str, known_providers: set | None = None) 
 
 def _phase_target_agent(card, *, project_path: str, phase: str, source_column: str,
                         agent_override: str | None = None,
-                        known_providers: set | None = None) -> str:
+                        known_providers: set | None = None,
+                        fallback_persona: str | None = None) -> str:
     """Persona/column for the spawned session. Analyst phase is fixed to
     'analyst'; executor phase reuses the legacy overload-resolution rules from
     `_run_card` (the pre-`_phase_*` lines 767-768 of this module), so an
@@ -71,7 +72,19 @@ def _phase_target_agent(card, *, project_path: str, phase: str, source_column: s
     a provider id apart from a persona/column name (mirrors the provider-id
     resolution on the spawn side). When it's None, `agent_override` is taken
     at face value, which preserves the pre-refactor semantics for tests that
-    don't populate the providers registry."""
+    don't populate the providers registry.
+
+    `fallback_persona` is the work_type-resolved persona (see
+    `_resolve_work_type_fallback` and `get_work_type_persona`). It kicks in
+    only when `card.agent` is missing or doesn't match a known persona file —
+    which is exactly the regression behind kanban card 9cf106e7 ("Card with
+    analysis work type got picked up by an engineer"), where a legacy card
+    created before the create-time auto-fill (commit 80e139e) had
+    `agent='claude-code'` (a provider id, not a persona) and was routed to the
+    hardcoded 'engineer' fallback. Resolving at dispatch time closes that gap
+    — including cards whose user later PATCHed work_type without re-picking
+    agent — without touching the existing card row in DB.
+    """
     if phase == "analyst":
         return "analyst"
     if agent_override and (known_providers is None or agent_override not in known_providers):
@@ -81,6 +94,15 @@ def _phase_target_agent(card, *, project_path: str, phase: str, source_column: s
     card_agent = getattr(card, "agent", None)
     if card_agent and card_agent in known_agents:
         return card_agent
+    # Work-type fallback: when card.agent is missing or doesn't match a known
+    # persona (e.g. it's a provider id like 'claude-code' from a legacy row),
+    # the work_type mapping decides the persona instead of the hardcoded
+    # 'engineer' fallback. Required to also match a known persona file —
+    # otherwise the work_type mapping could route to a column whose persona
+    # the project doesn't have, and the spawn below would land in an empty
+    # column.
+    if fallback_persona and fallback_persona in known_agents:
+        return fallback_persona
     persona = _persona_for_card(project_path, card, source_column)
     return _resolve_agent_from_persona(persona) or "engineer"
 
@@ -359,6 +381,50 @@ def _persona_for_card(project_path: str, card, column: str) -> str | None:
         if persona:
             return persona
     return _read_persona(project_path, column)
+
+
+async def _resolve_work_type_fallback(session, project_key: str, card) -> str | None:
+    """Resolve a work_type-driven fallback persona for dispatch.
+
+    Returns the persona string the work_type mapping suggests for this card, or
+    None when work_type is unset / not a recognised value. Only the persona
+    name is returned here; the final accept/reject against the project's
+    known agent files happens in `_phase_target_agent`, so the fallback can
+    never route to a column whose persona the project lacks.
+
+    Returns None — instead of the default 'engineer' fallback — because
+    `_phase_target_agent` already handles the missing-fallback case (falls
+    through to the legacy persona/column lookup + hardcoded 'engineer'). We
+    want to set the fallback only when work_type actively says something.
+
+    Two cases return None:
+      * `card.work_type` is unset or empty (no routing hint at all).
+      * `card.work_type` is a value not in `WORK_TYPES` (e.g. an enum value
+        left over from before the schema tightened, or a manually PATCHed
+        legacy row). In that case, `get_work_type_persona` would silently
+        return 'engineer' via the `WORK_TYPE_PERSONA_DEFAULTS` default —
+        and we'd silently override a custom source-column persona with the
+        engineer column. Returning None here keeps the column-derived
+        persona in charge. The actual enum is locked by the API+schema
+        layer; this is a defensive check for legacy/PATCHed data.
+
+    Mirrors the create-time `resolve_create_agent` (commit 80e139e) but is
+    called at dispatch time so it covers legacy rows from before that commit
+    and cards whose user later PATCHed `work_type` without re-picking agent —
+    see kanban card 9cf106e7 ("Card with analysis work type got picked up by
+    an engineer") for the regression this fixes.
+    """
+    work_type = getattr(card, "work_type", None)
+    if not work_type:
+        return None
+    from app.kanban.schemas import WORK_TYPES
+    if work_type not in WORK_TYPES:
+        # Unrecognised work_type (legacy data, schema drift, manual PATCH).
+        # Don't apply any fallback — let the column-derived persona win so a
+        # custom source-column persona isn't silently swapped for 'engineer'.
+        return None
+    from app.kanban.service import get_work_type_persona
+    return await get_work_type_persona(session, project_key, work_type)
 
 
 # ---- prompt ----------------------------------------------------------------
@@ -945,9 +1011,34 @@ async def _run_card(
          if v in known_providers),
         "claude-code",
     )
+    # Resolve the work_type fallback *before* the persona check in
+    # _phase_target_agent. Cheap when the project's mapping has no override
+    # (single DB lookup with a small indexed table). Closes the regression
+    # behind kanban card 9cf106e7: cards with work_type='analysis' but no
+    # valid agent (legacy cards from before the create-time auto-fill, or
+    # PATCHed work_type) used to silently route to 'engineer'. See
+    # _phase_target_agent's fallback_persona docstring for the full contract.
+    # Wrapped in try/except: a transient DB error here (between claim and
+    # move) would otherwise leave the card committed as 'claimed' but never
+    # moved, invisible to _next_card and stuck until a human clears the
+    # claim. Falling back to None preserves the legacy 'engineer' routing —
+    # strictly inferior to the work_type-aware routing, but the card still
+    # gets dispatched and the card row isn't wedged.
+    try:
+        fallback_persona = await _resolve_work_type_fallback(
+            session, project_key, card,
+        )
+    except Exception:
+        logger.exception(
+            "work_type fallback lookup failed for card %s in %s; "
+            "falling back to legacy engineer routing",
+            card.id, project_key,
+        )
+        fallback_persona = None
     target_agent = _phase_target_agent(
         card, project_path=project_path, phase=phase, source_column=source_column,
         agent_override=agent_override, known_providers=known_providers,
+        fallback_persona=fallback_persona,
     )
 
     await apply_operation(
