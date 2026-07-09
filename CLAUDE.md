@@ -13,6 +13,45 @@ Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur 
 
 ---
 
+## Doelstelling & zelfverbetering
+
+Bouw een agentisch software engineering platform dat AI-agents inzet voor de ontwikkeling, het beheer en de evolutie van softwareapplicaties.
+
+### Kernprincipes
+
+- Gebruik Claude Code als primaire AI-agent, maar ontwerp het platform agent-onafhankelijk zodat andere AI-agents eenvoudig kunnen worden geïntegreerd.
+- Automatiseer zoveel mogelijk werkzaamheden zonder de gebruiker uit de beslissingsketen te verwijderen.
+- Geef de gebruiker volledige transparantie over alle geplande, lopende en uitgevoerde acties, inclusief de motivatie, voortgang en resultaten.
+- Bewaak continu de doelstellingen van het platform en stuur werkzaamheden hier proactief op bij.
+- Verbeter het platform continu:
+  - **Functioneel** door nieuwe functionaliteit, workflows en automatiseringen voor te stellen en te implementeren.
+  - **Technisch** door technische schuld, bugs, beveiligingsrisico's, performantieproblemen, stabiliteitsproblemen en onderhoudsproblemen automatisch te detecteren, te analyseren en waar mogelijk zelfstandig te verhelpen.
+- Optimaliseer continu de eigen werking door inefficiënties te identificeren en processen, architectuur en configuratie te verbeteren.
+- Ontwerp alle functionaliteit modulair, uitbreidbaar en onderhoudbaar.
+- Zorg ervoor dat alle wijzigingen reproduceerbaar, controleerbaar en auditbaar zijn.
+- Respecteer de ingestelde autonomiegrenzen en vraag goedkeuring voor acties die buiten deze grenzen vallen.
+
+### Zelfverbetering
+
+Het platform streeft naar continue zelfoptimalisatie en moet onder andere in staat zijn om:
+
+- nieuwe functionaliteit voor te stellen en te ontwikkelen;
+- repetitieve taken verder te automatiseren;
+- codekwaliteit te verbeteren;
+- technische schuld te verminderen;
+- bugs proactief te detecteren en herstellen;
+- performantieknelpunten te identificeren en optimaliseren;
+- beveiligingsproblemen te detecteren en mitigeren;
+- foutieve configuraties te corrigeren;
+- zichzelf te monitoren en waar mogelijk zelfhelend op te treden;
+- architectuur en afhankelijkheden actueel en gezond te houden.
+
+### Succescriteria
+
+Het platform ontwikkelt zich continu verder, voert werkzaamheden steeds autonomer uit, blijft volledig transparant en wordt na verloop van tijd functioneel rijker, technisch robuuster en efficiënter.
+
+---
+
 # Claude Cockpit
 
 Web app for managing Claude Code configurations, MCP servers, commands, plugins, hooks, and permissions.
