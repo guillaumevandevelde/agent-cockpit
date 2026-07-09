@@ -321,26 +321,3 @@ class AgentTeamMember(Base):
     )
 
     team: Mapped["AgentTeam"] = relationship("AgentTeam", back_populates="members")
-
-
-class SubscriptionPref(Base):
-    """Per-provider, per-key preference row.
-
-    Shaped as `(provider_id, key) -> value` so future per-provider prefs
-    (e.g. `minimax.refresh_strategy`) slot in without a schema change.
-    Today only `anthropic.plan_tier` is set.
-    """
-
-    __tablename__ = "subscription_prefs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    provider_id: Mapped[str] = mapped_column(String, nullable=False)
-    key: Mapped[str] = mapped_column(String, nullable=False)
-    value: Mapped[str] = mapped_column(String, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
-    )
-
-    __table_args__ = (
-        UniqueConstraint("provider_id", "key", name="uix_subscription_prefs_provider_key"),
-    )

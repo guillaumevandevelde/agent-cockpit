@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.config import settings
-from app.services.subscriptions import invalidate_snapshot_cache
 
 _ENV_KEY = "MINIMAX_API_KEY"
 
@@ -41,10 +40,8 @@ def set_minimax_api_key(raw_value: str) -> None:
     value = _validate_value(raw_value)
     _upsert_env_line(_env_path(), _ENV_KEY, value)
     settings.minimax_api_key = value
-    invalidate_snapshot_cache("minimax")
 
 
 def clear_minimax_api_key() -> None:
     _upsert_env_line(_env_path(), _ENV_KEY, None)
     settings.minimax_api_key = None
-    invalidate_snapshot_cache("minimax")

@@ -577,11 +577,3 @@ async def remove_team_member(
         raise HTTPException(status_code=404, detail="Member not found")
     return {"removed": True}
 
-
-# ── Subscription usage endpoints (Task 3) ────────────────────────────────
-from app.api.v1.agent_bridge.subscription_usage import (  # noqa: E402
-    router as subscription_usage_router,
-)
-
-router.include_router(subscription_usage_router, tags=["subscription-usage"])
-
