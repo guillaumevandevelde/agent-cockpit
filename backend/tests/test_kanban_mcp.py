@@ -230,3 +230,48 @@ async def test_mcp_create_card_no_work_type_leaves_agent_empty():
     card = await m.create_card("P", "Plain card")
     assert card["agent"] is None
     assert card["work_type"] is None
+
+
+# --- parent_card_id on create_card ------------------------------------------
+# Regression: the analyst workflow is
+#   create_card(child) × N → add_plan_attachment(parent, child_card_ids)
+# and add_plan_attachment rejects any child whose parent_card_id != parent
+# (mcp_server.py:472 returns {"error": "parent_mismatch"}). The REST
+# CardCreate schema already accepts parent_card_id, but the MCP wrapper
+# didn't expose it — analysts had to PATCH the card after creation as a
+# workaround (see kanban card 3f8ccfab70f44672908a8b1559754148). The fix is
+# to mirror the REST contract on the MCP tool.
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_accepts_parent_card_id():
+    """A parent_card_id passed at create time must round-trip through the
+    create op-log and be visible on the resulting card — so a subsequent
+    add_plan_attachment call sees parent_card_id == expected_parent instead
+    of returning {"error": "parent_mismatch"}."""
+    parent = await m.create_card("P", "Parent")
+    child = await m.create_card("P", "Child", parent_card_id=parent["id"])
+    assert child["parent_card_id"] == parent["id"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_omitted_parent_card_id_stays_none():
+    """Omitting parent_card_id must leave the column None (backwards compat)."""
+    card = await m.create_card("P", "Standalone")
+    assert card["parent_card_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_then_add_plan_attachment_round_trip():
+    """End-to-end: create parent + children via MCP, then bind them with
+    add_plan_attachment. Pre-fix this returned {"error": "parent_mismatch"}
+    because children were born without parent_card_id."""
+    parent = await m.create_card("P", "Parent", work_type="analysis")
+    child_a = await m.create_card("P", "Child A", parent_card_id=parent["id"])
+    child_b = await m.create_card("P", "Child B", parent_card_id=parent["id"])
+
+    result = await m.add_plan_attachment(
+        parent["id"], "# Plan\n\nDo the thing.", [child_a["id"], child_b["id"]],
+    )
+    assert result["parent_card_id"] == parent["id"]
+    assert result["child_card_ids"] == [child_a["id"], child_b["id"]]
