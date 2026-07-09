@@ -307,6 +307,37 @@ async def work_type_mapping_for_project(
     return {wt: merged[wt] for wt in WORK_TYPES if wt in merged}
 
 
+async def resolve_create_agent(
+    session, project_key: str, *,
+    work_type: str | None, explicit_agent: str | None,
+) -> str | None:
+    """Pick the agent/persona for a newly created card.
+
+    Explicit `agent` wins over `work_type` — it is the highest-priority
+    routing hint per docs/cockpit/work-type-routing-analysis.md §2B, and the
+    dispatcher already reads `card.agent` before any column-derived persona.
+
+    Otherwise, when `work_type` is set, look up the per-project persona
+    mapping (or `WORK_TYPE_PERSONA_DEFAULTS` fallback) so the very first
+    dispatch lands on the right persona without the user having to fill in
+    `agent` by hand.
+
+    Returns None when neither is set: `card.agent` stays empty and the
+    dispatcher's column-derived fallback decides.
+
+    Empty/whitespace-only `explicit_agent` is treated as "not set" so a
+    frontend that posts `agent: ""` (e.g. an unselected dropdown) does not
+    block the work_type mapping.
+    """
+    if explicit_agent and explicit_agent.strip():
+        # Strip so the dispatcher's persona lookup sees the bare name
+        # ("engineer" matches .claude/agents/engineer.md; " engineer " does not).
+        return explicit_agent.strip()
+    if work_type:
+        return await get_work_type_persona(session, project_key, work_type)
+    return None
+
+
 async def get_work_type_persona(
     session, project_key: str, work_type: str
 ) -> str:
