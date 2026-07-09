@@ -35,7 +35,7 @@ import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
 import type { Card, ActivityEntry, KanbanColumn, Gate } from "../types";
 
-const GATE_POLL_INTERVAL_MS = 3000;
+const LIVE_POLL_INTERVAL_MS = 3000;
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
 
@@ -131,20 +131,20 @@ export function CardDrawer({
     ? card.claimed_by.slice("agent:".length)
     : null;
 
-  useEffect(() => {
-    kanbanApi
-      .activity(card.id)
-      .then(setActivity)
-      .catch(() => toast.error("Failed to load activity log"));
-  }, [card.id]);
-
-  // A running session opens a gate via the open_gate MCP tool at any time,
-  // independent of anything the UI does — poll so it shows up without a
-  // manual refresh, and so the session (blocked waiting for the answer)
-  // unblocks as soon as this drawer posts one.
+  // A running session posts activity (comments, moves) and may open a gate via
+  // the open_gate MCP tool at any time, independent of anything the UI does —
+  // poll both so they show up without the drawer needing to be closed and
+  // reopened, and so a session blocked on a gate unblocks as soon as this
+  // drawer posts an answer.
   useEffect(() => {
     let cancelled = false;
     const load = () => {
+      kanbanApi
+        .activity(card.id)
+        .then((a) => {
+          if (!cancelled) setActivity(a);
+        })
+        .catch(() => {});
       kanbanApi
         .listGates(card.id)
         .then((g) => {
@@ -153,7 +153,7 @@ export function CardDrawer({
         .catch(() => {});
     };
     load();
-    const interval = setInterval(load, GATE_POLL_INTERVAL_MS);
+    const interval = setInterval(load, LIVE_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);
