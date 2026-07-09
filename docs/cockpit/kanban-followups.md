@@ -75,6 +75,16 @@ endpoint enforcing an attached interactive relay). Adapted to drop upstream's MC
 integration (`agent_mail_server.py` doesn't exist in this fork) and to fit our
 already-diverged `TerminalView.tsx` (no team-slot theming, no `instance`/`session` props).
 
+## Work-type → agent-routing — analysed, awaiting decision (2026-07-09)
+
+`labels` on a card (free-text, `CardEditDialog.tsx`) has zero effect on which persona
+dispatches it — routing is `card.agent` (manual) → column-name-as-persona → hardcoded
+`"engineer"` fallback (`dispatch.py:61-85`). See `work-type-routing-analysis.md` for
+the full analysis, a proposed `work_type` field + mapping, and open questions
+(taxonomy, whether `developer`/`tester`/`code-review` in `_IMPEDIMENT_AGENTS`
+(`router.py:45-50`) are a real roadmap or vestigial cruft, whether `ship_mode="direct"`
+needs a human review gate) before this gets implemented.
+
 ## Upstream removed legacy Presence — deliberately NOT adopted (2026-07-08)
 
 Decision: **keep Presence as-is.** See the trade-off in
