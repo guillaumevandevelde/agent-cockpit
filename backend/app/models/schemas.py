@@ -2018,33 +2018,3 @@ class BridgeAttachmentDeleteResponse(BaseModel):
     deleted: bool
     target: str
     attachment_id: int
-
-
-class PeriodUsageResponse(BaseModel):
-    label: str
-    used: float
-    limit: float | None
-    unit: str
-    reset_at: datetime | None
-    source: str
-    note: str | None = None
-
-
-class SubscriptionUsageResponse(BaseModel):
-    provider: str
-    plan_label: str | None
-    periods: list[PeriodUsageResponse]
-    fetched_at: datetime
-    error: str | None = None
-    error_code: Literal[
-        "not_configured", "unauthorized", "unreachable",
-        "malformed", "no_endpoint", "plan_unknown",
-    ] | None = None
-
-
-class AnthropicPlanTierResponse(BaseModel):
-    tier: Literal["pro", "max_5x", "max_20x", "team"] | None
-
-
-class AnthropicPlanTierUpdateRequest(BaseModel):
-    tier: str | None = None
