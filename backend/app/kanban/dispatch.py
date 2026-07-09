@@ -412,15 +412,17 @@ def _build_problem_flag_instructions() -> str:
         "## Noticed a problem outside this card's scope?\n"
         "If you hit a bug, a stale doc, or a workflow gap that isn't the task "
         "above, don't just mention it in chat — it vanishes when this session "
-        "ends. File it: resolve this repo's real project key first (`curl -s "
-        '"http://localhost:8000/api/v1/kanban/project-key?project_path=$(git '
-        'rev-parse --show-toplevel)"` — guessing the key silently creates an '
-        "invisible parallel board), check `list_cards` on `Backlog`/"
-        "`Impediment` for an existing card describing the same root cause, "
-        "and either `comment` on it with what's new or `create_card` "
-        "(column `Backlog`, title `[problem] <summary>`) if none exists. See "
-        "the `flag-problem` skill for the full procedure. Keep this quick — "
-        "don't let it derail the card you were actually dispatched for.\n"
+        "ends. File it: resolve this repo's real project key first — call the "
+        "`resolve_project_key` MCP tool with this repo's working directory "
+        "(or, with shell access, `curl -s \"http://localhost:8000/api/v1/"
+        'kanban/project-key?project_path=$(git rev-parse --show-toplevel)"`) '
+        "— guessing the key silently creates an invisible parallel board. "
+        "Then check `list_cards` on `Backlog`/`Impediment` for an existing "
+        "card describing the same root cause, and either `comment` on it "
+        "with what's new or `create_card` (column `Backlog`, title "
+        "`[problem] <summary>`) if none exists. See the `flag-problem` skill "
+        "for the full procedure. Keep this quick — don't let it derail the "
+        "card you were actually dispatched for.\n"
     )
 
 

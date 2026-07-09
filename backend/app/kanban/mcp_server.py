@@ -17,6 +17,7 @@ from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
 from app.kanban.models import KanbanDeliverable
 from app.kanban.operations import ClaimRejected, apply_operation
+from app.kanban.project_key import resolve_project_key as _resolve_project_key
 from app.kanban.schemas import CardResponse
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,30 @@ async def ping() -> dict:
 
 
 @mcp.tool()
+async def resolve_project_key(project_path: str) -> dict:
+    """Resolve a filesystem path to this board's canonical project key.
+
+    Every card lives under a project key derived from `git remote get-url
+    origin` (as `git:<host>/<path>`), or a `slug:<name>` fallback when the
+    repo has no remote. `list_cards`/`create_card` take that key as a raw,
+    unvalidated string — a hand-typed or guessed key (e.g. a display name
+    instead of the resolved key) silently creates a new, orphaned bucket
+    that's invisible from the real board instead of erroring. Call this
+    first with the repo's working directory (e.g. the output of
+    `git rev-parse --show-toplevel`) to get the key actually used by
+    auto-dispatch, rather than guessing.
+    """
+    return {"project_key": _resolve_project_key(project_path)}
+
+
+@mcp.tool()
 async def list_cards(project: str, column: str | None = None) -> list[dict]:
-    """List cards for a project, optionally filtered by column."""
+    """List cards for a project, optionally filtered by column.
+
+    `project` must be the exact project key — use `resolve_project_key` first
+    if you're not certain of it. A mistyped or guessed key won't error; it
+    just returns an empty (or wrong) list from an unrelated bucket.
+    """
     async with KanbanSessionLocal() as s:
         rows = await service.list_cards(s, project, column)
         return [_card_dict(c) for c in rows]
@@ -77,7 +100,12 @@ async def get_card(card_id: str) -> dict:
 @mcp.tool()
 async def create_card(project: str, title: str, description: str = "",
                       column: str = "Backlog") -> dict:
-    """Create a new card (agents may decompose work into subtask cards)."""
+    """Create a new card (agents may decompose work into subtask cards).
+
+    `project` must be the exact project key — use `resolve_project_key` first
+    if you're not certain of it. A mistyped or guessed key won't error; it
+    silently creates a new, orphaned bucket that auto-dispatch never sees.
+    """
     async with KanbanSessionLocal() as s:
         cid = await apply_operation(s, op_type="create", entity_type="card",
             project_key=project, entity_id=None,
