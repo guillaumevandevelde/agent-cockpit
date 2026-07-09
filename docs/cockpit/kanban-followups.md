@@ -62,12 +62,29 @@ roles, slot colors, the fullscreen design spec) all read `session.team_preset_id
 `team_slot_name` / `team_slot_role`, which upstream's `discovery.py` only populates from
 `CLAUDE_DECK_TEAM_PRESET_*` tmux env vars set by the rejected preset launch-orchestration
 — our sessions never get those vars, so the fields are always empty and the UI would be
-dead weight. `465d354`/`ae5562e` (terminal contrast/light-theme fixes) exclusively patch
-`TeamLanesView.tsx` and `frontend/src/lib/agentTeamColors.ts`, neither of which exist here.
-`2b77891`/`0352e21` (keyboard shortcuts + their discoverability overlay) implement a
-leader-key (Ctrl+Space) scheme whose only real actions are "prev/next/jump to *displayed
-pane*" — i.e. navigating between `TeamLanesView` panes; without that view there's nothing
-to navigate between. None of these nine commits were ported.
+dead weight. None of these five were ported.
+
+**Correction (2026-07-09)** — the 2026-07-08 pass over-scoped the keyboard-shortcuts pair.
+`2b77891`/`0352e21` (leader-key `Ctrl+Space` navigation + its discoverability dialog) sit
+on top of `ebecf1c`, but their own `displayedTargets` memo in `CCBridgePage.tsx` is
+`layoutMode.kind === 'lanes' ? teamLanes... : layoutMode.kind === 'single' ? [target] :
+activeTargets` — the fallback is the plain multi-pane grid we already have, with zero
+`TeamLanesView` involvement, and the `single`-fullscreen case matches our existing
+`fullscreenTarget` state 1:1. Only the `'lanes'` branch is team-lane-only. So prev/next/jump
+navigation and the `r` read-only toggle are real, generic pane-navigation features, not
+"dead weight without lanes." **Ported**, adapted to this fork's `fullscreenTarget: string |
+null` model (`displayedTargets = isFullscreen && fullscreenTarget ? [fullscreenTarget] :
+activeTargets`, no `layoutMode`/lanes branch) — see `leaderShortcuts.ts` (pure key-detection,
+unit-tested) and `leaderNavigation.ts` (pure wrap-around index math, unit-tested).
+
+`465d354`/`ae5562e` (terminal contrast/light-theme fixes) are split differently than that
+pass assumed: `ae5562e` exclusively patches `frontend/src/lib/agentTeamColors.ts`, which
+doesn't exist here — **not ported**. `465d354` touches both `TeamLanesView.tsx`/
+`agentTeamColors.ts` (not ported, files don't exist) *and* generic contrast fixes in
+`CCBridgePage.tsx` (the focused-pane ring class) and `TerminalView.tsx` (read-only/
+interactive button contrast, connected-status contrast) that have nothing to do with team
+theming — those pieces **were ported** alongside the keyboard-shortcuts work, since the
+shortcuts-discoverability chip they style didn't exist until this pass added it.
 
 What *was* independent and got cherry-picked onto `master`: `e6756a7`/`efe0755` (Agent
 Bridge image attachments — paste/drag-drop an image into a tmux session, with the paste

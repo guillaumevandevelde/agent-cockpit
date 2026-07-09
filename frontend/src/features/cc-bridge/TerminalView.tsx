@@ -1,22 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Monitor, Maximize2, Minimize2, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { Keyboard, Monitor, Maximize2, Minimize2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTerminal } from './useTerminal'
 import { ImageAttachmentDialog } from './ImageAttachmentDialog'
 import { pasteBridgeAttachment, uploadBridgeAttachment } from './api'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { getInstanceAccentClasses } from '@/lib/instanceAccent'
 import { cn } from '@/lib/utils'
 import { FileBrowserPopover } from './FileBrowserPopover'
+import { LEADER_PREFIX_LABEL, LEADER_SHORTCUTS } from './leaderShortcuts'
 import type { AttentionKind } from './attention'
-import type { BridgeAttachment } from './types'
+import type { BridgeAttachment, LeaderNavigationDirection } from './types'
 import type { InstanceIdentity } from '@/types/status'
 
 interface TerminalViewProps {
   target: string | null
   fullscreen?: boolean
+  focused?: boolean
   onToggleFullscreen?: () => void
   onClose?: () => void
+  onLeaderNavigate?: (sourceTarget: string, direction: LeaderNavigationDirection) => void
+  onLeaderStateChange?: (sourceTarget: string, active: boolean) => void
   attention?: AttentionKind | null
   instance?: InstanceIdentity | null
 }
@@ -54,12 +65,27 @@ function imageFromClipboard(event: React.ClipboardEvent<HTMLDivElement>): File |
   return null
 }
 
-export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, attention, instance }: TerminalViewProps) {
+export function TerminalView({
+  target,
+  fullscreen,
+  focused,
+  onToggleFullscreen,
+  onClose,
+  onLeaderNavigate,
+  onLeaderStateChange,
+  attention,
+  instance,
+}: TerminalViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [draggingImage, setDraggingImage] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [imageAttachment, setImageAttachment] = useState<ImageAttachmentState | null>(null)
-  const { connected, readOnly, setReadOnly, attach, detach, sendText } = useTerminal(containerRef, wrapperRef)
+  const { connected, readOnly, setReadOnly, attach, detach, sendText, focusTerminal } = useTerminal(
+    containerRef,
+    wrapperRef,
+    { target, onLeaderNavigate, onLeaderStateChange }
+  )
   const accentClasses = getInstanceAccentClasses(instance?.accent)
   const modeLabel = readOnly ? 'Read-only' : 'Interactive'
 
@@ -72,6 +98,11 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
   }, [target, attach, detach])
 
   useEffect(() => {
+    if (!focused || !target) return
+    focusTerminal()
+  }, [focused, focusTerminal, target])
+
+  useEffect(() => {
     const previewUrl = imageAttachment?.previewUrl
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
@@ -80,6 +111,15 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
 
   const closeImageAttachment = useCallback(() => {
     setImageAttachment(null)
+  }, [])
+
+  const stopShortcutButtonPropagation = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+  }, [])
+
+  const openShortcuts = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setShortcutsOpen(true)
   }, [])
 
   const attachImageFile = useCallback(async (file: File) => {
@@ -207,7 +247,7 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
                   'px-2 py-0.5 rounded text-xs font-medium transition-colors',
                   readOnly
                     ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
+                    : 'text-foreground/80 hover:bg-muted hover:text-foreground'
                 )}
                 onClick={() => setReadOnly(true)}
               >
@@ -218,7 +258,7 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
                   'px-2 py-0.5 rounded text-xs font-medium transition-colors',
                   !readOnly
                     ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
+                    : 'text-foreground/80 hover:bg-muted hover:text-foreground'
                 )}
                 onClick={() => setReadOnly(false)}
               >
@@ -227,12 +267,23 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
             </div>
             <span className={cn(
               'text-xs shrink-0',
-              connected ? 'text-green-500' : 'text-muted-foreground'
+              connected ? 'text-green-500' : 'text-foreground/70'
             )}>
               {connected ? 'Connected' : 'Disconnected'}
             </span>
+            <button
+              type="button"
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded border bg-background px-1.5 text-[11px] text-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
+              aria-label="Keyboard shortcuts"
+              title={`Keyboard shortcuts (${LEADER_PREFIX_LABEL})`}
+              onMouseDown={stopShortcutButtonPropagation}
+              onClick={openShortcuts}
+            >
+              <Keyboard className="h-3.5 w-3.5" />
+              <span className="hidden lg:inline">{LEADER_PREFIX_LABEL}</span>
+            </button>
             <span
-              className="text-xs text-muted-foreground truncate"
+              className="text-xs text-foreground truncate"
               title={instance ? `${modeLabel} on ${instance.name} (${instance.hostname}) · ${target}` : target}
             >
               {instance ? `${modeLabel} on ${instance.name}` : target}
@@ -283,6 +334,26 @@ export function TerminalView({ target, fullscreen, onToggleFullscreen, onClose, 
           onSwitchInteractive={() => setReadOnly(false)}
         />
       )}
+      <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Keyboard shortcuts</DialogTitle>
+            <DialogDescription>
+              Press <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">{LEADER_PREFIX_LABEL}</kbd> while a bridge terminal is focused, then press a follow-up key.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {LEADER_SHORTCUTS.map((shortcut) => (
+              <div key={shortcut.keys} className="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
+                <kbd className="shrink-0 rounded border bg-background px-2 py-1 font-mono text-xs text-foreground">
+                  {shortcut.keys}
+                </kbd>
+                <span className="text-sm text-muted-foreground">{shortcut.label}</span>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

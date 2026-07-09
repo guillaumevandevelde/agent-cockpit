@@ -22,6 +22,19 @@ Provider filters are explicit:
 - **Claude Code** — Claude Code panes only
 - **Codex** — Codex panes only
 
+## Keyboard Controls
+
+Each terminal bar includes a keyboard shortcut chip. Click it to open the in-app shortcut reference; the dialog is available in both the normal grid and single fullscreen layouts.
+
+When a bridge terminal is focused, press `Ctrl+Space` to arm the Agent Bridge leader. The hint overlay lists the available follow-up keys:
+
+- `←` / `→` — focus the previous or next displayed pane, wrapping in on-screen order.
+- `1`-`4` — jump to displayed pane 1-4; out-of-range numbers do nothing.
+- `r` — toggle the focused pane between read-only and interactive mode.
+- `Esc` — cancel the leader.
+
+The displayed order is the grid attachment order, or the single fullscreen pane. If the next key is not a shortcut, Agent Bridge forwards the `Ctrl+Space` terminal input and the following key in interactive mode; read-only panes intentionally drop input. Some OS or input-method configurations reserve `Ctrl+Space` before it reaches the browser.
+
 ## New Sessions
 
 The new session dialog starts with a provider choice.

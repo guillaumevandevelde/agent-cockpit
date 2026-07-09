@@ -14,6 +14,8 @@ export interface AgentSession {
 
 export type CCSession = AgentSession
 
+export type LeaderNavigationDirection = 'prev' | 'next' | number
+
 export interface AgentSessionsResponse {
   sessions: AgentSession[]
   count: number

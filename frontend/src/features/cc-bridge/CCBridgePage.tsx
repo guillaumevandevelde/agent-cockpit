@@ -6,16 +6,20 @@ import { useCCSessions } from './useCCSessions'
 import { useTeams } from './useTeams'
 import { SessionList } from './SessionList'
 import { TerminalView } from './TerminalView'
+import { LeaderHintOverlay } from './LeaderHintOverlay'
 import { NewSessionDialog } from './NewSessionDialog'
 import { KillSessionDialog } from './KillSessionDialog'
 import { useAttentionByPane } from './useAttentionByPane'
 import { renameSession } from './api'
-import type { CCSession } from './types'
+import { resolveLeaderNavigationTarget } from './leaderNavigation'
+import type { CCSession, LeaderNavigationDirection } from './types'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
 import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
 
 const MAX_GRID_PANES = 4
+const FOCUSED_PANE_RING_CLASS =
+  "after:pointer-events-none after:absolute after:inset-0 after:z-10 after:ring-2 after:ring-primary after:ring-inset after:content-['']"
 type ProviderFilter = 'all' | AgentProviderId
 
 const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
@@ -45,10 +49,15 @@ export function CCBridgePage() {
   const [activeTargets, setActiveTargets] = useState<string[]>([])
   const [fullscreenTarget, setFullscreenTarget] = useState<string | null>(null)
   const [focusedTarget, setFocusedTarget] = useState<string | null>(null)
+  const [leaderHintTarget, setLeaderHintTarget] = useState<string | null>(null)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [killSession, setKillSession] = useState<CCSession | null>(null)
 
   const isFullscreen = fullscreenTarget !== null
+  const displayedTargets = useMemo(
+    () => (isFullscreen && fullscreenTarget ? [fullscreenTarget] : activeTargets),
+    [isFullscreen, fullscreenTarget, activeTargets]
+  )
   const visibleSessions = providerFilter === 'all'
     ? sessions
     : sessions.filter((session) => session.provider === providerFilter)
@@ -96,6 +105,21 @@ export function CCBridgePage() {
   }
 
   const initialDialogProvider = providerFilter === 'all' ? selectedProviderId : providerFilter
+
+  const handleLeaderNavigate = useCallback((sourceTarget: string, direction: LeaderNavigationDirection) => {
+    setFocusedTarget(sourceTarget)
+    const nextTarget = resolveLeaderNavigationTarget(displayedTargets, sourceTarget, direction)
+    if (nextTarget) setFocusedTarget(nextTarget)
+  }, [displayedTargets])
+
+  const handleLeaderStateChange = useCallback((sourceTarget: string, active: boolean) => {
+    if (active) {
+      setFocusedTarget(sourceTarget)
+      setLeaderHintTarget(sourceTarget)
+      return
+    }
+    setLeaderHintTarget((current) => (current === sourceTarget ? null : current))
+  }, [])
 
   useEffect(() => {
     if (!isFullscreen) return
@@ -181,6 +205,7 @@ export function CCBridgePage() {
   }
 
   const gridCols = activeTargets.length <= 1 ? 'grid-cols-1' : 'grid-cols-2'
+  const showLeaderHint = leaderHintTarget !== null && displayedTargets.includes(leaderHintTarget)
 
   return (
     <div className={cn(
@@ -189,6 +214,8 @@ export function CCBridgePage() {
         ? 'fixed inset-0 z-50 bg-background'
         : 'h-[calc(100vh-8.5rem)] border rounded-lg overflow-hidden'
     )}>
+      {showLeaderHint && <LeaderHintOverlay />}
+
       {!isFullscreen && (
         <div className="flex items-center gap-3 px-4 py-3 border-b shrink-0 bg-muted/30">
           <MonitorPlay className="h-5 w-5 shrink-0" />
@@ -264,7 +291,7 @@ export function CCBridgePage() {
                         ? 'hidden'
                         : 'relative min-h-0 min-w-0 overflow-hidden',
                       !isFullscreen && !hidden && 'border-b border-r last:border-r-0',
-                      !hidden && (focusedTarget === target ? 'bg-primary/60' : 'bg-border/30'),
+                      !hidden && focusedTarget === target && FOCUSED_PANE_RING_CLASS,
                     )}
                     onMouseDown={() => setFocusedTarget(target)}
                     onFocusCapture={() => setFocusedTarget(target)}
@@ -276,6 +303,9 @@ export function CCBridgePage() {
                       <TerminalView
                         target={target}
                         fullscreen={isThisFullscreen}
+                        focused={focusedTarget === target}
+                        onLeaderNavigate={handleLeaderNavigate}
+                        onLeaderStateChange={handleLeaderStateChange}
                         onToggleFullscreen={() =>
                           setFullscreenTarget(isThisFullscreen ? null : target)
                         }
