@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/contexts/ProjectContext", () => ({
   useProjectContext: () => ({
@@ -55,6 +55,7 @@ const setHidden = (hidden: boolean) => {
 
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   vi.restoreAllMocks();
   setHidden(false);
 });
@@ -78,5 +79,38 @@ describe("KanbanPage live refresh", () => {
     });
 
     await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("KanbanPage new-card dialog", () => {
+  it("forwards analyst_agent_id and executor_agent_id to kanbanApi.createCard (multi-agent create path)", async () => {
+    const createCardMock = kanbanApi.createCard as ReturnType<typeof vi.fn>;
+    createCardMock.mockResolvedValue({});
+
+    render(<KanbanPage />);
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    // Open the New card dialog. Both analyst/executor defaults are AUTO,
+    // which the dialog translates to null on submit.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New card" }));
+    });
+    // Title is required — fill it.
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Multi-agent card" },
+    });
+    await act(() => {
+      screen.getByRole("button", { name: "Create" }).click();
+    });
+
+    await waitFor(() => expect(createCardMock).toHaveBeenCalledTimes(1));
+    const body = createCardMock.mock.calls[0][0];
+    // CardEditDialog already emits both fields with AUTO → null; the bug
+    // was that KanbanPage.tsx's destructure + createCard body type dropped
+    // them, so the keys were missing from the POST.
+    expect(body).toHaveProperty("analyst_agent_id");
+    expect(body).toHaveProperty("executor_agent_id");
+    expect(body.analyst_agent_id).toBeNull();
+    expect(body.executor_agent_id).toBeNull();
   });
 });

@@ -74,6 +74,8 @@ export const kanbanApi = {
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
     scheduled_at?: string | null;
+    analyst_agent_id?: string | null;
+    executor_agent_id?: string | null;
   }): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards`, {
       method: "POST",
