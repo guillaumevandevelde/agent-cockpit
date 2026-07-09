@@ -132,3 +132,23 @@ class KanbanGate(KanbanBase):
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class KanbanWorkTypeMapping(KanbanBase):
+    """Per-project override of the work_type → persona routing.
+
+    Each row maps a single work_type (analysis | feature | bug | chore) to a
+    persona (typically the stem of a .claude/agents/<persona>.md file) for one
+    project. Missing rows fall back to the default mapping
+    (`WORK_TYPE_PERSONA_DEFAULTS` in schemas.py). Used at create_card time to
+    auto-fill `card.agent` from `card.work_type` — see dispatch work_type
+    follow-ups.
+    """
+    __tablename__ = "kanban_work_type_mappings"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_key: Mapped[str] = mapped_column(String(512), index=True)
+    work_type: Mapped[str] = mapped_column(String(32))
+    persona: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

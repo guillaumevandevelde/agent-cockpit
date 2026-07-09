@@ -3,9 +3,16 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import selectinload
 
-from app.kanban.models import KanbanCard, KanbanColumn, KanbanGate, KanbanOp
+from app.kanban.models import (
+    KanbanCard,
+    KanbanColumn,
+    KanbanGate,
+    KanbanOp,
+    KanbanWorkTypeMapping,
+)
 
 
 async def list_cards(session, project_key: str, column: str | None = None):
@@ -262,3 +269,132 @@ async def answer_gate(session, gate_id: str, answer: str) -> KanbanGate | None:
     gate.answered_at = datetime.now(UTC)
     await session.flush()
     return gate
+
+
+# Work-type → persona mapping (per-project)
+
+
+async def list_work_type_mappings(session, project_key: str) -> list[KanbanWorkTypeMapping]:
+    """All overrides for a project, in stable work_type order.
+
+    Missing work_types are not returned — the caller is expected to merge
+    these with `WORK_TYPE_PERSONA_DEFAULTS` for a complete picture (see
+    `work_type_mapping_for_project` and the GET endpoint).
+    """
+    stmt = (
+        select(KanbanWorkTypeMapping)
+        .where(KanbanWorkTypeMapping.project_key == project_key)
+        .order_by(KanbanWorkTypeMapping.work_type.asc())
+    )
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def work_type_mapping_for_project(
+    session, project_key: str
+) -> dict[str, str]:
+    """Return a complete {work_type: persona} map for the project, merging
+    stored overrides on top of `WORK_TYPE_PERSONA_DEFAULTS`. The result always
+    contains every entry in `WORK_TYPES` — callers can read directly without
+    handling KeyError.
+    """
+    from app.kanban.schemas import WORK_TYPE_PERSONA_DEFAULTS, WORK_TYPES
+
+    merged = dict(WORK_TYPE_PERSONA_DEFAULTS)
+    for row in await list_work_type_mappings(session, project_key):
+        merged[row.work_type] = row.persona
+    # Defensive: drop any legacy row whose work_type is no longer in WORK_TYPES
+    # (the API rejects new ones), so the response is always schema-conformant.
+    return {wt: merged[wt] for wt in WORK_TYPES if wt in merged}
+
+
+async def get_work_type_persona(
+    session, project_key: str, work_type: str
+) -> str:
+    """Resolve which persona a card with `work_type` should use for this
+    project. Falls back to `WORK_TYPE_PERSONA_DEFAULTS` when no override
+    exists, and to a safe `"engineer"` if the work_type itself is unknown
+    (e.g. a card predates the enum). Always returns a non-empty string so
+    the dispatcher can rely on it without None-checks.
+    """
+    from app.kanban.schemas import WORK_TYPE_PERSONA_DEFAULTS
+
+    row = (await session.execute(
+        select(KanbanWorkTypeMapping)
+        .where(KanbanWorkTypeMapping.project_key == project_key)
+        .where(KanbanWorkTypeMapping.work_type == work_type)
+    )).scalar_one_or_none()
+    if row is not None:
+        return row.persona
+    return WORK_TYPE_PERSONA_DEFAULTS.get(work_type, "engineer")
+
+
+async def upsert_work_type_mapping(
+    session, project_key: str, work_type: str, persona: str
+) -> KanbanWorkTypeMapping:
+    """Insert or update the (project_key, work_type) row.
+
+    Uses SQLite's ``INSERT ... ON CONFLICT DO UPDATE`` so the service is
+    atomic at the DB level (no read-then-write race). The unique constraint
+    is on (project_key, work_type) — see the table migration in db.py.
+    """
+    from app.kanban.schemas import WORK_TYPES
+
+    if work_type not in WORK_TYPES:
+        raise ValueError(
+            f"work_type must be one of {WORK_TYPES}, got {work_type!r}"
+        )
+    if not persona or not persona.strip():
+        raise ValueError("persona must be a non-empty string")
+    now = datetime.now(UTC)
+    new_id = uuid.uuid4().hex
+    stmt = sqlite_insert(KanbanWorkTypeMapping).values(
+        id=new_id, project_key=project_key, work_type=work_type,
+        persona=persona, created_at=now, updated_at=now,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["project_key", "work_type"],
+        set_={"persona": persona, "updated_at": now},
+    )
+    await session.execute(stmt)
+    await session.flush()
+    row = (await session.execute(
+        select(KanbanWorkTypeMapping)
+        .where(KanbanWorkTypeMapping.project_key == project_key)
+        .where(KanbanWorkTypeMapping.work_type == work_type)
+    )).scalar_one()
+    return row
+
+
+async def bulk_replace_work_type_mappings(
+    session, project_key: str, mappings: list[dict],
+) -> list[KanbanWorkTypeMapping]:
+    """Replace the full per-project mapping in one call.
+
+    `mappings` is a list of `{"work_type": str, "persona": str}` items.
+    Missing work_types are *not* deleted — they fall back to the default —
+    so callers can post just the rows they care about. To clear an override,
+    set the persona to the default value for that work_type.
+    """
+    for m in mappings:
+        await upsert_work_type_mapping(
+            session, project_key=project_key,
+            work_type=m["work_type"], persona=m["persona"],
+        )
+    return await list_work_type_mappings(session, project_key)
+
+
+async def delete_work_type_mapping(
+    session, project_key: str, work_type: str
+) -> bool:
+    """Remove an override. The next `get_work_type_persona` call will return
+    the default. Returns True iff a row was actually removed.
+    """
+    from sqlalchemy import delete as sql_delete
+
+    result = await session.execute(
+        sql_delete(KanbanWorkTypeMapping)
+        .where(KanbanWorkTypeMapping.project_key == project_key)
+        .where(KanbanWorkTypeMapping.work_type == work_type)
+    )
+    await session.flush()
+    return result.rowcount > 0

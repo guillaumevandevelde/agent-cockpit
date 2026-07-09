@@ -1,5 +1,15 @@
 import { apiClient } from "@/lib/api";
-import type { Card, ActivityEntry, KanbanColumn, AgentStatsResponse, McpHealth, DispatchPauseStatus, Gate } from "./types";
+import type {
+  Card,
+  ActivityEntry,
+  KanbanColumn,
+  AgentStatsResponse,
+  McpHealth,
+  DispatchPauseStatus,
+  Gate,
+  WorkType,
+  WorkTypeMapping,
+} from "./types";
 
 const BASE = "kanban";
 
@@ -255,6 +265,28 @@ export const kanbanApi = {
       method: "POST",
       body: JSON.stringify({ answer }),
     }),
+
+  listWorkTypeMappings: (
+    projectKey: string
+  ): Promise<{ project_key: string; mappings: Record<WorkType, string> }> =>
+    apiClient<{ project_key: string; mappings: Record<WorkType, string> }>(
+      `${BASE}/work-type-mappings?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
+  bulkPutWorkTypeMappings: (
+    projectKey: string,
+    mappings: { work_type: WorkType; persona: string }[]
+  ): Promise<WorkTypeMapping[]> =>
+    apiClient<WorkTypeMapping[]>(`${BASE}/work-type-mappings/bulk`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, mappings }),
+    }),
+
+  deleteWorkTypeMapping: (projectKey: string, workType: WorkType): Promise<void> =>
+    apiClient<void>(
+      `${BASE}/work-type-mappings/${workType}?project_key=${encodeURIComponent(projectKey)}`,
+      { method: "DELETE" }
+    ),
 };
 
 export async function addPlanAttachment(

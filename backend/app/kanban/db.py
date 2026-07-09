@@ -92,6 +92,7 @@ async def init_kanban_db() -> None:
         if settings.kanban_database_url.startswith("sqlite"):
             await _ensure_card_columns(conn)
             await _ensure_column_table(conn)
+            await _ensure_work_type_mapping_table(conn)
 
 
 async def _ensure_card_columns(conn) -> None:
@@ -152,3 +153,31 @@ async def _ensure_column_table(conn) -> None:
     cols = {r[1] for r in rows}
     if "default_platform" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN default_platform VARCHAR(16)")
+
+
+async def _ensure_work_type_mapping_table(conn) -> None:
+    """Create kanban_work_type_mappings if it doesn't exist.
+
+    One row per (project_key, work_type); persona is the routing target. The
+    (project_key, work_type) pair is unique so we can upsert via
+    ``INSERT ... ON CONFLICT`` from the service layer.
+    """
+    tables = (await conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+    table_names = {r[0] for r in tables}
+    if "kanban_work_type_mappings" not in table_names:
+        await conn.exec_driver_sql("""
+            CREATE TABLE kanban_work_type_mappings (
+                id VARCHAR(64) PRIMARY KEY,
+                project_key VARCHAR(512) NOT NULL,
+                work_type VARCHAR(32) NOT NULL,
+                persona VARCHAR(64) NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                CONSTRAINT uq_kanban_work_type_mappings_project_work_type
+                    UNIQUE (project_key, work_type)
+            )
+        """)
+        await conn.exec_driver_sql(
+            "CREATE INDEX ix_kanban_work_type_mappings_project_key "
+            "ON kanban_work_type_mappings (project_key)"
+        )

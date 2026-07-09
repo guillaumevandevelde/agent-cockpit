@@ -539,6 +539,114 @@
         "title": "AgentListResponse",
         "type": "object"
       },
+      "AgentMailInstallStatus": {
+        "properties": {
+          "claude_code_hooks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Claude Code Hooks",
+            "type": "array"
+          },
+          "claude_code_hooks_missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Claude Code Hooks Missing",
+            "type": "array"
+          },
+          "claude_settings_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claude Settings Path"
+          },
+          "cockpit_url": {
+            "title": "Cockpit Url",
+            "type": "string"
+          },
+          "codex_cli_available": {
+            "title": "Codex Cli Available",
+            "type": "boolean"
+          },
+          "codex_hook_shim_path": {
+            "title": "Codex Hook Shim Path",
+            "type": "string"
+          },
+          "codex_hooks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Codex Hooks",
+            "type": "array"
+          },
+          "codex_hooks_missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Codex Hooks Missing",
+            "type": "array"
+          },
+          "codex_hooks_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codex Hooks Path"
+          },
+          "curl_available": {
+            "title": "Curl Available",
+            "type": "boolean"
+          },
+          "mcp_server_hint": {
+            "default": "Register agent-mail tools via the MCP Server page (Bearer token) \u2014 not managed by this installer.",
+            "title": "Mcp Server Hint",
+            "type": "string"
+          },
+          "python_path": {
+            "title": "Python Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "claude_code_hooks",
+          "claude_code_hooks_missing",
+          "codex_cli_available",
+          "curl_available",
+          "codex_hook_shim_path",
+          "python_path",
+          "cockpit_url"
+        ],
+        "title": "AgentMailInstallStatus",
+        "type": "object"
+      },
+      "AgentMailSnippets": {
+        "properties": {
+          "agents_md_snippet": {
+            "title": "Agents Md Snippet",
+            "type": "string"
+          },
+          "codex_hooks_snippet": {
+            "title": "Codex Hooks Snippet",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codex_hooks_snippet",
+          "agents_md_snippet"
+        ],
+        "title": "AgentMailSnippets",
+        "type": "object"
+      },
       "AgentStat": {
         "properties": {
           "agent": {
@@ -1744,6 +1852,244 @@
         "title": "BlockUsageListResponse",
         "type": "object"
       },
+      "Body_upload_session_attachment_api_v1_agent_bridge_sessions__target__attachments_post": {
+        "properties": {
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "deck-ui",
+            "title": "Created By"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_session_attachment_api_v1_agent_bridge_sessions__target__attachments_post",
+        "type": "object"
+      },
+      "BridgeAttachmentDeleteResponse": {
+        "properties": {
+          "attachment_id": {
+            "title": "Attachment Id",
+            "type": "integer"
+          },
+          "deleted": {
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted",
+          "target",
+          "attachment_id"
+        ],
+        "title": "BridgeAttachmentDeleteResponse",
+        "type": "object"
+      },
+      "BridgeAttachmentListResponse": {
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/BridgeAttachmentResponse"
+            },
+            "title": "Attachments",
+            "type": "array"
+          }
+        },
+        "title": "BridgeAttachmentListResponse",
+        "type": "object"
+      },
+      "BridgeAttachmentPasteRequest": {
+        "properties": {
+          "prefix": {
+            "default": "",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "require_interactive_relay": {
+            "default": false,
+            "title": "Require Interactive Relay",
+            "type": "boolean"
+          },
+          "submit": {
+            "default": false,
+            "title": "Submit",
+            "type": "boolean"
+          },
+          "suffix": {
+            "default": "",
+            "title": "Suffix",
+            "type": "string"
+          }
+        },
+        "title": "BridgeAttachmentPasteRequest",
+        "type": "object"
+      },
+      "BridgeAttachmentPasteResponse": {
+        "properties": {
+          "pasted": {
+            "title": "Pasted",
+            "type": "boolean"
+          },
+          "submitted": {
+            "title": "Submitted",
+            "type": "boolean"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pasted",
+          "submitted",
+          "target"
+        ],
+        "title": "BridgeAttachmentPasteResponse",
+        "type": "object"
+      },
+      "BridgeAttachmentResponse": {
+        "properties": {
+          "agent_path": {
+            "title": "Agent Path",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "original_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Filename"
+          },
+          "prompt_text": {
+            "title": "Prompt Text",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "session_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Name"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "mime_type",
+          "size_bytes",
+          "sha256",
+          "agent_path",
+          "prompt_text",
+          "created_at"
+        ],
+        "title": "BridgeAttachmentResponse",
+        "type": "object"
+      },
       "BuildImageRequest": {
         "description": "Request to build Docker image.",
         "properties": {
@@ -1751,9 +2097,36 @@
             "default": "sandcastle:local",
             "title": "Image Name",
             "type": "string"
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime"
           }
         },
         "title": "BuildImageRequest",
+        "type": "object"
+      },
+      "BulkDeleteRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "BulkDeleteRequest",
         "type": "object"
       },
       "BulkResumeItem": {
@@ -2029,15 +2402,51 @@
             ],
             "title": "Agent"
           },
+          "analyst_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Agent Id"
+          },
           "column": {
             "default": "Backlog",
             "title": "Column",
             "type": "string"
           },
+          "depends_on": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On"
+          },
           "description": {
             "default": "",
             "title": "Description",
             "type": "string"
+          },
+          "executor_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executor Agent Id"
           },
           "labels": {
             "anyOf": [
@@ -2050,6 +2459,17 @@
               }
             ],
             "title": "Labels"
+          },
+          "parent_card_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Card Id"
           },
           "priority": {
             "anyOf": [
@@ -2113,6 +2533,17 @@
               }
             ],
             "title": "Transport"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
           }
         },
         "required": [
@@ -2134,6 +2565,28 @@
               }
             ],
             "title": "Agent"
+          },
+          "analyst_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Agent Id"
+          },
+          "analyst_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Run Id"
           },
           "claimed_at": {
             "anyOf": [
@@ -2175,9 +2628,39 @@
             "title": "Deliverables",
             "type": "array"
           },
+          "depends_on": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On"
+          },
           "description": {
             "title": "Description",
             "type": "string"
+          },
+          "dispatch_failures": {
+            "default": 0,
+            "title": "Dispatch Failures",
+            "type": "integer"
+          },
+          "executor_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executor Agent Id"
           },
           "id": {
             "title": "Id",
@@ -2194,6 +2677,17 @@
               }
             ],
             "title": "Labels"
+          },
+          "parent_card_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Card Id"
           },
           "priority": {
             "anyOf": [
@@ -2266,6 +2760,17 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
           }
         },
         "required": [
@@ -2294,6 +2799,28 @@
             ],
             "title": "Agent"
           },
+          "analyst_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Agent Id"
+          },
+          "analyst_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Run Id"
+          },
           "column": {
             "anyOf": [
               {
@@ -2304,6 +2831,20 @@
               }
             ],
             "title": "Column"
+          },
+          "depends_on": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On"
           },
           "description": {
             "anyOf": [
@@ -2316,6 +2857,17 @@
             ],
             "title": "Description"
           },
+          "executor_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executor Agent Id"
+          },
           "labels": {
             "anyOf": [
               {
@@ -2327,6 +2879,17 @@
               }
             ],
             "title": "Labels"
+          },
+          "parent_card_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Card Id"
           },
           "priority": {
             "anyOf": [
@@ -2393,6 +2956,17 @@
               }
             ],
             "title": "Transport"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
           }
         },
         "title": "CardUpdate",
@@ -2731,6 +3305,17 @@
             ],
             "title": "Default Agent"
           },
+          "default_platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Platform"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2775,6 +3360,17 @@
               }
             ],
             "title": "Default Agent"
+          },
+          "default_platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Platform"
           },
           "id": {
             "title": "Id",
@@ -2821,6 +3417,17 @@
               }
             ],
             "title": "Default Agent"
+          },
+          "default_platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Platform"
           },
           "name": {
             "anyOf": [
@@ -3922,6 +4529,291 @@
         "title": "ExportResponse",
         "type": "object"
       },
+      "ExternalAgentMailContextRequest": {
+        "properties": {
+          "body_markdown": {
+            "title": "Body Markdown",
+            "type": "string"
+          },
+          "files_or_symbols": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Files Or Symbols",
+            "type": "array"
+          },
+          "recipient_member_id": {
+            "title": "Recipient Member Id",
+            "type": "integer"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "why_needed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Why Needed"
+          }
+        },
+        "required": [
+          "recipient_member_id",
+          "body_markdown"
+        ],
+        "title": "ExternalAgentMailContextRequest",
+        "type": "object"
+      },
+      "ExternalAgentMailDeliveryRecipient": {
+        "properties": {
+          "member_id": {
+            "title": "Member Id",
+            "type": "integer"
+          },
+          "member_name": {
+            "title": "Member Name",
+            "type": "string"
+          },
+          "receipt_created": {
+            "default": true,
+            "title": "Receipt Created",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "wake_attempted": {
+            "default": false,
+            "title": "Wake Attempted",
+            "type": "boolean"
+          },
+          "wake_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wake Error"
+          },
+          "wake_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wake Method"
+          },
+          "wake_state": {
+            "title": "Wake State",
+            "type": "string"
+          },
+          "wake_succeeded": {
+            "default": false,
+            "title": "Wake Succeeded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "member_id",
+          "member_name",
+          "status",
+          "wake_state"
+        ],
+        "title": "ExternalAgentMailDeliveryRecipient",
+        "type": "object"
+      },
+      "ExternalAgentMailHandoffRequest": {
+        "properties": {
+          "body_markdown": {
+            "title": "Body Markdown",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "next_steps": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Next Steps",
+            "type": "array"
+          },
+          "recipient_member_id": {
+            "title": "Recipient Member Id",
+            "type": "integer"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "recipient_member_id",
+          "body_markdown"
+        ],
+        "title": "ExternalAgentMailHandoffRequest",
+        "type": "object"
+      },
+      "ExternalAgentMailMessageRequest": {
+        "properties": {
+          "body_markdown": {
+            "title": "Body Markdown",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "recipient_member_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Member Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "body_markdown"
+        ],
+        "title": "ExternalAgentMailMessageRequest",
+        "type": "object"
+      },
+      "ExternalAgentMailRequestStatus": {
+        "properties": {
+          "acknowledged": {
+            "default": false,
+            "title": "Acknowledged",
+            "type": "boolean"
+          },
+          "answered": {
+            "default": false,
+            "title": "Answered",
+            "type": "boolean"
+          },
+          "is_stale": {
+            "default": false,
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "integer"
+          },
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/MailMessageResponse"
+            },
+            "title": "Replies",
+            "type": "array"
+          },
+          "request_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Status"
+          },
+          "root": {
+            "$ref": "#/components/schemas/MailMessageResponse"
+          }
+        },
+        "required": [
+          "message_id",
+          "kind",
+          "root"
+        ],
+        "title": "ExternalAgentMailRequestStatus",
+        "type": "object"
+      },
+      "ExternalAgentMailSendResponse": {
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/MailExternalActorResponse"
+          },
+          "delivery_state": {
+            "title": "Delivery State",
+            "type": "string"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MailMessageResponse"
+          },
+          "recipients": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalAgentMailDeliveryRecipient"
+            },
+            "title": "Recipients",
+            "type": "array"
+          }
+        },
+        "required": [
+          "actor",
+          "message",
+          "delivery_state"
+        ],
+        "title": "ExternalAgentMailSendResponse",
+        "type": "object"
+      },
       "FailureStat": {
         "properties": {
           "agent": {
@@ -5004,6 +5896,56 @@
           "tree"
         ],
         "title": "ImportTreeResponse",
+        "type": "object"
+      },
+      "InstanceIdentity": {
+        "description": "Runtime identity for the Claude Cockpit backend instance.",
+        "properties": {
+          "accent": {
+            "enum": [
+              "blue",
+              "green",
+              "purple",
+              "orange",
+              "red",
+              "pink",
+              "cyan",
+              "slate"
+            ],
+            "title": "Accent",
+            "type": "string"
+          },
+          "hostname": {
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "short_hostname": {
+            "title": "Short Hostname",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "hostname",
+          "short_hostname",
+          "accent",
+          "started_at"
+        ],
+        "title": "InstanceIdentity",
         "type": "object"
       },
       "MCPAuthStartResponse": {
@@ -6123,6 +7065,687 @@
           "name"
         ],
         "title": "MCPTool",
+        "type": "object"
+      },
+      "MailAgentRegisterRequest": {
+        "properties": {
+          "cwd": {
+            "title": "Cwd",
+            "type": "string"
+          },
+          "pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pid"
+          },
+          "provider": {
+            "default": "unknown",
+            "title": "Provider",
+            "type": "string"
+          },
+          "session_key": {
+            "title": "Session Key",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "cwd",
+          "session_key"
+        ],
+        "title": "MailAgentRegisterRequest",
+        "type": "object"
+      },
+      "MailAgentRegisterResponse": {
+        "properties": {
+          "member": {
+            "$ref": "#/components/schemas/MailMemberResponse"
+          },
+          "session": {
+            "$ref": "#/components/schemas/MailSessionResponse"
+          }
+        },
+        "required": [
+          "member",
+          "session"
+        ],
+        "title": "MailAgentRegisterResponse",
+        "type": "object"
+      },
+      "MailExternalActorCreate": {
+        "properties": {
+          "actor_key": {
+            "title": "Actor Key",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "kind": {
+            "default": "external_tool",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_key",
+          "display_name"
+        ],
+        "title": "MailExternalActorCreate",
+        "type": "object"
+      },
+      "MailExternalActorCreateResponse": {
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/MailExternalActorResponse"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor",
+          "token"
+        ],
+        "title": "MailExternalActorCreateResponse",
+        "type": "object"
+      },
+      "MailExternalActorResponse": {
+        "properties": {
+          "actor_key": {
+            "title": "Actor Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          }
+        },
+        "required": [
+          "id",
+          "actor_key",
+          "display_name",
+          "kind",
+          "created_at"
+        ],
+        "title": "MailExternalActorResponse",
+        "type": "object"
+      },
+      "MailInboxResponse": {
+        "properties": {
+          "member_id": {
+            "title": "Member Id",
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MailMessageResponse"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "pending_count": {
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "unread_count": {
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "member_id",
+          "unread_count",
+          "pending_count"
+        ],
+        "title": "MailInboxResponse",
+        "type": "object"
+      },
+      "MailMemberResponse": {
+        "properties": {
+          "can_nudge": {
+            "default": false,
+            "title": "Can Nudge",
+            "type": "boolean"
+          },
+          "charter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charter"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "identity_key": {
+            "title": "Identity Key",
+            "type": "string"
+          },
+          "last_inbox_checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Inbox Checked At"
+          },
+          "pending_count": {
+            "default": 0,
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "repo_id": {
+            "title": "Repo Id",
+            "type": "string"
+          },
+          "repo_name": {
+            "title": "Repo Name",
+            "type": "string"
+          },
+          "repo_path": {
+            "title": "Repo Path",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/MailSessionResponse"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "stale_pending_count": {
+            "default": 0,
+            "title": "Stale Pending Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "unread_count": {
+            "default": 0,
+            "title": "Unread Count",
+            "type": "integer"
+          },
+          "unseen_pending_count": {
+            "default": 0,
+            "title": "Unseen Pending Count",
+            "type": "integer"
+          },
+          "wake_methods": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Wake Methods",
+            "type": "array"
+          },
+          "wake_state": {
+            "default": "delivered_waiting",
+            "title": "Wake State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "identity_key",
+          "repo_id",
+          "repo_path",
+          "repo_name",
+          "display_name",
+          "status"
+        ],
+        "title": "MailMemberResponse",
+        "type": "object"
+      },
+      "MailMemberUpdate": {
+        "properties": {
+          "charter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charter"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "title": "MailMemberUpdate",
+        "type": "object"
+      },
+      "MailMessageCreate": {
+        "properties": {
+          "body_markdown": {
+            "title": "Body Markdown",
+            "type": "string"
+          },
+          "kind": {
+            "default": "message",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "recipient_member_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Member Id"
+          },
+          "sender_member_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Member Id"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "thread_root_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Root Id"
+          }
+        },
+        "required": [
+          "body_markdown"
+        ],
+        "title": "MailMessageCreate",
+        "type": "object"
+      },
+      "MailMessageResponse": {
+        "properties": {
+          "acked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acked At"
+          },
+          "body_markdown": {
+            "title": "Body Markdown",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_stale": {
+            "default": false,
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "recipient_member_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Member Id"
+          },
+          "request_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Status"
+          },
+          "sender_actor_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Actor Id"
+          },
+          "sender_actor_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Actor Kind"
+          },
+          "sender_member_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Member Id"
+          },
+          "sender_name": {
+            "title": "Sender Name",
+            "type": "string"
+          },
+          "sender_type": {
+            "default": "director",
+            "title": "Sender Type",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "thread_root_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thread Root Id"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "sender_name",
+          "body_markdown",
+          "created_at"
+        ],
+        "title": "MailMessageResponse",
+        "type": "object"
+      },
+      "MailSessionResponse": {
+        "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity"
+          },
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cwd"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "mailbox_status": {
+            "title": "Mailbox Status",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "session_key": {
+            "title": "Session Key",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "tmux_target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tmux Target"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "source",
+          "session_key",
+          "mailbox_status"
+        ],
+        "title": "MailSessionResponse",
+        "type": "object"
+      },
+      "MailThreadResponse": {
+        "properties": {
+          "replies": {
+            "items": {
+              "$ref": "#/components/schemas/MailMessageResponse"
+            },
+            "title": "Replies",
+            "type": "array"
+          },
+          "root": {
+            "$ref": "#/components/schemas/MailMessageResponse"
+          }
+        },
+        "required": [
+          "root"
+        ],
+        "title": "MailThreadResponse",
         "type": "object"
       },
       "MarketplaceCreate": {
@@ -8834,6 +10457,104 @@
         "title": "ProviderHistoryDiagnosticsResponse",
         "type": "object"
       },
+      "ProviderLaunchOptionsResponse": {
+        "properties": {
+          "config_exists": {
+            "title": "Config Exists",
+            "type": "boolean"
+          },
+          "config_parse_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Parse Error"
+          },
+          "config_path": {
+            "title": "Config Path",
+            "type": "string"
+          },
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
+          },
+          "default_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Profile"
+          },
+          "model_options": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderModelOption"
+            },
+            "title": "Model Options",
+            "type": "array"
+          },
+          "models_cache_exists": {
+            "title": "Models Cache Exists",
+            "type": "boolean"
+          },
+          "models_cache_parse_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models Cache Parse Error"
+          },
+          "models_cache_path": {
+            "title": "Models Cache Path",
+            "type": "string"
+          },
+          "profile_options": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderProfileOption"
+            },
+            "title": "Profile Options",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_display_name": {
+            "title": "Provider Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "provider_display_name",
+          "config_path",
+          "models_cache_path",
+          "config_exists",
+          "models_cache_exists",
+          "model_options",
+          "profile_options"
+        ],
+        "title": "ProviderLaunchOptionsResponse",
+        "type": "object"
+      },
       "ProviderListResponse": {
         "properties": {
           "count": {
@@ -8946,6 +10667,51 @@
         "title": "ProviderMcpMutationResponse",
         "type": "object"
       },
+      "ProviderModelOption": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label",
+          "source"
+        ],
+        "title": "ProviderModelOption",
+        "type": "object"
+      },
       "ProviderPluginInventoryResponse": {
         "properties": {
           "exit_code": {
@@ -9042,6 +10808,48 @@
           "exit_code"
         ],
         "title": "ProviderPluginMutationResponse",
+        "type": "object"
+      },
+      "ProviderProfileOption": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parse_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parse Error"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label",
+          "sources",
+          "active"
+        ],
+        "title": "ProviderProfileOption",
         "type": "object"
       },
       "ProviderStatus": {
@@ -12220,13 +14028,44 @@
             ],
             "title": "Claude Code Version"
           },
+          "instance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstanceIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "providers": {
             "additionalProperties": true,
             "title": "Providers",
             "type": "object"
+          },
+          "scheduling_hooks_installed": {
+            "default": false,
+            "title": "Scheduling Hooks Installed",
+            "type": "boolean"
           }
         },
         "title": "SystemStatusResponse",
+        "type": "object"
+      },
+      "TeamListResponse": {
+        "properties": {
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/MailMemberResponse"
+            },
+            "title": "Members",
+            "type": "array"
+          }
+        },
+        "required": [
+          "members"
+        ],
+        "title": "TeamListResponse",
         "type": "object"
       },
       "TeamMemberInfo": {
@@ -12674,8 +14513,105 @@
         "title": "ValidationResponse",
         "type": "object"
       },
+      "WorkTypeMappingBulk": {
+        "description": "Bulk replace the per-project mapping.\n\nAny work_type from `WORK_TYPES` that's missing here is reset to the\ndefault (see `WORK_TYPE_PERSONA_DEFAULTS`). To clear an override, send the\ndefault persona for that work_type; there is no separate \"delete\" \u2014 a row\nwith the default persona is functionally identical to no row.",
+        "properties": {
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/WorkTypeMappingUpdate"
+            },
+            "title": "Mappings",
+            "type": "array"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_key",
+          "mappings"
+        ],
+        "title": "WorkTypeMappingBulk",
+        "type": "object"
+      },
+      "WorkTypeMappingResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "persona": {
+            "title": "Persona",
+            "type": "string"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "work_type": {
+            "title": "Work Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "project_key",
+          "work_type",
+          "persona",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkTypeMappingResponse",
+        "type": "object"
+      },
+      "WorkTypeMappingUpdate": {
+        "description": "Single work_type \u2192 persona override for a project.",
+        "properties": {
+          "persona": {
+            "title": "Persona",
+            "type": "string"
+          },
+          "work_type": {
+            "title": "Work Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_type",
+          "persona"
+        ],
+        "title": "WorkTypeMappingUpdate",
+        "type": "object"
+      },
       "app__api__v1__agent_bridge__router__SpawnRequest": {
         "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "allow_all": {
+            "default": false,
+            "title": "Allow All",
+            "type": "boolean"
+          },
           "approval_policy": {
             "anyOf": [
               {
@@ -12719,6 +14655,17 @@
               }
             ],
             "title": "Bedrock Model"
+          },
+          "context_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tier"
           },
           "dangerously_bypass_approvals_and_sandbox": {
             "default": false,
@@ -12778,6 +14725,16 @@
             "title": "No Alt Screen",
             "type": "boolean"
           },
+          "no_ask_user": {
+            "default": false,
+            "title": "No Ask User",
+            "type": "boolean"
+          },
+          "plan": {
+            "default": false,
+            "title": "Plan",
+            "type": "boolean"
+          },
           "platform": {
             "default": "anthropic",
             "title": "Platform",
@@ -12831,6 +14788,28 @@
             "default": "claude-code",
             "title": "Provider",
             "type": "string"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
+          "remote": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remote"
           },
           "sandbox": {
             "anyOf": [
@@ -12963,23 +14942,6 @@
     }
   },
   "paths": {
-    "/": {
-      "get": {
-        "description": "Root endpoint fallback when frontend is not built.",
-        "operationId": "root__get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Root"
-      }
-    },
     "/api/v1/agent-activity/live": {
       "get": {
         "description": "Return currently running agent sessions with optional pane preview.",
@@ -13376,6 +15338,250 @@
         ]
       }
     },
+    "/api/v1/agent-bridge/sessions/{target}/attachments": {
+      "get": {
+        "operationId": "list_session_attachments_api_v1_agent_bridge_sessions__target__attachments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Claude-Cockpit-Terminal-Token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Claude-Cockpit-Terminal-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeAttachmentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Session Attachments",
+        "tags": [
+          "Agent Bridge"
+        ]
+      },
+      "post": {
+        "operationId": "upload_session_attachment_api_v1_agent_bridge_sessions__target__attachments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Claude-Cockpit-Terminal-Token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Claude-Cockpit-Terminal-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_session_attachment_api_v1_agent_bridge_sessions__target__attachments_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeAttachmentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Session Attachment",
+        "tags": [
+          "Agent Bridge"
+        ]
+      }
+    },
+    "/api/v1/agent-bridge/sessions/{target}/attachments/{attachment_id}": {
+      "delete": {
+        "operationId": "delete_session_attachment_api_v1_agent_bridge_sessions__target__attachments__attachment_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Claude-Cockpit-Terminal-Token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Claude-Cockpit-Terminal-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeAttachmentDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Session Attachment",
+        "tags": [
+          "Agent Bridge"
+        ]
+      }
+    },
+    "/api/v1/agent-bridge/sessions/{target}/attachments/{attachment_id}/paste": {
+      "post": {
+        "operationId": "paste_session_attachment_api_v1_agent_bridge_sessions__target__attachments__attachment_id__paste_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Claude-Cockpit-Terminal-Token",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Claude-Cockpit-Terminal-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BridgeAttachmentPasteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeAttachmentPasteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Paste Session Attachment",
+        "tags": [
+          "Agent Bridge"
+        ]
+      }
+    },
     "/api/v1/agent-bridge/sessions/{target}/git-status": {
       "get": {
         "description": "Live git status of a running session's working directory (on demand).",
@@ -13725,6 +15931,882 @@
         "summary": "Get Terminal Token",
         "tags": [
           "Agent Bridge"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/agent/inbox": {
+      "get": {
+        "operationId": "agent_inbox_api_v1_agent_mail_agent_inbox_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unread_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Unread Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mark_read",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Mark Read",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailInboxResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agent Inbox",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/agent/register": {
+      "post": {
+        "operationId": "register_agent_api_v1_agent_mail_agent_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailAgentRegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAgentRegisterResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Agent",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/hooks/post-tool-use": {
+      "post": {
+        "operationId": "hook_post_tool_use_api_v1_agent_mail_hooks_post_tool_use_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hook Post Tool Use",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/hooks/session-end": {
+      "post": {
+        "operationId": "hook_session_end_api_v1_agent_mail_hooks_session_end_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hook Session End",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/hooks/session-start": {
+      "post": {
+        "operationId": "hook_session_start_api_v1_agent_mail_hooks_session_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hook Session Start",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/hooks/user-prompt-submit": {
+      "post": {
+        "operationId": "hook_user_prompt_submit_api_v1_agent_mail_hooks_user_prompt_submit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hook User Prompt Submit",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/install/claude-code/apply": {
+      "post": {
+        "operationId": "install_claude_code_api_v1_agent_mail_install_claude_code_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMailInstallStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Claude Code",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/install/claude-code/uninstall": {
+      "post": {
+        "operationId": "uninstall_claude_code_route_api_v1_agent_mail_install_claude_code_uninstall_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMailInstallStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Claude Code Route",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/install/codex/apply": {
+      "post": {
+        "operationId": "install_codex_api_v1_agent_mail_install_codex_apply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMailInstallStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Install Codex",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/install/codex/uninstall": {
+      "post": {
+        "operationId": "uninstall_codex_route_api_v1_agent_mail_install_codex_uninstall_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMailInstallStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Uninstall Codex Route",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/install/snippets": {
+      "get": {
+        "operationId": "install_snippets_api_v1_agent_mail_install_snippets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMailSnippets"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Install Snippets",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/install/status": {
+      "get": {
+        "operationId": "install_status_route_api_v1_agent_mail_install_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMailInstallStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Install Status Route",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/members/{member_id}": {
+      "patch": {
+        "operationId": "update_member_api_v1_agent_mail_members__member_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailMemberUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailMemberResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Member",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/members/{member_id}/queue-inbox-check": {
+      "post": {
+        "operationId": "queue_inbox_check_api_v1_agent_mail_members__member_id__queue_inbox_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "member_id",
+            "required": true,
+            "schema": {
+              "title": "Member Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Queue Inbox Check",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/messages": {
+      "get": {
+        "operationId": "list_messages_api_v1_agent_mail_messages_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MailMessageResponse"
+                  },
+                  "title": "Response List Messages Api V1 Agent Mail Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Messages",
+        "tags": [
+          "Agent Mail"
+        ]
+      },
+      "post": {
+        "operationId": "send_message_api_v1_agent_mail_messages_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailMessageCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailMessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Message",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/messages/{message_id}/ack": {
+      "post": {
+        "operationId": "ack_message_api_v1_agent_mail_messages__message_id__ack_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ack Message",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/messages/{message_id}/read": {
+      "post": {
+        "operationId": "mark_read_api_v1_agent_mail_messages__message_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Body",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Read",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/messages/{message_id}/thread": {
+      "get": {
+        "operationId": "get_thread_api_v1_agent_mail_messages__message_id__thread_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "member_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailThreadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Thread",
+        "tags": [
+          "Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/agent-mail/team": {
+      "get": {
+        "operationId": "get_team_api_v1_agent_mail_team_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sync",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Sync",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Team",
+        "tags": [
+          "Agent Mail"
         ]
       }
     },
@@ -16828,6 +19910,691 @@
         ]
       }
     },
+    "/api/v1/external/agent-mail/actors": {
+      "post": {
+        "operationId": "create_external_actor_api_v1_external_agent_mail_actors_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MailExternalActorCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailExternalActorCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create External Actor",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/actors/me": {
+      "get": {
+        "operationId": "get_external_actor_me_api_v1_external_agent_mail_actors_me_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailExternalActorResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get External Actor Me",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/broadcasts": {
+      "post": {
+        "operationId": "send_external_agent_mail_broadcast_api_v1_external_agent_mail_broadcasts_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalAgentMailMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailSendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send External Agent Mail Broadcast",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/context-requests": {
+      "post": {
+        "operationId": "send_external_agent_mail_context_request_api_v1_external_agent_mail_context_requests_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalAgentMailContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailSendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send External Agent Mail Context Request",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/handoffs": {
+      "post": {
+        "operationId": "send_external_agent_mail_handoff_api_v1_external_agent_mail_handoffs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalAgentMailHandoffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailSendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send External Agent Mail Handoff",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/members": {
+      "get": {
+        "operationId": "list_external_agent_mail_members_api_v1_external_agent_mail_members_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List External Agent Mail Members",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/messages": {
+      "post": {
+        "operationId": "send_external_agent_mail_message_api_v1_external_agent_mail_messages_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalAgentMailMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailSendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send External Agent Mail Message",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/requests/{message_id}/ack": {
+      "post": {
+        "operationId": "ack_external_agent_mail_request_api_v1_external_agent_mail_requests__message_id__ack_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailRequestStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ack External Agent Mail Request",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/requests/{message_id}/status": {
+      "get": {
+        "operationId": "get_external_agent_mail_request_status_api_v1_external_agent_mail_requests__message_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailRequestStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get External Agent Mail Request Status",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/requests/{message_id}/wait": {
+      "get": {
+        "operationId": "wait_external_agent_mail_request_status_api_v1_external_agent_mail_requests__message_id__wait_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeout_seconds",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "title": "Timeout Seconds",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailRequestStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Wait External Agent Mail Request Status",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/threads/{message_id}": {
+      "get": {
+        "operationId": "get_external_agent_mail_thread_api_v1_external_agent_mail_threads__message_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailThreadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get External Agent Mail Thread",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
+    "/api/v1/external/agent-mail/threads/{message_id}/replies": {
+      "post": {
+        "operationId": "reply_external_agent_mail_thread_api_v1_external_agent_mail_threads__message_id__replies_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalAgentMailMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAgentMailSendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reply External Agent Mail Thread",
+        "tags": [
+          "External Agent Mail"
+        ]
+      }
+    },
     "/api/v1/files": {
       "get": {
         "operationId": "list_directory_api_v1_files_get",
@@ -19345,6 +23112,138 @@
           }
         },
         "summary": "Set Transport",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/work-type-mappings": {
+      "get": {
+        "description": "Return the *complete* per-project {work_type: persona} map: stored\noverrides merged on top of `WORK_TYPE_PERSONA_DEFAULTS`. The response\nalways contains an entry for every work_type in `WORK_TYPES`, so the UI\ncan render the form without special-casing missing rows.",
+        "operationId": "list_work_type_mappings_api_v1_kanban_work_type_mappings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": true,
+            "schema": {
+              "title": "Project Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Work Type Mappings",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/work-type-mappings/bulk": {
+      "post": {
+        "description": "Bulk-replace the per-project mapping. Missing work_types fall back to\nthe default \u2014 they are *not* deleted by this call. Returns the full set\nof stored rows for the project (overrides only, not the merged view).",
+        "operationId": "bulk_upsert_work_type_mappings_api_v1_kanban_work_type_mappings_bulk_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkTypeMappingBulk"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkTypeMappingResponse"
+                  },
+                  "title": "Response Bulk Upsert Work Type Mappings Api V1 Kanban Work Type Mappings Bulk Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Upsert Work Type Mappings",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/work-type-mappings/{work_type}": {
+      "delete": {
+        "description": "Remove the override for a single (project_key, work_type) pair. Idempotent:\ndeleting a non-existent row returns 204 as well so the UI can call it\nwithout checking first. The next `GET` will show the default again.",
+        "operationId": "delete_work_type_mapping_api_v1_kanban_work_type_mappings__work_type__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_type",
+            "required": true,
+            "schema": {
+              "title": "Work Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": true,
+            "schema": {
+              "title": "Project Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Work Type Mapping",
         "tags": [
           "Kanban"
         ]
@@ -23098,7 +26997,7 @@
     },
     "/api/v1/projects/discover": {
       "post": {
-        "description": "Auto-discover Claude Code projects in the specified path.",
+        "description": "Auto-discover project folders in the specified path.",
         "operationId": "discover_projects_api_v1_projects_discover_post",
         "requestBody": {
           "content": {
@@ -23451,6 +27350,48 @@
           }
         },
         "summary": "Get Provider History Diagnostics",
+        "tags": [
+          "Providers"
+        ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/launch-options": {
+      "get": {
+        "operationId": "get_provider_launch_options_api_v1_providers__provider_id__launch_options_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderLaunchOptionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Provider Launch Options",
         "tags": [
           "Providers"
         ]
@@ -23942,7 +27883,7 @@
     },
     "/api/v1/sandcastle/build-image": {
       "post": {
-        "description": "Build the sandcastle Docker image.",
+        "description": "Build the sandcastle image with the given (or auto-detected) container runtime.",
         "operationId": "build_image_api_v1_sandcastle_build_image_post",
         "requestBody": {
           "content": {
@@ -24153,6 +28094,57 @@
           }
         },
         "summary": "List Containers",
+        "tags": [
+          "Sandcastle",
+          "sandcastle"
+        ]
+      }
+    },
+    "/api/v1/sandcastle/containers/{name}/logs/stream": {
+      "get": {
+        "description": "Stream a running sandcastle container's own stdout/stderr via SSE (`logs -f`).",
+        "operationId": "stream_container_logs_api_v1_sandcastle_containers__name__logs_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runtime",
+            "required": true,
+            "schema": {
+              "title": "Runtime",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Container Logs",
         "tags": [
           "Sandcastle",
           "sandcastle"
@@ -24884,6 +28876,46 @@
         ]
       }
     },
+    "/api/v1/scheduled-messages/bulk-delete": {
+      "post": {
+        "description": "Delete an arbitrary set of messages (any status) by id.",
+        "operationId": "bulk_delete_api_v1_scheduled_messages_bulk_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bulk Delete",
+        "tags": [
+          "Scheduled Messages"
+        ]
+      }
+    },
     "/api/v1/scheduled-messages/history": {
       "delete": {
         "description": "Delete all messages in terminal states (delivered, failed, cancelled).",
@@ -24938,6 +28970,46 @@
           }
         },
         "summary": "Hook Event",
+        "tags": [
+          "Scheduled Messages"
+        ]
+      }
+    },
+    "/api/v1/scheduled-messages/hooks-install": {
+      "post": {
+        "description": "Additively install any missing scheduling hooks in ~/.claude/settings.json.",
+        "operationId": "hooks_install_api_v1_scheduled_messages_hooks_install_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Hooks Install",
+        "tags": [
+          "Scheduled Messages"
+        ]
+      }
+    },
+    "/api/v1/scheduled-messages/hooks-status": {
+      "get": {
+        "description": "Whether the four CC hooks that feed this pipeline are installed.\n\nWithout them, ``/hook-event`` above is never called, so limit detection\nand auto-resume are silently dead \u2014 see\ndocs/cockpit/analyse-sessie-limieten-claude-code.md.",
+        "operationId": "hooks_status_api_v1_scheduled_messages_hooks_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Hooks Status",
         "tags": [
           "Scheduled Messages"
         ]
