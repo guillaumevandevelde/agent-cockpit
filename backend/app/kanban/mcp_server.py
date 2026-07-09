@@ -101,7 +101,8 @@ async def get_card(card_id: str) -> dict:
 async def create_card(project: str, title: str, description: str = "",
                       column: str = "Backlog",
                       work_type: str | None = None,
-                      agent: str | None = None) -> dict:
+                      agent: str | None = None,
+                      parent_card_id: str | None = None) -> dict:
     """Create a new card (agents may decompose work into subtask cards).
 
     `project` must be the exact project key — use `resolve_project_key` first
@@ -113,6 +114,12 @@ async def create_card(project: str, title: str, description: str = "",
     work_type → persona mapping auto-fills `agent` (mirrors the REST
     create_card path post-commit-80e139e). Explicit `agent` wins, same as the
     REST contract.
+
+    `parent_card_id` lets the analyst workflow create child cards that
+    `add_plan_attachment` will accept — that tool rejects any child whose
+    `parent_card_id` doesn't already match (`{"error": "parent_mismatch"}`),
+    so without this parameter the analyst had to PATCH the card after
+    creation as a workaround.
     """
     async with KanbanSessionLocal() as s:
         # Auto-fill `agent` from the work_type mapping so MCP-created cards
@@ -139,7 +146,8 @@ async def create_card(project: str, title: str, description: str = "",
             project_key=project, entity_id=None,
             payload={"title": title, "description": description,
                      "column": column, "work_type": work_type,
-                     "agent": resolved_agent})
+                     "agent": resolved_agent,
+                     "parent_card_id": parent_card_id})
         await s.commit()
         card = await service.get_card(s, cid)
         logger.info("create_card: %s in %s (%s, work_type=%s, agent=%s)",
