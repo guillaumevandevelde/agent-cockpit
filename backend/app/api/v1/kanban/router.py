@@ -196,9 +196,19 @@ async def _reload(s, cid: str) -> CardResponse:
 @router.post("/cards", response_model=CardResponse, status_code=status.HTTP_201_CREATED)
 async def create_card(payload: CardCreate):
     async with KanbanSessionLocal() as s:
+        # Auto-fill `agent` from the work_type mapping when the caller did
+        # not set it explicitly. See service.resolve_create_agent and
+        # docs/cockpit/work-type-routing-analysis.md §2B. The resolved value
+        # is written to the op-log so a rematerialize() rebuild reproduces it.
+        payload_dict = payload.model_dump(exclude={"project_key"})
+        payload_dict["agent"] = await service.resolve_create_agent(
+            s, payload.project_key,
+            work_type=payload.work_type,
+            explicit_agent=payload.agent,
+        )
         cid = await apply_operation(s, op_type="create", entity_type="card",
             project_key=payload.project_key, entity_id=None,
-            payload=payload.model_dump(exclude={"project_key"}))
+            payload=payload_dict)
         # If the caller set analyst_agent_id at create time, ensure the
         # analyst column exists for this project. Matches the PATCH path.
         if payload.analyst_agent_id:
