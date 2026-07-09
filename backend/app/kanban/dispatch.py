@@ -381,6 +381,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
     # to Done.  The backend then kills the tmux session and removes the
     # worktree automatically.
     ship_instructions = _build_ship_instructions(ship_mode)
+    problem_flag_instructions = _build_problem_flag_instructions()
 
     return (
         f"{preamble}"
@@ -394,9 +395,32 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
         "`comment`) to update the card exactly as those instructions direct. If you are "
         "blocked, use `report_impediment` with a clear question explaining what you need."
-        f"\n\n## Session-end workflow\n"
+        f"\n\n{problem_flag_instructions}"
+        f"\n## Session-end workflow\n"
         "When your work on this card is complete, follow these steps in order:\n\n"
         f"{ship_instructions}"
+    )
+
+
+def _build_problem_flag_instructions() -> str:
+    """Standing reminder to file (not just mention) problems noticed outside the
+    assigned card's scope. A skill at ``.claude/skills/flag-problem/SKILL.md``
+    has the full dedupe/project-key procedure when the agent has filesystem
+    access; this inlines the essential steps for parity with the ship
+    instructions above, which work the same way for the same reason."""
+    return (
+        "## Noticed a problem outside this card's scope?\n"
+        "If you hit a bug, a stale doc, or a workflow gap that isn't the task "
+        "above, don't just mention it in chat — it vanishes when this session "
+        "ends. File it: resolve this repo's real project key first (`curl -s "
+        '"http://localhost:8000/api/v1/kanban/project-key?project_path=$(git '
+        'rev-parse --show-toplevel)"` — guessing the key silently creates an '
+        "invisible parallel board), check `list_cards` on `Backlog`/"
+        "`Impediment` for an existing card describing the same root cause, "
+        "and either `comment` on it with what's new or `create_card` "
+        "(column `Backlog`, title `[problem] <summary>`) if none exists. See "
+        "the `flag-problem` skill for the full procedure. Keep this quick — "
+        "don't let it derail the card you were actually dispatched for.\n"
     )
 
 

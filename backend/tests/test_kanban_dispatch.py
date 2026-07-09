@@ -100,6 +100,19 @@ def test_card_prompt_without_persona_still_works():
     assert "# T" in prompt
 
 
+def test_card_prompt_includes_problem_flag_reminder():
+    """Every dispatched session should be reminded to file (not just mention)
+    problems it notices outside its assigned card's scope — see kanban card
+    'Kritische zelf structurering en reflectie' and the flag-problem skill."""
+    class _C:
+        title = "T"
+        description = ""
+    prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+    assert "flag-problem" in prompt
+    assert "project-key" in prompt
+    assert "create_card" in prompt
+
+
 # ---- dispatch_project: the core ------------------------------------------
 
 @pytest.mark.asyncio
