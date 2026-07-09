@@ -128,3 +128,19 @@ actively used on three independent, actively-maintained tracks in this fork: `RE
 ("Optie A (gekozen): Docker" in `docs/cockpit/00-orientation.md`). Removing it would break
 all three with no replacement. No code or `CLAUDE.md`/`README.md` change needed — both
 already correctly describe Docker as the current primary flow.
+
+## Updates (self-update) feature — keep as-is, close CLAUDE.md docs gap (2026-07-09)
+
+Decision: **keep the in-UI self-update button as it is.** See the analysis in
+`updates-feature-decision.md`. This is **not** an upstream-inherited feature as the original
+card description framed it: `git log upstream/master -- 'scripts/update.sh' ...` is empty
+and the merge-base `42429f3` predates the first fork-side commit (`1bf5920`,
+"feat(updates): in-UI 1-click self-update with SSE progress and auto-rollback",
+2026-07-02). `scripts/update.sh` already pulls from `origin` (this fork), not from
+`upstream`, so the "follow release.yml flow instead of upstream" concern doesn't apply — the
+implementation is already aligned with the fork's release model
+(`release.yml` = release-author flow, `update.sh` = release-consumer flow). The single
+follow-up is a one-line addition of "Updates" to `CLAUDE.md`'s feature list (the feature
+already exists in code, in `App.tsx`, in `lib/navigation.ts`, in `docs/features/updates.md`,
+and in `backend/tests/test_update_api.py` — it was just missing from the top-level
+feature-list line in `CLAUDE.md`). Done in this same commit.
