@@ -4,6 +4,15 @@
 > Bouwt voort op `kanban-spec.md` en het design in
 > `docs/superpowers/specs/2026-07-08-multi-agent-kanban-design.md`.
 
+> **Bron van waarheid:** dit document is leidend voor de multi-agent flow
+> (analyst → kind-kaarten + dependency-DAG + plan-attachment).
+> Gerelateerde superpowers-werkdocumenten:
+>
+> - `docs/superpowers/specs/2026-07-08-multi-agent-kanban-design.md` — ontwerp-rationale + datavelden.
+> - `docs/superpowers/plans/2026-07-08-multi-agent-kanban.md` — TDD-implementatieplan dat bovenstaande heeft uitgevoerd.
+>
+> Zie `00-orientation.md` → *Documenten* voor de drie-bomen-regel.
+
 ## 1. Wanneer gebruik je multi-agent?
 
 Gebruik de multi-agent-workflow voor kaarten die eerst **analyse** verdelen in **N

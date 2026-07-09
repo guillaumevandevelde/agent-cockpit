@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Bron van waarheid:** `docs/cockpit/kanban-dispatch-spec.md` is leidend voor de
+> dispatch-laag; dit superpowers-plan is de TDD-uitvoering die persona + shipmode
+> heeft opgeleverd. Zie `docs/cockpit/00-orientation.md` → *Documenten* voor de
+> drie-bomen-regel.
+
 **Goal:** Make a card the dispatcher picks up run autonomously end-to-end with a column-matched persona (Analyst for `Analysis`, Developer for `Todo`), shipping its result via a per-project mode — direct merge to master, or a draft pull request.
 
 **Architecture:** Personas live as editable markdown files under `.claude/`; the dispatcher reads the matching file and injects it (plus the card and the project's ship mode) into the spawn prompt. Sessions spawn with permissions skipped, in a worktree the dispatcher itself creates from `origin/master`. A per-project `shipmode` flag (device-local in `KanbanMeta`, like the existing `autodispatch` flag) selects the developer's terminal ship step, encoded in a `git-ship` skill.

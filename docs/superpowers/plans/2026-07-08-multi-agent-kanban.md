@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Bron van waarheid:** `docs/cockpit/multi-agent-kanban.md` is leidend voor de
+> multi-agent flow; dit superpowers-plan is de TDD-uitvoering die het heeft
+> opgeleverd. Zie `docs/cockpit/00-orientation.md` → *Documenten* voor de
+> drie-bomen-regel.
+
 **Goal:** Add an opt-in two-phase workflow to kanban cards (analyst session → split into children → independent executor sessions), per the design in `docs/superpowers/specs/2026-07-08-multi-agent-kanban-design.md`.
 
 **Architecture:** Extend the kanban data model with five new fields on `KanbanCard` (`analyst_agent_id`, `executor_agent_id`, `parent_card_id`, `analyst_run_id`, `depends_on`) and two new `kind` values on `KanbanDeliverable` (`plan`, `plan_ref`). Add a pure dep-resolver, an MCP tool that attaches a validated plan and fans it out to children, a phase-aware `_run_card(card, *, phase=...)`, an analyst-prompt fallback, and minimal frontend affordances (two dropdowns in `CardEditDialog`, badge on cards, plan tab in drawer). Backward compatible: cards without `analyst_agent_id` skip the whole multi-agent path.

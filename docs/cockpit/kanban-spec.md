@@ -1,7 +1,13 @@
 # Kanban — Spec: per-project bord met agent-zelfbediening
 
-> Status: ontwerp goedgekeurd (2026-06-13), nog niet geïmplementeerd. Datamodel- en
+> Status: ontwerp goedgekeurd (2026-06-13), geïmplementeerd in v1. Datamodel- en
 > sync-keuzes zijn vastgelegd via brainstorm; zie de beslissingstabel onderaan.
+
+> **Bron van waarheid:** dit document + `kanban-plan.md` zijn leidend voor het v1-bord
+> (passief). De actieve lagen erboven — auto-dispatch en multi-agent — leven in
+> `kanban-dispatch-spec.md` en `multi-agent-kanban.md`. Geen recente
+> superpowers-tegenhanger voor v1 zelf (de superpowers-tegenhangers documenteren de
+> latere lagen). Zie `00-orientation.md` → *Documenten* voor de drie-bomen-regel.
 
 ## Doel & filosofie
 

@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Bron van waarheid:** dit plan is leidend voor de v1-implementatie van het kanban-bord
+> (al uitgevoerd). Voor de actieve lagen — auto-dispatch en multi-agent — zijn
+> `kanban-dispatch-spec.md` en `multi-agent-kanban.md` in deze boom leidend; de
+> bijbehorende TDD-plannen staan in `docs/superpowers/plans/`. Zie
+> `00-orientation.md` → *Documenten* voor de drie-bomen-regel.
+
 **Goal:** A per-project kanban board where Claude Code agents claim cards and bind deliverables through MCP tools, built local-first on an append-only operation log so cross-device sync can be switched on later.
 
 **Architecture:** All mutations (from the MCP server and the REST/UI layer) flow through one `apply_operation` pipeline that (1) assigns an HLC, (2) appends to an append-only `kanban_ops` table, (3) updates derived materialized tables (`kanban_cards`, `kanban_deliverables`) using per-field last-write-wins and conditional claims. The board lives in its own configurable SQLAlchemy store, separate from Cockpit's device-local DB, so the materialized state is always rebuildable from the op-log (`rematerialize()`), which is also the basis for future sync.
