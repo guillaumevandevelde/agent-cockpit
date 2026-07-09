@@ -7,26 +7,47 @@ met een eigen identiteit: **Claude Cockpit**. De `upstream` git-remote wijst naa
 ## Doel
 
 Claude-deck levert al sessie-**monitoring** (Sessions / CC Bridge) — dat dekt "welke CC-sessie
-wacht op mijn input" grotendeels. De **net-nieuwe** uitbreiding die we bouwen is een
-**scheduled-messages feature**: boodschappen klaarzetten met een eenmalige **timer** of een
-terugkerende **cron**, die op het geplande moment in een Claude Code-sessie worden
-geïnjecteerd (via tmux `send-keys`).
+wacht op mijn input" grotendeels. Daar bovenop bouwt Claude Cockpit twee samenhangende
+lagen:
 
-## Huidige fase: FASE 2 — IMPLEMENTATIE (offline TDD)
+1. **Scheduled-messages** (vrijwel af) — boodschappen klaarzetten met een eenmalige
+   **timer** of terugkerende **cron**, die op het geplande moment in een Claude
+   Code-sessie worden geïnjecteerd (via tmux `send-keys`).
+2. **Kanban als hoofdwerking** (huidige actieve track) — een poll-loop die Todo-kaarten
+   autonoom claimt + spawnt, met multi-agent decompositie (analyst → executors) en
+   Agent Mail voor cross-session coördinatie.
 
-Fase 1 is **code-level groen** (zie `fase-1-validation.md`): discovery + spawn bestaan al in
-claude-deck, send-keys-injectie is triviaal via tmux. Het **implementatieplan** staat in
-**`fase-2-plan.md`** (12 TDD-tasks).
+## Huidige staat
 
-**Voortgang (2026-06-11):** de **volledige fase 2 frontend + backend zijn geïmplementeerd via TDD** —
-Tasks 1–11. Backend: 139 tests groen. Frontend: `npm run build` clean (0 errors).
+### Scheduled-messages — fase 2 vrijwel af
 
-Resterend:
-- **Task 12 — runtime e2e** + de **fase-1 runtime-validatie**: vergen `docker compose up` +
-  `claude` login (jouw twee handmatige stappen).
+Het implementatieplan staat in **`fase-2-plan.md`** (12 TDD-tasks). **Tasks 1–11 zijn
+geïmplementeerd via TDD**: backend-tests groen, frontend build clean. Resterend is alleen
+**Task 12 — runtime e2e** (en de **fase-1 runtime-checklist** in `fase-1-validation.md`):
+dat vergt `docker compose up` + `claude` login (twee handmatige stappen).
 
-**Open punt voor review:** `permission_mode` = `default|acceptEdits|bypass` (afgestemd op echte
-`claude`-flags i.p.v. de spec-labels safe/accept-edits/autonomous).
+**Open punt voor review:** `permission_mode` = `default|acceptEdits|bypass` (afgestemd op
+echte `claude`-flags i.p.v. de spec-labels safe/accept-edits/autonomous).
+
+### Kanban / multi-agent / agent-mail — actieve track
+
+Bovenop het passieve kanban-bord (v1) is een volledig autonome werkstroom gebouwd:
+
+- **Kanban auto-dispatch** — een APScheduler-poll die Todo-kaarten claimt als
+  `agent:<session>`, naar Doing verplaatst, en een Claude Code-sessie in een git-worktree
+  spawnt. Per-project opt-in (`autodispatch:<project_key>`). Zie
+  `kanban-dispatch-spec.md`.
+- **Multi-agent kanban** — voor kaarten die eerst analyse verdelen: de **analyst**-fase
+  splitst een parent-kaart op in N kind-kaarten met een dependency-DAG en een
+  `plan`-attachment; de dispatcher spawnt kind-kaarten pas zodra hun deps in `Done`
+  staan. Zie `multi-agent-kanban.md` (smoke-test cookbook).
+- **Agent Mail** — durable per-repo identiteit, structured messages tussen willekeurige
+  sessies, inspectable mailbox-UI, en wakeability via tmux. Geport uit upstream
+  (`adrirubio/claude-deck`), aangepast aan deze fork (geen preset/slot-laag). Zie
+  `agent-mail-spec.md`.
+
+De huidige open pool aan follow-ups + work-in-progress staat in
+**`kanban-followups.md`** — dat is de ingang voor nieuwe kaarten.
 
 ## Omgeving
 
@@ -46,7 +67,7 @@ docker compose up -d        # UI op http://localhost:8000
 ./scripts/dev.sh            # backend :8000 + frontend :5173
 ```
 
-## Kernbeslissingen (fase 2)
+## Kernbeslissingen (scheduled-messages)
 
 | Onderwerp | Keuze |
 |---|---|
@@ -59,7 +80,13 @@ docker compose up -d        # UI op http://localhost:8000
 
 ## Documenten
 
-- **`fase-1-validation.md`** — de checklist die je NU uitvoert.
-- **`fase-2-spec.md`** — het volledige ontwerp van de scheduled-messages feature (ná validatie).
+- **`fase-1-validation.md`** — de runtime-checklist die we nog moeten afronden (sessie-discovery + send-keys + spawn op WSL bevestigen).
+- **`fase-2-plan.md`** — 12 TDD-tasks voor de scheduled-messages feature; Tasks 1–11 geïmplementeerd, Task 12 = runtime e2e.
+- **`fase-2-spec.md`** — het volledige ontwerp van de scheduled-messages feature.
+- **`kanban-dispatch-spec.md`** — auto-dispatcher: claim-before-spawn, worktree-isolatie, opt-in per project.
+- **`kanban-spec.md` + `kanban-plan.md`** — v1-bord (passief) en het plan waaruit het is voortgekomen.
+- **`multi-agent-kanban.md`** — analyst-fase + plan-attachment + kind-kaart-dependencies (smoke-test cookbook).
+- **`agent-mail-spec.md`** — Agent Mail: herkomst uit upstream, fork-aanpassingen, datamodel.
+- **`kanban-followups.md`** — de huidige open pool (work-type routing, sync-HLC, upstream-keuzes).
 - Plan-/projectpagina in de kennisvault (Windows-zijde, los van deze repo):
   `C:\dev\obsidian\Personal\Projects\Claude Cockpit\claude-cockpit.md`.
