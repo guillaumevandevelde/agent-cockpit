@@ -90,7 +90,12 @@ file and confirm the signature is genuine before filing.
 
 Use `mcp__cockpit-kanban__create_card`:
 
-- **project**: `claude-cockpit`
+- **project**: resolve it first, don't guess — `curl -s
+  "http://localhost:8000/api/v1/kanban/project-key?project_path=$(git rev-parse --show-toplevel)"`.
+  The board is keyed by a free-form string with no validation, so a guessed
+  or hand-typed key (e.g. a display name or a different casing) silently
+  creates an invisible parallel board — see `flag-problem`'s Step 1 for the
+  incident that surfaced this.
 - **column**: `Backlog`
 - **title**: `[session-issue] <one-line summary>` — e.g.
   `[session-issue] Card abc-123 stuck in analyst 6h, tmux dead`
@@ -136,8 +141,10 @@ decide in 60 seconds whether to act.
 - You can't satisfy criterion 3 (tmux check) — don't guess, don't file.
 - Transcript match was a single line that happened to contain the keyword —
   re-read the file and confirm it's a genuine repeated signature.
-- You're about to file under a different project than `claude-cockpit` —
-  session problems in this fork always belong on `claude-cockpit`'s Backlog.
+- You're about to file under a project key you typed from memory instead of
+  resolving via `GET /api/v1/kanban/project-key?project_path=...` — session
+  problems in this fork always belong on *this repo's* resolved key, and a
+  guessed key silently orphans the card onto an invisible board.
 
 ## Quick reference
 
