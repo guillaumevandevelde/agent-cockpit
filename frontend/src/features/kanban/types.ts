@@ -13,6 +13,26 @@ export type WorkType = (typeof WORK_TYPES)[number];
 export const PLATFORMS = ["anthropic", "bedrock", "minimax"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
+// Work-type → persona routing. Mirrors backend/app/kanban/schemas.py
+// WORK_TYPE_PERSONA_DEFAULTS. Kept in sync by hand — there are only four
+// work_types and the mapping rarely changes; promote to a generated
+// constants file if a fifth is added.
+export const WORK_TYPE_PERSONA_DEFAULTS: Record<WorkType, string> = {
+  analysis: "analyst",
+  feature: "engineer",
+  bug: "engineer",
+  chore: "engineer",
+};
+
+export interface WorkTypeMapping {
+  id: string;
+  project_key: string;
+  work_type: WorkType;
+  persona: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface KanbanColumn {
   id: string;
   project_key: string;

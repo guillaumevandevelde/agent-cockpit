@@ -11,6 +11,7 @@ from app.kanban.db import KanbanSessionLocal
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
+    WORK_TYPES,
     ActivityEntry,
     AgentStatsResponse,
     AttachRequest,
@@ -37,6 +38,8 @@ from app.kanban.schemas import (
     ReorderRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
+    WorkTypeMappingBulk,
+    WorkTypeMappingResponse,
 )
 from app.utils.url_utils import resolve_base_url
 
@@ -104,6 +107,54 @@ async def delete_column(column_id: str):
     async with KanbanSessionLocal() as s:
         if not await service.delete_column(s, column_id):
             raise HTTPException(404, "column not found")
+        await s.commit()
+
+
+# Work-type → persona routing (per-project overrides; falls back to
+# WORK_TYPE_PERSONA_DEFAULTS for any work_type without a row).
+# See docs/cockpit/work-type-routing-analysis.md §5.5.
+
+
+@router.get("/work-type-mappings")
+async def list_work_type_mappings(project_key: str = Query(...)):
+    """Return the *complete* per-project {work_type: persona} map: stored
+    overrides merged on top of `WORK_TYPE_PERSONA_DEFAULTS`. The response
+    always contains an entry for every work_type in `WORK_TYPES`, so the UI
+    can render the form without special-casing missing rows.
+    """
+    async with KanbanSessionLocal() as s:
+        merged = await service.work_type_mapping_for_project(s, project_key)
+        return {"project_key": project_key, "mappings": merged}
+
+
+@router.post("/work-type-mappings/bulk", response_model=list[WorkTypeMappingResponse])
+async def bulk_upsert_work_type_mappings(payload: WorkTypeMappingBulk):
+    """Bulk-replace the per-project mapping. Missing work_types fall back to
+    the default — they are *not* deleted by this call. Returns the full set
+    of stored rows for the project (overrides only, not the merged view).
+    """
+    for m in payload.mappings:
+        if m.work_type not in WORK_TYPES:
+            raise HTTPException(422, f"work_type must be one of {WORK_TYPES}")
+    async with KanbanSessionLocal() as s:
+        rows = await service.bulk_replace_work_type_mappings(
+            s, project_key=payload.project_key,
+            mappings=[m.model_dump() for m in payload.mappings],
+        )
+        await s.commit()
+        return [WorkTypeMappingResponse.model_validate(r) for r in rows]
+
+
+@router.delete("/work-type-mappings/{work_type}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_work_type_mapping(work_type: str, project_key: str = Query(...)):
+    """Remove the override for a single (project_key, work_type) pair. Idempotent:
+    deleting a non-existent row returns 204 as well so the UI can call it
+    without checking first. The next `GET` will show the default again.
+    """
+    if work_type not in WORK_TYPES:
+        raise HTTPException(422, f"work_type must be one of {WORK_TYPES}")
+    async with KanbanSessionLocal() as s:
+        await service.delete_work_type_mapping(s, project_key, work_type)
         await s.commit()
 
 

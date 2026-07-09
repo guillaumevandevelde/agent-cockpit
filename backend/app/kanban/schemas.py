@@ -10,6 +10,19 @@ DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
 # WORK_TYPES. See docs/cockpit/work-type-routing-analysis.md §2A.
 WORK_TYPES = ["analysis", "feature", "bug", "chore"]
 
+# Work-type → persona routing (see docs/cockpit/work-type-routing-analysis.md §2A).
+# `analysis` always routes to the analyst persona so cards marked as pure
+# analysis go to the persona specialised in producing a plan/child-cards, while
+# `feature` / `bug` / `chore` go to the engineer persona by default. Per-project
+# overrides live in `kanban_work_type_mappings`; missing rows fall back to this
+# default map (see `get_work_type_persona` in service.py).
+WORK_TYPE_PERSONA_DEFAULTS: dict[str, str] = {
+    "analysis": "analyst",
+    "feature": "engineer",
+    "bug": "engineer",
+    "chore": "engineer",
+}
+
 
 class DeliverableResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -265,3 +278,34 @@ class AgentStatsResponse(BaseModel):
     agents: list[AgentStat]
     common_failures: list[FailureStat]
     tokens_available: bool
+
+
+# Work-type → persona routing (per-project)
+
+
+class WorkTypeMappingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_key: str
+    work_type: str
+    persona: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkTypeMappingUpdate(BaseModel):
+    """Single work_type → persona override for a project."""
+    work_type: str
+    persona: str
+
+
+class WorkTypeMappingBulk(BaseModel):
+    """Bulk replace the per-project mapping.
+
+    Any work_type from `WORK_TYPES` that's missing here is reset to the
+    default (see `WORK_TYPE_PERSONA_DEFAULTS`). To clear an override, send the
+    default persona for that work_type; there is no separate "delete" — a row
+    with the default persona is functionally identical to no row.
+    """
+    project_key: str
+    mappings: list[WorkTypeMappingUpdate]

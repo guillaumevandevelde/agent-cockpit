@@ -15,6 +15,7 @@ import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { MaxSessionsControl } from "./components/MaxSessionsControl";
 import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
 import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
+import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
@@ -32,6 +33,7 @@ export default function KanbanPage() {
   const [open, setOpen] = useState<Card | null>(null);
   const [creating, setCreating] = useState(false);
   const [editingColumns, setEditingColumns] = useState(false);
+  const [editingWorkTypeMappings, setEditingWorkTypeMappings] = useState(false);
   const draggingRef = useRef(false);
   const mutatingRef = useRef(0);
 
@@ -237,6 +239,13 @@ export default function KanbanPage() {
           <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
             Columns
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setEditingWorkTypeMappings(true)}
+          >
+            Work Types
+          </Button>
           {orphanCount > 0 && (
             <Button size="sm" variant="outline" onClick={redispatchAll}>
               Redispatch all ({orphanCount})
@@ -340,6 +349,14 @@ export default function KanbanPage() {
           projectPath={projectPath}
           columns={columns}
           onClose={() => setEditingColumns(false)}
+          onChanged={reload}
+        />
+      )}
+      {editingWorkTypeMappings && (
+        <WorkTypeMappingDialog
+          open
+          projectKey={projectKey}
+          onClose={() => setEditingWorkTypeMappings(false)}
           onChanged={reload}
         />
       )}
