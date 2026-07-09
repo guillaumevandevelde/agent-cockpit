@@ -64,7 +64,7 @@ def _phase_target_agent(card, *, project_path: str, phase: str, source_column: s
     """Persona/column for the spawned session. Analyst phase is fixed to
     'analyst'; executor phase reuses the legacy overload-resolution rules from
     `_run_card` (the pre-`_phase_*` lines 767-768 of this module), so an
-    explicit non-provider `agent_override` — e.g. "developer" — still wins over
+    explicit non-provider `agent_override` — e.g. "engineer" — still wins over
     card.agent and the column-derived fallback.
 
     `known_providers` is passed in so the agent_override short-circuit can tell
@@ -936,7 +936,7 @@ async def _run_card(
 
     # `agent_override` / `card.agent` overload two unrelated concepts:
     #   - a provider id (claude-code, mimo-code, …) → which CLI spawns the session
-    #   - a persona name (engineer, developer, …)  → which column + role prompt
+    #   - a persona name (engineer, analyst, …)  → which column + role prompt
     # Resolve them separately so a provider id is never mistaken for a column.
     known_providers = _known_provider_ids()
     provider_id = next(
@@ -1432,7 +1432,7 @@ async def dispatch_impediment_card(
     Args:
         card_id: The ID of the impediment card
         project_path: Path to the project
-        target_agent: The agent to dispatch to (analyst, developer, testing, code-review)
+        target_agent: The agent to dispatch to (analyst, engineer)
         impediment_question: The question that needs to be answered
         transport: The spawn transport to use (auto-selects based on card if None)
     

@@ -42,13 +42,14 @@ from app.utils.url_utils import resolve_base_url
 
 logger = logging.getLogger(__name__)
 
-# Fallback routing for an impediment when no target_agent is given. Mirrors the
-# former card-flow.json `impediment_agents`; the first entry is chosen.
+# Fallback routing for an impediment when no target_agent is given. Only the
+# two agents that actually exist in .claude/agents/ are listed; the first
+# entry is chosen. Vestigial roles from the old card-flow.json
+# (developer / tester / testing / code-review) are removed — see
+# docs/cockpit/work-type-routing-analysis.md §5.3.
 _IMPEDIMENT_AGENTS = {
-    "developer": ["analyst", "testing", "code-review"],
-    "tester": ["developer", "analyst"],
-    "analyst": ["developer"],
-    "code-review": ["developer"],
+    "analyst": ["engineer"],
+    "engineer": ["analyst"],
 }
 
 
@@ -715,9 +716,9 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
         # Determine target agent based on workflow rules or override
         target_agent = payload.target_agent
         if not target_agent:
-            current_agent = card.agent or "developer"
-            possible_agents = _IMPEDIMENT_AGENTS.get(current_agent, ["developer"])
-            target_agent = possible_agents[0] if possible_agents else "developer"
+            current_agent = card.agent or "engineer"
+            possible_agents = _IMPEDIMENT_AGENTS.get(current_agent, ["engineer"])
+            target_agent = possible_agents[0] if possible_agents else "engineer"
         
         try:
             res = await dispatch.dispatch_impediment_card(

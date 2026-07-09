@@ -245,8 +245,8 @@ async def release_card(card_id: str) -> dict:
 async def report_impediment(card_id: str, question: str) -> dict:
     """Report an impediment on a card. Moves it to Impediment column with a clear question.
 
-    Use this when you're stuck and need help from another agent (e.g., analyst for clarification,
-    tester for test failures, developer for code issues). The question should be specific and
+    Use this when you're stuck and need help from another agent (e.g., analyst for clarification
+    or planning, engineer for code issues or test failures). The question should be specific and
     actionable so the other agent can help you resolve the blocker.
     """
     async with KanbanSessionLocal() as s:
