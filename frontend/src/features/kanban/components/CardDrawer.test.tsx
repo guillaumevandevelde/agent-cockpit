@@ -56,7 +56,6 @@ describe("CardDrawer live activity", () => {
       <CardDrawer
         card={baseCard}
         projectPath="/proj"
-        columns={[]}
         onClose={() => {}}
         onChanged={() => {}}
       />,

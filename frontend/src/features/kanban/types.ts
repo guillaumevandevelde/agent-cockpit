@@ -10,6 +10,17 @@ export type Priority = (typeof PRIORITIES)[number];
 export const WORK_TYPES = ["analysis", "feature", "bug", "chore"] as const;
 export type WorkType = (typeof WORK_TYPES)[number];
 
+// Compact icon prefix for each work_type so the badge is scannable at a
+// glance when several cards are stacked on the board. The Record<WorkType,
+// string> type means adding a fifth work_type in WORK_TYPES is caught by the
+// type system here too.
+export const WORK_TYPE_ICONS: Record<WorkType, string> = {
+  analysis: "📊",
+  feature: "✨",
+  bug: "🐛",
+  chore: "🔧",
+};
+
 export const PLATFORMS = ["anthropic", "bedrock", "minimax"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 

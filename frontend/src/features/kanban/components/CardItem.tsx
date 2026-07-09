@@ -2,6 +2,7 @@ import { Card as UiCard } from "@/components/ui/card";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { CLICKABLE_CARD } from "@/lib/constants";
 import type { Card } from "../types";
+import { WORK_TYPES, WORK_TYPE_ICONS, type WorkType } from "../types";
 
 const PRIORITY_VARIANT: Record<string, BadgeProps["variant"]> = {
   low: "secondary",
@@ -18,6 +19,9 @@ export function CardItem({ card, onOpen }: { card: Card; onOpen: (c: Card) => vo
   const labels = card.labels ?? [];
   const scheduledAt = card.scheduled_at ?? null;
   const isPendingSchedule = isFutureSchedule(scheduledAt);
+  const workType = (card.work_type && (WORK_TYPES as readonly string[]).includes(card.work_type)
+    ? (card.work_type as WorkType)
+    : null);
 
   return (
     <UiCard
@@ -34,6 +38,11 @@ export function CardItem({ card, onOpen }: { card: Card; onOpen: (c: Card) => vo
     >
       <div className="font-medium text-sm">{card.title}</div>
       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        {workType && (
+          <Badge variant="secondary" className="text-[10px] font-normal">
+            {WORK_TYPE_ICONS[workType]} {workType}
+          </Badge>
+        )}
         {priority && (
           <Badge
             variant={PRIORITY_VARIANT[priority] ?? "outline"}

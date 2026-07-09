@@ -306,7 +306,6 @@ export default function KanbanPage() {
         <CardDrawer
           card={open}
           projectPath={projectPath}
-          columns={columns}
           onClose={() => setOpen(null)}
           onChanged={reload}
         />
@@ -314,17 +313,15 @@ export default function KanbanPage() {
       {creating && (
         <CardEditDialog
           open
-          columns={columns.map((c) => c.name)}
           defaultAgent={selectedProviderId}
           projectPath={projectPath}
           onClose={() => setCreating(false)}
-          onSubmit={async ({ title, description, column, priority, labels, work_type, agent, transport, resume_session_id, resume_project_folder, scheduled_at }) => {
+          onSubmit={async ({ title, description, priority, labels, work_type, agent, transport, resume_session_id, resume_project_folder, scheduled_at }) => {
             try {
               await kanbanApi.createCard({
                 project_key: projectKey,
                 title,
                 description,
-                column,
                 priority,
                 labels: labels.length ? labels : null,
                 work_type,

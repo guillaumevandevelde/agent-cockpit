@@ -33,7 +33,7 @@ import { useProviderContext } from "@/contexts/ProviderContext";
 import { kanbanApi } from "../api";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
-import type { Card, ActivityEntry, KanbanColumn, Gate } from "../types";
+import type { Card, ActivityEntry, Gate } from "../types";
 
 const LIVE_POLL_INTERVAL_MS = 3000;
 
@@ -105,13 +105,11 @@ function PlanTabContent({ card }: { card: Card }) {
 export function CardDrawer({
   card,
   projectPath,
-  columns,
   onClose,
   onChanged,
 }: {
   card: Card;
   projectPath: string;
-  columns: KanbanColumn[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -381,7 +379,6 @@ export function CardDrawer({
             initial={{
               title: card.title,
               description: card.description,
-              column: card.column,
               priority: card.priority,
               labels: card.labels,
               work_type: card.work_type,
@@ -390,16 +387,14 @@ export function CardDrawer({
               resume_project_folder: card.resume_project_folder,
               scheduled_at: card.scheduled_at,
             }}
-            columns={columns.map((c) => c.name)}
             defaultAgent={card.agent}
             projectPath={projectPath}
             onClose={() => setEditing(false)}
-            onSubmit={async ({ title, description, column, priority, labels, work_type, agent, transport, resume_session_id, resume_project_folder, scheduled_at }) => {
+            onSubmit={async ({ title, description, priority, labels, work_type, agent, transport, resume_session_id, resume_project_folder, scheduled_at }) => {
               try {
                 await kanbanApi.updateCard(card.id, {
                   title,
                   description,
-                  column,
                   priority,
                   labels: labels.length ? labels : null,
                   work_type,

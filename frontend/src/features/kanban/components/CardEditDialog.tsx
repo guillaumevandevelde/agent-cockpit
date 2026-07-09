@@ -48,7 +48,6 @@ function toDatetimeLocalValue(iso: string): string {
 export function CardEditDialog({
   open,
   initial,
-  columns,
   defaultAgent,
   projectPath,
   onClose,
@@ -58,7 +57,6 @@ export function CardEditDialog({
   initial?: {
     title: string;
     description: string;
-    column?: string;
     priority?: string | null;
     labels?: string[] | null;
     work_type?: string | null;
@@ -69,14 +67,12 @@ export function CardEditDialog({
     analyst_agent_id?: string | null;
     executor_agent_id?: string | null;
   };
-  columns: string[];
   defaultAgent?: string | null;
   projectPath?: string;
   onClose: () => void;
   onSubmit: (data: {
     title: string;
     description: string;
-    column: string;
     priority: string | null;
     labels: string[];
     work_type: string | null;
@@ -91,7 +87,6 @@ export function CardEditDialog({
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [column, setColumn] = useState(initial?.column ?? columns[0] ?? "Backlog");
   const [priority, setPriority] = useState<Priority>(
     (initial?.priority as Priority) ?? "none"
   );
@@ -166,6 +161,30 @@ export function CardEditDialog({
 
         <div className="space-y-4">
           <div className="space-y-2">
+            <Label htmlFor="card-work-type">Work type</Label>
+            <Select
+              value={workType || NO_WORK_TYPE}
+              onValueChange={(v) => setWorkType(v === NO_WORK_TYPE ? "" : (v as WorkType))}
+            >
+              <SelectTrigger id="card-work-type">
+                <SelectValue placeholder="(unset — dispatcher falls back)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_WORK_TYPE}>(unset)</SelectItem>
+                {WORK_TYPES.map((w) => (
+                  <SelectItem key={w} value={w}>
+                    {w}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Structured routing hint used by auto-dispatch (analysis → analyst,
+              feature/bug/chore → engineer). Free-form labels below are unaffected.
+            </p>
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="card-title">Title</Label>
             <Input
               id="card-title"
@@ -180,38 +199,20 @@ export function CardEditDialog({
             <MarkdownPreviewToggle value={description} onChange={setDescription} minHeight="140px" />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Column</Label>
-              <Select value={column} onValueChange={setColumn}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select column" />
-                </SelectTrigger>
-                <SelectContent>
-                  {columns.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Priority</Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRIORITIES.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {p}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="space-y-2">
+            <Label>Priority</Label>
+            <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select priority" />
+              </SelectTrigger>
+              <SelectContent>
+                {PRIORITIES.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {p}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-2">
@@ -429,30 +430,6 @@ export function CardEditDialog({
               </div>
             )}
           </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="card-work-type">Work type</Label>
-            <Select
-              value={workType || NO_WORK_TYPE}
-              onValueChange={(v) => setWorkType(v === NO_WORK_TYPE ? "" : (v as WorkType))}
-            >
-              <SelectTrigger id="card-work-type">
-                <SelectValue placeholder="(unset — dispatcher falls back)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_WORK_TYPE}>(unset)</SelectItem>
-                {WORK_TYPES.map((w) => (
-                  <SelectItem key={w} value={w}>
-                    {w}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Structured routing hint used by auto-dispatch (analysis → analyst,
-              feature/bug/chore → engineer). Free-form labels above are unaffected.
-            </p>
-          </div>
         </div>
 
         <DialogFooter>
@@ -465,7 +442,6 @@ export function CardEditDialog({
               onSubmit({
                 title,
                 description,
-                column,
                 priority: priority === "none" ? null : priority,
                 labels,
                 work_type: workType || null,
