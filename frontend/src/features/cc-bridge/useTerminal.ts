@@ -6,17 +6,40 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { fetchTerminalToken, buildTerminalWsUrl } from './api'
 import { isNativeCopyShortcut } from './terminalCopyShortcut'
+import { isLeaderPrefix, keyHasCommandModifier, shortcutDirection } from './leaderShortcuts'
+import type { LeaderNavigationDirection } from './types'
+
+const LEADER_TIMEOUT_MS = 2000
+const LEADER_PREFIX_INPUT = '\x00'
+
+interface TerminalShortcutOptions {
+  target?: string | null
+  onLeaderNavigate?: (sourceTarget: string, direction: LeaderNavigationDirection) => void
+  onLeaderStateChange?: (sourceTarget: string, active: boolean) => void
+}
 
 export function useTerminal(
   containerRef: React.RefObject<HTMLDivElement | null>,
   wrapperRef: React.RefObject<HTMLDivElement | null>,
+  shortcutOptions: TerminalShortcutOptions = {},
 ) {
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
+  const sourceTargetRef = useRef<string | null>(shortcutOptions.target ?? null)
+  const onLeaderNavigateRef = useRef(shortcutOptions.onLeaderNavigate)
+  const onLeaderStateChangeRef = useRef(shortcutOptions.onLeaderStateChange)
+  const leaderArmedRef = useRef(false)
+  const leaderTimeoutRef = useRef<number | null>(null)
   const [connected, setConnected] = useState(false)
   const [readOnly, setReadOnly] = useState(false)
   const readOnlyRef = useRef(false)
+
+  useEffect(() => {
+    sourceTargetRef.current = shortcutOptions.target ?? null
+    onLeaderNavigateRef.current = shortcutOptions.onLeaderNavigate
+    onLeaderStateChangeRef.current = shortcutOptions.onLeaderStateChange
+  }, [shortcutOptions.onLeaderNavigate, shortcutOptions.onLeaderStateChange, shortcutOptions.target])
 
   useEffect(() => {
     readOnlyRef.current = readOnly
@@ -24,6 +47,42 @@ export function useTerminal(
       wsRef.current.send(JSON.stringify({ type: 'mode', readOnly }))
     }
   }, [readOnly])
+
+  const notifyLeaderState = useCallback((active: boolean) => {
+    const sourceTarget = sourceTargetRef.current
+    if (!sourceTarget) return
+    onLeaderStateChangeRef.current?.(sourceTarget, active)
+  }, [])
+
+  const clearLeaderTimeout = useCallback(() => {
+    if (leaderTimeoutRef.current === null) return
+    window.clearTimeout(leaderTimeoutRef.current)
+    leaderTimeoutRef.current = null
+  }, [])
+
+  const emitLeaderPrefix = useCallback(() => {
+    termRef.current?.input(LEADER_PREFIX_INPUT)
+  }, [])
+
+  const disarmLeader = useCallback(() => {
+    if (!leaderArmedRef.current) return
+    clearLeaderTimeout()
+    leaderArmedRef.current = false
+    notifyLeaderState(false)
+  }, [clearLeaderTimeout, notifyLeaderState])
+
+  const armLeader = useCallback(() => {
+    clearLeaderTimeout()
+    leaderArmedRef.current = true
+    notifyLeaderState(true)
+    leaderTimeoutRef.current = window.setTimeout(() => {
+      if (!leaderArmedRef.current) return
+      leaderArmedRef.current = false
+      leaderTimeoutRef.current = null
+      emitLeaderPrefix()
+      notifyLeaderState(false)
+    }, LEADER_TIMEOUT_MS)
+  }, [clearLeaderTimeout, emitLeaderPrefix, notifyLeaderState])
 
   const initTerminal = useCallback(() => {
     if (termRef.current || !containerRef.current) return
@@ -36,6 +95,7 @@ export function useTerminal(
         background: '#1e1e2e',
         foreground: '#cdd6f4',
         cursor: '#f5e0dc',
+        selectionBackground: '#585b7066',
       },
     })
 
@@ -45,9 +105,52 @@ export function useTerminal(
 
     term.open(containerRef.current)
 
-    // Let the browser handle Ctrl+C/Cmd+C natively when text is selected,
-    // instead of xterm swallowing it and forwarding it to the PTY.
-    term.attachCustomKeyEventHandler((event) => !isNativeCopyShortcut(event, term.hasSelection()))
+    term.attachCustomKeyEventHandler((event) => {
+      // Let the browser handle Ctrl+C/Cmd+C natively when text is selected,
+      // instead of xterm swallowing it and forwarding it to the PTY.
+      if (isNativeCopyShortcut(event, term.hasSelection())) return false
+
+      if (event.type !== 'keydown' || event.isComposing) return true
+      if (!sourceTargetRef.current) return true
+
+      if (!leaderArmedRef.current) {
+        if (!isLeaderPrefix(event)) return true
+        event.preventDefault()
+        event.stopPropagation()
+        armLeader()
+        return false
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        disarmLeader()
+        return false
+      }
+
+      const direction = shortcutDirection(event)
+      if (direction !== null) {
+        event.preventDefault()
+        event.stopPropagation()
+        const sourceTarget = sourceTargetRef.current
+        if (!sourceTarget) return false
+        disarmLeader()
+        onLeaderNavigateRef.current?.(sourceTarget, direction)
+        return false
+      }
+
+      if (!keyHasCommandModifier(event) && event.key.toLowerCase() === 'r') {
+        event.preventDefault()
+        event.stopPropagation()
+        disarmLeader()
+        setReadOnly((current) => !current)
+        return false
+      }
+
+      disarmLeader()
+      emitLeaderPrefix()
+      return true
+    })
 
     try {
       term.loadAddon(new WebglAddon())
@@ -58,7 +161,7 @@ export function useTerminal(
     fitAddon.fit()
     termRef.current = term
     fitAddonRef.current = fitAddon
-  }, [containerRef])
+  }, [armLeader, containerRef, disarmLeader, emitLeaderPrefix])
 
   const attach = useCallback(async (target: string) => {
     if (wsRef.current) {
@@ -142,9 +245,14 @@ export function useTerminal(
       wsRef.current.close()
       wsRef.current = null
     }
+    disarmLeader()
     setConnected(false)
     termRef.current?.clear()
     termRef.current?.writeln('\x1b[90mDetached.\x1b[0m')
+  }, [disarmLeader])
+
+  const focusTerminal = useCallback(() => {
+    termRef.current?.focus()
   }, [])
 
   // Observe the stable wrapper element (not the xterm container) to avoid feedback loops
@@ -174,13 +282,18 @@ export function useTerminal(
 
   useEffect(() => {
     return () => {
+      clearLeaderTimeout()
+      if (leaderArmedRef.current) {
+        leaderArmedRef.current = false
+        notifyLeaderState(false)
+      }
       wsRef.current?.close()
       wsRef.current = null
       termRef.current?.dispose()
       termRef.current = null
       fitAddonRef.current = null
     }
-  }, [])
+  }, [clearLeaderTimeout, notifyLeaderState])
 
   const sendText = useCallback((text: string) => {
     if (!readOnlyRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
@@ -188,5 +301,5 @@ export function useTerminal(
     }
   }, [])
 
-  return { connected, readOnly, setReadOnly, attach, detach, sendText }
+  return { connected, readOnly, setReadOnly, attach, detach, sendText, focusTerminal }
 }
