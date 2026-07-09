@@ -1,12 +1,24 @@
 # ⚠️ Fork: Claude Cockpit — lees dit eerst
 
-Dit is een **fork** van claude-deck, hernoemd naar **Claude Cockpit**. We bouwen er een
-**scheduled-messages** feature bovenop (timer/cron → injectie in CC-sessies via tmux).
+Dit is een **fork** van claude-deck, hernoemd naar **Claude Cockpit**. De oorspronkelijke
+**scheduled-messages** feature (timer/cron → injectie in CC-sessies via tmux) is
+**vrijwel af** — Tasks 1–11 van `docs/cockpit/fase-2-plan.md` zijn geïmplementeerd
+(backend-tests groen, frontend build clean), alleen **Task 12 (runtime e2e)** en de
+**fase-1 runtime-checklist** (`fase-1-validation.md`) zijn mensenwerk.
+
+Het zwaartepunt van de **actieve** ontwikkeling ligt nu bij de kanban-/multi-agent-laag:
+
+- **Kanban auto-dispatch** — de dispatcher claimt + spawnt Todo-kaarten
+  (`docs/cockpit/kanban-dispatch-spec.md`, follow-ups in `kanban-followups.md`).
+- **Multi-agent kanban** — analyst-fase splitst parent-kaarten op in kind-kaarten met
+  afhankelijkheids-DAG en plan-attachment; executors wachten op hun deps
+  (`docs/cockpit/multi-agent-kanban.md`).
+- **Agent Mail** — cross-session berichten tussen willekeurige sessies met durable
+  repo-identiteit en inspectable mailbox (`docs/cockpit/agent-mail-spec.md`).
 
 - **Volledige oriëntatie + huidige taak:** `docs/cockpit/00-orientation.md`
-- **NU bezig — FASE 1 VALIDATIE:** `docs/cockpit/fase-1-validation.md`
-  (bevestigen dat claude-deck's CC Bridge werkt onder WSL; **bouw nog niets van fase 2**).
-- **Fase 2-ontwerp (na validatie):** `docs/cockpit/fase-2-spec.md`
+- **Scheduled-messages plan (vrijwel af):** `docs/cockpit/fase-2-plan.md`
+- **Huidige open pool:** `docs/cockpit/kanban-followups.md`
 - **Omgeving:** WSL Ubuntu, Docker (`docker compose up -d` → :8000), tmux, claude CLI.
 
 Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur etc.).
