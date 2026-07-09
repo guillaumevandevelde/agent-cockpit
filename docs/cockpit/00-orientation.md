@@ -80,13 +80,29 @@ docker compose up -d        # UI op http://localhost:8000
 
 ## Documenten
 
+Er zijn **drie parallelle plan-/spec-bomen** in `docs/`. De regel welke leidend is:
+
+| Boom | Doel | Leidend? |
+|---|---|---|
+| `docs/cockpit/` | Langlevende fork-architectuur, ontwerp, beslissingen, follow-ups. Topic-naam, niet gedateerd. | **Ja — bron van waarheid voor "hoe werkt de fork vandaag".** |
+| `docs/superpowers/{plans,specs}/` | Werkoutput van de `superpowers:writing-plans` / `superpowers:brainstorming`-skills: één paar `<datum>-<naam>-design.md` + `<datum>-<naam>.md` per taak. | Nee — taak-specifiek, wordt verplaatst naar `docs/cockpit/` zodra het werk landt. |
+| `docs/plans/` | Pre-fork claude-deck plans (VitePress-site). Geen kanban-inhoud. | **Nee — legacy, niet meer gebruiken voor nieuw werk.** |
+
+Bij overlap tussen cockpit en superpowers (bijv. kanban, scheduled-messages, agent-mail):
+**lees `docs/cockpit/` eerst**, en gebruik `docs/superpowers/` alleen om de TDD-stappen
+of ontwerp-rationale van één specifieke taak te volgen. Een superpowers-plan dat in
+`docs/cockpit/` is samengevat is geen "tweede waarheid" — het cockpit-document is
+canoniek en het plan is de uitvoering ervan.
+
+### Documenten-overzicht
+
 - **`fase-1-validation.md`** — de runtime-checklist die we nog moeten afronden (sessie-discovery + send-keys + spawn op WSL bevestigen).
-- **`fase-2-plan.md`** — 12 TDD-tasks voor de scheduled-messages feature; Tasks 1–11 geïmplementeerd, Task 12 = runtime e2e.
+- **`fase-2-plan.md`** — 12 TDD-tasks voor de scheduled-messages feature; Tasks 1–11 geïmplementeerd, Task 12 = runtime e2e. Leidend voor scheduled-messages; superpowers-tegenhanger: `docs/superpowers/specs/2026-06-13-scheduled-session-resume-design.md` + `…/plans/2026-06-14-scheduled-session-resume.md`.
 - **`fase-2-spec.md`** — het volledige ontwerp van de scheduled-messages feature.
-- **`kanban-dispatch-spec.md`** — auto-dispatcher: claim-before-spawn, worktree-isolatie, opt-in per project.
-- **`kanban-spec.md` + `kanban-plan.md`** — v1-bord (passief) en het plan waaruit het is voortgekomen.
-- **`multi-agent-kanban.md`** — analyst-fase + plan-attachment + kind-kaart-dependencies (smoke-test cookbook).
-- **`agent-mail-spec.md`** — Agent Mail: herkomst uit upstream, fork-aanpassingen, datamodel.
+- **`kanban-spec.md` + `kanban-plan.md`** — v1-bord (passief) en het plan waaruit het is voortgekomen. Geen recente superpowers-tegenhanger (v1 is gerealiseerd).
+- **`kanban-dispatch-spec.md`** — auto-dispatcher: claim-before-spawn, worktree-isolatie, opt-in per project. Leidend voor de dispatch-laag. Gerelateerd: `…/superpowers/specs/2026-06-15-kanban-agents-design.md` (persona + shipmode) + `…/superpowers/specs/2026-06-29-kanban-dispatch-transport-design.md` (transport-seam).
+- **`multi-agent-kanban.md`** — analyst-fase + plan-attachment + kind-kaart-dependencies (smoke-test cookbook). Leidend voor de multi-agent flow; gerelateerd: `…/superpowers/specs/2026-07-08-multi-agent-kanban-design.md` + `…/superpowers/plans/2026-07-08-multi-agent-kanban.md`.
+- **`agent-mail-spec.md`** — Agent Mail: herkomst uit upstream, fork-aanpassingen, datamodel. Leidend; gerelateerd: `…/superpowers/plans/2026-07-08-agent-mail-implementation.md`.
 - **`kanban-followups.md`** — de huidige open pool (work-type routing, sync-HLC, upstream-keuzes).
 - Plan-/projectpagina in de kennisvault (Windows-zijde, los van deze repo):
   `C:\dev\obsidian\Personal\Projects\Claude Cockpit\claude-cockpit.md`.

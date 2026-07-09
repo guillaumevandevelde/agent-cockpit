@@ -6,6 +6,11 @@
 persona-as-file pattern (`docs/superpowers/specs/2026-06-15-kanban-agents-design.md`),
 column-platform routing (`66df2d6` — "let a column pick which subscription its cards spawn against").
 
+> **Bron van waarheid:** `docs/cockpit/multi-agent-kanban.md` is leidend voor de
+> multi-agent flow (analyst → kind-kaarten + dependency-DAG + plan-attachment); dit
+> superpowers-document documenteert de ontwerp-rationale. Zie
+> `docs/cockpit/00-orientation.md` → *Documenten* voor de drie-bomen-regel.
+
 ## Problem
 
 The kanban board today dispatches a single Claude session per card. For cards that need

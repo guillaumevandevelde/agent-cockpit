@@ -4,6 +4,10 @@
 **Status:** Approved (design); ready for writing-plans
 **Builds on:** `docs/cockpit/kanban-dispatch-spec.md` (auto-dispatch), `backend/app/kanban/dispatch.py`
 
+> **Bron van waarheid:** `docs/cockpit/kanban-dispatch-spec.md` blijft leidend voor de
+> dispatch-laag; dit superpowers-document voegt persona + shipmode toe. Zie
+> `docs/cockpit/00-orientation.md` → *Documenten* voor de drie-bomen-regel.
+
 ## Problem
 
 The auto-dispatcher already claims an unclaimed **Todo** card, moves it to **Doing**, and
