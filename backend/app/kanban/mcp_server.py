@@ -99,20 +99,51 @@ async def get_card(card_id: str) -> dict:
 
 @mcp.tool()
 async def create_card(project: str, title: str, description: str = "",
-                      column: str = "Backlog") -> dict:
+                      column: str = "Backlog",
+                      work_type: str | None = None,
+                      agent: str | None = None) -> dict:
     """Create a new card (agents may decompose work into subtask cards).
 
     `project` must be the exact project key — use `resolve_project_key` first
     if you're not certain of it. A mistyped or guessed key won't error; it
     silently creates a new, orphaned bucket that auto-dispatch never sees.
+
+    `work_type` (analysis | feature | bug | chore) and `agent` are optional
+    routing hints. When `work_type` is set and `agent` is not, the
+    work_type → persona mapping auto-fills `agent` (mirrors the REST
+    create_card path post-commit-80e139e). Explicit `agent` wins, same as the
+    REST contract.
     """
     async with KanbanSessionLocal() as s:
+        # Auto-fill `agent` from the work_type mapping so MCP-created cards
+        # don't recreate the regression from kanban card 9cf106e7 ("Card with
+        # analysis work type got picked up by an engineer"): without this, a
+        # card created via MCP with work_type='analysis' landed with
+        # agent=None and the dispatcher routed it to the hardcoded 'engineer'
+        # fallback. See service.resolve_create_agent and
+        # docs/cockpit/work-type-routing-analysis.md §2B.
+        resolved_agent = await service.resolve_create_agent(
+            s, project, work_type=work_type, explicit_agent=agent,
+        )
+        # Note the asymmetry: `work_type` is the raw caller input (None if
+        # the caller didn't set it), while `agent` is the *resolved* value
+        # (possibly derived from work_type via resolve_create_agent, not the
+        # caller's explicit input). This is the same pattern the REST
+        # create_card path uses (router.py:204) — see the
+        # `resolve_create_agent` docstring for the priority order. The
+        # op-log stores the resolved agent so `rematerialize()` replay
+        # reproduces the same routing decision — the user's explicit `agent`
+        # input alone wouldn't, since the explicit-vs-derived distinction
+        # is lost once the create op is folded into the materialized row.
         cid = await apply_operation(s, op_type="create", entity_type="card",
             project_key=project, entity_id=None,
-            payload={"title": title, "description": description, "column": column})
+            payload={"title": title, "description": description,
+                     "column": column, "work_type": work_type,
+                     "agent": resolved_agent})
         await s.commit()
         card = await service.get_card(s, cid)
-        logger.info("create_card: %s in %s (%s)", cid, project, column)
+        logger.info("create_card: %s in %s (%s, work_type=%s, agent=%s)",
+                    cid, project, column, work_type, resolved_agent)
         return _card_dict(card)
 
 

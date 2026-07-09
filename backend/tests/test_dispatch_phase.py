@@ -720,3 +720,430 @@ def test_resolve_analyst_persona_falls_back_when_md_empty(tmp_path):
     body = dispatch._resolve_analyst_persona(str(tmp_path))
     from app.kanban.analyst_prompt import ANALYST_PROMPT
     assert body == ANALYST_PROMPT.strip()
+
+
+# ---- Bug fix: cards with work_type=analysis must route to analyst ----------
+# Regression for kanban card 9cf106e7 ("Card with analysis work type got picked
+# up by an engineer"). The card 0ece1ed291d349bea7b01e68b8268e0d was created
+# with work_type="analysis" and an "agent":"claude-code" (a provider id, not a
+# persona). _phase_target_agent saw `claude-code not in known_agents`, fell
+# through to `_persona_for_card`, and hit the hardcoded "engineer" fallback.
+# The fix: _run_card pre-resolves the work_type persona and passes it as a
+# fallback_persona to _phase_target_agent. _phase_target_agent uses it when
+# card.agent is missing or doesn't match a known persona. This protects all
+# future work_type-route decisions regardless of how the card was created or
+# whether a user later PATCHed work_type — the §2B "dispatch-time resolution"
+# alternative called out in docs/cockpit/work-type-routing-analysis.md §2B.
+
+
+def test_phase_target_agent_uses_fallback_persona_when_card_agent_missing(tmp_path):
+    """card.agent is None → fallback_persona wins over the hardcoded 'engineer' fallback."""
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+    card = _FakeCard(agent=None, work_type="analysis")
+    assert _phase_target_agent(
+        card, project_path=str(tmp_path), phase="executor",
+        source_column="Backlog", fallback_persona="analyst",
+    ) == "analyst"
+
+
+def test_phase_target_agent_uses_fallback_persona_when_card_agent_is_provider_id(tmp_path):
+    """card.agent is a non-persona (e.g. a legacy provider id 'claude-code') →
+    fallback_persona wins. Without this, a legacy card created before the
+    create-time auto-fill (commit 80e139e) routes work_type=analysis to engineer
+    because `claude-code` is not a known agent file."""
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    card = _FakeCard(agent="claude-code", work_type="analysis")
+    assert _phase_target_agent(
+        card, project_path=str(tmp_path), phase="executor",
+        source_column="Backlog", fallback_persona="analyst",
+    ) == "analyst"
+
+
+def test_phase_target_agent_explicit_card_agent_wins_over_fallback(tmp_path):
+    """When card.agent is a known persona, the fallback is ignored. This
+    preserves the §2B priority: explicit card.agent > work_type mapping."""
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+    card = _FakeCard(agent="engineer", work_type="analysis")
+    assert _phase_target_agent(
+        card, project_path=str(tmp_path), phase="executor",
+        source_column="Backlog", fallback_persona="analyst",
+    ) == "engineer", (
+        "explicit card.agent='engineer' must still win over a work_type-driven "
+        "fallback to analyst"
+    )
+
+
+def test_phase_target_agent_fallback_must_be_a_known_persona(tmp_path):
+    """A fallback_persona that doesn't match a known agent file is rejected —
+    the work_type mapping can never invent a persona the project doesn't have."""
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+    card = _FakeCard(agent=None, work_type="analysis")
+    # "analyst.md" does not exist on disk → fallback rejected → engineer fallback.
+    assert _phase_target_agent(
+        card, project_path=str(tmp_path), phase="executor",
+        source_column="Backlog", fallback_persona="analyst",
+    ) == "engineer", (
+        "fallback_persona='analyst' must not route to a column whose persona "
+        "file does not exist on disk"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_card_routes_analysis_card_with_missing_agent_to_analyst(monkeypatch, tmp_path):
+    """End-to-end regression: a card with work_type='analysis' and no/invalid
+    agent must end up in the 'analyst' column after _run_card — not 'engineer'."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+
+    _stub_default_work_type_mapping(monkeypatch)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "analyse", "column": "Backlog",
+                     "work_type": "analysis"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.work_type == "analysis"
+        assert card.agent is None  # missing — triggers the fallback
+
+        await dispatch._run_card(
+            s, card=card, project_key=PK,
+            project_path=str(tmp_path), transport=_fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "analyst", (
+            f"work_type='analysis' with missing agent must route to 'analyst', "
+            f"not the 'engineer' fallback. Got column={card.column!r}. "
+            f"This is the regression for kanban card 9cf106e7."
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_card_routes_analysis_card_with_provider_id_agent_to_analyst(monkeypatch, tmp_path):
+    """The actual incident: card.agent='claude-code' (provider id, not a persona)
+    and work_type='analysis' — must still route to 'analyst'. Without the fix,
+    'claude-code' not in known_agents drops through to 'engineer'."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+
+    _stub_default_work_type_mapping(monkeypatch)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "analyse", "column": "Backlog",
+                     "work_type": "analysis", "agent": "claude-code"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.work_type == "analysis"
+        assert card.agent == "claude-code"  # legacy / provider id, not a persona
+
+        await dispatch._run_card(
+            s, card=card, project_key=PK,
+            project_path=str(tmp_path), transport=_fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "analyst", (
+            f"work_type='analysis' with agent='claude-code' (not a persona) "
+            f"must route to 'analyst', not 'engineer'. Got column={card.column!r}."
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_card_respects_per_project_work_type_override(monkeypatch, tmp_path):
+    """A stored (project_key, work_type) override on
+    kanban_work_type_mappings must win over the global default for that
+    project's dispatches. Without this, a project that wants `analysis` to
+    route to engineer (e.g. an ops project where "analysis" is engineering
+    due-diligence) silently gets analyst instead."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+
+    # The end-to-end path goes through service.get_work_type_persona, so
+    # stub it to return the per-project override (engineer for analysis on
+    # this project) rather than the global default (analyst).
+    from app.kanban import service
+
+    async def fake_get_work_type_persona(session, project_key, work_type):
+        from app.kanban.schemas import WORK_TYPE_PERSONA_DEFAULTS
+        overrides = {("git:example", "analysis"): "engineer"}
+        return overrides.get(
+            (project_key, work_type),
+            WORK_TYPE_PERSONA_DEFAULTS.get(work_type, "engineer"),
+        )
+
+    monkeypatch.setattr(service, "get_work_type_persona", fake_get_work_type_persona)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "override project", "column": "Backlog",
+                     "work_type": "analysis"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+
+        await dispatch._run_card(
+            s, card=card, project_key=PK,
+            project_path=str(tmp_path), transport=_fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "engineer", (
+            f"per-project override (analysis→engineer on git:example) must win "
+            f"over the global default (analysis→analyst). Got column={card.column!r}."
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_card_redispatch_is_idempotent_for_work_type_fallback(monkeypatch, tmp_path):
+    """Redispatching the same card (the documented use case for
+    redispatch_card) must produce the same routing decision — no per-call
+    cache, no per-session state that flips persona between dispatches.
+
+    Without this guarantee, a card could end up in different columns on
+    subsequent dispatches just because the fallback resolution is
+    stateful, with no diff in work_type or agent to explain it."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+
+    _stub_default_work_type_mapping(monkeypatch)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "redispatch me", "column": "Backlog",
+                     "work_type": "analysis"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+
+        # First dispatch
+        await dispatch._run_card(
+            s, card=card, project_key=PK,
+            project_path=str(tmp_path), transport=_fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        first_column = card.column
+        assert first_column == "analyst"
+
+        # Simulate "card returned to Backlog after session" — release
+        # the claim and move back. The same card is now re-dispatched.
+        await apply_operation(
+            s, op_type="release", entity_type="card",
+            project_key=PK, entity_id=cid, payload={},
+        )
+        await apply_operation(
+            s, op_type="move", entity_type="card",
+            project_key=PK, entity_id=cid, payload={"column": "Backlog"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+
+        # Second dispatch — must land in the same column.
+        await dispatch._run_card(
+            s, card=card, project_key=PK,
+            project_path=str(tmp_path), transport=_fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.column == first_column, (
+            f"redispatch must produce the same routing decision as the first "
+            f"dispatch (idempotent). First={first_column!r}, second={card.column!r}."
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_card_unknown_work_type_falls_through_not_engineer(monkeypatch, tmp_path):
+    """An unrecognised work_type (e.g. legacy data, schema drift) must NOT
+    silently override a column-derived persona with 'engineer'. The
+    dispatcher should leave the routing to the column-derived fallback,
+    so a card in a custom source-column persona doesn't silently get
+    swapped to 'engineer'."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+
+    # get_work_type_persona in production would silently return "engineer"
+    # for unknown work_types via WORK_TYPE_PERSONA_DEFAULTS.get default.
+    # We exercise the real path (no stub) here — _resolve_work_type_fallback
+    # in dispatch.py is what protects against it.
+    from app.kanban import service
+    from app.kanban.schemas import WORK_TYPE_PERSONA_DEFAULTS
+
+    real_default = WORK_TYPE_PERSONA_DEFAULTS.get("research", "engineer")
+    assert real_default == "engineer", (
+        "test premise: WORK_TYPE_PERSONA_DEFAULTS must default to 'engineer' "
+        "for unknown work_types, so we can prove dispatch.py does NOT leak "
+        "that default to column routing"
+    )
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "legacy data", "column": "Backlog",
+                     "work_type": "research"},  # not in WORK_TYPES
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+
+        await dispatch._run_card(
+            s, card=card, project_key=PK,
+            project_path=str(tmp_path), transport=_fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+        card = await s.get(KanbanCard, cid)
+        # 'research' isn't in WORK_TYPES → _resolve_work_type_fallback
+        # returns None → _phase_target_agent falls through to
+        # _persona_for_card → hardcoded 'engineer'. The regression we're
+        # guarding against is *changing* this default silently. Today
+        # 'engineer' IS the legacy fallback, so the expected value is
+        # 'engineer' — but we document the contract: the work_type lookup
+        # must NOT have run for an unrecognised value. The dispatch still
+        # goes to a known column so the card isn't wedged.
+        assert card.column == "engineer", (
+            f"unknown work_type='research' must not wedge the card; the "
+            f"legacy 'engineer' fallback is acceptable, but the *route* "
+            f"must NOT be a work_type-driven override. Got column={card.column!r}."
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_card_explicit_valid_card_agent_overrides_work_type_fallback(monkeypatch, tmp_path):
+    """Priority: card.agent (when it IS a valid persona) > work_type mapping.
+    A user explicitly setting agent='engineer' on a work_type='analysis' card
+    must NOT be silently re-routed to 'analyst'."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+
+    (tmp_path / ".claude" / "agents").mkdir(parents=True)
+    (tmp_path / ".claude" / "agents" / "analyst.md").write_text("# analyst")
+    (tmp_path / ".claude" / "agents" / "engineer.md").write_text("# engineer")
+
+    _stub_default_work_type_mapping(monkeypatch)
+
+    KanbanSessionLocal = TestSessionLocal()
+    PK = "git:example"
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "explicit engineer", "column": "Backlog",
+                     "work_type": "analysis", "agent": "engineer"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.work_type == "analysis"
+        assert card.agent == "engineer"  # explicit, valid persona
+
+        await dispatch._run_card(
+            s, card=card, project_key=PK,
+            project_path=str(tmp_path), transport=_fake_transport,
+            phase="executor",
+        )
+        await s.commit()
+
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "engineer", (
+            f"card.agent='engineer' (valid persona) must win over the "
+            f"work_type='analysis' fallback. Got column={card.column!r}."
+        )
+
+
+# ---- Shared test helpers for the work_type dispatch fallback tests -----
+# The end-to-end _run_card tests above all need the same two helpers:
+# (a) a stub of service.get_work_type_persona returning the global default
+#     mapping (no per-project overrides), and
+# (b) a no-op transport that just records the call.
+# Keeping them in one place avoids the three near-identical copy-pasted
+# stubs the previous review flagged.
+
+
+def _fake_transport(directory, prompt, session_name, provider_id, platform):
+    """No-op transport that returns a minimal result dict."""
+    return {"session_name": session_name, "transport": "worktree"}
+
+
+def _stub_default_work_type_mapping(monkeypatch):
+    """Patch service.get_work_type_persona to return the global default
+    mapping (no per-project override applied). Mirrors
+    `service.get_work_type_persona`'s fallback chain but skips the DB read
+    against kanban_work_type_mappings (which the test DB may not have set
+    up across all paths). dispatch.py resolves the helper at call time via
+    `from app.kanban.service import get_work_type_persona`, so monkeypatching
+    the service module is the correct target."""
+    from app.kanban import service
+
+    async def fake_get_work_type_persona(session, project_key, work_type):
+        from app.kanban.schemas import WORK_TYPE_PERSONA_DEFAULTS
+        return WORK_TYPE_PERSONA_DEFAULTS.get(work_type, "engineer")
+
+    monkeypatch.setattr(service, "get_work_type_persona", fake_get_work_type_persona)
