@@ -88,3 +88,16 @@ notifications, `tmux_pane` plumbing, cascade-delete, flaky-test fixes, most rece
 `frontend/src/hooks/useAttentionNotifications.ts`) reads live off the Presence websocket —
 removing it would break that feature with no replacement. No code or `CLAUDE.md` change
 needed; `CLAUDE.md` already correctly lists Presence as a current feature/route.
+
+## Upstream removed Docker support — deliberately NOT adopted (2026-07-09)
+
+Decision: **keep Docker as Cockpit's primary/recommended flow.** See the trade-off in
+`upstream-docker-removal-decision.md`. Upstream's `2e1ebea`/`91401f7` remove Docker support
+on `upstream/master`, but (same pattern as the Presence decision above) that history
+diverged from ours after the fork point (`42429f3`) — not a cleanup we missed. Docker is
+actively used on three independent, actively-maintained tracks in this fork: `README.md`'s
+"Quick Start with Docker" onboarding path, the Sandcastle feature's Docker sandbox provider
+(with recent security-hardening commits), and the scheduled-messages fase-2 environment
+("Optie A (gekozen): Docker" in `docs/cockpit/00-orientation.md`). Removing it would break
+all three with no replacement. No code or `CLAUDE.md`/`README.md` change needed — both
+already correctly describe Docker as the current primary flow.
