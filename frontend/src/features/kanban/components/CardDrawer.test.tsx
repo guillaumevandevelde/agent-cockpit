@@ -80,3 +80,47 @@ describe("CardDrawer live activity", () => {
     await waitFor(() => expect(screen.getByText(/second/)).toBeTruthy());
   }, 8000);
 });
+
+describe("CardDrawer edit dialog round-trip", () => {
+  it("preserves analyst_agent_id and executor_agent_id when editing a multi-agent card", async () => {
+    const updateCardMock = kanbanApi.updateCard as ReturnType<typeof vi.fn>;
+    updateCardMock.mockResolvedValue(baseCard);
+
+    const splitCard: Card = {
+      ...baseCard,
+      analyst_agent_id: "claude-code",
+      executor_agent_id: "open-code",
+    };
+
+    render(
+      <CardDrawer
+        card={splitCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Open the Edit dialog.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    });
+
+    // The dialog should pre-select the existing analyst/executor split. We
+    // don't assert the underlying <Select> DOM state directly because Radix's
+    // Select renders the value via portal; instead, the strongest contract is
+    // that the update payload preserves those fields when the user submits
+    // without touching them.
+    const updateButton = await screen.findByRole("button", { name: "Update" });
+    await act(async () => {
+      fireEvent.click(updateButton);
+    });
+
+    await waitFor(() => expect(updateCardMock).toHaveBeenCalled());
+    const [, body] = updateCardMock.mock.calls[0];
+    expect(body).toMatchObject({
+      analyst_agent_id: "claude-code",
+      executor_agent_id: "open-code",
+    });
+  });
+});
