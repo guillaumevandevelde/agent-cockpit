@@ -161,3 +161,32 @@ async def test_move_card_to_other_columns_does_not_require_summary():
     assert moved["column"] == "Doing"
     moved = await m.move_card(cid, "To Resume")
     assert moved["column"] == "To Resume"
+
+
+# --- resolve_project_key: MCP-only path to the real board key, so agents ---
+# --- without shell/HTTP access don't have to guess a project string. -------
+
+@pytest.mark.asyncio
+async def test_resolve_project_key_returns_git_key(monkeypatch):
+    monkeypatch.setattr(
+        m, "_resolve_project_key",
+        lambda path: "git:github.com/u/repo",
+    )
+    result = await m.resolve_project_key("/some/path")
+    assert result == {"project_key": "git:github.com/u/repo"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_key_matches_what_create_card_should_use(monkeypatch):
+    """The key resolve_project_key returns is exactly what a subsequent
+    create_card/list_cards call must use as `project` — proves the new tool
+    actually closes the fragmentation gap instead of just returning a key
+    the rest of the API ignores."""
+    monkeypatch.setattr(
+        m, "_resolve_project_key",
+        lambda path: "git:github.com/u/repo",
+    )
+    resolved = await m.resolve_project_key("/some/path")
+    cid = (await m.create_card(resolved["project_key"], "t", ""))["id"]
+    listed = await m.list_cards(resolved["project_key"])
+    assert any(c["id"] == cid for c in listed)

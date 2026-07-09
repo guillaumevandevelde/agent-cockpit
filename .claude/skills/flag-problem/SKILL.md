@@ -48,15 +48,18 @@ by hand. A card filed under any other string (a guessed slug, a display name,
 a different-cased string) is orphaned: invisible from the real board, and it
 makes future dedupe checks against it silently miss.
 
-Resolve it for real, don't guess:
+Resolve it for real, don't guess. If the `cockpit-kanban` MCP server is
+available, call its `resolve_project_key` tool with this repo's working
+directory (e.g. `git rev-parse --show-toplevel`) — this works even for
+MCP-only agents with no shell/HTTP access. Otherwise, with shell access:
 
 ```bash
 curl -s "http://localhost:8000/api/v1/kanban/project-key?project_path=$(git rev-parse --show-toplevel)"
 ```
 
-This returns `{"project_key": "git:host/owner/repo"}` (or `slug:<name>` if
-the repo has no remote). **Use that exact string** as `project` in every
-`list_cards`/`create_card` call below. If you're already inside a
+Either way you get back `{"project_key": "git:host/owner/repo"}` (or
+`slug:<name>` if the repo has no remote). **Use that exact string** as
+`project` in every `list_cards`/`create_card` call below. If you're already inside a
 kanban-dispatched session, this is the same key your own card lives under —
 you can also confirm by finding your own card:
 `list_cards(project=<resolved key>)` and matching `claimed_by` against your

@@ -90,12 +90,13 @@ file and confirm the signature is genuine before filing.
 
 Use `mcp__cockpit-kanban__create_card`:
 
-- **project**: resolve it first, don't guess — `curl -s
-  "http://localhost:8000/api/v1/kanban/project-key?project_path=$(git rev-parse --show-toplevel)"`.
-  The board is keyed by a free-form string with no validation, so a guessed
-  or hand-typed key (e.g. a display name or a different casing) silently
-  creates an invisible parallel board — see `flag-problem`'s Step 1 for the
-  incident that surfaced this.
+- **project**: resolve it first, don't guess — call the `cockpit-kanban`
+  MCP server's `resolve_project_key` tool (works without shell access), or
+  `curl -s "http://localhost:8000/api/v1/kanban/project-key?project_path=$(git rev-parse --show-toplevel)"`
+  if you only have shell access. The board is keyed by a free-form string
+  with no validation, so a guessed or hand-typed key (e.g. a display name or
+  a different casing) silently creates an invisible parallel board — see
+  `flag-problem`'s Step 1 for the incident that surfaced this.
 - **column**: `Backlog`
 - **title**: `[session-issue] <one-line summary>` — e.g.
   `[session-issue] Card abc-123 stuck in analyst 6h, tmux dead`
