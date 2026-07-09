@@ -166,6 +166,42 @@ Pick option 2 if a scheduled/cron-driven agent will run this soon (no human
 to read comments). Pick option 1 if a human triages the runs. The two can
 coexist; the breadcrumb is the goal, the mechanism is interchangeable.
 
+## Step 7 — schedule the next run (chain-of-one-shots)
+
+**Only do this step if the host card that opened you has a "Step 7 — schedule
+the next run" instruction in its description.** The recurring-cadence proposal
+(`docs/cockpit/recurring-cadence-proposal.md`) attaches this prompt to its
+weekly trigger cards; if your card doesn't have it, this step does not apply
+to you (a human or a one-off scheduled-message opened you).
+
+When it does apply, the **last** action before you move your host card to
+Done is to create the **successor** card that will open next week's run —
+otherwise the chain dies and the next week has to be re-seeded by hand.
+
+1. Resolve the project key via Step 1 — never guess (see Common mistakes).
+2. Compute `next_scheduled_at` = next Monday 09:00 in the project's default
+   timezone (`Europe/Brussels`), expressed as an ISO-8601 string with offset.
+   Compute from "now + 7 days, then snap forward to the next Monday 09:00"
+   so the chain self-corrects after a missed run rather than drifting
+   forward by exactly 7 days.
+3. Call `create_card` (or REST `POST /api/v1/kanban/cards`) with the same
+   `parent_card_id` as your host card, the same `project`, `work_type`,
+   `agent`, and `labels`, and `scheduled_at = next_scheduled_at`. **Always
+   include `parent_card_id`** — without it, the successor is an orphan
+   with no link back to the cadence proposal and the audit trail in the
+   kanban activity feed is broken.
+4. The successor's `description` is a verbatim copy of the host card's
+   description (which already includes the "Step 7 — schedule the next run"
+   instruction). One typo and the chain dies — copy carefully, or build the
+   description from a known-good template.
+5. Do this even if your run filed zero Backlog cards (zero-finding is
+   legitimate per Step 3) — a dead chain is worse than a no-op run.
+
+The chain ends when a human deletes the host card (or pushes its
+`scheduled_at` past the successor's `scheduled_at` and then deletes both).
+A per-card `enabled` field does not exist on `KanbanCard` — pause by
+removing or far-futuring the card; do not search for `enabled=false`.
+
 ## Common mistakes
 
 | Excuse | Why it's wrong |
@@ -184,8 +220,10 @@ coexist; the breadcrumb is the goal, the mechanism is interchangeable.
 Pull sources  →  filter for actionable  →  dedupe vs Backlog+Impediment
               →  file 1–3 Backlog cards (per template)
               →  record the run (comment or .claude/state/research-last-run.json)
+              →  (Step 7 only if the host card asks) create the successor card
 ```
 
 Acceptance gate for the run: at least one source pulled, filter pass done,
-dedupe checked, decision recorded (cards filed OR explicit no-op). Anything
-less is a half-run — restart from Step 2.
+dedupe checked, decision recorded (cards filed OR explicit no-op), and —
+if the host card invoked Step 7 — successor card created with the right
+`parent_card_id`. Anything less is a half-run — restart from Step 2.
