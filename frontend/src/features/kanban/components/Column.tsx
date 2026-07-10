@@ -1,6 +1,12 @@
 import { useState } from "react";
 import type { Card, Column as Col, KanbanColumn } from "../types";
+import type { ReadyState } from "./ReadyStateBadge";
 import { CardItem } from "./CardItem";
+
+export interface CardMeta {
+  readyState: ReadyState;
+  blockerTitles: string[];
+}
 
 export function Column({
   column,
@@ -10,6 +16,7 @@ export function Column({
   onDropCardAt,
   onDragStartColumn,
   onDropColumn,
+  cardMeta,
 }: {
   column: Col;
   kanbanColumn?: KanbanColumn;
@@ -18,6 +25,7 @@ export function Column({
   onDropCardAt: (cardId: string, column: Col, index: number) => void;
   onDragStartColumn?: (columnId: string) => void;
   onDropColumn?: (targetColumnId: string) => void;
+  cardMeta?: Map<string, CardMeta>;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -66,22 +74,30 @@ export function Column({
         {column} <span className="ml-1">({cards.length})</span>
       </div>
       <div className="overflow-y-auto flex-1 min-h-0">
-        {cards.map((c, i) => (
-          <div
-            key={c.id}
-            draggable
-            onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
-            onDragOver={(e) => {
-              e.preventDefault();
-              const rect = e.currentTarget.getBoundingClientRect();
-              const after = e.clientY - rect.top > rect.height / 2;
-              setDropIndex(after ? i + 1 : i);
-            }}
-          >
-            {dropIndex === i && <div className="h-0.5 bg-primary rounded mb-2" />}
-            <CardItem card={c} onOpen={onOpen} />
-          </div>
-        ))}
+        {cards.map((c, i) => {
+          const meta = cardMeta?.get(c.id);
+          return (
+            <div
+              key={c.id}
+              draggable
+              onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
+              onDragOver={(e) => {
+                e.preventDefault();
+                const rect = e.currentTarget.getBoundingClientRect();
+                const after = e.clientY - rect.top > rect.height / 2;
+                setDropIndex(after ? i + 1 : i);
+              }}
+            >
+              {dropIndex === i && <div className="h-0.5 bg-primary rounded mb-2" />}
+              <CardItem
+                card={c}
+                onOpen={onOpen}
+                readyState={meta?.readyState}
+                blockerTitles={meta?.blockerTitles}
+              />
+            </div>
+          );
+        })}
         {dropIndex === cards.length && <div className="h-0.5 bg-primary rounded mb-2" />}
       </div>
     </div>
