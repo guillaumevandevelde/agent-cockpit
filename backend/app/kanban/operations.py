@@ -279,6 +279,33 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         # to mark on each child via the follow-up ops).
         await session.flush()
         return
+    if entity_type == "deliverable" and op_type == "update_plan_attachment":
+        # Overwrite the markdown on the most recent `kind=plan` deliverable
+        # for this card. The router checks that a plan exists before issuing
+        # this op; if none is found here (raced delete, or HLC replay with a
+        # missing prior op), the rowcount is 0 and we leave the state alone.
+        # Single UPDATE keeps the deliverable row id stable so child
+        # `plan_ref` rows still resolve to the same id on the next dispatch.
+        result = await session.execute(
+            update(KanbanDeliverable)
+            .where(KanbanDeliverable.card_id == entity_id)
+            .where(KanbanDeliverable.kind == "plan")
+            .where(KanbanDeliverable.id == (
+                select(KanbanDeliverable.id)
+                .where(KanbanDeliverable.card_id == entity_id)
+                .where(KanbanDeliverable.kind == "plan")
+                .order_by(KanbanDeliverable.created_at.desc())
+                .limit(1)
+                .scalar_subquery()
+            ))
+            .values(ref=payload["plan_markdown"])
+        )
+        if result.rowcount == 0:
+            logger.warning(
+                "update_plan_attachment: no plan deliverable for card %s "
+                "(race or replay with missing prior op?)", entity_id,
+            )
+        return
     if entity_type == "deliverable" and op_type == "link_plan_ref":
         session.add(KanbanDeliverable(
             id=uuid.uuid4().hex, card_id=entity_id,

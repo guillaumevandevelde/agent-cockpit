@@ -141,6 +141,10 @@ class AttachRequest(BaseModel):
     ref: str
 
 
+class UpdatePlanAttachmentRequest(BaseModel):
+    plan_markdown: str
+
+
 class ActivityEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     hlc: str
