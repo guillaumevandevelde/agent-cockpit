@@ -49,6 +49,17 @@ Bovenop het passieve kanban-bord (v1) is een volledig autonome werkstroom gebouw
 De huidige open pool aan follow-ups + work-in-progress staat in
 **`kanban-followups.md`** — dat is de ingang voor nieuwe kaarten.
 
+### Kaartherkomst: `[research]`-kaarten in Backlog
+
+Backlog-kaarten met titel-prefix **`[research] <samenvatting>`** komen **niet** uit de
+analyst/executor-decompositiestroom, maar worden automatisch aangemaakt door de periodieke
+**`market-research`-skill** (`.claude/skills/market-research/SKILL.md`, Step 5): een
+naar-buiten-gerichte ecosysteem-scan (concurrerende open-source agent-platforms,
+GitHub-topics, changelogs) die findings omzet in concrete, gescopete Backlog-kaarten.
+De skill zet zelf al een passend `work_type` op elke kaart, dus ze routeren normaal — de
+prefix is puur een herkomstlabel. Voor het cadans-/trigger-mechanisme (wanneer de scan
+draait) zie **`recurring-cadence-proposal.md`**.
+
 ## Omgeving
 
 - **WSL Ubuntu 25.10**, non-root user with sudo.
