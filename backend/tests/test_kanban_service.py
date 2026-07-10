@@ -148,7 +148,6 @@ async def test_list_cards_ready_and_blocking_combine_as_intersection():
         parent1  (no deps, child1 depends on it)        ready, blocking  → keep
         child1   (deps=[parent1])                      blocked, leaf    → skip
         parent2  (no deps, no one depends on it)        ready, idle      → skip
-        child2   (deps=[parent2], leaf)                 blocked, leaf    → skip
     """
     async with KanbanSessionLocal() as s:
         parent1_id = await apply_operation(s, op_type="create", entity_type="card",
@@ -161,10 +160,6 @@ async def test_list_cards_ready_and_blocking_combine_as_intersection():
         parent2_id = await apply_operation(s, op_type="create", entity_type="card",
             project_key="A", entity_id=None,
             payload={"title": "p2", "column": "Backlog"})
-        child2_id = await apply_operation(s, op_type="create", entity_type="card",
-            project_key="A", entity_id=None,
-            payload={"title": "c2", "column": "Backlog",
-                     "depends_on": [parent2_id]})
         await s.commit()
 
         both = await service.list_cards(s, "A", ready=True, blocking=True)
@@ -172,10 +167,9 @@ async def test_list_cards_ready_and_blocking_combine_as_intersection():
         # Only parent1 satisfies both filters.
         assert ids == {parent1_id}
         # And explicitly verify each excluded card's reason:
-        # child1 — not ready (parent1 not Done); child2 — not ready;
+        # child1 — not ready (parent1 not Done);
         # parent2 — not blocking (no open dependent).
         assert child1_id not in ids
-        assert child2_id not in ids
         assert parent2_id not in ids
 
 
