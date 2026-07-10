@@ -237,6 +237,95 @@ describe("CardDrawer deliverables tab per-kind rendering", () => {
   });
 });
 
+describe("CardDrawer Plan tab", () => {
+  it("renders the parent plan markdown editable with a Save button that calls updatePlanAttachment", async () => {
+    const planDeliverable = {
+      id: "plan-1",
+      kind: "plan" as const,
+      ref: "# Original plan\n- step 1",
+      created_at: "2026-07-10T10:00:00Z",
+    };
+    const cardWithPlan: Card = {
+      ...baseCard,
+      deliverables: [planDeliverable],
+    };
+
+    const updatePlanMock = kanbanApi.updatePlanAttachment as ReturnType<typeof vi.fn>;
+    updatePlanMock.mockResolvedValue({ ...cardWithPlan });
+
+    const onChanged = vi.fn();
+    render(
+      <CardDrawer
+        card={cardWithPlan}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    // Switch to the Plan tab (Radix Tabs activates on mousedown, not click).
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "Plan" }));
+    });
+
+    // The Save button is rendered alongside the editable markdown.
+    const saveButton = await screen.findByRole("button", { name: "Save plan" });
+    expect(saveButton).not.toBeNull();
+
+    // Default to preview mode — switch to edit, change text, then save.
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "Edit" }));
+    });
+    const textarea = (await screen.findByPlaceholderText(/write markdown/i)) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "# Updated plan\n- step A" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(saveButton);
+    });
+
+    await waitFor(() => expect(updatePlanMock).toHaveBeenCalled());
+    const [cardId, planMarkdown] = updatePlanMock.mock.calls[0];
+    expect(cardId).toBe(cardWithPlan.id);
+    expect(planMarkdown).toBe("# Updated plan\n- step A");
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("renders a child plan_ref card without a Save button (read-only)", async () => {
+    const cardWithRef: Card = {
+      ...baseCard,
+      parent_card_id: "parent-abcdef0123",
+      depends_on: [],
+      deliverables: [
+        {
+          id: "ref-1",
+          kind: "plan_ref",
+          ref: JSON.stringify({ parent_card_id: "parent-abcdef0123" }),
+          created_at: "2026-07-10T10:00:00Z",
+        },
+      ],
+    };
+
+    render(
+      <CardDrawer
+        card={cardWithRef}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "Plan" }));
+    });
+
+    // No Save button for plan_ref children — only the parent plan is editable.
+    expect(screen.queryByRole("button", { name: "Save plan" })).toBeNull();
+  });
+});
+
 describe("CardDrawer edit dialog round-trip", () => {
   it("preserves analyst_agent_id and executor_agent_id when editing a multi-agent card", async () => {
     const updateCardMock = kanbanApi.updateCard as ReturnType<typeof vi.fn>;

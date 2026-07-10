@@ -303,6 +303,15 @@ export const kanbanApi = {
     apiClient<{ provider: string; options: string[] }>(`${BASE}/model-options/refresh`, {
       method: "POST",
     }),
+
+  updatePlanAttachment: (
+    cardId: string,
+    planMarkdown: string,
+  ): Promise<Card> =>
+    apiClient<Card>(`${BASE}/cards/${cardId}/plan-attachment`, {
+      method: "PATCH",
+      body: JSON.stringify({ plan_markdown: planMarkdown }),
+    }),
 };
 
 export async function addPlanAttachment(
