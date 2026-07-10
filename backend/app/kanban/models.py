@@ -55,6 +55,17 @@ class KanbanCard(KanbanBase):
     parent_card_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     analyst_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Free-form key/value bag for integration data (external IDs, workflow
+    # provenance, sha of last-seen upstream commit, …). Mirrors claude-task-master's
+    # task.metadata: callers can attach integration-specific data without a schema
+    # migration. JSON-serialized like labels/depends_on; nullable, defaults to None
+    # so existing rows continue to round-trip as null.
+    # Python attribute is `meta` because SQLAlchemy's Declarative API reserves
+    # `metadata` on the base class. The DB column stays `metadata` (set via the
+    # positional first arg to mapped_column) so the API contract and DB schema
+    # both use the name documented in the kanban card; pydantic schemas below
+    # bind to this attribute via Field(alias="metadata").
+    meta: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     # Consecutive dispatch-target failures (spawn died within seconds, or raised
     # synchronously before any session existed). Reset once a dispatch runs long
     # enough to prove the target works, or when the streak trips the Impediment

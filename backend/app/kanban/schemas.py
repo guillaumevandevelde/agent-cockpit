@@ -1,7 +1,7 @@
 """Pydantic schemas + the fixed column set."""
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 COLUMNS = ["Backlog", "Impediment", "Done", "To Resume"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
@@ -58,6 +58,13 @@ class CardResponse(BaseModel):
     parent_card_id: str | None = None
     analyst_run_id: str | None = None
     depends_on: list[str] | None = None
+    # Aliased because the SQLAlchemy ORM attribute is `meta` (Declarative API
+    # reserves `metadata` on the base class). Field name in JSON stays
+    # `metadata` so the API contract matches the kanban card spec; pydantic
+    # reads `card.meta` when materializing CardResponse from an ORM instance.
+    metadata: dict | None = Field(
+        default=None, validation_alias=AliasChoices("meta", "metadata"),
+    )
     deliverables: list[DeliverableResponse] = []
 
 
@@ -78,6 +85,7 @@ class CardCreate(BaseModel):
     executor_agent_id: str | None = None
     parent_card_id: str | None = None
     depends_on: list[str] | None = None
+    metadata: dict | None = None
 
 
 class CardUpdate(BaseModel):
@@ -97,6 +105,7 @@ class CardUpdate(BaseModel):
     parent_card_id: str | None = None
     analyst_run_id: str | None = None
     depends_on: list[str] | None = None
+    metadata: dict | None = None
 
 
 class MoveRequest(BaseModel):
