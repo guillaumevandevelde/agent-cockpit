@@ -133,6 +133,8 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN metadata JSON")
     if "model" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN model VARCHAR(64)")
+    if "column_overrides" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN column_overrides JSON")
 
 
 async def _ensure_column_table(conn) -> None:

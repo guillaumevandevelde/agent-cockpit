@@ -41,10 +41,10 @@ class RecordingTransport:
         self.fail = fail
 
     def __call__(self, *, directory, prompt, session_name, cli_id="claude-code",
-                 platform="anthropic", model=None):
+                 provider="anthropic", model=None):
         self.calls.append({"directory": directory, "prompt": prompt,
                            "session_name": session_name, "cli_id": cli_id,
-                           "platform": platform, "model": model})
+                           "provider": provider, "model": model})
         if self.fail:
             raise RuntimeError("tmux exploded")
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
@@ -180,7 +180,7 @@ async def test_dispatch_defaults_to_anthropic_platform():
         await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
         await s.commit()
     assert len(transport.calls) == 1
-    assert transport.calls[0]["platform"] == "anthropic"
+    assert transport.calls[0]["provider"] == "anthropic"
 
 
 @pytest.mark.asyncio
@@ -201,7 +201,7 @@ async def test_dispatch_uses_column_default_provider():
         card = await get_card(s, cid)
     assert card.column == "engineer"
     assert len(transport.calls) == 1
-    assert transport.calls[0]["platform"] == "minimax"
+    assert transport.calls[0]["provider"] == "minimax"
 
 
 # ---- model precedence: card.model > column.default_model > persona frontmatter ----
@@ -272,11 +272,155 @@ async def test_dispatch_falls_back_to_persona_frontmatter_model(tmp_path):
 
 
 def test_effective_model_precedence():
-    assert dispatch._effective_model("opus", "sonnet", "haiku") == "opus"
-    assert dispatch._effective_model(None, "sonnet", "haiku") == "sonnet"
-    assert dispatch._effective_model(None, None, "haiku") == "haiku"
-    assert dispatch._effective_model(None, None, None) is None
-    assert dispatch._effective_model("", "", "") is None
+    # per-column override > card.model > column.default_model > persona frontmatter
+    assert dispatch._effective_model("m5", "opus", "sonnet", "haiku") == "m5"
+    assert dispatch._effective_model(None, "opus", "sonnet", "haiku") == "opus"
+    assert dispatch._effective_model(None, None, "sonnet", "haiku") == "sonnet"
+    assert dispatch._effective_model(None, None, None, "haiku") == "haiku"
+    assert dispatch._effective_model(None, None, None, None) is None
+    assert dispatch._effective_model("", "", "", "") is None
+
+
+# ---- per-card column_overrides: model+provider per target column ----------
+
+@pytest.mark.asyncio
+async def test_dispatch_column_override_beats_column_defaults():
+    """Parent-card scenario: an engineer column defaulting to minimax/M3, but a
+    card carrying a per-column override for "engineer" spawns with the override's
+    provider AND model instead — even though Sonnet 5 lives only on Anthropic."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="minimax", default_model="MiniMax-M3[1m]",
+        )
+        cid = await _make_card(s)
+        await apply_operation(s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"column_overrides": {
+                "engineer": {"model": "sonnet-5", "provider": "anthropic"}}})
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "anthropic"
+    assert transport.calls[0]["model"] == "sonnet-5"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_column_override_beats_card_model():
+    """A per-column override outranks card.model (the card-global override)."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"model": "opus", "column_overrides": {
+                "engineer": {"model": "sonnet-5", "provider": "anthropic"}}})
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["model"] == "sonnet-5"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_column_override_provider_only_leaves_model_fallthrough():
+    """An override may set provider without model: the provider is overridden but
+    the model still falls through to column.default_model / persona / None."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_model="sonnet",
+        )
+        cid = await _make_card(s)
+        await apply_operation(s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"column_overrides": {
+                "engineer": {"provider": "bedrock"}}})
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "bedrock"
+    assert transport.calls[0]["model"] == "sonnet"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_column_override_for_other_column_is_ignored():
+    """An override keyed on a column other than the dispatch target has no effect
+    — behaves as if no override existed for the resolved column."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"column_overrides": {
+                "analyst": {"model": "sonnet-5", "provider": "bedrock"}}})
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    # card dispatches into "engineer"; only an "analyst" override exists -> no effect
+    assert transport.calls[0]["provider"] == "anthropic"
+    assert transport.calls[0]["model"] is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_without_column_overrides_is_backwards_compatible():
+    """A card with column_overrides=None dispatches exactly as it does today."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        card = await get_card(s, cid)
+        assert card.column_overrides is None
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "anthropic"
+    assert transport.calls[0]["model"] is None
+
+
+# The two tests below share one card-shaped override dict spanning both the
+# "analyst" and "engineer" columns and prove each phase resolves its OWN entry,
+# because the lookup is keyed on the phase's resolved target column.
+_BOTH_PHASE_OVERRIDES = {
+    "analyst": {"model": "opus", "provider": "anthropic"},
+    "engineer": {"model": "MiniMax-M3[1m]", "provider": "minimax"},
+}
+
+
+@pytest.mark.asyncio
+async def test_dispatch_analyst_target_uses_analyst_override(tmp_path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "analyst.md").write_text("You are the Analyst.")
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="Investigate", column="Backlog")
+        await apply_operation(s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "analyst",
+                                    "column_overrides": _BOTH_PHASE_OVERRIDES})
+        await s.commit()
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path=str(tmp_path), transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "anthropic"
+    assert transport.calls[0]["model"] == "opus"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_engineer_target_uses_engineer_override():
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"column_overrides": _BOTH_PHASE_OVERRIDES})
+        await s.commit()
+        await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "minimax"
+    assert transport.calls[0]["model"] == "MiniMax-M3[1m]"
 
 
 @pytest.mark.asyncio
@@ -564,8 +708,8 @@ async def test_column_cap_defaults_null_means_no_per_column_limit(project_with_a
 async def test_column_max_sessions_column_roundtrip():
     """max_sessions on a column can be set via create_column and read back."""
     async with KanbanSessionLocal() as s:
-        col = await service.create_column(s, project_key=PK, name="testcol",
-                                           default_agent="test", max_sessions=3)
+        await service.create_column(s, project_key=PK, name="testcol",
+                                     default_agent="test", max_sessions=3)
         await s.commit()
         cols = await service.list_columns(s, PK)
     matching = [c for c in cols if c.name == "testcol"]
@@ -1308,7 +1452,7 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -1556,7 +1700,7 @@ async def test_dispatch_all_pending_resumes_to_resume_cards():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -1959,7 +2103,7 @@ async def test_card_transport_sandcastle_uses_sandcastle_transport():
     worktree = RecordingTransport()
     sc_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
+    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
@@ -1990,11 +2134,11 @@ async def test_card_transport_worktree_overrides_sandcastle_project_default():
     sc_calls = []
     wt_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
+    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
-    def fake_worktree(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
+    def fake_worktree(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
         wt_calls.append(session_name)
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
@@ -2072,7 +2216,7 @@ async def test_redispatch_with_resume_session_id_uses_resume_transport():
     """When card has resume_session_id, redispatch calls resume transport, not worktree."""
     calls = []
 
-    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
         calls.append({"mode": "resume", "session_name": session_name})
         return {"session_name": session_name}
 

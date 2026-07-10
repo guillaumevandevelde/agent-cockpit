@@ -485,12 +485,16 @@ def _read_persona_model(project_path: str, filename: str) -> str | None:
     return model if isinstance(model, str) and model else None
 
 
-def _effective_model(card_model: str | None, column_default_model: str | None,
+def _effective_model(override_model: str | None, card_model: str | None,
+                     column_default_model: str | None,
                      persona_model: str | None) -> str | None:
-    """Precedence: card.model > column.default_model > persona frontmatter
-    `model:` > None (no --model flag, provider default applies). Empty
-    strings are treated as unset, same as None."""
-    return card_model or column_default_model or persona_model or None
+    """Precedence: per-column override (`card.column_overrides[<target>].model`)
+    > card.model > column.default_model > persona frontmatter `model:` > None
+    (no --model flag, provider default applies). The per-column override is the
+    most explicit intent the card author can express for a specific agent
+    column, so it wins over the card-global `model`. Empty strings are treated
+    as unset, same as None."""
+    return override_model or card_model or column_default_model or persona_model or None
 
 
 def _persona_for_card(project_path: str, card, column: str) -> str | None:
@@ -1584,13 +1588,28 @@ async def _run_card(
     else:
         persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
+    # A per-card override for this phase's resolved target column (persona) wins
+    # over the column defaults for BOTH provider and model. Because analyst and
+    # executor phases both reach this point with their own `target_agent`, each
+    # phase automatically picks up its own override entry (if any). See
+    # KanbanCard.column_overrides.
+    column_override = (card.column_overrides or {}).get(target_agent) or {}
+    override_provider = column_override.get("provider") or None
+    override_model = column_override.get("model") or None
     # The target column decides which subscription/vendor the spawn authenticates
     # against (see KanbanColumn.default_provider); unset means the dispatcher's own
-    # default, the Anthropic subscription.
-    provider = await get_column_default_provider(session, project_key, target_agent) or PROVIDER_ANTHROPIC
+    # default, the Anthropic subscription. A per-card override for this column
+    # takes precedence over the column default.
+    provider = (
+        override_provider
+        or await get_column_default_provider(session, project_key, target_agent)
+        or PROVIDER_ANTHROPIC
+    )
     persona_model = _read_persona_model(project_path, f"{target_agent}.md")
     column_default_model = await get_column_default_model(session, project_key, target_agent)
-    effective_model = _effective_model(card.model, column_default_model, persona_model)
+    effective_model = _effective_model(
+        override_model, card.model, column_default_model, persona_model,
+    )
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         impediment_question=impediment_question,
         impediment_answer=impediment_answer,
