@@ -18,16 +18,11 @@ import {
 } from "@/components/ui/select";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
-import { PROVIDERS, DEFAULT_MODEL_SUGGESTIONS } from "../types";
+import { PROVIDERS, PROVIDER_LABELS, DEFAULT_MODEL_SUGGESTIONS } from "../types";
 import type { KanbanColumn } from "../types";
 
 const BACKLOG_COLUMN = "Backlog";
 const DEFAULT_PROVIDER_SENTINEL = "__default__";
-const PROVIDER_LABELS: Record<string, string> = {
-  anthropic: "Anthropic",
-  bedrock: "Bedrock",
-  minimax: "MiniMax",
-};
 
 export function ColumnSettingsDialog({
   open,

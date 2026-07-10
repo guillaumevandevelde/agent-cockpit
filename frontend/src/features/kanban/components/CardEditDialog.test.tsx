@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/contexts/ProviderContext", () => ({
   useProviderContext: () => ({
@@ -13,9 +13,19 @@ vi.mock("@/features/cc-bridge/api", () => ({
   fetchResumableSessions: vi.fn(async () => ({ sessions: [] })),
 }));
 
+const listColumnsMock = vi.fn(async () => ({
+  columns: [
+    { id: "c1", name: "engineer", default_agent: "engineer", default_provider: "minimax", default_model: "m3" },
+    { id: "c2", name: "analyst", default_agent: "analyst", default_provider: null, default_model: null },
+    // Flow column with no default_agent -> should not get an override row.
+    { id: "c3", name: "Backlog", default_agent: null, default_provider: null, default_model: null },
+  ],
+}));
+
 vi.mock("../api", () => ({
   kanbanApi: {
     getModelOptions: vi.fn(async () => ({ provider: "claude-code", options: ["sonnet", "opus", "haiku"] })),
+    listColumns: (...args: unknown[]) => listColumnsMock(...(args as [])),
   },
 }));
 
@@ -127,5 +137,73 @@ describe("CardEditDialog", () => {
     screen.getByRole("button", { name: /update/i }).click();
     const payload = onSubmit.mock.calls[0][0];
     expect(payload).toHaveProperty("model", null);
+  });
+
+  it("renders one override row per agent column (skipping flow columns) and forwards column_overrides", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        projectKey="proj"
+        initial={{ title: "T", description: "" }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    // Rows appear once listColumns resolves. Only agent columns get a row.
+    const engineerModel = await screen.findByLabelText("Model for engineer");
+    expect(screen.getByLabelText("Model for analyst")).toBeTruthy();
+    expect(screen.queryByLabelText("Model for Backlog")).toBeNull();
+    // Column default shows as the placeholder.
+    expect((engineerModel as HTMLInputElement).placeholder).toBe("m3");
+
+    fireEvent.change(engineerModel, { target: { value: "sonnet-5" } });
+    screen.getByRole("button", { name: /update/i }).click();
+
+    const payload = onSubmit.mock.calls[0][0];
+    // provider left at Default -> null; model is the typed override.
+    expect(payload.column_overrides).toEqual({
+      engineer: { model: "sonnet-5", provider: null },
+    });
+  });
+
+  it("submits column_overrides: null when no override row is filled", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        projectKey="proj"
+        initial={{ title: "T", description: "" }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    await screen.findByLabelText("Model for engineer");
+    screen.getByRole("button", { name: /update/i }).click();
+    expect(onSubmit.mock.calls[0][0]).toHaveProperty("column_overrides", null);
+  });
+
+  it("pre-fills existing column_overrides from initial", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        projectKey="proj"
+        initial={{
+          title: "T",
+          description: "",
+          column_overrides: { engineer: { model: "opus", provider: "anthropic" } },
+        }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    const engineerModel = (await screen.findByLabelText("Model for engineer")) as HTMLInputElement;
+    await waitFor(() => expect(engineerModel.value).toBe("opus"));
+    // Round-trips unchanged on submit.
+    screen.getByRole("button", { name: /update/i }).click();
+    expect(onSubmit.mock.calls[0][0].column_overrides).toEqual({
+      engineer: { model: "opus", provider: "anthropic" },
+    });
   });
 });

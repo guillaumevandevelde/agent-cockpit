@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
 import { fetchResumableSessions } from "@/features/cc-bridge/api";
 import { useProviderContext } from "@/contexts/ProviderContext";
-import { PRIORITIES, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, type Priority, type WorkType } from "../types";
+import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, type Priority, type WorkType, type ColumnOverride, type KanbanColumn } from "../types";
 import { kanbanApi } from "../api";
 import type { ResumableSession } from "@/types/sessions";
 
@@ -37,6 +37,37 @@ function parseLabels(raw: string): string[] {
 
 const AUTO = "__auto__"; // sentinel: null agent (dispatch resolves the provider at run time)
 const NO_WORK_TYPE = ""; // sentinel: no work_type set (routing hint is purely optional)
+const DEFAULT_PROVIDER_SENTINEL = "__default__"; // per-column provider: no override (use column default)
+
+// Form-side shape for one per-column override row. Provider uses the sentinel
+// above to mean "no override"; the model is free text. Serialized to the
+// ColumnOverride API shape ({model, provider} with nulls) on submit.
+type OverrideDraft = { model: string; provider: string };
+
+function draftsFromOverrides(
+  overrides: Record<string, ColumnOverride> | null | undefined,
+): Record<string, OverrideDraft> {
+  const out: Record<string, OverrideDraft> = {};
+  for (const [name, ov] of Object.entries(overrides ?? {})) {
+    out[name] = {
+      model: ov?.model ?? "",
+      provider: ov?.provider ?? DEFAULT_PROVIDER_SENTINEL,
+    };
+  }
+  return out;
+}
+
+function overridesFromDrafts(
+  drafts: Record<string, OverrideDraft>,
+): Record<string, ColumnOverride> | null {
+  const out: Record<string, ColumnOverride> = {};
+  for (const [name, d] of Object.entries(drafts)) {
+    const model = d.model.trim() || null;
+    const provider = d.provider === DEFAULT_PROVIDER_SENTINEL ? null : d.provider;
+    if (model || provider) out[name] = { model, provider };
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 /** ISO datetime -> local "YYYY-MM-DDTHH:mm" for a native datetime-local input. */
 function toDatetimeLocalValue(iso: string): string {
@@ -50,6 +81,7 @@ export function CardEditDialog({
   open,
   initial,
   defaultAgent,
+  projectKey,
   projectPath,
   onClose,
   onSubmit,
@@ -62,6 +94,7 @@ export function CardEditDialog({
     labels?: string[] | null;
     work_type?: string | null;
     model?: string | null;
+    column_overrides?: Record<string, ColumnOverride> | null;
     transport?: string | null;
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
@@ -70,6 +103,7 @@ export function CardEditDialog({
     executor_agent_id?: string | null;
   };
   defaultAgent?: string | null;
+  projectKey?: string;
   projectPath?: string;
   onClose: () => void;
   onSubmit: (data: {
@@ -80,6 +114,7 @@ export function CardEditDialog({
     work_type: string | null;
     agent: string | null;
     model: string | null;
+    column_overrides: Record<string, ColumnOverride> | null;
     transport: string | null;
     resume_session_id: string | null;
     resume_project_folder: string | null;
@@ -104,6 +139,13 @@ export function CardEditDialog({
   const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
   const [analystAgentId, setAnalystAgentId] = useState<string>(initial?.analyst_agent_id ?? AUTO);
   const [executorAgentId, setExecutorAgentId] = useState<string>(initial?.executor_agent_id ?? AUTO);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(
+    !!(initial?.analyst_agent_id || initial?.executor_agent_id)
+  );
+  const [columns, setColumns] = useState<KanbanColumn[]>([]);
+  const [overrideDrafts, setOverrideDrafts] = useState<Record<string, OverrideDraft>>(
+    () => draftsFromOverrides(initial?.column_overrides)
+  );
   const [transport, setTransport] = useState<string>(initial?.transport ?? "auto");
   const [scheduledAt, setScheduledAt] = useState<string>(
     initial?.scheduled_at ? toDatetimeLocalValue(initial.scheduled_at) : ""
@@ -129,6 +171,30 @@ export function CardEditDialog({
       .then((r) => { if (Array.isArray(r?.options)) setModelOptions(r.options); })
       .catch(() => {});
   }, [open]);
+
+  // Load the project's columns so we can render one override row per agent
+  // column. Guarded on projectKey so the dialog still works when opened
+  // without a project (e.g. in unit tests) — the override section just
+  // renders empty then.
+  useEffect(() => {
+    if (!open || !projectKey) return;
+    let cancelled = false;
+    kanbanApi.listColumns(projectKey)
+      .then((r) => { if (!cancelled) setColumns(r.columns ?? []); })
+      .catch(() => { if (!cancelled) setColumns([]); });
+    return () => { cancelled = true; };
+  }, [open, projectKey]);
+
+  // Agent columns are those wired to a default_agent (persona). The dispatcher
+  // keys per-card overrides on the column name, which equals the persona name,
+  // so these are exactly the columns a user can override per card.
+  const agentColumns = columns.filter((c) => c.default_agent);
+
+  const setOverride = (name: string, patch: Partial<OverrideDraft>) =>
+    setOverrideDrafts((prev) => {
+      const base = prev[name] ?? { model: "", provider: DEFAULT_PROVIDER_SENTINEL };
+      return { ...prev, [name]: { ...base, ...patch } };
+    });
 
   // Pre-select the existing resume session when editing
   useEffect(() => {
@@ -260,44 +326,125 @@ export function CardEditDialog({
               ))}
             </datalist>
             <p className="text-xs text-muted-foreground">
-              Overrides the column default and persona frontmatter for this card only.
+              Global fallback: overrides the column default and persona
+              frontmatter for this card only. Per-column overrides below win
+              over it for their column.
             </p>
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="analyst_agent_id">Analyst-agent (multi-agent split)</Label>
-            <Select value={analystAgentId}
-                    onValueChange={(v) => setAnalystAgentId(v === AUTO ? AUTO : v)}>
-              <SelectTrigger id="analyst_agent_id">
-                <SelectValue placeholder="Geen (single-agent)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={AUTO}>Geen (single-agent)</SelectItem>
-                <SelectItem value="claude-code">Claude Code</SelectItem>
-                <SelectItem value="mimo-code">MiniMax (mimo-code)</SelectItem>
-                <SelectItem value="codex-cli">Codex CLI</SelectItem>
-                <SelectItem value="open-code">OpenCode</SelectItem>
-                <SelectItem value="copilot-cli">Copilot CLI</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {agentColumns.length > 0 && (
+            <div className="space-y-2">
+              <Label>Model per agent-kolom</Label>
+              <p className="text-xs text-muted-foreground">
+                Override the model + provider for a specific agent column. A row
+                left empty means no override — the column default is used.
+              </p>
+              <div className="space-y-2">
+                {agentColumns.map((col) => {
+                  const draft = overrideDrafts[col.name];
+                  const modelValue = draft?.model ?? "";
+                  const providerValue = draft?.provider ?? DEFAULT_PROVIDER_SENTINEL;
+                  const defaultLabel = [
+                    col.default_model || null,
+                    col.default_provider
+                      ? PROVIDER_LABELS[col.default_provider] ?? col.default_provider
+                      : "Anthropic",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return (
+                    <div key={col.id} className="grid grid-cols-[7rem_1fr_9rem] items-center gap-2">
+                      <span className="text-sm font-medium truncate" title={col.name}>
+                        {col.name}
+                      </span>
+                      <input
+                        aria-label={`Model for ${col.name}`}
+                        list="card-model-suggestions"
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                        placeholder={col.default_model || "(column default)"}
+                        value={modelValue}
+                        onChange={(e) => setOverride(col.name, { model: e.target.value })}
+                      />
+                      <Select
+                        value={providerValue}
+                        onValueChange={(v) => setOverride(col.name, { provider: v })}
+                      >
+                        <SelectTrigger aria-label={`Provider for ${col.name}`}>
+                          <SelectValue placeholder="Default" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={DEFAULT_PROVIDER_SENTINEL}>Default</SelectItem>
+                          {PROVIDERS.map((p) => (
+                            <SelectItem key={p} value={p}>
+                              {PROVIDER_LABELS[p]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {defaultLabel && (
+                        <p className="col-span-3 -mt-1 text-[10px] text-muted-foreground">
+                          Default: {defaultLabel}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-          <div className="space-y-1">
-            <Label htmlFor="executor_agent_id">Executor-agent</Label>
-            <Select value={executorAgentId}
-                    onValueChange={(v) => setExecutorAgentId(v === AUTO ? AUTO : v)}>
-              <SelectTrigger id="executor_agent_id">
-                <SelectValue placeholder="Auto (= card.agent)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={AUTO}>Auto (= card.agent)</SelectItem>
-                <SelectItem value="claude-code">Claude Code</SelectItem>
-                <SelectItem value="mimo-code">MiniMax (mimo-code)</SelectItem>
-                <SelectItem value="codex-cli">Codex CLI</SelectItem>
-                <SelectItem value="open-code">OpenCode</SelectItem>
-                <SelectItem value="copilot-cli">Copilot CLI</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="space-y-2 rounded-md border p-3">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-sm font-medium"
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              <span>Multi-agent split (geavanceerd)</span>
+              <span className="text-xs text-muted-foreground">{showAdvanced ? "Verbergen" : "Tonen"}</span>
+            </button>
+            {showAdvanced && (
+              <div className="space-y-3 pt-1">
+                <p className="text-xs text-muted-foreground">
+                  Kies een analyst-CLI om de two-phase split (analyst → executor)
+                  te triggeren. Laat leeg voor een single-agent kaart.
+                </p>
+                <div className="space-y-1">
+                  <Label htmlFor="analyst_agent_id">Analyst-agent (multi-agent split)</Label>
+                  <Select value={analystAgentId}
+                          onValueChange={(v) => setAnalystAgentId(v === AUTO ? AUTO : v)}>
+                    <SelectTrigger id="analyst_agent_id">
+                      <SelectValue placeholder="Geen (single-agent)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={AUTO}>Geen (single-agent)</SelectItem>
+                      <SelectItem value="claude-code">Claude Code</SelectItem>
+                      <SelectItem value="mimo-code">MiniMax (mimo-code)</SelectItem>
+                      <SelectItem value="codex-cli">Codex CLI</SelectItem>
+                      <SelectItem value="open-code">OpenCode</SelectItem>
+                      <SelectItem value="copilot-cli">Copilot CLI</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="executor_agent_id">Executor-agent</Label>
+                  <Select value={executorAgentId}
+                          onValueChange={(v) => setExecutorAgentId(v === AUTO ? AUTO : v)}>
+                    <SelectTrigger id="executor_agent_id">
+                      <SelectValue placeholder="Auto (= card.agent)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={AUTO}>Auto (= card.agent)</SelectItem>
+                      <SelectItem value="claude-code">Claude Code</SelectItem>
+                      <SelectItem value="mimo-code">MiniMax (mimo-code)</SelectItem>
+                      <SelectItem value="codex-cli">Codex CLI</SelectItem>
+                      <SelectItem value="open-code">OpenCode</SelectItem>
+                      <SelectItem value="copilot-cli">Copilot CLI</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -479,6 +626,7 @@ export function CardEditDialog({
                 work_type: workType || null,
                 agent: agent === AUTO ? null : agent,
                 model: model.trim() || null,
+                column_overrides: overridesFromDrafts(overrideDrafts),
                 transport: transport === "auto" ? null : transport,
                 resume_session_id,
                 resume_project_folder,
