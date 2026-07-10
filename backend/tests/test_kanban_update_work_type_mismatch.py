@@ -27,7 +27,6 @@ from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
 from app.main import app
 
-
 # ---- service-layer tests -----------------------------------------------------
 
 

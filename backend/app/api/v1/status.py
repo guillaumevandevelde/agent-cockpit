@@ -10,10 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.constants import SessionStatus
 from app.models.schemas import SystemStatusResponse
+from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 from app.services.instance_identity import get_instance_identity
 from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
 from app.services.presence_service import PresenceService
-from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 from app.services.scheduling.hook_installer import get_hooks_status
 
 router = APIRouter()

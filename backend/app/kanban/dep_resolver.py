@@ -5,7 +5,7 @@ the cycle-detection has no DB / session imports — it operates on plain dicts.
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 
 def meets_dep_prerequisites(card, cards_by_id: dict) -> bool:

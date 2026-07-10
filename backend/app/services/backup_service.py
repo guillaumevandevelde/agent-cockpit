@@ -24,6 +24,8 @@ from app.models.schemas import (
     RestorePlan,
     RestoreResult,
 )
+from app.services.agentic_cli import get_agentic_cli
+from app.services.agentic_cli.codex_cli import get_codex_home
 from app.services.backup_shared import (
     CODEX_RESTORE_REFUSAL_MESSAGE,  # noqa: F401  (re-exported for tests/backup_service consumers)
     _get_claude_code_version,
@@ -31,8 +33,6 @@ from app.services.backup_shared import (
     get_backup_storage_dir,
 )
 from app.services.cli_executor import AgenticCliExecutor
-from app.services.agentic_cli import get_agentic_cli
-from app.services.agentic_cli.codex_cli import get_codex_home
 from app.services.restore_service import RestoreService
 from app.utils.path_utils import (
     get_claude_user_agents_dir,

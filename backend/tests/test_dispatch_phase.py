@@ -176,7 +176,7 @@ async def test_run_card_skips_plan_context_for_legacy_cards(monkeypatch):
       - _plan_context_section is never called for the legacy card
       - the captured prompt does not contain the placeholder text
     """
-    from app.kanban.dispatch import _run_card
+    from app.kanban.dispatch import _plan_context_section, _run_card
     from app.kanban.models import KanbanCard
     from tests.kanban_test_db import TestSessionLocal
 

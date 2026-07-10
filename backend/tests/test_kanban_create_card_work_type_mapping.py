@@ -23,7 +23,6 @@ The autouse `_reset_test_db` fixture lives in tests/conftest.py — don't add
 one here.
 """
 import pytest
-import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.kanban import service
@@ -31,7 +30,6 @@ from app.kanban.db import KanbanSessionLocal
 from app.kanban.operations import rematerialize
 from app.kanban.schemas import WORK_TYPE_PERSONA_DEFAULTS
 from app.main import app
-
 
 # ---- service-layer tests -----------------------------------------------------
 

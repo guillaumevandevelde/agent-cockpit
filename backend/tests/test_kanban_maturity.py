@@ -40,10 +40,10 @@ class RecordingTransport:
         self.calls = []
 
     def __call__(self, *, directory, prompt, session_name, cli_id="claude-code",
-                 platform="anthropic", model=None):
+                 provider="anthropic", model=None):
         self.calls.append({"directory": directory, "prompt": prompt,
                            "session_name": session_name, "cli_id": cli_id,
-                           "platform": platform, "model": model})
+                           "provider": provider, "model": model})
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
 
