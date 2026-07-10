@@ -82,6 +82,7 @@ async def create_column(payload: ColumnCreate):
             s, project_key=payload.project_key, name=payload.name,
             rank=payload.rank, default_agent=payload.default_agent,
             default_platform=payload.default_platform,
+            default_model=payload.default_model,
             max_sessions=payload.max_sessions,
         )
         await s.commit()
@@ -96,6 +97,7 @@ async def update_column(column_id: str, payload: ColumnUpdate):
             name=payload.name, rank=payload.rank,
             default_agent=payload.default_agent,
             default_platform=payload.default_platform,
+            default_model=payload.default_model,
             max_sessions=payload.max_sessions,
         )
         if col is None:

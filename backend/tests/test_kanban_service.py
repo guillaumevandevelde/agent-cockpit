@@ -218,6 +218,34 @@ async def test_update_column_can_set_default_platform():
         await s.commit()
         assert updated.default_platform == "minimax"
 
+
+@pytest.mark.asyncio
+async def test_column_default_model_roundtrip():
+    async with KanbanSessionLocal() as s:
+        col = await service.create_column(
+            s, project_key="A", name="engineer", default_agent="engineer",
+            default_model="opus",
+        )
+        await s.commit()
+        assert col.default_model == "opus"
+        assert await service.get_column_default_model(s, "A", "engineer") == "opus"
+
+
+@pytest.mark.asyncio
+async def test_column_default_model_missing_column_returns_none():
+    async with KanbanSessionLocal() as s:
+        assert await service.get_column_default_model(s, "A", "no-such-column") is None
+
+
+@pytest.mark.asyncio
+async def test_update_column_can_set_default_model():
+    async with KanbanSessionLocal() as s:
+        col = await service.create_column(s, project_key="A", name="engineer")
+        await s.commit()
+        updated = await service.update_column(s, col.id, default_model="haiku")
+        await s.commit()
+        assert updated.default_model == "haiku"
+
 # NOTE: the sync-seam tests (ops_since / ingest_ops convergence + idempotent replay)
 # were removed when sync.py was pruned. See docs/cockpit/sync-hlc-freeze-vs-prune.md.
 # Idempotent HLC-ordered replay of the *local* op-log stays covered by

@@ -380,3 +380,34 @@ async def test_update_card_persists_multi_agent_fields():
         assert card.executor_agent_id == "mimo-code"
         assert card.parent_card_id == "parent-1"
         assert card.depends_on == ["c1", "c2"]
+
+
+@pytest.mark.asyncio
+async def test_create_card_persists_model():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "x", "column": "Backlog", "model": "opus"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.model == "opus"
+
+
+@pytest.mark.asyncio
+async def test_update_card_persists_model():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "x", "column": "Backlog"},
+        )
+        await apply_operation(
+            s, op_type="update", entity_type="card",
+            project_key="git:example", entity_id=cid,
+            payload={"model": "sonnet"},
+        )
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.model == "sonnet"

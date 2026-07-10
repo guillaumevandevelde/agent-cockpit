@@ -44,6 +44,7 @@ class CardResponse(BaseModel):
     labels: list | None = None
     work_type: str | None = None
     agent: str | None = None
+    model: str | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
@@ -83,6 +84,7 @@ class CardCreate(BaseModel):
     labels: list | None = None
     work_type: str | None = None
     agent: str | None = None
+    model: str | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
@@ -102,6 +104,7 @@ class CardUpdate(BaseModel):
     labels: list | None = None
     work_type: str | None = None
     agent: str | None = None
+    model: str | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
@@ -198,6 +201,7 @@ class ColumnResponse(BaseModel):
     rank: str
     default_agent: str | None = None
     default_platform: str | None = None
+    default_model: str | None = None
     max_sessions: int | None = None
     created_at: datetime
     updated_at: datetime
@@ -209,6 +213,7 @@ class ColumnCreate(BaseModel):
     rank: str | None = None
     default_agent: str | None = None
     default_platform: str | None = None
+    default_model: str | None = None
     max_sessions: int | None = None
 
 
@@ -217,6 +222,7 @@ class ColumnUpdate(BaseModel):
     rank: str | None = None
     default_agent: str | None = None
     default_platform: str | None = None
+    default_model: str | None = None
     max_sessions: int | None = None
 
 

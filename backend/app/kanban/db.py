@@ -131,6 +131,8 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN work_type VARCHAR(16)")
     if "metadata" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN metadata JSON")
+    if "model" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN model VARCHAR(64)")
 
 
 async def _ensure_column_table(conn) -> None:
@@ -157,6 +159,8 @@ async def _ensure_column_table(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN default_platform VARCHAR(16)")
     if "max_sessions" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN max_sessions INTEGER")
+    if "default_model" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN default_model VARCHAR(64)")
 
 
 async def _ensure_work_type_mapping_table(conn) -> None:

@@ -158,6 +158,7 @@ async def get_column(session, column_id: str):
 async def create_column(session, project_key: str, name: str,
                         rank: str | None = None, default_agent: str | None = None,
                         default_platform: str | None = None,
+                        default_model: str | None = None,
                         max_sessions: int | None = None):
     col = KanbanColumn(
         id=uuid.uuid4().hex,
@@ -166,6 +167,7 @@ async def create_column(session, project_key: str, name: str,
         rank=rank or uuid.uuid4().hex,
         default_agent=default_agent,
         default_platform=default_platform,
+        default_model=default_model,
         max_sessions=max_sessions,
     )
     session.add(col)
@@ -216,6 +218,19 @@ async def get_column_default_platform(session, project_key: str, column_name: st
     )
     col = (await session.execute(stmt)).scalar_one_or_none()
     return col.default_platform if col else None
+
+
+async def get_column_default_model(session, project_key: str, column_name: str) -> str | None:
+    """Look up the default model for a column name within a project. None means
+    no override -- resolution falls through to the persona frontmatter's
+    `model:` field, then to no --model flag at all (platform default)."""
+    stmt = (
+        select(KanbanColumn)
+        .where(KanbanColumn.project_key == project_key)
+        .where(KanbanColumn.name == column_name)
+    )
+    col = (await session.execute(stmt)).scalar_one_or_none()
+    return col.default_model if col else None
 
 
 async def list_pending_cards(session, project_key: str) -> list[KanbanCard]:

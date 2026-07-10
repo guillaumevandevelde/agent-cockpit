@@ -127,6 +127,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 priority=payload.get("priority"), labels=payload.get("labels"),
                 work_type=payload.get("work_type"),
                 agent=payload.get("agent"),
+                model=payload.get("model"),
                 transport=payload.get("transport"),
                 resume_session_id=payload.get("resume_session_id"),
                 resume_project_folder=payload.get("resume_project_folder"),
@@ -177,7 +178,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             for f in ("title", "description"):
                 if f in payload and payload[f] is not None:
                     _lww_set(card, f, payload[f], hlc)
-            for f in ("priority", "labels", "work_type", "agent", "transport",
+            for f in ("priority", "labels", "work_type", "agent", "model", "transport",
                       "resume_session_id", "resume_project_folder", "scheduled_at",
                       "dispatch_failures",
                       "analyst_agent_id", "executor_agent_id", "parent_card_id",
