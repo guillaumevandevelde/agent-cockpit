@@ -23,7 +23,7 @@ const FOCUSED_PANE_RING_CLASS =
 type ProviderFilter = 'all' | AgenticCliId
 
 const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
-  { value: 'all', label: 'All agents' },
+  { value: 'all', label: 'All runs' },
   { value: 'claude-code', label: 'Claude Code' },
   { value: 'codex-cli', label: 'Codex' },
   { value: 'copilot-cli', label: 'Copilot' },
@@ -93,7 +93,7 @@ export function CCBridgePage() {
       : !selectedFilterProvider.installed
         ? `${selectedFilterProvider.display_name} is not installed.`
         : selectedFilterProvider.capability_details?.spawn?.reason
-          ?? `${selectedFilterProvider.display_name} cannot launch sessions from Agent Bridge.`
+          ?? `${selectedFilterProvider.display_name} cannot launch runs from Agent Bridge.`
 
   const filterCounts: Record<ProviderFilter, number> = {
     all: sessions.length,

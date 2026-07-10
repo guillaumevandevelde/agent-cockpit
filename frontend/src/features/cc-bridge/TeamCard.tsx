@@ -5,12 +5,12 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { SessionCard } from './SessionCard'
-import type { AgentTeam, CCSession } from './types'
+import type { RunGroup, CCSession } from './types'
 import type { AttentionKind } from './attention'
 import type { InstanceIdentity } from '@/types/status'
 
 interface TeamCardProps {
-  team: AgentTeam
+  team: RunGroup
   activeTargets: string[]
   onToggleTarget: (target: string) => void
   onKillSession: (session: CCSession) => void

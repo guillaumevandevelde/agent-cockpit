@@ -73,13 +73,13 @@ function deliveryWarning(member: MailMemberResponse, kind: Exclude<MailMessageKi
   const expectsAction = kind === 'context_request' || kind === 'handoff'
   if (member.status === 'offline' || member.wake_state === 'offline') {
     return expectsAction
-      ? `${member.display_name} is offline. This ${kind === 'handoff' ? 'handoff' : 'request'} will be stored, but no live agent can be woken to respond until that participant checks in again.`
-      : `${member.display_name} is offline. This message will be stored for later; Claude Cockpit cannot wake a live session.`
+      ? `${member.display_name} is offline. This ${kind === 'handoff' ? 'handoff' : 'request'} will be stored, but no live run can be woken to respond until that participant checks in again.`
+      : `${member.display_name} is offline. This message will be stored for later; Claude Cockpit cannot wake a live run.`
   }
   if (member.wake_state === 'delivered_waiting') {
     return expectsAction
-      ? `${member.display_name} is not wakeable. The ${kind === 'handoff' ? 'handoff' : 'request'} will be stored, but the agent may not see it until it checks Agent Mail or reaches a hook boundary.`
-      : `${member.display_name} is not wakeable. The message will be stored, but Claude Cockpit cannot nudge this session.`
+      ? `${member.display_name} is not wakeable. The ${kind === 'handoff' ? 'handoff' : 'request'} will be stored, but the run may not see it until it checks Agent Mail or reaches a hook boundary.`
+      : `${member.display_name} is not wakeable. The message will be stored, but Claude Cockpit cannot nudge this run.`
   }
   return null
 }

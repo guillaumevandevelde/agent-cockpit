@@ -9,7 +9,7 @@ import { CLICKABLE_CARD } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import type { AgenticCliId } from '@/types/providers'
 
-interface AgentSession {
+interface RunPreview {
   tmux_target: string
   session_name: string
   cwd: string
@@ -19,8 +19,8 @@ interface AgentSession {
   status: string
 }
 
-interface AgentActivityResponse {
-  agents: AgentSession[]
+interface RunActivityResponse {
+  runs: RunPreview[]
   count: number
 }
 
@@ -48,40 +48,40 @@ const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
 ]
 
 export function AgentActivityCard() {
-  const [agents, setAgents] = useState<AgentSession[]>([])
+  const [runs, setRuns] = useState<RunPreview[]>([])
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [providerFilter, setProviderFilter] = useState<ProviderFilter>('all')
   const navigate = useNavigate()
 
-  const filteredAgents = providerFilter === 'all'
-    ? agents
-    : agents.filter((agent) => agent.provider === providerFilter)
+  const filteredRuns = providerFilter === 'all'
+    ? runs
+    : runs.filter((run) => run.provider === providerFilter)
 
   const filterCounts: Record<ProviderFilter, number> = {
-    all: agents.length,
-    'claude-code': agents.filter((a) => a.provider === 'claude-code').length,
-    'codex-cli': agents.filter((a) => a.provider === 'codex-cli').length,
-    'copilot-cli': agents.filter((a) => a.provider === 'copilot-cli').length,
-    'mimo-code': agents.filter((a) => a.provider === 'mimo-code').length,
-    'open-code': agents.filter((a) => a.provider === 'open-code').length,
+    all: runs.length,
+    'claude-code': runs.filter((r) => r.provider === 'claude-code').length,
+    'codex-cli': runs.filter((r) => r.provider === 'codex-cli').length,
+    'copilot-cli': runs.filter((r) => r.provider === 'copilot-cli').length,
+    'mimo-code': runs.filter((r) => r.provider === 'mimo-code').length,
+    'open-code': runs.filter((r) => r.provider === 'open-code').length,
   }
 
-  const fetchAgents = async () => {
+  const fetchRuns = async () => {
     setLoading(true)
     try {
-      const data = await apiClient<AgentActivityResponse>(buildEndpoint('agent-activity/live'))
-      setAgents(data.agents)
+      const data = await apiClient<RunActivityResponse>(buildEndpoint('agent-activity/live'))
+      setRuns(data.runs)
     } catch {
-      setAgents([])
+      setRuns([])
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    fetchAgents()
-    const interval = setInterval(fetchAgents, 10000)
+    fetchRuns()
+    const interval = setInterval(fetchRuns, 10000)
     return () => clearInterval(interval)
   }, [])
 
@@ -92,10 +92,10 @@ export function AgentActivityCard() {
           <div>
             <CardTitle className="flex items-center gap-2">
               <Terminal className="h-5 w-5" />
-              Live Agent Sessions
+              Live Runs
             </CardTitle>
             <CardDescription>
-              Currently running agent sessions across all providers
+              Currently running CLI sessions across all providers
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -119,7 +119,7 @@ export function AgentActivityCard() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={fetchAgents}
+              onClick={fetchRuns}
               disabled={loading}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -128,32 +128,32 @@ export function AgentActivityCard() {
         </div>
       </CardHeader>
       <CardContent>
-        {filteredAgents.length === 0 ? (
+        {filteredRuns.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
-            {agents.length === 0
-              ? 'No active agent sessions. Start one from the Agent Bridge.'
-              : `No ${providerFilter === 'all' ? '' : providerFilter + ' '}sessions found.`}
+            {runs.length === 0
+              ? 'No active runs. Start one from the Agent Bridge.'
+              : `No ${providerFilter === 'all' ? '' : providerFilter + ' '}runs found.`}
           </p>
         ) : (
           <div className="space-y-2">
-            {filteredAgents.map((agent) => (
+            {filteredRuns.map((run) => (
               <div
-                key={agent.tmux_target}
+                key={run.tmux_target}
                 className={CLICKABLE_CARD + ' rounded-lg border p-3'}
-                onClick={() => setExpanded(expanded === agent.tmux_target ? null : agent.tmux_target)}
+                onClick={() => setExpanded(expanded === run.tmux_target ? null : run.tmux_target)}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium truncate">{agent.session_name || agent.tmux_target}</span>
-                        <Badge variant="outline" className="text-xs">{agent.provider}</Badge>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[agent.status] ?? STATUS_COLORS.active}`}>
-                          {STATUS_LABELS[agent.status] ?? agent.status}
+                        <span className="font-medium truncate">{run.session_name || run.tmux_target}</span>
+                        <Badge variant="outline" className="text-xs">{run.provider}</Badge>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[run.status] ?? STATUS_COLORS.active}`}>
+                          {STATUS_LABELS[run.status] ?? run.status}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {agent.cwd}
+                        {run.cwd}
                       </p>
                     </div>
                   </div>
@@ -171,9 +171,9 @@ export function AgentActivityCard() {
                     </Button>
                   </div>
                 </div>
-                {expanded === agent.tmux_target && agent.preview && (
+                {expanded === run.tmux_target && run.preview && (
                   <pre className="mt-2 rounded bg-muted p-2 text-xs overflow-x-auto max-h-32 overflow-y-auto">
-                    {agent.preview}
+                    {run.preview}
                   </pre>
                 )}
               </div>

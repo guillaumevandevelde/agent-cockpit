@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { AgentTeam, AgentSession } from './types'
+import type { RunGroup, AgentSession } from './types'
 import { fetchTeams } from './api'
 
 const POLL_INTERVAL = 5000
 
 export function useTeams() {
-  const [teams, setTeams] = useState<AgentTeam[]>([])
+  const [teams, setTeams] = useState<RunGroup[]>([])
   const [ungrouped, setUngrouped] = useState<AgentSession[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

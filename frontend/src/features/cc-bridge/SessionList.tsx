@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { SessionCard } from './SessionCard'
 import { TeamCard } from './TeamCard'
-import type { CCSession, AgentTeam } from './types'
+import type { CCSession, RunGroup } from './types'
 import type { AttentionKind } from './attention'
 import type { AgenticCliId } from '@/types/providers'
 import type { InstanceIdentity } from '@/types/status'
@@ -12,7 +12,7 @@ type ProviderFilter = 'all' | AgenticCliId
 
 interface SessionListProps {
   sessions: CCSession[]
-  teams: AgentTeam[]
+  teams: RunGroup[]
   ungrouped: CCSession[]
   loading: boolean
   error: string | null
@@ -49,7 +49,7 @@ export function SessionList({
 }: SessionListProps) {
   const totalCount = sessions.length
   const emptyName = providerFilter === 'all'
-    ? 'agent'
+    ? 'run'
     : providerFilter === 'codex-cli' ? 'Codex'
     : providerFilter === 'mimo-code' ? 'MiMoCode'
     : 'Claude Code'
@@ -62,10 +62,10 @@ export function SessionList({
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-3 border-b">
         <span className="text-sm font-medium">
-          Sessions ({totalCount})
+          Runs ({totalCount})
           {teams.length > 0 && (
             <span className="text-muted-foreground ml-1">
-              · {teams.length} team{teams.length !== 1 ? 's' : ''}
+              · {teams.length} group{teams.length !== 1 ? 's' : ''}
             </span>
           )}
         </span>
