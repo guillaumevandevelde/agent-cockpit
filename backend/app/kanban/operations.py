@@ -15,7 +15,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from app.kanban.hlc import HLC, hlc_max
 from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanMeta, KanbanOp
@@ -185,24 +185,48 @@ async def _materialize(session, *, op_type, entity_type, project_key,
         await session.flush()
         return
     if entity_type == "card" and op_type == "claim":
-        card = await session.get(KanbanCard, entity_id)
-        if card is None:
+        # Existence check first — preserves the existing "claim on missing card
+        # is silently ignored" contract. We deliberately use a column-only SELECT
+        # rather than `session.get(KanbanCard, ...)` so the session's identity
+        # map is not populated with a stale snapshot that could mask concurrent
+        # commits if the same session issues another claim later.
+        exists = await session.scalar(
+            select(KanbanCard.id).where(KanbanCard.id == entity_id)
+        )
+        if exists is None:
             return
         # Reject empty claimants so frontend `!c.claimed_by` and backend
         # `claimed_by.is_(None)` never diverge on the same card.
         if not payload.get("claimed_by"):
             raise ValueError("claimed_by must be a non-empty string")
-        # Conditional: a live claim with an equal/earlier claim_hlc wins.
-        if card.claimed_by is not None and hlc_max(card.claim_hlc, hlc) != hlc:
-            raise ClaimRejected(card.claimed_by)
-        if card.claimed_by is not None and card.claim_hlc and card.claim_hlc < hlc:
-            # An earlier claim already holds it; later claim is rejected.
-            raise ClaimRejected(card.claimed_by)
-        card.claimed_by = payload["claimed_by"]
-        card.claimed_at = _utcnow()
-        card.claim_hlc = hlc
-        card.updated_at = _utcnow()
-        await session.flush()
+        # Atomic conditional claim: a single UPDATE guarded by `claimed_by IS NULL`
+        # is the only way to prevent the TOCTOU window between two concurrent
+        # `claim_card` calls that each loaded the card before either committed.
+        # The previous read-check-write pattern in Python was racy: a session's
+        # identity-map object can hold a stale `claimed_by is None` snapshot, so
+        # two claimants would both pass the in-Python check and the second
+        # commit would silently overwrite the first. The rowcount check here
+        # matches first-wins semantics — the existing claim keeps the card.
+        now = _utcnow()
+        result = await session.execute(
+            update(KanbanCard)
+            .where(KanbanCard.id == entity_id)
+            .where(KanbanCard.claimed_by.is_(None))
+            .values(
+                claimed_by=payload["claimed_by"],
+                claimed_at=now,
+                claim_hlc=hlc,
+                updated_at=now,
+            )
+        )
+        if result.rowcount == 0:
+            # Someone else already owns the card. Fetch the current owner from
+            # the DB for the error message — do NOT trust the identity-map
+            # object that was already loaded above (it is stale on purpose).
+            current_owner = await session.scalar(
+                select(KanbanCard.claimed_by).where(KanbanCard.id == entity_id)
+            )
+            raise ClaimRejected(current_owner or "unknown")
         return
 
     if entity_type == "card" and op_type == "delete":
