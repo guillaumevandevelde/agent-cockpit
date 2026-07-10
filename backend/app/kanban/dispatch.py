@@ -554,6 +554,32 @@ async def _resolve_work_type_fallback(session, project_key: str, card) -> str | 
 # so no two scopes collide).
 _REVISIT_PREFIX = "**Revisit:** "
 
+# Prefix matched against a card's activity-feed comments when extracting the
+# human's answer to an impediment. Mirrors _REVISIT_PREFIX: the resolve path
+# (router.resolve_impediment) stamps this prefix on a human-supplied answer,
+# dispatch reads it back via extract_impediment_answer and injects it into the
+# `## IMPEDIMENT` section. Distinct from the `**Impediment:**` question prefix
+# so the two never collide when both live in the same feed.
+_IMPEDIMENT_ANSWER_PREFIX = "**Resolution:** "
+
+
+def extract_impediment_answer(activity) -> str | None:
+    """Return the text of the latest `**Resolution:** <answer>` comment on a
+    card's activity feed, or None when no such comment exists.
+
+    Mirrors `extract_revisit_question`: walk the feed in reverse (newest
+    first) so, when a human refines their answer across multiple resolve
+    rounds, the *latest* resolution wins. Anything that's not a `comment`
+    op is skipped; the prefix match is on `payload["text"]`.
+    """
+    for op in reversed(list(activity)):
+        if op.op_type != "comment":
+            continue
+        text = (op.payload.get("text") or "")
+        if text.startswith(_IMPEDIMENT_ANSWER_PREFIX):
+            return text[len(_IMPEDIMENT_ANSWER_PREFIX):]
+    return None
+
 
 def extract_revisit_question(activity) -> str | None:
     """Return the text of the latest `**Revisit:** <note>` comment on a
@@ -578,6 +604,7 @@ def extract_revisit_question(activity) -> str | None:
 
 def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       impediment_question: str | None = None,
+                      impediment_answer: str | None = None,
                       revisit_question: str | None = None,
                       revisit_prior_decision: dict | None = None) -> str:
     preamble = (persona.strip() + "\n\n") if persona else ""
@@ -587,8 +614,21 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
             "\n\n## IMPEDIMENT\n"
             "A previous agent was blocked on this card. Their question:\n"
             f"> {impediment_question}\n\n"
-            "Please address this question or clarify what's needed before proceeding.\n"
         )
+        if impediment_answer:
+            # A human answered the blocker via /resolve-impediment (or a
+            # `**Resolution:**` comment). Surface it as authoritative so the
+            # resumed session acts on the decision instead of re-asking.
+            impediment_section += (
+                "A human has since answered this — treat the answer as an "
+                "authoritative decision and proceed accordingly:\n"
+                f"> {impediment_answer}\n\n"
+            )
+        else:
+            impediment_section += (
+                "Please address this question or clarify what's needed "
+                "before proceeding.\n"
+            )
 
     revisit_section = ""
     if revisit_question:
@@ -1409,6 +1449,7 @@ async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
     phase: str = "executor",
     impediment_question: str | None = None,
+    impediment_answer: str | None = None,
     revisit_question: str | None = None,
     revisit_prior_decision: dict | None = None,
     agent_override: str | None = None,
@@ -1508,6 +1549,7 @@ async def _run_card(
     effective_model = _effective_model(card.model, column_default_model, persona_model)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         impediment_question=impediment_question,
+        impediment_answer=impediment_answer,
         revisit_question=revisit_question,
         revisit_prior_decision=revisit_prior_decision)
     if phase == "executor" and card.parent_card_id is not None:
@@ -2147,17 +2189,20 @@ async def dispatch_card(
 async def dispatch_impediment_card(
     session, *, card_id: str, project_path: str, target_agent: str,
     impediment_question: str,
+    impediment_answer: str | None = None,
     transport: SpawnTransport | None = None,
 ) -> dict | None:
     """Dispatch an impediment card to a specific agent for resolution.
-    
+
     Args:
         card_id: The ID of the impediment card
         project_path: Path to the project
         target_agent: The agent to dispatch to (analyst, engineer)
         impediment_question: The question that needs to be answered
+        impediment_answer: A human's answer/decision on the blocker, injected
+            into the `## IMPEDIMENT` section so the resumed session acts on it
         transport: The spawn transport to use (auto-selects based on card if None)
-    
+
     Returns:
         Result dict or None if dispatch failed
     """
@@ -2184,6 +2229,7 @@ async def dispatch_impediment_card(
         session, card=card, project_key=card.project_key,
         project_path=project_path, transport=transport,
         impediment_question=impediment_question,
+        impediment_answer=impediment_answer,
     )
 
 

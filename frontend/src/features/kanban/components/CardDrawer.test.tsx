@@ -345,6 +345,74 @@ describe("CardDrawer reopen control", () => {
   });
 });
 
+describe("CardDrawer resolve impediment control", () => {
+  it("does not render the resolve-impediment control when the card is not in Impediment", () => {
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+
+    render(
+      <CardDrawer
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("resolve-impediment-control")).toBeNull();
+  });
+
+  it("surfaces the impediment question and submits the answer via resolveImpediment", async () => {
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Which library should we use?" },
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
+    resolveMock.mockResolvedValue({ ...baseCard, column: "Doing" });
+
+    const impedimentCard: Card = { ...baseCard, column: "Impediment" };
+    const onChanged = vi.fn();
+
+    render(
+      <CardDrawer
+        card={impedimentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    expect(control).not.toBeNull();
+
+    // The agent's question is surfaced for context.
+    await waitFor(() =>
+      expect(screen.getByTestId("impediment-question").textContent).toMatch(
+        /Which library should we use\?/,
+      ),
+    );
+
+    const textarea = screen.getByTestId("resolve-impediment-answer") as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "Use library B." } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+    });
+
+    await waitFor(() => expect(resolveMock).toHaveBeenCalled());
+    const [cardId, projectPath, answer] = resolveMock.mock.calls[0];
+    expect(cardId).toBe("card-1");
+    expect(projectPath).toBe("/proj");
+    expect(answer).toBe("Use library B.");
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+});
+
 describe("CardDrawer deliverables tab per-kind rendering", () => {
   it("renders each deliverable kind with its own icon and ref formatting", () => {
     const card: Card = {

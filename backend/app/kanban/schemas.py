@@ -273,6 +273,11 @@ class ImpedimentResolveRequest(BaseModel):
     """Request to resolve an impediment."""
     project_path: str
     target_agent: str | None = None  # override auto-detection
+    # A human's answer/decision on the blocker. When present it's posted as a
+    # durable `**Resolution:**` comment and injected into the resumed session's
+    # `## IMPEDIMENT` prompt section — the reliable channel for a human's answer
+    # to reach the next dispatched session.
+    answer: str | None = None
 
 
 # Decision gates

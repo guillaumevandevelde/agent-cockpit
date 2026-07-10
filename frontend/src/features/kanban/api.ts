@@ -193,6 +193,16 @@ export const kanbanApi = {
       body: JSON.stringify({ note }),
     }),
 
+  // Resolve an impediment: optionally attach a human's answer/decision (posted
+  // as a durable `**Resolution:**` comment) and re-dispatch the card to an
+  // agent that picks up the work with that answer injected into its prompt.
+  // 422 when the card isn't in the Impediment column. Returns the reloaded card.
+  resolveImpediment: (id: string, projectPath: string, answer?: string): Promise<Card> =>
+    apiClient<Card>(`${BASE}/cards/${id}/resolve-impediment`, {
+      method: "POST",
+      body: JSON.stringify({ project_path: projectPath, answer }),
+    }),
+
   attach: (id: string, kind: string, ref: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}/deliverables`, {
       method: "POST",

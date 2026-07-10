@@ -1041,18 +1041,34 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
         
         if card.column != "Impediment":
             raise HTTPException(422, "card is not in Impediment column")
-        
-        # Get impediment question from activity
+
+        # A human's answer, when supplied, is stamped as a durable
+        # `**Resolution:**` comment before we re-read the feed — that makes it
+        # auditable and lets extract_impediment_answer pick it up uniformly
+        # (whether it came in on this request or via a manual comment).
+        if payload.answer and payload.answer.strip():
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=cid,
+                payload={"text": f"{dispatch._IMPEDIMENT_ANSWER_PREFIX}{payload.answer.strip()}"})
+            await s.commit()
+
+        # Get impediment question + latest human answer from activity. Match the
+        # exact `**Impediment:** ` prefix (not a loose "Impediment:" substring)
+        # so a human's `**Resolution:**` answer that happens to mention the word
+        # isn't mistaken for the question.
         activity = await service.card_activity(s, cid)
         impediment_question = None
         for entry in reversed(activity):
-            if entry.op_type == "comment" and "Impediment:" in entry.payload.get("text", ""):
-                impediment_question = entry.payload["text"].replace("**Impediment:** ", "")
+            text = entry.payload.get("text", "") if entry.op_type == "comment" else ""
+            if text.startswith("**Impediment:** "):
+                impediment_question = text[len("**Impediment:** "):]
                 break
-        
+
         if not impediment_question:
             impediment_question = "No impediment question found"
-        
+
+        impediment_answer = dispatch.extract_impediment_answer(activity)
+
         # Determine target agent based on workflow rules or override
         target_agent = payload.target_agent
         if not target_agent:
@@ -1064,6 +1080,7 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
             res = await dispatch.dispatch_impediment_card(
                 s, card_id=cid, project_path=payload.project_path,
                 target_agent=target_agent, impediment_question=impediment_question,
+                impediment_answer=impediment_answer,
             )
         except Exception as e:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")

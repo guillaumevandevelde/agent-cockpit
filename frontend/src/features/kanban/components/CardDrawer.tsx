@@ -42,6 +42,7 @@ const LIVE_POLL_INTERVAL_MS = 3000;
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
 const DONE_COLUMN = "Done";
+const IMPEDIMENT_COLUMN = "Impediment";
 
 // Prefix on the audit-trail comment that a review request posts on the
 // original card. Deliberately distinct from `_DONE_SUMMARY_PREFIX` in the
@@ -374,6 +375,97 @@ function ReopenControl({
   );
 }
 
+// Prefix on the audit-trail comment that `report_impediment` posts on a card
+// when an agent gets stuck. The control below surfaces this question so a human
+// knows what they're answering.
+const IMPEDIMENT_PREFIX = "**Impediment:** ";
+
+// Control shown when a card sits in the Impediment column. An agent that got
+// stuck posted an `**Impediment:**` question and released its claim; this lets
+// a human type an answer/decision and re-dispatch the card. The answer is
+// posted as a durable `**Resolution:**` comment and injected into the resumed
+// session's `## IMPEDIMENT` prompt section (backend /resolve-impediment) — the
+// reliable channel that a plain activity-feed comment never was.
+function ResolveImpedimentControl({
+  card,
+  activity,
+  projectPath,
+  onChanged,
+}: {
+  card: Card;
+  activity: ActivityEntry[];
+  projectPath: string;
+  onChanged: () => void;
+}) {
+  const [answer, setAnswer] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Surface the agent's question (latest `**Impediment:**` comment) so the
+  // human has context for their answer.
+  const question = [...activity]
+    .reverse()
+    .find(
+      (e) =>
+        e.op_type === "comment" &&
+        typeof e.payload.text === "string" &&
+        (e.payload.text as string).startsWith(IMPEDIMENT_PREFIX),
+    );
+  const questionText = question
+    ? (question.payload.text as string).slice(IMPEDIMENT_PREFIX.length)
+    : null;
+
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await kanbanApi.resolveImpediment(
+        card.id,
+        projectPath,
+        answer.trim() || undefined,
+      );
+      toast.success("Impediment resolved — card re-dispatched");
+      setAnswer("");
+      onChanged();
+    } catch {
+      toast.error("Failed to resolve impediment");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-md border-2 border-orange-500/40 bg-orange-50 p-3 text-sm space-y-2 dark:bg-orange-950/30"
+      data-testid="resolve-impediment-control"
+    >
+      <div className="text-xs font-semibold uppercase text-orange-700 dark:text-orange-400">
+        Impediment — needs a human answer
+      </div>
+      {questionText && (
+        <div className="text-foreground whitespace-pre-wrap" data-testid="impediment-question">
+          {questionText}
+        </div>
+      )}
+      <Textarea
+        value={answer}
+        onChange={(e) => setAnswer(e.target.value)}
+        placeholder="Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
+        disabled={submitting}
+        data-testid="resolve-impediment-answer"
+      />
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={submit}
+          disabled={submitting}
+          data-testid="resolve-impediment-submit"
+        >
+          {submitting ? "Resolving…" : "Answer & re-dispatch"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function EditablePlan({
   plan,
   cardId,
@@ -668,6 +760,15 @@ export function CardDrawer({
             <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
             <ReopenControl card={card} onChanged={onChanged} />
           </>
+        )}
+
+        {card.column === IMPEDIMENT_COLUMN && (
+          <ResolveImpedimentControl
+            card={card}
+            activity={activity}
+            projectPath={projectPath}
+            onChanged={onChanged}
+          />
         )}
 
         <div className="text-sm">
