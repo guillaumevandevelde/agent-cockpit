@@ -81,3 +81,63 @@ async def test_open_gate_logs_a_comment_on_the_card():
     card = await m.get_card(cid)
     assert card["id"] == cid  # sanity: card still intact, session/claim untouched
     assert card.get("claimed_by") is None
+
+
+# --- latest_gate_answer ----------------------------------------------------
+# Acceptance criterion: resolve-impediment splices the human's chosen gate
+# answer into the resumed session's prompt. service.latest_gate_answer is the
+# lookup resolve_impediment uses; it's exercised here in isolation so the
+# ordering / status filter contract stays pinned even if the router path
+# drifts.
+
+
+@pytest.mark.asyncio
+async def test_latest_gate_answer_returns_none_when_no_gate_exists():
+    cid = (await m.create_card("P", "Card", ""))["id"]
+    async with KanbanSessionLocal() as s:
+        assert await service.latest_gate_answer(s, cid) is None
+
+
+@pytest.mark.asyncio
+async def test_latest_gate_answer_returns_none_when_gate_unanswered():
+    cid = (await m.create_card("P", "Card", ""))["id"]
+    await m.open_gate(cid, "Pick one", ["a", "b"], timeout_seconds=0.01)
+    async with KanbanSessionLocal() as s:
+        # Gate exists but status="open" — pending human input. Don't surface
+        # any answer yet (would mislead the resumed session).
+        assert await service.latest_gate_answer(s, cid) is None
+
+
+@pytest.mark.asyncio
+async def test_latest_gate_answer_returns_chosen_value_via_mcp():
+    cid = (await m.create_card("P", "Card", ""))["id"]
+    async with KanbanSessionLocal() as s:
+        gate = await service.create_gate(s, card_id=cid, project_key="P",
+            question="Pick one", options=["a", "b"])
+        gate_id = gate.id
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        await service.answer_gate(s, gate_id, "b")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        assert await service.latest_gate_answer(s, cid) == "b"
+
+
+@pytest.mark.asyncio
+async def test_latest_gate_answer_picks_most_recent_answer():
+    """Re-opened impediments may carry multiple gates. The latest *answered*
+    one wins so a human who changes their mind overrides the first pick."""
+    cid = (await m.create_card("P", "Card", ""))["id"]
+    async with KanbanSessionLocal() as s:
+        first = await service.create_gate(s, card_id=cid, project_key="P",
+            question="Round 1", options=["x", "y"])
+        await service.answer_gate(s, first.id, "x")
+        # Force a non-zero gap between answered_at so order_by is unambiguous.
+        import asyncio
+        await asyncio.sleep(0.01)
+        second = await service.create_gate(s, card_id=cid, project_key="P",
+            question="Round 2", options=["x", "y"])
+        await service.answer_gate(s, second.id, "y")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        assert await service.latest_gate_answer(s, cid) == "y"

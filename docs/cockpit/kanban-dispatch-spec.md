@@ -104,3 +104,43 @@ If you cannot complete it, leave a `comment` explaining why.
 - **Podman transport** (the abstraction is ready; the impl is the containerized-
   sessions track).
 - **Real `claimed_by` identity for UI claims** (still `me@ui`, tracked in followups M6).
+
+## Reporting a human-decision impediment (standard question flow)
+
+When an agent gets stuck on something only a human can decide (Postgres vs
+SQLite, scope question, etc.) it must use **`report_impediment`** with an
+optional `options: list[str]` and **end its session immediately** — it must
+not block on the answer. This is the standard question flow for every
+human-decision request:
+
+- MCP tool: `mcp__cockpit-kanban__report_impediment(card_id, question, options?)`
+  (`backend/app/kanban/mcp_server.py:report_impediment`).
+- REST: `POST /api/v1/kanban/cards/{cid}/report-impediment` (mirror).
+- Behaviour: card moves to `Impediment`, claim is released, the session ends.
+  When `options=` is supplied a `KanbanGate` row in status="open" is also
+  created so the UI shows choice buttons; the human picks one via
+  `POST /cards/{cid}/gates/{gate_id}/answer` (the existing gate path).
+- The legacy blocking `open_gate` tool poll-loops on the agent session —
+  this **blocks the session** until a human happens to answer, leaves the
+  worktree alive during the wait, and has been the cause of "wedged session
+  → worktree reaped" losses (kanban card 28b578ba). It remains in the API
+  for diagnostic / in-flow micro-decisions but is **not** the recommended
+  path for human-decision blockers.
+
+When the human clicks **Resolve impediment** on an Impediment card the
+dispatcher restarts a fresh session via
+`POST /cards/{cid}/resolve-impediment`. `router.resolve_impediment`
+composes the resumed prompt's `impediment_question` from:
+
+1. The latest `**Impediment:** <question>` comment (set by
+   `report_impediment`).
+2. When a `KanbanGate` with `status="answered"` exists on the card
+   (`service.latest_gate_answer`, latest-by-`answered_at`), the chosen
+   option is appended as `<question>\n\nChosen answer: <option>` so the new
+   agent sees both the original ask and the human's pick in the
+   `## IMPEDIMENT` block of `build_card_prompt`.
+
+A resolved Impediment card without a gate (legacy free-text
+`report_impediment(question=...)`) gets the raw question back — backwards
+compatible.
+

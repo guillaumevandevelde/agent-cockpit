@@ -61,6 +61,15 @@ De analyst gebruikt dezelfde MCP-tools als elke andere agent (`create_card`,
 het plan-attachment en spawnt automatisch kind-kaarten zodra hun deps in `Done`
 staan.
 
+Loopt de analyst tijdens de analyse vast op iets dat alleen een mens kan beslissen
+(technologie-keuze, scope-vraag, onduidelijke requirements), gebruik dan
+`report_impediment(card_id, question, options=[...])` — de kaart gaat naar
+`Impediment`, de claim wordt vrijgegeven en de sessie eindigt direct. Bij
+`options=` verschijnen er keuze-knoppen in de UI; het gekozen antwoord wordt bij
+`resolve_impediment` automatisch in de `impediment_question` van de hervatte
+sessie gezet. Zie `kanban-dispatch-spec.md` → *Reporting a human-decision
+impediment* voor details.
+
 ## 3. Stappen in de UI
 
 1. Maak een kaart aan in **Backlog** via de "+"-knop rechtsboven het bord.

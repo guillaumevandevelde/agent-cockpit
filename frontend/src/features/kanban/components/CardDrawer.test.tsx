@@ -620,3 +620,236 @@ describe("CardDrawer edit dialog round-trip", () => {
     });
   });
 });
+
+// --- Impediment + structured-options gate rendering -----------------------
+// Acceptance criterion: when a card lands in Impediment carrying a
+// `report_impediment(options=...)` gate, the CardDrawer must (a) render the
+// choice buttons, (b) after the human answers show the recorded choice, and
+// (c) expose a "Resolve impediment" button that hits the resolve-impediment
+// REST endpoint. The legacy free-text path (no gate) must still surface the
+// Resolve button so a human who wants to nudge a stuck card by hand can do
+// so without first picking an option. See report_impediment in
+// /mcp_server.py + the POST /cards/{cid}/resolve-impediment contract in
+// router.py.
+
+const impCard: Card = { ...baseCard, column: "Impediment" };
+
+describe("CardDrawer Impediment column: structured-options gate", () => {
+  it("renders the open-gate decision block on an Impediment card", async () => {
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    render(
+      <CardDrawer
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Both options render as buttons.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Postgres" })).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: "SQLite" })).toBeTruthy();
+    // The Impediment-specific header is used in place of "Decision requested".
+    expect(screen.getByText(/pick one to unblock/i)).toBeTruthy();
+  });
+
+  it("shows the recorded choice + Resolve button after the human answers", async () => {
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "answered",
+        answer: "Postgres",
+        created_at: "2026-07-10T10:00:00Z",
+        answered_at: "2026-07-10T10:01:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    render(
+      <CardDrawer
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The recorded choice is shown.
+    const recorded = await screen.findByTestId("impediment-resolved-pending");
+    expect(recorded.textContent).toMatch(/Postgres/);
+    expect(recorded.textContent).toMatch(/Choice recorded/);
+
+    // The Resolve button is rendered.
+    const resolveBtn = screen.getByTestId("resolve-impediment-button");
+    expect(resolveBtn).not.toBeNull();
+  });
+
+  it("Resolve button calls resolveImpediment and then onChanged", async () => {
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "answered",
+        answer: "Postgres",
+        created_at: "2026-07-10T10:00:00Z",
+        answered_at: "2026-07-10T10:01:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
+    resolveMock.mockResolvedValue({ ...impCard, id: "card-1" });
+
+    const onChanged = vi.fn();
+    render(
+      <CardDrawer
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    const resolveBtn = await screen.findByTestId("resolve-impediment-button");
+    await act(async () => {
+      fireEvent.click(resolveBtn);
+    });
+
+    await waitFor(() => expect(resolveMock).toHaveBeenCalled());
+    const [cardId, projectPath] = resolveMock.mock.calls[0];
+    expect(cardId).toBe("card-1");
+    expect(projectPath).toBe("/proj");
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("Resolve panel is hidden when no gate has been answered yet (free-text path)", async () => {
+    // Free-text path: a card that landed in Impediment via report_impediment
+    // without options=. No gate exists. The legacy free-text resolve control
+    // (upstream's ResolveImpedimentControl) handles that case via its own
+    // textarea — our structured-options panel must NOT also surface here,
+    // because there's no recorded choice to display.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** I need a schema review." },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    render(
+      <CardDrawer
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Wait for the polled gate fetch to land (returns []).
+    await waitFor(() =>
+      expect(
+        (kanbanApi.listGates as ReturnType<typeof vi.fn>).mock.calls.length,
+      ).toBeGreaterThan(0),
+    );
+    // Our structured-options "recorded choice" panel must not render.
+    expect(screen.queryByTestId("impediment-resolved-pending")).toBeNull();
+    // The upstream ResolveImpedimentControl textarea IS shown — that's the
+    // free-text path the human uses here.
+    expect(
+      screen.getByTestId("resolve-impediment-control"),
+    ).toBeTruthy();
+  });
+
+  it("Resolve panel is hidden when an open (unanswered) gate is still showing", async () => {
+    // While a structured gate is still open, the "recorded choice" panel must
+    // NOT render — there's no answer yet. The open-gate choice buttons stay
+    // visible and guide the human to pick an option.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    render(
+      <CardDrawer
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Wait for the polled gate fetch to land before asserting. Without this,
+    // the assertion runs while gates=[] (initial state) and our panel would
+    // not yet have been evaluated against the polled state.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Postgres" })).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("impediment-resolved-pending")).toBeNull();
+    expect(screen.queryByTestId("resolve-impediment-button")).toBeNull();
+  });
+
+  it("Resolve button is hidden outside the Impediment column", async () => {
+    // The Resolve button is Impediment-column specific — a Doing card must
+    // never expose it, even when a gate answer happens to exist.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Stray gate question",
+        options: ["A", "B"],
+        status: "answered",
+        answer: "A",
+        created_at: "2026-07-10T10:00:00Z",
+        answered_at: "2026-07-10T10:01:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+    render(
+      <CardDrawer
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("impediment-resolved-pending")).toBeNull();
+    expect(screen.queryByTestId("resolve-impediment-button")).toBeNull();
+  });
+});

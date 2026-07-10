@@ -46,8 +46,14 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 - `move_card` — verplaats de kaart (naar `Done` bij succes, `Impediment` bij blokkade).
 - `comment` — log voortgang of beslissingen op de kaart.
 - `attach_deliverable` — koppel je PR/branch/commit (`kind`: pr|branch|commit|link|note).
-- `report_impediment` — als je écht vastloopt: verplaatst naar `Impediment` met een
-  concrete, actionable vraag en geeft de claim vrij.
+- `report_impediment` — als je écht vastloopt: geef verplicht een concrete, actionable
+  `question` mee en (bij voorkeur) een `options: list[str]` met kandidaat-antwoorden.
+  Verplaatst naar `Impediment` en geeft de claim vrij — de sessie eindigt hier direct.
+  De mens kiest later (via de UI) één van de opties of typt een eigen antwoord in de
+  activiteit-feed; een hervattende sessie leest het resultaat via dezelfde
+  `impediment_question`-pipeline. Dit is de **standaard vraagflow** voor élke
+  menselijke beslissing — geen blokkerende `open_gate` meer (die houdt de sessie open
+  en laat de worktree als 'dood' reaperen).
 
 Volg de `Ship mode` uit je prompt (pull-request vs direct).
 

@@ -646,6 +646,19 @@ export function CardDrawer({
   }, [card.id]);
 
   const openGates = gates.filter((g) => g.status === "open");
+  // Latest answered gate (if any). Shown on Impediment cards so the human can
+  // see what they picked before clicking "Resolve impediment" — and so the
+  // resolved session knows the answer was captured. Mirrors the
+  // service.latest_gate_answer ordering (newest first) on the backend.
+  const latestAnsweredGate = (() => {
+    const answered = gates.filter((g) => g.status === "answered");
+    if (!answered.length) return null;
+    return [...answered].sort((a, b) => {
+      const ta = a.answered_at ? Date.parse(a.answered_at) : 0;
+      const tb = b.answered_at ? Date.parse(b.answered_at) : 0;
+      return tb - ta;
+    })[0];
+  })();
 
   const answerGate = async (gate: Gate, option: string) => {
     setAnswering(gate.id);
@@ -704,6 +717,24 @@ export function CardDrawer({
     }
   };
 
+  // Resolve an Impediment card: dispatches a fresh session that picks up the
+  // original question + (when report_impediment used options=) the human's
+  // chosen answer. Mirrors the backend's `POST /cards/{cid}/resolve-impediment`.
+  // The button is enabled as soon as the card is in Impediment: the legacy
+  // free-text path has no gate to wait for, and the structured path is
+  // dispatchable the moment the human picks an option (their choice is what
+  // gets forwarded, not the unresolved question).
+  const resolveImpediment = async () => {
+    try {
+      await kanbanApi.resolveImpediment(card.id, projectPath);
+      toast.success("Impediment resolved — fresh session dispatched");
+      onChanged();
+    } catch {
+      toast.error("Resolve failed — card may have changed; reloading");
+      onChanged();
+    }
+  };
+
   const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
   const isClaimedByHuman = card.claimed_by && !isClaimedByAgent;
 
@@ -736,7 +767,9 @@ export function CardDrawer({
             className="rounded-md border-2 border-primary/50 bg-primary/5 p-3 text-sm"
           >
             <div className="mb-2 text-xs font-semibold uppercase text-primary">
-              Decision requested
+              {card.column === IMPEDIMENT_COLUMN
+                ? "Decision needed — pick one to unblock"
+                : "Decision requested"}
             </div>
             <MarkdownRenderer content={gate.question} />
             <div className="mt-3 flex flex-wrap gap-2">
@@ -753,6 +786,32 @@ export function CardDrawer({
             </div>
           </div>
         ))}
+
+        {card.column === IMPEDIMENT_COLUMN && latestAnsweredGate && (
+          <div
+            data-testid="impediment-resolved-pending"
+            className="rounded-md border-2 border-emerald-600/50 bg-emerald-50 dark:bg-emerald-950/30 p-3 text-sm"
+          >
+            <div className="mb-2 text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-400">
+              Choice recorded
+            </div>
+            <div className="text-muted-foreground">The human picked:</div>
+            <div className="mt-1 font-medium">
+              <MarkdownRenderer
+                content={`> ${latestAnsweredGate.answer ?? ""}`}
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={resolveImpediment}
+                data-testid="resolve-impediment-button"
+              >
+                Resolve impediment
+              </Button>
+            </div>
+          </div>
+        )}
 
         {card.column === DONE_COLUMN && (
           <>

@@ -524,6 +524,32 @@ async def answer_gate(session, gate_id: str, answer: str) -> KanbanGate | None:
     return gate
 
 
+async def latest_gate_answer(session, card_id: str) -> str | None:
+    """Return the chosen answer from the most recent *answered* gate on this
+    card, or None when no gate exists yet, no gate has been answered, or the
+    card has only an open (still-pending) gate.
+
+    Used by ``resolve_impediment`` to splice the human's pick into the
+    resumed session's ``impediment_question`` so the new agent sees both the
+    original ask *and* the decision in one block. Returns None for the
+    legacy free-text impediment path (no gate ever opened), keeping
+    backwards-compatible callers (no chosen-answer line in the prompt).
+    """
+    from app.kanban.models import KanbanGate
+
+    stmt = (
+        select(KanbanGate)
+        .where(KanbanGate.card_id == card_id)
+        .where(KanbanGate.status == "answered")
+        .order_by(KanbanGate.answered_at.desc())
+        .limit(1)
+    )
+    gate = (await session.execute(stmt)).scalars().first()
+    if gate is None:
+        return None
+    return gate.answer
+
+
 # Work-type → persona mapping (per-project)
 
 
