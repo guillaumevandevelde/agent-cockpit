@@ -23,7 +23,7 @@ from typing import Protocol
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
-from app.kanban.service import get_card, get_column_default_platform, list_cards
+from app.kanban.service import get_card, get_column_default_model, get_column_default_platform, list_cards
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.providers.platform_env import PLATFORM_ANTHROPIC
 
@@ -403,6 +403,14 @@ def _read_persona_model(project_path: str, filename: str) -> str | None:
     return model if isinstance(model, str) and model else None
 
 
+def _effective_model(card_model: str | None, column_default_model: str | None,
+                     persona_model: str | None) -> str | None:
+    """Precedence: card.model > column.default_model > persona frontmatter
+    `model:` > None (no --model flag, platform default applies). Empty
+    strings are treated as unset, same as None."""
+    return card_model or column_default_model or persona_model or None
+
+
 def _persona_for_card(project_path: str, card, column: str) -> str | None:
     """Resolve persona for a card. `column` is passed explicitly because the card
     may already have been moved to a non-persona column."""
@@ -700,7 +708,8 @@ def _build_ship_instructions(ship_mode: str) -> str:
 
 class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str,
-                 provider_id: str = "claude-code", platform: str = "anthropic") -> dict: ...
+                 provider_id: str = "claude-code", platform: str = "anthropic",
+                 model: str | None = None) -> dict: ...
 
 
 def _known_provider_ids() -> set[str]:
@@ -715,7 +724,8 @@ def _known_provider_ids() -> set[str]:
 def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass."""
     def _transport(*, directory: str, prompt: str, session_name: str,
-                   provider_id: str = "claude-code", platform: str = "anthropic") -> dict:
+                   provider_id: str = "claude-code", platform: str = "anthropic",
+                   model: str | None = None) -> dict:
         """Create a worktree off origin/master, then spawn a `provider_id` session in it,
         against the given `platform` subscription (anthropic | bedrock | minimax).
 
@@ -745,7 +755,7 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
             skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
-            platform=platform,
+            platform=platform, model=model,
         )
         try:
             result = spawn_session(provider_id, options, session_name=session_name)
@@ -774,12 +784,13 @@ _sandcastle_start_tasks: set = set()
 
 
 def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
-                         provider_id: str = "claude-code", platform: str = "anthropic") -> dict:
+                         provider_id: str = "claude-code", platform: str = "anthropic",
+                         model: str | None = None) -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
 
-    `provider_id` and `platform` are accepted for transport-signature parity but
-    ignored: sandcastle runs use the per-project sandcastle config's `agent_provider`,
-    not the card's or column's.
+    `provider_id`, `platform` and `model` are accepted for transport-signature
+    parity but ignored: sandcastle runs use the per-project sandcastle config's
+    `agent_provider`, not the card's, column's, or persona's.
 
     Runs the agent in a Docker/Podman container. The actual run is kicked off
     asynchronously; this function returns immediately after scheduling it.
@@ -1145,6 +1156,9 @@ async def _run_card(
     # against (see KanbanColumn.default_platform); unset means the dispatcher's own
     # default, the Anthropic subscription.
     platform = await get_column_default_platform(session, project_key, target_agent) or PLATFORM_ANTHROPIC
+    persona_model = _read_persona_model(project_path, f"{target_agent}.md")
+    column_default_model = await get_column_default_model(session, project_key, target_agent)
+    effective_model = _effective_model(card.model, column_default_model, persona_model)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         impediment_question=impediment_question)
     if phase == "executor" and card.parent_card_id is not None:
@@ -1163,7 +1177,7 @@ async def _run_card(
         prompt = plan_section + prompt
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
-                                 provider_id=provider_id, platform=platform)
+                                 provider_id=provider_id, platform=platform, model=effective_model)
     except Exception:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
@@ -1952,7 +1966,8 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
     recorded cwd (via project_folder), and spawns with ``--resume session_id``.
     """
     def _transport(*, directory: str, prompt: str, session_name: str,
-                   provider_id: str = "claude-code", platform: str = "anthropic") -> dict:
+                   provider_id: str = "claude-code", platform: str = "anthropic",
+                   model: str | None = None) -> dict:
         from app.services.agent_bridge.spawn import spawn_session
         from app.services.providers.base import SpawnCommandOptions
         from app.services.scheduling.session_registry import session_registry
@@ -1972,6 +1987,7 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             prompt=prompt,
             skip_permissions=skip_permissions,
             platform=platform,
+            model=model,
         )
         result = spawn_session(provider_id, options, session_name=session_name)
         # Track the spawn so the dispatch reaper can detect a resumed session
