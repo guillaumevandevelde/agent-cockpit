@@ -35,6 +35,13 @@ vervolgens onafhankelijk op.
    - Geef elke kind-kaart een **concrete, scoped beschrijving**: titel + 2-5 zinnen
      met acceptance criteria, zodat een executor zonder context weet wat 'ie moet
      opleveren.
+   - **Zet `work_type="analysis"`** op een kind-kaart die zélf nog onderzoek,
+     scope-bepaling of verdere decompositie vereist vóór een executor 'm zonder
+     extra context kan implementeren. Zo'n kind routeert bij dispatch naar de
+     `analyst`-persona (i.p.v. `engineer`) en krijgt het 📊-badge, zodat het eerst
+     een eigen plan-fase doorloopt. Kind-kaarten die al direct uitvoerbaar zijn
+     krijgen een passend `work_type` (`feature`/`bug`/`chore`) of laten het veld
+     leeg.
    - Houd het aantal kind-kaarten ≤ 50 (hard cap van `add_plan_attachment`).
 4. **Plan-attachment schrijven** via `add_plan_attachment(card_id=<parent>,
    plan_markdown=<markdown>, child_card_ids=[...], depends_on_graph={...})`. Het
@@ -50,7 +57,8 @@ vervolgens onafhankelijk op.
 Gebruik de `cockpit-kanban` MCP-tools. Jij beweegt de kaart zelf — er is **geen**
 apart workflow-systeem dat je output parseert:
 
-- `create_card` — kind-kaarten aanmaken (basic fields: `project`, `title`, `description`).
+- `create_card` — kind-kaarten aanmaken (basic fields: `project`, `title`, `description`;
+  zet `work_type="analysis"` als de kind-kaart zelf nog een analyse-fase nodig heeft — zie stap 3).
 - `add_plan_attachment` — kind-kaarten aan de parent koppelen + dep-graph + plan-markdown.
 - `move_card` — parent naar `Done` als exit-signaal.
 - `report_impediment` — als je écht vastloopt tijdens analyse (bijv. de kaart is

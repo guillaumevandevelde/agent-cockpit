@@ -19,6 +19,12 @@ Werkwijze:
 2. Bedenk een implementatieplan met 1+ kind-kaarten.
 3. Voor elke kind-kaart: titel, beschrijving, executor_agent_id
    (default: parent.executor_agent_id), optionele depends_on.
+   Zet work_type="analysis" op een kind-kaart die zélf nog onderzoek,
+   scope-bepaling of verdere decompositie nodig heeft voordat een executor
+   'm zonder extra context kan implementeren — zo'n kind routeert bij dispatch
+   naar de analyst-persona (i.p.v. de executor) en doorloopt eerst een eigen
+   plan-fase. Direct uitvoerbare kinderen krijgen een passend work_type
+   (feature/bug/chore) of laten het veld leeg.
 4. Schrijf een plan-attachment op de parent via add_plan_attachment.
 5. Verplaats de parent-kaart naar 'Done' met summary
    'Plan opgesplitst in N taken'.
