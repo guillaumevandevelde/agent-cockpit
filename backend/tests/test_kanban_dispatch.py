@@ -1784,6 +1784,103 @@ async def test_redispatch_all_orphans_skips_blocked_card():
     assert len(transport.calls) == 1
 
 
+# ---- priority sort on bulk dispatch paths ---------------------------------
+
+def _dispatch_order(transport) -> list[str]:
+    """Extract the order in which the recording transport was invoked, by
+    matching each call's prompt against card titles (build_card_prompt embeds
+    the title verbatim). Returns the title sequence in dispatch order."""
+    out = []
+    for call in transport.calls:
+        prompt = call["prompt"]
+        for title in ("urgent", "medium-card", "low-card", "card-a", "card-b",
+                      "card-c", "orphan-high", "orphan-mid", "orphan-low"):
+            if title in prompt:
+                out.append(title)
+                break
+    return out
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_dispatches_high_priority_first():
+    """dispatch_all_pending sorts by priority desc (high → medium → low) before
+    the per-card loop, so the manual "Dispatch All" button no longer falls back
+    to rank FIFO when an operator tags urgent work."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Insert in rank order low → high → medium so a FIFO implementation
+        # would dispatch in that order. The fix must reorder them.
+        await _make_card(s, title="low-card", column="Backlog", priority="low")
+        await _make_card(s, title="urgent", column="Backlog", priority="high")
+        await _make_card(s, title="medium-card", column="Backlog", priority="medium")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 3
+    assert _dispatch_order(transport) == ["urgent", "medium-card", "low-card"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_preserves_rank_within_same_priority():
+    """Stable sort on rank: within the same priority, older (lower-rank) cards
+    still dispatch first — the fix must not scramble the existing tie-break."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Two high-priority cards (a created first, b created second) and one low
+        await _make_card(s, title="card-a", column="Backlog", priority="high")
+        await _make_card(s, title="card-b", column="Backlog", priority="high")
+        await _make_card(s, title="card-c", column="Backlog", priority="low")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    order = _dispatch_order(transport)
+    # High first (in rank order: a, b), then low
+    assert order == ["card-a", "card-b", "card-c"]
+
+
+@pytest.mark.asyncio
+async def test_redispatch_all_orphans_dispatches_high_priority_first():
+    """redispatch_all_orphans sorts orphans by priority desc, matching the
+    auto-tick's _next_card behaviour."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Insert in rank order low → high → medium so a FIFO implementation
+        # would dispatch in that order.
+        await _make_card(s, title="orphan-low", column="developer", priority="low")
+        await _make_card(s, title="orphan-high", column="testing", priority="high")
+        await _make_card(s, title="orphan-mid", column="review", priority="medium")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 3
+    assert _dispatch_order(transport) == ["orphan-high", "orphan-mid", "orphan-low"]
+
+
+def test_priority_key_helper_matches_priority_rank():
+    """The extracted `_priority_key` helper must produce the same sort key the
+    inline `_PRIORITY_RANK.get(c.priority, 0)` did — same numeric rank per
+    priority, defaulting to 0 for unknown / None. Guards the helper extraction
+    in dispatch.py."""
+    class _C:
+        def __init__(self, p):
+            self.priority = p
+    assert dispatch._priority_key(_C("high")) == 3
+    assert dispatch._priority_key(_C("medium")) == 2
+    assert dispatch._priority_key(_C("low")) == 1
+    assert dispatch._priority_key(_C("none")) == 0
+    assert dispatch._priority_key(_C(None)) == 0
+    assert dispatch._priority_key(_C("garbage")) == 0
+
+
 @pytest.mark.asyncio
 async def test_dispatch_all_pending_picks_up_card_after_dep_clears():
     """After the parent moves to Done, the previously-blocked child becomes
