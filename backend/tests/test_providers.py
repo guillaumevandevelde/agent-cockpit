@@ -326,3 +326,47 @@ def test_copilot_spawn_command_rejects_unsupported_mode():
     provider = get_provider("copilot-cli")
     with pytest.raises(ValueError):
         provider.build_spawn_command(SpawnCommandOptions(directory="/tmp/project", mode="worktree"))
+
+
+def test_claude_code_spawn_command_includes_model_flag_when_set():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("claude-code")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="plain", model="opus", prompt="do the thing")
+    )
+
+    assert command == ["claude", "--model", "opus", "do the thing"]
+
+
+def test_claude_code_spawn_command_omits_model_flag_when_unset():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("claude-code")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="plain", prompt="do the thing")
+    )
+
+    assert "--model" not in command
+    assert command == ["claude", "do the thing"]
+
+
+def test_claude_code_spawn_command_includes_model_flag_across_modes():
+    from app.services.providers import get_provider
+    from app.services.providers.base import SpawnCommandOptions
+
+    provider = get_provider("claude-code")
+
+    worktree_command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="worktree",
+                            worktree_name="k-feature-a1b2", model="sonnet")
+    )
+    assert worktree_command == ["claude", "--worktree", "k-feature-a1b2", "--model", "sonnet"]
+
+    resume_command = provider.build_spawn_command(
+        SpawnCommandOptions(directory="/tmp/project", mode="resume",
+                            session_id="sess-123", model="haiku")
+    )
+    assert resume_command == ["claude", "--resume", "sess-123", "--model", "haiku"]

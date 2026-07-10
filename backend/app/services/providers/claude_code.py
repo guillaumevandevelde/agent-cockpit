@@ -72,6 +72,8 @@ class ClaudeCodeProvider(AgentProvider):
 
         if options.skip_permissions:
             command.append("--dangerously-skip-permissions")
+        if options.model:
+            command += ["--model", options.model]
         if options.prompt:
             command.append(options.prompt)
         return command
