@@ -359,6 +359,162 @@ async def test_dispatch_freed_slot_is_reusable():
     assert len(transport.calls) == 1
 
 
+# ---- per-column session cap -------------------------------------------------
+
+
+def test_active_session_count_by_column():
+    cards = [
+        _bare_card("engineer", "agent:a"),
+        _bare_card("review", "agent:b"),
+        _bare_card("Backlog", "agent:c"),
+        _bare_card("Done", "agent:d"),
+        _bare_card("engineer", "me@ui"),
+        _bare_card("engineer", None),
+        _bare_card("analyst", "agent:e"),
+    ]
+    counts = dispatch._active_session_count_by_column(cards)
+    assert counts == {"engineer": 1, "review": 1, "analyst": 1}
+
+
+@pytest.fixture
+def project_with_agents(tmp_path):
+    """Create a temporary project with agent persona files so column resolution
+    resolves agent names (engineer, review) to their agent columns instead of
+    falling through to the hardcoded 'engineer' default."""
+    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir.mkdir(parents=True)
+    for name in ("engineer", "review"):
+        (agents_dir / f"{name}.md").write_text(f"# {name}")
+    return str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_respects_per_column_cap(project_with_agents):
+    """When a column has per-column max_sessions, the dispatcher stops
+    dispatching cards to that column once the cap is reached."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 10)
+        await service.create_column(s, project_key=PK, name="engineer",
+                                     default_agent="engineer", max_sessions=1)
+        await service.create_column(s, project_key=PK, name="review",
+                                     default_agent="review", max_sessions=2)
+        for i in range(4):
+            cid = await _make_card(s, title=f"eng-{i}", column="Backlog")
+            await apply_operation(
+                s, op_type="update", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"agent": "engineer"},
+            )
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+
+    assert result is not None
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_per_column_cap_does_not_block_other_columns(project_with_agents):
+    """Per-column caps apply independently: a full engineer column doesn't
+    block cards targeting the review column."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 10)
+        await service.create_column(s, project_key=PK, name="engineer",
+                                     default_agent="engineer", max_sessions=1)
+        await service.create_column(s, project_key=PK, name="review",
+                                     default_agent="review", max_sessions=2)
+        # Fill the engineer slot first
+        busy_id = await _make_card(s, title="eng-busy", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy_id, payload={"claimed_by": "agent:k-eng-0001"},
+        )
+        cid = await _make_card(s, title="eng-2", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "engineer"},
+        )
+        for title in ("rev-1", "rev-2"):
+            cid = await _make_card(s, title=title, column="Backlog")
+            await apply_operation(
+                s, op_type="update", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"agent": "review"},
+            )
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+
+    assert result is not None
+    assert len(transport.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_column_cap_defaults_null_means_no_per_column_limit(project_with_agents):
+    """A column with max_sessions=NULL (unset) falls back to the project cap."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_max_sessions(s, PK, 2)
+        await service.create_column(s, project_key=PK, name="engineer",
+                                     default_agent="engineer", max_sessions=None)
+        await service.create_column(s, project_key=PK, name="analyst",
+                                     default_agent="analyst", max_sessions=None)
+        for i in range(4):
+            cid = await _make_card(s, title=f"task-{i}", column="Backlog")
+            await apply_operation(
+                s, op_type="update", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"agent": "engineer"},
+            )
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+
+    assert result is not None
+    assert len(transport.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_column_max_sessions_column_roundtrip():
+    """max_sessions on a column can be set via create_column and read back."""
+    async with KanbanSessionLocal() as s:
+        col = await service.create_column(s, project_key=PK, name="testcol",
+                                           default_agent="test", max_sessions=3)
+        await s.commit()
+        cols = await service.list_columns(s, PK)
+    matching = [c for c in cols if c.name == "testcol"]
+    assert len(matching) == 1
+    assert matching[0].max_sessions == 3
+
+
+@pytest.mark.asyncio
+async def test_column_max_sessions_can_be_updated():
+    """max_sessions on a column can be updated."""
+    async with KanbanSessionLocal() as s:
+        col = await service.create_column(s, project_key=PK, name="testcol",
+                                           default_agent="test", max_sessions=1)
+        await s.commit()
+        cid = col.id
+    async with KanbanSessionLocal() as s:
+        updated = await service.update_column(s, cid, max_sessions=5)
+        await s.commit()
+    assert updated.max_sessions == 5
+
+
+# ---- retry queue ------------------------------------------------------------
+
+
 @pytest.mark.asyncio
 async def test_retry_queued_cards_respects_per_project_cap(monkeypatch):
     """Retrying memory-queued cards must honour the per-project session cap.

@@ -104,6 +104,10 @@ class KanbanColumn(KanbanBase):
     # dispatcher's own default (anthropic). Orthogonal to default_agent, which
     # picks the CLI/persona, not the backend the CLI authenticates against.
     default_platform: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Per-column session cap. NULL means no per-column limit — falls back to the
+    # project-level max_sessions cap. Set to e.g. 1 so only one card at a time
+    # dispatches into this column.
+    max_sessions: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
