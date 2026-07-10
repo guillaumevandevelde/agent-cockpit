@@ -171,6 +171,16 @@ export const kanbanApi = {
       body: JSON.stringify({ text }),
     }),
 
+  // Flag doubt on a Done card: posts a `**Review requested:**` comment on the
+  // original card and creates a new analysis card wired back to it via
+  // `metadata.reviewed_card_id`. Returns that newly created review card. 409 if
+  // the target card isn't in Done.
+  requestReview: (id: string, note: string): Promise<Card> =>
+    apiClient<Card>(`${BASE}/cards/${id}/request-review`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
   attach: (id: string, kind: string, ref: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}/deliverables`, {
       method: "POST",

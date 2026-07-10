@@ -17,6 +17,7 @@ vi.mock("../api", async (importOriginal) => {
     stub[key] = vi.fn(async () => ({}));
   }
   stub.listGates = vi.fn(async () => []);
+  stub.activity = vi.fn(async () => []);
   return { kanbanApi: stub };
 });
 
@@ -159,6 +160,90 @@ describe("CardDrawer Done summary banner", () => {
     const banner = screen.getByTestId("done-summary-banner");
     expect(banner.textContent).toMatch(/Completed/);
     expect(banner.textContent).not.toMatch(/Took/);
+  });
+});
+
+describe("CardDrawer request review control", () => {
+  it("does not render the request-review control when the card is not in Done", () => {
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+
+    render(
+      <CardDrawer
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("request-review-control")).toBeNull();
+    expect(screen.queryByTestId("review-requested-state")).toBeNull();
+  });
+
+  it("submits the note via requestReview and calls onChanged on a Done card", async () => {
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const requestReviewMock = kanbanApi.requestReview as ReturnType<typeof vi.fn>;
+    requestReviewMock.mockResolvedValue({ ...baseCard, id: "review-card-9" });
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    const onChanged = vi.fn();
+
+    render(
+      <CardDrawer
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    const control = await screen.findByTestId("request-review-control");
+    expect(control).not.toBeNull();
+
+    const textarea = screen.getByTestId("request-review-note") as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "I doubt the edge case is handled" },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("request-review-submit"));
+    });
+
+    await waitFor(() => expect(requestReviewMock).toHaveBeenCalled());
+    const [cardId, note] = requestReviewMock.mock.calls[0];
+    expect(cardId).toBe("card-1");
+    expect(note).toBe("I doubt the edge case is handled");
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("renders the already-requested state when a matching activity entry exists", async () => {
+    const activityMock = kanbanApi.activity as ReturnType<typeof vi.fn>;
+    activityMock.mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Review requested:** the retry logic looks off" },
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+
+    render(
+      <CardDrawer
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const state = await screen.findByTestId("review-requested-state");
+    expect(state.textContent).toMatch(/the retry logic looks off/);
+    // The fresh input form must not render alongside the already-requested state.
+    expect(screen.queryByTestId("request-review-control")).toBeNull();
   });
 });
 

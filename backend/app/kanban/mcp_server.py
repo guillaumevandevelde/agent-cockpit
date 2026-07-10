@@ -277,6 +277,32 @@ async def comment(card_id: str, text: str) -> dict:
 
 
 @mcp.tool()
+async def request_review(card_id: str, note: str) -> dict:
+    """Flag doubt on a *completed* (Done) card and route it to the analyst for triage.
+
+    Posts a `**Review requested:** <note>` comment on the original card, then
+    creates a new Backlog card `Review: <title>` with work_type="analysis" (which
+    auto-routes to the analyst persona) linked back via metadata.reviewed_card_id.
+    The analyst then judges whether the doubt is founded — closing the review card
+    with an explanation, or decomposing it into rework child cards.
+
+    Returns the new review card, or {error: not_found} if the card is missing, or
+    {error: not_in_done, column: <col>} if the card isn't currently in Done.
+    """
+    async with KanbanSessionLocal() as s:
+        try:
+            card = await service.request_review(s, card_id, note)
+        except service.CardNotInDone as e:
+            return {"error": "not_in_done", "column": e.column}
+        if card is None:
+            logger.debug("request_review: %s not found", card_id)
+            return {"error": _NOT_FOUND, "card_id": card_id}
+        await s.commit()
+        logger.info("request_review: %s → review card %s", card_id, card.id)
+        return await _card_dict(s, card)
+
+
+@mcp.tool()
 async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
     """Bind a deliverable (pr|branch|commit|link|note) as a portable reference."""
     async with KanbanSessionLocal() as s:

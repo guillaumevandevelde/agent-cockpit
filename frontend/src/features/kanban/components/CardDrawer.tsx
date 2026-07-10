@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
@@ -41,6 +42,13 @@ const LIVE_POLL_INTERVAL_MS = 3000;
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
 const DONE_COLUMN = "Done";
+
+// Prefix on the audit-trail comment that a review request posts on the
+// original card. Deliberately distinct from `_DONE_SUMMARY_PREFIX` in the
+// backend `service.py` so `enrich_done_info` never mistakes it for the Done
+// summary. The UI also scans the polled activity for this prefix to render the
+// "already requested" state instead of a fresh input.
+const REVIEW_REQUEST_PREFIX = "**Review requested:** ";
 
 // "Completed on 10 July 2026 at 14:30" — explicit, locale-independent format
 // so a screenshot is reproducible across machines.
@@ -211,6 +219,93 @@ function DoneSummaryBanner({ card }: { card: Card }) {
           {duration && <span>{duration}</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+// "Request review" control shown under the Done banner. Lets a human flag a
+// doubt on a completed card: the note is posted as a `**Review requested:**`
+// comment on this card and a new analysis card is spun up (backend). To avoid
+// piling up duplicate requests, if the polled `activity` already contains a
+// matching comment we render the note that was sent in a disabled state
+// instead of a fresh input.
+function RequestReviewControl({
+  card,
+  activity,
+  onChanged,
+}: {
+  card: Card;
+  activity: ActivityEntry[];
+  onChanged: () => void;
+}) {
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const existing = activity.find(
+    (e) =>
+      e.op_type === "comment" &&
+      typeof e.payload.text === "string" &&
+      (e.payload.text as string).startsWith(REVIEW_REQUEST_PREFIX),
+  );
+
+  if (existing) {
+    const sentNote = (existing.payload.text as string).slice(
+      REVIEW_REQUEST_PREFIX.length,
+    );
+    return (
+      <div
+        className="rounded-md border-2 border-amber-500/40 bg-amber-50 p-3 text-sm dark:bg-amber-950/30"
+        data-testid="review-requested-state"
+      >
+        <div className="mb-1 text-xs font-semibold uppercase text-amber-700 dark:text-amber-400">
+          Review requested
+        </div>
+        <div className="text-foreground whitespace-pre-wrap">{sentNote}</div>
+      </div>
+    );
+  }
+
+  const submit = async () => {
+    const trimmed = note.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    try {
+      const reviewCard = await kanbanApi.requestReview(card.id, trimmed);
+      toast.success(`Review card created — ${reviewCard.id}`);
+      setNote("");
+      onChanged();
+    } catch {
+      toast.error("Failed to request review");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-md border p-3 text-sm space-y-2"
+      data-testid="request-review-control"
+    >
+      <div className="text-xs font-semibold uppercase text-muted-foreground">
+        Request review
+      </div>
+      <Textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Describe your doubt about this implementation…"
+        disabled={submitting}
+        data-testid="request-review-note"
+      />
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={submit}
+          disabled={submitting || !note.trim()}
+          data-testid="request-review-submit"
+        >
+          {submitting ? "Requesting…" : "Request review"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -503,7 +598,12 @@ export function CardDrawer({
           </div>
         ))}
 
-        {card.column === DONE_COLUMN && <DoneSummaryBanner card={card} />}
+        {card.column === DONE_COLUMN && (
+          <>
+            <DoneSummaryBanner card={card} />
+            <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
+          </>
+        )}
 
         <div className="text-sm">
           <MarkdownRenderer content={card.description || "_No description_"} />

@@ -136,6 +136,11 @@ class CommentRequest(BaseModel):
     text: str
 
 
+class ReviewRequest(BaseModel):
+    """Flag doubt on a completed card and route it to the analyst for triage."""
+    note: str
+
+
 class AttachRequest(BaseModel):
     kind: str
     ref: str

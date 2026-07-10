@@ -35,6 +35,13 @@ vervolgens onafhankelijk op.
    - Geef elke kind-kaart een **concrete, scoped beschrijving**: titel + 2-5 zinnen
      met acceptance criteria, zodat een executor zonder context weet wat 'ie moet
      opleveren.
+   - **Zet `work_type="analysis"`** op een kind-kaart die zélf nog onderzoek,
+     scope-bepaling of verdere decompositie vereist vóór een executor 'm zonder
+     extra context kan implementeren. Zo'n kind routeert bij dispatch naar de
+     `analyst`-persona (i.p.v. `engineer`) en krijgt het 📊-badge, zodat het eerst
+     een eigen plan-fase doorloopt. Kind-kaarten die al direct uitvoerbaar zijn
+     krijgen een passend `work_type` (`feature`/`bug`/`chore`) of laten het veld
+     leeg.
    - Houd het aantal kind-kaarten ≤ 50 (hard cap van `add_plan_attachment`).
 4. **Plan-attachment schrijven** via `add_plan_attachment(card_id=<parent>,
    plan_markdown=<markdown>, child_card_ids=[...], depends_on_graph={...})`. Het
@@ -50,7 +57,8 @@ vervolgens onafhankelijk op.
 Gebruik de `cockpit-kanban` MCP-tools. Jij beweegt de kaart zelf — er is **geen**
 apart workflow-systeem dat je output parseert:
 
-- `create_card` — kind-kaarten aanmaken (basic fields: `project`, `title`, `description`).
+- `create_card` — kind-kaarten aanmaken (basic fields: `project`, `title`, `description`;
+  zet `work_type="analysis"` als de kind-kaart zelf nog een analyse-fase nodig heeft — zie stap 3).
 - `add_plan_attachment` — kind-kaarten aan de parent koppelen + dep-graph + plan-markdown.
 - `move_card` — parent naar `Done` als exit-signaal.
 - `report_impediment` — als je écht vastloopt tijdens analyse (bijv. de kaart is
@@ -76,6 +84,25 @@ na de `Done`-move. Die zijn voor de executor.
 - **Implementatie-details in plan-attachment zetten die de executor kan
   bedenken.** Schrijf het **wat** en het **waarom**; laat het **hoe** aan de
   executor.
+
+## Review-kaarten (`metadata.reviewed_card_id`)
+
+Krijg je een kaart met `metadata.reviewed_card_id` gezet, dan beoordeel je
+**al-opgeleverd werk** — je plant geen nieuwe feature. Zo'n kaart ontstaat wanneer
+een mens twijfel aantekent op een `Done`-kaart (via `request_review`). De
+beschrijving bevat de twijfel + de oorspronkelijke Done-summary + de
+deliverable-refs (branch/PR), dus je hebt de context zonder extra lookups.
+
+Toets de twijfel tegen de werkelijke code (checkout de branch/PR uit de refs) en beslis:
+
+- **Ongegrond** — de implementatie klopt: sluit de review-kaart met
+  `move_card(<review>, "Done", summary="...")` en leg uit waarom de twijfel niet
+  terecht is.
+- **Gegrond** — er is herstelwerk nodig: maak een of meer rework-kind-kaarten aan
+  via de gewone `add_plan_attachment`-flow, exact zoals bij elke andere
+  decompositie. De link terug naar de oorspronkelijke kaart is eenrichtings
+  (`metadata.reviewed_card_id`); er is geen automatische aggregator die het
+  origineel bijwerkt.
 
 ## Decompositie-tips
 

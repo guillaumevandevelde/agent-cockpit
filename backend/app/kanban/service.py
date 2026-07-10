@@ -127,6 +127,81 @@ async def enrich_done_info(session, card_id: str) -> tuple[str | None, datetime 
     return text[len(_DONE_SUMMARY_PREFIX):], op.created_at
 
 
+# Prefix for the comment posted on the *original* Done card when a human
+# requests a review of already-shipped work. Deliberately distinct from
+# `_DONE_SUMMARY_PREFIX` ("**Summary:** ") and the `**Impediment:** ` label so
+# `enrich_done_info`'s Summary scan never mistakes a review request for the
+# card's Done summary. The mirror of the Done/Impediment "prefixed comment"
+# convention, one column further along the workflow (see request_review).
+_REVIEW_REQUESTED_PREFIX = "**Review requested:** "
+
+
+class CardNotInDone(Exception):
+    """request_review target isn't currently in the Done column. Carries the
+    card's actual column so callers can surface it (REST → 409, MCP → error dict)."""
+    def __init__(self, column: str):
+        self.column = column
+        super().__init__(f"card is in {column!r}, not Done")
+
+
+def _review_description(note: str, done_summary: str | None,
+                        deliverables) -> str:
+    """Build the review card's description: the human's doubt + the original
+    card's Done summary + its deliverable refs, so the analyst has full context
+    for triage without a second lookup."""
+    parts = [note.strip()]
+    parts.append(f"**Original summary:** {done_summary.strip() if done_summary else '(none)'}")
+    if deliverables:
+        refs = "\n".join(f"- {d.kind}: {d.ref}" for d in deliverables)
+        parts.append(f"**Deliverables:**\n{refs}")
+    else:
+        parts.append("**Deliverables:** (none)")
+    return "\n\n".join(parts)
+
+
+async def request_review(session, card_id: str, note: str):
+    """Flag doubt on a completed card and route it to the analyst for triage.
+
+    Reuses three existing mechanisms rather than inventing a new "review agent":
+    1. Posts a `**Review requested:** <note>` comment on the *original* card so
+       the doubt stays in that card's audit trail (mirrors the Done/Impediment
+       prefixed-comment convention; the prefix is distinct so `enrich_done_info`
+       never reads it as the Done summary).
+    2. Creates a *new* Backlog card `Review: <title>` with `work_type="analysis"`
+       (auto-routes to the analyst persona via WORK_TYPE_PERSONA_DEFAULTS) whose
+       description carries the note + the original's done_summary + deliverable
+       refs, and `metadata.reviewed_card_id` linking back to the original. A new
+       card, not a reopen, so the original's done_summary/completed_at stay intact.
+
+    Returns the new review card, or None when `card_id` doesn't exist. Raises
+    CardNotInDone when the card exists but isn't in Done (the check runs before
+    any op, so a rejected call leaves the board untouched).
+    """
+    from app.kanban.operations import apply_operation
+
+    card = await get_card(session, card_id)
+    if card is None:
+        return None
+    if card.column != "Done":
+        raise CardNotInDone(card.column)
+
+    await apply_operation(session, op_type="comment", entity_type="comment",
+        project_key="", entity_id=card_id,
+        payload={"text": f"{_REVIEW_REQUESTED_PREFIX}{note}"})
+
+    done_summary, _ = await enrich_done_info(session, card_id)
+    description = _review_description(note, done_summary, card.deliverables)
+    agent = await resolve_create_agent(
+        session, card.project_key, work_type="analysis", explicit_agent=None,
+    )
+    new_id = await apply_operation(session, op_type="create", entity_type="card",
+        project_key=card.project_key, entity_id=None,
+        payload={"title": f"Review: {card.title}", "description": description,
+                 "column": "Backlog", "work_type": "analysis", "agent": agent,
+                 "metadata": {"reviewed_card_id": card_id}})
+    return await get_card(session, new_id)
+
+
 async def list_project_ops(session, project_key: str):
     """All op-log entries for a project's cards. Ops carry project_key="" for
     move/claim/comment (set by the router), so we join by card id instead."""
