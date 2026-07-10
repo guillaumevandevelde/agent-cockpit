@@ -1859,7 +1859,18 @@ async def dispatch_card(
 ) -> dict | None:
     """Manually dispatch one specific card now, regardless of the auto-pick toggle or
     the busy cap. Returns the result dict or None if the card is missing or its claim
-    was lost. If agent_override is provided, use that agent instead of the card's agent."""
+    was lost. If agent_override is provided, use that agent instead of the card's agent.
+
+    Deliberately does NOT enforce the depends_on gate that ``dispatch_project``
+    (the auto-dispatch tick) and the bulk paths ``dispatch_all_pending`` /
+    ``redispatch_all_orphans`` enforce. The per-card "Dispatch" / "Redispatch"
+    buttons are an explicit human override — the operator who clicked them has
+    already seen the Blocked badge, decided the dependency should not block this
+    run (e.g. testing a fix, picking up an unrelated piece of work, or working
+    with stale ``depends_on`` data) and pressed the button. A silent refusion
+    here would just push the operator to bypass the board entirely. If your use
+    case needs the gate, use ``dispatch_project`` / ``dispatch_all_pending``
+    instead — they are the right entry points."""
     card = await get_card(session, card_id)
     if card is None:
         return None
@@ -1939,6 +1950,11 @@ async def redispatch_card(
     below picks the resume transport (`claude --resume`, same worktree) instead
     of discarding the conversation and starting a brand new session.
 
+    Like ``dispatch_card``, deliberately does NOT enforce the depends_on gate
+    the bulk paths / auto-dispatch tick use — redispatch from the CardDrawer is
+    an explicit human override after the operator has already seen the Blocked
+    badge. See ``dispatch_card`` for the full rationale.
+
     When transport is None, the appropriate transport is automatically selected
     based on the card's transport field (sandcastle/worktree) and the project's
     sandcastle configuration.
@@ -2015,6 +2031,14 @@ async def dispatch_all_pending(
     When transport is None, each card's transport is auto-selected based on its
     card.transport field and the project's sandcastle configuration.
     Returns a list of result dicts for each successfully dispatched card.
+
+    Cards whose ``depends_on`` is not fully resolved to Done are skipped — same
+    gate the auto-dispatch tick uses (see app.kanban.dep_resolver). They stay
+    in Backlog so they get picked up on the next bulk call (or the next tick)
+    once the dependency clears, instead of being silently dropped from the
+    board. The per-card ``dispatch_card`` / ``redispatch_card`` calls bypass
+    this gate by design — those are explicit human overrides from the
+    CardDrawer.
     """
     if transport is None:
         transport = await get_transport_for_project(project_path)
@@ -2022,7 +2046,19 @@ async def dispatch_all_pending(
     pending = [c for c in await list_pending_cards(session, project_key) if _is_due(c)]
     column_caps = await _column_max_sessions(session, project_key)
     results = []
+    # Apply the same depends_on gate the auto-dispatch tick uses so a "Dispatch All"
+    # button click can never spawn a Blocked card (the dispatch tick — also called
+    # from `dispatch_project` — already does this; bulk paths must match it for the
+    # UI's Blocked badge to mean anything). Skipped cards stay in Backlog so they're
+    # picked up once the dependency clears, on the next bulk call or the next tick.
+    cards_by_id = {c.id: c for c in await list_cards(session, project_key)}
     for card in pending:
+        if not meets_dep_prerequisites(card, cards_by_id):
+            logger.info(
+                "dispatch_all_pending: skipping blocked card %s (depends_on %s not yet Done)",
+                card.id, card.depends_on,
+            )
+            continue
         # Respect per-column caps even in manual "Dispatch all" — the cap is a
         # structural limit, not a busy heuristic. Analyst phase always goes to
         # the "analyst" column; executor phase resolves via _resolve_target_column.
@@ -2053,13 +2089,28 @@ async def redispatch_all_orphans(
 ) -> list[dict]:
     """Re-dispatch all orphaned cards (unclaimed on agent columns) for a project.
 
+    Mirrors `dispatch_all_pending`'s depends_on gate: orphans whose `depends_on`
+    is not fully resolved to Done are skipped (with a log line) so the bulk
+    redispatch button never spawns a Blocked orphan. See app.kanban.dep_resolver
+    for the rationale shared with the auto-dispatch tick.
+
     When transport is None, each card's transport is auto-selected.
     Returns a list of result dicts for each successfully dispatched card.
     """
     from app.kanban.service import list_orphaned_cards
     orphans = await list_orphaned_cards(session, project_key)
+    # Snapshot the lookup once for the gate — `orphan.column` may flip to a fixed
+    # column mid-loop on a successful redispatch, so don't reuse the per-card
+    # `orphans` iterable for "current column".
+    cards_by_id = {c.id: c for c in await list_cards(session, project_key)}
     results = []
     for card in orphans:
+        if not meets_dep_prerequisites(card, cards_by_id):
+            logger.info(
+                "redispatch_all_orphans: skipping blocked orphan %s (depends_on %s not yet Done)",
+                card.id, card.depends_on,
+            )
+            continue
         try:
             # Pass None so redispatch_card auto-selects per-card transport
             res = await redispatch_card(
