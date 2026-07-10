@@ -40,6 +40,7 @@ from app.kanban.schemas import (
     MoveRequest,
     RedispatchRequest,
     ReorderRequest,
+    ReopenRequest,
     ReviewRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
@@ -451,6 +452,38 @@ async def request_review(cid: str, payload: ReviewRequest):
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 f"card is in {e.column!r}, not Done; review can only be "
+                "requested on a completed card",
+            )
+        if card is None:
+            raise HTTPException(404, "card not found")
+        await s.commit()
+        return await _reload(s, card.id)
+
+
+@router.post("/cards/{cid}/reopen", response_model=CardResponse)
+async def reopen_card(cid: str, payload: ReopenRequest):
+    """Weerleg & heropen: post a `**Revisit:** <note>` comment on a Done
+    card and move the *same* card back to Backlog so the dispatcher picks
+    it up on the next tick.
+
+    Distinct from `request_review`: a review spawns a sibling analysis
+    card (analyst triage); a reopen moves the existing card back to the
+    dispatch queue. The Done summary stays in the activity feed (distinct
+    prefix), and the dispatcher injects the rebuttal into the spawned
+    session's prompt via the `## REVISIT` section (see
+    `dispatch.build_card_prompt`).
+
+    404 when the card id is unknown, 409 when the card exists but isn't
+    in Done. Returns the reopened card so the UI can refresh without a
+    second round-trip.
+    """
+    async with KanbanSessionLocal() as s:
+        try:
+            card = await service.reopen_card(s, cid, payload.note)
+        except service.CardNotInDone as e:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"card is in {e.column!r}, not Done; reopen can only be "
                 "requested on a completed card",
             )
         if card is None:

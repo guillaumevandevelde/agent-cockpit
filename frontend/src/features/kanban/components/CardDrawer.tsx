@@ -310,6 +310,70 @@ function RequestReviewControl({
   );
 }
 
+// "Heropen met feedback" control shown under the Done banner. Lets a human
+// post a rebuttal on a completed decision: the note is posted as a
+// `**Revisit:**` comment on this card and the *same* card is moved back
+// to Backlog (reopen) — distinct from RequestReviewControl which spawns
+// a sibling analysis card. The dispatcher then re-picks the card and
+// injects the rebuttal into the spawned session's prompt via the
+// `## REVISIT` section + a pointer to the prior decision's summary and
+// deliverables. Like the review control, the textarea + submit are the
+// only UI for this — the activity feed stays read-only.
+function ReopenControl({
+  card,
+  onChanged,
+}: {
+  card: Card;
+  onChanged: () => void;
+}) {
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    const trimmed = note.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    try {
+      const reopened = await kanbanApi.reopen(card.id, trimmed);
+      toast.success(`Heropend — kaart terug in ${reopened.column}`);
+      setNote("");
+      onChanged();
+    } catch {
+      toast.error("Heropen mislukt");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="rounded-md border p-3 text-sm space-y-2"
+      data-testid="reopen-control"
+    >
+      <div className="text-xs font-semibold uppercase text-muted-foreground">
+        Heropen met feedback
+      </div>
+      <Textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Weerleg deze beslissing — de kaart gaat terug naar Backlog en een nieuwe sessie pakt hem op met jouw tegengewicht in de prompt."
+        disabled={submitting}
+        data-testid="reopen-note"
+      />
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={submit}
+          disabled={submitting || !note.trim()}
+          data-testid="reopen-submit"
+        >
+          {submitting ? "Heropenen…" : "Heropen met feedback"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function EditablePlan({
   plan,
   cardId,
@@ -602,6 +666,7 @@ export function CardDrawer({
           <>
             <DoneSummaryBanner card={card} />
             <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
+            <ReopenControl card={card} onChanged={onChanged} />
           </>
         )}
 

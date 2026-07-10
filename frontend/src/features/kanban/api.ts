@@ -181,6 +181,18 @@ export const kanbanApi = {
       body: JSON.stringify({ note }),
     }),
 
+  // Weerleg & heropen: post a `**Revisit:**` comment on a Done card and move
+  // the *same* card back to Backlog so the dispatcher re-picks it. Returns
+  // the reopened card (which now lives in Backlog). 409 when the card is in
+  // flight (Doing/Impediment). Distinct from requestReview: a review spawns
+  // a sibling analysis card, a reopen moves the existing card back into the
+  // dispatch queue.
+  reopen: (id: string, note: string): Promise<Card> =>
+    apiClient<Card>(`${BASE}/cards/${id}/reopen`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
   attach: (id: string, kind: string, ref: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}/deliverables`, {
       method: "POST",
