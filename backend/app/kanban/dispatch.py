@@ -872,6 +872,26 @@ def _mint_session_name(
     return name
 
 
+def _resolve_target_column(card, project_path: str) -> str:
+    """Resolve the agent column this card will be dispatched to (executor phase).
+
+    Mirrors the first half of _phase_target_agent without the work_type DB
+    fallback (the cap check is approximate — a card skipped due to a column
+    cap will be re-evaluated next tick when the per-column count drops).
+    """
+    agent_override = None
+    known_providers = _known_provider_ids()
+    if agent_override and agent_override not in known_providers:
+        return agent_override
+    agents_dir = Path(project_path) / ".claude" / "agents"
+    known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
+    card_agent = getattr(card, "agent", None)
+    if card_agent and card_agent in known_agents:
+        return card_agent
+    persona = _persona_for_card(project_path, card, card.column)
+    return _resolve_agent_from_persona(persona) or "engineer"
+
+
 def _active_session_count(cards: Iterable[KanbanCard]) -> int:
     """Number of occupied dispatch slots: cards in agent columns (not Backlog,
     Impediment, or Done) held by an `agent:` claim."""
@@ -880,6 +900,34 @@ def _active_session_count(cards: Iterable[KanbanCard]) -> int:
         1 for c in cards
         if c.column not in COLUMNS and (c.claimed_by or "").startswith(CLAIMANT_PREFIX)
     )
+
+
+def _active_session_count_by_column(cards: Iterable[KanbanCard]) -> dict[str, int]:
+    """Per-column count of occupied dispatch slots (agent-claimed cards in agent
+    columns). Returns a dict {column_name: count}. Non-agent columns are omitted."""
+    from app.kanban.schemas import COLUMNS
+    counts: dict[str, int] = {}
+    for c in cards:
+        if c.column not in COLUMNS and (c.claimed_by or "").startswith(CLAIMANT_PREFIX):
+            counts[c.column] = counts.get(c.column, 0) + 1
+    return counts
+
+
+async def _column_max_sessions(session, project_key: str) -> dict[str, int]:
+    """Per-column max_sessions caps for a project.
+
+    Returns a dict {column_name: cap}. Only columns with an explicit
+    max_sessions setting are included — columns not in the dict fall
+    back to the project-level cap.
+    """
+    from app.kanban.models import KanbanColumn
+    from sqlalchemy import select
+    rows = (await session.execute(
+        select(KanbanColumn)
+        .where(KanbanColumn.project_key == project_key)
+        .where(KanbanColumn.max_sessions.isnot(None))
+    )).scalars().all()
+    return {r.name: r.max_sessions for r in rows if r.max_sessions is not None and r.max_sessions > 0}
 
 
 def _claimant_session(card: KanbanCard) -> str | None:
@@ -1415,6 +1463,7 @@ async def dispatch_project(
             cards = await list_cards(session, project_key)
 
     cap = await get_max_sessions(session, project_key)
+    column_caps = await _column_max_sessions(session, project_key)
     last_result: dict | None = None
 
     # Fill every free slot in this tick, re-listing after each dispatch so the
@@ -1423,6 +1472,22 @@ async def dispatch_project(
         card = _next_card(cards)
         if card is None:
             break
+
+        # Per-column cap: if the candidate card's target column has a
+        # per-column max_sessions, check it. The card's current column
+        # (Backlog) is not its agent column yet; the target column is
+        # resolved from its phase. Analyst phase always goes to "analyst";
+        # executor phase uses the agent/persona/column resolution.
+        phase = resolve_phase(card)
+        target_column = "analyst" if phase == "analyst" else _resolve_target_column(card, project_path)
+        col_cap = column_caps.get(target_column)
+        if col_cap is not None:
+            col_counts = _active_session_count_by_column(cards)
+            if col_counts.get(target_column, 0) >= col_cap:
+                # Column at its per-column cap — skip this card. Remove it from
+                # the working set so _next_card doesn't pick it again this tick.
+                cards = [c for c in cards if c.id != card.id]
+                continue
 
         # Skip child cards whose parents aren't Done yet — _next_card is rank/
         # priority-aware but doesn't know about depends_on, so the dep filter
@@ -1653,8 +1718,20 @@ async def dispatch_all_pending(
         transport = await get_transport_for_project(project_path)
     from app.kanban.service import list_pending_cards
     pending = [c for c in await list_pending_cards(session, project_key) if _is_due(c)]
+    column_caps = await _column_max_sessions(session, project_key)
     results = []
     for card in pending:
+        # Respect per-column caps even in manual "Dispatch all" — the cap is a
+        # structural limit, not a busy heuristic. Analyst phase always goes to
+        # the "analyst" column; executor phase resolves via _resolve_target_column.
+        phase = resolve_phase(card)
+        target_column = "analyst" if phase == "analyst" else _resolve_target_column(card, project_path)
+        col_cap = column_caps.get(target_column)
+        if col_cap is not None:
+            cards = await list_cards(session, project_key)
+            col_counts = _active_session_count_by_column(cards)
+            if col_counts.get(target_column, 0) >= col_cap:
+                continue
         try:
             card_transport = get_transport_for_card(card, transport)
             res = await _run_card(
@@ -1928,13 +2005,29 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                 # a failed dispatch, so leave the card untouched in the queue (don't
                 # mark_retry, which would count toward max_retries and eventually drop
                 # a card that is merely waiting for a slot).
+                cards = await list_cards(ks, card.project_key)
                 cap = await get_max_sessions(ks, card.project_key)
-                if _active_session_count(await list_cards(ks, card.project_key)) >= cap:
+                if _active_session_count(cards) >= cap:
                     logger.info(
                         f"Card {card.card_id} held back: project {card.project_key} "
                         f"at session cap ({cap})"
                     )
                     continue
+
+                # Per-column cap check: if the card's target column has a
+                # per-column max_sessions, respect it before retrying.
+                column_caps = await _column_max_sessions(ks, card.project_key)
+                if column_caps:
+                    target_column = _resolve_target_column(card_data, card.project_path)
+                    col_cap = column_caps.get(target_column)
+                    if col_cap is not None:
+                        col_counts = _active_session_count_by_column(cards)
+                        if col_counts.get(target_column, 0) >= col_cap:
+                            logger.info(
+                                f"Card {card.card_id} held back: column '{target_column}' "
+                                f"at per-column cap ({col_cap})"
+                            )
+                            continue
 
                 result = await _run_card(
                     ks, card=card_data, project_key=card.project_key,

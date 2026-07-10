@@ -124,7 +124,8 @@ async def get_column(session, column_id: str):
 
 async def create_column(session, project_key: str, name: str,
                         rank: str | None = None, default_agent: str | None = None,
-                        default_platform: str | None = None):
+                        default_platform: str | None = None,
+                        max_sessions: int | None = None):
     col = KanbanColumn(
         id=uuid.uuid4().hex,
         project_key=project_key,
@@ -132,6 +133,7 @@ async def create_column(session, project_key: str, name: str,
         rank=rank or uuid.uuid4().hex,
         default_agent=default_agent,
         default_platform=default_platform,
+        max_sessions=max_sessions,
     )
     session.add(col)
     await session.flush()

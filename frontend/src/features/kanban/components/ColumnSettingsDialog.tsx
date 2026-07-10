@@ -50,6 +50,7 @@ export function ColumnSettingsDialog({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAgent, setEditAgent] = useState<string>("");
   const [editPlatform, setEditPlatform] = useState<string>(DEFAULT_PLATFORM_SENTINEL);
+  const [editMaxSessions, setEditMaxSessions] = useState<number | null>(null);
 
   useEffect(() => {
     setItems(columns);
@@ -91,6 +92,7 @@ export function ColumnSettingsDialog({
       const col = await kanbanApi.updateColumn(id, {
         default_agent: agent,
         default_platform: platform,
+        max_sessions: editMaxSessions,
       });
       setItems((prev) => prev.map((c) => (c.id === id ? col : c)));
       setEditingId(null);
@@ -171,6 +173,27 @@ export function ColumnSettingsDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  <div className="flex items-center gap-1">
+                    <button
+                      className="h-7 w-7 rounded border text-sm hover:bg-accent disabled:opacity-30"
+                      onClick={() => setEditMaxSessions(Math.max(1, (editMaxSessions ?? 0) - 1))}
+                      disabled={(editMaxSessions ?? 0) <= 1}
+                      title="Decrease max sessions"
+                    >−</button>
+                    <span className="w-12 text-center text-xs tabular-nums">
+                      {editMaxSessions ?? "∞"}
+                    </span>
+                    <button
+                      className="h-7 w-7 rounded border text-sm hover:bg-accent"
+                      onClick={() => setEditMaxSessions((editMaxSessions ?? 0) + 1)}
+                      title="Increase max sessions"
+                    >+</button>
+                    <button
+                      className="ml-1 h-7 rounded border px-2 text-[10px] hover:bg-accent"
+                      onClick={() => setEditMaxSessions(0)}
+                      title="No per-column limit (use project cap)"
+                    >∞</button>
+                  </div>
                   <Button size="sm" onClick={() => handleUpdate(col.id)}>
                     Save
                   </Button>
@@ -193,6 +216,9 @@ export function ColumnSettingsDialog({
                       </div>
                     )}
                   </div>
+                  <div className="text-xs text-muted-foreground tabular-nums mr-2" title="Max concurrent sessions">
+                    {col.max_sessions != null && col.max_sessions > 0 ? `max ${col.max_sessions}` : "∞"}
+                  </div>
                   {!isBacklog(col.name) && (
                     <>
                       <Button
@@ -202,6 +228,7 @@ export function ColumnSettingsDialog({
                           setEditingId(col.id);
                           setEditAgent(col.default_agent ?? "");
                           setEditPlatform(col.default_platform ?? DEFAULT_PLATFORM_SENTINEL);
+                          setEditMaxSessions(col.max_sessions ?? 0);
                         }}
                       >
                         Edit

@@ -51,6 +51,7 @@ export interface KanbanColumn {
   rank: string;
   default_agent: string | null;
   default_platform: string | null;
+  max_sessions: number | null;
   created_at: string;
   updated_at: string;
 }

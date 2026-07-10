@@ -183,6 +183,7 @@ class ColumnResponse(BaseModel):
     rank: str
     default_agent: str | None = None
     default_platform: str | None = None
+    max_sessions: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -193,6 +194,7 @@ class ColumnCreate(BaseModel):
     rank: str | None = None
     default_agent: str | None = None
     default_platform: str | None = None
+    max_sessions: int | None = None
 
 
 class ColumnUpdate(BaseModel):
@@ -200,6 +202,7 @@ class ColumnUpdate(BaseModel):
     rank: str | None = None
     default_agent: str | None = None
     default_platform: str | None = None
+    max_sessions: int | None = None
 
 
 class ColumnClearRequest(BaseModel):
