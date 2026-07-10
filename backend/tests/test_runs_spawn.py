@@ -87,7 +87,7 @@ def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
         SpawnCommandOptions(
             directory=str(tmp_path),
             mode="plain",
-            platform="bedrock",
+            provider="bedrock",
             aws_region="us-east-1",
             aws_profile="bedrock-prod",
         ),
@@ -101,7 +101,7 @@ def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
     assert "CLAUDE_CODE_USE_BEDROCK=1" in argv
     assert "AWS_REGION=us-east-1" in argv
     assert "AWS_PROFILE=bedrock-prod" in argv
-    assert spawn.get_spawned_sessions()["repo-abcd"]["platform"] == "bedrock"
+    assert spawn.get_spawned_sessions()["repo-abcd"]["provider"] == "bedrock"
 
 
 def test_codex_bedrock_platform_omits_claude_specific_env(monkeypatch, tmp_path):
@@ -123,7 +123,7 @@ def test_codex_bedrock_platform_omits_claude_specific_env(monkeypatch, tmp_path)
         SpawnCommandOptions(
             directory=str(tmp_path),
             mode="plain",
-            platform="bedrock",
+            provider="bedrock",
             aws_region="us-east-2",
             aws_profile="codex-bedrock",
             bedrock_model="openai.gpt-5.5",
@@ -158,14 +158,14 @@ def test_minimax_platform_injects_configured_key_and_default_base_url(monkeypatc
 
     spawn.spawn_session(
         "claude-code",
-        SpawnCommandOptions(directory=str(tmp_path), mode="plain", platform="minimax"),
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", provider="minimax"),
     )
 
     argv = calls[0]
     assert "-e" in argv
     assert "ANTHROPIC_AUTH_TOKEN=sk-test-key" in argv
     assert "ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic" in argv
-    assert spawn.get_spawned_sessions()["repo-abcd"]["platform"] == "minimax"
+    assert spawn.get_spawned_sessions()["repo-abcd"]["provider"] == "minimax"
 
 
 def test_minimax_platform_uses_configured_base_url_override(monkeypatch, tmp_path):
@@ -190,7 +190,7 @@ def test_minimax_platform_uses_configured_base_url_override(monkeypatch, tmp_pat
         SpawnCommandOptions(
             directory=str(tmp_path),
             mode="plain",
-            platform="minimax",
+            provider="minimax",
             minimax_base_url="https://api.minimaxi.com/anthropic",
         ),
     )
@@ -216,7 +216,7 @@ def test_minimax_platform_without_configured_key_omits_auth_token(monkeypatch, t
 
     spawn.spawn_session(
         "claude-code",
-        SpawnCommandOptions(directory=str(tmp_path), mode="plain", platform="minimax"),
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", provider="minimax"),
     )
 
     argv = calls[0]
@@ -246,7 +246,7 @@ def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
     assert "-e" not in argv
     assert argv[:7] == ["tmux", "new-session", "-d", "-s", "repo-abcd", "-c", str(tmp_path)]
     assert len(argv) == 8
-    assert spawn.get_spawned_sessions()["repo-abcd"]["platform"] == "anthropic"
+    assert spawn.get_spawned_sessions()["repo-abcd"]["provider"] == "anthropic"
 
 
 def test_sanitize_session_name_strips_invalid_chars():

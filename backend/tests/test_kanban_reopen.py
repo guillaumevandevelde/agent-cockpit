@@ -316,8 +316,9 @@ async def test_stamp_resume_target_persists_session_id(monkeypatch, tmp_path):
     resume transport. Failure (transcript gone) is silent — None fallback
     is the expected path for analyst cards post-GC."""
     import os
-    from app.utils.path_utils import convert_path_to_folder_name
+
     from app.kanban import session_recovery
+    from app.utils.path_utils import convert_path_to_folder_name
 
     repo = tmp_path / "repo"
     worktree = repo / ".claude" / "worktrees" / "k-some-0001"

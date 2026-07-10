@@ -15,10 +15,10 @@ task runs (mirrors the pattern in
 `tests/test_session_cleanup.py::test_scheduled_task_actually_runs_after_gc`).
 """
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock
 
 from app.kanban import mcp_server as m
 from app.kanban import session_cleanup
