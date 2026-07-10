@@ -144,3 +144,41 @@ follow-up is a one-line addition of "Updates" to `CLAUDE.md`'s feature list (the
 already exists in code, in `App.tsx`, in `lib/navigation.ts`, in `docs/features/updates.md`,
 and in `backend/tests/test_update_api.py` — it was just missing from the top-level
 feature-list line in `CLAUDE.md`). Done in this same commit.
+
+## Reviewer-agent + review-kolom — deliberately NOT adopted (2026-07-10)
+
+Decision: **don't add a `reviewer.md` persona + dedicated Review column on top of the
+existing self-review architecture.** See the trade-off in `reviewer-agent-decision.md`. The
+beweerde baten ("tweede paar ogen", "gate vóór Done", "consistentie met plan") worden al
+afgedekt door bestaande infrastructuur:
+
+- Onafhankelijke, context-verse review → `/code-review effort medium` (verplicht in
+  `engineer.md` §6 sinds `d95b0b6`/`dde58db`) is een verse subagent-context, geen
+  "ik weet wat ik bedoelde"-bias.
+- Tracking van gate-uitvoering → `iteration-loop preset verify` met
+  `.claude/state/iteration-<card-id>.txt` log + `<loop-complete>` emit.
+- Echte geautomatiseerde gate ná push → CI `quality.yml` (ruff + pytest + frontend
+  lint + build op elke push naar `master`).
+- Menselijke gate vóór Done wanneer gewenst → `ship_mode="pull-request"` + GitHub
+  PR-review (al beschikbaar; geen infra-wijziging nodig om te forceren).
+
+Een onafhankelijke Reviewer-agent in dezelfde auto-pipeline heeft niet de eigenschappen
+die "second pair of eyes" suggereert: het is hetzelfde model (Opus 4.8), dezelfde
+codebase-kennis, andere prompt. Twee AI-sessies die elkaars werk controleren is geen
+four-eyes-stap, dat is een spiegel. De CLAUDE.md-doelstelling "zo autonoom mogelijk"
+pleit actief tegen een nieuwe tussenstap waar de baten niet bewezen zijn.
+
+Kosten die wel reëel zijn: extra tokens (hele sessie vs. subagent-call), langere
+doorlooptijd, concurrency-cap-blokkade (Reviewer claimt de hele project-cap — geen nieuwe
+kaarten tot reviewer klaar is), visuele complexiteit (extra kolom in elk project-board).
+
+Dit is dezelfde vraag die eerder gesteld is in `work-type-routing-analysis.md` §3.3 over
+`developer`/`tester`/`code-review` in `_IMPEDIMENT_AGENTS`; die werd in `35beb16`
+beantwoord met "reduceer tot de twee rollen die vandaag echt bestaan tot er een concreet
+plan is voor meer rollen." Diezelfde drempel geldt hier.
+
+**Wanneer heroverwegen:** als een specifieke, herhaaldelijk-optredende klasse bugs door
+de huidige gate-combinatie (engineer-zelfreview + CI) glipt, dan is CI strakker maken
+het juiste antwoord, niet een nieuwe AI-gate. Voor menselijke gates:
+`ship_mode="pull-request"` forceren per project of per kaart-type. Voor echte four-eyes
+(audit/regulering): een menselijke reviewer, niet een tweede AI-sessie.
