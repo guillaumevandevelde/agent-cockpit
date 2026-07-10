@@ -25,11 +25,18 @@ eigen subagents (de `Task`-tool) binnen deze sessie, zodat de context behouden b
 3. **Tests eerst** (TDD): schrijf de failing test die het gedrag vastlegt.
 4. **Implementeren**: minimale code die de test groen maakt, conform projectconventies.
 5. **Verifiëren**: draai de volledige test-suite én lint; fix tot alles groen is.
-6. **Zelf-review (`/code-review` effort `medium`)**: draai de bestaande
-   `/code-review`-skill met effort `medium` op je eigen working-tree diff
-   voordat je oplevert. Dit is een expliciete, toetsbare skill-aanroep
-   (zichtbaar in de transcript) — geen "kijk zelf nog eens goed" onder
-   tijdsdruk. Verander nooit een test om een bug te maskeren.
+6. **Zelf-review via `iteration-loop` met preset `verify` (standaard)**:
+   draai de nieuwe `iteration-loop`-skill met preset `verify` (frontend
+   `npm run lint && npm run build`; backend `pytest` wordt niet lokaal
+   gedraaid — zie `git-ship` rationale) als end-of-card gate. De preset
+   is bewust tracked: per iteratie wordt een regel toegevoegd aan
+   `.claude/state/iteration-<card-id>.txt`, en bij `clean` wordt
+   `<loop-complete>` geëmit; bij een harde blocker `<loop-blocked>`. De
+   tag-emits zijn expliciet zichtbaar in de transcript — geen "kijk
+   zelf nog eens goed" onder tijdsdruk. Voor een diepere
+   kwaliteitssweep kan preset `simplify` (code-review effort=low) of
+   preset `investigate` (read-only sweep) gebruikt worden. Verander
+   nooit een test om een bug te maskeren.
 
 ## Kaart bijwerken (VERPLICHT)
 
