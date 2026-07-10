@@ -1,0 +1,10 @@
+{
+  "last_run": "2026-07-10",
+  "sources_seen": {
+    "claude-task-master": "release notes as of 2026-07-10 (watch/compact list mode, verbose loop output, optional metadata field, 13-IDE detection, Docker-sandboxed loop command)",
+    "Aperant/Auto-Claude": "v2.7.6 stable / v2.8.0-beta.4 (Insights/Ideation bugfixes; repo silent on pushes since 2026-03-23, project pivoting commercial)",
+    "claude-deck (upstream fork origin, adrirubio/claude-deck)": "v2.0.1 (2026-06-20); v2.0.0 (2026-06-19) Agent Mail + Agent Teams + external orchestration API — already triaged in docs/cockpit/upstream-agent-teams-decision.md, upstream-presence-removal-decision.md, upstream-docker-removal-decision.md",
+    "Anthropic API changelog": "structured outputs GA (Sonnet/Opus/Haiku 4.5), prompt-caching workspace-isolation (2026-02-05) — not directly actionable, Cockpit orchestrates via CLI sessions not raw API calls",
+    "LangGraph": "2026-05-12 release — DeltaChannel (beta, incremental checkpoint deltas), ContextHubBackend (LangSmith Hub-backed skill/memory versioning) — noted, not filed (SaaS-coupled / large-scope, would need decomposition)"
+  }
+}
