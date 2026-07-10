@@ -81,6 +81,162 @@ describe("CardDrawer live activity", () => {
   }, 8000);
 });
 
+describe("CardDrawer Done summary banner", () => {
+  it("shows the green summary banner with summary text, completed date, and duration when card is Done with done_summary", () => {
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      created_at: "2026-07-10T10:00:00Z",
+      done_summary: "Added done_summary + completed_at to CardResponse via op-log enrichment.",
+      completed_at: "2026-07-10T12:15:00Z",
+    };
+
+    render(
+      <CardDrawer
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The banner is a single element with a stable testid — query by it so
+    // we're not coupling to the exact phrasing of "Completed".
+    const banner = screen.getByTestId("done-summary-banner");
+    expect(banner).not.toBeNull();
+    // Summary text rendered verbatim
+    expect(banner.textContent).toMatch(
+      /Added done_summary \+ completed_at to CardResponse/,
+    );
+    // Completed-on date appears (formatted)
+    expect(banner.textContent).toMatch(/Completed on 10 July 2026 at/);
+    // Duration text "2h 15m" appears between created_at and completed_at
+    expect(banner.textContent).toMatch(/Took 2h 15m/);
+  });
+
+  it("does not show the summary banner when card is not in the Done column", () => {
+    const doingCard: Card = {
+      ...baseCard,
+      column: "Doing",
+      done_summary: "stale summary",
+      completed_at: "2026-07-10T12:00:00Z",
+    };
+
+    render(
+      <CardDrawer
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The banner is Done-column gated; for any other column the testid must
+    // not be present, regardless of whether done_summary/completed_at are set.
+    expect(screen.queryByTestId("done-summary-banner")).toBeNull();
+  });
+
+  it("shows only a minimal Completed indicator when card is Done but done_summary is empty", () => {
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      created_at: "2026-07-10T10:00:00Z",
+      completed_at: "2026-07-10T11:00:00Z",
+    };
+
+    render(
+      <CardDrawer
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Banner is still rendered (Done column), but without summary text or
+    // duration. The "Took ..." row is suppressed because it only anchors
+    // when a summary is present.
+    const banner = screen.getByTestId("done-summary-banner");
+    expect(banner.textContent).toMatch(/Completed/);
+    expect(banner.textContent).not.toMatch(/Took/);
+  });
+});
+
+describe("CardDrawer deliverables tab per-kind rendering", () => {
+  it("renders each deliverable kind with its own icon and ref formatting", () => {
+    const card: Card = {
+      ...baseCard,
+      deliverables: [
+        { id: "d1", kind: "branch", ref: "k-mijn-branch-naam", created_at: "2026-07-10T10:00:00Z" },
+        { id: "d2", kind: "pr", ref: "https://github.com/org/repo/pull/123", created_at: "2026-07-10T10:01:00Z" },
+        { id: "d3", kind: "commit", ref: "abcdef1234567890", created_at: "2026-07-10T10:02:00Z" },
+        { id: "d4", kind: "note", ref: "Hand-tested via the UI", created_at: "2026-07-10T10:03:00Z" },
+        { id: "d5", kind: "plan", ref: "# My plan\n- step 1\n- step 2", created_at: "2026-07-10T10:04:00Z" },
+        {
+          id: "d6",
+          kind: "plan_ref",
+          ref: JSON.stringify({ parent_card_id: "parent-abcdef0123" }),
+          created_at: "2026-07-10T10:05:00Z",
+        },
+      ],
+    };
+
+    render(
+      <CardDrawer
+        card={card}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The Radix Dialog content is portaled to document.body, so query there
+    // directly. `container` only holds the trigger stub.
+    const scope = document.body;
+
+    // Each deliverable row carries a `data-deliverable-kind` attribute so the
+    // test can target it directly without depending on textContent layout.
+    const branchRow = scope.querySelector('[data-deliverable-kind="branch"]');
+    expect(branchRow).not.toBeNull();
+    expect(branchRow!.textContent).toMatch(/🔀/);
+    expect(branchRow!.textContent).toMatch(/k-mijn-branch-naam/);
+    // Old "branch: <ref>" prefix must be gone.
+    expect(branchRow!.textContent).not.toMatch(/^branch:/);
+
+    const prRow = scope.querySelector('[data-deliverable-kind="pr"]');
+    expect(prRow).not.toBeNull();
+    expect(prRow!.textContent).toMatch(/github\.com\/org\/repo\/pull\/123/);
+    // PR row contains an <a> with the URL.
+    const prLink = prRow!.querySelector("a");
+    expect(prLink).not.toBeNull();
+    expect(prLink!.getAttribute("href")).toBe(
+      "https://github.com/org/repo/pull/123",
+    );
+
+    const commitRow = scope.querySelector('[data-deliverable-kind="commit"]');
+    expect(commitRow).not.toBeNull();
+    expect(commitRow!.textContent).toMatch(/💻/);
+    expect(commitRow!.textContent).toMatch(/abcdef1/);
+    // Full 16-char hash must NOT appear in the commit row.
+    expect(commitRow!.textContent).not.toMatch(/abcdef1234567890/);
+
+    const noteRow = scope.querySelector('[data-deliverable-kind="note"]');
+    expect(noteRow).not.toBeNull();
+    expect(noteRow!.textContent).toMatch(/📝/);
+    expect(noteRow!.textContent).toMatch(/Hand-tested via the UI/);
+
+    const planRow = scope.querySelector('[data-deliverable-kind="plan"]');
+    expect(planRow).not.toBeNull();
+    expect(planRow!.textContent).toMatch(/📋/);
+    expect(planRow!.textContent).toMatch(/Plan document/);
+
+    const planRefRow = scope.querySelector('[data-deliverable-kind="plan_ref"]');
+    expect(planRefRow).not.toBeNull();
+    // parent_card_id "parent-abcdef0123" → first 8 chars = "parent-a"
+    expect(planRefRow!.textContent).toMatch(/Verwijst naar parent-plan parent-a/);
+  });
+});
+
 describe("CardDrawer edit dialog round-trip", () => {
   it("preserves analyst_agent_id and executor_agent_id when editing a multi-agent card", async () => {
     const updateCardMock = kanbanApi.updateCard as ReturnType<typeof vi.fn>;
