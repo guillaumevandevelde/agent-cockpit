@@ -2693,6 +2693,67 @@ class TestBuildShipInstructions:
             assert "summary_required" not in instructions  # not the agent's problem to debug
 
 
+class TestBuildShipInstructionsSessionRetro:
+    """The session-end retro step is injected between attach_deliverable and
+    move_card→Done for executor/engineer cards in both ship modes (the analyst
+    path is wired separately). The retro is the engine behind
+    self-improvement: a `[self-improve]` card filed here survives past the
+    transcript and lands on the dispatcher queue, while a comment in the
+    transcript does not.
+    """
+
+    def test_direct_mode_includes_session_retro_step(self):
+        instructions = dispatch._build_ship_instructions("direct")
+        assert "session-retro" in instructions
+        assert "self-improve" in instructions
+        assert ".claude/skills/session-retro/SKILL.md" in instructions
+
+    def test_pull_request_mode_includes_session_retro_step(self):
+        instructions = dispatch._build_ship_instructions("pull-request")
+        assert "session-retro" in instructions
+        assert "self-improve" in instructions
+        assert ".claude/skills/session-retro/SKILL.md" in instructions
+
+    def test_session_retro_step_runs_after_attach_deliverable_and_before_move_card(self):
+        """Acceptance: the retro must be the *last* step before move_card→Done
+        (after ship + attach_deliverable, never before them). A retro wired
+        earlier would burn time on lessons that ship-discipline should catch."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            attach_idx = instructions.index("attach_deliverable")
+            retro_idx = instructions.index("session-retro")
+            move_idx = instructions.index('move_card')
+            assert attach_idx < retro_idx < move_idx, (
+                f"order broken in {mode}: "
+                f"attach@{attach_idx} retro@{retro_idx} move@{move_idx}"
+            )
+
+    def test_session_retro_step_uses_consistent_step_numbering(self):
+        """The retro step is renumbered in each mode to fit between attach (5/6)
+        and move (7/8). Regression guard: if the step number drifts, the agent
+        loses its place."""
+        # direct: attach=5, retro=6, move=7
+        direct = dispatch._build_ship_instructions("direct")
+        assert "5. **Attach the deliverable**" in direct
+        assert "6. **Run the session-end retro**" in direct
+        assert "7. **Move the card to Done**" in direct
+        # pull-request: attach=6, retro=7, move=8
+        pr = dispatch._build_ship_instructions("pull-request")
+        assert "6. **Attach the deliverable**" in pr
+        assert "7. **Run the session-end retro**" in pr
+        assert "8. **Move the card**" in pr
+
+    def test_build_card_prompt_includes_session_retro_step(self):
+        """The retro step reaches the dispatch prompt (not just the helper)."""
+        class _C:
+            title = "My Card"
+            description = "Do the thing"
+        for mode in ("direct", "pull-request"):
+            prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode=mode)
+            assert "session-retro" in prompt, f"missing in {mode} prompt"
+            assert "self-improve" in prompt, f"missing in {mode} prompt"
+
+
 class TestBuildCardPromptSessionEnd:
     """build_card_prompt includes the Session-end workflow section."""
 

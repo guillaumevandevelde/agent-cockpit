@@ -887,6 +887,9 @@ def _build_ship_instructions(ship_mode: str) -> str:
         "current branch.\n"
     )
 
+    retro_direct = _build_session_retro_step(step_number=6)
+    retro_pr = _build_session_retro_step(step_number=7)
+
     if ship_mode == "direct":
         shipping = (
             "4. **Ship (direct mode)** — merge your branch into master and push:\n"
@@ -899,7 +902,8 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "   ```\n"
             "5. **Attach the deliverable** — ``attach_deliverable`` with "
             "``kind=\"branch\"`` and ``ref=<your-branch-name>``.\n"
-            "6. **Move the card to Done** — ``move_card`` with ``column=\"Done\"`` "
+            + retro_direct +
+            "7. **Move the card to Done** — ``move_card`` with ``column=\"Done\"`` "
             "and ``summary=<what you did>``, a few sentences on the work you "
             "completed.  ``summary`` is required for this move; the call is "
             "rejected without it.  The backend will kill this session and remove "
@@ -957,7 +961,8 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "   ```\n"
             "6. **Attach the deliverable** — ``attach_deliverable`` with "
             "``kind=\"pr\"`` and ``ref=<PR-URL>`` (or ``kind=\"branch\"`` if no PR).\n"
-            "7. **Move the card** — if the PR merged, ``move_card`` with "
+            + retro_pr +
+            "8. **Move the card** — if the PR merged, ``move_card`` with "
             "``column=\"Done\"`` and ``summary=<what you did>``, a few sentences "
             "on the work you completed (``summary`` is required for this move; "
             "the call is rejected without it).  If the poll loop exited because a "
@@ -967,6 +972,39 @@ def _build_ship_instructions(ship_mode: str) -> str:
         )
 
     return sync + tests + commit + shipping
+
+
+def _build_session_retro_step(step_number: int = 6) -> str:
+    """Step injected between ``attach_deliverable`` and ``move_card → Done``.
+
+    Inlines the headless-trim version of the ``session-retro`` skill so the
+    step works for any spawned agent (whether or not it can read the skill
+    files). Mirrors the source of truth at
+    ``.claude/skills/session-retro/SKILL.md`` — keep them in sync.
+
+    The retro runs *after* the work is shipped and the deliverable is attached,
+    *before* the card moves to ``Done`` (the step number shifts accordingly in
+    the caller). It's wired only for executor/engineer cards: analyst cards
+    exit via the ``move_parent → Done`` path in ``analyst_prompt.py`` and have
+    no ship step, so a retro there is a separate (small) wiring decision.
+
+    The ``step_number`` argument lets the caller pick the right place in the
+    numbered sequence — 6 in direct mode (attach=5, move=7), 7 in
+    pull-request mode (attach=6, move=8).
+    """
+    return (
+        f"{step_number}. **Run the session-end retro** — invoke the "
+        "``session-retro`` skill "
+        "(read ``.claude/skills/session-retro/SKILL.md`` for the full procedure). "
+        "It walks this session backwards, applies a four-pass filter "
+        "(systemic, materieel, actionable, novel), dedupes against existing "
+        "Backlog/Impediment cards, and files 0–N ``[self-improve]`` cards. Even "
+        "a clean session gets a no-op ``comment`` on this card so a follow-up "
+        "sweeper can see the retro ran. Keep it light — under a minute, "
+        "~3–5 tool calls; don't burn the ship budget writing lengthy "
+        "descriptions.\n"
+    )
+
 
 
 # ---- transport -------------------------------------------------------------

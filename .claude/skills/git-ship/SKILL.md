@@ -13,6 +13,12 @@ This skill is the companion to `_build_ship_instructions` in
 `backend/app/kanban/dispatch.py`.  The dispatch prompt inlines the same steps so
 the workflow works even when the agent cannot read `.claude/skills/`.
 
+**Session-end retro:** step 6 of both modes invokes the `session-retro` skill
+(`.claude/skills/session-retro/SKILL.md`) between `attach_deliverable` and the
+`move_card → Done`. This is wired only for executor/engineer sessions; analyst
+sessions exit via `move_parent → Done` in `analyst_prompt.py` and are out of
+scope here.
+
 ## 1. Sync
 
 ```bash
@@ -59,7 +65,10 @@ git push origin HEAD:master
 git checkout "$BRANCH"   # back so the worktree stays valid
 ```
 
-Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`) and `move_card` to
+Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`), **run the session-end
+retro** (invoke the `session-retro` skill — read
+`.claude/skills/session-retro/SKILL.md` for the full procedure: reflect → dedupe → file
+0–N `[self-improve]` cards → `comment` on this host card), and finally `move_card` to
 `Done` with a `summary` of the work you did (required — the move is rejected without it).
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
@@ -109,8 +118,11 @@ while true; do
 done
 ```
 
-If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `move_card` to `Done`
-with a `summary` of the work you did (required — the move is rejected without it).
+If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), **run the session-end retro**
+(invoke the `session-retro` skill — read `.claude/skills/session-retro/SKILL.md` for the
+full procedure: reflect → dedupe → file 0–N `[self-improve]` cards → `comment` on this host
+card), and finally `move_card` to `Done` with a `summary` of the work you did (required —
+the move is rejected without it).
 
 If the loop exited because a check failed, the PR was closed, or the wait timed
 out: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `report_impediment`
@@ -145,5 +157,8 @@ when leftovers exist.
 - Never merge or open a PR when tests are red.
 - A new worktree always branches from `origin/master`.
 - `attach_deliverable` before `move_card` so the deliverable is on the card.
+- Run the **session-end retro** (`session-retro` skill) between `attach_deliverable`
+  and `move_card → Done` so self-improvement lessons land on the Backlog, not in
+  the void of a closed transcript.
 - `move_card` into `Done` or `Impediment` requires `summary` — the server rejects the
   move without it (`report_impediment` already supplies one via its `question` arg).
