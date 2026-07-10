@@ -4,12 +4,12 @@ from unittest.mock import patch
 
 
 def test_provider_cli_executor_uses_codex_binary_and_whitelist():
-    from app.services.cli_executor import ProviderCLIExecutor
+    from app.services.cli_executor import AgenticCliExecutor
 
     with patch("app.services.cli_executor.shutil.which", return_value="/usr/bin/codex"), \
          patch("app.services.cli_executor.subprocess.run") as run:
         run.return_value = SimpleNamespace(stdout="{}", stderr="", returncode=0)
-        result = ProviderCLIExecutor("codex-cli").execute("doctor", ["--json"])
+        result = AgenticCliExecutor("codex-cli").execute("doctor", ["--json"])
 
     run.assert_called_once()
     assert run.call_args.args[0] == ["/usr/bin/codex", "doctor", "--json"]
@@ -31,7 +31,7 @@ async def test_provider_cli_api_redacts_sensitive_output(monkeypatch):
         def execute(self, command, args):
             return SimpleNamespace(stdout="token=secret-token", stderr="api_key=secret-key", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.execute_provider_cli(
         "codex-cli",
@@ -43,9 +43,9 @@ async def test_provider_cli_api_redacts_sensitive_output(monkeypatch):
 
 
 def test_provider_cli_executor_rejects_unsafe_codex_command():
-    from app.services.cli_executor import ProviderCLIExecutor
+    from app.services.cli_executor import AgenticCliExecutor
 
-    executor = ProviderCLIExecutor("codex-cli")
+    executor = AgenticCliExecutor("codex-cli")
 
     assert executor.validate_command("exec") is False
     assert executor.validate_command("logout") is False
@@ -58,5 +58,5 @@ def test_legacy_cli_executor_defaults_to_claude_code():
     with patch("app.services.cli_executor.shutil.which", return_value="/usr/bin/claude"):
         executor = CLIExecutor()
 
-    assert executor.provider_id == "claude-code"
+    assert executor.cli_id == "claude-code"
     assert executor.claude_binary == "/usr/bin/claude"

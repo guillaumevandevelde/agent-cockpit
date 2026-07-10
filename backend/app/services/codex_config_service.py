@@ -16,7 +16,7 @@ import tomlkit
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import Table
 
-from app.services.providers.codex_cli import get_codex_home
+from app.services.agentic_cli.codex_cli import get_codex_home
 
 logger = logging.getLogger(__name__)
 

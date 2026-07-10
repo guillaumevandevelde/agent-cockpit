@@ -106,7 +106,7 @@ class CLIExecuteRequest(BaseModel):
 
     command: str
     args: list[str] = []
-    provider: str = "claude-code"
+    cli: str = "claude-code"
 
 
 class CLIResult(BaseModel):
@@ -1985,7 +1985,7 @@ class BridgeAttachmentResponse(BaseModel):
     id: int
     target: str
     session_name: str | None = None
-    provider: str | None = None
+    cli: str | None = None
     original_filename: str | None = None
     mime_type: str
     size_bytes: int

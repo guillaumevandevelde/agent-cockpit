@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
 from app.models.schemas import CLIExecuteRequest, CLIResult
-from app.services.cli_executor import ProviderCLIExecutor
+from app.services.cli_executor import AgenticCliExecutor
 from app.services.codex_config_service import CodexConfigService
 from app.services.codex_history_service import CodexHistoryService
 from app.services.codex_usage_context_service import CodexUsageContextService
-from app.services.providers import get_provider, get_providers
+from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 
 router = APIRouter()
 
@@ -269,7 +269,7 @@ class CodexPluginMutationRequest(BaseModel):
 @router.get("/providers", response_model=ProviderListResponse)
 async def list_providers():
     providers = await asyncio.gather(
-        *(asyncio.to_thread(provider.get_status) for provider in get_providers())
+        *(asyncio.to_thread(provider.get_status) for provider in get_agentic_clis())
     )
     return {"providers": providers, "count": len(providers)}
 
@@ -296,7 +296,7 @@ async def get_provider_capabilities(provider_id: str):
 
 def _get_provider_or_404(provider_id: str):
     try:
-        return get_provider(provider_id)
+        return get_agentic_cli(provider_id)
     except ValueError as exc:
         raise _provider_error(
             404,
@@ -319,7 +319,7 @@ def _require_capability(provider, capability: str, operation: str) -> None:
     )
 
 
-def _require_provider_binary(executor: ProviderCLIExecutor, operation: str) -> None:
+def _require_provider_binary(executor: AgenticCliExecutor, operation: str) -> None:
     if executor.binary_path:
         return
     raise _provider_error(
@@ -548,7 +548,7 @@ def _parse_codex_feature_rows(stdout: str) -> list[dict[str, Any]]:
 @router.post("/providers/{provider_id}/cli", response_model=CLIResult)
 async def execute_provider_cli(provider_id: str, request: CLIExecuteRequest):
     provider = _get_provider_or_404(provider_id)
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
 
     if not executor.validate_command(request.command):
         raise _provider_error(
@@ -571,7 +571,7 @@ async def execute_provider_cli(provider_id: str, request: CLIExecuteRequest):
 @router.get("/providers/{provider_id}/doctor", response_model=ProviderDoctorResponse)
 async def get_provider_doctor(provider_id: str):
     provider = _get_provider_or_404(provider_id)
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_capability(provider, "doctor", "doctor diagnostics")
     _require_provider_binary(executor, "doctor diagnostics")
 
@@ -599,7 +599,7 @@ async def get_provider_doctor(provider_id: str):
 @router.get("/providers/{provider_id}/mcp", response_model=ProviderMcpInventoryResponse)
 async def get_provider_mcp_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "MCP inventory")
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_provider_binary(executor, "MCP inventory")
 
     result = await asyncio.to_thread(
@@ -630,7 +630,7 @@ async def get_provider_mcp_inventory(provider_id: str):
 async def add_provider_mcp_server(provider_id: str, request: CodexMcpAddRequest):
     mcp_args = _build_codex_mcp_add_args(request)
     provider = _require_codex_provider(provider_id, "MCP server mutation")
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_provider_binary(executor, "MCP server mutation")
 
     result = await asyncio.to_thread(
@@ -652,7 +652,7 @@ async def remove_provider_mcp_server(provider_id: str, server_name: str):
         raise HTTPException(status_code=400, detail=str(exc))
 
     provider = _require_codex_provider(provider_id, "MCP server mutation")
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_provider_binary(executor, "MCP server mutation")
 
     result = await asyncio.to_thread(
@@ -669,7 +669,7 @@ async def remove_provider_mcp_server(provider_id: str, server_name: str):
 @router.get("/providers/{provider_id}/plugins", response_model=ProviderPluginInventoryResponse)
 async def get_provider_plugin_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "plugin inventory")
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_provider_binary(executor, "plugin inventory")
 
     result = await asyncio.to_thread(
@@ -690,7 +690,7 @@ async def get_provider_plugin_inventory(provider_id: str):
 @router.get("/providers/{provider_id}/features", response_model=ProviderFeatureInventoryResponse)
 async def get_provider_feature_inventory(provider_id: str):
     provider = _require_codex_provider(provider_id, "feature inventory")
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_provider_binary(executor, "feature inventory")
 
     result = await asyncio.to_thread(
@@ -711,7 +711,7 @@ async def get_provider_feature_inventory(provider_id: str):
 async def install_provider_plugin(provider_id: str, request: CodexPluginMutationRequest):
     plugin_args = _build_codex_plugin_args("add", request.name, request.marketplace)
     provider = _require_codex_provider(provider_id, "plugin mutation")
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_provider_binary(executor, "plugin mutation")
 
     result = await asyncio.to_thread(executor.execute, "plugin", plugin_args, timeout=60)
@@ -728,7 +728,7 @@ async def install_provider_plugin(provider_id: str, request: CodexPluginMutation
 async def remove_provider_plugin(provider_id: str, plugin_name: str, marketplace: str | None = None):
     plugin_args = _build_codex_plugin_args("remove", plugin_name, marketplace)
     provider = _require_codex_provider(provider_id, "plugin mutation")
-    executor = ProviderCLIExecutor(provider.id)
+    executor = AgenticCliExecutor(provider.id)
     _require_provider_binary(executor, "plugin mutation")
 
     result = await asyncio.to_thread(executor.execute, "plugin", plugin_args, timeout=60)

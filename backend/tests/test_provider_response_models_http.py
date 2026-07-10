@@ -50,7 +50,7 @@ async def test_get_provider_doctor_matches_response_model(monkeypatch):
                 stdout='{"overallStatus":"ok"}', stderr="", exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.get("/api/v1/providers/codex-cli/doctor")
@@ -68,7 +68,7 @@ async def test_get_provider_mcp_inventory_matches_response_model(monkeypatch):
                 stdout='{"servers":{"local":{"command":"node"}}}', stderr="", exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.get("/api/v1/providers/codex-cli/mcp")
@@ -84,7 +84,7 @@ async def test_add_provider_mcp_server_matches_response_model(monkeypatch):
         def execute(self, command, args, timeout=30):
             return SimpleNamespace(stdout="added", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.post(
@@ -103,7 +103,7 @@ async def test_remove_provider_mcp_server_matches_response_model(monkeypatch):
         def execute(self, command, args, timeout=30):
             return SimpleNamespace(stdout="removed", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.delete("/api/v1/providers/codex-cli/mcp/linear")
@@ -126,7 +126,7 @@ async def test_get_provider_plugin_inventory_matches_response_model(monkeypatch)
                 exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.get("/api/v1/providers/codex-cli/plugins")
@@ -146,7 +146,7 @@ async def test_get_provider_feature_inventory_matches_response_model(monkeypatch
                 exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.get("/api/v1/providers/codex-cli/features")
@@ -162,7 +162,7 @@ async def test_install_provider_plugin_matches_response_model(monkeypatch):
         def execute(self, command, args, timeout=60):
             return SimpleNamespace(stdout="installed", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.post(
@@ -181,7 +181,7 @@ async def test_remove_provider_plugin_matches_response_model(monkeypatch):
         def execute(self, command, args, timeout=60):
             return SimpleNamespace(stdout="removed", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     async with _client() as ac:
         r = await ac.delete("/api/v1/providers/codex-cli/plugins/linear")

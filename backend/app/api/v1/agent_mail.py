@@ -118,16 +118,16 @@ async def agent_inbox(
     )
 
 
-def _hook_provider(payload: dict) -> str:
-    provider = str(payload.get("provider") or "claude-code")
-    return provider if provider in {"claude-code", "codex-cli"} else "unknown"
+def _hook_cli(payload: dict) -> str:
+    raw = str(payload.get("provider") or payload.get("cli") or "claude-code")
+    return raw if raw in {"claude-code", "codex-cli"} else "unknown"
 
 
 def _hook_session_key(payload: dict) -> str | None:
     session_id = payload.get("session_id")
     if not session_id:
         return None
-    prefix = "cc" if _hook_provider(payload) == "claude-code" else "codex"
+    prefix = "cc" if _hook_cli(payload) == "claude-code" else "codex"
     return f"{prefix}:{session_id}"
 
 
@@ -139,7 +139,7 @@ async def _register_from_hook(db: AsyncSession, payload: dict):
     return await agent_mail_service.register_session(
         db,
         MailAgentRegisterRequest(
-            source="hook", provider=_hook_provider(payload), cwd=cwd,
+            source="hook", cli=_hook_cli(payload), cwd=cwd,
             session_key=session_key, pid=payload.get("pid"),
         ),
     )

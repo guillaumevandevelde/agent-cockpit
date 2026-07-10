@@ -116,13 +116,13 @@ class KanbanColumn(KanbanBase):
     rank: Mapped[str] = mapped_column(String(64), default="")
     default_agent: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Which subscription/vendor cards dispatched into this column spawn against
-    # (anthropic | bedrock | minimax, see platform_env.py). None means the
+    # (anthropic | bedrock | minimax, see provider_env.py). None means the
     # dispatcher's own default (anthropic). Orthogonal to default_agent, which
     # picks the CLI/persona, not the backend the CLI authenticates against.
-    default_platform: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    default_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Column-wide model default, one precedence level below a card's own
     # `model` and above the persona frontmatter default. Same free-text,
-    # no-validation contract as default_agent/default_platform.
+    # no-validation contract as default_agent/default_provider.
     default_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Per-column session cap. NULL means no per-column limit — falls back to the
     # project-level max_sessions cap. Set to e.g. 1 so only one card at a time

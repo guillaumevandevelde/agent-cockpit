@@ -40,10 +40,10 @@ class RecordingTransport:
         self.calls = []
         self.fail = fail
 
-    def __call__(self, *, directory, prompt, session_name, provider_id="claude-code",
+    def __call__(self, *, directory, prompt, session_name, cli_id="claude-code",
                  platform="anthropic", model=None):
         self.calls.append({"directory": directory, "prompt": prompt,
-                           "session_name": session_name, "provider_id": provider_id,
+                           "session_name": session_name, "cli_id": cli_id,
                            "platform": platform, "model": model})
         if self.fail:
             raise RuntimeError("tmux exploded")
@@ -144,7 +144,7 @@ async def test_dispatch_defaults_to_claude_code_provider():
         await dispatch.dispatch_card(s, card_id=cid, project_path="/p", transport=transport)
         await s.commit()
     assert len(transport.calls) == 1
-    assert transport.calls[0]["provider_id"] == "claude-code"
+    assert transport.calls[0]["cli_id"] == "claude-code"
 
 
 @pytest.mark.asyncio
@@ -167,7 +167,7 @@ async def test_dispatch_threads_card_provider_to_transport():
         card = await get_card(s, cid)
     assert result is not None
     assert len(transport.calls) == 1
-    assert transport.calls[0]["provider_id"] == "mimo-code"
+    assert transport.calls[0]["cli_id"] == "mimo-code"
     assert card.column == "engineer"  # provider id is NOT used as the column
 
 
@@ -184,15 +184,15 @@ async def test_dispatch_defaults_to_anthropic_platform():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_uses_column_default_platform():
-    """A column configured with default_platform="minimax" (e.g. an "engineer"
+async def test_dispatch_uses_column_default_provider():
+    """A column configured with default_provider="minimax" (e.g. an "engineer"
     column meant for bulk coding work) routes its cards' spawn to that platform,
     while columns without one keep the default Anthropic subscription."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await service.create_column(
             s, project_key=PK, name="engineer", default_agent="engineer",
-            default_platform="minimax",
+            default_provider="minimax",
         )
         cid = await _make_card(s)
         await s.commit()
@@ -293,7 +293,7 @@ async def test_persona_override_still_routes_to_persona_column():
         await s.commit()
         card = await get_card(s, cid)
     assert card.column == "developer"
-    assert transport.calls[0]["provider_id"] == "claude-code"
+    assert transport.calls[0]["cli_id"] == "claude-code"
 
 
 @pytest.mark.asyncio
@@ -1091,8 +1091,8 @@ def test_worktree_transport_creates_from_origin_master(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_spawn(provider_id, options, session_name=None):
-        captured["provider"] = provider_id
+    def fake_spawn(cli_id, options, session_name=None):
+        captured["cli"] = cli_id
         captured["options"] = options
         captured["session_name"] = session_name
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
@@ -1127,7 +1127,7 @@ def test_worktree_transport_removes_worktree_when_spawn_fails(monkeypatch, tmp_p
             stderr = ""
         return R()
 
-    def fake_spawn(provider_id, options, session_name=None):
+    def fake_spawn(cli_id, options, session_name=None):
         raise RuntimeError("tmux exploded")
 
     import app.kanban.dispatch as d
@@ -1308,7 +1308,7 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -1556,7 +1556,7 @@ async def test_dispatch_all_pending_resumes_to_resume_cards():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -1959,7 +1959,7 @@ async def test_card_transport_sandcastle_uses_sandcastle_transport():
     worktree = RecordingTransport()
     sc_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic", model=None):
+    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
@@ -1990,11 +1990,11 @@ async def test_card_transport_worktree_overrides_sandcastle_project_default():
     sc_calls = []
     wt_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic", model=None):
+    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
-    def fake_worktree(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic", model=None):
+    def fake_worktree(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
         wt_calls.append(session_name)
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
@@ -2026,7 +2026,7 @@ def test_make_resume_transport_records_call():
     """make_resume_transport produces a callable that passes session_id through."""
     calls = []
 
-    def fake_spawn(provider_id, options, *, session_name):
+    def fake_spawn(cli_id, options, *, session_name):
         calls.append({"options": options, "session_name": session_name})
         return {"session_name": session_name}
 
@@ -2072,7 +2072,7 @@ async def test_redispatch_with_resume_session_id_uses_resume_transport():
     """When card has resume_session_id, redispatch calls resume transport, not worktree."""
     calls = []
 
-    def resume_transport(*, directory, prompt, session_name, provider_id="claude-code", platform="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", platform="anthropic", model=None):
         calls.append({"mode": "resume", "session_name": session_name})
         return {"session_name": session_name}
 

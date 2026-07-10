@@ -1,4 +1,4 @@
-"""Provider abstraction for local agent CLIs."""
+"""Agentic CLI abstraction — base class shared by every supported CLI."""
 from __future__ import annotations
 
 import logging
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.services.providers.capabilities import capability_flags, normalize_capability_matrix
+from app.services.agentic_cli.capabilities import capability_flags, normalize_capability_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ _MAX_TREE_DEPTH = 4
 
 @dataclass(frozen=True)
 class SpawnCommandOptions:
-    """Provider-neutral launch options used by the tmux bridge."""
+    """CLI-neutral launch options used by the tmux bridge."""
 
     directory: str
     mode: str = "plain"
@@ -39,7 +39,7 @@ class SpawnCommandOptions:
     no_alt_screen: bool = False
     dangerously_bypass_approvals_and_sandbox: bool = False
     use_last: bool = False
-    platform: str = "anthropic"
+    provider: str = "anthropic"
     aws_region: str | None = None
     aws_profile: str | None = None
     bedrock_model: str | None = None
@@ -108,8 +108,8 @@ def has_binary_descendant(
     return False
 
 
-class AgentProvider(ABC):
-    """Base class for provider-specific CLI behavior."""
+class AgenticCli(ABC):
+    """Base class for CLI-specific behavior."""
 
     id: str
     display_name: str
@@ -117,11 +117,11 @@ class AgentProvider(ABC):
     version_args: tuple[str, ...] = ("--version",)
 
     def get_capabilities(self) -> dict[str, bool]:
-        """Return backward-compatible provider feature support flags."""
+        """Return backward-compatible feature support flags."""
         return capability_flags(self.id)
 
     def get_capability_matrix(self) -> dict[str, dict[str, Any]]:
-        """Return detailed provider capability metadata."""
+        """Return detailed capability metadata."""
         return normalize_capability_matrix(self.id)
 
     def get_capability_details(self) -> dict[str, dict[str, str]]:
@@ -130,22 +130,22 @@ class AgentProvider(ABC):
 
     @abstractmethod
     def get_config_paths(self, project_path: str | None = None) -> dict[str, Any]:
-        """Return important config paths for this provider."""
+        """Return important config paths for this CLI."""
 
     @abstractmethod
     def is_process_match(self, command: str, pid: str) -> bool:
-        """Return True when a tmux pane belongs to this provider."""
+        """Return True when a tmux pane belongs to this CLI."""
 
     @abstractmethod
     def build_spawn_command(self, options: SpawnCommandOptions) -> list[str]:
-        """Build the provider CLI command for a tmux session."""
+        """Build the CLI command for a tmux session."""
 
     @abstractmethod
     def get_allowed_cli_commands(self) -> list[str]:
-        """Return safe command names exposed by a provider CLI API."""
+        """Return safe command names exposed by this CLI's API."""
 
     def get_backup_policy(self) -> dict[str, Any] | None:
-        """Return provider backup/export/restore policy metadata, if defined."""
+        """Return backup/export/restore policy metadata, if defined."""
         return None
 
     def get_version(self) -> str | None:

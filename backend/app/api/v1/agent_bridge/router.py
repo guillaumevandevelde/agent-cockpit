@@ -1,4 +1,4 @@
-"""Agent Bridge endpoints: mixed provider session discovery, terminal access, and team grouping."""
+"""Agent Bridge endpoints: mixed agentic-CLI session discovery, terminal access, and team grouping."""
 from __future__ import annotations
 
 import logging
@@ -40,9 +40,9 @@ from app.services.agent_bridge.discovery import capture_pane_preview, discover_a
 from app.services.agent_bridge.pty_relay import PtyRelay, is_target_interactive
 from app.services.agent_bridge.resumable import list_resumable_sessions
 from app.services.agent_bridge.spawn import kill_session, rename_session, spawn_session
+from app.services.agentic_cli import get_agentic_cli
+from app.services.agentic_cli.base import SpawnCommandOptions
 from app.services.host_service import HostNotFoundError
-from app.services.providers import get_provider
-from app.services.providers.base import SpawnCommandOptions
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ _TOKEN_TTL = 30
 
 
 class SpawnRequest(BaseModel):
-    provider: str = "claude-code"
+    cli: str = "claude-code"
     session_name: str | None = None
     directory: str
     mode: Literal["plain", "worktree", "resume", "fork"] = "plain"
@@ -71,7 +71,7 @@ class SpawnRequest(BaseModel):
     no_alt_screen: bool = False
     dangerously_bypass_approvals_and_sandbox: bool = False
     use_last: bool = False
-    platform: str = "anthropic"
+    provider: str = "anthropic"
     aws_region: str | None = None
     aws_profile: str | None = None
     bedrock_model: str | None = None
@@ -87,9 +87,9 @@ class SpawnRequest(BaseModel):
 
 
 @router.get("/sessions")
-def list_sessions(provider: str | None = Query(default=None)):
+def list_sessions(cli: str | None = Query(default=None)):
     try:
-        sessions = discover_agent_sessions(provider)
+        sessions = discover_agent_sessions(cli)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"sessions": sessions, "count": len(sessions)}
@@ -135,11 +135,11 @@ async def get_session_git_status(target: str):
     return status
 
 
-class PlatformStatusResponse(BaseModel):
+class ProviderStatusResponse(BaseModel):
     configured: bool
 
 
-@router.get("/platforms/minimax/status", response_model=PlatformStatusResponse)
+@router.get("/platforms/minimax/status", response_model=ProviderStatusResponse)
 def get_minimax_platform_status():
     """Whether MINIMAX_API_KEY is set in the backend environment.
 
@@ -153,7 +153,7 @@ class MinimaxCredentialsRequest(BaseModel):
     minimax_api_key: str
 
 
-@router.post("/platforms/minimax/credentials", response_model=PlatformStatusResponse)
+@router.post("/platforms/minimax/credentials", response_model=ProviderStatusResponse)
 def set_minimax_credentials(request: MinimaxCredentialsRequest):
     """Set the MiniMax API key from the UI: writes it to the backend .env file
     and updates the running Settings immediately. Never returns the key."""
@@ -164,7 +164,7 @@ def set_minimax_credentials(request: MinimaxCredentialsRequest):
     return {"configured": True}
 
 
-@router.delete("/platforms/minimax/credentials", response_model=PlatformStatusResponse)
+@router.delete("/platforms/minimax/credentials", response_model=ProviderStatusResponse)
 def clear_minimax_credentials():
     minimax_credentials.clear_minimax_api_key()
     return {"configured": False}
@@ -325,7 +325,7 @@ async def delete_session_attachment(
 @router.post("/sessions")
 async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depends(get_db)):
     try:
-        get_provider(request.provider)
+        get_agentic_cli(request.cli)
 
         host_data = None
         if request.host_id is not None:
@@ -349,7 +349,7 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             no_alt_screen=request.no_alt_screen,
             dangerously_bypass_approvals_and_sandbox=request.dangerously_bypass_approvals_and_sandbox,
             use_last=request.use_last,
-            platform=request.platform,
+            provider=request.provider,
             aws_region=request.aws_region,
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
@@ -363,7 +363,7 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             allow_all=request.allow_all,
             no_ask_user=request.no_ask_user,
         )
-        return spawn_session(request.provider, options, session_name=request.session_name, host_data=host_data)
+        return spawn_session(request.cli, options, session_name=request.session_name, host_data=host_data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except HostNotFoundError as exc:
@@ -376,11 +376,11 @@ class BulkResumeItem(BaseModel):
 
 
 class BulkResumeRequest(BaseModel):
-    provider: str = "claude-code"
+    cli: str = "claude-code"
     directory: str = ""
     sessions: list[BulkResumeItem]
     skip_permissions: bool = False
-    platform: str = "anthropic"
+    provider: str = "anthropic"
     aws_region: str | None = None
     aws_profile: str | None = None
     bedrock_model: str | None = None
@@ -407,7 +407,7 @@ def bulk_resume_endpoint(request: BulkResumeRequest):
     if not request.sessions:
         raise HTTPException(status_code=400, detail="No sessions provided")
     try:
-        get_provider(request.provider)
+        get_agentic_cli(request.cli)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -421,14 +421,14 @@ def bulk_resume_endpoint(request: BulkResumeRequest):
             session_id=item.session_id,
             project_folder=item.project_folder,
             skip_permissions=request.skip_permissions,
-            platform=request.platform,
+            provider=request.provider,
             aws_region=request.aws_region,
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
             minimax_base_url=request.minimax_base_url,
         )
         try:
-            spawned = spawn_session(request.provider, options)
+            spawned = spawn_session(request.cli, options)
             results.append(
                 BulkResumeResult(
                     session_id=item.session_id,
@@ -485,7 +485,7 @@ class TeamMemberInfo(BaseModel):
 class AgentTeamResponse(BaseModel):
     team_id: str
     name: str
-    provider: str
+    cli: str
     cwd: str
     is_auto_detected: bool
     lead: dict[str, Any] | None = None
@@ -516,7 +516,7 @@ async def list_teams(db: AsyncSession = Depends(get_db)):
 
 class CreateTeamRequest(BaseModel):
     name: str
-    provider: str = ""
+    cli: str = ""
     cwd: str = ""
     lead_session_name: str | None = None
     members: list[TeamMemberInfo] = []
@@ -529,7 +529,7 @@ async def create_team(request: CreateTeamRequest, db: AsyncSession = Depends(get
         team = await teams_service.create_manual_team(
             db,
             name=request.name,
-            provider=request.provider,
+            cli=request.cli,
             cwd=request.cwd,
             lead_session_name=request.lead_session_name,
             member_sessions=[m.model_dump() for m in request.members],

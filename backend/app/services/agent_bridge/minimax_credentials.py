@@ -1,7 +1,7 @@
 """Persist the MiniMax API key from the UI to the backend .env file.
 
 Mirrors the "never store in the database, never return to the browser"
-invariant from platform_env.py: this writes a plain KEY=value line to the same
+invariant from provider_env.py: this writes a plain KEY=value line to the same
 .env file pydantic-settings reads at startup, and mutates the in-process
 Settings object so the change takes effect immediately, without a restart.
 """

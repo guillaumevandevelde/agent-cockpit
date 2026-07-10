@@ -52,12 +52,12 @@ async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_pa
 
     captured = {}
 
-    def fake_spawn(provider_id, options, session_name=None, host_data=None):
-        captured["provider_id"] = provider_id
+    def fake_spawn(cli_id, options, session_name=None, host_data=None):
+        captured["cli_id"] = cli_id
         captured["options"] = options
         return {
-            "provider": provider_id,
-            "provider_display_name": "Codex CLI",
+            "cli": cli_id,
+            "cli_display_name": "Codex CLI",
             "tmux_target": "codex-smoke:0.0",
             "session_name": "codex-smoke",
         }
@@ -79,7 +79,7 @@ async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_pa
     )
 
     assert response["provider"] == "codex-cli"
-    assert captured["provider_id"] == "codex-cli"
+    assert captured["cli_id"] == "codex-cli"
     assert captured["options"].profile == "default"
     assert captured["options"].sandbox == "workspace-write"
     assert captured["options"].approval_policy == "on-request"

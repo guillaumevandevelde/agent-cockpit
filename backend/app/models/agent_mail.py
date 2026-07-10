@@ -44,7 +44,7 @@ class MailAgentSession(Base):
     member_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("mail_team_members.id", ondelete="CASCADE"), index=True, nullable=False
     )
-    provider: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
+    cli: Mapped[str] = mapped_column(String(32), default="unknown", nullable=False)
     source: Mapped[str] = mapped_column(String(16), nullable=False)  # hook | mcp | observed
     session_key: Mapped[str] = mapped_column(String(256), unique=True, index=True, nullable=False)
     cwd: Mapped[str | None] = mapped_column(String(1024), nullable=True)

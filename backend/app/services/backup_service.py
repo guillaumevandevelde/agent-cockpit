@@ -30,9 +30,9 @@ from app.services.backup_shared import (
     _get_current_platform,
     get_backup_storage_dir,
 )
-from app.services.cli_executor import ProviderCLIExecutor
-from app.services.providers import get_provider
-from app.services.providers.codex_cli import get_codex_home
+from app.services.cli_executor import AgenticCliExecutor
+from app.services.agentic_cli import get_agentic_cli
+from app.services.agentic_cli.codex_cli import get_codex_home
 from app.services.restore_service import RestoreService
 from app.utils.path_utils import (
     get_claude_user_agents_dir,
@@ -149,10 +149,10 @@ class BackupService:
     def _get_codex_backup_policy(self) -> dict[str, Any]:
         """Return the Codex export/restore policy used in manifests and status."""
         try:
-            provider_policy = get_provider("codex-cli").get_backup_policy()
+            cli_policy = get_agentic_cli("codex-cli").get_backup_policy()
         except Exception:
-            provider_policy = None
-        return dict(provider_policy or {
+            cli_policy = None
+        return dict(cli_policy or {
             "provider": "codex-cli",
             "export_supported": True,
             "automatic_restore_supported": False,
@@ -228,7 +228,7 @@ class BackupService:
         }
 
         try:
-            executor = ProviderCLIExecutor("codex-cli")
+            executor = AgenticCliExecutor("codex-cli")
             if not executor.binary_path:
                 inventory["cli"] = {"installed": False}
                 return inventory

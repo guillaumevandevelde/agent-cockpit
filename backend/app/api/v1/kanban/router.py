@@ -87,7 +87,7 @@ async def create_column(payload: ColumnCreate):
         col = await service.create_column(
             s, project_key=payload.project_key, name=payload.name,
             rank=payload.rank, default_agent=payload.default_agent,
-            default_platform=payload.default_platform,
+            default_provider=payload.default_provider,
             default_model=payload.default_model,
             max_sessions=payload.max_sessions,
         )
@@ -102,7 +102,7 @@ async def update_column(column_id: str, payload: ColumnUpdate):
             s, column_id,
             name=payload.name, rank=payload.rank,
             default_agent=payload.default_agent,
-            default_platform=payload.default_platform,
+            default_provider=payload.default_provider,
             default_model=payload.default_model,
             max_sessions=payload.max_sessions,
         )

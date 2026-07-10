@@ -232,7 +232,7 @@ async def get_column(session, column_id: str):
 
 async def create_column(session, project_key: str, name: str,
                         rank: str | None = None, default_agent: str | None = None,
-                        default_platform: str | None = None,
+                        default_provider: str | None = None,
                         default_model: str | None = None,
                         max_sessions: int | None = None):
     col = KanbanColumn(
@@ -241,7 +241,7 @@ async def create_column(session, project_key: str, name: str,
         name=name,
         rank=rank or uuid.uuid4().hex,
         default_agent=default_agent,
-        default_platform=default_platform,
+        default_provider=default_provider,
         default_model=default_model,
         max_sessions=max_sessions,
     )
@@ -282,8 +282,8 @@ async def get_column_default_agent(session, project_key: str, column_name: str) 
     return col.default_agent if col else None
 
 
-async def get_column_default_platform(session, project_key: str, column_name: str) -> str | None:
-    """Look up the default platform (anthropic | bedrock | minimax) for a column
+async def get_column_default_provider(session, project_key: str, column_name: str) -> str | None:
+    """Look up the default provider (anthropic | bedrock | minimax) for a column
     name within a project. None means no override — the dispatcher falls back to
     the Anthropic subscription."""
     stmt = (
@@ -292,7 +292,7 @@ async def get_column_default_platform(session, project_key: str, column_name: st
         .where(KanbanColumn.name == column_name)
     )
     col = (await session.execute(stmt)).scalar_one_or_none()
-    return col.default_platform if col else None
+    return col.default_provider if col else None
 
 
 async def get_column_default_model(session, project_key: str, column_name: str) -> str | None:

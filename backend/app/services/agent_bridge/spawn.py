@@ -1,4 +1,4 @@
-"""Spawn and kill agent provider sessions in tmux."""
+"""Spawn and kill agent CLI sessions in tmux."""
 from __future__ import annotations
 
 import logging
@@ -9,11 +9,11 @@ import uuid
 from pathlib import Path
 
 from app.config import settings
+from app.services.agentic_cli import get_agentic_cli
+from app.services.agentic_cli.base import SpawnCommandOptions
+from app.services.agentic_cli.claude_code import ClaudeCodeCli
+from app.services.agentic_cli.provider_env import build_provider_env
 from app.services.host_service import build_ssh_base
-from app.services.providers import get_provider
-from app.services.providers.base import SpawnCommandOptions
-from app.services.providers.claude_code import ClaudeCodeProvider
-from app.services.providers.platform_env import build_platform_env
 from app.utils.git_ref import sanitize_git_branch_name
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ def _session_name_for(directory: str, preferred: str | None = None) -> str:
 
 def _spawn_session_remote(
     host_data: dict,
-    provider_display_name: str,
+    cli_display_name: str,
     name: str,
     directory: str,
     shell_command: str,
@@ -94,19 +94,19 @@ def _spawn_session_remote(
 
 
 def spawn_session(
-    provider_id: str,
+    cli_id: str,
     options: SpawnCommandOptions,
     session_name: str | None = None,
     host_data: dict | None = None,
 ) -> dict:
-    """Spawn a new provider CLI session inside tmux.
+    """Spawn a new agentic CLI session inside tmux.
 
     When *host_data* is provided the session is spawned on that remote host
     via SSH instead of locally.
     """
-    provider = get_provider(provider_id)
-    if isinstance(provider, ClaudeCodeProvider):
-        directory = provider.resolve_directory(options)
+    cli = get_agentic_cli(cli_id)
+    if isinstance(cli, ClaudeCodeCli):
+        directory = cli.resolve_directory(options)
         options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})
 
     directory = _validate_directory(options.directory)
@@ -122,26 +122,26 @@ def spawn_session(
 
     preferred = session_name or (options.worktree_name if options.mode == "worktree" else None)
     name = _session_name_for(directory, preferred)
-    if provider.id == "claude-code" and options.mode == "worktree" and not options.worktree_name:
+    if cli.id == "claude-code" and options.mode == "worktree" and not options.worktree_name:
         options = SpawnCommandOptions(**{**options.__dict__, "worktree_name": name})
-    command = provider.build_spawn_command(options)
+    command = cli.build_spawn_command(options)
     shell_command = " ".join(shlex.quote(part) for part in command)
 
-    platform_env = build_platform_env(
-        options.platform,
+    provider_env = build_provider_env(
+        options.provider,
         region=options.aws_region,
         aws_profile=options.aws_profile,
         model=options.bedrock_model,
         minimax_api_key=settings.minimax_api_key,
         minimax_base_url=options.minimax_base_url or settings.minimax_base_url,
-        provider_id=provider.id,
+        cli_id=cli.id,
     )
     env_flags: list[str] = []
-    for key, value in platform_env.items():
+    for key, value in provider_env.items():
         env_flags += ["-e", f"{key}={value}"]
 
     if host_data:
-        _spawn_session_remote(host_data, provider.display_name, name, directory, shell_command, env_flags)
+        _spawn_session_remote(host_data, cli.display_name, name, directory, shell_command, env_flags)
     else:
         try:
             result = subprocess.run(
@@ -158,13 +158,13 @@ def spawn_session(
             raise ValueError("tmux new-session timed out")
 
     _spawned_sessions[name] = {
-        "provider": provider.id,
+        "cli": cli.id,
         "mode": options.mode,
         "directory": directory,
         "worktree_name": options.worktree_name or (name if options.mode == "worktree" else None),
         "worktree_path": options.worktree_path,
         "repo_path": options.repo_path,
-        "platform": options.platform,
+        "provider": options.provider,
         "host_id": host_data["id"] if host_data else None,
         "host_alias": host_data["alias"] if host_data else None,
     }
@@ -172,13 +172,13 @@ def spawn_session(
     logger.info(
         "%s %s session %s in %s (mode=%s)",
         "Remotely spawned" if host_data else "Spawned",
-        provider.id, name, directory, options.mode,
+        cli.id, name, directory, options.mode,
     )
 
-    display_name = f"{provider.display_name} ({host_data['alias']})" if host_data else provider.display_name
+    display_name = f"{cli.display_name} ({host_data['alias']})" if host_data else cli.display_name
     return {
-        "provider": provider.id,
-        "provider_display_name": display_name,
+        "cli": cli.id,
+        "cli_display_name": display_name,
         "tmux_target": f"{name}:0.0",
         "session_name": name,
         "worktree_name": _spawned_sessions[name]["worktree_name"],
@@ -203,7 +203,7 @@ def kill_session(session_name: str, cleanup_worktree: bool = False) -> dict:
     except subprocess.TimeoutExpired:
         return {"killed": False, "error": "tmux kill-session timed out"}
 
-    if cleanup_worktree and metadata and metadata.get("provider") == "claude-code" and metadata["mode"] == "worktree":
+    if cleanup_worktree and metadata and metadata.get("cli") == "claude-code" and metadata["mode"] == "worktree":
         worktree_name = metadata.get("worktree_name")
         directory = metadata["directory"]
         if worktree_name:

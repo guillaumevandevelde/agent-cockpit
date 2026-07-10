@@ -3,28 +3,28 @@ import pytest
 
 
 def test_anthropic_returns_empty_env():
-    from app.services.providers.platform_env import PLATFORM_ANTHROPIC, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_ANTHROPIC, build_provider_env
 
-    assert build_platform_env(PLATFORM_ANTHROPIC) == {}
+    assert build_provider_env(PROVIDER_ANTHROPIC) == {}
 
 
 def test_unknown_platform_returns_empty_env():
-    from app.services.providers.platform_env import build_platform_env
+    from app.services.agentic_cli.provider_env import build_provider_env
 
-    assert build_platform_env("vertex") == {}
+    assert build_provider_env("vertex") == {}
 
 
 def test_bedrock_minimal_sets_use_bedrock_flag():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    assert build_platform_env(PLATFORM_BEDROCK) == {"CLAUDE_CODE_USE_BEDROCK": "1"}
+    assert build_provider_env(PROVIDER_BEDROCK) == {"CLAUDE_CODE_USE_BEDROCK": "1"}
 
 
 def test_bedrock_with_all_fields():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(
-        PLATFORM_BEDROCK,
+    env = build_provider_env(
+        PROVIDER_BEDROCK,
         region="us-east-1",
         aws_profile="bedrock-prod",
         model="arn:aws:bedrock:us-east-1:123:inference-profile/x",
@@ -38,42 +38,42 @@ def test_bedrock_with_all_fields():
 
 
 def test_bedrock_skips_blank_and_whitespace_values():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(PLATFORM_BEDROCK, region="  ", aws_profile="", model=None)
+    env = build_provider_env(PROVIDER_BEDROCK, region="  ", aws_profile="", model=None)
     assert env == {"CLAUDE_CODE_USE_BEDROCK": "1"}
 
 
 def test_bedrock_strips_surrounding_whitespace():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(PLATFORM_BEDROCK, region="  us-west-2  ")
+    env = build_provider_env(PROVIDER_BEDROCK, region="  us-west-2  ")
     assert env["AWS_REGION"] == "us-west-2"
 
 
 def test_bedrock_rejects_newline_in_value():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
     with pytest.raises(ValueError):
-        build_platform_env(PLATFORM_BEDROCK, region="us-east-1\nFOO=bar")
+        build_provider_env(PROVIDER_BEDROCK, region="us-east-1\nFOO=bar")
 
 
 def test_bedrock_rejects_null_byte_in_value():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
     with pytest.raises(ValueError):
-        build_platform_env(PLATFORM_BEDROCK, model="bad\x00value")
+        build_provider_env(PROVIDER_BEDROCK, model="bad\x00value")
 
 
 def test_codex_bedrock_only_sets_shared_aws_env():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(
-        PLATFORM_BEDROCK,
+    env = build_provider_env(
+        PROVIDER_BEDROCK,
         region="us-east-2",
         aws_profile="codex-bedrock",
         model="openai.gpt-5.5",
-        provider_id="codex-cli",
+        cli_id="codex-cli",
     )
 
     assert env == {
@@ -83,20 +83,20 @@ def test_codex_bedrock_only_sets_shared_aws_env():
 
 
 def test_codex_bedrock_without_region_or_profile_has_no_env():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    assert build_platform_env(PLATFORM_BEDROCK, provider_id="codex-cli") == {}
+    assert build_provider_env(PROVIDER_BEDROCK, cli_id="codex-cli") == {}
 
 
 def test_opencode_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(
-        PLATFORM_BEDROCK,
+    env = build_provider_env(
+        PROVIDER_BEDROCK,
         region="us-east-2",
         aws_profile="opencode-bedrock",
         model="anthropic.claude-opus-4-8",
-        provider_id="open-code",
+        cli_id="open-code",
     )
 
     assert env == {
@@ -108,14 +108,14 @@ def test_opencode_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
 
 
 def test_copilot_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(
-        PLATFORM_BEDROCK,
+    env = build_provider_env(
+        PROVIDER_BEDROCK,
         region="us-east-2",
         aws_profile="copilot-bedrock",
         model="some-model",
-        provider_id="copilot-cli",
+        cli_id="copilot-cli",
     )
 
     assert "CLAUDE_CODE_USE_BEDROCK" not in env
@@ -123,13 +123,13 @@ def test_copilot_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
 
 
 def test_mimo_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(
-        PLATFORM_BEDROCK,
+    env = build_provider_env(
+        PROVIDER_BEDROCK,
         region="us-east-2",
         model="some-model",
-        provider_id="mimo-code",
+        cli_id="mimo-code",
     )
 
     assert "CLAUDE_CODE_USE_BEDROCK" not in env
@@ -137,9 +137,9 @@ def test_mimo_bedrock_only_sets_shared_aws_env_not_claude_code_flags():
 
 
 def test_claude_code_bedrock_still_sets_claude_flags_by_default():
-    from app.services.providers.platform_env import PLATFORM_BEDROCK, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK, build_provider_env
 
-    env = build_platform_env(PLATFORM_BEDROCK, model="arn:aws:bedrock:us-east-1:123:x")
+    env = build_provider_env(PROVIDER_BEDROCK, model="arn:aws:bedrock:us-east-1:123:x")
 
     assert env == {
         "CLAUDE_CODE_USE_BEDROCK": "1",
@@ -148,15 +148,15 @@ def test_claude_code_bedrock_still_sets_claude_flags_by_default():
 
 
 def test_minimax_minimal_uses_international_defaults():
-    from app.services.providers.platform_env import (
+    from app.services.agentic_cli.provider_env import (
         MINIMAX_AUTO_COMPACT_WINDOW,
         MINIMAX_BASE_URL_INTERNATIONAL,
         MINIMAX_DEFAULT_MODEL,
-        PLATFORM_MINIMAX,
-        build_platform_env,
+        PROVIDER_MINIMAX,
+        build_provider_env,
     )
 
-    env = build_platform_env(PLATFORM_MINIMAX)
+    env = build_provider_env(PROVIDER_MINIMAX)
     assert env == {
         "ANTHROPIC_BASE_URL": MINIMAX_BASE_URL_INTERNATIONAL,
         "ANTHROPIC_MODEL": MINIMAX_DEFAULT_MODEL,
@@ -165,42 +165,42 @@ def test_minimax_minimal_uses_international_defaults():
 
 
 def test_minimax_with_api_key_sets_auth_token():
-    from app.services.providers.platform_env import PLATFORM_MINIMAX, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
 
-    env = build_platform_env(PLATFORM_MINIMAX, minimax_api_key="sk-test-key")
+    env = build_provider_env(PROVIDER_MINIMAX, minimax_api_key="sk-test-key")
     assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-test-key"
 
 
 def test_minimax_blank_api_key_is_omitted():
-    from app.services.providers.platform_env import PLATFORM_MINIMAX, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
 
-    env = build_platform_env(PLATFORM_MINIMAX, minimax_api_key="   ")
+    env = build_provider_env(PROVIDER_MINIMAX, minimax_api_key="   ")
     assert "ANTHROPIC_AUTH_TOKEN" not in env
 
 
 def test_minimax_base_url_is_configurable_for_china_region():
-    from app.services.providers.platform_env import (
+    from app.services.agentic_cli.provider_env import (
         MINIMAX_BASE_URL_CHINA,
-        PLATFORM_MINIMAX,
-        build_platform_env,
+        PROVIDER_MINIMAX,
+        build_provider_env,
     )
 
-    env = build_platform_env(PLATFORM_MINIMAX, minimax_base_url=MINIMAX_BASE_URL_CHINA)
+    env = build_provider_env(PROVIDER_MINIMAX, minimax_base_url=MINIMAX_BASE_URL_CHINA)
     assert env["ANTHROPIC_BASE_URL"] == MINIMAX_BASE_URL_CHINA
 
 
 def test_minimax_model_override():
-    from app.services.providers.platform_env import PLATFORM_MINIMAX, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
 
-    env = build_platform_env(PLATFORM_MINIMAX, model="MiniMax-M3")
+    env = build_provider_env(PROVIDER_MINIMAX, model="MiniMax-M3")
     assert env["ANTHROPIC_MODEL"] == "MiniMax-M3"
 
 
 def test_minimax_strips_surrounding_whitespace():
-    from app.services.providers.platform_env import PLATFORM_MINIMAX, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
 
-    env = build_platform_env(
-        PLATFORM_MINIMAX,
+    env = build_provider_env(
+        PROVIDER_MINIMAX,
         minimax_api_key="  sk-test-key  ",
         minimax_base_url="  https://api.minimax.io/anthropic  ",
     )
@@ -209,23 +209,23 @@ def test_minimax_strips_surrounding_whitespace():
 
 
 def test_minimax_rejects_newline_in_api_key():
-    from app.services.providers.platform_env import PLATFORM_MINIMAX, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
 
     with pytest.raises(ValueError):
-        build_platform_env(PLATFORM_MINIMAX, minimax_api_key="sk-test\nFOO=bar")
+        build_provider_env(PROVIDER_MINIMAX, minimax_api_key="sk-test\nFOO=bar")
 
 
 def test_minimax_rejects_null_byte_in_base_url():
-    from app.services.providers.platform_env import PLATFORM_MINIMAX, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
 
     with pytest.raises(ValueError):
-        build_platform_env(PLATFORM_MINIMAX, minimax_base_url="bad\x00value")
+        build_provider_env(PROVIDER_MINIMAX, minimax_base_url="bad\x00value")
 
 
 def test_minimax_env_never_includes_bedrock_keys():
-    from app.services.providers.platform_env import PLATFORM_MINIMAX, build_platform_env
+    from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
 
-    env = build_platform_env(PLATFORM_MINIMAX)
+    env = build_provider_env(PROVIDER_MINIMAX)
     assert "CLAUDE_CODE_USE_BEDROCK" not in env
     assert "AWS_REGION" not in env
     assert "AWS_PROFILE" not in env

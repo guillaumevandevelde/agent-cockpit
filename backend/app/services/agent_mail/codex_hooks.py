@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from app.config import settings
-from app.services.providers.codex_cli import get_codex_home
+from app.services.agentic_cli.codex_cli import get_codex_home
 
 CODEX_MAIL_HOOK_EVENTS = {"SessionStart": "session-start", "UserPromptSubmit": "user-prompt-submit"}
 _HOOK_SHIM_MARKER = "codex_hook_shim.py"

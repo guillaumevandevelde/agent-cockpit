@@ -4,22 +4,22 @@ from unittest.mock import patch
 
 
 def test_provider_registry_contains_initial_providers():
-    from app.services.providers import get_provider, get_providers
+    from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 
-    provider_ids = {provider.id for provider in get_providers()}
+    provider_ids = {provider.id for provider in get_agentic_clis()}
 
     assert provider_ids == {"claude-code", "codex-cli", "copilot-cli", "mimo-code", "open-code"}
-    assert get_provider("claude-code").display_name == "Claude Code"
-    assert get_provider("codex-cli").binary_name == "codex"
-    assert get_provider("open-code").display_name == "OpenCode"
-    assert get_provider("copilot-cli").binary_name == "copilot"
+    assert get_agentic_cli("claude-code").display_name == "Claude Code"
+    assert get_agentic_cli("codex-cli").binary_name == "codex"
+    assert get_agentic_cli("open-code").display_name == "OpenCode"
+    assert get_agentic_cli("copilot-cli").binary_name == "copilot"
 
 
 def test_provider_status_includes_central_capability_matrix():
-    from app.services.providers import get_provider
+    from app.services.agentic_cli import get_agentic_cli
 
-    claude = get_provider("claude-code").get_status()
-    codex = get_provider("codex-cli").get_status()
+    claude = get_agentic_cli("claude-code").get_status()
+    codex = get_agentic_cli("codex-cli").get_status()
 
     assert claude["capabilities"]["plugins"] is True
     assert claude["capabilities"]["fork"] is False
@@ -46,9 +46,9 @@ async def test_provider_capabilities_api_returns_matrix():
 
 
 def test_codex_process_detection_matches_interactive_binary():
-    from app.services.providers import get_provider
+    from app.services.agentic_cli import get_agentic_cli
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
 
     assert provider.is_process_match("codex", "123") is True
     assert provider.is_process_match("/usr/local/bin/codex", "123") is True
@@ -56,20 +56,20 @@ def test_codex_process_detection_matches_interactive_binary():
 
 
 def test_codex_process_detection_matches_node_wrapper_descendant():
-    from app.services.providers import get_provider
+    from app.services.agentic_cli import get_agentic_cli
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
 
-    with patch("app.services.providers.base.subprocess.run") as run:
+    with patch("app.services.agentic_cli.base.subprocess.run") as run:
         run.return_value = SimpleNamespace(stdout="456 /usr/local/bin/codex\n")
         assert provider.is_process_match("node", "123") is True
 
 
 def test_codex_bedrock_spawn_command_sets_model_provider_and_bedrock_model():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(
             directory="/tmp/project",
@@ -92,10 +92,10 @@ def test_codex_bedrock_spawn_command_sets_model_provider_and_bedrock_model():
 
 
 def test_codex_bedrock_spawn_command_falls_back_to_model_without_bedrock_model():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="plain", platform="bedrock", model="fallback-model")
     )
@@ -105,10 +105,10 @@ def test_codex_bedrock_spawn_command_falls_back_to_model_without_bedrock_model()
 
 
 def test_codex_anthropic_platform_spawn_command_omits_bedrock_config():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="plain", model="gpt-5.1-codex")
     )
@@ -118,10 +118,10 @@ def test_codex_anthropic_platform_spawn_command_omits_bedrock_config():
 
 
 def test_codex_spawn_command_sets_reasoning_effort():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(
             directory="/tmp/project",
@@ -143,10 +143,10 @@ def test_codex_spawn_command_sets_reasoning_effort():
 
 
 def test_codex_spawn_command_omits_reasoning_effort_config_when_unset():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="plain", model="gpt-5.1-codex")
     )
@@ -155,10 +155,10 @@ def test_codex_spawn_command_omits_reasoning_effort_config_when_unset():
 
 
 def test_codex_bedrock_spawn_command_combines_model_provider_and_reasoning_effort_config():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("codex-cli")
+    provider = get_agentic_cli("codex-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(
             directory="/tmp/project",
@@ -185,10 +185,10 @@ def test_codex_bedrock_spawn_command_combines_model_provider_and_reasoning_effor
 def test_opencode_spawn_command_rejects_reasoning_effort():
     import pytest
 
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("open-code")
+    provider = get_agentic_cli("open-code")
     with pytest.raises(ValueError):
         provider.build_spawn_command(
             SpawnCommandOptions(directory="/tmp/project", mode="plain", reasoning_effort="xhigh")
@@ -196,10 +196,10 @@ def test_opencode_spawn_command_rejects_reasoning_effort():
 
 
 def test_opencode_spawn_command_without_reasoning_effort_still_works():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("open-code")
+    provider = get_agentic_cli("open-code")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="plain", model="claude-opus-4-8")
     )
@@ -208,9 +208,9 @@ def test_opencode_spawn_command_without_reasoning_effort_still_works():
 
 
 def test_copilot_status_and_capabilities():
-    from app.services.providers import get_provider
+    from app.services.agentic_cli import get_agentic_cli
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
     status = provider.get_status()
 
     assert status["display_name"] == "GitHub Copilot CLI"
@@ -221,9 +221,9 @@ def test_copilot_status_and_capabilities():
 
 
 def test_copilot_process_detection():
-    from app.services.providers import get_provider
+    from app.services.agentic_cli import get_agentic_cli
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
 
     assert provider.is_process_match("copilot", "123") is True
     assert provider.is_process_match("/usr/local/bin/copilot", "123") is True
@@ -231,20 +231,20 @@ def test_copilot_process_detection():
 
 
 def test_copilot_process_detection_matches_node_wrapper_descendant():
-    from app.services.providers import get_provider
+    from app.services.agentic_cli import get_agentic_cli
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
 
-    with patch("app.services.providers.base.subprocess.run") as run:
+    with patch("app.services.agentic_cli.base.subprocess.run") as run:
         run.return_value = SimpleNamespace(stdout="789 /usr/local/bin/copilot\n")
         assert provider.is_process_match("node", "123") is True
 
 
 def test_copilot_spawn_command_new_session():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(
             directory="/tmp/project",
@@ -283,10 +283,10 @@ def test_copilot_spawn_command_new_session():
 
 
 def test_copilot_spawn_command_resume_uses_continue_when_use_last():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="resume", use_last=True)
     )
@@ -295,10 +295,10 @@ def test_copilot_spawn_command_resume_uses_continue_when_use_last():
 
 
 def test_copilot_spawn_command_resume_uses_session_id():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="resume", session_id="abc123")
     )
@@ -309,10 +309,10 @@ def test_copilot_spawn_command_resume_uses_session_id():
 def test_copilot_spawn_command_resume_requires_session_id_or_use_last():
     import pytest
 
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
     with pytest.raises(ValueError):
         provider.build_spawn_command(SpawnCommandOptions(directory="/tmp/project", mode="resume"))
 
@@ -320,19 +320,19 @@ def test_copilot_spawn_command_resume_requires_session_id_or_use_last():
 def test_copilot_spawn_command_rejects_unsupported_mode():
     import pytest
 
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("copilot-cli")
+    provider = get_agentic_cli("copilot-cli")
     with pytest.raises(ValueError):
         provider.build_spawn_command(SpawnCommandOptions(directory="/tmp/project", mode="worktree"))
 
 
 def test_claude_code_spawn_command_includes_model_flag_when_set():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("claude-code")
+    provider = get_agentic_cli("claude-code")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="plain", model="opus", prompt="do the thing")
     )
@@ -341,10 +341,10 @@ def test_claude_code_spawn_command_includes_model_flag_when_set():
 
 
 def test_claude_code_spawn_command_omits_model_flag_when_unset():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("claude-code")
+    provider = get_agentic_cli("claude-code")
     command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="plain", prompt="do the thing")
     )
@@ -354,10 +354,10 @@ def test_claude_code_spawn_command_omits_model_flag_when_unset():
 
 
 def test_claude_code_spawn_command_includes_model_flag_across_modes():
-    from app.services.providers import get_provider
-    from app.services.providers.base import SpawnCommandOptions
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
 
-    provider = get_provider("claude-code")
+    provider = get_agentic_cli("claude-code")
 
     worktree_command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="worktree",

@@ -155,8 +155,21 @@ async def _ensure_column_table(conn) -> None:
 
     rows = (await conn.exec_driver_sql("PRAGMA table_info(kanban_columns)")).fetchall()
     cols = {r[1] for r in rows}
-    if "default_platform" not in cols:
-        await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN default_platform VARCHAR(16)")
+    # default_platform was renamed to default_provider to align with the
+    # canonical vendor terminology in docs/cockpit/terminology.md.
+    # SQLite 3.25+ supports ALTER TABLE ... RENAME COLUMN in place, so
+    # existing rows survive. Idempotent: skips when either side is already
+    # in its final shape (fresh install or partial mid-flight migration).
+    if "default_provider" not in cols and "default_platform" in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_columns RENAME COLUMN default_platform TO default_provider"
+        )
+        cols.discard("default_platform")
+        cols.add("default_provider")
+    elif "default_provider" not in cols and "default_platform" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_columns ADD COLUMN default_provider VARCHAR(16)"
+        )
     if "max_sessions" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN max_sessions INTEGER")
     if "default_model" not in cols:

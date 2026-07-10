@@ -1,4 +1,4 @@
-"""Provider-aware CLI executor service."""
+"""Agentic-CLI-aware CLI executor service."""
 
 import logging
 import re
@@ -6,27 +6,27 @@ import shutil
 import subprocess
 
 from ..models.schemas import CLIResult
-from .providers import get_provider
-from .providers.base import AgentProvider
+from .agentic_cli import get_agentic_cli
+from .agentic_cli.base import AgenticCli
 
 logger = logging.getLogger(__name__)
 
-class ProviderCLIExecutor:
-    """Execute whitelisted provider CLI commands with security constraints."""
+class AgenticCliExecutor:
+    """Execute whitelisted agentic CLI commands with security constraints."""
 
-    DEFAULT_PROVIDER = "claude-code"
+    DEFAULT_CLI = "claude-code"
     SAFE_ARG_PATTERN = re.compile(r"^[A-Za-z0-9_./@:+,=%?#&-]{0,4096}$")
 
-    def __init__(self, provider_id: str = DEFAULT_PROVIDER):
-        self.provider = get_provider(provider_id)
-        self.provider_id = self.provider.id
-        self.binary_path = self._find_binary(self.provider)
-        self.ALLOWED_COMMANDS = self.provider.get_allowed_cli_commands()
+    def __init__(self, cli_id: str = DEFAULT_CLI):
+        self.cli = get_agentic_cli(cli_id)
+        self.cli_id = self.cli.id
+        self.binary_path = self._find_binary(self.cli)
+        self.ALLOWED_COMMANDS = self.cli.get_allowed_cli_commands()
         # Compatibility for existing callers that check claude_binary directly.
-        self.claude_binary = self.binary_path if self.provider_id == "claude-code" else None
+        self.claude_binary = self.binary_path if self.cli_id == "claude-code" else None
 
-    def _find_binary(self, provider: AgentProvider) -> str | None:
-        return shutil.which(provider.binary_name)
+    def _find_binary(self, cli: AgenticCli) -> str | None:
+        return shutil.which(cli.binary_name)
 
     def validate_command(self, command: str) -> bool:
         """
@@ -38,7 +38,7 @@ class ProviderCLIExecutor:
         Returns:
             True if command is allowed, False otherwise
         """
-        return command in self.provider.get_allowed_cli_commands()
+        return command in self.cli.get_allowed_cli_commands()
 
     def _validate_args(self, args: list[str]) -> list[str]:
         safe_args = []
@@ -60,10 +60,10 @@ class ProviderCLIExecutor:
         env: dict[str, str] | None = None
     ) -> CLIResult:
         """
-        Execute a provider CLI command
+        Execute an agentic CLI command
 
         Args:
-            command: The provider CLI subcommand (must be whitelisted)
+            command: The CLI subcommand (must be whitelisted)
             args: List of arguments to pass to the command
             timeout: Maximum execution time in seconds (default: 30)
             env: Optional environment variables to pass to the command
@@ -72,27 +72,27 @@ class ProviderCLIExecutor:
             CLIResult containing stdout, stderr, and exit code
 
         Raises:
-            ValueError: If command is not whitelisted or provider binary not found
+            ValueError: If command is not whitelisted or CLI binary not found
             subprocess.TimeoutExpired: If command execution exceeds timeout
         """
         if not self.validate_command(command):
             raise ValueError(
                 f"Command '{command}' is not allowed. "
-                f"Allowed commands for {self.provider.display_name}: "
-                f"{', '.join(self.provider.get_allowed_cli_commands())}"
+                f"Allowed commands for {self.cli.display_name}: "
+                f"{', '.join(self.cli.get_allowed_cli_commands())}"
             )
 
         if not self.binary_path:
             raise ValueError(
-                f"{self.provider.display_name} binary not found in PATH. "
-                f"Please ensure {self.provider.display_name} is installed and accessible."
+                f"{self.cli.display_name} binary not found in PATH. "
+                f"Please ensure {self.cli.display_name} is installed and accessible."
             )
 
         safe_args = self._validate_args(args)
         full_command = [self.binary_path, command] + safe_args
 
         try:
-            # Provider commands use a resolved fixed binary, a provider-owned subcommand
+            # CLI commands use a resolved fixed binary, a CLI-owned subcommand
             # whitelist, shell=False, and validation for user-controlled arguments.
             # lgtm[py/command-line-injection]
             result = subprocess.run(
@@ -123,7 +123,7 @@ class ProviderCLIExecutor:
             )
 
 
-class CLIExecutor(ProviderCLIExecutor):
+class CLIExecutor(AgenticCliExecutor):
     """Backward-compatible Claude Code executor."""
 
     def __init__(self):

@@ -5,7 +5,7 @@ CLI execution API endpoints.
 from fastapi import APIRouter, HTTPException
 
 from ...models.schemas import CLIExecuteRequest, CLIResult
-from ...services.cli_executor import CLIExecutor, ProviderCLIExecutor
+from ...services.cli_executor import CLIExecutor, AgenticCliExecutor
 
 router = APIRouter(prefix="/cli", tags=["CLI"])
 
@@ -28,7 +28,7 @@ async def execute_cli_command(request: CLIExecuteRequest) -> CLIResult:
         HTTPException: If command is not whitelisted or execution fails
     """
     try:
-        executor = ProviderCLIExecutor(request.provider)
+        executor = AgenticCliExecutor(request.cli)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

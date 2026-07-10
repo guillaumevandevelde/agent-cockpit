@@ -230,7 +230,7 @@ class ColumnResponse(BaseModel):
     name: str
     rank: str
     default_agent: str | None = None
-    default_platform: str | None = None
+    default_provider: str | None = None
     default_model: str | None = None
     max_sessions: int | None = None
     created_at: datetime
@@ -242,7 +242,7 @@ class ColumnCreate(BaseModel):
     name: str
     rank: str | None = None
     default_agent: str | None = None
-    default_platform: str | None = None
+    default_provider: str | None = None
     default_model: str | None = None
     max_sessions: int | None = None
 
@@ -251,7 +251,7 @@ class ColumnUpdate(BaseModel):
     name: str | None = None
     rank: str | None = None
     default_agent: str | None = None
-    default_platform: str | None = None
+    default_provider: str | None = None
     default_model: str | None = None
     max_sessions: int | None = None
 

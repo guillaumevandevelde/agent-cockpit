@@ -73,7 +73,7 @@ class AgentBridgeAttachmentService:
 
         agent_path = self._agent_path(storage_path)
         prompt_text = self._build_prompt(
-            provider=str(session.get("provider") or "unknown"),
+            cli=str(session.get("cli") or "unknown"),
             agent_path=agent_path,
             prompt=prompt,
             template=template,
@@ -81,7 +81,7 @@ class AgentBridgeAttachmentService:
         attachment = BridgeSessionAttachment(
             target=target,
             session_name=self._clean_optional(session.get("session_name")),
-            provider=self._clean_optional(session.get("provider")),
+            cli=self._clean_optional(session.get("cli")),
             original_filename=self._clean_optional(original_filename),
             mime_type=mime_type,
             size_bytes=len(content),
@@ -248,12 +248,12 @@ class AgentBridgeAttachmentService:
     def _build_prompt(
         self,
         *,
-        provider: str,
+        cli: str,
         agent_path: str,
         prompt: str | None = None,
         template: str | None = None,
     ) -> str:
-        template_text = prompt or _PROMPT_TEMPLATES.get(template or provider) or _PROMPT_TEMPLATES["unknown"]
+        template_text = prompt or _PROMPT_TEMPLATES.get(template or cli) or _PROMPT_TEMPLATES["unknown"]
         if "{path}" not in template_text:
             raise ValueError("Attachment prompt must include {path}")
         return self._clean_prompt_text(template_text.replace("{path}", agent_path))
@@ -318,7 +318,7 @@ class AgentBridgeAttachmentService:
             id=attachment.id,
             target=attachment.target,
             session_name=attachment.session_name,
-            provider=attachment.provider,
+            cli=attachment.cli,
             original_filename=attachment.original_filename,
             mime_type=attachment.mime_type,
             size_bytes=attachment.size_bytes,

@@ -23,8 +23,8 @@ def _client() -> AsyncClient:
 async def test_bulk_resume_spawns_each_session_in_resume_mode(monkeypatch):
     spawned = []
 
-    def fake_spawn(provider_id, options, session_name=None):
-        spawned.append((provider_id, options.mode, options.session_id, options.project_folder))
+    def fake_spawn(cli_id, options, session_name=None):
+        spawned.append((cli_id, options.mode, options.session_id, options.project_folder))
         return {"tmux_target": f"{options.session_id}:0.0", "session_name": options.session_id}
 
     monkeypatch.setattr(bridge_router, "spawn_session", fake_spawn)
@@ -53,7 +53,7 @@ async def test_bulk_resume_spawns_each_session_in_resume_mode(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bulk_resume_reports_partial_failure(monkeypatch):
-    def fake_spawn(provider_id, options, session_name=None):
+    def fake_spawn(cli_id, options, session_name=None):
         if options.session_id == "bad":
             raise ValueError("boom")
         return {"tmux_target": f"{options.session_id}:0.0", "session_name": options.session_id}

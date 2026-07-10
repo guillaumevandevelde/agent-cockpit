@@ -11,7 +11,7 @@ MAIL_REQUEST_KINDS = ["context_request", "handoff"]
 
 class MailSessionResponse(BaseModel):
     id: int
-    provider: str
+    cli: str
     source: str
     session_key: str
     cwd: str | None = None
@@ -173,7 +173,7 @@ class ExternalAgentMailRequestStatus(BaseModel):
 
 class MailAgentRegisterRequest(BaseModel):
     source: str
-    provider: str = "unknown"
+    cli: str = "unknown"
     cwd: str
     session_key: str
     pid: int | None = None

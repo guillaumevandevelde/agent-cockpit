@@ -45,7 +45,7 @@ MCP_HEARTBEAT_TTL_SECONDS = 3600
 OBSERVED_TTL_SECONDS = 300
 STALE_REQUEST_MINUTES = 15
 AUTO_NUDGE_COOLDOWN_SECONDS = 30
-TMUX_WAKE_PROVIDERS = {"claude-code", "codex-cli"}
+TMUX_WAKE_CLIS = {"claude-code", "codex-cli"}
 INBOX_CHECK_PROMPT = (
     "Claude Cockpit Agent Mail: please call `agent_mail_check_inbox(unread_only=False)` now, "
     "then answer any pending context requests or handoffs before continuing."
@@ -109,7 +109,7 @@ class AgentMailService:
             )
             db.add(session)
         session.member_id = member.id
-        session.provider = request.provider
+        session.cli = request.cli
         session.cwd = request.cwd
         session.pid = request.pid
         session.mailbox_status = "connected"
@@ -214,7 +214,7 @@ class AgentMailService:
                 session = MailAgentSession(member_id=member.id, source="observed", session_key=session_key)
                 db.add(session)
             session.member_id = member.id
-            session.provider = info.get("provider", "unknown")
+            session.cli = info.get("cli") or info.get("provider") or "unknown"
             session.cwd = cwd
             session.tmux_target = info.get("tmux_target")
             session.pane_id = pane_id
@@ -229,10 +229,10 @@ class AgentMailService:
 
     async def _member_for_observed_session(self, db: AsyncSession, info: dict) -> MailTeamMember:
         """Match an observed tmux pane to an already-registered hook/MCP session
-        of the same provider via PID ancestry, so one logical agent doesn't get
+        of the same CLI via PID ancestry, so one logical agent doesn't get
         two member rows (a hook-registered session plus a tmux-observed one)."""
         cwd = str(info.get("cwd") or "")
-        provider = str(info.get("provider") or "unknown")
+        cli = str(info.get("cli") or info.get("provider") or "unknown")
         try:
             pid = int(info.get("pid") or 0) or None
         except (TypeError, ValueError):
@@ -243,7 +243,7 @@ class AgentMailService:
             result = await db.execute(
                 select(MailAgentSession).where(
                     MailAgentSession.source != "observed",
-                    MailAgentSession.provider == provider,
+                    MailAgentSession.cli == cli,
                     MailAgentSession.pid.is_not(None),
                     MailAgentSession.last_seen_at >= now - timedelta(seconds=HEARTBEAT_TTL_SECONDS),
                 ).order_by(MailAgentSession.last_seen_at.desc())
@@ -346,7 +346,7 @@ class AgentMailService:
     def _session_can_nudge(self, session: MailAgentSession, now: datetime) -> bool:
         return bool(
             session.source == "observed"
-            and session.provider in TMUX_WAKE_PROVIDERS
+            and session.cli in TMUX_WAKE_CLIS
             and session.tmux_target
             and self._effective_status(session, now) == "observed"
         )
@@ -593,7 +593,7 @@ class AgentMailService:
             select(MailAgentSession).where(
                 MailAgentSession.member_id == member_id,
                 MailAgentSession.source == "observed",
-                MailAgentSession.provider.in_(sorted(TMUX_WAKE_PROVIDERS)),
+                MailAgentSession.cli.in_(sorted(TMUX_WAKE_CLIS)),
                 MailAgentSession.tmux_target.is_not(None),
             ).order_by(MailAgentSession.last_seen_at.desc())
         )
@@ -670,7 +670,7 @@ class AgentMailService:
 
     def _session_response(self, session: MailAgentSession, now: datetime) -> MailSessionResponse:
         return MailSessionResponse(
-            id=session.id, provider=session.provider, source=session.source,
+            id=session.id, cli=session.cli, source=session.source,
             session_key=session.session_key, cwd=session.cwd, tmux_target=session.tmux_target,
             mailbox_status=self._effective_status(session, now), activity=session.activity,
             last_seen_at=session.last_seen_at,

@@ -1,21 +1,21 @@
-"""Claude Code provider implementation."""
+"""Claude Code CLI implementation."""
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 
-from app.services.cc_bridge.spawn import _resolve_project_directory
-from app.services.providers.base import (
-    AgentProvider,
+from app.services.agentic_cli.base import (
+    AgenticCli,
     SpawnCommandOptions,
     argv0_name,
     has_binary_descendant,
 )
+from app.services.cc_bridge.spawn import _resolve_project_directory
 from app.utils.path_utils import ClaudePathUtils
 
 logger = logging.getLogger(__name__)
 
-class ClaudeCodeProvider(AgentProvider):
+class ClaudeCodeCli(AgenticCli):
     id = "claude-code"
     display_name = "Claude Code"
     binary_name = "claude"
