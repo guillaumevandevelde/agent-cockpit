@@ -42,10 +42,34 @@ class AutoResumeService:
         self._enabled[cwd] = enabled
 
     def is_limit_notification(self, message: str | None) -> bool:
-        """Check if a notification message indicates a session rate limit."""
+        """Check if a notification message indicates a session rate limit.
+
+        Recognises the canonical "hit your session limit" wording plus
+        provider-specific alternatives: a Minimax subscription can also
+        report a 429 / "Token Plan" limit, an "API Error" with "429",
+        or a "request rejected" / "usage limit" notice — all of which
+        mean the same thing operationally: every session on this device
+        will keep hitting the wall, and the global dispatch pause should
+        kick in. Without these alternates the hook path silently dropped
+        Minimax limit notifications, so the reaper's capture-pane scan was
+        the only thing still catching them — see kanban card
+        "Backend: reaper detecteert+ruimt stuck sessies op".
+        """
         if not message:
             return False
-        return "hit your session limit" in message.lower()
+        text = message.lower()
+        if "hit your session limit" in text:
+            return True
+        return any(
+            needle in text
+            for needle in (
+                "api error",
+                "429",
+                "token plan",
+                "usage limit",
+                "request rejected",
+            )
+        )
 
     def parse_reset_time(self, message: str | None) -> tuple[datetime, str] | None:
         """Parse reset time and timezone from notification message.

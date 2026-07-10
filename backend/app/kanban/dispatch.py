@@ -30,6 +30,7 @@ from app.services.providers.platform_env import PLATFORM_ANTHROPIC
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
 from app.kanban.dep_resolver import meets_dep_prerequisites
+from app.services.scheduling.session_registry import session_registry
 
 logger = logging.getLogger(__name__)
 
@@ -1064,6 +1065,114 @@ def _claimant_session(card: KanbanCard) -> str | None:
     return None
 
 
+# ---- stuck-session reaper helpers -----------------------------------------
+#
+# When a dispatched session hits a 429 / Token Plan limit on first invocation,
+# the `claude` CLI prints the error and never initialises hooks — so the tmux
+# pane stays open while SessionRegistry.record() is never called. The standard
+# `reap_stale_claims` path treats the session as alive and skips it, leaving
+# the card claimed forever. These helpers extend the reaper with a pane-content
+# scan that detects the rate limit and triggers a full cleanup.
+
+# Stuck tmux sessions that don't initialise hooks inside this window are
+# inspected by the reaper. The default of 120s is a balance: it must be long
+# enough not to race a normal `claude` startup (~10-30s) but short enough that
+# the next tick after a 429 actually cleans up the orphaned claim. Mirrors the
+# default in SessionRegistry.get_stuck_sessions().
+STUCK_SESSION_TIMEOUT_S = 120
+
+
+def _capture_pane_content(session_name: str, *, lines: int = 20) -> str | None:
+    """Capture the last `lines` of tmux pane content for `session_name`.
+
+    Returns the captured text (ANSI escapes preserved — strip if you need
+    to), or None on any failure: tmux missing on PATH, non-zero exit
+    (session gone), timeout, etc. Returning None is the whole point: a
+    missing capture must NEVER translate into a false positive that
+    triggers a clean-up of a healthy but slow session. The reaper treats
+    None as "we don't know", which means fail-open."""
+    try:
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", session_name, "-p", "-S", f"-{lines}"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _is_rate_limited_session(pane_content: str) -> bool:
+    """True if tmux pane content shows a 429 / rate-limit indicator.
+
+    Matches a small set of well-known substrings (case-insensitive), reusing
+    the canonical detector on AutoResumeService so the hook-event path and
+    the reaper's pane scan stay in sync — a 429 detected via either source
+    triggers the same dispatch pause, and we never risk the two drifting
+    apart."""
+    if not pane_content:
+        return False
+    from app.services.scheduling.auto_resume import auto_resume_service
+    return auto_resume_service.is_limit_notification(pane_content)
+
+
+async def _cleanup_stuck_session(
+    session, *, card, project_key: str, session_name: str, pane_content: str,
+) -> None:
+    """Clean up a stuck tmux session that hit a rate limit.
+
+    Compensating-ops shape mirrors `_release_dead_claim`'s dead-on-arrival
+    branch: kill the tmux session, bump dispatch_failures, clear any stale
+    resume pointer, release the agent claim — and additionally set the
+    global dispatch pause so the next tick doesn't immediately re-spawn
+    the same card into the same rate-limited wall.
+
+    The session is NOT dead-on-arrival (it has been alive for at least
+    STUCK_SESSION_TIMEOUT_S) but counting it as a failure is still right:
+    a 429 is an infrastructure wall that will hit the same dispatch
+    target on the next attempt, so we want MAX_DISPATCH_FAILURES to
+    eventually move the card to Impediment instead of looping forever."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.dispatch_pause import set_paused_until
+    from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
+
+    logger.warning(
+        "stuck session %s hit a rate limit (pane: %r); pausing dispatch for %sh, "
+        "killing tmux, releasing claim",
+        session_name, (pane_content or "")[:200].replace("\n", " "),
+        FALLBACK_PAUSE_HOURS,
+    )
+
+    # Conservative fallback duration; the hook-event path has the parsed
+    # reset time, but the reaper only sees tmux pane content.
+    pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+    await set_paused_until(session, pause_until)
+
+    # _kill_agent_session also calls clear_spawn on the registry, so
+    # get_stuck_sessions won't keep flagging this name next tick.
+    _kill_agent_session(session_name)
+
+    await _clear_stale_resume_fields(session, card=card, project_key=project_key)
+    failures = await _bump_dispatch_failures(session, card=card, project_key=project_key)
+    if failures >= MAX_DISPATCH_FAILURES:
+        await _move_to_impediment_after_repeated_failures(
+            session, card=card, project_key=project_key,
+            session_name=session_name, failures=failures,
+        )
+    else:
+        logger.info(
+            "reaped stuck rate-limited session %s on card %s (%d/%d consecutive failures)",
+            session_name, card.id, failures, MAX_DISPATCH_FAILURES,
+        )
+
+    await apply_operation(
+        session, op_type="release", entity_type="card",
+        project_key=project_key, entity_id=card.id, payload={},
+    )
+
+
 def _live_sessions() -> set[str] | None:
     """Names of tmux sessions alive on this device, or None when tmux cannot be
     queried. Returning None (not an empty set) on an *ambiguous* failure is the
@@ -1299,11 +1408,25 @@ async def _move_to_resume(
     the dead tmux session, and releases the agent claim. Returns True when a resume
     target was found and the card was moved; False when the worktree has no resumable
     transcript — the caller should fall back to a plain claim release (reaper default).
+
+    Accepts cards on agent columns AND Backlog/Impediment (but not on fixed
+    end-state columns "Done" / "To Resume" — those are terminal). Extending to
+    Backlog/Impediment lets ``move_limited_session_to_resume`` rescue a card
+    whose prior reap pushed it off its agent column before the hook event
+    for its rate-limited session arrived — without that, the card sits on
+    Backlog with a dead session and the reaper won't re-process it.
     """
     from app.kanban.schemas import COLUMNS
     from app.kanban.session_recovery import _resolve_resume_target
 
-    if card.column in COLUMNS:
+    # Block terminal end-state columns only. "To Resume" is a fixed column
+    # too, but idempotently re-claiming it would still be a no-op move (same
+    # column), so excluding it keeps the predicate tight. Any column the
+    # kanban may carry new work on (agent columns + the project workflow
+    # columns Backlog / Impediment) is fair game.
+    if card.column == "Done" or card.column == "To Resume":
+        return False
+    if card.column in COLUMNS and card.column not in ("Backlog", "Impediment"):
         return False
     session_name = _claimant_session(card)
     if session_name is None:
@@ -1330,8 +1453,8 @@ async def _move_to_resume(
         project_key=project_key, entity_id=card.id, payload={},
     )
     logger.info(
-        "moved card %s to To Resume (session %s -> %s, project_folder=%s)",
-        card.id, session_name, session_id, project_folder,
+        "moved card %s (column %s) to To Resume (session %s -> %s, project_folder=%s)",
+        card.id, card.column, session_name, session_id, project_folder,
     )
     return True
 
@@ -1358,9 +1481,16 @@ async def move_limited_session_to_resume(cwd: str) -> bool:
     limit notice forever (the CLI never exits) -- so without this, the card would
     sit claimed in its agent column indefinitely. Reuses `_move_to_resume`, which
     doesn't check liveness itself, so calling it for a still-alive session is safe.
+
+    Looks for the card on any of: agent columns, Backlog, Impediment. The Backlog /
+    Impediment extension matters when the rate-limited session's card was already
+    pushed there by a prior reap (e.g. the new stuck-session reaper path killed it
+    and bumped dispatch_failures; on the next tick the card moves to Backlog while
+    waiting for dispatch_failures to cross MAX_DISPATCH_FAILURES, and a Notification
+    hook event for its 429 then arrives). Cards on fixed columns (Done / To Resume)
+    are left alone.
     """
     from app.kanban.db import KanbanSessionLocal
-    from app.kanban.schemas import COLUMNS
 
     target = _resume_target_from_cwd(cwd)
     if target is None:
@@ -1373,8 +1503,14 @@ async def move_limited_session_to_resume(cwd: str) -> bool:
     claimant = CLAIMANT_PREFIX + session_name
     async with KanbanSessionLocal() as ks:
         cards = await list_cards(ks, project_key)
+        # A kanban card is eligible if it's claimed by this session AND it's
+        # not in a terminal fixed column. We allow any agent column plus
+        # Backlog / Impediment so the function can rescue cards that landed
+        # off-agent between the rate limit and the hook event firing.
         card = next(
-            (c for c in cards if c.column not in COLUMNS and c.claimed_by == claimant),
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
             None,
         )
         if card is None:
@@ -1411,15 +1547,53 @@ async def reap_stale_claims(
     When ``project_path`` is provided, dead sessions with a resumable transcript in
     their worktree are moved to the "To Resume" column (via ``_move_to_resume``)
     instead of being just released. Cards without a resumable worktree fall back to
-    the plain release as before."""
+    the plain release as before.
+
+    Stuck sessions — alive in tmux but never sent any hook event past
+    STUCK_SESSION_TIMEOUT_S — get a separate scan first. A pane that matches
+    a 429 / Token Plan pattern is treated as a rate-limit hit and cleaned up
+    via `_cleanup_stuck_session` (sets the global dispatch pause, kills tmux,
+    bumps dispatch_failures, clears any stale resume pointer, releases the
+    claim). A stuck session whose pane shows ordinary progress is left alone
+    — it's just slow to initialise hooks, not actually broken."""
     from app.kanban.schemas import COLUMNS
+
     sandcastle_live = sandcastle_live or set()
     reaped = 0
+
+    # Pre-compute the stuck set once per tick: get_stuck_sessions walks the
+    # registry's spawn map and filters by the live set. Doing it per-card
+    # would be wasteful, but more importantly it would race a kill the
+    # cleanup path performs (registry.clear_spawn) — keeping a snapshot
+    # here means the same name can't be re-classified mid-loop.
+    stuck_names = session_registry.get_stuck_sessions(
+        live_sessions, timeout_s=STUCK_SESSION_TIMEOUT_S,
+    )
+
     for card in cards:
         if card.column in COLUMNS:  # Skip fixed columns (Backlog, Impediment, Done, To Resume)
             continue
         name = _claimant_session(card)
-        if name is None or name in live_sessions or name in sandcastle_live:
+        if name is None:
+            continue
+
+        # New path: a session that's alive in tmux but never sent hooks is
+        # the signature of a 429 on first invocation. Inspect its pane and,
+        # if it shows a rate-limit pattern, full cleanup (incl. dispatch
+        # pause). If the pane shows ordinary work or we couldn't capture
+        # it, do nothing — the session is just slow, and falling through
+        # to the alive-skip branch keeps the existing reaper semantics.
+        if name in stuck_names:
+            pane = _capture_pane_content(name)
+            if pane is not None and _is_rate_limited_session(pane):
+                await _cleanup_stuck_session(
+                    session, card=card, project_key=project_key,
+                    session_name=name, pane_content=pane,
+                )
+                reaped += 1
+                continue
+
+        if name in live_sessions or name in sandcastle_live:
             continue
 
         # If we know the project path, try resume recovery first

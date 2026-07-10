@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.services.scheduling.auto_resume import AutoResumeService
 
 
@@ -21,6 +23,22 @@ class TestLimitDetection:
     def test_case_insensitive(self):
         svc = AutoResumeService()
         msg = "YOU'VE HIT YOUR SESSION LIMIT · resets 11:10pm (Europe/Brussels)"
+        assert svc.is_limit_notification(msg) is True
+
+    @pytest.mark.parametrize("msg", [
+        "API Error: 429 Too Many Requests",
+        "Received 429 from upstream provider",
+        "Token Plan limit reached for this account",
+        "You've hit your usage limit for the day",
+        "Request rejected: rate limit exceeded",
+        "api error (429) — try again in 5h",
+    ])
+    def test_detects_minimax_style_rate_limit_notifications(self, msg):
+        """Minimax (and similar providers) can report a rate limit via a
+        429 / 'Token Plan' / 'API Error' / 'usage limit' / 'request rejected'
+        message — the global dispatch pause must catch these too, not only
+        the canonical Anthropic 'hit your session limit' wording."""
+        svc = AutoResumeService()
         assert svc.is_limit_notification(msg) is True
 
 
