@@ -66,6 +66,12 @@ class CardResponse(BaseModel):
         default=None, validation_alias=AliasChoices("meta", "metadata"),
     )
     deliverables: list[DeliverableResponse] = []
+    # Enrichment derived from the op-log at request time: the summary text
+    # + timestamp of the most recent "**Summary:** ..." comment op on this
+    # card (the comment that mcp_server.move_card posts when a card lands
+    # in Done). Both null when no such op exists. See service.enrich_done_info.
+    done_summary: str | None = None
+    completed_at: datetime | None = None
 
 
 class CardCreate(BaseModel):
