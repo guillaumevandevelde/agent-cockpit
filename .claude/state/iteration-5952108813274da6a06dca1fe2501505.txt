@@ -1,0 +1,2 @@
+2026-07-10T07:36:50Z | preset=verify | iter=1 | cd frontend && npm run lint && npm run build | starting
+2026-07-10T07:37:55Z | preset=verify | iter=1 | lint=0 errors 101 pre-existing warnings (unchanged baseline); build=✓ built in 745ms 0 errors | clean

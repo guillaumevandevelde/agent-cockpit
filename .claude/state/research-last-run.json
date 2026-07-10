@@ -1,10 +1,41 @@
 {
   "last_run": "2026-07-10",
+  "previous_run": "2026-07-10",
+  "trigger_card": "5952108813274da6a06dca1fe2501505",
   "sources_seen": {
-    "claude-task-master": "release notes as of 2026-07-10 (watch/compact list mode, verbose loop output, optional metadata field, 13-IDE detection, Docker-sandboxed loop command)",
-    "Aperant/Auto-Claude": "v2.7.6 stable / v2.8.0-beta.4 (Insights/Ideation bugfixes; repo silent on pushes since 2026-03-23, project pivoting commercial)",
-    "claude-deck (upstream fork origin, adrirubio/claude-deck)": "v2.0.1 (2026-06-20); v2.0.0 (2026-06-19) Agent Mail + Agent Teams + external orchestration API — already triaged in docs/cockpit/upstream-agent-teams-decision.md, upstream-presence-removal-decision.md, upstream-docker-removal-decision.md",
-    "Anthropic API changelog": "structured outputs GA (Sonnet/Opus/Haiku 4.5), prompt-caching workspace-isolation (2026-02-05) — not directly actionable, Cockpit orchestrates via CLI sessions not raw API calls",
-    "LangGraph": "2026-05-12 release — DeltaChannel (beta, incremental checkpoint deltas), ContextHubBackend (LangSmith Hub-backed skill/memory versioning) — noted, not filed (SaaS-coupled / large-scope, would need decomposition)"
+    "claude-task-master": "0.43.1 (Mar 31) and 0.43.0 (Feb 4) — no new releases since previous sweep; optional metadata field on tasks (already filed as 5a4eabb8 in previous sweep) remains the most-cited 2026 change.",
+    "Aperant/Auto-Claude": "v2.7.6 stable (Feb 20) and v2.8.0-beta.4..6 (Mar 13–23); repo silent on pushes since 2026-03-23. New finding this run: 'Queue System v2 — Smart task prioritization with auto-promotion and intelligent rate limit recovery' (filed as c6ced802fa1246e9a09a186170b3126f).",
+    "claude-deck (upstream fork origin, adrirubio/claude-deck)": "v2.0.1 (Jun 20) stabilization; v2.0.0 (Jun 19) Agent Mail + Agent Teams + external orchestration — already triaged in upstream-agent-teams-decision.md, upstream-presence-removal-decision.md, upstream-docker-removal-decision.md. Nothing new since previous sweep.",
+    "Claude Code changelog (code.claude.com/docs/en/changelog)": "2.1.183 (Jun 19) through 2.1.206 (Jul 9). Headline items: 2.1.197 Sonnet 5 default with 1M-token context, 2.1.198 subagents run in background by default + new Notification hook subtypes (agent_needs_input / agent_completed) for background agents, 2.1.205 /commit-push-pr auto-allows git push, 2.1.206 /doctor trim-checked-in-CLAUDE.md. Filed: 11fe18aaf11845c0a25f70adc7d7323c (Notification hook events for kanban dispatch).",
+    "Claude Agent SDK Python (anthropics/claude-agent-sdk-python)": "0.1.0 introduced programmatic subagents via 'agents' option (large refactor, noted only — would need a parent card with decomposition if pursued); 0.2.111 zombie-subprocess prevention, 0.2.101 typed TaskUpdatedMessage, 0.1.65 SessionStore adapters — all SDK-only and Cockpit uses raw subprocess/tmux today, so noted for a future SDK-migration decision card.",
+    "Anthropic API changelog": "structured outputs GA (Sonnet/Opus/Haiku 4.5), prompt-caching workspace-isolation (2026-02-05) — not directly actionable, Cockpit orchestrates via CLI sessions not raw API calls. Sonnet 5 1M-context announcement (Jun 30) is a model-default change, no Cockpit change needed.",
+    "LangGraph": "1.2.5 (Jun 12) through 1.2.9 (Jul 10) — all bug-fix releases focused on DeltaChannel / updateState / subgraphs. Headline multi-agent work (v3 streaming, RemoteGraph.interleave, websocket transports) shipped in 1.2.3 (Jun 1) just outside the 30-day window. Noted but not filed: would need decomposition (SaaS-coupled RemoteGraph requires LangSmith).",
+    "GitHub topics ai-agent / autonomous-coding / ai-coding-agents": "Topic page does not surface creation date — cannot identify truly NEW repos with the current WebFetch. WebSearch with date filters is the only reliable path; deferred to a follow-up that adds a WebSearch-based discovery step to the skill."
+  },
+  "findings": {
+    "filed": [
+      {
+        "card_id": "11fe18aaf11845c0a25f70adc7d7323c",
+        "title": "[research] Wire Claude Code Notification hook events (agent_needs_input / agent_completed) into kanban dispatch",
+        "source": "Claude Code 2.1.198 (Jul 1, 2026)",
+        "scope": "~3 files (auto_resume.py + scheduled_messages/router.py + 1 new test file)",
+        "dedupe_check": "Existing hook-related cards (c0d4e37e hook-event gap tracking, 2b0be5ab reaper for 429) target *missing* hooks for stuck-session detection — different problem, complementary not duplicate."
+      },
+      {
+        "card_id": "c6ced802fa1246e9a09a186170b3126f",
+        "title": "[research] Apply priority sort to dispatch_all_pending (and other bulk paths) — today only the auto-tick honors `priority`",
+        "source": "Aperant v2.7.6 (Feb 20, 2026) — Queue System v2",
+        "scope": "~1-2 files (dispatch.py — extract _priority_key helper, apply to dispatch_all_pending + redispatch_all_orphans loops, replace inline sort in _next_card)",
+        "dedupe_check": "Auto-tick (_next_card line 1003, orphan line 1015) already sorts by priority; the gap is only in the manual bulk paths. No existing card covers this. The recently-merged 2b0be5ab (429/Token Plan reaper) is complementary, not duplicate."
+      }
+    ],
+    "deduped": 0,
+    "no_op": 0,
+    "filter_rejects": [
+      "Claude Agent SDK migration (programmatic subagents, typed TaskUpdatedMessage) — large-scope architectural change, would need a parent card with explicit 'needs decomposition' callout. Deferred to a separate parent feature card; not filed in this run because the acceptance criteria are 1-3 cards and the SDK migration is borderline a different category (library swap, not feature add).",
+      "Sonnet 5 1M-token context default — not actionable for Cockpit (model change, no platform change).",
+      "LangGraph DeltaChannel / ContextHubBackend — SaaS-coupled (LangSmith required), would need decomposition. Previously evaluated in last sweep, still not filed.",
+      "Aperant 'auto-changelog' / 'ideation phase' — feature parity not requested by any current Cockpit card, no friction point in current operator workflow."
+    ]
   }
 }
