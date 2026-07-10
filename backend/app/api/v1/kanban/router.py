@@ -40,6 +40,7 @@ from app.kanban.schemas import (
     MoveRequest,
     RedispatchRequest,
     ReorderRequest,
+    ReviewRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
     UpdatePlanAttachmentRequest,
@@ -411,6 +412,31 @@ async def comment(cid: str, payload: CommentRequest):
             project_key="", entity_id=cid, payload=payload.model_dump())
         await s.commit()
         return await _reload(s, cid)
+
+
+@router.post("/cards/{cid}/request-review", response_model=CardResponse,
+             status_code=status.HTTP_201_CREATED)
+async def request_review(cid: str, payload: ReviewRequest):
+    """Flag doubt on a completed card and route it to the analyst for triage.
+
+    Posts a `**Review requested:** <note>` comment on the original Done card and
+    creates a new Backlog `Review: <title>` card (work_type=analysis → analyst
+    persona) linked back via metadata.reviewed_card_id. Returns the new review
+    card. 404 if the card is missing, 409 if it isn't currently in Done.
+    """
+    async with KanbanSessionLocal() as s:
+        try:
+            card = await service.request_review(s, cid, payload.note)
+        except service.CardNotInDone as e:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"card is in {e.column!r}, not Done; review can only be "
+                "requested on a completed card",
+            )
+        if card is None:
+            raise HTTPException(404, "card not found")
+        await s.commit()
+        return await _reload(s, card.id)
 
 
 @router.post("/cards/{cid}/deliverables", response_model=CardResponse)

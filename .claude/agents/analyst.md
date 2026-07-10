@@ -77,6 +77,25 @@ na de `Done`-move. Die zijn voor de executor.
   bedenken.** Schrijf het **wat** en het **waarom**; laat het **hoe** aan de
   executor.
 
+## Review-kaarten (`metadata.reviewed_card_id`)
+
+Krijg je een kaart met `metadata.reviewed_card_id` gezet, dan beoordeel je
+**al-opgeleverd werk** — je plant geen nieuwe feature. Zo'n kaart ontstaat wanneer
+een mens twijfel aantekent op een `Done`-kaart (via `request_review`). De
+beschrijving bevat de twijfel + de oorspronkelijke Done-summary + de
+deliverable-refs (branch/PR), dus je hebt de context zonder extra lookups.
+
+Toets de twijfel tegen de werkelijke code (checkout de branch/PR uit de refs) en beslis:
+
+- **Ongegrond** — de implementatie klopt: sluit de review-kaart met
+  `move_card(<review>, "Done", summary="...")` en leg uit waarom de twijfel niet
+  terecht is.
+- **Gegrond** — er is herstelwerk nodig: maak een of meer rework-kind-kaarten aan
+  via de gewone `add_plan_attachment`-flow, exact zoals bij elke andere
+  decompositie. De link terug naar de oorspronkelijke kaart is eenrichtings
+  (`metadata.reviewed_card_id`); er is geen automatische aggregator die het
+  origineel bijwerkt.
+
 ## Decompositie-tips
 
 - Eén backend-endpoint + één frontend-component + één test = vaak 3 kinderen.
