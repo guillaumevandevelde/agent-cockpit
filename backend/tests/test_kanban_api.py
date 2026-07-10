@@ -325,3 +325,57 @@ async def test_create_card_with_analyst_agent_id_creates_analyst_column():
             r = await ac.get("/api/v1/kanban/columns",
                               params={"project_key": "FIX-B-CREATE"})
             assert any(c["name"] == "analyst" for c in r.json()["columns"])
+
+
+@pytest.mark.asyncio
+async def test_list_cards_ready_query_param_filters_via_http():
+    """The router must forward ?ready=true to the service-layer filter so a
+    frontend or planning agent can ask 'what is dispatchable right now?'
+    over HTTP without re-implementing the dep walk."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        parent = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "READY-P", "title": "parent"})).json()
+        parent_id = parent["id"]
+        child = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "READY-P", "title": "child",
+                  "depends_on": [parent_id]})).json()
+        child_id = child["id"]
+
+        r = await ac.get("/api/v1/kanban/cards",
+            params={"project_key": "READY-P", "ready": "true"})
+        assert r.status_code == 200, r.text
+        ids = {c["id"] for c in r.json()["items"]}
+        assert parent_id in ids
+        assert child_id not in ids
+
+        # Without the filter both cards come back.
+        r = await ac.get("/api/v1/kanban/cards",
+            params={"project_key": "READY-P"})
+        assert {c["id"] for c in r.json()["items"]} == {parent_id, child_id}
+
+
+@pytest.mark.asyncio
+async def test_list_cards_blocking_query_param_filters_via_http():
+    """The router must forward ?blocking=true to the service-layer filter so
+    a planning agent can ask 'which cards are still being waited on?'."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        parent = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "BLOCK-P", "title": "parent"})).json()
+        parent_id = parent["id"]
+        child = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "BLOCK-P", "title": "child",
+                  "depends_on": [parent_id]})).json()
+        child_id = child["id"]
+        standalone = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "BLOCK-P", "title": "standalone"})).json()
+        standalone_id = standalone["id"]
+
+        r = await ac.get("/api/v1/kanban/cards",
+            params={"project_key": "BLOCK-P", "blocking": "true"})
+        assert r.status_code == 200, r.text
+        ids = {c["id"] for c in r.json()["items"]}
+        assert parent_id in ids
+        assert child_id not in ids
+        assert standalone_id not in ids

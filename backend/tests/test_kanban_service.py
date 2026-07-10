@@ -32,6 +32,154 @@ async def test_list_cards_filters_by_project_and_column():
 
 
 @pytest.mark.asyncio
+async def test_list_cards_ready_excludes_cards_with_open_dependencies():
+    """ready=True keeps cards with no depends_on OR whose depends_on all
+    resolve to a parent in column='Done'. The dep_resolver predicate
+    (`meets_dep_prerequisites`) is the source of truth here so the
+    auto-dispatch tick and the API filter agree."""
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parent", "column": "Backlog"})
+        child_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child", "column": "Backlog",
+                     "depends_on": [parent_id]})
+        standalone_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "standalone", "column": "Backlog"})
+        await s.commit()
+
+        ready = await service.list_cards(s, "A", ready=True)
+        ready_ids = {c.id for c in ready}
+        # parent has no deps → ready; child has an unmet parent → not ready;
+        # standalone has no deps → ready.
+        assert parent_id in ready_ids
+        assert child_id not in ready_ids
+        assert standalone_id in ready_ids
+
+        # All cards still come back when neither filter is set (existing path).
+        everything = await service.list_cards(s, "A")
+        assert {c.id for c in everything} == {parent_id, child_id, standalone_id}
+
+
+@pytest.mark.asyncio
+async def test_list_cards_ready_treats_done_parents_as_satisfied():
+    """A child whose parent has been moved to Done counts as ready. Mirrors
+    dispatch's own dep check so the UI doesn't show 'blocked' on cards the
+    dispatcher would actually pick up."""
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parent", "column": "Backlog"})
+        child_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child", "column": "Backlog",
+                     "depends_on": [parent_id]})
+        await s.commit()
+
+        # Move parent to Done.
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="A", entity_id=parent_id, payload={"column": "Done"})
+        await s.commit()
+
+        ready = await service.list_cards(s, "A", ready=True)
+        ready_ids = {c.id for c in ready}
+        assert child_id in ready_ids
+
+
+@pytest.mark.asyncio
+async def test_list_cards_blocking_returns_cards_waited_on_by_others():
+    """blocking=True keeps a card IFF at least one other non-Done card in
+    the project lists my id in its depends_on. Self-evident baseline:
+    the parent of an open child is blocking; an idle standalone is not."""
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parent", "column": "Backlog"})
+        child_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child", "column": "Backlog",
+                     "depends_on": [parent_id]})
+        standalone_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "standalone", "column": "Backlog"})
+        await s.commit()
+
+        blocking = await service.list_cards(s, "A", blocking=True)
+        blocking_ids = {c.id for c in blocking}
+        # parent is the only card the still-unfinished child waits on.
+        assert parent_id in blocking_ids
+        assert child_id not in blocking_ids
+        assert standalone_id not in blocking_ids
+
+
+@pytest.mark.asyncio
+async def test_list_cards_blocking_excludes_when_all_dependents_are_done():
+    """Once the only child has been moved to Done, the parent is no longer
+    blocking. The "blocking" notion is 'someone still waits on me', which
+    dissolves the moment every dependent reaches Done."""
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parent", "column": "Backlog"})
+        child_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child", "column": "Backlog",
+                     "depends_on": [parent_id]})
+        await s.commit()
+
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="A", entity_id=child_id, payload={"column": "Done"})
+        await s.commit()
+
+        blocking = await service.list_cards(s, "A", blocking=True)
+        assert {c.id for c in blocking} == set()
+
+
+@pytest.mark.asyncio
+async def test_list_cards_ready_and_blocking_combine_as_intersection():
+    """ready=True & blocking=True keeps cards that are simultaneously
+    dispatchable AND waited on — a 'bottleneck' card whose parents are done
+    but whose own children are not yet. Independent filters per the API
+    contract, but compose cleanly so a planning agent can ask for both.
+
+    Topology used:
+        parent1  (no deps, child1 depends on it)        ready, blocking  → keep
+        child1   (deps=[parent1])                      blocked, leaf    → skip
+        parent2  (no deps, no one depends on it)        ready, idle      → skip
+        child2   (deps=[parent2], leaf)                 blocked, leaf    → skip
+    """
+    async with KanbanSessionLocal() as s:
+        parent1_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "p1", "column": "Backlog"})
+        child1_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "c1", "column": "Backlog",
+                     "depends_on": [parent1_id]})
+        parent2_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "p2", "column": "Backlog"})
+        child2_id = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "c2", "column": "Backlog",
+                     "depends_on": [parent2_id]})
+        await s.commit()
+
+        both = await service.list_cards(s, "A", ready=True, blocking=True)
+        ids = {c.id for c in both}
+        # Only parent1 satisfies both filters.
+        assert ids == {parent1_id}
+        # And explicitly verify each excluded card's reason:
+        # child1 — not ready (parent1 not Done); child2 — not ready;
+        # parent2 — not blocking (no open dependent).
+        assert child1_id not in ids
+        assert child2_id not in ids
+        assert parent2_id not in ids
+
+
+@pytest.mark.asyncio
 async def test_card_activity_returns_oplog_for_card():
     async with KanbanSessionLocal() as s:
         cid = await apply_operation(s, op_type="create", entity_type="card",

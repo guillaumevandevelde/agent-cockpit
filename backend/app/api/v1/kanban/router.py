@@ -180,9 +180,31 @@ async def agent_stats(project_key: str = Query(...)):
 
 
 @router.get("/cards")
-async def list_cards(project_key: str = Query(...), column: str | None = None):
+async def list_cards(
+    project_key: str = Query(...),
+    column: str | None = None,
+    ready: bool | None = Query(
+        None,
+        description=(
+            "When true, only return cards with no unmet dependencies "
+            "(i.e. deps all Done, or none). When false, return the complement. "
+            "Omit to skip the filter."
+        ),
+    ),
+    blocking: bool | None = Query(
+        None,
+        description=(
+            "When true, only return cards that at least one other non-Done "
+            "card depends on. When false, return the complement. "
+            "Omit to skip the filter."
+        ),
+    ),
+):
     async with KanbanSessionLocal() as s:
-        rows = await service.list_cards(s, project_key, column)
+        rows = await service.list_cards(
+            s, project_key, column,
+            ready=ready, blocking=blocking,
+        )
         return {"items": [CardResponse.model_validate(c) for c in rows]}
 
 

@@ -4,6 +4,7 @@ import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { Button } from "@/components/ui/button";
 import { Board } from "./components/Board";
+import type { CardMeta } from "./components/Column";
 import { CardDrawer } from "./components/CardDrawer";
 import { CardEditDialog } from "./components/CardEditDialog";
 import { ColumnSettingsDialog } from "./components/ColumnSettingsDialog";
@@ -22,6 +23,7 @@ import type { Card, KanbanColumn } from "./types";
 const FIXED_COLUMNS = new Set(["Backlog", "Impediment", "Done", "To Resume"]);
 const DISPATCH_COLUMNS = new Set(["Backlog", "To Resume"]);
 const POLL_INTERVAL_MS = 5000;
+const AGENT_CLAIM_PREFIX = "agent:";
 
 export default function KanbanPage() {
   const { activeProject } = useProjectContext();
@@ -112,6 +114,35 @@ export default function KanbanPage() {
     () => cards.filter((c) => c.column === "Done").length,
     [cards],
   );
+
+  // Per-card operational state for the ReadyStateBadge. Mirrors the backend
+  // `meets_dep_prerequisites` semantic so the UI badge and the dispatcher's
+  // own dep check agree: a card is "ready" iff every entry in `depends_on`
+  // is present and Done. "Dispatching" wins over Ready/Blocked because a card
+  // already being worked on is the more pressing signal for the operator.
+  const cardMeta = useMemo(() => {
+    const cardsById = new Map(cards.map((c) => [c.id, c]));
+    const meta = new Map<string, CardMeta>();
+    for (const card of cards) {
+      if (card.claimed_by?.startsWith(AGENT_CLAIM_PREFIX)) {
+        meta.set(card.id, { readyState: "dispatching", blockerTitles: [] });
+        continue;
+      }
+      const deps = card.depends_on ?? [];
+      const blockerTitles: string[] = [];
+      for (const depId of deps) {
+        const parent = cardsById.get(depId);
+        if (!parent || parent.column !== "Done") {
+          blockerTitles.push(parent?.title ?? "(missing)");
+        }
+      }
+      meta.set(card.id, {
+        readyState: blockerTitles.length === 0 ? "ready" : "blocked",
+        blockerTitles,
+      });
+    }
+    return meta;
+  }, [cards]);
 
   const clearDoneColumn = async () => {
     try {
@@ -270,6 +301,7 @@ export default function KanbanPage() {
       <Board
         columns={columns}
         cards={cards}
+        cardMeta={cardMeta}
         onOpen={setOpen}
         onDropCardAt={onDropCardAt}
         onReorderColumns={async (sourceId, targetId) => {

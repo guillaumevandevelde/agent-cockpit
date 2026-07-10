@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import selectinload
 
+from app.kanban.dep_resolver import meets_dep_prerequisites
 from app.kanban.models import (
     KanbanCard,
     KanbanColumn,
@@ -15,7 +16,26 @@ from app.kanban.models import (
 )
 
 
-async def list_cards(session, project_key: str, column: str | None = None):
+async def list_cards(
+    session,
+    project_key: str,
+    column: str | None = None,
+    *,
+    ready: bool | None = None,
+    blocking: bool | None = None,
+):
+    """List cards for a project.
+
+    `ready`/`blocking` are independent opt-in filters; both False/Nil means
+    "no filter" (preserving the original behaviour for every existing caller).
+    They compose as an intersection when both are set.
+
+    `ready` mirrors the dispatcher's own dep check
+    (`app.kanban.dep_resolver.meets_dep_prerequisites`) so the API and the
+    dispatch tick agree on what is dispatchable. `blocking` answers "which
+    cards are still being waited on?" — a card X is blocking when some other
+    non-Done card lists X in its `depends_on`.
+    """
     stmt = (
         select(KanbanCard)
         .where(KanbanCard.project_key == project_key)
@@ -24,7 +44,36 @@ async def list_cards(session, project_key: str, column: str | None = None):
     )
     if column is not None:
         stmt = stmt.where(KanbanCard.column == column)
-    return (await session.execute(stmt)).scalars().all()
+    rows = list((await session.execute(stmt)).scalars().all())
+    if ready is None and blocking is None:
+        return rows
+    cards_by_id = {c.id: c for c in rows}
+    if blocking is True:
+        blocking_ids = _blocking_card_ids(rows)
+    else:
+        blocking_ids = None
+    return [
+        c for c in rows
+        if (ready is None or ready is meets_dep_prerequisites(c, cards_by_id))
+        and (blocking is None or blocking is (c.id in (blocking_ids or set())))
+    ]
+
+
+def _blocking_card_ids(cards: list[KanbanCard]) -> set[str]:
+    """Card ids that have at least one non-Done dependent in `cards`.
+
+    Self-resolved against the passed-in list rather than a fresh DB read so
+    the caller's `ready`/`blocking` filters both see the same snapshot — a
+    freshly-Done parent has no in-flight children, so re-reading the DB would
+    see an out-of-date view for the rest of this tick."""
+    blocking: set[str] = set()
+    for card in cards:
+        if card.column == "Done":
+            # A finished card no longer blocks anything; skip.
+            continue
+        for parent_id in card.depends_on or ():
+            blocking.add(parent_id)
+    return blocking
 
 
 async def get_card(session, card_id: str):

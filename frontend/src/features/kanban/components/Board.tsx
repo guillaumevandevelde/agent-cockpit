@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Card, KanbanColumn } from "../types";
-import { Column } from "./Column";
+import { Column, type CardMeta } from "./Column";
 
 export function Board({
   columns,
@@ -8,12 +8,14 @@ export function Board({
   onOpen,
   onDropCardAt,
   onReorderColumns,
+  cardMeta,
 }: {
   columns: KanbanColumn[];
   cards: Card[];
   onOpen: (c: Card) => void;
   onDropCardAt: (cardId: string, column: string, index: number) => void;
   onReorderColumns?: (sourceId: string, targetId: string) => void;
+  cardMeta?: Map<string, CardMeta>;
 }) {
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
@@ -34,6 +36,7 @@ export function Board({
             }
             setDraggedColumn(null);
           }}
+          cardMeta={cardMeta}
         />
       ))}
     </div>

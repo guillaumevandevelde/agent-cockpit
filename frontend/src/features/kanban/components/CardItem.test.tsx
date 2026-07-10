@@ -52,3 +52,59 @@ describe("CardItem work_type badge", () => {
     expect(onOpen).toHaveBeenCalledWith(baseCard);
   });
 });
+
+describe("CardItem ReadyStateBadge", () => {
+  it("renders a 'Ready' badge when readyState='ready' is supplied", () => {
+    render(
+      <CardItem card={baseCard} readyState="ready" onOpen={() => {}} />,
+    );
+    expect(screen.getByText("Ready")).not.toBeNull();
+    expect(screen.queryByText("Blocked")).toBeNull();
+    expect(screen.queryByText("Dispatching")).toBeNull();
+  });
+
+  it("renders a 'Blocked' badge with blocker titles in the tooltip", () => {
+    // Tooltip text is exposed via the standard `title` HTML attribute, which
+    // jsdom turns into the `title` property on the element. Reading it back
+    // here pins the contract — the CardDrawer / KanbanPage must list the
+    // blocker titles so an operator can see at a glance which other cards
+    // gate this one, instead of having to open the deps one-by-one.
+    render(
+      <CardItem
+        card={baseCard}
+        readyState="blocked"
+        blockerTitles={["Parent A", "Parent B"]}
+        onOpen={() => {}}
+      />,
+    );
+    const blocked = screen.getByText("Blocked");
+    expect(blocked).not.toBeNull();
+    expect(blocked.getAttribute("title")).toBe("Blocked by: Parent A, Parent B");
+    expect(screen.queryByText("Ready")).toBeNull();
+    expect(screen.queryByText("Dispatching")).toBeNull();
+  });
+
+  it("renders a 'Dispatching' badge when readyState='dispatching' is supplied", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, claimed_by: "agent:tmux-x" }}
+        readyState="dispatching"
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("Dispatching")).not.toBeNull();
+    expect(screen.queryByText("Ready")).toBeNull();
+    expect(screen.queryByText("Blocked")).toBeNull();
+  });
+
+  it("omits the ready-state badge entirely when no readyState prop is passed", () => {
+    // Backwards compat: every existing caller that doesn't compute state
+    // (e.g. a future card-detail panel rendering) shouldn't suddenly grow
+    // a 'Ready' badge out of nowhere. The opt-in prop keeps behaviour for
+    // untouched callers identical.
+    render(<CardItem card={baseCard} onOpen={() => {}} />);
+    expect(screen.queryByText("Ready")).toBeNull();
+    expect(screen.queryByText("Blocked")).toBeNull();
+    expect(screen.queryByText("Dispatching")).toBeNull();
+  });
+});
