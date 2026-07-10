@@ -6,6 +6,7 @@
 > - `docs/superpowers/specs/2026-06-15-kanban-agents-design.md` — persona's (Analyst/Developer) + per-project shipmode.
 > - `docs/superpowers/specs/2026-06-29-kanban-dispatch-transport-design.md` — abstractie van het spawn-transport (tmux vandaag, podman later).
 > - `docs/superpowers/plans/2026-06-15-kanban-dispatch-agents.md` — TDD-implementatieplan dat bovenstaande heeft uitgevoerd.
+> - `docs/superpowers/specs/2026-07-10-kanban-model-override-design.md` — per-kaart/per-kolom model-override (`card.model`/`column.default_model`) bovenop de persona-routing.
 >
 > Zie `00-orientation.md` → *Documenten* voor de drie-bomen-regel.
 
