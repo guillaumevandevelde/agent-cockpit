@@ -145,40 +145,51 @@ already exists in code, in `App.tsx`, in `lib/navigation.ts`, in `docs/features/
 and in `backend/tests/test_update_api.py` — it was just missing from the top-level
 feature-list line in `CLAUDE.md`). Done in this same commit.
 
-## Reviewer-agent + review-kolom — deliberately NOT adopted (2026-07-10)
+## Reviewer-agent + review-kolom — lichtere feature-compliance review WEL bouwen (2026-07-10, revised)
 
-Decision: **don't add a `reviewer.md` persona + dedicated Review column on top of the
-existing self-review architecture.** See the trade-off in `reviewer-agent-decision.md`. The
-beweerde baten ("tweede paar ogen", "gate vóór Done", "consistentie met plan") worden al
-afgedekt door bestaande infrastructuur:
+**Eerste iteratie (2026-07-10 ochtend):** "niet bouwen". Op drie punten fout:
+(1) `/code-review` (slash-command op de diff) werd verward met feature-compliance
+review (kaart-spec ↔ implementatie); dat zijn verschillende vragen. (2) Het
+cleared-context-effect van een verse subagent-sessie werd onderschat als "slechts
+andere prompt"; het substantieve verschil is dat author-context motivated
+reasoning introduceert. (3) Een betrouwbare pre-Done gate werd geframed als
+autonomy-*reducing*; correct is autonomy-*enabling* (minder handmatige
+menselijke verificatie nodig).
 
-- Onafhankelijke, context-verse review → `/code-review effort medium` (verplicht in
-  `engineer.md` §6 sinds `d95b0b6`/`dde58db`) is een verse subagent-context, geen
-  "ik weet wat ik bedoelde"-bias.
-- Tracking van gate-uitvoering → `iteration-loop preset verify` met
-  `.claude/state/iteration-<card-id>.txt` log + `<loop-complete>` emit.
-- Echte geautomatiseerde gate ná push → CI `quality.yml` (ruff + pytest + frontend
-  lint + build op elke push naar `master`).
-- Menselijke gate vóór Done wanneer gewenst → `ship_mode="pull-request"` + GitHub
-  PR-review (al beschikbaar; geen infra-wijziging nodig om te forceren).
+**Revised beslissing:** **wél bouwen, in een lichtere vorm** — een
+feature-compliance-review (FCR) als subagent-call binnen de engineer-sessie,
+direct vóór `move_card Done`. Geen aparte `reviewer.md` persona, geen
+Review-kolom, geen concurrency-cap-impact. De FCR voedt de reviewer alleen
+met (kaart-titel + -beschrijving + diff tegen `origin/master`) en laat 'm
+beoordelen of de implementatie de gevraagde feature is — niet of de code
+goed is (dat doet `/code-review` al).
 
-Een onafhankelijke Reviewer-agent in dezelfde auto-pipeline heeft niet de eigenschappen
-die "second pair of eyes" suggereert: het is hetzelfde model (Opus 4.8), dezelfde
-codebase-kennis, andere prompt. Twee AI-sessies die elkaars werk controleren is geen
-four-eyes-stap, dat is een spiegel. De CLAUDE.md-doelstelling "zo autonoom mogelijk"
-pleit actief tegen een nieuwe tussenstap waar de baten niet bewezen zijn.
+Trade-off in `reviewer-agent-decision.md` (gemarkeerd als REVISED). Concrete
+vervolgkaart: één engineer-kaart die `engineer.md` §"Zelf-review" uitbreidt
+met één nieuwe subagent-call-stap (vergelijkbaar met de bestaande
+`/code-review`-regel); optioneel dezelfde stap in
+`_build_ship_instructions(ship_mode)` zodat ook auto-dispatch-sessies de
+FCR krijgen; optioneel scope tot `work_type in ("feature", "bug")` om
+`chore`/`analysis`-kaarten overbodige overhead te besparen. Geschat: halve
+tot hele dag werk + een empirische check op de eerste 5-10 kaarten na
+introductie of de FCR dingen vindt die `/code-review` miste.
 
-Kosten die wel reëel zijn: extra tokens (hele sessie vs. subagent-call), langere
-doorlooptijd, concurrency-cap-blokkade (Reviewer claimt de hele project-cap — geen nieuwe
-kaarten tot reviewer klaar is), visuele complexiteit (extra kolom in elk project-board).
+**Wat we NIET bouwen (en waarom):** een aparte Reviewer-persona + kolom +
+dispatch-flow staat buiten scope. De kosten daarvan (extra sessie,
+concurrency-cap-blokkade, visuele complexiteit, routing-ambiguïteit) zijn
+reëel en wegen niet op tegen de marginale extra waarde boven de
+subagent-FCR. Voor *post-Done* twijfel bestaat `request_review` al (zie
+`backend/app/kanban/service.py:async def request_review`) — die maakt een
+nieuwe analysis-kaart aan voor de analyst.
 
-Dit is dezelfde vraag die eerder gesteld is in `work-type-routing-analysis.md` §3.3 over
-`developer`/`tester`/`code-review` in `_IMPEDIMENT_AGENTS`; die werd in `35beb16`
-beantwoord met "reduceer tot de twee rollen die vandaag echt bestaan tot er een concreet
-plan is voor meer rollen." Diezelfde drempel geldt hier.
+**Wanneer heroverwegen:** als de FCR in praktijk geen blokkeringen oplevert
+die `/code-review` niet al ving (empirisch meetbaar op de eerste 5-10
+kaarten) → terugtrekken. Bij te veel vals-positieven → scope verfijnen
+(alleen `feature`/`bug`). Bij bugs die door FCR + CI glippen → CI strakker.
+Voor echte four-eyes-eisen → menselijke reviewer via `ship_mode="pull-request"`.
 
-**Wanneer heroverwegen:** als een specifieke, herhaaldelijk-optredende klasse bugs door
-de huidige gate-combinatie (engineer-zelfreview + CI) glipt, dan is CI strakker maken
-het juiste antwoord, niet een nieuwe AI-gate. Voor menselijke gates:
-`ship_mode="pull-request"` forceren per project of per kaart-type. Voor echte four-eyes
-(audit/regulering): een menselijke reviewer, niet een tweede AI-sessie.
+**Let op voor toekomstige analyses:** dit onderzoek toonde dat "zelfde
+model, andere prompt" op zichzelf geen reden is om een fresh-reviewer-stap
+af te doen. Het cognitieve verschil komt van *cleared context*, niet van
+de prompt. Een toekomstige vraag over een vergelijkbare
+kwaliteits-uitbreiding moet dat onderscheid vanaf het begin maken.
