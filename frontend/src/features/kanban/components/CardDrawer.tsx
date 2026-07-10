@@ -946,6 +946,7 @@ export function CardDrawer({
               labels: card.labels,
               work_type: card.work_type,
               model: card.model,
+              column_overrides: card.column_overrides,
               transport: card.transport,
               resume_session_id: card.resume_session_id,
               resume_project_folder: card.resume_project_folder,
@@ -954,9 +955,10 @@ export function CardDrawer({
               executor_agent_id: card.executor_agent_id,
             }}
             defaultAgent={card.agent}
+            projectKey={card.project_key}
             projectPath={projectPath}
             onClose={() => setEditing(false)}
-            onSubmit={async ({ title, description, priority, labels, work_type, agent, model, transport, resume_session_id, resume_project_folder, scheduled_at, analyst_agent_id, executor_agent_id }) => {
+            onSubmit={async ({ title, description, priority, labels, work_type, agent, model, column_overrides, transport, resume_session_id, resume_project_folder, scheduled_at, analyst_agent_id, executor_agent_id }) => {
               try {
                 await kanbanApi.updateCard(card.id, {
                   title,
@@ -966,6 +968,7 @@ export function CardDrawer({
                   work_type,
                   agent,
                   model,
+                  column_overrides,
                   transport,
                   resume_session_id,
                   resume_project_folder,

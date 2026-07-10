@@ -2,6 +2,7 @@ import { apiClient } from "@/lib/api";
 import type {
   Card,
   ActivityEntry,
+  ColumnOverride,
   KanbanColumn,
   AgentStatsResponse,
   McpHealth,
@@ -73,6 +74,7 @@ export const kanbanApi = {
     work_type?: string | null;
     agent?: string | null;
     model?: string | null;
+    column_overrides?: Record<string, ColumnOverride> | null;
     transport?: string | null;
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
@@ -93,6 +95,7 @@ export const kanbanApi = {
       column?: string;
       agent?: string | null;
       model?: string | null;
+      column_overrides?: Record<string, ColumnOverride> | null;
       priority?: string | null;
       labels?: string[] | null;
       work_type?: string | null;

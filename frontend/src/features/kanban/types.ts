@@ -24,6 +24,24 @@ export const WORK_TYPE_ICONS: Record<WorkType, string> = {
 export const PROVIDERS = ["anthropic", "bedrock", "minimax"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
+// Human-readable labels for the provider ids above. Kept as Record<string,
+// string> (not Record<Provider, string>) so it can be indexed by the free
+// `default_provider` string on a column without a TS narrowing dance.
+export const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: "Anthropic",
+  bedrock: "Bedrock",
+  minimax: "MiniMax",
+};
+
+// Per-agent-column model+provider override carried on a card. Mirrors the
+// backend shape: card.column_overrides = { "<column-name>": ColumnOverride }.
+// At dispatch time the resolved target column's entry wins over the column
+// defaults for both model and provider (see backend dispatch.py).
+export interface ColumnOverride {
+  model: string | null;
+  provider: string | null;
+}
+
 // Seed suggestions shown in the model free-text field before the list has
 // ever been refreshed from the installed CLI. Mirrors backend/app/kanban/
 // dispatch.py MODEL_OPTIONS_SEED. Not an enum -- any string is accepted (see
@@ -87,6 +105,7 @@ export interface Card {
   work_type?: string | null;
   agent?: string | null;
   model?: string | null;
+  column_overrides?: Record<string, ColumnOverride> | null;
   transport?: string | null;  // worktree | sandcastle | auto (null)
   resume_session_id?: string | null;
   resume_project_folder?: string | null;
