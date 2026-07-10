@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from sqlalchemy import select
 
 from app.config import settings
 from app.kanban import service
@@ -38,6 +39,7 @@ from app.kanban.schemas import (
     ReorderRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
+    UpdatePlanAttachmentRequest,
     WorkTypeMappingBulk,
     WorkTypeMappingResponse,
 )
@@ -374,6 +376,39 @@ async def attach(cid: str, payload: AttachRequest):
     async with KanbanSessionLocal() as s:
         await apply_operation(s, op_type="attach", entity_type="deliverable",
             project_key="", entity_id=cid, payload=payload.model_dump())
+        await s.commit()
+        return await _reload(s, cid)
+
+
+@router.patch("/cards/{cid}/plan-attachment", response_model=CardResponse)
+async def update_plan_attachment(cid: str, payload: UpdatePlanAttachmentRequest):
+    """Overwrite the markdown on the card's existing `kind=plan` deliverable.
+
+    Returns 404 when no `kind=plan` deliverable exists for the card — use
+    POST /cards/{cid}/deliverables (or the MCP `add_plan_attachment` tool) to
+    create one first. The deliverable row id is preserved across updates so
+    child `plan_ref` rows keep resolving to the same plan on the next dispatch.
+    """
+    from app.kanban.models import KanbanDeliverable
+    async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is None:
+            raise HTTPException(404, "card not found")
+        existing = (await s.execute(
+            select(KanbanDeliverable)
+            .where(KanbanDeliverable.card_id == cid)
+            .where(KanbanDeliverable.kind == "plan")
+            .order_by(KanbanDeliverable.created_at.desc())
+            .limit(1)
+        )).scalars().first()
+        if existing is None:
+            raise HTTPException(
+                404,
+                "no plan attachment on this card; create one first",
+            )
+        await apply_operation(s, op_type="update_plan_attachment",
+            entity_type="deliverable", project_key="",
+            entity_id=cid, payload=payload.model_dump())
         await s.commit()
         return await _reload(s, cid)
 
