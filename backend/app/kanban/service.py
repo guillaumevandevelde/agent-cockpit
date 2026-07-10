@@ -48,10 +48,7 @@ async def list_cards(
     if ready is None and blocking is None:
         return rows
     cards_by_id = {c.id: c for c in rows}
-    if blocking is True:
-        blocking_ids = _blocking_card_ids(rows)
-    else:
-        blocking_ids = None
+    blocking_ids = _blocking_card_ids(rows) if blocking is True else None
     return [
         c for c in rows
         if (ready is None or ready is meets_dep_prerequisites(c, cards_by_id))

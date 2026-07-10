@@ -74,7 +74,7 @@ def test_codex_bedrock_spawn_command_sets_model_provider_and_bedrock_model():
         SpawnCommandOptions(
             directory="/tmp/project",
             mode="plain",
-            platform="bedrock",
+            provider="bedrock",
             bedrock_model="openai.gpt-5.5",
             model="ignored-when-bedrock-model-set",
         )
@@ -97,7 +97,7 @@ def test_codex_bedrock_spawn_command_falls_back_to_model_without_bedrock_model()
 
     provider = get_agentic_cli("codex-cli")
     command = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="plain", platform="bedrock", model="fallback-model")
+        SpawnCommandOptions(directory="/tmp/project", mode="plain", provider="bedrock", model="fallback-model")
     )
 
     assert "--config" in command
@@ -163,7 +163,7 @@ def test_codex_bedrock_spawn_command_combines_model_provider_and_reasoning_effor
         SpawnCommandOptions(
             directory="/tmp/project",
             mode="plain",
-            platform="bedrock",
+            provider="bedrock",
             bedrock_model="openai.gpt-5.5",
             reasoning_effort="xhigh",
         )

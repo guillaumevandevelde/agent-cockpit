@@ -6,7 +6,7 @@ import hashlib
 import logging
 import os
 import socket
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 
 from app.models.schemas import InstanceIdentity
@@ -24,7 +24,7 @@ ALLOWED_ACCENTS: tuple[str, ...] = (
     "slate",
 )
 
-_STARTED_AT = datetime.now(timezone.utc)
+_STARTED_AT = datetime.now(UTC)
 _MAX_NAME_LENGTH = 64
 _MAX_ID_LENGTH = 64
 
@@ -63,7 +63,7 @@ def _stable_id(hostname: str, explicit_id: str | None) -> str:
     cleaned = _clean_explicit_id(explicit_id)
     if cleaned:
         return cleaned
-    return hashlib.sha256(f"claude-cockpit:{hostname}".encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(f"claude-cockpit:{hostname}".encode()).hexdigest()[:12]
 
 
 def _accent_from_hostname(hostname: str) -> str:

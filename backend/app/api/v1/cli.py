@@ -5,7 +5,7 @@ CLI execution API endpoints.
 from fastapi import APIRouter, HTTPException
 
 from ...models.schemas import CLIExecuteRequest, CLIResult
-from ...services.cli_executor import CLIExecutor, AgenticCliExecutor
+from ...services.cli_executor import AgenticCliExecutor, CLIExecutor
 
 router = APIRouter(prefix="/cli", tags=["CLI"])
 

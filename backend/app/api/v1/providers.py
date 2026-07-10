@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
 from app.models.schemas import CLIExecuteRequest, CLIResult
+from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 from app.services.cli_executor import AgenticCliExecutor
 from app.services.codex_config_service import CodexConfigService
 from app.services.codex_history_service import CodexHistoryService
 from app.services.codex_usage_context_service import CodexUsageContextService
-from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 
 router = APIRouter()
 

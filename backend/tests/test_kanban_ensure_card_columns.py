@@ -69,7 +69,7 @@ async def test_ensure_card_columns_adds_missing_analyst_dispatch_columns():
 
             rows = (await conn.exec_driver_sql("PRAGMA table_info(kanban_cards)")).fetchall()
             after = {r[1] for r in rows}
-        assert NEW_COLUMNS <= after
+        assert after >= NEW_COLUMNS
     finally:
         await engine.dispose()
 

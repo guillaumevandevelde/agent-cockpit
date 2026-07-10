@@ -91,10 +91,11 @@ async def test_multi_agent_flow(monkeypatch):
         assert spawned == [("analyst", parent_id)]
 
         # --- Analyst ops: plan deliverable + child plan_refs + depends_on -
+        import json as _json
+
         from sqlalchemy import select
 
         from app.kanban.models import KanbanDeliverable
-        import json as _json
 
         c1 = await apply_operation(
             s, op_type="create", entity_type="card",
