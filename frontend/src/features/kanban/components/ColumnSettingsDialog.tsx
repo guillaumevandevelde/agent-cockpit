@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
-import { PLATFORMS } from "../types";
+import { PLATFORMS, DEFAULT_MODEL_SUGGESTIONS } from "../types";
 import type { KanbanColumn } from "../types";
 
 const BACKLOG_COLUMN = "Backlog";
@@ -50,7 +50,9 @@ export function ColumnSettingsDialog({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAgent, setEditAgent] = useState<string>("");
   const [editPlatform, setEditPlatform] = useState<string>(DEFAULT_PLATFORM_SENTINEL);
+  const [editModel, setEditModel] = useState<string>("");
   const [editMaxSessions, setEditMaxSessions] = useState<number | null>(null);
+  const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
 
   useEffect(() => {
     setItems(columns);
@@ -60,6 +62,20 @@ export function ColumnSettingsDialog({
     if (!projectPath) return;
     kanbanApi.agents(projectPath).then((r) => setAvailableAgents(r.agents));
   }, [projectPath]);
+
+  useEffect(() => {
+    if (!open) return;
+    kanbanApi.getModelOptions().then((r) => setModelOptions(r.options)).catch(() => {});
+  }, [open]);
+
+  const handleRefreshModels = async () => {
+    try {
+      const r = await kanbanApi.refreshModelOptions();
+      setModelOptions(r.options);
+    } catch {
+      toast.error("Failed to refresh model list");
+    }
+  };
 
   const handleCreate = async () => {
     if (!selectedAgent) {
@@ -88,10 +104,12 @@ export function ColumnSettingsDialog({
   const handleUpdate = async (id: string) => {
     const agent = editAgent.trim() || null;
     const platform = editPlatform === DEFAULT_PLATFORM_SENTINEL ? null : editPlatform;
+    const model = editModel.trim() || null;
     try {
       const col = await kanbanApi.updateColumn(id, {
         default_agent: agent,
         default_platform: platform,
+        default_model: model,
         max_sessions: editMaxSessions,
       });
       setItems((prev) => prev.map((c) => (c.id === id ? col : c)));
@@ -173,6 +191,31 @@ export function ColumnSettingsDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  <div className="flex flex-col gap-1">
+                    <label htmlFor={`default-model-${col.id}`} className="sr-only">
+                      Default model
+                    </label>
+                    <input
+                      id={`default-model-${col.id}`}
+                      list={`model-suggestions-${col.id}`}
+                      className="h-8 w-32 rounded border bg-background px-2 text-sm"
+                      placeholder="Default model"
+                      value={editModel}
+                      onChange={(e) => setEditModel(e.target.value)}
+                    />
+                    <datalist id={`model-suggestions-${col.id}`}>
+                      {modelOptions.map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                    <button
+                      type="button"
+                      className="text-[10px] text-muted-foreground hover:text-foreground text-left"
+                      onClick={handleRefreshModels}
+                    >
+                      Refresh
+                    </button>
+                  </div>
                   <div className="flex items-center gap-1">
                     <button
                       className="h-7 w-7 rounded border text-sm hover:bg-accent disabled:opacity-30"
@@ -215,6 +258,11 @@ export function ColumnSettingsDialog({
                         Platform: {PLATFORM_LABELS[col.default_platform] ?? col.default_platform}
                       </div>
                     )}
+                    {col.default_model && (
+                      <div className="text-xs text-muted-foreground">
+                        Model: {col.default_model}
+                      </div>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground tabular-nums mr-2" title="Max concurrent sessions">
                     {col.max_sessions != null && col.max_sessions > 0 ? `max ${col.max_sessions}` : "∞"}
@@ -228,6 +276,7 @@ export function ColumnSettingsDialog({
                           setEditingId(col.id);
                           setEditAgent(col.default_agent ?? "");
                           setEditPlatform(col.default_platform ?? DEFAULT_PLATFORM_SENTINEL);
+                          setEditModel(col.default_model ?? "");
                           setEditMaxSessions(col.max_sessions ?? 0);
                         }}
                       >
