@@ -31,3 +31,37 @@ def test_read_persona_returns_body(tmp_path):
 
 def test_read_persona_missing_file_returns_none(tmp_path):
     assert dispatch._read_persona(str(tmp_path), "Todo") is None
+
+
+def test_read_persona_model_returns_frontmatter_model(tmp_path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "engineer.md").write_text(
+        "---\nname: 'engineer'\nmodel: 'claude-opus-4-8'\n---\nBe an engineer.\n"
+    )
+    assert dispatch._read_persona_model(str(tmp_path), "engineer.md") == "claude-opus-4-8"
+
+
+def test_read_persona_model_returns_none_when_field_absent(tmp_path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "analyst.md").write_text("---\nname: 'analyst'\n---\nBe an analyst.\n")
+    assert dispatch._read_persona_model(str(tmp_path), "analyst.md") is None
+
+
+def test_read_persona_model_returns_none_when_no_frontmatter(tmp_path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "plain.md").write_text("Just a body, no frontmatter.\n")
+    assert dispatch._read_persona_model(str(tmp_path), "plain.md") is None
+
+
+def test_read_persona_model_returns_none_for_missing_file(tmp_path):
+    assert dispatch._read_persona_model(str(tmp_path), "missing.md") is None
+
+
+def test_read_persona_model_returns_none_for_malformed_yaml(tmp_path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "broken.md").write_text("---\nmodel: [unclosed\n---\nBody.\n")
+    assert dispatch._read_persona_model(str(tmp_path), "broken.md") is None

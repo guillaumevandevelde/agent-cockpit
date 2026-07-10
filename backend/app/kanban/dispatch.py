@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import uuid
+import yaml
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -369,6 +370,37 @@ def _read_persona_file(project_path: str, filename: str) -> str | None:
         return _strip_frontmatter(path.read_text()).strip()
     except OSError:
         return None
+
+
+def _read_persona_model(project_path: str, filename: str) -> str | None:
+    """Read the `model:` field from a persona file's YAML frontmatter, if any.
+
+    Complements `_read_persona_file`, which strips this exact frontmatter
+    block before the persona body reaches the prompt (see `_strip_frontmatter`)
+    -- today that `model:` field (already present in engineer.md/analyst.md)
+    is silently discarded. This is the read that makes it a real fallback in
+    the model-resolution precedence. Never raises: a missing file, absent
+    frontmatter, missing `model` key, or malformed YAML all resolve to None,
+    which falls through to the next precedence level.
+    """
+    path = Path(project_path) / ".claude" / "agents" / filename
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    if not text.startswith("---\n"):
+        return None
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return None
+    try:
+        frontmatter = yaml.safe_load(text[4:end])
+    except yaml.YAMLError:
+        return None
+    if not isinstance(frontmatter, dict):
+        return None
+    model = frontmatter.get("model")
+    return model if isinstance(model, str) and model else None
 
 
 def _persona_for_card(project_path: str, card, column: str) -> str | None:
