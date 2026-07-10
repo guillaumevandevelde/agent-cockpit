@@ -1723,6 +1723,108 @@ async def test_redispatch_all_remaining_count_is_correct():
         assert len(await service.list_pending_cards(s, PK)) == 1
 
 
+# ---- depends_on gate on bulk dispatch paths -------------------------------
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_skips_blocked_card():
+    """A Backlog card whose depends_on points to a non-Done parent must NOT be
+    spawned by dispatch_all_pending — same predicate the auto-dispatch tick uses.
+    Without this gate, the bulk action silently contradicts the Blocked badge."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Backlog")
+        # Child whose only dep is the still-Open parent.
+        child = await _make_card(s, title="child", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=child, payload={"depends_on": [parent]},
+        )
+        # A second, unblocked card that should still go through.
+        await _make_card(s, title="free", column="Backlog")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    assert len(results) == 2, f"expected only unblocked cards dispatched, got {results}"
+    # The blocked child must not appear in the spawned set; the free card and
+    # the (Open but unblocked) parent do.
+    assert len(transport.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_redispatch_all_orphans_skips_blocked_card():
+    """An orphaned card whose depends_on points to a non-Done parent must NOT be
+    spawned by redispatch_all_orphans. Mirrors the dispatch_all_pending contract."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Parent on Backlog (still Open). Child on an agent column, unclaimed
+        # → an "orphan" eligible for redispatch_all_orphans — but blocked on the
+        # parent via depends_on.
+        parent = await _make_card(s, title="parent", column="Backlog")
+        blocked_orphan = await _make_card(s, title="blocked-orphan", column="developer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=blocked_orphan, payload={"depends_on": [parent]},
+        )
+        # An orphan with no deps must still go through.
+        await _make_card(s, title="free-orphan", column="testing")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    assert len(results) == 1, f"expected only unblocked orphan dispatched, got {results}"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_picks_up_card_after_dep_clears():
+    """After the parent moves to Done, the previously-blocked child becomes
+    dispatchable on the next bulk call — confirms the transition is live and
+    doesn't require a restart."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Backlog")
+        child = await _make_card(s, title="child", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=child, payload={"depends_on": [parent]},
+        )
+        await s.commit()
+
+    # First bulk call: parent is unblocked (no deps), child is blocked. Only
+    # the parent should dispatch — the Blocked child stays in Backlog.
+    async with KanbanSessionLocal() as s:
+        results_before = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results_before) == 1
+
+    # Move parent to Done → child's deps are now satisfied.
+    async with KanbanSessionLocal() as s:
+        await apply_operation(
+            s, op_type="move", entity_type="card", project_key=PK,
+            entity_id=parent, payload={"column": "Done"},
+        )
+        await s.commit()
+
+    # Second bulk call: child is now dispatchable.
+    async with KanbanSessionLocal() as s:
+        results_after = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results_after) == 1
+
+
 # ---- card transport field persistence ------------------------------------
 
 @pytest.mark.asyncio
