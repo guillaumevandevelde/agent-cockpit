@@ -51,6 +51,15 @@ class KanbanCard(KanbanBase):
     # persona frontmatter `model:` > no --model flag (platform default). See
     # docs/superpowers/specs/2026-07-10-kanban-model-override-design.md.
     model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Per-agent-column (persona) model+provider override, shape:
+    #   { "<column-name>": {"model": str|null, "provider": str|null} }
+    # At dispatch, once the phase's target column/persona is resolved, its
+    # entry (if any) wins over both the column's default_provider and the
+    # card/column/persona model precedence — see dispatch._effective_model.
+    # Same free-text, no-enum contract as `model`/`labels`; nullable, so
+    # existing rows round-trip as null (backwards compatible). Covers analyst
+    # and executor phases alike because both resolve their target column here.
+    column_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     transport: Mapped[str | None] = mapped_column(String(16), nullable=True)  # worktree | sandcastle | auto (null)
     resume_session_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     resume_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)

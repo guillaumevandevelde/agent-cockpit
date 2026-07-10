@@ -45,6 +45,9 @@ class CardResponse(BaseModel):
     work_type: str | None = None
     agent: str | None = None
     model: str | None = None
+    # Per-agent-column model+provider override:
+    #   { "<column-name>": {"model": str|null, "provider": str|null} }
+    column_overrides: dict | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
@@ -85,6 +88,7 @@ class CardCreate(BaseModel):
     work_type: str | None = None
     agent: str | None = None
     model: str | None = None
+    column_overrides: dict | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
@@ -105,6 +109,7 @@ class CardUpdate(BaseModel):
     work_type: str | None = None
     agent: str | None = None
     model: str | None = None
+    column_overrides: dict | None = None
     transport: str | None = None  # worktree | sandcastle | auto (null)
     resume_session_id: str | None = None
     resume_project_folder: str | None = None
