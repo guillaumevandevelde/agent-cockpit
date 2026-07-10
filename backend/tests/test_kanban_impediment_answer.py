@@ -112,6 +112,22 @@ def test_build_card_prompt_omits_answer_block_when_no_answer():
     assert "clarify what's needed" in prompt
 
 
+def test_build_card_prompt_documents_rest_fallback_for_minus_32602():
+    """Every dispatched session must carry the REST fallback so an intermittent
+    `-32602` MCP handshake race doesn't strand a finished card in its dispatch
+    column (kanban card 7b1d0a91: MCP tools returned -32602 on every call)."""
+    class _C:
+        title = "Bug"
+        description = "Fix the crash"
+    prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+    assert "-32602" in prompt
+    assert "/api/v1/kanban" in prompt
+    # The concrete endpoints an agent needs to move/comment/attach without MCP.
+    assert "/cards/{id}/move" in prompt
+    assert "/cards/{id}/comment" in prompt
+    assert "/cards/{id}/deliverables" in prompt
+
+
 # --- REST --------------------------------------------------------------------
 
 

@@ -680,6 +680,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
     # worktree automatically.
     ship_instructions = _build_ship_instructions(ship_mode)
     problem_flag_instructions = _build_problem_flag_instructions()
+    mcp_fallback_instructions = _build_mcp_fallback_instructions()
 
     return (
         f"{preamble}"
@@ -694,10 +695,41 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
         "`comment`) to update the card exactly as those instructions direct. If you are "
         "blocked, use `report_impediment` with a clear question explaining what you need."
+        f"\n\n{mcp_fallback_instructions}"
         f"\n\n{problem_flag_instructions}"
         f"\n## Session-end workflow\n"
         "When your work on this card is complete, follow these steps in order:\n\n"
         f"{ship_instructions}"
+    )
+
+
+def _build_mcp_fallback_instructions() -> str:
+    """REST fallback for when the `cockpit-kanban` MCP tools fail with JSON-RPC
+    `-32602` (Invalid request parameters).
+
+    Root cause (confirmed; see app/kanban/mcp_health.py failure-mode B): the
+    agent completes its MCP `initialize` handshake, then the backend restarts
+    or reconnects (dev `--reload`, a supervisor restart, a crash-restart). The
+    SSE stream reconnects but the *server-side* session state was never
+    re-initialized, so the fresh session answers **every** subsequent request —
+    including `ping` — with a generic ``-32602``. The payload the agent sent is
+    fine; retrying often clears it once the client re-initializes. A session
+    that doesn't know the REST equivalents can burn several turns rediscovering
+    endpoint paths, or worse strand a finished card in its dispatch column. See
+    kanban card 7b1d0a91 for the full postmortem."""
+    return (
+        "## If a `cockpit-kanban` MCP call fails with `-32602`\n"
+        "`-32602` (Invalid request parameters) from a `mcp__cockpit-kanban__*` "
+        "tool is an intermittent MCP handshake race, **not** a bad payload — "
+        "retry the same call once. If it still fails, fall back to the REST API "
+        "at `http://localhost:8000/api/v1/kanban` (same board, same effect):\n"
+        "- `POST /cards/{id}/comment` — body `{\"text\": \"…\"}`\n"
+        "- `POST /cards/{id}/move` — body `{\"column\": \"…\"}` (for Done/Impediment, "
+        "follow with a `comment` carrying your summary — the REST move has no "
+        "`summary` field)\n"
+        "- `POST /cards/{id}/deliverables` — body `{\"kind\": \"branch|pr|commit|link|note\", \"ref\": \"…\"}`\n"
+        "- `GET /cards?project_key=<key>&column=<col>` — list cards\n"
+        "- `GET /project-key?project_path=<abs path>` — resolve the project key\n"
     )
 
 
