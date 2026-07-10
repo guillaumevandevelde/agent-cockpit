@@ -24,6 +24,12 @@ export const WORK_TYPE_ICONS: Record<WorkType, string> = {
 export const PLATFORMS = ["anthropic", "bedrock", "minimax"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
+// Seed suggestions shown in the model free-text field before the list has
+// ever been refreshed from the installed CLI. Mirrors backend/app/kanban/
+// dispatch.py MODEL_OPTIONS_SEED. Not an enum -- any string is accepted (see
+// docs/superpowers/specs/2026-07-10-kanban-model-override-design.md).
+export const DEFAULT_MODEL_SUGGESTIONS = ["sonnet", "opus", "haiku"] as const;
+
 // Work-type → persona routing. Mirrors backend/app/kanban/schemas.py
 // WORK_TYPE_PERSONA_DEFAULTS. Kept in sync by hand — there are only four
 // work_types and the mapping rarely changes; promote to a generated
@@ -51,6 +57,7 @@ export interface KanbanColumn {
   rank: string;
   default_agent: string | null;
   default_platform: string | null;
+  default_model: string | null;
   max_sessions: number | null;
   created_at: string;
   updated_at: string;
@@ -79,6 +86,7 @@ export interface Card {
   labels?: string[] | null;
   work_type?: string | null;
   agent?: string | null;
+  model?: string | null;
   transport?: string | null;  // worktree | sandcastle | auto (null)
   resume_session_id?: string | null;
   resume_project_folder?: string | null;

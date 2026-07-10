@@ -31,6 +31,7 @@ export const kanbanApi = {
     rank?: string;
     default_agent?: string | null;
     default_platform?: string | null;
+    default_model?: string | null;
     max_sessions?: number | null;
   }): Promise<KanbanColumn> =>
     apiClient<KanbanColumn>(`${BASE}/columns`, {
@@ -40,7 +41,7 @@ export const kanbanApi = {
 
   updateColumn: (
     id: string,
-    body: { name?: string; rank?: string; default_agent?: string | null; default_platform?: string | null; max_sessions?: number | null }
+    body: { name?: string; rank?: string; default_agent?: string | null; default_platform?: string | null; default_model?: string | null; max_sessions?: number | null }
   ): Promise<KanbanColumn> =>
     apiClient<KanbanColumn>(`${BASE}/columns/${id}`, {
       method: "PATCH",
@@ -71,6 +72,7 @@ export const kanbanApi = {
     labels?: string[] | null;
     work_type?: string | null;
     agent?: string | null;
+    model?: string | null;
     transport?: string | null;
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
@@ -90,6 +92,7 @@ export const kanbanApi = {
       description?: string;
       column?: string;
       agent?: string | null;
+      model?: string | null;
       priority?: string | null;
       labels?: string[] | null;
       work_type?: string | null;
@@ -292,6 +295,14 @@ export const kanbanApi = {
       `${BASE}/work-type-mappings/${workType}?project_key=${encodeURIComponent(projectKey)}`,
       { method: "DELETE" }
     ),
+
+  getModelOptions: (): Promise<{ provider: string; options: string[] }> =>
+    apiClient<{ provider: string; options: string[] }>(`${BASE}/model-options`),
+
+  refreshModelOptions: (): Promise<{ provider: string; options: string[] }> =>
+    apiClient<{ provider: string; options: string[] }>(`${BASE}/model-options/refresh`, {
+      method: "POST",
+    }),
 };
 
 export async function addPlanAttachment(
