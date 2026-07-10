@@ -716,11 +716,17 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
             platform=platform,
         )
         try:
-            return spawn_session(provider_id, options, session_name=session_name)
+            result = spawn_session(provider_id, options, session_name=session_name)
         except Exception:
             subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
                            capture_output=True, text=True, timeout=30)
             raise
+        # Track the spawn so the dispatch reaper can detect sessions that die
+        # before their first hook event (e.g. a 429 Token Plan limit on the
+        # first `claude` invocation -- the tmux pane stays open but no hook
+        # script ever runs, so `record()` would never be called for this name).
+        session_registry.mark_spawned(session_name)
+        return result
 
     return _transport
 
@@ -1862,6 +1868,8 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
 
 def _kill_agent_session(session_name: str) -> None:
     """Kill a tmux session belonging to an agent."""
+    from app.services.scheduling.session_registry import session_registry
+
     try:
         subprocess.run(
             ["tmux", "kill-session", "-t", session_name],
@@ -1869,6 +1877,11 @@ def _kill_agent_session(session_name: str) -> None:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
+    # Forget the spawn tracking so the registry doesn't keep reporting this
+    # name as a candidate for `get_stuck_sessions` after the reaper's own
+    # kill (next card) -- or after a human-driven redispatch that kills the
+    # old session before re-spawning under the same name.
+    session_registry.clear_spawn(session_name)
 
 
 class MemoryLimitExceeded(Exception):
@@ -1928,7 +1941,12 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             skip_permissions=skip_permissions,
             platform=platform,
         )
-        return spawn_session(provider_id, options, session_name=session_name)
+        result = spawn_session(provider_id, options, session_name=session_name)
+        # Track the spawn so the dispatch reaper can detect a resumed session
+        # that immediately hits a 429 Token Plan limit and never initialises
+        # its hook scripts. See `make_worktree_transport` for the full rationale.
+        session_registry.mark_spawned(session_name)
+        return result
 
     return _transport
 

@@ -4,9 +4,17 @@ Keyed by Claude session_id (not cwd), so concurrent sessions in one working
 copy are tracked independently. Idle == a Stop with no later busy event.
 
 Enforces hardware-aware session limits via memory_monitor.
+
+Also tracks spawn-time gaps (`mark_spawned` / `get_stuck_sessions`) so the
+dispatch reaper can spot tmux sessions whose `claude` process died immediately
+after spawn (e.g. a 429 Token Plan limit) before it ever sent a hook event.
+That gap is undetectable from `record()` alone, because no hook means no
+`record()` call. Stale tracking is cleared on the kill path.
 """
 import asyncio
 import logging
+import time
+from pathlib import Path
 
 from app.services.memory_monitor import get_memory_status_cached
 
@@ -23,6 +31,13 @@ class SessionRegistry:
         self._waiters: dict[str, list[asyncio.Event]] = {}
         self._external: set[str] = set()  # non-tmux sessions (e.g. sandcastle runs)
         self._max_sessions_override = max_sessions
+        # spawn-name -> monotonic spawn time. Set by the dispatch transports
+        # the moment a tmux session is created; cleared on kill.
+        self._spawn_times: dict[str, float] = {}
+        # Names whose cwd matched one of our dispatched sessions on a recent
+        # hook event. Once non-empty for a name, the session is no longer
+        # considered "stuck" — its `claude` process is alive enough to call home.
+        self._spawn_received_hooks: set[str] = set()
 
     @property
     def effective_max_sessions(self) -> int:
@@ -56,7 +71,7 @@ class SessionRegistry:
     def record(self, event: str, session_id: str, cwd: str,
                tmux_pane: str | None = None) -> bool:
         """Record a session event.
-        
+
         Returns True if the event was recorded, False if rejected due to limits.
         """
         # Check limits for new sessions
@@ -78,7 +93,75 @@ class SessionRegistry:
                 ev.set()
         elif event in _BUSY_EVENTS:
             self._idle[session_id] = False
+        # Side-effect: when this hook event came from one of our dispatched
+        # tmux sessions, clear its stuck-spawn flag. We resolve cwd → session
+        # name from the worktree layout (<project>/.claude/worktrees/<name>);
+        # any other cwd shape (project root, sandcastle, an arbitrary `claude`
+        # session) is not ours and is ignored.
+        spawned_name = self._session_name_for_dispatched_cwd(cwd)
+        if spawned_name is not None and spawned_name in self._spawn_times:
+            self._spawn_received_hooks.add(spawned_name)
         return True
+
+    def mark_spawned(self, session_name: str) -> None:
+        """Record that the dispatch transport just spawned `session_name`.
+
+        Used by the reaper (next-tick) to detect stuck sessions: a tmux pane
+        that has been alive longer than `get_stuck_sessions`' timeout but has
+        not yet sent any hook event. The classic trigger is a 429 Token Plan
+        limit on first spawn — the `claude` CLI prints the error but never
+        initialises hooks, so `record()` is never called.
+
+        Re-calling with the same name resets the spawn clock (used for
+        --resume re-attaches, where the same tmux session is reused).
+        """
+        self._spawn_times[session_name] = time.monotonic()
+
+    def clear_spawn(self, session_name: str) -> None:
+        """Forget a previously-marked spawn. Called from the dispatch kill
+        path so the registry doesn't carry zombie tracking once a session
+        has been torn down. Idempotent."""
+        self._spawn_times.pop(session_name, None)
+        self._spawn_received_hooks.discard(session_name)
+
+    def get_stuck_sessions(
+        self, live_session_names: set[str], *, timeout_s: int = 120,
+    ) -> set[str]:
+        """Return names of tmux sessions that are alive but have spawned
+        longer ago than `timeout_s` and have not yet sent any hook event.
+
+        Only sessions whose `cwd` shape matches a dispatched worktree are
+        considered (the registry only knows about spawned sessions in the
+        first place — anything outside its tracking is silently ignored).
+        Sessions not in `live_session_names` are also excluded: the reaper
+        has a separate dead-session path for those, and we must never tell it
+        to send signals to a session that has already disappeared.
+        """
+        now = time.monotonic()
+        return {
+            name
+            for name, spawned_at in self._spawn_times.items()
+            if name in live_session_names
+            and now - spawned_at >= timeout_s
+            and name not in self._spawn_received_hooks
+        }
+
+    @staticmethod
+    def _session_name_for_dispatched_cwd(cwd: str) -> str | None:
+        """Return the tmux session name of a dispatched session for `cwd`,
+        or None if `cwd` is not a dispatched worktree.
+
+        A dispatched agent runs in ``<project_path>/.claude/worktrees/<session_name>``
+        so the parent dir must be ``worktrees`` and *its* parent must be ``.claude``.
+        Other cwd shapes (the project root, an unrelated `claude` session, a
+        sandcastle container path) have no session name we recognise.
+        """
+        if not cwd:
+            return None
+        worktree = Path(cwd)
+        if worktree.parent.name != "worktrees" or worktree.parent.parent.name != ".claude":
+            return None
+        return worktree.name
 
     def cleanup_stale_sessions(self, max_idle_seconds: int = 3600) -> int:
         """Remove sessions that have been idle for too long.
