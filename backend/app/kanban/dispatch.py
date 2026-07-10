@@ -546,8 +546,40 @@ async def _resolve_work_type_fallback(session, project_key: str, card) -> str | 
 
 # ---- prompt ----------------------------------------------------------------
 
+# Prefix matched against a card's activity-feed comments when extracting the
+# latest revisit note. Kept in sync with service._REVISIT_PREFIX — the
+# service stamps this prefix on reopen_comment writes, dispatch reads it back
+# via extract_revisit_question. Same prefix discipline as
+# service._DONE_SUMMARY_PREFIX / _REVIEW_REQUESTED_PREFIX (distinct prefixes
+# so no two scopes collide).
+_REVISIT_PREFIX = "**Revisit:** "
+
+
+def extract_revisit_question(activity) -> str | None:
+    """Return the text of the latest `**Revisit:** <note>` comment on a
+    card's activity feed, or None when no such comment exists.
+
+    Mirrors the `**Impediment:**` extraction in router.resolve_impediment:
+    walk the feed in reverse (newest first) so multiple reopen rounds
+    return the *latest* rebuttal instead of the oldest one.
+
+    `activity` is the op-log KanbanOp list returned by
+    `service.card_activity`. Anything that's not an op of type `comment`
+    is skipped; the prefix match is on `payload["text"]`.
+    """
+    for op in reversed(list(activity)):
+        if op.op_type != "comment":
+            continue
+        text = (op.payload.get("text") or "")
+        if text.startswith(_REVISIT_PREFIX):
+            return text[len(_REVISIT_PREFIX):]
+    return None
+
+
 def build_card_prompt(card, *, persona: str | None, ship_mode: str,
-                      impediment_question: str | None = None) -> str:
+                      impediment_question: str | None = None,
+                      revisit_question: str | None = None,
+                      revisit_prior_decision: dict | None = None) -> str:
     preamble = (persona.strip() + "\n\n") if persona else ""
     impediment_section = ""
     if impediment_question:
@@ -557,6 +589,40 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
             f"> {impediment_question}\n\n"
             "Please address this question or clarify what's needed before proceeding.\n"
         )
+
+    revisit_section = ""
+    if revisit_question:
+        # Mirror of `impediment_section`. The prior-decision dict carries the
+        # Done summary + deliverable refs so the re-picked-up session has
+        # enough context to revise without re-reading every comment. When
+        # None or empty, only the rebuttal is rendered — that's the safe
+        # fallback for cards without the (optional) decision enrichment.
+        parts = [
+            "\n\n## REVISIT",
+            "A previous agent completed this card and a human has reopened it "
+            "with the following rebuttal. Treat this as a request to revise "
+            "the prior decision, not a brand-new task.\n",
+            f"> {revisit_question}\n",
+        ]
+        prior = revisit_prior_decision or {}
+        prior_lines = []
+        if prior.get("summary"):
+            prior_lines.append(f"- **Previous summary:** {prior['summary'].strip()}")
+        prior_deliverables = prior.get("deliverables") or []
+        if prior_deliverables:
+            refs = "\n".join(
+                f"  - `{d.get('kind', '?')}: {d.get('ref', '?')}`"
+                for d in prior_deliverables
+            )
+            prior_lines.append(f"- **Previous deliverables:**\n{refs}")
+        if prior_lines:
+            parts.append("\nFor context, the prior decision referenced:\n\n"
+                         + "\n".join(prior_lines) + "\n")
+        parts.append(
+            "\nPlease re-read the prior decision (deliverable docs in git) "
+            "and revise or uphold it with reasoning, then ship the update.\n"
+        )
+        revisit_section = "".join(parts)
 
     # Standardised session-end workflow — provider-agnostic, works with any
     # coding agent (Claude Code, OpenCode, Codex CLI, …).  The agent runs
@@ -573,6 +639,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         f"# {card.title}\n"
         f"{getattr(card, 'description', '') or ''}\n"
         f"{impediment_section}\n"
+        f"{revisit_section}\n"
         f"Ship mode: {ship_mode}\n\n"
         "Work autonomously to completion, following your role instructions above. "
         "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
@@ -606,6 +673,82 @@ def _build_problem_flag_instructions() -> str:
         "`[problem] <summary>`) if none exists. See the `flag-problem` skill "
         "for the full procedure. Keep this quick — don't let it derail the "
         "card you were actually dispatched for.\n"
+    )
+
+
+async def _resolve_revisit(session, card) -> tuple[str | None, dict | None]:
+    """Look up the latest `**Revisit:**` rebuttal for a card (None when no
+    reopen has happened) plus a small "prior decision" envelope that the
+    `## REVISIT` prompt section consumes.
+
+    Returns `(question, prior_decision_dict)` where `prior_decision_dict`
+    carries the Done summary + the deliverable refs. Both are None when the
+    card has no Revisit comment (the common case for non-reopened cards).
+
+    The prior-decision envelope is intentionally a small dict (not a
+    structured object) so callers don't need to import service-layer types;
+    `build_card_prompt` consumes it directly.
+    """
+    from app.kanban import service as svc
+
+    activity = await svc.card_activity(session, card.id)
+    revisit = extract_revisit_question(activity)
+    if revisit is None:
+        return None, None
+
+    done_summary, _ = await svc.enrich_done_info(session, card.id)
+    # Refresh the card to pick up deliverables (the session may have stale
+    # relationship state after _make_card creates the row without the
+    # deliverable eager-load).
+    fresh = await svc.get_card(session, card.id)
+    deliverables = []
+    if fresh is not None:
+        for d in (fresh.deliverables or []):
+            deliverables.append({"kind": d.kind, "ref": d.ref})
+    return revisit, {
+        "summary": done_summary or "",
+        "deliverables": deliverables,
+    }
+
+
+async def _stamp_resume_target(session, *, card, project_key: str,
+                               project_path: str) -> None:
+    """Best-effort resume: if the previous agent claim points at a session
+    whose worktree + Claude transcript still exist, persist
+    `resume_session_id`/`resume_project_folder` on the card so the spawn
+    below picks the resume transport.
+
+    Used by `dispatch_project` (auto-tick) right before picking up a
+    reopened card, so the agent session that revisits the decision can
+    literally continue where the prior one left off. Failure is silent
+    by design — analyst cards routinely GC their worktree after merging,
+    so a None fallback is the expected path. The dispatcher then runs a
+    fresh session; the agent rebuilds context from the `## REVISIT`
+    prompt-injected material instead.
+
+    No-op when the card has no `agent:` claim (e.g. it was never picked
+    up, only commented on by hand) — there's no prior session to resume.
+    """
+    from app.kanban.operations import apply_operation
+    from app.kanban.session_recovery import _resolve_resume_target
+
+    claimant = card.claimed_by or ""
+    if not claimant.startswith(CLAIMANT_PREFIX):
+        return
+    session_name = claimant[len(CLAIMANT_PREFIX):]
+    target = _resolve_resume_target(project_path, session_name)
+    if target is None:
+        return
+    resume_session_id, resume_project_folder = target
+    await apply_operation(
+        session, op_type="update", entity_type="card",
+        project_key=project_key, entity_id=card.id,
+        payload={"resume_session_id": resume_session_id,
+                 "resume_project_folder": resume_project_folder},
+    )
+    logger.info(
+        "reopen: stamped resume target on card %s (session %s -> %s)",
+        card.id, session_name, resume_session_id,
     )
 
 
@@ -1266,6 +1409,8 @@ async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
     phase: str = "executor",
     impediment_question: str | None = None,
+    revisit_question: str | None = None,
+    revisit_prior_decision: dict | None = None,
     agent_override: str | None = None,
     live_sessions: set[str] | None = None,
 ) -> dict | None:
@@ -1275,7 +1420,15 @@ async def _run_card(
     The transport parameter is the project default. If the card has an explicit transport
     setting, that takes precedence. `live_sessions`, when the caller already has a fresh
     tmux snapshot, is used to keep the minted session name from colliding with a running
-    session (see _mint_session_name)."""
+    session (see _mint_session_name).
+
+    `revisit_question` / `revisit_prior_decision` thread through to
+    `build_card_prompt` (the `## REVISIT` section mirror of `## IMPEDIMENT`).
+    Dispatch sets these when it picks up a card whose latest
+    `**Revisit:**`-prefixed comment exists — see `dispatch_project` and
+    `_run_card`'s caller; manual `dispatch_card` callers (UI button) leave
+    them None so the prompt doesn't leak prior-decision context the human
+    didn't ask for."""
     source_column = card.column
     name = _mint_session_name(project_path, card.title, live_sessions=live_sessions)
     claimant = CLAIMANT_PREFIX + name
@@ -1354,7 +1507,9 @@ async def _run_card(
     column_default_model = await get_column_default_model(session, project_key, target_agent)
     effective_model = _effective_model(card.model, column_default_model, persona_model)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
-        impediment_question=impediment_question)
+        impediment_question=impediment_question,
+        revisit_question=revisit_question,
+        revisit_prior_decision=revisit_prior_decision)
     if phase == "executor" and card.parent_card_id is not None:
         # Only child cards (parent_card_id set) get the PLAN CONTEXT section.
         # Legacy single-agent cards never have a parent; prepending the
@@ -1871,6 +2026,35 @@ async def dispatch_project(
         if transport is None:
             transport = await get_transport_for_project(project_path)
 
+        # Revisit injection: a card that was reopened (Done → Backlog with
+        # a `**Revisit:**` comment in the activity feed) needs the latest
+        # rebuttal threaded into the prompt so the next agent sees it
+        # (build_card_prompt renders the `## REVISIT` section only when
+        # revisit_question is non-None). Extract here, in the auto-tick,
+        # because this is where we have both the session and the project
+        # path handy; manual dispatch paths don't pull this in by default.
+        # Done cheaply (one short scan of an already-materialised op-log)
+        # and only on cards that actually have a Revisit comment, so the
+        # hot path is unaffected for ordinary cards.
+        revisit_question, revisit_prior_decision = await _resolve_revisit(
+            session, card,
+        )
+
+        # Best-effort resume stamp: when the prior session's worktree +
+        # transcript are still on disk, persist `resume_session_id` /
+        # `resume_project_folder` so the spawn below picks the resume
+        # transport (claude --resume) instead of starting fresh. Failure
+        # is silent — analyst cards routinely GC their worktree after
+        # Done, so a None fallback is the common path; the dispatch still
+        # runs as a fresh session, the agent just rebuilds context from
+        # the `## REVISIT` prompt-injected material. Mirrors the same
+        # graceful-degradation behaviour as redispatch_card.
+        if revisit_question and not card.resume_session_id:
+            await _stamp_resume_target(
+                session, card=card, project_key=project_key,
+                project_path=project_path,
+            )
+
         # Two-phase dispatch: when the card has an analyst_agent_id and no
         # analyst_run_id yet, spawn the analyst first and persist the run id
         # so the next tick doesn't re-spawn. The executor waits for a later
@@ -1883,6 +2067,8 @@ async def dispatch_project(
                 session, card=card, project_key=project_key,
                 project_path=project_path, transport=transport,
                 phase="analyst",
+                revisit_question=revisit_question,
+                revisit_prior_decision=revisit_prior_decision,
                 live_sessions=live_sessions,
             )
             if last_result is None:
@@ -1908,6 +2094,8 @@ async def dispatch_project(
             session, card=card, project_key=project_key,
             project_path=project_path, transport=transport,
             phase="executor",
+            revisit_question=revisit_question,
+            revisit_prior_decision=revisit_prior_decision,
             live_sessions=live_sessions,
         )
         if last_result is None:

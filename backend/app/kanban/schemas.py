@@ -141,6 +141,14 @@ class ReviewRequest(BaseModel):
     note: str
 
 
+class ReopenRequest(BaseModel):
+    """Weerleg & heropen: reopen a Done card with a rebuttal note. The note
+    is posted as `**Revisit:**` on the card and the card moves back to
+    Backlog so dispatch picks it up. Mirrors `ReviewRequest`'s shape — same
+    Done-column gate, distinct semantic."""
+    note: str
+
+
 class AttachRequest(BaseModel):
     kind: str
     ref: str

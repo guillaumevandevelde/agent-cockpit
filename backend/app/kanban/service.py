@@ -136,9 +136,20 @@ async def enrich_done_info(session, card_id: str) -> tuple[str | None, datetime 
 _REVIEW_REQUESTED_PREFIX = "**Review requested:** "
 
 
+# Prefix for the comment posted when a human reopens a Done card with a
+# rebuttal ("Weerleg & heropen"). Distinct from `_REVIEW_REQUESTED_PREFIX`
+# (a review spawns a sibling analysis card; a reopen moves the *same* card
+# back to Backlog) and distinct from `_DONE_SUMMARY_PREFIX` so
+# `enrich_done_info` never reads a reopen as the Done summary. Matched
+# verbatim by dispatch.extract_revisit_question to re-inject the latest
+# rebuttal into the prompt when the card is re-picked.
+_REVISIT_PREFIX = "**Revisit:** "
+
+
 class CardNotInDone(Exception):
-    """request_review target isn't currently in the Done column. Carries the
-    card's actual column so callers can surface it (REST → 409, MCP → error dict)."""
+    """request_review / reopen_card target isn't currently in the Done column.
+    Carries the card's actual column so callers can surface it
+    (REST → 409, MCP → error dict)."""
     def __init__(self, column: str):
         self.column = column
         super().__init__(f"card is in {column!r}, not Done")
@@ -200,6 +211,74 @@ async def request_review(session, card_id: str, note: str):
                  "column": "Backlog", "work_type": "analysis", "agent": agent,
                  "metadata": {"reviewed_card_id": card_id}})
     return await get_card(session, new_id)
+
+
+# Hard cap on the length of a reopen note we accept from REST/MCP. Anything
+# bigger is almost certainly an accidental paste of a long log/doc; let the
+# caller trim. Mirrors how the CommentRequest schema doesn't enforce a length
+# today (kept simple on purpose — this matches `request_review`).
+# (No explicit cap here on purpose; routers/mcp_server pass the note as-is.)
+
+
+async def reopen_card(session, card_id: str, note: str):
+    """Reopen a completed card with a rebuttal ("Weerleg & heropen").
+
+    Mirrors `request_review`'s "Done column only" contract for the *first*
+    reopen, but additionally accepts a card already in `Backlog` so a
+    second human rebuttal can sharpen a previously-reopened decision
+    without having to wait for the dispatch tick to move the card back to
+    Done (the card just needs the latest `**Revisit:**` comment to be
+    extractable when dispatch picks it up — see
+    `dispatch.extract_revisit_question`).
+
+    Behaviour matrix:
+
+    - Card in `Done` → post the Revisit comment + move to `Backlog`.
+    - Card in `Backlog` (already reopened once) → post the Revisit
+      comment only. The dispatch tick already has the card on its list;
+      the new comment becomes the latest `**Revisit:**` and gets injected
+      into the next prompt.
+    - Card in any other column → raise `CardNotInDone`. Active cards
+      shouldn't be reopened while in flight.
+
+    The `request_review` contract enforced `column == "Done"` because the
+    review flow spawns a sibling card; reopen doesn't, so the constraint
+    here is relaxed to the union of Done + Backlog. A reviewer who has
+    seen the first rebuttal but wants to push back harder should not have
+    to wait for the next dispatch cycle to amend the rebuttal.
+
+    Resume-handling (`resume_session_id`/`resume_project_folder`) lives in
+    the dispatch layer, because that layer is the only one with a reliable
+    project_path (the service-level API would need to thread it through to
+    call `session_recovery._resolve_resume_target`). Doing it at dispatch time
+    keeps the service contract minimal: this routine only mutates board state.
+
+    Returns the reloaded card on success. None when the card id is unknown.
+    Raises `CardNotInDone` when the card exists but isn't in Done or
+    Backlog — the check runs before any op, so a rejected call leaves the
+    board untouched.
+    """
+    from app.kanban.operations import apply_operation
+
+    card = await get_card(session, card_id)
+    if card is None:
+        return None
+    if card.column not in ("Done", "Backlog"):
+        raise CardNotInDone(card.column)
+
+    await apply_operation(session, op_type="comment", entity_type="comment",
+        project_key="", entity_id=card_id,
+        payload={"text": f"{_REVISIT_PREFIX}{note}"})
+
+    # Only re-move to Backlog when the card was in Done — repeated reopen
+    # calls on an already-Backlog card just append a sharper Revisit
+    # comment; the dispatch tick already has the card on its list and the
+    # new comment becomes the one it injects.
+    if card.column == "Done":
+        await apply_operation(session, op_type="move", entity_type="card",
+            project_key="", entity_id=card_id, payload={"column": "Backlog"})
+
+    return await get_card(session, card_id)
 
 
 async def list_project_ops(session, project_key: str):

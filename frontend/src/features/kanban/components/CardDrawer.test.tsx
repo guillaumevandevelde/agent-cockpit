@@ -247,6 +247,104 @@ describe("CardDrawer request review control", () => {
   });
 });
 
+describe("CardDrawer reopen control", () => {
+  it("does not render the reopen control when the card is not in Done", () => {
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+
+    render(
+      <CardDrawer
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("reopen-control")).toBeNull();
+  });
+
+  it("submits the rebuttal via reopen and calls onChanged on a Done card", async () => {
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const reopenMock = kanbanApi.reopen as ReturnType<typeof vi.fn>;
+    reopenMock.mockResolvedValue({ ...baseCard, id: "card-1", column: "Backlog" });
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    const onChanged = vi.fn();
+
+    render(
+      <CardDrawer
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    const control = await screen.findByTestId("reopen-control");
+    expect(control).not.toBeNull();
+
+    const textarea = screen.getByTestId("reopen-note") as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "X is wrong because Y." },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("reopen-submit"));
+    });
+
+    await waitFor(() => expect(reopenMock).toHaveBeenCalled());
+    const [cardId, note] = reopenMock.mock.calls[0];
+    expect(cardId).toBe("card-1");
+    expect(note).toBe("X is wrong because Y.");
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("disables the submit button while the request is in flight", async () => {
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    const reopenMock = kanbanApi.reopen as ReturnType<typeof vi.fn>;
+    // Resolve only on the explicit call below — keep the in-flight promise pending.
+    let resolveReopen!: (value: Card) => void;
+    reopenMock.mockImplementation(
+      () =>
+        new Promise<Card>((resolve) => {
+          resolveReopen = resolve;
+        }),
+    );
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+
+    render(
+      <CardDrawer
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const textarea = await screen.findByTestId("reopen-note");
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "Rebuttal text" },
+      });
+    });
+    const submit = screen.getByTestId("reopen-submit");
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+
+    // While in flight, the button must be disabled so a double-click
+    // doesn't fire two reopen ops.
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    // Resolve so cleanup doesn't hang on an unsettled promise.
+    await act(async () => {
+      resolveReopen({ ...baseCard, column: "Backlog" });
+    });
+  });
+});
+
 describe("CardDrawer deliverables tab per-kind rendering", () => {
   it("renders each deliverable kind with its own icon and ref formatting", () => {
     const card: Card = {

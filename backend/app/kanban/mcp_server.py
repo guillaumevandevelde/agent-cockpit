@@ -303,6 +303,36 @@ async def request_review(card_id: str, note: str) -> dict:
 
 
 @mcp.tool()
+async def reopen_card(card_id: str, note: str) -> dict:
+    """Weerleg & heropen: reopen a *completed* (Done) card with a rebuttal.
+
+    Posts a `**Revisit:** <note>` comment on the original card and moves the
+    *same* card back to Backlog so the dispatcher re-picks it. Distinct from
+    `request_review`: a review spawns a sibling analysis card; a reopen moves
+    the existing card back into the dispatch queue. The dispatcher injects the
+    rebuttal into the spawned session's prompt via a `## REVISIT` section
+    (mirroring `## IMPEDIMENT`), so the next agent sees both the rebuttal and
+    the previous decision's summary + deliverable refs. When the original
+    session transcript is still on disk, the dispatcher also resumes that
+    transcript instead of starting fresh.
+
+    Returns the reopened card, or {error: not_found} if the card is missing,
+    or {error: not_in_done, column: <col>} if the card isn't currently in Done.
+    """
+    async with KanbanSessionLocal() as s:
+        try:
+            card = await service.reopen_card(s, card_id, note)
+        except service.CardNotInDone as e:
+            return {"error": "not_in_done", "column": e.column}
+        if card is None:
+            logger.debug("reopen_card: %s not found", card_id)
+            return {"error": _NOT_FOUND, "card_id": card_id}
+        await s.commit()
+        logger.info("reopen_card: %s reopened", card_id)
+        return await _card_dict(s, card)
+
+
+@mcp.tool()
 async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
     """Bind a deliverable (pr|branch|commit|link|note) as a portable reference."""
     async with KanbanSessionLocal() as s:
