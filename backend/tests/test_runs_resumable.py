@@ -8,9 +8,9 @@ import pytest
 
 
 def test_resume_resolve_directory_prefers_transcript_cwd(monkeypatch, tmp_path):
-    from app.services.cc_bridge import spawn as claude_spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
     from app.services.agentic_cli.claude_code import ClaudeCodeProvider
+    from app.services.runs import spawn as claude_spawn
 
     worktree_dir = tmp_path / "wt"
     worktree_dir.mkdir()
@@ -46,7 +46,7 @@ def _write_session(folder: Path, session_id: str, text: str):
 
 
 def test_encode_project_folder_matches_claude_layout():
-    from app.services.agent_bridge.resumable import _encode_project_folder
+    from app.services.runs.resumable import _encode_project_folder
 
     encoded = _encode_project_folder(
         "/home/guillaume/dev/claude-cockpit/.claude/worktrees/Kanban-plan"
@@ -56,7 +56,7 @@ def test_encode_project_folder_matches_claude_layout():
 
 @pytest.mark.asyncio
 async def test_aggregates_main_and_worktree_sessions(monkeypatch, tmp_path):
-    from app.services.agent_bridge import resumable
+    from app.services.runs import resumable
 
     main_dir = tmp_path / "repo"
     main_dir.mkdir()
@@ -93,7 +93,7 @@ async def test_aggregates_main_and_worktree_sessions(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_non_git_directory_returns_only_its_own_sessions(monkeypatch, tmp_path):
-    from app.services.agent_bridge import resumable
+    from app.services.runs import resumable
 
     plain_dir = tmp_path / "plain"
     plain_dir.mkdir()
@@ -115,7 +115,7 @@ async def test_non_git_directory_returns_only_its_own_sessions(monkeypatch, tmp_
 def test_list_worktrees_parses_porcelain_output(monkeypatch):
     from types import SimpleNamespace
 
-    from app.services.agent_bridge import resumable
+    from app.services.runs import resumable
 
     porcelain = (
         "worktree /home/g/repo\n"
@@ -141,7 +141,7 @@ def test_list_worktrees_parses_porcelain_output(monkeypatch):
 
 
 def test_list_worktrees_falls_back_when_git_missing(monkeypatch):
-    from app.services.agent_bridge import resumable
+    from app.services.runs import resumable
 
     def boom(*a, **k):
         raise FileNotFoundError("git not found")

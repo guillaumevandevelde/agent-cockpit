@@ -24,8 +24,8 @@ async def test_live_agents_happy_path():
             "provider": "claude-code",
         }
     ]
-    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=fake_sessions), \
-         patch("app.api.v1.agent_activity.capture_pane_preview", return_value="line1\nline2\n"):
+    with patch("app.api.v1.run_activity.discover_agent_sessions", return_value=fake_sessions), \
+         patch("app.api.v1.run_activity.capture_pane_preview", return_value="line1\nline2\n"):
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/live")
     assert r.status_code == 200, r.text
@@ -40,7 +40,7 @@ async def test_live_agents_happy_path():
 
 @pytest.mark.asyncio
 async def test_live_agents_empty_when_no_sessions():
-    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=[]):
+    with patch("app.api.v1.run_activity.discover_agent_sessions", return_value=[]):
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/live")
     assert r.status_code == 200, r.text
@@ -50,8 +50,8 @@ async def test_live_agents_empty_when_no_sessions():
 @pytest.mark.asyncio
 async def test_live_agents_status_waiting_inferred_from_preview():
     fake_sessions = [{"tmux_target": "s:0.0", "provider": "claude-code"}]
-    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=fake_sessions), \
-         patch("app.api.v1.agent_activity.capture_pane_preview", return_value="Waiting for permission to run"):
+    with patch("app.api.v1.run_activity.discover_agent_sessions", return_value=fake_sessions), \
+         patch("app.api.v1.run_activity.capture_pane_preview", return_value="Waiting for permission to run"):
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/live")
     assert r.status_code == 200, r.text
@@ -76,7 +76,7 @@ async def test_activity_summary_groups_by_provider():
         {"provider": "claude-code"},
         {"provider": "codex"},
     ]
-    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=fake_sessions):
+    with patch("app.api.v1.run_activity.discover_agent_sessions", return_value=fake_sessions):
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/summary")
     assert r.status_code == 200, r.text
@@ -107,8 +107,8 @@ async def test_live_agents_does_not_block_the_event_loop():
             events.append("tick")
 
     fake_sessions = [{"tmux_target": "s:0.0", "provider": "claude-code"}]
-    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=fake_sessions), \
-         patch("app.api.v1.agent_activity.capture_pane_preview", side_effect=slow_capture):
+    with patch("app.api.v1.run_activity.discover_agent_sessions", return_value=fake_sessions), \
+         patch("app.api.v1.run_activity.capture_pane_preview", side_effect=slow_capture):
         async def do_request() -> None:
             async with _client() as ac:
                 r = await ac.get("/api/v1/agent-activity/live")

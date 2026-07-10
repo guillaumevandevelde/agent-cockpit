@@ -9,27 +9,32 @@ and retried automatically when resources become available.
 """
 from __future__ import annotations
 
-import logging
 import json
+import logging
 import re
 import subprocess
 import uuid
-import yaml
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from app.kanban.models import KanbanCard, KanbanMeta
-from app.kanban.operations import ClaimRejected, apply_operation
-from app.kanban.project_key import resolve_project_key
-from app.kanban.service import get_card, get_column_default_model, get_column_default_provider, list_cards
-from app.services.memory_monitor import get_memory_status_cached
-from app.services.agentic_cli.provider_env import PROVIDER_ANTHROPIC
+import yaml
 
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
 from app.kanban.dep_resolver import meets_dep_prerequisites
+from app.kanban.models import KanbanCard, KanbanMeta
+from app.kanban.operations import ClaimRejected, apply_operation
+from app.kanban.project_key import resolve_project_key
+from app.kanban.service import (
+    get_card,
+    get_column_default_model,
+    get_column_default_provider,
+    list_cards,
+)
+from app.services.agentic_cli.provider_env import PROVIDER_ANTHROPIC
+from app.services.memory_monitor import get_memory_status_cached
 from app.services.scheduling.session_registry import session_registry
 
 logger = logging.getLogger(__name__)
@@ -951,8 +956,8 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
 
         Raises MemoryLimitExceeded if hardware memory limits are reached.
         """
-        from app.services.agent_bridge.spawn import spawn_session
         from app.services.agentic_cli.base import SpawnCommandOptions
+        from app.services.runs.spawn import spawn_session
         from app.services.scheduling.session_registry import session_registry
 
         if not session_registry.can_add_session():
@@ -1122,7 +1127,7 @@ def _mint_session_name(
     # Must also avoid colliding with a currently-live tmux session: the claim,
     # git worktree and git branch are all committed under this exact name before
     # spawn_session runs. If it happened to already be a running session, spawn's
-    # own collision fallback (agent_bridge.spawn._session_name_for) would silently
+    # own collision fallback (runs.spawn._session_name_for) would silently
     # rename just the tmux session -- leaving cleanup_session_for_card looking up
     # a name that never existed, assuming the agent "already exited", and
     # orphaning the real session forever (see kanban card "session termination").
@@ -1189,8 +1194,9 @@ async def _column_max_sessions(session, project_key: str) -> dict[str, int]:
     max_sessions setting are included — columns not in the dict fall
     back to the project-level cap.
     """
-    from app.kanban.models import KanbanColumn
     from sqlalchemy import select
+
+    from app.kanban.models import KanbanColumn
     rows = (await session.execute(
         select(KanbanColumn)
         .where(KanbanColumn.project_key == project_key)
@@ -2531,8 +2537,8 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
     def _transport(*, directory: str, prompt: str, session_name: str,
                    cli_id: str = "claude-code", provider: str = "anthropic",
                    model: str | None = None) -> dict:
-        from app.services.agent_bridge.spawn import spawn_session
         from app.services.agentic_cli.base import SpawnCommandOptions
+        from app.services.runs.spawn import spawn_session
         from app.services.scheduling.session_registry import session_registry
 
         if not session_registry.can_add_session():

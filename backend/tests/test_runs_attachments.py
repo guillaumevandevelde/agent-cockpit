@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models.database import BridgeSessionAttachment
-from app.services.agent_bridge.attachments import agent_bridge_attachment_service
+from app.services.runs.attachments import run_attachment_service
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
@@ -49,7 +49,7 @@ def attachment_boundaries(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "bridge_attachment_retention_days", 7)
     monkeypatch.setattr(settings, "bridge_attachment_max_per_session_per_day", 100)
     monkeypatch.setattr(
-        "app.services.agent_bridge.attachments.discover_agent_sessions",
+        "app.services.runs.attachments.discover_agent_sessions",
         lambda: [
             {
                 "tmux_target": "snazzyemail:0.0",
@@ -148,9 +148,9 @@ async def test_paste_attachment_sends_literal_text_then_delayed_enter(client, mo
         calls.append(args)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("app.services.agent_bridge.attachments.subprocess.run", fake_run)
+    monkeypatch.setattr("app.services.runs.attachments.subprocess.run", fake_run)
     monkeypatch.setattr(
-        "app.services.agent_bridge.attachments.time.sleep",
+        "app.services.runs.attachments.time.sleep",
         lambda seconds: calls.append(["sleep", seconds]),
     )
 
@@ -179,11 +179,11 @@ async def test_paste_attachment_can_require_interactive_relay(client, monkeypatc
     calls = []
 
     monkeypatch.setattr(
-        "app.api.v1.agent_bridge.router.is_target_interactive",
+        "app.api.v1.runs.router.is_target_interactive",
         lambda _target: False,
     )
     monkeypatch.setattr(
-        "app.services.agent_bridge.attachments.subprocess.run",
+        "app.services.runs.attachments.subprocess.run",
         lambda args, **_kwargs: calls.append(args),
     )
 
@@ -242,7 +242,7 @@ async def test_cleanup_expired_removes_file_and_row(db, tmp_path):
     await db.commit()
     await db.refresh(attachment)
 
-    removed = await agent_bridge_attachment_service.cleanup_expired(db, now=now)
+    removed = await run_attachment_service.cleanup_expired(db, now=now)
 
     assert removed == 1
     assert not storage_path.exists()

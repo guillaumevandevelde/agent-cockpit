@@ -274,18 +274,18 @@ class PresenceSession(Base):
     )
 
 
-class AgentTeam(Base):
-    """A group of related agent sessions (a team with lead + members).
+class RunGroup(Base):
+    """A group of related CLI runs (lead + members).
 
     Auto-detected by matching cwd across sessions, or created manually via
     the "Make team" action in the UI.
     """
 
-    __tablename__ = "agent_teams"
+    __tablename__ = "run_groups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    lead_session_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    lead_run_name: Mapped[str | None] = mapped_column(String, nullable=True)
     cli: Mapped[str] = mapped_column(String, nullable=False)
     cwd: Mapped[str] = mapped_column(String, nullable=False)
     is_auto_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -296,28 +296,28 @@ class AgentTeam(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
-    members: Mapped[list["AgentTeamMember"]] = relationship(
-        "AgentTeamMember",
-        back_populates="team",
+    memberships: Mapped[list["RunMembership"]] = relationship(
+        "RunMembership",
+        back_populates="group",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
 
 
-class AgentTeamMember(Base):
-    """A member session belonging to an agent team."""
+class RunMembership(Base):
+    """A run belonging to a RunGroup."""
 
-    __tablename__ = "agent_team_members"
+    __tablename__ = "run_memberships"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    team_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("agent_teams.id", ondelete="CASCADE"), nullable=False
+    group_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("run_groups.id", ondelete="CASCADE"), nullable=False
     )
-    session_name: Mapped[str] = mapped_column(String, nullable=False)
+    run_name: Mapped[str] = mapped_column(String, nullable=False)
     pane_id: Mapped[str | None] = mapped_column(String, nullable=True)
     tmux_target: Mapped[str] = mapped_column(String, nullable=False)
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )
 
-    team: Mapped["AgentTeam"] = relationship("AgentTeam", back_populates="members")
+    group: Mapped["RunGroup"] = relationship("RunGroup", back_populates="memberships")

@@ -100,8 +100,8 @@ async def test_tick_spawns_analyst_when_set(monkeypatch):
 
     monkeypatch.setattr(dispatch, "_run_card", fake_run_card)
 
-    from app.kanban.operations import apply_operation
     from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
     from tests.kanban_test_db import TestSessionLocal
 
     KanbanSessionLocal = TestSessionLocal()
@@ -456,7 +456,6 @@ async def test_redispatch_card_runs_analyst_phase_when_analyst_run_id_missing(mo
     §8 ("analyst sessie crasht halverwege → gebruiker kan redispatch_card
     aanroepen").
     """
-    from app.kanban.models import KanbanCard
     from app.kanban.operations import apply_operation
     from tests.kanban_test_db import TestSessionLocal
 
@@ -513,7 +512,6 @@ async def test_redispatch_card_runs_executor_phase_when_analyst_already_ran(monk
     """A multi-agent card past the analyst phase must re-spawn the executor
     when re-dispatched — not the analyst a second time. Covers the case
     where the executor crashed (analyst_run_id is set)."""
-    from app.kanban.models import KanbanCard
     from app.kanban.operations import apply_operation
     from tests.kanban_test_db import TestSessionLocal
 
@@ -622,9 +620,10 @@ async def test_dispatch_project_analyst_run_id_persisted_via_op_log(monkeypatch)
     - the op-log carries a corresponding ``update`` op with the field in its
       payload (which rematerialize() would replay)
     """
+    from sqlalchemy import select
+
     from app.kanban.models import KanbanCard, KanbanOp
     from app.kanban.operations import apply_operation
-    from sqlalchemy import select
     from tests.kanban_test_db import TestSessionLocal
 
     async def fake_run_card(session, **kwargs):
@@ -1028,7 +1027,6 @@ async def test_run_card_unknown_work_type_falls_through_not_engineer(monkeypatch
     # for unknown work_types via WORK_TYPE_PERSONA_DEFAULTS.get default.
     # We exercise the real path (no stub) here — _resolve_work_type_fallback
     # in dispatch.py is what protects against it.
-    from app.kanban import service
     from app.kanban.schemas import WORK_TYPE_PERSONA_DEFAULTS
 
     real_default = WORK_TYPE_PERSONA_DEFAULTS.get("research", "engineer")

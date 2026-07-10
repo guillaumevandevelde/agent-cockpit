@@ -48,10 +48,10 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize database
     await init_db()
     from app.database import AsyncSessionLocal
-    from app.services.agent_bridge.attachments import agent_bridge_attachment_service
+    from app.services.runs.attachments import run_attachment_service
     try:
         async with AsyncSessionLocal() as db:
-            await agent_bridge_attachment_service.cleanup_expired(db)
+            await run_attachment_service.cleanup_expired(db)
     except Exception:
         logger.exception("Failed to clean up expired Agent Bridge attachments")
     from app.kanban.db import init_kanban_db
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     await ensure_backup_columns(engine)
     await ensure_model_columns(engine)
     # Clean up any orphaned relay processes from previous runs
-    from app.services.cc_bridge.pty_relay import cleanup_orphaned_relays, close_all_relays
+    from app.services.runs.pty_relay import cleanup_orphaned_relays, close_all_relays
     cleanup_orphaned_relays()
     # Start the scheduler and reschedule persisted, enabled jobs
     from sqlalchemy import select

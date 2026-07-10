@@ -53,7 +53,7 @@ class TestCcBridgeOriginValidation:
 
 class TestAgentBridgeOriginValidation:
     def _check(self, origin: str, host: str, cors_origins: list[str] = _ALLOWED) -> bool:
-        import app.api.v1.agent_bridge.router as mod
+        import app.api.v1.runs.router as mod
         with patch.object(mod, "settings") as m:
             m.cors_origins = cors_origins
             return mod._is_same_origin(origin, _make_ws(host))

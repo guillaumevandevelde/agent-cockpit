@@ -3,30 +3,30 @@ from unittest.mock import MagicMock
 
 
 def test_is_claude_code_matches_claude_command():
-    from app.services.cc_bridge.discovery import _is_claude_code
+    from app.services.runs.discovery import _is_claude_code
     assert _is_claude_code("claude") is True
 
 
 def test_is_claude_code_rejects_other_commands():
-    from app.services.cc_bridge.discovery import _is_claude_code
+    from app.services.runs.discovery import _is_claude_code
     assert _is_claude_code("vim") is False
     assert _is_claude_code("bash") is False
     assert _is_claude_code("node") is False
 
 
 def test_is_claude_code_matches_claude_variants():
-    from app.services.cc_bridge.discovery import _is_claude_code
+    from app.services.runs.discovery import _is_claude_code
     assert _is_claude_code("claude") is True
 
 
 def test_discover_returns_list():
-    from app.services.cc_bridge.discovery import discover_cc_sessions
+    from app.services.runs.discovery import discover_cc_sessions
     result = discover_cc_sessions()
     assert isinstance(result, list)
 
 
 def test_discover_session_dict_shape():
-    from app.services.cc_bridge.discovery import _build_session_info
+    from app.services.runs.discovery import _build_session_info
 
     mock_pane = MagicMock()
     mock_pane.pane_current_command = "claude"
@@ -51,6 +51,6 @@ def test_discover_session_dict_shape():
 
 
 def test_capture_pane_preview_returns_string():
-    from app.services.cc_bridge.discovery import capture_pane_preview
+    from app.services.runs.discovery import capture_pane_preview
     result = capture_pane_preview("nonexistent-session:0.0")
     assert isinstance(result, str)

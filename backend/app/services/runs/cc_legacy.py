@@ -4,11 +4,11 @@ from __future__ import annotations
 import logging
 
 from app.models.constants import SessionStatus
-from app.services.agent_bridge.discovery import (
-    capture_pane_preview,  # noqa: F401  (re-exported for cc_bridge.router)
+from app.services.agentic_cli import get_agentic_cli
+from app.services.runs.discovery import (
+    capture_pane_preview,  # noqa: F401  (re-exported for the legacy cc-bridge route)
     discover_agent_sessions,
 )
-from app.services.agentic_cli import get_agentic_cli
 
 logger = logging.getLogger(__name__)
 
