@@ -533,6 +533,41 @@ async def get_work_type_persona(
     return WORK_TYPE_PERSONA_DEFAULTS.get(work_type, "engineer")
 
 
+# Prefix for the comment posted when a card's work_type is changed to one whose
+# persona no longer matches a still-pinned `agent`. `resolve_create_agent`'s
+# "explicit agent wins over work_type" rule is intentional and unchanged (the
+# dispatcher reads card.agent first, and dispatch.py's fallback_persona matches
+# a valid persona name directly), so a stale agent silently beats the new
+# work_type mapping. This comment makes that otherwise-invisible routing
+# decision show up on the board. See the "[problem] update_card laat work_type
+# wijzigen zonder agent te her-resolven" card.
+_ROUTING_MISMATCH_PREFIX = "**Routing mismatch:** "
+
+
+async def work_type_agent_mismatch_comment(
+    session, project_key: str, *,
+    new_work_type: str | None, current_agent: str | None,
+) -> str | None:
+    """Return a board comment when `new_work_type` maps to a persona that
+    differs from the card's pinned `current_agent`, else None.
+
+    Only informational — dispatch keeps honouring the explicit `agent`. Returns
+    None when there is no conflict: no agent pinned, no (or cleared) work_type,
+    or the mapped persona already equals the pinned agent.
+    """
+    agent = (current_agent or "").strip()
+    if not agent or not new_work_type:
+        return None
+    persona = await get_work_type_persona(session, project_key, new_work_type)
+    if persona == agent:
+        return None
+    return (
+        f'{_ROUTING_MISMATCH_PREFIX}work_type="{new_work_type}" maps to persona '
+        f'"{persona}", but this card\'s agent is pinned to "{agent}" — dispatch '
+        f'will use "{agent}". Clear or change `agent` to route by work_type.'
+    )
+
+
 async def upsert_work_type_mapping(
     session, project_key: str, work_type: str, persona: str
 ) -> KanbanWorkTypeMapping:

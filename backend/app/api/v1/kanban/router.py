@@ -335,8 +335,28 @@ async def update_card(cid: str, payload: CardUpdate):
                 payload={"column": column_change})
 
         if data:
+            # A work_type change that leaves the pinned `agent` untouched keeps
+            # dispatch routing to the stale agent (the "explicit agent wins"
+            # rule is intentional — see service.resolve_create_agent). Surface
+            # that otherwise-silent decision as a visible board comment. Read
+            # the current agent *before* applying the update.
+            mismatch_comment = None
+            if "work_type" in data and "agent" not in data:
+                existing = await service.get_card(s, cid)
+                if existing is not None:
+                    mismatch_comment = await service.work_type_agent_mismatch_comment(
+                        s, existing.project_key or _project_key_from_card(s, existing),
+                        new_work_type=data["work_type"],
+                        current_agent=existing.agent,
+                    )
+
             await apply_operation(s, op_type="update", entity_type="card",
                 project_key="", entity_id=cid, payload=data)
+
+            if mismatch_comment:
+                await apply_operation(s, op_type="comment", entity_type="comment",
+                    project_key="", entity_id=cid,
+                    payload={"text": mismatch_comment})
 
         # If the card now has analyst_agent_id set, ensure the 'analyst'
         # kanban_columns row exists for this project. Idempotent. Without
