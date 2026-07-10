@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Find the PR for this workflow run
         id: pr
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: pulls } = await github.rest.pulls.list({
@@ -33,7 +33,7 @@ jobs:
 
       - name: Comment and label, once only
         if: steps.pr.outputs.number != '' && !contains(steps.pr.outputs.labels, 'auto-fix-attempted')
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const prNumber = Number('${{ steps.pr.outputs.number }}');
