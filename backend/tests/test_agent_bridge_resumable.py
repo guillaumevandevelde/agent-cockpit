@@ -9,8 +9,8 @@ import pytest
 
 def test_resume_resolve_directory_prefers_transcript_cwd(monkeypatch, tmp_path):
     from app.services.cc_bridge import spawn as claude_spawn
-    from app.services.providers.base import SpawnCommandOptions
-    from app.services.providers.claude_code import ClaudeCodeProvider
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.agentic_cli.claude_code import ClaudeCodeProvider
 
     worktree_dir = tmp_path / "wt"
     worktree_dir.mkdir()

@@ -1,17 +1,17 @@
-"""Codex CLI provider implementation."""
+"""Codex CLI implementation."""
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
 
-from app.services.providers.base import (
-    AgentProvider,
+from app.services.agentic_cli.base import (
+    AgenticCli,
     SpawnCommandOptions,
     argv0_name,
     has_binary_descendant,
 )
-from app.services.providers.platform_env import PLATFORM_BEDROCK
+from app.services.agentic_cli.provider_env import PROVIDER_BEDROCK
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def get_codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 
 
-class CodexCliProvider(AgentProvider):
+class CodexCli(AgenticCli):
     id = "codex-cli"
     display_name = "Codex"
     binary_name = "codex"
@@ -83,12 +83,12 @@ class CodexCliProvider(AgentProvider):
             raise ValueError(f"Unsupported Codex mode: {options.mode}")
 
         command = ["codex", "--cd", options.directory]
-        if options.platform == PLATFORM_BEDROCK:
+        if options.provider == PROVIDER_BEDROCK:
             command += ["--config", CODEX_BEDROCK_MODEL_PROVIDER]
 
         effective_model = (
             options.bedrock_model
-            if options.platform == PLATFORM_BEDROCK and options.bedrock_model
+            if options.provider == PROVIDER_BEDROCK and options.bedrock_model
             else options.model
         )
         if effective_model:

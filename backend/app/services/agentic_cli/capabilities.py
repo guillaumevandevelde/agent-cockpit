@@ -1,4 +1,4 @@
-"""Central provider capability matrix."""
+"""Central CLI capability matrix."""
 from __future__ import annotations
 
 import logging
@@ -39,7 +39,7 @@ def capability(state: str, label: str, reason: str | None = None) -> dict[str, s
     return result
 
 
-PROVIDER_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
+AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
     "claude-code": {
         "config": capability("write_capable", "Configuration", "Claude Code JSON settings can be viewed and edited."),
         "sessions": capability("read_only", "Session History", "Claude Code transcript history is available."),
@@ -153,8 +153,8 @@ PROVIDER_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
 }
 
 
-def normalize_capability_matrix(provider_id: str) -> dict[str, dict[str, Any]]:
-    matrix = deepcopy(PROVIDER_CAPABILITY_MATRIX.get(provider_id, {}))
+def normalize_capability_matrix(cli_id: str) -> dict[str, dict[str, Any]]:
+    matrix = deepcopy(AGENTIC_CLI_CAPABILITY_MATRIX.get(cli_id, {}))
     for key in CAPABILITY_KEYS:
         matrix.setdefault(
             key,
@@ -163,8 +163,8 @@ def normalize_capability_matrix(provider_id: str) -> dict[str, dict[str, Any]]:
     return matrix
 
 
-def capability_flags(provider_id: str) -> dict[str, bool]:
-    matrix = normalize_capability_matrix(provider_id)
+def capability_flags(cli_id: str) -> dict[str, bool]:
+    matrix = normalize_capability_matrix(cli_id)
     return {
         key: detail.get("state") in SUPPORTED_STATES
         for key, detail in matrix.items()

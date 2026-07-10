@@ -23,9 +23,9 @@ from typing import Protocol
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
-from app.kanban.service import get_card, get_column_default_model, get_column_default_platform, list_cards
+from app.kanban.service import get_card, get_column_default_model, get_column_default_provider, list_cards
 from app.services.memory_monitor import get_memory_status_cached
-from app.services.providers.platform_env import PLATFORM_ANTHROPIC
+from app.services.agentic_cli.provider_env import PROVIDER_ANTHROPIC
 
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
@@ -34,20 +34,20 @@ from app.services.scheduling.session_registry import session_registry
 
 logger = logging.getLogger(__name__)
 
-# Known provider IDs are registered in app.services.providers; re-derived here
+# Known CLI IDs are registered in app.services.agentic_cli; re-derived here
 # so the phase router doesn't depend on that module being imported at typing time.
-def _phase_provider_id(card, *, phase: str, known_providers: set | None = None) -> str:
-    """Resolve which spawn transport/provider id the card picks for `phase`.
+def _phase_cli_id(card, *, phase: str, known_clis: set | None = None) -> str:
+    """Resolve which spawn transport/CLI id the card picks for `phase`.
 
     For analyst: the card's analyst_agent_id, or "claude-code" when unset.
     For executor: the card's executor_agent_id first; if that's unset, fall
-    back to card.agent — but only when it is itself a registered provider id.
+    back to card.agent — but only when it is itself a registered CLI id.
     A legacy `card.agent` like "engineer" (a persona/column name, not a
-    provider) must NOT leak into the spawn transport, so when `known_providers`
+    CLI id) must NOT leak into the spawn transport, so when `known_clis`
     is supplied, only matching values are accepted as a fallback; when it is
     None (tests / pre-resolution callers), `card.agent` is taken at face value.
     Without that filter the executor branch would pass `"engineer"` to a
-    transport that expects a registered provider id."""
+    transport that expects a registered CLI id."""
     if phase == "analyst":
         return getattr(card, "analyst_agent_id", None) or "claude-code"
     # phase == "executor"
@@ -55,26 +55,26 @@ def _phase_provider_id(card, *, phase: str, known_providers: set | None = None) 
     if executor_id:
         return executor_id
     fallback = getattr(card, "agent", None)
-    if fallback and (known_providers is None or fallback in known_providers):
+    if fallback and (known_clis is None or fallback in known_clis):
         return fallback
     return "claude-code"
 
 
 def _phase_target_agent(card, *, project_path: str, phase: str, source_column: str,
                         agent_override: str | None = None,
-                        known_providers: set | None = None,
+                        known_clis: set | None = None,
                         fallback_persona: str | None = None) -> str:
     """Persona/column for the spawned session. Analyst phase is fixed to
     'analyst'; executor phase reuses the legacy overload-resolution rules from
     `_run_card` (the pre-`_phase_*` lines 767-768 of this module), so an
-    explicit non-provider `agent_override` — e.g. "engineer" — still wins over
+    explicit non-CLI `agent_override` — e.g. "engineer" — still wins over
     card.agent and the column-derived fallback.
 
-    `known_providers` is passed in so the agent_override short-circuit can tell
-    a provider id apart from a persona/column name (mirrors the provider-id
+    `known_clis` is passed in so the agent_override short-circuit can tell
+    a CLI id apart from a persona/column name (mirrors the CLI-id
     resolution on the spawn side). When it's None, `agent_override` is taken
     at face value, which preserves the pre-refactor semantics for tests that
-    don't populate the providers registry.
+    don't populate the agentic_cli registry.
 
     `fallback_persona` is the work_type-resolved persona (see
     `_resolve_work_type_fallback` and `get_work_type_persona`). It kicks in
@@ -82,14 +82,14 @@ def _phase_target_agent(card, *, project_path: str, phase: str, source_column: s
     which is exactly the regression behind kanban card 9cf106e7 ("Card with
     analysis work type got picked up by an engineer"), where a legacy card
     created before the create-time auto-fill (commit 80e139e) had
-    `agent='claude-code'` (a provider id, not a persona) and was routed to the
+    `agent='claude-code'` (a CLI id, not a persona) and was routed to the
     hardcoded 'engineer' fallback. Resolving at dispatch time closes that gap
     — including cards whose user later PATCHed work_type without re-picking
     agent — without touching the existing card row in DB.
     """
     if phase == "analyst":
         return "analyst"
-    if agent_override and (known_providers is None or agent_override not in known_providers):
+    if agent_override and (known_clis is None or agent_override not in known_clis):
         return agent_override
     agents_dir = Path(project_path) / ".claude" / "agents"
     known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
@@ -97,7 +97,7 @@ def _phase_target_agent(card, *, project_path: str, phase: str, source_column: s
     if card_agent and card_agent in known_agents:
         return card_agent
     # Work-type fallback: when card.agent is missing or doesn't match a known
-    # persona (e.g. it's a provider id like 'claude-code' from a legacy row),
+    # persona (e.g. it's a CLI id like 'claude-code' from a legacy row),
     # the work_type mapping decides the persona instead of the hardcoded
     # 'engineer' fallback. Required to also match a known persona file —
     # otherwise the work_type mapping could route to a column whose persona
@@ -483,7 +483,7 @@ def _read_persona_model(project_path: str, filename: str) -> str | None:
 def _effective_model(card_model: str | None, column_default_model: str | None,
                      persona_model: str | None) -> str | None:
     """Precedence: card.model > column.default_model > persona frontmatter
-    `model:` > None (no --model flag, platform default applies). Empty
+    `model:` > None (no --model flag, provider default applies). Empty
     strings are treated as unset, same as None."""
     return card_model or column_default_model or persona_model or None
 
@@ -785,31 +785,31 @@ def _build_ship_instructions(ship_mode: str) -> str:
 
 class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str,
-                 provider_id: str = "claude-code", platform: str = "anthropic",
+                 cli_id: str = "claude-code", provider: str = "anthropic",
                  model: str | None = None) -> dict: ...
 
 
-def _known_provider_ids() -> set[str]:
-    """Ids of the agent providers the registry knows about (claude-code, codex-cli, …).
+def _known_cli_ids() -> set[str]:
+    """Ids of the agentic CLIs the registry knows about (claude-code, codex-cli, …).
 
-    Used to tell a provider selection apart from a persona/column name, since
+    Used to tell a CLI selection apart from a persona/column name, since
     `card.agent` overloads both."""
-    from app.services.providers import get_providers
-    return {p.id for p in get_providers()}
+    from app.services.agentic_cli import get_agentic_clis
+    return {p.id for p in get_agentic_clis()}
 
 
 def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass."""
     def _transport(*, directory: str, prompt: str, session_name: str,
-                   provider_id: str = "claude-code", platform: str = "anthropic",
+                   cli_id: str = "claude-code", provider: str = "anthropic",
                    model: str | None = None) -> dict:
-        """Create a worktree off origin/master, then spawn a `provider_id` session in it,
-        against the given `platform` subscription (anthropic | bedrock | minimax).
+        """Create a worktree off origin/master, then spawn a `cli_id` session in it,
+        against the given `provider` subscription (anthropic | bedrock | minimax).
 
         Raises MemoryLimitExceeded if hardware memory limits are reached.
         """
         from app.services.agent_bridge.spawn import spawn_session
-        from app.services.providers.base import SpawnCommandOptions
+        from app.services.agentic_cli.base import SpawnCommandOptions
         from app.services.scheduling.session_registry import session_registry
 
         if not session_registry.can_add_session():
@@ -832,10 +832,10 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
             skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
-            platform=platform, model=model,
+            provider=provider, model=model,
         )
         try:
-            result = spawn_session(provider_id, options, session_name=session_name)
+            result = spawn_session(cli_id, options, session_name=session_name)
         except Exception:
             subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
                            capture_output=True, text=True, timeout=30)
@@ -861,11 +861,11 @@ _sandcastle_start_tasks: set = set()
 
 
 def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
-                         provider_id: str = "claude-code", platform: str = "anthropic",
+                         cli_id: str = "claude-code", provider: str = "anthropic",
                          model: str | None = None) -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
 
-    `provider_id`, `platform` and `model` are accepted for transport-signature
+    `cli_id`, `provider` and `model` are accepted for transport-signature
     parity but ignored: sandcastle runs use the per-project sandcastle config's
     `agent_provider`, not the card's, column's, or persona's.
 
@@ -1006,8 +1006,8 @@ def _resolve_target_column(card, project_path: str) -> str:
     cap will be re-evaluated next tick when the per-column count drops).
     """
     agent_override = None
-    known_providers = _known_provider_ids()
-    if agent_override and agent_override not in known_providers:
+    known_clis = _known_cli_ids()
+    if agent_override and agent_override not in known_clis:
         return agent_override
     agents_dir = Path(project_path) / ".claude" / "agents"
     known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
@@ -1292,14 +1292,14 @@ async def _run_card(
         return None  # lost the race; another tick/device took it
 
     # `agent_override` / `card.agent` overload two unrelated concepts:
-    #   - a provider id (claude-code, mimo-code, …) → which CLI spawns the session
+    #   - a CLI id (claude-code, mimo-code, …) → which CLI spawns the session
     #   - a persona name (engineer, analyst, …)  → which column + role prompt
-    # Resolve them separately so a provider id is never mistaken for a column.
-    known_providers = _known_provider_ids()
-    provider_id = next(
-        (v for v in (agent_override, _phase_provider_id(card, phase=phase,
-                                                       known_providers=known_providers))
-         if v in known_providers),
+    # Resolve them separately so a CLI id is never mistaken for a column.
+    known_clis = _known_cli_ids()
+    cli_id = next(
+        (v for v in (agent_override, _phase_cli_id(card, phase=phase,
+                                                       known_clis=known_clis))
+         if v in known_clis),
         "claude-code",
     )
     # Resolve the work_type fallback *before* the persona check in
@@ -1328,7 +1328,7 @@ async def _run_card(
         fallback_persona = None
     target_agent = _phase_target_agent(
         card, project_path=project_path, phase=phase, source_column=source_column,
-        agent_override=agent_override, known_providers=known_providers,
+        agent_override=agent_override, known_clis=known_clis,
         fallback_persona=fallback_persona,
     )
 
@@ -1347,9 +1347,9 @@ async def _run_card(
         persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
     # The target column decides which subscription/vendor the spawn authenticates
-    # against (see KanbanColumn.default_platform); unset means the dispatcher's own
+    # against (see KanbanColumn.default_provider); unset means the dispatcher's own
     # default, the Anthropic subscription.
-    platform = await get_column_default_platform(session, project_key, target_agent) or PLATFORM_ANTHROPIC
+    provider = await get_column_default_provider(session, project_key, target_agent) or PROVIDER_ANTHROPIC
     persona_model = _read_persona_model(project_path, f"{target_agent}.md")
     column_default_model = await get_column_default_model(session, project_key, target_agent)
     effective_model = _effective_model(card.model, column_default_model, persona_model)
@@ -1371,7 +1371,7 @@ async def _run_card(
         prompt = plan_section + prompt
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
-                                 provider_id=provider_id, platform=platform, model=effective_model)
+                                 cli_id=cli_id, provider=provider, model=effective_model)
     except Exception:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
@@ -1402,7 +1402,7 @@ async def _run_card(
     logger.info("dispatched card %s (%s) -> session %s (transport: %s, provider: %s)",
                 card.id, source_column, name,
                 "sandcastle" if card_transport == sandcastle_transport else "worktree",
-                provider_id)
+                cli_id)
     return {"card_id": card.id, "session_name": name, "claimant": claimant,
             "source_column": source_column, "spawned": spawned}
 
@@ -2337,14 +2337,14 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
     """Factory that returns a transport that resumes an existing session.
 
     Unlike the worktree transport, this does NOT create a new git worktree.
-    The ClaudeCodeProvider resolves the working directory from the session's
+    The ClaudeCodeCli resolves the working directory from the session's
     recorded cwd (via project_folder), and spawns with ``--resume session_id``.
     """
     def _transport(*, directory: str, prompt: str, session_name: str,
-                   provider_id: str = "claude-code", platform: str = "anthropic",
+                   cli_id: str = "claude-code", provider: str = "anthropic",
                    model: str | None = None) -> dict:
         from app.services.agent_bridge.spawn import spawn_session
-        from app.services.providers.base import SpawnCommandOptions
+        from app.services.agentic_cli.base import SpawnCommandOptions
         from app.services.scheduling.session_registry import session_registry
 
         if not session_registry.can_add_session():
@@ -2361,10 +2361,10 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             project_folder=project_folder,
             prompt=prompt,
             skip_permissions=skip_permissions,
-            platform=platform,
+            provider=provider,
             model=model,
         )
-        result = spawn_session(provider_id, options, session_name=session_name)
+        result = spawn_session(cli_id, options, session_name=session_name)
         # Track the spawn so the dispatch reaper can detect a resumed session
         # that immediately hits a 429 Token Plan limit and never initialises
         # its hook scripts. See `make_worktree_transport` for the full rationale.

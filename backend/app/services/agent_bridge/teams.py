@@ -20,14 +20,14 @@ def discover_teams(
 
     Uses a two-pass approach:
     1. Auto-detect teams by grouping sessions that share the same ``cwd``
-       and ``provider`` — the most reliable signal that sessions are related
+       and ``cli`` — the most reliable signal that sessions are related
        (lead + members spawned via ``task()`` all run in the same directory).
     2. Merge in any manually-created teams from the DB, matching by session_name.
 
     A "team" is a dict with:
       - team_id: unique string ("auto-<hash>" or "manual-<db-id>")
       - name: display name (directory basename or user-given name)
-      - provider: shared provider id
+      - cli: shared CLI id
       - cwd: shared working directory
       - is_auto_detected: True for auto groups, False for manual
       - lead: the first session in the group (or explicit lead for manual teams)
@@ -52,26 +52,26 @@ def discover_teams(
                 teams.append({
                     "team_id": mt["team_id"],
                     "name": mt.get("name", "Team"),
-                    "provider": mt.get("provider", ""),
-                    "provider_display_name": mt.get("provider_display_name", team_sessions[0].get("provider_display_name", "")),
+                    "cli": mt.get("cli", ""),
+                    "cli_display_name": mt.get("cli_display_name", team_sessions[0].get("cli_display_name", "")),
                     "cwd": mt.get("cwd", team_sessions[0].get("cwd", "")),
                     "is_auto_detected": False,
                     "lead": team_sessions[0],
                     "members": team_sessions,
                 })
 
-    # Pass 2: auto-detect by cwd + provider (skipping manual team members)
+    # Pass 2: auto-detect by cwd + cli (skipping manual team members)
     from collections import defaultdict
 
     groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for session in sessions:
         if session.get("session_name", "") in manual_member_names:
             continue
-        key = (session.get("cwd", ""), session.get("provider", ""))
+        key = (session.get("cwd", ""), session.get("cli", ""))
         if key[0]:  # Only group sessions with a known cwd
             groups[key].append(session)
 
-    for (cwd, provider), group in groups.items():
+    for (cwd, cli), group in groups.items():
         if len(group) < 2:
             continue  # Only form teams of 2+
         for s in group:
@@ -85,8 +85,8 @@ def discover_teams(
         teams.append({
             "team_id": team_id,
             "name": name,
-            "provider": provider,
-            "provider_display_name": group[0].get("provider_display_name", provider),
+            "cli": cli,
+            "cli_display_name": group[0].get("cli_display_name", cli),
             "cwd": cwd,
             "is_auto_detected": True,
             "lead": group[0],
@@ -121,7 +121,7 @@ async def get_manual_teams(db: AsyncSession) -> list[dict[str, Any]]:
         output.append({
             "team_id": f"manual-{team.id}",
             "name": team.name,
-            "provider": team.provider,
+            "cli": team.cli,
             "cwd": team.cwd,
             "is_auto_detected": False,
             "lead_session_name": team.lead_session_name,
@@ -140,7 +140,7 @@ async def get_manual_teams(db: AsyncSession) -> list[dict[str, Any]]:
 async def create_manual_team(
     db: AsyncSession,
     name: str,
-    provider: str,
+    cli: str,
     cwd: str,
     lead_session_name: str | None = None,
     member_sessions: list[dict[str, str]] | None = None,
@@ -148,7 +148,7 @@ async def create_manual_team(
     """Create a new manual team in the database."""
     team = AgentTeam(
         name=name,
-        provider=provider,
+        cli=cli,
         cwd=cwd,
         lead_session_name=lead_session_name,
         is_auto_detected=False,
@@ -172,7 +172,7 @@ async def create_manual_team(
     return {
         "team_id": f"manual-{team.id}",
         "name": team.name,
-        "provider": team.provider,
+        "cli": team.cli,
         "cwd": team.cwd,
         "is_auto_detected": False,
         "lead_session_name": team.lead_session_name,

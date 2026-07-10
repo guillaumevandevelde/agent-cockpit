@@ -1,4 +1,4 @@
-"""Discover agent provider sessions running in tmux."""
+"""Discover agent CLI sessions running in tmux."""
 from __future__ import annotations
 
 import logging
@@ -6,8 +6,8 @@ import subprocess
 from typing import Any
 
 from app.models.constants import SessionStatus
-from app.services.providers import get_provider, get_providers
-from app.services.providers.base import AgentProvider
+from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
+from app.services.agentic_cli.base import AgenticCli
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +30,11 @@ def _build_session_info_from_parts(
     pane_id: str,
     cwd: str,
     pid: str,
-    provider: AgentProvider,
+    cli: AgenticCli,
 ) -> dict[str, Any]:
     return {
-        "provider": provider.id,
-        "provider_display_name": provider.display_name,
+        "cli": cli.id,
+        "cli_display_name": cli.display_name,
         "tmux_target": target,
         "session_name": session_name,
         "window_name": window_name,
@@ -45,9 +45,9 @@ def _build_session_info_from_parts(
     }
 
 
-def discover_agent_sessions(provider_id: str | None = None) -> list[dict[str, Any]]:
-    """Find all tmux panes running supported agent providers."""
-    providers = [get_provider(provider_id)] if provider_id else get_providers()
+def discover_agent_sessions(cli_id: str | None = None) -> list[dict[str, Any]]:
+    """Find all tmux panes running supported agentic CLIs."""
+    clis = [get_agentic_cli(cli_id)] if cli_id else get_agentic_clis()
     try:
         result = subprocess.run(
             ["tmux", "list-panes", "-a", "-F", _PANE_FORMAT],
@@ -71,8 +71,8 @@ def discover_agent_sessions(provider_id: str | None = None) -> list[dict[str, An
         if len(parts) != 7:
             continue
         target, session_name, window_name, pane_id, cwd, pid, command = parts
-        for provider in providers:
-            if provider.is_process_match(command, pid):
+        for cli in clis:
+            if cli.is_process_match(command, pid):
                 sessions.append(
                     _build_session_info_from_parts(
                         target=target,
@@ -81,7 +81,7 @@ def discover_agent_sessions(provider_id: str | None = None) -> list[dict[str, An
                         pane_id=pane_id,
                         cwd=cwd,
                         pid=pid,
-                        provider=provider,
+                        cli=cli,
                     )
                 )
                 break

@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.services.providers.codex_cli import get_codex_home
+from app.services.agentic_cli.codex_cli import get_codex_home
 
 logger = logging.getLogger(__name__)
 

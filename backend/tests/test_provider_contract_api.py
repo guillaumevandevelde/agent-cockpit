@@ -78,13 +78,13 @@ async def test_provider_cli_disallowed_command_returns_contract_error(monkeypatc
     class FakeExecutor:
         binary_path = "/usr/bin/codex"
         provider = SimpleNamespace(display_name="Codex")
-        provider_id = "codex-cli"
+        cli_id = "codex-cli"
         ALLOWED_COMMANDS = ["doctor"]
 
         def validate_command(self, command):
             return command == "doctor"
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
         await providers_api.execute_provider_cli(
@@ -105,13 +105,13 @@ async def test_provider_cli_missing_binary_returns_contract_error(monkeypatch):
     class FakeExecutor:
         binary_path = None
         provider = SimpleNamespace(display_name="Codex")
-        provider_id = "codex-cli"
+        cli_id = "codex-cli"
         ALLOWED_COMMANDS = ["doctor"]
 
         def validate_command(self, command):
             return command == "doctor"
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     with pytest.raises(providers_api.HTTPException) as exc_info:
         await providers_api.execute_provider_cli(

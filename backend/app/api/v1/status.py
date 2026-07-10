@@ -13,7 +13,7 @@ from app.models.schemas import SystemStatusResponse
 from app.services.instance_identity import get_instance_identity
 from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
 from app.services.presence_service import PresenceService
-from app.services.providers import get_provider, get_providers
+from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 from app.services.scheduling.hook_installer import get_hooks_status
 
 router = APIRouter()
@@ -36,7 +36,7 @@ async def _get_claude_code_version() -> str | None:
         if time.time() - cached_at < _CACHE_TTL:
             return cached_version
 
-        version = await asyncio.to_thread(get_provider("claude-code").get_version)
+        version = await asyncio.to_thread(get_agentic_cli("claude-code").get_version)
 
         _version_cache = (version, time.time())
         return version
@@ -50,7 +50,7 @@ async def _get_active_count(db: AsyncSession) -> int:
 
 async def _get_provider_statuses() -> dict[str, Any]:
     statuses = await asyncio.gather(
-        *(asyncio.to_thread(provider.get_status) for provider in get_providers())
+        *(asyncio.to_thread(provider.get_status) for provider in get_agentic_clis())
     )
     return {status["id"]: status for status in statuses}
 

@@ -1,2 +1,2 @@
-"""Shared tmux bridge services for agent providers."""
+"""Shared tmux bridge services for agentic CLIs."""
 

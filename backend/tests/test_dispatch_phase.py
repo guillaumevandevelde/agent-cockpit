@@ -6,7 +6,7 @@ do not need the kanban test database.
 import pytest
 
 from app.kanban import dispatch
-from app.kanban.dispatch import _phase_provider_id, _phase_target_agent
+from app.kanban.dispatch import _phase_cli_id, _phase_target_agent
 
 
 class _FakeCard:
@@ -17,27 +17,27 @@ class _FakeCard:
 
 def test_phase_provider_analyst_uses_analyst_field():
     card = _FakeCard(analyst_agent_id="claude-code", agent="engineer")
-    assert _phase_provider_id(card, phase="analyst") == "claude-code"
+    assert _phase_cli_id(card, phase="analyst") == "claude-code"
 
 
 def test_phase_provider_executor_uses_executor_field():
     card = _FakeCard(executor_agent_id="mimo-code", agent="engineer")
-    assert _phase_provider_id(card, phase="executor") == "mimo-code"
+    assert _phase_cli_id(card, phase="executor") == "mimo-code"
 
 
 def test_phase_provider_executor_falls_back_to_card_agent():
     card = _FakeCard(agent="codex-cli", executor_agent_id=None)
-    assert _phase_provider_id(card, phase="executor") == "codex-cli"
+    assert _phase_cli_id(card, phase="executor") == "codex-cli"
 
 
 def test_phase_provider_executor_default_claude_code():
     card = _FakeCard(agent=None, executor_agent_id=None)
-    assert _phase_provider_id(card, phase="executor") == "claude-code"
+    assert _phase_cli_id(card, phase="executor") == "claude-code"
 
 
 def test_phase_provider_analyst_default_claude_code():
     card = _FakeCard(analyst_agent_id=None)
-    assert _phase_provider_id(card, phase="analyst") == "claude-code"
+    assert _phase_cli_id(card, phase="analyst") == "claude-code"
 
 
 def test_phase_target_agent_analyst_is_analyst():
@@ -198,7 +198,7 @@ async def test_run_card_skips_plan_context_for_legacy_cards(monkeypatch):
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, provider_id, platform):
+    def fake_transport(directory, prompt, session_name, cli_id, provider):
         captured["prompt"] = prompt
         captured["session_name"] = session_name
         return {"session": session_name, "prompt": prompt}
@@ -255,7 +255,7 @@ async def test_run_card_prepends_plan_context_for_child_with_parent(monkeypatch)
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, provider_id, platform):
+    def fake_transport(directory, prompt, session_name, cli_id, provider):
         captured["prompt"] = prompt
         captured["session_name"] = session_name
         return {"session": session_name, "prompt": prompt}
@@ -309,7 +309,7 @@ async def test_run_card_prepends_placeholder_for_child_with_missing_plan(monkeyp
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, provider_id, platform):
+    def fake_transport(directory, prompt, session_name, cli_id, provider):
         captured["prompt"] = prompt
         return {"session": session_name, "prompt": prompt}
 
@@ -1127,7 +1127,7 @@ async def test_run_card_explicit_valid_card_agent_overrides_work_type_fallback(m
 # stubs the previous review flagged.
 
 
-def _fake_transport(directory, prompt, session_name, provider_id, platform):
+def _fake_transport(directory, prompt, session_name, cli_id, provider):
     """No-op transport that returns a minimal result dict."""
     return {"session_name": session_name, "transport": "worktree"}
 

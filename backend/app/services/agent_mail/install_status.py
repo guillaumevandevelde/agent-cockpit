@@ -18,8 +18,8 @@ def cockpit_base_url() -> str:
 
 def codex_cli_available() -> bool:
     try:
-        from app.services.cli_executor import ProviderCLIExecutor
-        return ProviderCLIExecutor("codex-cli").binary_path is not None
+        from app.services.cli_executor import AgenticCliExecutor
+        return AgenticCliExecutor("codex-cli").binary_path is not None
     except Exception:
         return False
 

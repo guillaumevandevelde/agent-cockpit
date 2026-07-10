@@ -18,7 +18,7 @@ async def test_provider_doctor_returns_parsed_codex_report(monkeypatch):
                 exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.get_provider_doctor("codex-cli")
 
@@ -40,7 +40,7 @@ async def test_provider_doctor_redacts_report_and_stderr(monkeypatch):
                 exit_code=1,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.get_provider_doctor("codex-cli")
 

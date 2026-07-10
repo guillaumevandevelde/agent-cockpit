@@ -42,7 +42,7 @@ async def test_minimax_status_never_echoes_the_key(monkeypatch):
 async def test_spawn_request_passes_minimax_base_url_to_options(monkeypatch):
     captured = {}
 
-    def fake_spawn(provider_id, options, session_name=None, host_data=None):
+    def fake_spawn(cli_id, options, session_name=None, host_data=None):
         captured["options"] = options
         return {"tmux_target": "s:0.0", "session_name": "s"}
 

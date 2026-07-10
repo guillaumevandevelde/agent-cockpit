@@ -1,12 +1,12 @@
-"""GitHub Copilot CLI provider implementation."""
+"""GitHub Copilot CLI implementation."""
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
 
-from app.services.providers.base import (
-    AgentProvider,
+from app.services.agentic_cli.base import (
+    AgenticCli,
     SpawnCommandOptions,
     argv0_name,
     has_binary_descendant,
@@ -20,7 +20,7 @@ def get_copilot_home() -> Path:
     return Path(os.environ.get("COPILOT_HOME", Path.home() / ".copilot")).expanduser()
 
 
-class CopilotCliProvider(AgentProvider):
+class CopilotCli(AgenticCli):
     id = "copilot-cli"
     display_name = "GitHub Copilot CLI"
     binary_name = "copilot"

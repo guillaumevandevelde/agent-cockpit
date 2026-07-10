@@ -1,4 +1,4 @@
-"""OpenCode provider implementation."""
+"""OpenCode CLI implementation."""
 from __future__ import annotations
 
 import logging
@@ -8,8 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from app.services.providers.base import (
-    AgentProvider,
+from app.services.agentic_cli.base import (
+    AgenticCli,
     SpawnCommandOptions,
     argv0_name,
     has_binary_descendant,
@@ -42,7 +42,7 @@ def _find_opencode_binary() -> str | None:
     return shutil.which("opencode")
 
 
-class OpenCodeProvider(AgentProvider):
+class OpenCodeCli(AgenticCli):
     id = "open-code"
     display_name = "OpenCode"
     binary_name = "opencode"

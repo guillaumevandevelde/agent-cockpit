@@ -1,4 +1,4 @@
-"""MiMoCode provider implementation."""
+"""MiMoCode CLI implementation."""
 from __future__ import annotations
 
 import logging
@@ -8,8 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from app.services.providers.base import (
-    AgentProvider,
+from app.services.agentic_cli.base import (
+    AgenticCli,
     SpawnCommandOptions,
     argv0_name,
     has_binary_descendant,
@@ -34,7 +34,7 @@ def _find_mimo_binary() -> str | None:
     return None
 
 
-class MiMoCodeProvider(AgentProvider):
+class MiMoCodeCli(AgenticCli):
     id = "mimo-code"
     display_name = "MiMoCode"
     binary_name = "mimo"

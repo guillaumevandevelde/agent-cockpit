@@ -19,7 +19,7 @@ async def test_codex_mcp_inventory_parses_json_and_redacts(monkeypatch):
                 exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.get_provider_mcp_inventory("codex-cli")
 
@@ -43,7 +43,7 @@ async def test_codex_mcp_inventory_surfaces_errors(monkeypatch):
                 exit_code=2,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.get_provider_mcp_inventory("codex-cli")
 
@@ -89,7 +89,7 @@ async def test_codex_plugin_inventory_returns_text_and_best_effort_rows(monkeypa
                 exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.get_provider_plugin_inventory("codex-cli")
 
@@ -136,7 +136,7 @@ async def test_codex_feature_inventory_parses_known_features(monkeypatch):
                 exit_code=0,
             )
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.get_provider_feature_inventory("codex-cli")
 
@@ -160,7 +160,7 @@ async def test_codex_mcp_add_uses_cli_command_args_and_env(monkeypatch):
             calls.append((command, args, timeout))
             return SimpleNamespace(stdout="added auth_token=secret-value", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.add_provider_mcp_server(
         "codex-cli",
@@ -195,7 +195,7 @@ async def test_codex_mcp_add_uses_url_cli_args(monkeypatch):
             calls.append((command, args, timeout))
             return SimpleNamespace(stdout="added", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     await providers_api.add_provider_mcp_server(
         "codex-cli",
@@ -242,7 +242,7 @@ async def test_codex_mcp_remove_uses_cli_remove(monkeypatch):
             calls.append((command, args, timeout))
             return SimpleNamespace(stdout="removed", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.remove_provider_mcp_server("codex-cli", "linear")
 
@@ -262,7 +262,7 @@ async def test_codex_plugin_install_uses_cli_add_with_marketplace(monkeypatch):
             calls.append((command, args, timeout))
             return SimpleNamespace(stdout="installed auth_token=secret-value", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.install_provider_plugin(
         "codex-cli",
@@ -287,7 +287,7 @@ async def test_codex_plugin_install_accepts_selector(monkeypatch):
             calls.append((command, args, timeout))
             return SimpleNamespace(stdout="installed", stderr="", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     await providers_api.install_provider_plugin(
         "codex-cli",
@@ -309,7 +309,7 @@ async def test_codex_plugin_remove_uses_cli_remove(monkeypatch):
             calls.append((command, args, timeout))
             return SimpleNamespace(stdout="removed", stderr="token=secret-value", exit_code=0)
 
-    monkeypatch.setattr(providers_api, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(providers_api, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     response = await providers_api.remove_provider_plugin(
         "codex-cli",

@@ -58,7 +58,7 @@ def test_codex_backup_exports_config_rules_and_redacted_inventory(monkeypatch, t
                 )
             raise AssertionError(command)
 
-    monkeypatch.setattr(backup_service, "ProviderCLIExecutor", lambda provider_id: FakeExecutor())
+    monkeypatch.setattr(backup_service, "AgenticCliExecutor", lambda cli_id: FakeExecutor())
 
     service = BackupService(FakeDb(), codex_home=codex_home)
     backup, manifest = asyncio.run(service.create_backup(
@@ -172,9 +172,9 @@ def test_codex_backup_restore_plan_reports_explicit_refusal(tmp_path):
 
 
 def test_codex_provider_status_exposes_backup_policy():
-    from app.services.providers import get_provider
+    from app.services.agentic_cli import get_agentic_cli
 
-    status = get_provider("codex-cli").get_status()
+    status = get_agentic_cli("codex-cli").get_status()
 
     assert status["capabilities"]["backup"] is True
     assert status["capabilities"]["restore"] is False

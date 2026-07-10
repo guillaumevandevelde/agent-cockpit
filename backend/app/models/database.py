@@ -214,7 +214,7 @@ class BridgeSessionAttachment(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     target: Mapped[str] = mapped_column(String, index=True, nullable=False)
     session_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    cli: Mapped[str | None] = mapped_column(String, nullable=True)
     original_filename: Mapped[str | None] = mapped_column(String, nullable=True)
     mime_type: Mapped[str] = mapped_column(String, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -286,7 +286,7 @@ class AgentTeam(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     lead_session_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    provider: Mapped[str] = mapped_column(String, nullable=False)
+    cli: Mapped[str] = mapped_column(String, nullable=False)
     cwd: Mapped[str] = mapped_column(String, nullable=False)
     is_auto_detected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
