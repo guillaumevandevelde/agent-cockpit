@@ -2076,6 +2076,86 @@ async def test_move_limited_session_to_resume_returns_false_when_project_key_unr
 
 
 @pytest.mark.asyncio
+async def test_move_limited_session_to_resume_handles_backlog_card(monkeypatch):
+    """A 429-hit session whose card already landed in Backlog (e.g. moved
+    there by a prior reap that bumped dispatch_failures back to source_column)
+    must still get moved to To Resume when its hook event fires — otherwise
+    the card sits in Backlog with a 429-killed session, never picked up
+    again. The fix: move_limited_session_to_resume accepts cards on Backlog
+    and Impediment, not only agent columns."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="backlog-429", column="Backlog")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-backlog-0001"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-backlog", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-backlog-0001",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert result is True
+    assert card.column == "To Resume"
+    assert card.resume_session_id == "sess-backlog"
+    assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_handles_impediment_card(monkeypatch):
+    """Same as the Backlog case, but for a card that ended up in Impediment
+    before its hook event arrived — Impediment is human territory so this
+    is more theoretical, but the function should be uniformly permissive."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="impediment-429", column="Impediment")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-imp-0001"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-imp", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-imp-0001",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert result is True
+    assert card.column == "To Resume"
+    assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
 async def test_active_session_count_excludes_to_resume():
     """Cards in To Resume are excluded from _active_session_count (fixed column)."""
     async with KanbanSessionLocal() as s:
@@ -2664,3 +2744,316 @@ async def test_run_dispatch_tick_commits_compensating_ops_on_spawn_failure(monke
     assert card.claimed_by is None         # compensating release was committed
     assert card.dispatch_failures == 1     # circuit-breaker counter was committed
     assert len(transport.calls) == 1
+
+
+# ---- stuck-session reaper (alive in tmux, never sent hooks, 429/Token Plan
+# in pane content -> set dispatch_pause, kill, release) ----------------------
+
+
+class _FrozenClock:
+    """Test clock for SessionRegistry's monotonic timer. Advancing moves
+    spawn ages past the stuck timeout so the registry actually surfaces
+    the name from get_stuck_sessions()."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+@pytest.mark.asyncio
+async def test_reaper_reaps_stuck_session_with_429_and_pauses_dispatch(monkeypatch):
+    """A session that's alive in tmux but never sent a hook (classic 429
+    Token Plan signature: `claude` prints the error and never initialises
+    hooks) must be killed by the reaper, its claim released, dispatch_failures
+    bumped, and the global dispatch pause set to the fallback duration.
+    Without this, the card sits claimed forever and auto-dispatch stalls."""
+    from datetime import UTC, datetime, timedelta
+
+    import app.kanban.dispatch as d
+    from app.kanban import dispatch_pause
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-429-0001")
+    clock.advance(200)  # past the default 120s stuck threshold
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    # Mock capture-pane to simulate a 429 stuck tmux pane.
+    pane = "API Error: 429 — Token Plan limit reached for this account"
+    monkeypatch.setattr(
+        d, "_capture_pane_content", lambda name, *, lines=20: pane,
+    )
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck-429", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-429-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-429-0001"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+        paused_until = await dispatch_pause.get_paused_until(s)
+
+    assert reaped == 1
+    assert killed == ["k-429-0001"]
+    assert card.claimed_by is None
+    assert card.dispatch_failures == 1
+    assert paused_until is not None
+    # FALLBACK_PAUSE_HOURS = 5 — accept any wall-clock drift up to 60s.
+    expected = datetime.now(UTC) + timedelta(hours=5)
+    assert abs((paused_until - expected).total_seconds()) < 60
+
+
+@pytest.mark.asyncio
+async def test_reaper_skips_stuck_session_without_rate_limit(monkeypatch):
+    """A session that's alive in tmux but just slow to send hooks (the pane
+    shows ordinary work, no 429) must NOT be killed by the new reaper path —
+    we'd otherwise silently lose a healthy in-flight session."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-clean-0001")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    monkeypatch.setattr(
+        d, "_capture_pane_content", lambda name, *, lines=20: "Working on it…",
+    )
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck-clean", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-clean-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-clean-0001"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 0
+    assert killed == []
+    assert card.claimed_by == "agent:k-clean-0001"  # untouched
+
+
+@pytest.mark.asyncio
+async def test_reaper_stuck_session_fails_open_when_capture_pane_unavailable(monkeypatch):
+    """If `capture-pane` itself fails (tmux not on PATH, timeout, …), the
+    reaper must not act on the stuck session — fail-open is safer than
+    killing a session whose pane we can't actually read."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-failopen-1")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    # capture-pane returns None = failure to capture
+    monkeypatch.setattr(d, "_capture_pane_content", lambda name, *, lines=20: None)
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck-no-capture", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-failopen-1"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-failopen-1"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 0
+    assert killed == []
+    assert card.claimed_by == "agent:k-failopen-1"
+
+
+@pytest.mark.asyncio
+async def test_reaper_stuck_session_clears_resume_fields(monkeypatch):
+    """When a 429-stuck session is reaped, any stale resume_session_id /
+    resume_project_folder pointing at a since-merged worktree must be
+    cleared too — otherwise the next dispatch picks the resume transport
+    and re-spawns against a dead worktree, hitting the same 429 again."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-stale-429")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    monkeypatch.setattr(
+        d, "_capture_pane_content",
+        lambda name, *, lines=20: "API Error: 429 - Token Plan",
+    )
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: None)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stale-resume-429", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"resume_session_id": "old-sess",
+                                     "resume_project_folder": "-old-worktree"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-stale-429"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-stale-429"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert card.resume_session_id is None
+    assert card.resume_project_folder is None
+    assert card.dispatch_failures == 1
+    assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_reaper_stuck_session_repeated_failures_move_to_impediment(monkeypatch):
+    """A card that hits a 429 three ticks in a row must end up in Impediment
+    (same circuit breaker as the dead-on-arrival path), so a human can
+    look at it instead of the loop burning dispatch ticks forever."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    monkeypatch.setattr(d, "session_registry", reg)
+    monkeypatch.setattr(
+        d, "_capture_pane_content", lambda name, *, lines=20: "API Error: 429",
+    )
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: None)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="repeat-429", column="engineer")
+        await s.commit()
+
+    for _ in range(dispatch.MAX_DISPATCH_FAILURES):
+        # Simulate a fresh spawn that has now been alive past the stuck
+        # threshold: mark first (captures the current clock), then advance
+        # so the reap sees the spawn age as >= timeout_s.
+        reg.clear_spawn("k-imp-0001")
+        reg.mark_spawned("k-imp-0001")
+        clock.advance(200)
+        async with KanbanSessionLocal() as s:
+            await apply_operation(
+                s, op_type="claim", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"claimed_by": "agent:k-imp-0001"},
+            )
+            await s.commit()
+            await dispatch.reap_stale_claims(
+                s, project_key=PK, cards=await list_cards(s, PK),
+                live_sessions={"k-imp-0001"}, project_path="/p",
+            )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    assert card.column == "Impediment"
+    assert card.claimed_by is None
+    assert card.dispatch_failures == 0  # reset so a future redispatch starts fresh
+
+
+def test_capture_pane_content_returns_pane_text(monkeypatch):
+    """_capture_pane_content shells out to `tmux capture-pane` and returns
+    stdout. Verifies the cmd shape (session name + tail lines) since
+    regressions there would silently shift what content the rate-limit
+    detector sees."""
+    import app.kanban.dispatch as d
+
+    seen = []
+
+    class R:
+        returncode = 0
+        stdout = "Working..."
+        stderr = ""
+
+    def fake_run(cmd, *a, **k):
+        seen.append(cmd)
+        return R()
+
+    monkeypatch.setattr(d.subprocess, "run", fake_run)
+    out = d._capture_pane_content("k-test", lines=20)
+    assert out == "Working..."
+    assert seen[0][0:3] == ["tmux", "capture-pane", "-t"]
+    assert seen[0][3] == "k-test"
+    assert "-S" in seen[0]
+    assert "-20" in seen[0]
+
+
+def test_capture_pane_content_returns_none_on_failure(monkeypatch):
+    """If tmux capture-pane fails (session gone, non-zero exit, FileNotFound,
+    timeout) the helper returns None so the reaper fails open. Returning
+    a partial/empty string would silently downgrade the detector."""
+    import app.kanban.dispatch as d
+
+    class RFail:
+        returncode = 1
+        stdout = ""
+        stderr = "can't find pane"
+
+    monkeypatch.setattr(d.subprocess, "run", lambda *a, **k: RFail())
+    assert d._capture_pane_content("k-missing") is None
+
+    def raise_fnf(*a, **k):
+        raise FileNotFoundError("tmux not on PATH")
+
+    monkeypatch.setattr(d.subprocess, "run", raise_fnf)
+    assert d._capture_pane_content("k-missing") is None
+
+
+def test_is_rate_limited_session_matches_known_patterns():
+    """_is_rate_limited_session must recognise the same set of substrings
+    that the hook-event path uses (so a 429 detected via either source
+    triggers the same dispatch-pause), but not match ordinary progress
+    output that just happens to mention numbers or 'plan'."""
+    import app.kanban.dispatch as d
+    assert d._is_rate_limited_session("API Error: 429 Too Many Requests") is True
+    assert d._is_rate_limited_session("Token Plan limit reached") is True
+    assert d._is_rate_limited_session("Hit your usage limit for the day") is True
+    assert d._is_rate_limited_session("Request rejected: rate limit") is True
+    assert d._is_rate_limited_session("api error (429)") is True
+    # Negative cases — these must NOT trip the detector.
+    assert d._is_rate_limited_session("Working on tests...") is False
+    assert d._is_rate_limited_session("Planning the next refactor") is False
+    assert d._is_rate_limited_session("") is False
+    assert d._is_rate_limited_session("Compaction 1/2 complete") is False
+
