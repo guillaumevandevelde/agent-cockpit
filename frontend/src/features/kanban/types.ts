@@ -92,6 +92,12 @@ export interface Card {
   depends_on?: string[] | null;
   created_at: string;
   updated_at: string;
+  // Derived server-side from the op-log: the most recent **Done:** comment's
+  // text and the time it landed. Optional because the backend doesn't always
+  // have a Done-comment (card was never moved, or moved without a summary) —
+  // the CardDrawer shows a banner only when both are set.
+  done_summary?: string | null;
+  completed_at?: string | null;
   deliverables: Deliverable[];
 }
 

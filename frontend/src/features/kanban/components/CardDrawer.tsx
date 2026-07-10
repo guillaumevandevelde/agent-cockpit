@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -33,11 +34,185 @@ import { useProviderContext } from "@/contexts/ProviderContext";
 import { kanbanApi } from "../api";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
-import type { Card, ActivityEntry, Gate } from "../types";
+import type { Card, ActivityEntry, Deliverable, Gate } from "../types";
 
 const LIVE_POLL_INTERVAL_MS = 3000;
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
+const DONE_COLUMN = "Done";
+
+// "Completed on 10 July 2026 at 14:30" — explicit, locale-independent format
+// so a screenshot is reproducible across machines.
+function formatCompletedAt(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const date = d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const time = d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `Completed on ${date} at ${time}`;
+}
+
+// "Took 2h 15m" / "Took 45m" / "Took 3d 4h" — coarse, human-friendly.
+// Returns null when the duration is zero/negative so the caller can omit the
+// "Took ..." row entirely.
+function formatDuration(startIso: string, endIso: string): string | null {
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIso).getTime();
+  if (isNaN(start) || isNaN(end) || end <= start) return null;
+  const totalMinutes = Math.floor((end - start) / 60_000);
+  if (totalMinutes < 1) return null;
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `Took ${days}d ${hours}h`;
+  if (hours > 0) return `Took ${hours}h ${minutes}m`;
+  return `Took ${minutes}m`;
+}
+
+// "2 hours ago" — short relative timestamp for deliverable rows.
+function formatRelativeTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return formatDistanceToNow(d, { addSuffix: true });
+}
+
+// Render a single deliverable with kind-specific icon + ref formatting.
+function DeliverableRow({ d }: { d: Deliverable }) {
+  const created = formatRelativeTime(d.created_at);
+
+  switch (d.kind) {
+    case "branch":
+      return (
+        <div className="text-xs flex flex-wrap items-center gap-2" data-deliverable-kind={d.kind}>
+          <span className="font-mono">🔀 {d.ref}</span>
+          <span className="text-muted-foreground">· {created}</span>
+        </div>
+      );
+    case "pr": {
+      // `ref` may be a full URL or a shorthand like "PR #123" — render it as
+      // a clickable link when it parses as http(s), otherwise as plain text.
+      const isUrl = /^https?:\/\//i.test(d.ref);
+      return (
+        <div className="text-xs flex flex-wrap items-center gap-2" data-deliverable-kind={d.kind}>
+          <span className="font-mono">🔗</span>
+          {isUrl ? (
+            <a
+              href={d.ref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline break-all"
+            >
+              {d.ref}
+            </a>
+          ) : (
+            <span>{d.ref}</span>
+          )}
+          <span className="text-muted-foreground">· {created}</span>
+        </div>
+      );
+    }
+    case "commit":
+      return (
+        <div className="text-xs flex flex-wrap items-center gap-2" data-deliverable-kind={d.kind}>
+          <span className="font-mono">💻 {d.ref.slice(0, 7)}</span>
+          <span className="text-muted-foreground">· {created}</span>
+        </div>
+      );
+    case "note":
+      return (
+        <div className="text-xs flex flex-wrap items-center gap-2" data-deliverable-kind={d.kind}>
+          <span className="font-mono">📝</span>
+          <span>{d.ref}</span>
+          <span className="text-muted-foreground">· {created}</span>
+        </div>
+      );
+    case "plan":
+      return (
+        <div className="text-xs flex flex-col gap-1" data-deliverable-kind={d.kind}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">📋 Plan document</span>
+            <span className="text-muted-foreground">· {created}</span>
+          </div>
+          <div className="ml-6">
+            <MarkdownRenderer content={d.ref} />
+          </div>
+        </div>
+      );
+    case "plan_ref": {
+      // The `ref` is a JSON payload `{parent_card_id, plan_deliverable_id}`
+      // — surface a pointer to the parent plan for context.
+      let parentId = "";
+      try {
+        const parsed = JSON.parse(d.ref) as { parent_card_id?: string };
+        parentId = parsed.parent_card_id ?? "";
+      } catch {
+        // unparseable — fall through with empty parentId
+      }
+      return (
+        <div className="text-xs flex flex-wrap items-center gap-2" data-deliverable-kind={d.kind}>
+          <span className="font-mono">🔗</span>
+          <span>
+            Verwijst naar parent-plan {parentId ? parentId.slice(0, 8) : "unknown"}
+          </span>
+          <span className="text-muted-foreground">· {created}</span>
+        </div>
+      );
+    }
+    case "link":
+      return (
+        <div className="text-xs flex flex-wrap items-center gap-2" data-deliverable-kind={d.kind}>
+          <span className="font-mono">🔗</span>
+          <a
+            href={d.ref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline break-all"
+          >
+            {d.ref}
+          </a>
+          <span className="text-muted-foreground">· {created}</span>
+        </div>
+      );
+  }
+}
+
+// Banner shown when a card is in the Done column. The full banner (with
+// summary + completed_at + duration) only renders when the backend-supplied
+// `done_summary` is non-empty; otherwise a slim "Completed" line keeps the
+// status visible without inventing a summary.
+function DoneSummaryBanner({ card }: { card: Card }) {
+  const summary = (card.done_summary ?? "").trim();
+  const completedAt = card.completed_at ?? null;
+  const duration =
+    summary && completedAt ? formatDuration(card.created_at, completedAt) : null;
+
+  return (
+    <div
+      className="rounded-md border-2 border-green-500/40 bg-green-50 p-3 text-sm dark:bg-green-950/30"
+      data-testid="done-summary-banner"
+    >
+      <div className="mb-1 text-xs font-semibold uppercase text-green-700 dark:text-green-400">
+        ✅ Completed
+      </div>
+      {summary && (
+        <div className="text-foreground whitespace-pre-wrap">{summary}</div>
+      )}
+      {(completedAt || duration) && (
+        <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+          {completedAt && <span>{formatCompletedAt(completedAt)}</span>}
+          {duration && <span>{duration}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PlanTabContent({ card }: { card: Card }) {
   // Parent case: a "plan" deliverable carries the markdown directly in `ref`.
@@ -267,6 +442,8 @@ export function CardDrawer({
           </div>
         ))}
 
+        {card.column === DONE_COLUMN && <DoneSummaryBanner card={card} />}
+
         <div className="text-sm">
           <MarkdownRenderer content={card.description || "_No description_"} />
         </div>
@@ -344,11 +521,11 @@ export function CardDrawer({
             {card.deliverables.length === 0 && (
               <div className="text-xs text-muted-foreground">None</div>
             )}
-            {card.deliverables.map((d) => (
-              <div key={d.id} className="text-xs">
-                {d.kind}: {d.ref}
-              </div>
-            ))}
+            <div className="space-y-2">
+              {card.deliverables.map((d) => (
+                <DeliverableRow key={d.id} d={d} />
+              ))}
+            </div>
           </TabsContent>
 
           <TabsContent value="activity">
