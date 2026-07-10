@@ -27,17 +27,17 @@ async def test_live_agents_response_validates():
             "provider": "claude-code",
         }
     ]
-    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=fake_sessions), \
-         patch("app.api.v1.agent_activity.capture_pane_preview", return_value="line1\n"):
+    with patch("app.api.v1.run_activity.discover_agent_sessions", return_value=fake_sessions), \
+         patch("app.api.v1.run_activity.capture_pane_preview", return_value="line1\n"):
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/live")
     assert r.status_code == 200, r.text
-    agent_activity_api.AgentActivityListResponse.model_validate(r.json())
+    agent_activity_api.RunActivityListResponse.model_validate(r.json())
 
 
 @pytest.mark.asyncio
 async def test_activity_summary_response_validates():
-    with patch("app.api.v1.agent_activity.discover_agent_sessions", return_value=[]):
+    with patch("app.api.v1.run_activity.discover_agent_sessions", return_value=[]):
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/summary")
     assert r.status_code == 200, r.text

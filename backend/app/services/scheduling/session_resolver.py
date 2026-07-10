@@ -2,8 +2,8 @@
 import logging
 import os
 
-from app.services.agent_bridge.discovery import discover_agent_sessions
-from app.services.cc_bridge.spawn import spawn_session
+from app.services.runs.cc_spawn import spawn_session
+from app.services.runs.discovery import discover_agent_sessions
 from app.services.scheduling.session_registry import session_registry
 
 logger = logging.getLogger(__name__)

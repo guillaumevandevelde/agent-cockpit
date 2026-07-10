@@ -3,7 +3,7 @@ backend has a MiniMax API key configured, but never echoes the key itself."""
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import app.api.v1.agent_bridge.router as bridge_router
+import app.api.v1.runs.router as bridge_router
 from app.config import settings
 from app.main import app
 

@@ -4,7 +4,7 @@ rather than crash the API."""
 import subprocess
 from unittest.mock import MagicMock, patch
 
-from app.services.agent_bridge import discovery
+from app.services.runs import discovery
 
 
 def test_discover_returns_empty_when_tmux_not_installed():

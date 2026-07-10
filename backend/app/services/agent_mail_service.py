@@ -4,7 +4,7 @@ Adapted from upstream claude-deck's agent_mail_service.py: identity is
 repo-scoped only (no team-preset/slot integration — see
 docs/cockpit/agent-mail-spec.md), tmux delivery reuses
 app.services.scheduling.tmux_inject instead of a private subprocess call,
-and pane discovery reuses app.services.agent_bridge.discovery instead of a
+and pane discovery reuses app.services.runs.discovery instead of a
 private scanner.
 """
 import logging
@@ -34,7 +34,7 @@ from app.models.agent_mail_schemas import (
     MailSessionResponse,
     MailThreadResponse,
 )
-from app.services.agent_bridge.discovery import discover_agent_sessions
+from app.services.runs.discovery import discover_agent_sessions
 from app.services.scheduling.tmux_inject import send_text
 from app.utils.repo_utils import derive_repo_identity
 

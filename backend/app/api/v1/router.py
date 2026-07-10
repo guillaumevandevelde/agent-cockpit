@@ -1,8 +1,6 @@
 """Main API router for v1 endpoints."""
 from fastapi import APIRouter
 
-from .agent_activity import router as agent_activity_router
-from .agent_bridge.router import router as agent_bridge_router
 from .agent_mail import router as agent_mail_router
 from .agents import router as agents_router
 from .apm import router as apm_router
@@ -28,6 +26,8 @@ from .plugins import router as plugins_router
 from .presence import router as presence_router
 from .projects import router as projects_router
 from .providers import router as providers_router
+from .run_activity import router as run_activity_router
+from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
 from .scheduled_messages.router import router as scheduled_messages_router
 from .sessions import router as sessions_router
@@ -72,13 +72,13 @@ router.include_router(context_router, tags=["Context"])
 router.include_router(plans_router, tags=["Plans"])
 router.include_router(presence_router, prefix="/presence", tags=["Presence"])
 router.include_router(cc_bridge_router, prefix="/cc-bridge", tags=["CC Bridge"])
-router.include_router(agent_bridge_router, prefix="/agent-bridge", tags=["Agent Bridge"])
+router.include_router(runs_router, prefix="/agent-bridge", tags=["Agent Bridge"])
 router.include_router(providers_router, tags=["Providers"])
 router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)
 router.include_router(kanban_router)
-router.include_router(agent_activity_router)
+router.include_router(run_activity_router)
 router.include_router(apm_router)
 router.include_router(files_router)
 router.include_router(mcp_server_router, tags=["MCP Server"])

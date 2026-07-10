@@ -10,7 +10,7 @@ from app.services.agentic_cli.base import (
     argv0_name,
     has_binary_descendant,
 )
-from app.services.cc_bridge.spawn import _resolve_project_directory
+from app.services.runs.cc_spawn import _resolve_project_directory
 from app.utils.path_utils import ClaudePathUtils
 
 logger = logging.getLogger(__name__)

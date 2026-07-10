@@ -1,4 +1,4 @@
-"""Agent activity API — live status of running agent sessions."""
+"""Run activity API — live status of running CLI runs."""
 from __future__ import annotations
 
 import asyncio
@@ -6,12 +6,12 @@ import asyncio
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
+from app.services.runs.discovery import capture_pane_preview, discover_agent_sessions
 
 router = APIRouter(prefix="/agent-activity", tags=["Agent Activity"])
 
 
-class AgentActivity(BaseModel):
+class RunActivity(BaseModel):
     tmux_target: str
     session_name: str
     cwd: str
@@ -21,8 +21,8 @@ class AgentActivity(BaseModel):
     status: str = "active"
 
 
-class AgentActivityListResponse(BaseModel):
-    agents: list[AgentActivity]
+class RunActivityListResponse(BaseModel):
+    agents: list[RunActivity]
     count: int
 
 
@@ -32,14 +32,14 @@ class ActivitySummaryResponse(BaseModel):
     has_active: bool
 
 
-@router.get("/live", response_model=AgentActivityListResponse)
+@router.get("/live", response_model=RunActivityListResponse)
 async def get_live_agents(
     provider: str | None = Query(default=None),
     preview_lines: int = Query(default=5, ge=1, le=20),
 ) -> dict:
-    """Return currently running agent sessions with optional pane preview."""
+    """Return currently running CLI runs with optional pane preview."""
     sessions = await asyncio.to_thread(discover_agent_sessions, provider)
-    agents: list[AgentActivity] = []
+    agents: list[RunActivity] = []
     for s in sessions:
         preview = None
         target = s.get("tmux_target", "")
@@ -48,7 +48,7 @@ async def get_live_agents(
             if raw:
                 lines = raw.strip().splitlines()
                 preview = "\n".join(lines[-preview_lines:])
-        agents.append(AgentActivity(
+        agents.append(RunActivity(
             tmux_target=target,
             session_name=s.get("session_name", ""),
             cwd=s.get("cwd", ""),
@@ -61,7 +61,7 @@ async def get_live_agents(
 
 
 def _infer_status(preview: str | None, session: dict) -> str:
-    """Infer agent status from pane content."""
+    """Infer run status from pane content."""
     if not preview:
         return "active"
     lower = preview.lower()

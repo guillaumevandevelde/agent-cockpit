@@ -3,7 +3,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-import app.api.v1.agent_bridge.router as bridge_router
+import app.api.v1.runs.router as bridge_router
 from app.database import Base, engine
 from app.main import app
 

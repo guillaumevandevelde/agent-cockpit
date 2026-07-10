@@ -1,4 +1,9 @@
-"""Agent Bridge endpoints: mixed agentic-CLI session discovery, terminal access, and team grouping."""
+"""Run endpoints: mixed agentic-CLI run discovery, terminal access, and run-group endpoints.
+
+The wire-format (URL prefix, JSON keys, and team/group shape) is preserved for
+back-compat with the frontend; the underlying Python class names follow the
+canonical "Run" terminology from ``docs/cockpit/terminology.md``.
+"""
 from __future__ import annotations
 
 import logging
@@ -32,17 +37,17 @@ from app.models.schemas import (
     BridgeAttachmentResponse,
     ResumableSessionListResponse,
 )
-from app.services.agent_bridge import git_status as git_status_service
-from app.services.agent_bridge import minimax_credentials
-from app.services.agent_bridge import teams as teams_service
-from app.services.agent_bridge.attachments import agent_bridge_attachment_service
-from app.services.agent_bridge.discovery import capture_pane_preview, discover_agent_sessions
-from app.services.agent_bridge.pty_relay import PtyRelay, is_target_interactive
-from app.services.agent_bridge.resumable import list_resumable_sessions
-from app.services.agent_bridge.spawn import kill_session, rename_session, spawn_session
 from app.services.agentic_cli import get_agentic_cli
 from app.services.agentic_cli.base import SpawnCommandOptions
 from app.services.host_service import HostNotFoundError
+from app.services.runs import git_status as git_status_service
+from app.services.runs import groups as groups_service
+from app.services.runs import minimax_credentials
+from app.services.runs.attachments import run_attachment_service
+from app.services.runs.discovery import capture_pane_preview, discover_agent_sessions
+from app.services.runs.pty_relay import PtyRelay, is_target_interactive
+from app.services.runs.resumable import list_resumable_sessions
+from app.services.runs.spawn import kill_session, rename_session, spawn_session
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +254,7 @@ async def upload_session_attachment(
     _require_attachment_access(request, token)
     try:
         content = await file.read(settings.bridge_attachment_max_bytes + 1)
-        return await agent_bridge_attachment_service.create_attachment(
+        return await run_attachment_service.create_attachment(
             db,
             target=target,
             content=content,
@@ -270,7 +275,7 @@ async def list_session_attachments(
     db: AsyncSession = Depends(get_db),
 ):
     _require_attachment_access(request, token)
-    attachments = await agent_bridge_attachment_service.list_attachments(db, target=target)
+    attachments = await run_attachment_service.list_attachments(db, target=target)
     return BridgeAttachmentListResponse(attachments=attachments)
 
 
@@ -290,7 +295,7 @@ async def paste_session_attachment(
     if paste_request.require_interactive_relay and not is_target_interactive(target):
         raise HTTPException(status_code=409, detail="Terminal relay is read-only or not attached")
     try:
-        return await agent_bridge_attachment_service.paste_attachment(
+        return await run_attachment_service.paste_attachment(
             db,
             target=target,
             attachment_id=attachment_id,
@@ -313,7 +318,7 @@ async def delete_session_attachment(
 ):
     _require_attachment_access(request, token)
     try:
-        return await agent_bridge_attachment_service.delete_attachment(
+        return await run_attachment_service.delete_attachment(
             db,
             target=target,
             attachment_id=attachment_id,
@@ -473,16 +478,19 @@ def rename_session_endpoint(target: str, request: RenameRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-# ── Agent Team endpoints ──────────────────────────────────────────────────
+# ── Run Group endpoints ──────────────────────────────────────────────
+# The wire-format is preserved (URL `/teams`, JSON keys `team_id`/`members`)
+# so the frontend card can switch in lockstep; the Python class names follow
+# the canonical Run terminology.
 
 
-class TeamMemberInfo(BaseModel):
-    session_name: str
+class GroupMemberInfo(BaseModel):
+    run_name: str
     pane_id: str | None = None
     tmux_target: str = ""
 
 
-class AgentTeamResponse(BaseModel):
+class RunGroupResponse(BaseModel):
     team_id: str
     name: str
     cli: str
@@ -492,64 +500,78 @@ class AgentTeamResponse(BaseModel):
     members: list[dict[str, Any]]
 
 
-class AgentTeamsResponse(BaseModel):
-    teams: list[AgentTeamResponse]
+class RunGroupsResponse(BaseModel):
+    teams: list[RunGroupResponse]
     ungrouped: list[dict[str, Any]]
     total_teams: int
     total_sessions: int
 
 
-@router.get("/teams")
-async def list_teams(db: AsyncSession = Depends(get_db)):
-    """List all agent teams (auto-detected + manual) with their sessions."""
-    sessions = discover_agent_sessions()
-    manual_teams = await teams_service.get_manual_teams(db)
-    teams = teams_service.discover_teams(sessions, manual_teams)
-    ungrouped = teams_service.get_ungrouped_sessions(sessions, teams)
-    return AgentTeamsResponse(
-        teams=[AgentTeamResponse(**t) for t in teams],
-        ungrouped=ungrouped,
-        total_teams=len(teams),
-        total_sessions=len(sessions),
+def _group_dict_to_team_response(group: dict[str, Any]) -> RunGroupResponse:
+    """Adapt the service-layer group dict (key: ``runs``) to the legacy wire
+    shape (key: ``members``)."""
+    return RunGroupResponse(
+        team_id=group["group_id"],
+        name=group["name"],
+        cli=group["cli"],
+        cwd=group["cwd"],
+        is_auto_detected=group["is_auto_detected"],
+        lead=group.get("lead"),
+        members=group.get("runs", group.get("members", [])),
     )
 
 
-class CreateTeamRequest(BaseModel):
+@router.get("/teams")
+async def list_teams(db: AsyncSession = Depends(get_db)):
+    """List all run groups (auto-detected + manual) with their runs."""
+    runs = discover_agent_sessions()
+    manual_groups = await groups_service.get_manual_groups(db)
+    groups = groups_service.discover_groups(runs, manual_groups)
+    ungrouped = groups_service.get_ungrouped_runs(runs, groups)
+    return RunGroupsResponse(
+        teams=[_group_dict_to_team_response(g) for g in groups],
+        ungrouped=ungrouped,
+        total_teams=len(groups),
+        total_sessions=len(runs),
+    )
+
+
+class CreateGroupRequest(BaseModel):
     name: str
     cli: str = ""
     cwd: str = ""
-    lead_session_name: str | None = None
-    members: list[TeamMemberInfo] = []
+    lead_run_name: str | None = None
+    members: list[GroupMemberInfo] = []
 
 
 @router.post("/teams")
-async def create_team(request: CreateTeamRequest, db: AsyncSession = Depends(get_db)):
-    """Create a new manual agent team."""
+async def create_group(request: CreateGroupRequest, db: AsyncSession = Depends(get_db)):
+    """Create a new manual run group."""
     try:
-        team = await teams_service.create_manual_team(
+        group = await groups_service.create_manual_group(
             db,
             name=request.name,
             cli=request.cli,
             cwd=request.cwd,
-            lead_session_name=request.lead_session_name,
-            member_sessions=[m.model_dump() for m in request.members],
+            lead_run_name=request.lead_run_name,
+            member_runs=[m.model_dump() for m in request.members],
         )
-        return team
+        return group
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.delete("/teams/{team_id}")
 async def delete_team(team_id: int, db: AsyncSession = Depends(get_db)):
-    """Delete a manual agent team."""
-    success = await teams_service.delete_manual_team(db, team_id)
+    """Delete a manual run group."""
+    success = await groups_service.delete_manual_group(db, team_id)
     if not success:
         raise HTTPException(status_code=404, detail="Team not found")
     return {"deleted": True}
 
 
 class AddMemberRequest(BaseModel):
-    session_name: str
+    run_name: str
     pane_id: str | None = None
     tmux_target: str = ""
 
@@ -558,9 +580,9 @@ class AddMemberRequest(BaseModel):
 async def add_team_member(
     team_id: int, request: AddMemberRequest, db: AsyncSession = Depends(get_db)
 ):
-    """Add a member to a manual team."""
-    success = await teams_service.add_team_member(
-        db, team_id, request.session_name, request.pane_id, request.tmux_target
+    """Add a run to a manual group."""
+    success = await groups_service.add_group_membership(
+        db, team_id, request.run_name, request.pane_id, request.tmux_target
     )
     if not success:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -571,9 +593,8 @@ async def add_team_member(
 async def remove_team_member(
     team_id: int, member_id: int, db: AsyncSession = Depends(get_db)
 ):
-    """Remove a member from a manual team."""
-    success = await teams_service.remove_team_member(db, member_id)
+    """Remove a run from a manual group."""
+    success = await groups_service.remove_group_membership(db, member_id)
     if not success:
         raise HTTPException(status_code=404, detail="Member not found")
     return {"removed": True}
-

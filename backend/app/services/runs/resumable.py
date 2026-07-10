@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schemas import ResumableSession
-from app.services.agent_bridge.spawn import _validate_directory
+from app.services.runs.spawn import _validate_directory
 from app.services.session_service import SessionService
 
 logger = logging.getLogger(__name__)

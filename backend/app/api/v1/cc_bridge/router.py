@@ -1,4 +1,9 @@
-"""CC Bridge endpoints — session discovery, preview, and terminal WebSocket."""
+"""CC Bridge endpoints — legacy Claude-Code-only session discovery and terminal WebSocket.
+
+Discovery, spawn, and the pty relay now live in ``app.services.runs``; this
+module is a wire-format compat shim for the legacy ``/api/v1/cc-bridge`` URL
+prefix. The frontend card removes the route.
+"""
 import logging
 import secrets
 import time
@@ -8,8 +13,8 @@ from fastapi import APIRouter, HTTPException, WebSocket
 from pydantic import BaseModel
 
 from app.config import settings
-from app.services.cc_bridge.discovery import capture_pane_preview, discover_cc_sessions
-from app.services.cc_bridge.pty_relay import PtyRelay
+from app.services.runs.cc_legacy import capture_pane_preview, discover_cc_sessions
+from app.services.runs.pty_relay import PtyRelay
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +119,7 @@ async def session_terminal(
 @router.post("/sessions")
 def spawn_session_endpoint(request: SpawnRequest):
     """Spawn a new Claude Code session in tmux."""
-    from app.services.cc_bridge.spawn import spawn_session as do_spawn
+    from app.services.runs.cc_spawn import spawn_session as do_spawn
     try:
         result = do_spawn(
             directory=request.directory,
@@ -132,5 +137,5 @@ def spawn_session_endpoint(request: SpawnRequest):
 @router.delete("/sessions/{target}")
 def kill_session_endpoint(target: str, cleanup_worktree: bool = False):
     """Kill a tmux session and optionally clean up its worktree."""
-    from app.services.cc_bridge.spawn import kill_session
+    from app.services.runs.cc_spawn import kill_session
     return kill_session(session_name=target, cleanup_worktree=cleanup_worktree)

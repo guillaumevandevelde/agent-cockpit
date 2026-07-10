@@ -1,5 +1,5 @@
 # backend/tests/test_spawn_worktree_cleanup.py
-from app.services.agent_bridge import spawn as spawnmod
+from app.services.runs import spawn as spawnmod
 
 
 def test_kill_session_removes_dispatcher_worktree(monkeypatch, tmp_path):

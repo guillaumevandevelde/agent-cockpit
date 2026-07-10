@@ -195,7 +195,7 @@ async def _worktree_path_for_card(card) -> Path | None:
 
     resume_folder = getattr(card, "resume_project_folder", None)
     if resume_folder:
-        from app.services.cc_bridge.spawn import _resolve_project_directory
+        from app.services.runs.cc_spawn import _resolve_project_directory
         try:
             resolved = _resolve_project_directory(
                 resume_folder, getattr(card, "resume_session_id", None),

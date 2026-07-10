@@ -66,30 +66,60 @@ async def init_db() -> None:
 
 
 async def _migrate_terminology_columns(conn) -> None:
-    """Rename columns to align with the canonical terminology.
+    """Rename tables and columns to align with the canonical terminology.
 
-    The CLI-tool concept used to live under ``provider`` (e.g. ``provider`` on
-    ``BridgeSessionAttachment``, ``AgentTeam``, and ``MailAgentSession``);
-    per ``docs/cockpit/terminology.md`` that concept is now ``cli``. SQLite's
-    ``ALTER TABLE ... RENAME COLUMN`` (3.25+) does this in place — no data
-    loss, no need to drop the live kanban DB that lives in ``claude_registry.db``.
+    Two waves:
 
-    Idempotent: skips when the source column is absent or the target column is
-    already present (covers both fresh installs where ``create_all`` produced
+    1. CLI-tool concept used to live under ``provider`` (e.g. ``provider`` on
+       ``BridgeSessionAttachment``, ``RunGroup``, and ``MailAgentSession``);
+       per ``docs/cockpit/terminology.md`` that concept is now ``cli``.
+    2. The ``agent_teams``/``agent_team_members`` tables (and their
+       ``lead_session_name``/``session_name`` columns) were renamed to
+       ``run_groups``/``run_memberships``/``lead_run_name``/``run_name`` —
+       "agent-as-team" collided with the persona definition of "Agent" (a
+       subagent-persona from ``.claude/agents/*.md``); the running concept is
+       now "Run".
+
+    Both waves use SQLite's ``ALTER TABLE ... RENAME TO/COLUMN`` (3.22+/3.25+)
+    so live data survives — the kanban DB lives in ``claude_registry.db`` and
+    cannot be dropped.
+
+    Idempotent: each entry skips when the source is absent or the target
+    already exists (covers both fresh installs where ``create_all`` produced
     the new name and partial in-flight migrations).
     """
-    renames: tuple[tuple[str, str, str], ...] = (
+    column_renames: tuple[tuple[str, str, str], ...] = (
         ("bridge_session_attachments", "provider", "cli"),
-        ("agent_teams", "provider", "cli"),
+        ("run_groups", "provider", "cli"),
         ("mail_agent_sessions", "provider", "cli"),
+        ("run_groups", "lead_session_name", "lead_run_name"),
+        ("run_memberships", "session_name", "run_name"),
     )
-    for table, old_name, new_name in renames:
-        tables = (
-            await conn.exec_driver_sql(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        ).fetchall()
-        table_names = {row[0] for row in tables}
+    table_renames: tuple[tuple[str, str], ...] = (
+        ("agent_teams", "run_groups"),
+        ("agent_team_members", "run_memberships"),
+    )
+
+    tables = (
+        await conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    ).fetchall()
+    table_names = {row[0] for row in tables}
+
+    for old_table, new_table in table_renames:
+        if new_table in table_names:
+            continue
+        if old_table not in table_names:
+            continue
+        await conn.exec_driver_sql(
+            f"ALTER TABLE {old_table} RENAME TO {new_table}"
+        )
+        table_names.discard(old_table)
+        table_names.add(new_table)
+
+    # column renames — re-fetch table list because table renames above
+    for table, old_name, new_name in column_renames:
         if table not in table_names:
             continue
         rows = (

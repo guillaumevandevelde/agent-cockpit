@@ -1,5 +1,5 @@
 """Task 6b: spawn_session forwards extra_args into the tmux command."""
-import app.services.cc_bridge.spawn as sp
+import app.services.runs.spawn as sp
 
 
 def test_spawn_includes_extra_args(monkeypatch):

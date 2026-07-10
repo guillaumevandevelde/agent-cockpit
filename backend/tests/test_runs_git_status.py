@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.services.agent_bridge import git_status as gs
+from app.services.runs import git_status as gs
 
 
 def _git(cwd: Path, *args: str) -> None:

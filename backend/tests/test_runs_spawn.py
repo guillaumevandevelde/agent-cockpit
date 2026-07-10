@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 
 def test_claude_worktree_uses_generated_session_name_when_blank(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -29,9 +29,9 @@ def test_claude_worktree_uses_generated_session_name_when_blank(monkeypatch, tmp
 
 
 def test_claude_resume_resolves_directory_from_transcript_cwd(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
-    from app.services.cc_bridge import spawn as claude_spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
+    from app.services.runs import spawn as claude_spawn
 
     project_dir = tmp_path / "claude-deck"
     project_dir.mkdir()
@@ -69,8 +69,8 @@ def test_claude_resume_resolves_directory_from_transcript_cwd(monkeypatch, tmp_p
 
 
 def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -105,8 +105,8 @@ def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
 
 
 def test_codex_bedrock_platform_omits_claude_specific_env(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -141,8 +141,8 @@ def test_codex_bedrock_platform_omits_claude_specific_env(monkeypatch, tmp_path)
 
 def test_minimax_platform_injects_configured_key_and_default_base_url(monkeypatch, tmp_path):
     from app.config import settings
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -170,8 +170,8 @@ def test_minimax_platform_injects_configured_key_and_default_base_url(monkeypatc
 
 def test_minimax_platform_uses_configured_base_url_override(monkeypatch, tmp_path):
     from app.config import settings
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -200,8 +200,8 @@ def test_minimax_platform_uses_configured_base_url_override(monkeypatch, tmp_pat
 
 def test_minimax_platform_without_configured_key_omits_auth_token(monkeypatch, tmp_path):
     from app.config import settings
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -224,8 +224,8 @@ def test_minimax_platform_without_configured_key_omits_auth_token(monkeypatch, t
 
 
 def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -250,7 +250,7 @@ def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
 
 
 def test_sanitize_session_name_strips_invalid_chars():
-    from app.services.agent_bridge import spawn
+    from app.services.runs import spawn
 
     assert spawn._sanitize_session_name("My Feature!") == "My-Feature"
     assert spawn._sanitize_session_name("---") == ""
@@ -259,7 +259,7 @@ def test_sanitize_session_name_strips_invalid_chars():
 
 
 def test_session_name_for_uses_preferred_when_free(monkeypatch):
-    from app.services.agent_bridge import spawn
+    from app.services.runs import spawn
 
     monkeypatch.setattr(spawn, "_running_session_names", lambda: set())
 
@@ -267,7 +267,7 @@ def test_session_name_for_uses_preferred_when_free(monkeypatch):
 
 
 def test_session_name_for_adds_suffix_on_collision(monkeypatch):
-    from app.services.agent_bridge import spawn
+    from app.services.runs import spawn
 
     monkeypatch.setattr(spawn, "_running_session_names", lambda: {"my-feature"})
     monkeypatch.setattr(spawn.uuid, "uuid4", lambda: SimpleNamespace(hex="deadbeef"))
@@ -276,8 +276,8 @@ def test_session_name_for_adds_suffix_on_collision(monkeypatch):
 
 
 def test_spawn_session_uses_worktree_name_as_session_name(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -299,8 +299,8 @@ def test_spawn_session_uses_worktree_name_as_session_name(monkeypatch, tmp_path)
 
 
 def test_spawn_session_sanitizes_dirty_worktree_name(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     calls = []
 
@@ -328,8 +328,8 @@ def test_spawn_session_sanitizes_dirty_worktree_name(monkeypatch, tmp_path):
 
 
 def test_spawn_session_keeps_clean_worktree_name_unflagged(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     def fake_run(args, capture_output=True, text=True, timeout=10):
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -349,8 +349,8 @@ def test_spawn_session_keeps_clean_worktree_name_unflagged(monkeypatch, tmp_path
 
 
 def test_spawn_session_explicit_session_name_overrides(monkeypatch, tmp_path):
-    from app.services.agent_bridge import spawn
     from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
 
     def fake_run(args, capture_output=True, text=True, timeout=10):
         return SimpleNamespace(returncode=0, stdout="", stderr="")

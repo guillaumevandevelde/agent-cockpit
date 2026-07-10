@@ -22,7 +22,7 @@ async def test_provider_registry_smoke_exposes_claude_and_codex_statuses():
 
 
 def test_agent_bridge_session_filter_smoke(monkeypatch):
-    from app.api.v1.agent_bridge import router as agent_bridge_api
+    from app.api.v1.runs import router as agent_bridge_api
 
     calls = []
 
@@ -48,7 +48,7 @@ def test_agent_bridge_session_filter_smoke(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_path):
-    from app.api.v1.agent_bridge import router as agent_bridge_api
+    from app.api.v1.runs import router as agent_bridge_api
 
     captured = {}
 
@@ -89,7 +89,7 @@ async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_pa
 
 @pytest.mark.asyncio
 async def test_agent_bridge_spawn_unknown_provider_smoke(tmp_path):
-    from app.api.v1.agent_bridge import router as agent_bridge_api
+    from app.api.v1.runs import router as agent_bridge_api
 
     with pytest.raises(agent_bridge_api.HTTPException) as exc_info:
         await agent_bridge_api.spawn_session_endpoint(

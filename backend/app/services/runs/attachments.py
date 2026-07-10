@@ -1,4 +1,4 @@
-"""Image attachment handling for Agent Bridge tmux sessions."""
+"""Image attachment handling for live Run tmux sessions."""
 from __future__ import annotations
 
 import hashlib
@@ -21,7 +21,7 @@ from app.models.schemas import (
     BridgeAttachmentPasteResponse,
     BridgeAttachmentResponse,
 )
-from app.services.agent_bridge.discovery import discover_agent_sessions
+from app.services.runs.discovery import discover_agent_sessions
 
 TMUX_ENTER_DELAY_SECONDS = 0.25
 
@@ -40,7 +40,7 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-class AgentBridgeAttachmentService:
+class RunAttachmentService:
     """Stores images where the tmux agent can read them and injects references."""
 
     async def create_attachment(
@@ -331,4 +331,4 @@ class AgentBridgeAttachmentService:
         )
 
 
-agent_bridge_attachment_service = AgentBridgeAttachmentService()
+run_attachment_service = RunAttachmentService()
