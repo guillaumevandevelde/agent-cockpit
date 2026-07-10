@@ -158,13 +158,13 @@ export function TeamTab({
             const wakeMethods = member.wake_methods ?? []
             const deliveryWarnings = [
               member.unseen_pending_count > 0
-                ? `${member.unseen_pending_count} pending request(s) have not been read by this agent.`
+                ? `${member.unseen_pending_count} pending request(s) have not been read by this run.`
                 : null,
               member.stale_pending_count > 0
                 ? `${member.stale_pending_count} pending request(s) are stale.`
                 : null,
               !member.can_nudge && (member.unread_count > 0 || member.pending_count > 0)
-                ? 'No wake path is available; the visible agent must check its inbox.'
+                ? 'No wake path is available; the visible run must check its inbox.'
                 : null,
             ].filter(Boolean)
             const showQueueInboxCheck = member.can_nudge && (member.unread_count > 0 || member.pending_count > 0)

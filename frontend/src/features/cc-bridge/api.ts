@@ -134,16 +134,16 @@ export async function renameSession(sessionName: string, name: string): Promise<
   })
 }
 
-// ── Team API ──────────────────────────────────────────────────────────────
+// ── Run Group API ────────────────────────────────────────────────────────
 
-import type { AgentTeamsResponse, CreateTeamRequest, CreateTeamResponse } from './types'
+import type { RunGroupsResponse, CreateGroupRequest, CreateGroupResponse } from './types'
 
-export async function fetchTeams(): Promise<AgentTeamsResponse> {
-  return apiClient<AgentTeamsResponse>(BASE + '/teams')
+export async function fetchTeams(): Promise<RunGroupsResponse> {
+  return apiClient<RunGroupsResponse>(BASE + '/teams')
 }
 
-export async function createTeam(request: CreateTeamRequest): Promise<CreateTeamResponse> {
-  return apiClient<CreateTeamResponse>(BASE + '/teams', {
+export async function createTeam(request: CreateGroupRequest): Promise<CreateGroupResponse> {
+  return apiClient<CreateGroupResponse>(BASE + '/teams', {
     method: 'POST',
     body: JSON.stringify(request),
   })

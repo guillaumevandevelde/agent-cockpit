@@ -166,15 +166,15 @@ export interface RenameSessionResponse {
   tmux_target: string
 }
 
-// ── Agent Team types ─────────────────────────────────────────────────────
+// ── Run Group types ──────────────────────────────────────────────────────
 
-export interface AgentTeamMember {
+export interface RunGroupMember {
   session_name: string
   pane_id?: string | null
   tmux_target: string
 }
 
-export interface AgentTeam {
+export interface RunGroup {
   team_id: string
   name: string
   provider: string
@@ -185,14 +185,14 @@ export interface AgentTeam {
   members: AgentSession[]
 }
 
-export interface AgentTeamsResponse {
-  teams: AgentTeam[]
+export interface RunGroupsResponse {
+  teams: RunGroup[]
   ungrouped: AgentSession[]
   total_teams: number
   total_sessions: number
 }
 
-export interface CreateTeamRequest {
+export interface CreateGroupRequest {
   name: string
   provider?: string
   cwd?: string
@@ -200,11 +200,11 @@ export interface CreateTeamRequest {
   members: { session_name: string; pane_id?: string | null; tmux_target: string }[]
 }
 
-export interface CreateTeamResponse {
+export interface CreateGroupResponse {
   team_id: string
   name: string
   provider: string
   cwd: string
   is_auto_detected: boolean
-  members: AgentTeamMember[]
+  members: RunGroupMember[]
 }

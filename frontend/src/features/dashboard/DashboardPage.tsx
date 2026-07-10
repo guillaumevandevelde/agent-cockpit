@@ -256,14 +256,14 @@ export function DashboardPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardDescription>
-                {providerStats.sessionMetricKind === 'live' ? `${selectedProviderName} Live Sessions` : 'Claude Session History'}
+                {providerStats.sessionMetricKind === 'live' ? `${selectedProviderName} Live Runs` : 'Claude Session History'}
               </CardDescription>
               <CardTitle className="text-3xl">{providerStats.sessionCount}</CardTitle>
             </CardHeader>
             <CardContent>
               {providerStats.sessionMetricKind === 'live' ? (
                 <p className="text-xs text-muted-foreground">
-                  Sessions currently visible through Agent Bridge
+                  Runs currently visible through Agent Bridge
                 </p>
               ) : (
                 <div className="text-xs text-muted-foreground space-y-1">
@@ -279,7 +279,7 @@ export function DashboardPage() {
                 className="p-0 h-auto mt-2"
                 onClick={() => navigate(providerStats.sessionMetricKind === 'live' ? '/agent-bridge' : '/sessions')}
               >
-                {providerStats.sessionMetricKind === 'live' ? 'View live sessions →' : 'View all sessions →'}
+                {providerStats.sessionMetricKind === 'live' ? 'View live runs →' : 'View all sessions →'}
               </Button>
             </CardContent>
           </Card>

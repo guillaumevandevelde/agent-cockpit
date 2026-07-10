@@ -67,8 +67,8 @@ export function wakeStateLabel(state: string): string {
 
 export function wakeStateTitle(state: string): string {
   if (state === 'wakeable') return 'Claude Cockpit has a wake path for this member.'
-  if (state === 'delivered_waiting') return 'Messages are delivered, but Claude Cockpit cannot wake this visible agent session.'
-  if (state === 'offline') return 'No live session is available for this member.'
+  if (state === 'delivered_waiting') return 'Messages are delivered, but Claude Cockpit cannot wake this visible run.'
+  if (state === 'offline') return 'No live run is available for this member.'
   return state
 }
 
@@ -105,7 +105,7 @@ export function sessionStatusLabel(source: string, status: MailMemberStatus | st
 
 export function sessionStatusTitle(source: string, status: MailMemberStatus | string): string {
   if (source === 'hook' && status === 'connected') return 'A lifecycle hook checked in recently.'
-  if (source === 'hook' && status === 'offline') return 'No recent lifecycle hook event has checked in. This does not mean the agent is disconnected.'
+  if (source === 'hook' && status === 'offline') return 'No recent lifecycle hook event has checked in. This does not mean the run is disconnected.'
   return statusTitle(status)
 }
 

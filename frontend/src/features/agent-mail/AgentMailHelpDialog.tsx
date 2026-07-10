@@ -49,8 +49,8 @@ export function AgentMailHelpDialog({ open, onOpenChange }: AgentMailHelpDialogP
             <ol className="list-decimal space-y-1 pl-5">
               <li>Create an MCP token on the MCP Server page and wire it into Claude Code/Codex config.</li>
               <li>Use the Install tab to add the lifecycle hooks.</li>
-              <li>Restart or resume the affected agent sessions.</li>
-              <li>Have each agent call <code>agent_mail_whoami</code> once from its repo.</li>
+              <li>Restart or resume the affected runs.</li>
+              <li>Have each run call <code>agent_mail_whoami</code> once from its repo.</li>
               <li>Ask agents to check <code>agent_mail_check_inbox</code> before and after major work.</li>
             </ol>
           </HelpSection>
@@ -59,13 +59,13 @@ export function AgentMailHelpDialog({ open, onOpenChange }: AgentMailHelpDialogP
             <p>
               Claude Code and Codex sessions outside tmux can receive mail through MCP, but
               Claude Cockpit cannot wake their visible terminal session yet. Those messages stay
-              unread until the agent checks its inbox or reaches a hook boundary.
+              unread until the run checks its inbox or reaches a hook boundary.
             </p>
           </HelpSection>
 
-          <HelpSection icon={Inbox} title="What agents can do">
+          <HelpSection icon={Inbox} title="What runs can do">
             <p>
-              Agents can request context from another repo's agent, create handoffs, reply in
+              Runs can request context from another repo's run, create handoffs, reply in
               threads, acknowledge answers, and list the team. The useful tools are
               <code> agent_mail_request_context</code>, <code> agent_mail_create_handoff</code>,
               <code> agent_mail_reply</code>, and <code> agent_mail_ack_message</code>.
