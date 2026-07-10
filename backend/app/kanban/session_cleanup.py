@@ -343,7 +343,14 @@ _cleanup_tasks: set = set()
 
 
 def on_card_moved_to_done(card_id: str, project_key: str) -> None:
-    """Schedule session cleanup when a card moves to Done.
+    """Schedule session cleanup when a card moves to a terminal column
+    (Done or Impediment).
+
+    Despite the historical name (kept for grep-trace stability — see
+    kanban card 28b578ba), this now fires for both Done and Impediment
+    transitions. Both are documented "session ends here" markers in
+    `dispatch._build_ship_instructions` and `mcp_server.report_impediment`,
+    so they share the same kill-the-tmux + remove-the-worktree pipeline.
 
     Always called from within a running async context (the kanban operations
     pipeline), so we schedule the cleanup as a background task via the

@@ -23,6 +23,16 @@ from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanMeta, KanbanO
 logger = logging.getLogger(__name__)
 
 
+# Column transitions that end the agent session. Both Done (work shipped)
+# and Impediment (work blocked on a human, session ends per
+# mcp_server.report_impediment) trigger the same kill-the-tmux-and-cleanup
+# pipeline. See kanban card 28b578ba for the Impediment gap. A bare
+# `release` op without a column change is intentionally NOT here — that
+# would silently kill in-flight work on every user-typed release from the
+# UI.
+_TERMINAL_CLEANUP_COLUMNS = frozenset({"Done", "Impediment"})
+
+
 class ClaimRejected(Exception):
     """Raised when a claim loses to an existing earlier claim."""
     def __init__(self, current_owner: str):
@@ -154,9 +164,18 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 _lww_set(card, "column", payload["column"], hlc)
             if payload.get("rank") is not None:
                 _lww_set(card, "rank", payload["rank"], hlc)
-            # When card moves to Done, schedule session cleanup
+            # When card moves to a session-ending terminal column, schedule
+            # session cleanup. Done already triggered this — Impediment did
+            # not, so report_impediment sessions stayed alive after the move
+            # (kanban card 28b578ba). Both transitions mean "the session ends
+            # here" per dispatch._build_ship_instructions and
+            # mcp_server.report_impediment's explicit "session ends here"
+            # contract. Only column transitions trigger this — a bare `release`
+            # op on an agent column is a separate decision and must not, or
+            # every user-typed release would silently kill in-flight work.
             new_column = payload.get("column")
-            if new_column == "Done" and old_column != "Done":
+            if (new_column in _TERMINAL_CLEANUP_COLUMNS
+                    and old_column not in _TERMINAL_CLEANUP_COLUMNS):
                 from app.kanban.session_cleanup import on_card_moved_to_done
                 on_card_moved_to_done(entity_id, project_key)
             # A card leaving an agent column back into a fixed one (e.g. a UI
