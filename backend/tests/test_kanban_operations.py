@@ -1,4 +1,6 @@
 # backend/tests/test_kanban_operations.py
+import gc
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -161,6 +163,65 @@ async def test_second_claim_is_rejected():
         await s.commit()
         card = await s.get(KanbanCard, cid)
         assert card.claimed_by == "first@devA"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_claim_second_loser_is_rejected_after_first_commits():
+    # TOCTOU race: two independent sessions both load the card BEFORE either
+    # writes. The first commits a claim; the second still holds the unclaimed
+    # snapshot in its identity map. Without an atomic guard, the second
+    # session's `session.get(...)` returns the stale unclaimed object, the
+    # in-Python check passes, and the second commit silently overwrites the
+    # first claim. The contract is that ClaimRejected must surface here so
+    # neither caller is misled into thinking they hold the card.
+    async with KanbanSessionLocal() as setup:
+        cid = await apply_operation(
+            setup, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "race-target"},
+        )
+        await setup.commit()
+
+    session_a = KanbanSessionLocal()
+    session_b = KanbanSessionLocal()
+    try:
+        # Force the TOCTOU window: both sessions load the card BEFORE either
+        # writes, so the second session's `_materialize` reads from a stale
+        # identity-map snapshot. (NB: re-calling session.get() between the
+        # commits would itself refresh the snapshot and mask the bug; we
+        # explicitly avoid that here. Strong refs + gc.collect() prevent the
+        # SQLAlchemy identity map's WeakValueDictionary from silently GC'ing
+        # the cached object between the two commits.)
+        loaded_b = await session_b.get(KanbanCard, cid)
+        await session_a.get(KanbanCard, cid)
+        gc.collect()
+        assert loaded_b.claimed_by is None  # unclaimed snapshot pinned
+
+        await apply_operation(
+            session_a, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "agent:a"},
+        )
+        await session_a.commit()
+        # Sanity: the second session still holds the stale unclaimed snapshot.
+        assert loaded_b.claimed_by is None
+
+        # The second session still has the unclaimed snapshot in its identity
+        # map. The contract says: this must raise, not silently overwrite.
+        with pytest.raises(ClaimRejected) as excinfo:
+            await apply_operation(
+                session_b, op_type="claim", entity_type="card",
+                project_key="p", entity_id=cid, payload={"claimed_by": "agent:b"},
+            )
+        # The error should name the *actual* current owner, not the loser's id.
+        assert excinfo.value.current_owner == "agent:a"
+        await session_b.rollback()
+    finally:
+        await session_a.close()
+        await session_b.close()
+
+    # Final state: the first claim is the one that survived.
+    async with KanbanSessionLocal() as verify:
+        card = await verify.get(KanbanCard, cid)
+        assert card.claimed_by == "agent:a"
 
 
 @pytest.mark.asyncio
