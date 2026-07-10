@@ -411,3 +411,32 @@ async def test_update_card_persists_model():
         await s.commit()
         card = await s.get(KanbanCard, cid)
         assert card.model == "sonnet"
+
+
+@pytest.mark.asyncio
+async def test_delete_card_with_gate_succeeds():
+    # Regression: a card that went through open_gate (even answered/closed)
+    # left a KanbanGate row FK-referencing it. clear-column deletes Done cards
+    # one by one in a single transaction; with foreign_keys=ON, hitting such a
+    # card raised IntegrityError and aborted the whole "Clear Done" operation.
+    from app.kanban import service
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "x", "column": "Done"},
+        )
+        await service.create_gate(
+            s, card_id=cid, project_key="git:example",
+            question="Ship now?", options=["yes", "no"],
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="delete", entity_type="card",
+            project_key="", entity_id=cid, payload={})
+        await s.commit()
+        assert await s.get(KanbanCard, cid) is None
+        gates = await service.list_gates(s, cid)
+        assert gates == []

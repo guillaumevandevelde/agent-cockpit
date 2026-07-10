@@ -16,6 +16,7 @@ import atexit
 import os
 import tempfile
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -41,6 +42,16 @@ def _cleanup_test_db_file() -> None:
 test_engine = create_async_engine(
     f"sqlite+aiosqlite:///{_db_path}", future=True, poolclass=NullPool,
 )
+
+
+@event.listens_for(test_engine.sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, _):
+    # Mirrors app.kanban.db's connect listener so tests enforce the same FK
+    # constraints as production (SQLite defaults foreign_keys to OFF per
+    # connection otherwise).
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA foreign_keys=ON")
+    cur.close()
 _test_session_factory = async_sessionmaker(
     test_engine, class_=AsyncSession, expire_on_commit=False,
     autocommit=False, autoflush=False,

@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, select, update
 
 from app.kanban.hlc import HLC, hlc_max
-from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanMeta, KanbanOp
+from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanGate, KanbanMeta, KanbanOp
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +268,9 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             )
             await session.execute(
                 delete(KanbanDeliverable).where(KanbanDeliverable.card_id == entity_id)
+            )
+            await session.execute(
+                delete(KanbanGate).where(KanbanGate.card_id == entity_id)
             )
             await session.delete(card)
             await session.flush()
