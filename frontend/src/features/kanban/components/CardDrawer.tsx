@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
+import { MarkdownPreviewToggle } from "@/components/shared/MarkdownPreviewToggle";
 import { MODAL_SIZES } from "@/lib/constants";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { kanbanApi } from "../api";
@@ -214,11 +215,71 @@ function DoneSummaryBanner({ card }: { card: Card }) {
   );
 }
 
-function PlanTabContent({ card }: { card: Card }) {
-  // Parent case: a "plan" deliverable carries the markdown directly in `ref`.
+function EditablePlan({
+  plan,
+  cardId,
+  onChanged,
+}: {
+  plan: string;
+  cardId: string;
+  onChanged: () => void;
+}) {
+  const [draft, setDraft] = useState(plan);
+  const [saving, setSaving] = useState(false);
+  // Mirror upstream changes of `plan` (e.g. after the parent re-loads the
+  // card via `onChanged`) into `draft`. The `prevPlan` state-tracker is the
+  // React-idiomatic "previous props" pattern — assigning to state during
+  // render is supported and avoids the cascading-render warning that an
+  // unconditional `useEffect(() => setDraft(plan), [plan])` would produce.
+  const [prevPlan, setPrevPlan] = useState(plan);
+  if (plan !== prevPlan) {
+    setPrevPlan(plan);
+    setDraft(plan);
+  }
+
+  const dirty = draft !== plan;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await kanbanApi.updatePlanAttachment(cardId, draft);
+      toast.success("Plan saved");
+      onChanged();
+    } catch {
+      toast.error("Failed to save plan");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <MarkdownPreviewToggle
+        value={draft}
+        onChange={setDraft}
+        defaultTab="preview"
+        disabled={saving}
+      />
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          onClick={save}
+          disabled={saving || !dirty}
+          data-testid="save-plan-button"
+        >
+          {saving ? "Saving…" : "Save plan"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PlanTabContent({ card, onChanged }: { card: Card; onChanged: () => void }) {
+  // Parent case: a "plan" deliverable carries the markdown directly in `ref`
+  // and is editable. The child `plan_ref` case below stays read-only.
   const planDeliverable = card.deliverables.find((d) => d.kind === "plan");
   if (planDeliverable) {
-    return <MarkdownRenderer content={planDeliverable.ref} />;
+    return <EditablePlan plan={planDeliverable.ref} cardId={card.id} onChanged={onChanged} />;
   }
 
   // Child case: a "plan_ref" deliverable's `ref` is a JSON string with the
@@ -540,7 +601,7 @@ export function CardDrawer({
           </TabsContent>
 
           <TabsContent value="plan">
-            <PlanTabContent card={card} />
+            <PlanTabContent card={card} onChanged={onChanged} />
           </TabsContent>
 
           {runSession && (
