@@ -136,6 +136,9 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 parent_card_id=payload.get("parent_card_id"),
                 analyst_run_id=payload.get("analyst_run_id"),
                 depends_on=payload.get("depends_on"),
+                # ORM attribute is `meta` (SQLAlchemy reserves `metadata`); the
+                # API/JSON contract and the DB column are both `metadata`.
+                meta=payload.get("metadata"),
                 title_hlc=hlc, description_hlc=hlc, column_hlc=hlc, rank_hlc=hlc,
             ))
             await session.flush()
@@ -181,6 +184,11 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                       "analyst_run_id", "depends_on"):
                 if f in payload:
                     setattr(card, f, payload[f])
+            # ORM attribute is `meta` (not `metadata` — reserved by SQLAlchemy's
+            # Declarative base). The op-log and API payload both carry the
+            # `metadata` key; this mapping is the one place that translates.
+            if "metadata" in payload:
+                card.meta = payload["metadata"]
         card.updated_at = _utcnow()
         await session.flush()
         return
