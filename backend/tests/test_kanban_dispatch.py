@@ -3234,3 +3234,137 @@ def test_is_rate_limited_session_matches_known_patterns():
     assert d._is_rate_limited_session("") is False
     assert d._is_rate_limited_session("Compaction 1/2 complete") is False
 
+
+# ---- post_agent_status_comment (CC 2.1.198+ background-agent notifications) -
+
+
+@pytest.mark.asyncio
+async def test_post_agent_status_comment_writes_to_claimed_card(monkeypatch):
+    """A `agent_needs_input` / `agent_completed` notification for a
+    kanban-dispatched session lands as a comment op on the card claimed
+    by that session. The card itself is NOT moved (no `move` op emitted,
+    column unchanged)."""
+    import unittest.mock as mock
+
+    from sqlalchemy import select
+
+    from app.kanban import db as kdb
+    from app.kanban.models import KanbanOp
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="background agent card", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-bg-0001"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+        result = await dispatch.post_agent_status_comment(
+            "/p/.claude/worktrees/k-bg-0001", "Session reported completion",
+        )
+
+    assert result is True
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        comment_rows = (await s.execute(
+            select(KanbanOp)
+            .where(KanbanOp.entity_id == cid)
+            .where(KanbanOp.op_type == "comment")
+        )).scalars().all()
+        move_rows = (await s.execute(
+            select(KanbanOp)
+            .where(KanbanOp.entity_id == cid)
+            .where(KanbanOp.op_type == "move")
+        )).scalars().all()
+
+    # Card column is untouched; the only side effect is the activity comment.
+    assert card.column == "engineer"
+    assert [r.payload.get("text") for r in comment_rows] == [
+        "Session reported completion",
+    ]
+    assert move_rows == []
+
+
+@pytest.mark.asyncio
+async def test_post_agent_status_comment_ignores_non_worktree_cwd():
+    """A cwd that isn't a `<project>/.claude/worktrees/<name>` shape (a
+    manual `claude` session, sandcastle, project root) must not be
+    touched. Same contract as ``move_limited_session_to_resume`` — the
+    hook path is a no-op for non-kanban sessions."""
+    result = await dispatch.post_agent_status_comment(
+        "/home/me/some-project", "Session is waiting for input",
+    )
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_post_agent_status_comment_returns_false_when_no_matching_card(monkeypatch):
+    """No card claimed by that session -> no-op, even if the cwd shape matches."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="unrelated", column="engineer")
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+        result = await dispatch.post_agent_status_comment(
+            "/p/.claude/worktrees/k-no-such-session", "Session reported completion",
+        )
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_post_agent_status_comment_returns_false_when_project_key_unresolved():
+    """Unresolvable project path -> bail out before touching the DB."""
+    import unittest.mock as mock
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=None):
+        result = await dispatch.post_agent_status_comment(
+            "/p/.claude/worktrees/k-unknown-0001", "Session is waiting for input",
+        )
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_post_agent_status_comment_skips_cards_in_terminal_columns(monkeypatch):
+    """Cards already on Done / To Resume must not receive a fresh
+    'agent finished' comment — the operator has already declared an
+    outcome, and re-commenting would be noise."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    for terminal_col in ("Done", "To Resume"):
+        async with KanbanSessionLocal() as s:
+            cid = await _make_card(
+                s, title=f"finished card in {terminal_col}",
+                column=terminal_col,
+            )
+            await apply_operation(
+                s, op_type="claim", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"claimed_by": f"agent:k-term-{terminal_col}"},
+            )
+            await s.commit()
+
+        with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+            result = await dispatch.post_agent_status_comment(
+                f"/p/.claude/worktrees/k-term-{terminal_col}",
+                "Session reported completion",
+            )
+
+        assert result is False, (
+            f"post_agent_status_comment must skip cards on {terminal_col}"
+        )
+

@@ -13,9 +13,15 @@ logger = logging.getLogger(__name__)
 def render_hook_command(event: str, port: int = 8000) -> str:
     url = f"http://localhost:{port}/api/v1/scheduled-messages/hook-event"
     if event == "Notification":
+        # Claude Code 2.1.198+ adds `notification_type` to Notification events
+        # (e.g. agent_needs_input, agent_completed). Forward it so the router
+        # can branch on the structured field rather than substring-matching
+        # `message`; older CC payloads simply have `null` for that key, which
+        # is fine — `auto_resume.classify_notification` falls back to
+        # substring matching when notification_type is absent.
         return (
             f"jq -c --arg ev {json.dumps(event)} '{{event:$ev, session_id:.session_id, cwd:.cwd, "
-            "tmux_pane:env.TMUX_PANE, message:.message}' "
+            "tmux_pane:env.TMUX_PANE, message:.message, notification_type:.notification_type}' "
             f"| curl -s -X POST -H 'Content-Type: application/json' -d @- {url} >/dev/null 2>&1 || true"
         )
     return (

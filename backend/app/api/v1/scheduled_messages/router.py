@@ -180,57 +180,87 @@ async def hook_event(ev: HookEvent):
     session_registry.record(ev.event, session_id=ev.session_id, cwd=ev.cwd,
                             tmux_pane=ev.tmux_pane)
 
-    if ev.event == "Notification" and auto_resume_service.is_limit_notification(ev.message):
-        # Kanban-dispatched session hit its usage limit and is stuck open: move its
-        # card to "To Resume" and kill the tmux session now, rather than leaving it
-        # dangling until a human notices. No-op for non-kanban sessions.
-        from app.kanban.dispatch import move_limited_session_to_resume
-        try:
-            await move_limited_session_to_resume(ev.cwd)
-        except Exception:
-            logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
+    if ev.event == "Notification":
+        kind = auto_resume_service.classify_notification(
+            message=ev.message, notification_type=ev.notification_type,
+        )
 
-        parsed = auto_resume_service.parse_reset_time(ev.message)
+        if kind == "limit":
+            # Kanban-dispatched session hit its usage limit and is stuck open: move its
+            # card to "To Resume" and kill the tmux session now, rather than leaving it
+            # dangling until a human notices. No-op for non-kanban sessions.
+            from app.kanban.dispatch import move_limited_session_to_resume
+            try:
+                await move_limited_session_to_resume(ev.cwd)
+            except Exception:
+                logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
 
-        # The usage limit is account-wide: every session hits the same wall for
-        # the rest of the reset window. Pause the whole auto-dispatch tick (every
-        # project on this device) until then, so it doesn't keep respawning "To
-        # Resume" cards every ~10s only to immediately re-hit the same limit.
-        if parsed:
-            pause_until, _tz_name = parsed
-        else:
-            # Recognized as a limit hit but the reset time didn't match the known
-            # clock-time format (e.g. a weekly/model cap with different wording).
-            # Fall back to a conservative fixed pause instead of skipping it --
-            # skipping just re-triggers the same spin-and-burn loop the pause
-            # exists to prevent.
-            from datetime import UTC, datetime, timedelta
-            pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
-            logger.warning(
-                "unrecognized usage-limit message format for %s, falling back to a "
-                "%sh dispatch pause: %r",
-                ev.cwd, FALLBACK_PAUSE_HOURS, ev.message,
+            parsed = auto_resume_service.parse_reset_time(ev.message)
+
+            # The usage limit is account-wide: every session hits the same wall for
+            # the rest of the reset window. Pause the whole auto-dispatch tick (every
+            # project on this device) until then, so it doesn't keep respawning "To
+            # Resume" cards every ~10s only to immediately re-hit the same limit.
+            if parsed:
+                pause_until, _tz_name = parsed
+            else:
+                # Recognized as a limit hit but the reset time didn't match the known
+                # clock-time format (e.g. a weekly/model cap with different wording).
+                # Fall back to a conservative fixed pause instead of skipping it --
+                # skipping just re-triggers the same spin-and-burn loop the pause
+                # exists to prevent.
+                from datetime import UTC, datetime, timedelta
+                pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+                logger.warning(
+                    "unrecognized usage-limit message format for %s, falling back to a "
+                    "%sh dispatch pause: %r",
+                    ev.cwd, FALLBACK_PAUSE_HOURS, ev.message,
+                )
+
+            from app.kanban.db import KanbanSessionLocal
+            from app.kanban.dispatch_pause import set_paused_until
+            try:
+                async with KanbanSessionLocal() as ks:
+                    await set_paused_until(ks, pause_until)
+                    await ks.commit()
+            except Exception:
+                logger.exception("failed to set global dispatch pause for %s", ev.cwd)
+
+            # Auto-resume: schedule a resume job for the scheduled-messages feature,
+            # for projects that opted in explicitly (independent of the kanban path).
+            if parsed and auto_resume_service.is_enabled(ev.cwd):
+                reset_time, tz_name = parsed
+                auto_resume_service.schedule_resume(
+                    cwd=ev.cwd,
+                    reset_time=reset_time,
+                    tz_name=tz_name,
+                    session_id=ev.session_id,
+                )
+
+        elif kind in ("needs_input", "completed"):
+            # New background-agent subtypes (Claude Code 2.1.198+, Jul 2026).
+            # Surface the event as a kanban activity comment so the operator
+            # sees "agent waiting" / "agent finished" on the card, but do NOT
+            # move the card — the explicit human/engineer move to Done stays
+            # authoritative (matches the rate-limit design where
+            # `move_limited_session_to_resume` is the only auto-move and
+            # only on a real rate-limit hit). No-op for non-kanban sessions.
+            from app.kanban.dispatch import post_agent_status_comment
+            text = (
+                "Session is waiting for input"
+                if kind == "needs_input"
+                else "Session reported completion"
             )
+            try:
+                await post_agent_status_comment(ev.cwd, text)
+            except Exception:
+                logger.exception(
+                    "failed to post agent-status comment to kanban card for %s",
+                    ev.cwd,
+                )
 
-        from app.kanban.db import KanbanSessionLocal
-        from app.kanban.dispatch_pause import set_paused_until
-        try:
-            async with KanbanSessionLocal() as ks:
-                await set_paused_until(ks, pause_until)
-                await ks.commit()
-        except Exception:
-            logger.exception("failed to set global dispatch pause for %s", ev.cwd)
-
-        # Auto-resume: schedule a resume job for the scheduled-messages feature,
-        # for projects that opted in explicitly (independent of the kanban path).
-        if parsed and auto_resume_service.is_enabled(ev.cwd):
-            reset_time, tz_name = parsed
-            auto_resume_service.schedule_resume(
-                cwd=ev.cwd,
-                reset_time=reset_time,
-                tz_name=tz_name,
-                session_id=ev.session_id,
-            )
+        # else "other" → drop silently (permission_prompt / idle_prompt /
+        # auth_success / elicitation_* / unknown payloads), same as before.
 
     return {"ok": True}
 

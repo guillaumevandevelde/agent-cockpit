@@ -7,6 +7,7 @@ session (or resumes) and injects a continuation message.
 import logging
 import re
 from datetime import datetime, timedelta
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.date import DateTrigger
@@ -28,6 +29,13 @@ DEFAULT_RESUME_MESSAGE = "Continue where you left off."
 # length of a Claude billing block -- guessing too short just re-triggers the
 # same spin-and-burn loop the pause exists to prevent.
 FALLBACK_PAUSE_HOURS = 5
+
+# Notification classification for the Claude Code Notification hook (Claude Code
+# 2.1.198+, Jul 2026). The new `agent_needs_input` and `agent_completed`
+# notification_type values are for background agents run via `claude agents` —
+# they let external systems surface a "needs attention" badge or detect a
+# finished session that the human/engineer hasn't moved to Done yet.
+NotificationKind = Literal["limit", "needs_input", "completed", "other"]
 
 
 class AutoResumeService:
@@ -55,12 +63,48 @@ class AutoResumeService:
         the only thing still catching them — see kanban card
         "Backend: reaper detecteert+ruimt stuck sessies op".
         """
-        if not message:
-            return False
-        text = message.lower()
-        if "hit your session limit" in text:
-            return True
-        return any(
+        return self.classify_notification(message=message) == "limit"
+
+    def classify_notification(
+        self,
+        *,
+        message: str | None = None,
+        notification_type: str | None = None,
+    ) -> NotificationKind:
+        """Bucket a Notification hook payload so the router can branch on intent.
+
+        The Claude Code Notification hook (CC 2.1.198+, Jul 2026) carries an
+        explicit `notification_type` for the new background-agent subtypes
+        ``agent_needs_input`` and ``agent_completed`` (template strings:
+        ``"<label> needs your input"`` and ``"<label> finished"`` / ``"failed"``).
+        Pre-2.1.198 payloads only have a free-text ``message``, so this also
+        substring-matches that wording as a fallback for older hook scripts
+        and for provider-specific variants.
+
+        Returns one of:
+          - ``"limit"`` — rate-limit hit; router triggers the global dispatch
+            pause + ``To Resume`` move (existing behaviour).
+          - ``"needs_input"`` — background agent is waiting on the user;
+            router posts a card activity comment so the operator can see the
+            card needs attention.
+          - ``"completed"`` — background agent finished (succeeded or failed);
+            router posts a card activity comment. The card is NOT auto-moved
+            to Done; the explicit human/engineer move stays authoritative.
+          - ``"other"`` — anything else (permission_prompt, idle_prompt,
+            auth_success, elicitation_*, empty/unknown payloads); router
+            drops these silently, same as today.
+
+        Limit detection runs first: a limit hit must not be shadowed by the
+        needs_input branch even if a provider ever merges both into a single
+        payload.
+
+        When ``notification_type`` is set, it takes precedence over the
+        message-substring fallback for the agent buckets — otherwise a
+        permission_prompt / elicitation_dialog (whose template also contains
+        "Claude needs your input") would be misclassified as needs_input.
+        """
+        text = (message or "").lower()
+        if "hit your session limit" in text or any(
             needle in text
             for needle in (
                 "api error",
@@ -69,7 +113,29 @@ class AutoResumeService:
                 "usage limit",
                 "request rejected",
             )
-        )
+        ):
+            return "limit"
+
+        if notification_type == "agent_needs_input":
+            return "needs_input"
+        if notification_type == "agent_completed":
+            return "completed"
+        # Any explicit non-agent notification_type (permission_prompt,
+        # idle_prompt, auth_success, elicitation_*) means the structured
+        # field is authoritative — don't let a "Claude needs your input"
+        # substring in the message flip us into the needs_input bucket.
+        if notification_type:
+            return "other"
+
+        if "needs your input" in text:
+            return "needs_input"
+        if "finished" in text or "failed" in text:
+            # CC's background-agent completion template is "<label> finished"
+            # on success and "<label> failed" on failure. Both surface under
+            # agent_completed; the operator reads the message to see which.
+            return "completed"
+
+        return "other"
 
     def parse_reset_time(self, message: str | None) -> tuple[datetime, str] | None:
         """Parse reset time and timezone from notification message.
