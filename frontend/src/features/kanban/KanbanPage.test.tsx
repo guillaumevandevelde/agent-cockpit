@@ -29,6 +29,8 @@ vi.mock("./api", async (importOriginal) => {
     advertised_endpoint: null,
     routes_to_mount: true,
     message_post_status: null,
+    tool_call_ok: true,
+    protocol_version: null,
     tools: [],
     db_ok: true,
     error: null,

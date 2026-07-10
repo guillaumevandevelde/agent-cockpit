@@ -173,6 +173,8 @@ export interface McpHealth {
   advertised_endpoint: string | null;
   routes_to_mount: boolean;
   message_post_status: number | null;
+  tool_call_ok: boolean;
+  protocol_version: string | null;
   tools: string[];
   db_ok: boolean;
   error: string | null;

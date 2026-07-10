@@ -22,7 +22,8 @@ export function McpHealthBadge() {
     } catch (e) {
       setHealth({
         ok: false, advertised_endpoint: null, routes_to_mount: false,
-        message_post_status: null, tools: [], db_ok: false,
+        message_post_status: null, tool_call_ok: false, protocol_version: null,
+        tools: [], db_ok: false,
         error: e instanceof Error ? e.message : "health check request failed",
       });
     } finally {
@@ -40,7 +41,8 @@ export function McpHealthBadge() {
           alive &&
           setHealth({
             ok: false, advertised_endpoint: null, routes_to_mount: false,
-            message_post_status: null, tools: [], db_ok: false,
+            message_post_status: null, tool_call_ok: false, protocol_version: null,
+            tools: [], db_ok: false,
             error: e instanceof Error ? e.message : "health check request failed",
           })
       );
@@ -58,6 +60,8 @@ export function McpHealthBadge() {
         `advertised endpoint: ${health.advertised_endpoint ?? "none"}`,
         `routes to mount: ${health.routes_to_mount}`,
         health.message_post_status != null ? `message POST status: ${health.message_post_status}` : null,
+        `tool call ok: ${health.tool_call_ok}`,
+        health.protocol_version ? `protocol: ${health.protocol_version}` : null,
         `tools: ${health.tools.length ? health.tools.join(", ") : "none"}`,
         `store reachable: ${health.db_ok}`,
         health.error ? `error: ${health.error}` : null,
