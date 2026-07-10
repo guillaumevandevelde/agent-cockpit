@@ -21,8 +21,8 @@ export const WORK_TYPE_ICONS: Record<WorkType, string> = {
   chore: "🔧",
 };
 
-export const PLATFORMS = ["anthropic", "bedrock", "minimax"] as const;
-export type Platform = (typeof PLATFORMS)[number];
+export const PROVIDERS = ["anthropic", "bedrock", "minimax"] as const;
+export type Provider = (typeof PROVIDERS)[number];
 
 // Seed suggestions shown in the model free-text field before the list has
 // ever been refreshed from the installed CLI. Mirrors backend/app/kanban/
@@ -56,7 +56,7 @@ export interface KanbanColumn {
   name: string;
   rank: string;
   default_agent: string | null;
-  default_platform: string | null;
+  default_provider: string | null;
   default_model: string | null;
   max_sessions: number | null;
   created_at: string;

@@ -5,10 +5,10 @@ import { SessionCard } from './SessionCard'
 import { TeamCard } from './TeamCard'
 import type { CCSession, AgentTeam } from './types'
 import type { AttentionKind } from './attention'
-import type { AgentProviderId } from '@/types/providers'
+import type { AgenticCliId } from '@/types/providers'
 import type { InstanceIdentity } from '@/types/status'
 
-type ProviderFilter = 'all' | AgentProviderId
+type ProviderFilter = 'all' | AgenticCliId
 
 interface SessionListProps {
   sessions: CCSession[]

@@ -1,4 +1,4 @@
-import type { AgentProviderStatus } from './providers'
+import type { AgenticCliStatus } from './providers'
 
 export type InstanceAccent =
   | 'blue'
@@ -22,6 +22,6 @@ export interface InstanceIdentity {
 export interface SystemStatusResponse {
   claude_code_version: string | null
   active_sessions: number
-  providers?: Record<string, AgentProviderStatus>
+  providers?: Record<string, AgenticCliStatus>
   instance?: InstanceIdentity
 }

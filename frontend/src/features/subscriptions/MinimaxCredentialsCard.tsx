@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { fetchMinimaxPlatformStatus, setMinimaxApiKey, clearMinimaxApiKey } from '@/features/cc-bridge/api'
+import { fetchMinimaxProviderStatus, setMinimaxApiKey, clearMinimaxApiKey } from '@/features/cc-bridge/api'
 
 export function MinimaxCredentialsCard() {
   const [configured, setConfigured] = useState<boolean | null>(null)
@@ -14,7 +14,7 @@ export function MinimaxCredentialsCard() {
 
   useEffect(() => {
     let cancelled = false
-    fetchMinimaxPlatformStatus()
+    fetchMinimaxProviderStatus()
       .then((data) => { if (!cancelled) setConfigured(data.configured) })
       .catch(() => { if (!cancelled) setConfigured(null) })
     return () => { cancelled = true }

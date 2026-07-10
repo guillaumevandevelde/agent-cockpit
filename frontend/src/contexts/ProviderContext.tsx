@@ -1,23 +1,23 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useProviders } from '@/hooks/useProviders'
-import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
+import type { AgenticCliId, AgenticCliStatus } from '@/types/providers'
 
 interface ProviderContextValue {
-  providers: AgentProviderStatus[]
+  providers: AgenticCliStatus[]
   loading: boolean
   error: string | null
-  selectedProviderId: AgentProviderId
-  selectedProvider: AgentProviderStatus | null
-  setSelectedProviderId: (providerId: AgentProviderId) => void
+  selectedProviderId: AgenticCliId
+  selectedProvider: AgenticCliStatus | null
+  setSelectedProviderId: (providerId: AgenticCliId) => void
   refreshProviders: () => void
 }
 
-const DEFAULT_PROVIDER: AgentProviderId = 'claude-code'
+const DEFAULT_PROVIDER: AgenticCliId = 'claude-code'
 const STORAGE_KEY = 'claude-cockpit:selected-provider'
 
 const ProviderContext = createContext<ProviderContextValue | undefined>(undefined)
 
-function readStoredProvider(): AgentProviderId {
+function readStoredProvider(): AgenticCliId {
   const stored = window.localStorage.getItem(STORAGE_KEY)
   if (stored === 'codex-cli' || stored === 'claude-code' || stored === 'mimo-code') {
     return stored
@@ -27,7 +27,7 @@ function readStoredProvider(): AgentProviderId {
 
 export function ProviderProvider({ children }: { children: ReactNode }) {
   const { providers, loading, error, refresh } = useProviders()
-  const [selectedProviderId, setSelectedProviderIdState] = useState<AgentProviderId>(readStoredProvider)
+  const [selectedProviderId, setSelectedProviderIdState] = useState<AgenticCliId>(readStoredProvider)
 
   useEffect(() => {
     if (providers.length === 0) return
@@ -43,7 +43,7 @@ export function ProviderProvider({ children }: { children: ReactNode }) {
     }
   }, [providers, selectedProviderId])
 
-  const setSelectedProviderId = useCallback((providerId: AgentProviderId) => {
+  const setSelectedProviderId = useCallback((providerId: AgenticCliId) => {
     window.localStorage.setItem(STORAGE_KEY, providerId)
     setSelectedProviderIdState(providerId)
   }, [])

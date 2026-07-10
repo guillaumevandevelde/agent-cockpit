@@ -1,4 +1,4 @@
-import type { AgentProviderCapabilities, AgentProviderId, AgentProviderStatus } from '@/types/providers'
+import type { AgenticCliCapabilities, AgenticCliId, AgenticCliStatus } from '@/types/providers'
 import {
   LayoutDashboard,
   Settings,
@@ -37,7 +37,7 @@ export type NavItem = {
   name: string
   href: string
   icon: LucideIcon
-  capability?: keyof AgentProviderCapabilities
+  capability?: keyof AgenticCliCapabilities
 }
 
 export type NavGroup = {
@@ -74,7 +74,7 @@ const commonNavigation: NavGroup[] = [
   },
 ]
 
-const providerNavigation: Record<AgentProviderId, NavGroup[]> = {
+const providerNavigation: Record<AgenticCliId, NavGroup[]> = {
   'claude-code': [
     {
       name: 'Claude Code',
@@ -153,7 +153,7 @@ const providerNavigation: Record<AgentProviderId, NavGroup[]> = {
   ],
 }
 
-export function getNavigation(providerId: AgentProviderId): NavGroup[] {
+export function getNavigation(providerId: AgenticCliId): NavGroup[] {
   return [
     ...commonNavigation,
     ...(providerNavigation[providerId] ?? []),
@@ -162,7 +162,7 @@ export function getNavigation(providerId: AgentProviderId): NavGroup[] {
 
 const visibleCapabilityStates = new Set(['supported', 'read_only', 'write_capable'])
 
-export function supportsProvider(item: NavItem, provider: AgentProviderStatus | null) {
+export function supportsProvider(item: NavItem, provider: AgenticCliStatus | null) {
   if (!item.capability || !provider) return true
   const detail = provider.capability_matrix?.[item.capability]
   if (detail) return visibleCapabilityStates.has(detail.state)

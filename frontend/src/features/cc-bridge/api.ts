@@ -1,6 +1,6 @@
 import { apiClient, buildEndpoint, type ApiError } from '@/lib/api'
 import { API_BASE_URL } from '@/lib/constants'
-import type { AgentProviderId } from '@/types/providers'
+import type { AgenticCliId } from '@/types/providers'
 import type {
   BridgeAttachment,
   BridgeAttachmentDeleteResponse,
@@ -17,7 +17,7 @@ import type {
   RenameSessionResponse,
   BulkResumeRequest,
   BulkResumeResponse,
-  PlatformStatusResponse,
+  ProviderStatusResponse,
 } from './types'
 import type { ResumableSessionListResponse } from '@/types/sessions'
 
@@ -58,7 +58,7 @@ async function attachmentRequest<T>(
   return response.json()
 }
 
-export async function fetchCCSessions(provider?: AgentProviderId): Promise<CCSessionsResponse> {
+export async function fetchCCSessions(provider?: AgenticCliId): Promise<CCSessionsResponse> {
   return apiClient<CCSessionsResponse>(buildEndpoint(BASE + '/sessions', { provider }))
 }
 
@@ -96,19 +96,19 @@ export async function spawnSession(request: SpawnSessionRequest): Promise<SpawnS
   })
 }
 
-export async function fetchMinimaxPlatformStatus(): Promise<PlatformStatusResponse> {
-  return apiClient<PlatformStatusResponse>(BASE + '/platforms/minimax/status')
+export async function fetchMinimaxProviderStatus(): Promise<ProviderStatusResponse> {
+  return apiClient<ProviderStatusResponse>(BASE + '/platforms/minimax/status')
 }
 
-export async function setMinimaxApiKey(minimaxApiKey: string): Promise<PlatformStatusResponse> {
-  return apiClient<PlatformStatusResponse>(BASE + '/platforms/minimax/credentials', {
+export async function setMinimaxApiKey(minimaxApiKey: string): Promise<ProviderStatusResponse> {
+  return apiClient<ProviderStatusResponse>(BASE + '/platforms/minimax/credentials', {
     method: 'POST',
     body: JSON.stringify({ minimax_api_key: minimaxApiKey }),
   })
 }
 
-export async function clearMinimaxApiKey(): Promise<PlatformStatusResponse> {
-  return apiClient<PlatformStatusResponse>(BASE + '/platforms/minimax/credentials', {
+export async function clearMinimaxApiKey(): Promise<ProviderStatusResponse> {
+  return apiClient<ProviderStatusResponse>(BASE + '/platforms/minimax/credentials', {
     method: 'DELETE',
   })
 }

@@ -21,7 +21,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { CLICKABLE_CARD } from '@/lib/constants'
-import type { AgentProviderStatus, AgentProviderCapabilityDetail, AgentProviderCapabilities } from '@/types/providers'
+import type { AgenticCliStatus, AgenticCliCapabilityDetail, AgenticCliCapabilities } from '@/types/providers'
 
 const CAPABILITY_GROUPS = [
   {
@@ -74,7 +74,7 @@ const CAPABILITY_ICONS: Record<string, typeof Settings> = {
   restore: Activity,
 }
 
-function CapabilityBadge({ name, detail }: { name: string; detail: AgentProviderCapabilityDetail }) {
+function CapabilityBadge({ name, detail }: { name: string; detail: AgenticCliCapabilityDetail }) {
   const Icon = CAPABILITY_ICONS[name] ?? Activity
   const isSupported = detail.state === 'supported' || detail.state === 'read_only' || detail.state === 'write_capable'
   const isWritable = detail.state === 'write_capable'
@@ -98,12 +98,12 @@ function CapabilityBadge({ name, detail }: { name: string; detail: AgentProvider
 }
 
 function ProviderCard({ provider, isSelected, onSelect }: {
-  provider: AgentProviderStatus
+  provider: AgenticCliStatus
   isSelected: boolean
   onSelect: () => void
 }) {
   const navigate = useNavigate()
-  const matrix = (provider.capability_matrix ?? {}) as Partial<Record<keyof AgentProviderCapabilities, AgentProviderCapabilityDetail>>
+  const matrix = (provider.capability_matrix ?? {}) as Partial<Record<keyof AgenticCliCapabilities, AgenticCliCapabilityDetail>>
   const supportedCount = Object.values(matrix).filter(
     (d) => d.state === 'supported' || d.state === 'read_only' || d.state === 'write_capable'
   ).length
@@ -161,8 +161,8 @@ function ProviderCard({ provider, isSelected, onSelect }: {
       <div className="space-y-2">
         {CAPABILITY_GROUPS.map((group) => {
           const groupCaps = group.capabilities
-            .map((c) => ({ name: c, detail: matrix[c as keyof AgentProviderCapabilities] }))
-            .filter((c): c is { name: string; detail: AgentProviderCapabilityDetail } => !!c.detail)
+            .map((c) => ({ name: c, detail: matrix[c as keyof AgenticCliCapabilities] }))
+            .filter((c): c is { name: string; detail: AgenticCliCapabilityDetail } => !!c.detail)
           if (groupCaps.length === 0) return null
           const groupSupported = groupCaps.filter(
             (c) => c.detail.state === 'supported' || c.detail.state === 'read_only' || c.detail.state === 'write_capable'

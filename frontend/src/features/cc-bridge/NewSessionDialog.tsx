@@ -23,12 +23,12 @@ import { MODAL_SIZES } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
 import { fetchHosts } from '@/features/hosts/api'
-import { spawnSession, fetchResumableSessions, bulkResumeSessions, fetchMinimaxPlatformStatus } from './api'
+import { spawnSession, fetchResumableSessions, bulkResumeSessions, fetchMinimaxProviderStatus } from './api'
 import { fetchCodexLaunchOptions } from '@/hooks/useProviders'
 import { Link } from 'react-router-dom'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
-import type { AgentProviderId, CodexLaunchOptionsResponse } from '@/types/providers'
+import type { AgenticCliId, CodexLaunchOptionsResponse } from '@/types/providers'
 import type { SpawnSessionRequest } from './types'
 import type { ResumableSession } from '@/types/sessions'
 import type { Host } from '@/features/hosts/types'
@@ -40,7 +40,7 @@ interface NewSessionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSpawned: (tmuxTarget: string) => void
-  initialProvider?: AgentProviderId
+  initialProvider?: AgenticCliId
 }
 
 const MODE_OPTIONS: { value: Mode; label: string }[] = [
@@ -62,37 +62,37 @@ const COPILOT_MODE_OPTIONS: { value: Mode; label: string }[] = [
 
 type CopilotRemote = 'default' | 'remote' | 'local'
 
-const PLATFORM_STORAGE_KEY = 'cc-bridge.platform'
+const PROVIDER_STORAGE_KEY = 'cc-bridge.provider'
 
-type Platform = 'anthropic' | 'bedrock' | 'minimax'
+type VendorProvider = 'anthropic' | 'bedrock' | 'minimax'
 
 const MINIMAX_BASE_URL_INTERNATIONAL = 'https://api.minimax.io/anthropic'
 const MINIMAX_BASE_URL_CHINA = 'https://api.minimaxi.com/anthropic'
 
-interface RememberedPlatform {
-  platform: Platform
+interface RememberedProvider {
+  provider: VendorProvider
   aws_region: string
   aws_profile: string
   bedrock_model: string
   minimax_base_url: string
 }
 
-function loadRememberedPlatform(): RememberedPlatform {
-  const fallback: RememberedPlatform = {
-    platform: 'anthropic',
+function loadRememberedProvider(): RememberedProvider {
+  const fallback: RememberedProvider = {
+    provider: 'anthropic',
     aws_region: '',
     aws_profile: '',
     bedrock_model: '',
     minimax_base_url: MINIMAX_BASE_URL_INTERNATIONAL,
   }
   try {
-    const raw = localStorage.getItem(PLATFORM_STORAGE_KEY)
+    const raw = localStorage.getItem(PROVIDER_STORAGE_KEY)
     if (!raw) return fallback
-    const parsed = JSON.parse(raw) as Partial<RememberedPlatform>
-    const platform: Platform =
-      parsed.platform === 'bedrock' ? 'bedrock' : parsed.platform === 'minimax' ? 'minimax' : 'anthropic'
+    const parsed = JSON.parse(raw) as Partial<RememberedProvider>
+    const provider: VendorProvider =
+      parsed.provider === 'bedrock' ? 'bedrock' : parsed.provider === 'minimax' ? 'minimax' : 'anthropic'
     return {
-      platform,
+      provider,
       aws_region: typeof parsed.aws_region === 'string' ? parsed.aws_region : '',
       aws_profile: typeof parsed.aws_profile === 'string' ? parsed.aws_profile : '',
       bedrock_model: typeof parsed.bedrock_model === 'string' ? parsed.bedrock_model : '',
@@ -120,7 +120,7 @@ function matchesProjectSearch(project: ProjectResponse, query: string) {
 export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvider }: NewSessionDialogProps) {
   const { providers, selectedProviderId } = useProviderContext()
   const defaultProvider = initialProvider ?? selectedProviderId
-  const [provider, setProvider] = useState<AgentProviderId>(defaultProvider)
+  const [provider, setProvider] = useState<AgenticCliId>(defaultProvider)
   const [directory, setDirectory] = useState('')
   const [projectSearch, setProjectSearch] = useState('')
   const [mode, setMode] = useState<Mode>('plain')
@@ -138,7 +138,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [codexReasoningEffort, setCodexReasoningEffort] = useState('')
   const [codexSessionId, setCodexSessionId] = useState('')
   const [useLast, setUseLast] = useState(true)
-  const [platform, setPlatform] = useState<Platform>('anthropic')
+  const [vendorProvider, setVendorProvider] = useState<VendorProvider>('anthropic')
   const [awsRegion, setAwsRegion] = useState('')
   const [awsProfile, setAwsProfile] = useState('')
   const [bedrockModel, setBedrockModel] = useState('')
@@ -220,11 +220,11 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     }
   }, [open, activeProject?.path, directory])
 
-  // Prefill the remembered platform selection when the dialog opens.
+  // Prefill the remembered provider selection when the dialog opens.
   useEffect(() => {
     if (!open) return
-    const remembered = loadRememberedPlatform()
-    setPlatform(remembered.platform)
+    const remembered = loadRememberedProvider()
+    setVendorProvider(remembered.provider)
     setAwsRegion(remembered.aws_region)
     setAwsProfile(remembered.aws_profile)
     setBedrockModel(remembered.bedrock_model)
@@ -234,14 +234,14 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   // Check whether the backend has a MiniMax API key configured. Cockpit never
   // handles the key itself, so this only toggles a "not configured" notice.
   useEffect(() => {
-    if (!open || platform !== 'minimax') return
+    if (!open || vendorProvider !== 'minimax') return
     let cancelled = false
     setMinimaxConfigured(null)
-    fetchMinimaxPlatformStatus()
+    fetchMinimaxProviderStatus()
       .then((data) => { if (!cancelled) setMinimaxConfigured(data.configured) })
       .catch(() => { if (!cancelled) setMinimaxConfigured(null) })
     return () => { cancelled = true }
-  }, [open, platform])
+  }, [open, vendorProvider])
 
   useEffect(() => {
     if (!open) return
@@ -338,13 +338,13 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     setSubmitting(true)
 
     try {
-      const isBedrock = !isCopilot && platform === 'bedrock'
-      const isMinimax = !isCodex && !isCopilot && platform === 'minimax'
+      const isBedrock = !isCopilot && vendorProvider === 'bedrock'
+      const isMinimax = !isCodex && !isCopilot && vendorProvider === 'minimax'
       try {
         localStorage.setItem(
-          PLATFORM_STORAGE_KEY,
+          PROVIDER_STORAGE_KEY,
           JSON.stringify({
-            platform: isCopilot ? 'anthropic' : platform,
+            provider: isCopilot ? 'anthropic' : vendorProvider,
             aws_region: awsRegion,
             aws_profile: awsProfile,
             bedrock_model: bedrockModel,
@@ -352,7 +352,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
           }),
         )
       } catch {
-        // Persisting the platform preference is best-effort; ignore storage failures.
+        // Persisting the provider preference is best-effort; ignore storage failures.
       }
 
       // Resume mode (Claude Code) resumes every selected session in one batch,
@@ -360,15 +360,15 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       if (provider === 'claude-code' && mode === 'resume') {
         const selected = recentSessions.filter((s) => selectedSessionIds.has(s.id))
         const result = await bulkResumeSessions({
-          provider,
+          cli: provider,
           directory: directory.trim(),
           sessions: selected.map((s) => ({ session_id: s.id, project_folder: s.project_folder })),
           ...(skipPermissions && { skip_permissions: true }),
-          ...(isBedrock && { platform: 'bedrock' as const }),
+          ...(isBedrock && { provider: 'bedrock' as const }),
           ...(isBedrock && awsRegion.trim() && { aws_region: awsRegion.trim() }),
           ...(isBedrock && awsProfile.trim() && { aws_profile: awsProfile.trim() }),
           ...(isBedrock && bedrockModel.trim() && { bedrock_model: bedrockModel.trim() }),
-          ...(isMinimax && { platform: 'minimax' as const }),
+          ...(isMinimax && { provider: 'minimax' as const }),
           ...(isMinimax && minimaxBaseUrl.trim() && { minimax_base_url: minimaxBaseUrl.trim() }),
         })
         for (const item of result.results) {
@@ -384,7 +384,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       }
 
       const request: SpawnSessionRequest = {
-        provider,
+        cli: provider,
         directory: directory.trim(),
         mode,
         ...(sessionName.trim() && { session_name: sessionName.trim() }),
@@ -410,11 +410,11 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
         ...(isCopilot && copilotRemote !== 'default' && { remote: copilotRemote === 'remote' }),
         ...(isCopilot && copilotAllowAll && { allow_all: true }),
         ...(isCopilot && copilotNoAskUser && { no_ask_user: true }),
-        ...(isBedrock && { platform: 'bedrock' as const }),
+        ...(isBedrock && { provider: 'bedrock' as const }),
         ...(isBedrock && awsRegion.trim() && { aws_region: awsRegion.trim() }),
         ...(isBedrock && awsProfile.trim() && { aws_profile: awsProfile.trim() }),
         ...(isBedrock && bedrockModel.trim() && { bedrock_model: bedrockModel.trim() }),
-        ...(isMinimax && { platform: 'minimax' as const }),
+        ...(isMinimax && { provider: 'minimax' as const }),
         ...(isMinimax && minimaxBaseUrl.trim() && { minimax_base_url: minimaxBaseUrl.trim() }),
         ...(selectedHostId !== null && { host_id: selectedHostId }),
       }
@@ -448,7 +448,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             <Select
               value={provider}
               onValueChange={(value) => {
-                setProvider(value as AgentProviderId)
+                setProvider(value as AgenticCliId)
                 setMode('plain')
                 setSelectedSessionIds(new Set())
                 setError(null)
@@ -834,8 +834,8 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
 
           {!isCopilot && (
             <div className="space-y-1.5">
-              <Label>Platform</Label>
-              <Select value={platform} onValueChange={(value) => setPlatform(value as Platform)}>
+              <Label>Provider</Label>
+              <Select value={vendorProvider} onValueChange={(value) => setVendorProvider(value as VendorProvider)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -848,7 +848,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             </div>
           )}
 
-          {!isCopilot && platform === 'bedrock' && (
+          {!isCopilot && vendorProvider === 'bedrock' && (
             <div className="space-y-3 rounded-md border border-border p-3">
               <p className="text-xs text-muted-foreground">
                 Uses AWS credentials from the server environment. Region is usually required.
@@ -868,7 +868,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             </div>
           )}
 
-          {!isCodex && !isCopilot && platform === 'minimax' && (
+          {!isCodex && !isCopilot && vendorProvider === 'minimax' && (
             <div className="space-y-3 rounded-md border border-border p-3">
               {minimaxConfigured === null && (
                 <p className="text-xs text-muted-foreground">Checking configuration...</p>

@@ -1,7 +1,7 @@
-import type { AgentProviderId } from '@/types/providers'
+import type { AgenticCliId } from '@/types/providers'
 
 export interface AgentSession {
-  provider: AgentProviderId
+  provider: AgenticCliId
   provider_display_name: string
   tmux_target: string
   session_name: string
@@ -43,7 +43,7 @@ export interface CCTokenResponse {
 }
 
 export interface SpawnSessionRequest {
-  provider?: AgentProviderId
+  cli?: AgenticCliId
   directory: string
   session_name?: string
   mode: 'plain' | 'worktree' | 'resume' | 'fork'
@@ -61,7 +61,7 @@ export interface SpawnSessionRequest {
   no_alt_screen?: boolean
   dangerously_bypass_approvals_and_sandbox?: boolean
   use_last?: boolean
-  platform?: 'anthropic' | 'bedrock' | 'minimax'
+  provider?: 'anthropic' | 'bedrock' | 'minimax'
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
@@ -86,11 +86,11 @@ export interface SpawnSessionResponse {
 }
 
 export interface BulkResumeRequest {
-  provider?: AgentProviderId
+  cli?: AgenticCliId
   directory?: string
   sessions: { session_id: string; project_folder: string }[]
   skip_permissions?: boolean
-  platform?: 'anthropic' | 'bedrock' | 'minimax'
+  provider?: 'anthropic' | 'bedrock' | 'minimax'
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
@@ -112,7 +112,7 @@ export interface BulkResumeResponse {
   failed: number
 }
 
-export interface PlatformStatusResponse {
+export interface ProviderStatusResponse {
   configured: boolean
 }
 

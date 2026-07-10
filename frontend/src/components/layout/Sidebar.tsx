@@ -11,13 +11,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
+import type { AgenticCliId, AgenticCliStatus } from '@/types/providers'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 function NavGroupSection({ group, collapsed, selectedProvider }: {
   group: NavGroup
   collapsed: boolean
-  selectedProvider: AgentProviderStatus | null
+  selectedProvider: AgenticCliStatus | null
 }) {
   const visibleItems = group.items.filter((item) => supportsProvider(item, selectedProvider))
   if (visibleItems.length === 0) return null
@@ -67,8 +67,8 @@ export function Sidebar() {
         <div className="py-4 border-b space-y-3">
           <ProjectSwitcher />
           <div className="px-4 space-y-1.5">
-            <p className="text-xs font-medium text-muted-foreground">Agent Provider</p>
-            <Select value={selectedProviderId} onValueChange={(value) => setSelectedProviderId(value as AgentProviderId)}>
+            <p className="text-xs font-medium text-muted-foreground">Agentic CLI</p>
+            <Select value={selectedProviderId} onValueChange={(value) => setSelectedProviderId(value as AgenticCliId)}>
               <SelectTrigger className="h-9">
                 <SelectValue />
               </SelectTrigger>
