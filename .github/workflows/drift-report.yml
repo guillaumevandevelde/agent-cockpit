@@ -47,6 +47,42 @@ jobs:
         id: todos
         run: echo "count=$(grep -rEl 'TODO|FIXME' backend/app frontend/src | wc -l)" >> "$GITHUB_OUTPUT"
 
+      - name: Features → docs drift
+        id: feature-docs
+        # Signal-only: surfaces frontend feature folders without a matching
+        # docs/features/<name>.md (or an explicit alias). Never fails the build.
+        run: |
+          {
+            python scripts/check_features_docs.py --repo-root "$GITHUB_WORKSPACE" > /tmp/feature_docs_status 2>&1
+            cat /tmp/features_docs_summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          } || true
+        working-directory: backend
+
+      - name: Agent role consistency
+        id: agent-roles
+        # Signal-only: every persona in _IMPEDIMENT_AGENTS /
+        # WORK_TYPE_PERSONA_DEFAULTS must match a .claude/agents/*.md entry.
+        # Catches vestigial roles (developer/tester/testing/code-review) that
+        # the strict test_impediment_agents.py blocks at the backend level.
+        run: |
+          {
+            python scripts/check_agent_roles.py --repo-root "$GITHUB_WORKSPACE" > /tmp/agent_roles_status 2>&1
+            cat /tmp/agent_roles_summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          } || true
+        working-directory: backend
+
+      - name: CLAUDE.md age vs merges
+        id: claude-md-age
+        # Signal-only: warns when CLAUDE.md has not been touched in many merge
+        # commits on the default branch (threshold: 20 merges).
+        run: |
+          {
+            python scripts/check_claude_md_age.py --repo-root "$GITHUB_WORKSPACE" \
+              --file CLAUDE.md --threshold 20 > /tmp/claude_md_age_status 2>&1
+            cat /tmp/claude_md_age_summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          } || true
+        working-directory: backend
+
       - name: Write summary
         run: |
           {
@@ -54,6 +90,9 @@ jobs:
             echo ""
             echo "- OpenAPI contract: ${{ steps.contract.outputs.status }}"
             echo "- Files containing TODO/FIXME: ${{ steps.todos.outputs.count }}"
+            echo "- Features → docs: $(cat /tmp/feature_docs_status)"
+            echo "- Agent role consistency: $(cat /tmp/agent_roles_status)"
+            echo "- CLAUDE.md age: $(cat /tmp/claude_md_age_status)"
             echo ""
             echo "See the Quality and Security workflow runs for lint/type/coverage/security detail."
           } >> "$GITHUB_STEP_SUMMARY"
