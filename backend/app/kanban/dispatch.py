@@ -247,6 +247,82 @@ async def set_default_transport(session, project_key: str, value: str) -> None:
     await _sync_sandcastle_enabled(project_key, value == "sandcastle")
 
 
+# ---- model options: device-local cache of `claude -p "/model"`'s alias list ----
+
+MODEL_OPTIONS_KEY = "model_options:claude-code"
+MODEL_OPTIONS_SEED = ("sonnet", "opus", "haiku")
+
+
+def _parse_model_options(output: str) -> list[str]:
+    """Parse `claude -p "/model"` stdout into the list of available aliases.
+
+    Real output (Claude Code 2.1.206, verified 2026-07-10):
+        Current model: Sonnet 5 (default)
+        Usage: /model <name>. Available: sonnet, opus, haiku, fable, best,
+        sonnet[1m], opus[1m], fable[1m], opusplan, default, or a full model ID.
+
+    The trailing "or a full model ID" clause is dropped -- it isn't an alias,
+    it's a note that any string is accepted. Returns [] if the "Available: "
+    marker isn't found (unexpected CLI output shape) rather than raising --
+    callers fall back to the cached/seed list.
+    """
+    marker = "Available: "
+    idx = output.find(marker)
+    if idx == -1:
+        return []
+    tail = " ".join(output[idx + len(marker):].split())
+    items = [s.strip() for s in tail.split(",")]
+    return [s for s in items if s and "full model ID" not in s]
+
+
+def refresh_claude_model_options_sync() -> list[str]:
+    """Run `claude -p "/model"` and parse the available model aliases.
+
+    Synchronous subprocess.run: a short-lived, one-shot CLI query, not a
+    spawned session -- no worktree, no tmux. Raises subprocess.SubprocessError
+    or OSError (e.g. `claude` not on PATH) on failure; callers decide whether
+    to surface that or fall back to the cache.
+    """
+    result = subprocess.run(
+        ["claude", "-p", "/model"],
+        capture_output=True, text=True, timeout=30, check=True,
+    )
+    return _parse_model_options(result.stdout)
+
+
+async def refresh_claude_model_options(session) -> list[str]:
+    """Refresh and cache the model-options list. An empty parse result is
+    returned as-is but does NOT overwrite a previously cached non-empty list
+    -- a transient CLI output-shape hiccup shouldn't wipe out a known-good
+    cache."""
+    import asyncio
+    options = await asyncio.to_thread(refresh_claude_model_options_sync)
+    if options:
+        await _set_model_options_cache(session, options)
+    return options
+
+
+async def get_cached_model_options(session) -> list[str]:
+    row = await session.get(KanbanMeta, MODEL_OPTIONS_KEY)
+    if row is None:
+        return list(MODEL_OPTIONS_SEED)
+    try:
+        options = json.loads(row.value)
+    except (TypeError, ValueError):
+        return list(MODEL_OPTIONS_SEED)
+    return options if options else list(MODEL_OPTIONS_SEED)
+
+
+async def _set_model_options_cache(session, options: list[str]) -> None:
+    value = json.dumps(options)
+    row = await session.get(KanbanMeta, MODEL_OPTIONS_KEY)
+    if row is None:
+        session.add(KanbanMeta(key=MODEL_OPTIONS_KEY, value=value))
+    else:
+        row.value = value
+    await session.flush()
+
+
 async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
     """Keep SandcastleConfig.enabled aligned with the project's default transport so
     the two never drift. Resolves the project path from the registry; no-op if the

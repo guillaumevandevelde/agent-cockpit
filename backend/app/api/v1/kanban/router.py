@@ -1,6 +1,7 @@
 """REST API for the kanban board. All mutations go through apply_operation."""
 import json
 import logging
+import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -112,6 +113,32 @@ async def delete_column(column_id: str):
         if not await service.delete_column(s, column_id):
             raise HTTPException(404, "column not found")
         await s.commit()
+
+
+@router.get("/model-options")
+async def model_options():
+    """Cached list of Claude model aliases (sonnet/opus/haiku/...), refreshed
+    on demand via POST .../model-options/refresh. Seed defaults until the
+    first refresh."""
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {"provider": "claude-code",
+                "options": await dispatch.get_cached_model_options(s)}
+
+
+@router.post("/model-options/refresh")
+async def refresh_model_options():
+    """Re-query the installed `claude` CLI for its current model alias list
+    and cache it. 502 if the CLI isn't installed/reachable -- the cached list
+    from the last successful refresh (or the seed) is left untouched."""
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            options = await dispatch.refresh_claude_model_options(s)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise HTTPException(502, f"failed to query claude CLI: {e}") from e
+        await s.commit()
+        return {"provider": "claude-code", "options": options}
 
 
 # Work-type → persona routing (per-project overrides; falls back to
