@@ -1523,6 +1523,62 @@ async def move_limited_session_to_resume(cwd: str) -> bool:
         return moved
 
 
+async def post_agent_status_comment(cwd: str, text: str) -> bool:
+    """Post a comment to the kanban card owned by the session running in `cwd`.
+
+    Used by the Notification hook for the new ``agent_needs_input`` /
+    ``agent_completed`` background-agent subtypes (Claude Code 2.1.198+, Jul
+    2026). The card is NOT moved: the explicit human/engineer move to Done
+    stays authoritative — matching the rate-limit design where
+    ``move_limited_session_to_resume`` is the only auto-move and only on a
+    real rate-limit hit. Surfacing the event as an activity comment lets the
+    operator see "this card's agent is waiting" / "this card's agent
+    finished" without changing the dispatch state machine.
+
+    Resolves the card the same way as ``move_limited_session_to_resume``
+    (project via ``_resume_target_from_cwd`` → project_key, then the card
+    claimed by ``agent:<session_name>``). Returns False for non-kanban
+    sessions (cwd outside ``.claude/worktrees/``, unknown project_key, or
+    no matching claim) so the hook path stays a no-op for hand-started
+    sessions.
+    """
+    from app.kanban.db import KanbanSessionLocal
+
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return False
+    project_path, session_name = target
+    project_key = _safe_resolve_key(project_path)
+    if project_key is None:
+        return False
+
+    claimant = CLAIMANT_PREFIX + session_name
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        # Restrict to active columns (anything that isn't a fixed end-state).
+        # Posting "session reported completion" to a card already on Done
+        # would be noise; same for a card the operator has already moved to
+        # To Resume.
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return False
+        await apply_operation(
+            ks, op_type="comment", entity_type="comment",
+            project_key=project_key, entity_id=card.id, payload={"text": text},
+        )
+        await ks.commit()
+        logger.info(
+            "posted agent-status comment to card %s (session %s): %s",
+            card.id, session_name, text,
+        )
+        return True
+
+
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
     sandcastle_live: set[str] | None = None,

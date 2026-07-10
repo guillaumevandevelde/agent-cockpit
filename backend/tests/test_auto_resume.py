@@ -120,3 +120,95 @@ class TestScheduleResume:
     def test_cancel_nonexistent_returns_false(self):
         svc = AutoResumeService()
         assert svc.cancel("/nonexistent") is False
+
+
+class TestClassifyNotification:
+    """classify_notification() splits a Notification payload into limit /
+    needs_input / completed / other so the hook router can branch on intent
+    instead of string-sniffing `message` in two places."""
+
+    def test_limit_classification_preserves_existing_behaviour(self):
+        """Existing `is_limit_notification` cases must keep classifying as
+        'limit' so the rate-limit → To Resume + dispatch-pause path is
+        untouched by the new bucket."""
+        svc = AutoResumeService()
+        assert svc.classify_notification(
+            message="You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+        ) == "limit"
+        assert svc.classify_notification(
+            message="API Error: 429 Too Many Requests",
+        ) == "limit"
+        assert svc.classify_notification(
+            message="Token Plan limit reached for this account",
+        ) == "limit"
+
+    def test_needs_input_via_notification_type(self):
+        """When Claude Code 2.1.198+ forwards a structured notification_type,
+        that's authoritative — message can be anything (the template string
+        varies per release and per label)."""
+        svc = AutoResumeService()
+        assert svc.classify_notification(
+            notification_type="agent_needs_input",
+            message="some background-agent label needs your input",
+        ) == "needs_input"
+
+    def test_needs_input_via_message_substring_fallback(self):
+        """Older hook payloads (no notification_type) still hit the new bucket
+        via the canonical '<label> needs your input' wording — same substring
+        shape as the existing limit match."""
+        svc = AutoResumeService()
+        assert svc.classify_notification(
+            message="background-agent needs your input",
+        ) == "needs_input"
+        assert svc.classify_notification(
+            message="My Agent needs your input: waiting on tool X",
+        ) == "needs_input"
+
+    def test_completed_via_notification_type(self):
+        svc = AutoResumeService()
+        assert svc.classify_notification(
+            notification_type="agent_completed",
+            message="background-agent finished",
+        ) == "completed"
+        # Outcome='failure' still surfaces under agent_completed — the
+        # completed bucket means "the agent finished its lifecycle", not
+        # necessarily "it succeeded"; the operator decides from the message.
+        assert svc.classify_notification(
+            notification_type="agent_completed",
+            message="background-agent failed",
+        ) == "completed"
+
+    def test_completed_via_message_substring_fallback(self):
+        svc = AutoResumeService()
+        assert svc.classify_notification(message="background-agent finished") == "completed"
+        assert svc.classify_notification(message="background-agent failed") == "completed"
+
+    def test_other_for_unrelated_notifications(self):
+        """permission_prompt / idle_prompt / auth_success / elicitation_*
+        must NOT be misclassified as needs_input or completed — they
+        classify as 'other' so the router drops them silently, same as
+        today."""
+        svc = AutoResumeService()
+        assert svc.classify_notification(
+            notification_type="permission_prompt",
+            message="Claude needs your input",
+        ) == "other"
+        assert svc.classify_notification(
+            notification_type="idle_prompt",
+            message="Claude is waiting",
+        ) == "other"
+        assert svc.classify_notification(
+            notification_type="auth_success",
+            message="logged in",
+        ) == "other"
+        assert svc.classify_notification(
+            notification_type="elicitation_dialog",
+            message="Claude needs your input",
+        ) == "other"
+
+    def test_other_for_empty_or_missing_payload(self):
+        svc = AutoResumeService()
+        assert svc.classify_notification() == "other"
+        assert svc.classify_notification(message=None) == "other"
+        assert svc.classify_notification(message="") == "other"
+        assert svc.classify_notification(notification_type="") == "other"

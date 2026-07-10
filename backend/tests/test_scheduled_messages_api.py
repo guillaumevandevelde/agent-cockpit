@@ -291,6 +291,216 @@ async def test_hook_event_limit_notification_without_reset_time_falls_back_to_co
 
 
 @pytest.mark.asyncio
+async def test_hook_event_agent_needs_input_posts_card_activity_comment():
+    """CC 2.1.198+ `agent_needs_input` notifications must surface as a
+    kanban activity comment so the operator can see "agent waiting" on
+    the card. The card is NOT auto-moved."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(dispatch, "move_limited_session_to_resume") as move_mock, \
+         mock.patch.object(
+             dispatch, "post_agent_status_comment", return_value=True,
+         ) as post_mock:
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={
+                    "event": "Notification", "session_id": "s-needs-1",
+                    "cwd": "/p/.claude/worktrees/k-needs-0001",
+                    "notification_type": "agent_needs_input",
+                    "message": "background agent needs your input",
+                },
+            )
+            assert r.status_code == 200
+
+    # No-op for the rate-limit branch (different notification kind) and
+    # the comment path was hit with the canonical "waiting for input" text.
+    move_mock.assert_not_called()
+    post_mock.assert_awaited_once()
+    args, _ = post_mock.await_args
+    assert args[0] == "/p/.claude/worktrees/k-needs-0001"
+    assert "waiting for input" in args[1].lower()
+
+
+@pytest.mark.asyncio
+async def test_hook_event_agent_completed_posts_card_activity_comment():
+    """CC 2.1.198+ `agent_completed` notifications must surface as a
+    kanban activity comment so the operator sees "agent finished" on the
+    card. The card is NOT auto-moved (Done stays a human/engineer action)."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(dispatch, "move_limited_session_to_resume") as move_mock, \
+         mock.patch.object(
+             dispatch, "post_agent_status_comment", return_value=True,
+         ) as post_mock:
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={
+                    "event": "Notification", "session_id": "s-done-1",
+                    "cwd": "/p/.claude/worktrees/k-done-0001",
+                    "notification_type": "agent_completed",
+                    "message": "background agent finished",
+                },
+            )
+            assert r.status_code == 200
+
+    move_mock.assert_not_called()
+    post_mock.assert_awaited_once()
+    args, _ = post_mock.await_args
+    assert args[0] == "/p/.claude/worktrees/k-done-0001"
+    assert "reported completion" in args[1].lower()
+
+
+@pytest.mark.asyncio
+async def test_hook_event_agent_completed_does_not_move_card_to_done():
+    """Even though `agent_completed` reports the agent finished, the
+    card must NOT be auto-moved to Done — matches the rate-limit design
+    where only the explicit `move_limited_session_to_resume` path moves
+    a card, and only on a real rate-limit hit. Surfacing the event as a
+    comment is the right level of reaction; the engineer still flips
+    the card to Done after the wrap-up work."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+    from app.kanban.operations import apply_operation
+
+    transport = ASGITransport(app=app)
+    # Spy on `move` ops against the kanban op-log. The new branch must not
+    # produce any; the rate-limit branch uses `_move_to_resume`, which does,
+    # so the absence of a `move` op is the strongest guarantee we can give
+    # from this hook alone (no card was moved to Done or anywhere else).
+    move_ops: list[tuple] = []
+    original_apply = apply_operation
+
+    async def spy_apply(session, *, op_type, entity_type, project_key,
+                        entity_id, payload):
+        if op_type == "move":
+            move_ops.append((entity_type, entity_id, payload))
+        return await original_apply(
+            session, op_type=op_type, entity_type=entity_type,
+            project_key=project_key, entity_id=entity_id, payload=payload,
+        )
+
+    with mock.patch.object(dispatch, "move_limited_session_to_resume") as move_mock, \
+         mock.patch.object(dispatch, "post_agent_status_comment", return_value=True), \
+         mock.patch("app.kanban.operations.apply_operation", side_effect=spy_apply):
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={
+                    "event": "Notification", "session_id": "s-done-2",
+                    "cwd": "/p/.claude/worktrees/k-done-0002",
+                    "notification_type": "agent_completed",
+                    "message": "background agent finished",
+                },
+            )
+            assert r.status_code == 200
+
+    move_mock.assert_not_called()
+    assert move_ops == [], (
+        f"agent_completed must not produce any `move` ops; saw: {move_ops}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_hook_event_needs_input_via_message_substring_fallback():
+    """Pre-2.1.198 hook scripts don't forward notification_type; the
+    router must still classify the canonical '<label> needs your input'
+    message via the substring fallback and post the same activity comment."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(
+        dispatch, "post_agent_status_comment", return_value=True,
+    ) as post_mock:
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={
+                    "event": "Notification", "session_id": "s-fb-1",
+                    "cwd": "/p/.claude/worktrees/k-fb-0001",
+                    "message": "background agent needs your input",
+                },
+            )
+            assert r.status_code == 200
+
+    post_mock.assert_awaited_once()
+    args, _ = post_mock.await_args
+    assert "waiting for input" in args[1].lower()
+
+
+@pytest.mark.asyncio
+async def test_hook_event_other_notification_types_are_silently_dropped():
+    """permission_prompt / idle_prompt / auth_success / elicitation_*
+    must NOT trigger the agent-status comment branch — they're
+    unrelated to background-agent state and just create noise if
+    commented on every card."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+
+    transport = ASGITransport(app=app)
+    for ntype in ("permission_prompt", "idle_prompt", "auth_success",
+                  "elicitation_dialog", "elicitation_complete", "elicitation_response"):
+        with mock.patch.object(
+            dispatch, "move_limited_session_to_resume",
+        ) as move_mock, mock.patch.object(
+            dispatch, "post_agent_status_comment",
+        ) as post_mock:
+            async with AsyncClient(transport=transport, base_url="http://t") as ac:
+                r = await ac.post(
+                    "/api/v1/scheduled-messages/hook-event",
+                    json={
+                        "event": "Notification", "session_id": f"s-{ntype}",
+                        "cwd": f"/p/.claude/worktrees/k-{ntype}-0001",
+                        "notification_type": ntype,
+                        "message": "Claude needs your input",
+                    },
+                )
+                assert r.status_code == 200
+        move_mock.assert_not_called()
+        post_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_hook_event_notification_without_type_or_relevant_message_is_dropped():
+    """A Notification with no notification_type and no recognisable message
+    (e.g. a future Claude Code variant) must not falsely fire the
+    new-comment branch. Same shape as the pre-existing 'other notifications
+    do not touch kanban' test, but for clarity kept as a separate test
+    so the new code path is explicitly covered."""
+    from unittest import mock
+
+    import app.kanban.dispatch as dispatch
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(dispatch, "move_limited_session_to_resume") as move_mock, \
+         mock.patch.object(dispatch, "post_agent_status_comment") as post_mock:
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={
+                    "event": "Notification", "session_id": "s-other",
+                    "cwd": "/p/.claude/worktrees/k-other-0002",
+                    "message": "Waiting for your input",
+                },
+            )
+            assert r.status_code == 200
+
+    move_mock.assert_not_called()
+    post_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_hooks_status_and_install_roundtrip(tmp_path, monkeypatch):
     """The hooks-status/hooks-install endpoints drive hook_installer directly."""
     from app.services.scheduling import hook_installer

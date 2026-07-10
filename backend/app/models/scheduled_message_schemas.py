@@ -122,3 +122,9 @@ class HookEvent(BaseModel):
     cwd: str
     tmux_pane: str | None = None
     message: str | None = None
+    # Claude Code 2.1.198+ carries an explicit notification_type on the
+    # Notification event for the new background-agent subtypes
+    # (agent_needs_input / agent_completed). Older hook scripts only set
+    # `message`, so this stays optional and the router falls back to
+    # substring matching on `message` when it's absent.
+    notification_type: str | None = None
