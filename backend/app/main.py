@@ -126,22 +126,45 @@ _UNPROTECTED_PATHS = {
 }
 
 
-@app.middleware("http")
-async def require_api_token(request: Request, call_next):
-    """Require a bearer token when remote-access protection is configured."""
-    is_protected_api = (
-        request.url.path.startswith(settings.api_v1_prefix)
-        or request.url.path.startswith("/kanban-mcp")
-    )
-    if settings.api_token and is_protected_api and request.url.path not in _UNPROTECTED_PATHS:
-        authorization = request.headers.get("authorization", "")
-        token = authorization.removeprefix("Bearer ").strip()
-        if not secrets.compare_digest(token, settings.api_token):
-            return JSONResponse(status_code=401, content={"detail": "Invalid API token"})
-    return await call_next(request)
+class RequireApiTokenMiddleware:
+    """Require a bearer token when remote-access protection is configured.
+
+    Plain ASGI middleware rather than `BaseHTTPMiddleware` — see the
+    docstring in app/middleware/correlation_id.py for why: stacking two
+    `BaseHTTPMiddleware`s under concurrent load can corrupt one of the
+    responses (AssertionError: Unexpected message: http.response.start).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive=receive)
+        is_protected_api = (
+            request.url.path.startswith(settings.api_v1_prefix)
+            or request.url.path.startswith("/kanban-mcp")
+        )
+        if settings.api_token and is_protected_api and request.url.path not in _UNPROTECTED_PATHS:
+            authorization = request.headers.get("authorization", "")
+            token = authorization.removeprefix("Bearer ").strip()
+            if not secrets.compare_digest(token, settings.api_token):
+                response = JSONResponse(status_code=401, content={"detail": "Invalid API token"})
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
-# Configure CORS
+# Registration order matters: Starlette's add_middleware() does
+# user_middleware.insert(0, ...), so the *last* one registered ends up
+# outermost (runs first per request). Register require-api-token first so
+# it stays innermost, then CORS, then correlation-id last/outermost — this
+# reproduces the exact same effective request order as the original
+# `@app.middleware("http")` + add_middleware(...) calls it replaces.
+app.add_middleware(RequireApiTokenMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
