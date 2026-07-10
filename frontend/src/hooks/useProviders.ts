@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiClient } from '@/lib/api'
 import type {
-  AgentProviderId,
-  AgentProviderStatus,
+  AgenticCliId,
+  AgenticCliStatus,
   CodexConfigUpdateRequest,
   CodexFeatureInventoryResponse,
   CodexLaunchOptionsResponse,
@@ -13,19 +13,19 @@ import type {
   CodexPluginMutationRequest,
   CodexPluginMutationResponse,
   ProviderDoctorResponse,
-  ProvidersResponse,
+  AgenticClisResponse,
 } from '@/types/providers'
 
 const POLL_INTERVAL_MS = 60_000
 
 export function useProviders() {
-  const [providers, setProviders] = useState<AgentProviderStatus[]>([])
+  const [providers, setProviders] = useState<AgenticCliStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const data = await apiClient<ProvidersResponse>('providers')
+      const data = await apiClient<AgenticClisResponse>('providers')
       setProviders(data.providers)
       setError(null)
     } catch (err) {
@@ -44,7 +44,7 @@ export function useProviders() {
   return { providers, loading, error, refresh }
 }
 
-export async function fetchProviderDoctor(providerId: AgentProviderId): Promise<ProviderDoctorResponse> {
+export async function fetchProviderDoctor(providerId: AgenticCliId): Promise<ProviderDoctorResponse> {
   return apiClient<ProviderDoctorResponse>(`providers/${providerId}/doctor`)
 }
 

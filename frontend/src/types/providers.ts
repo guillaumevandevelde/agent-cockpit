@@ -1,6 +1,6 @@
-export type AgentProviderId = 'claude-code' | 'codex-cli' | 'copilot-cli' | 'mimo-code' | 'open-code'
+export type AgenticCliId = 'claude-code' | 'codex-cli' | 'copilot-cli' | 'mimo-code' | 'open-code'
 
-export interface AgentProviderCapabilities {
+export interface AgenticCliCapabilities {
   config: boolean
   sessions: boolean
   spawn: boolean
@@ -22,30 +22,43 @@ export interface AgentProviderCapabilities {
   backup: boolean
 }
 
-export type AgentProviderCapabilityState = 'supported' | 'read_only' | 'write_capable' | 'unsupported' | 'unknown'
+export type AgenticCliCapabilityState = 'supported' | 'read_only' | 'write_capable' | 'unsupported' | 'unknown'
 
-export interface AgentProviderCapabilityDetail {
-  state: AgentProviderCapabilityState
+export interface AgenticCliCapabilityDetail {
+  state: AgenticCliCapabilityState
   label: string
   reason?: string
 }
 
-export interface AgentProviderStatus {
-  id: AgentProviderId
+export interface AgenticCliStatus {
+  id: AgenticCliId
   display_name: string
   binary_name: string
   installed: boolean
   binary_path: string | null
   version: string | null
-  capabilities: AgentProviderCapabilities
-  capability_matrix: Partial<Record<keyof AgentProviderCapabilities, AgentProviderCapabilityDetail>>
-  capability_details?: Partial<Record<keyof AgentProviderCapabilities, AgentProviderCapabilityDetail>>
+  capabilities: AgenticCliCapabilities
+  capability_matrix: Partial<Record<keyof AgenticCliCapabilities, AgenticCliCapabilityDetail>>
+  capability_details?: Partial<Record<keyof AgenticCliCapabilities, AgenticCliCapabilityDetail>>
   config_paths: Record<string, string>
 }
 
-export interface ProvidersResponse {
-  providers: AgentProviderStatus[]
+export interface AgenticClisResponse {
+  providers: AgenticCliStatus[]
   count: number
+}
+
+// Wire-compat: the REST endpoint is still /api/v1/providers and the JSON field
+// is still called `provider` (per docs/cockpit/terminology.md and the backend
+// wire-compat decision). The semantics on the wire are the agentic coding CLI
+// (claude-code/codex-cli/...), not the vendor.
+export interface ProviderDoctorResponse {
+  provider: AgenticCliId
+  provider_display_name: string
+  exit_code: number
+  report: ProviderDoctorReport | null
+  parse_error: string | null
+  stderr: string
 }
 
 export type ProviderDoctorStatus = 'ok' | 'warn' | 'error' | 'unknown' | string
@@ -66,15 +79,6 @@ export interface ProviderDoctorReport {
   overallStatus?: ProviderDoctorStatus
   codexVersion?: string
   checks?: Record<string, ProviderDoctorCheck>
-}
-
-export interface ProviderDoctorResponse {
-  provider: AgentProviderId
-  provider_display_name: string
-  exit_code: number
-  report: ProviderDoctorReport | null
-  parse_error: string | null
-  stderr: string
 }
 
 export interface CodexConfigSummary {

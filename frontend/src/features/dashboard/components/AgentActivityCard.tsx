@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Terminal, RefreshCw, Eye } from 'lucide-react'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { cn } from '@/lib/utils'
-import type { AgentProviderId } from '@/types/providers'
+import type { AgenticCliId } from '@/types/providers'
 
 interface AgentSession {
   tmux_target: string
@@ -36,7 +36,7 @@ const STATUS_LABELS: Record<string, string> = {
   error: 'Error',
 }
 
-type ProviderFilter = 'all' | AgentProviderId
+type ProviderFilter = 'all' | AgenticCliId
 
 const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
   { value: 'all', label: 'All' },

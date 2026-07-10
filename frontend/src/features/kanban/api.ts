@@ -30,7 +30,7 @@ export const kanbanApi = {
     name: string;
     rank?: string;
     default_agent?: string | null;
-    default_platform?: string | null;
+    default_provider?: string | null;
     default_model?: string | null;
     max_sessions?: number | null;
   }): Promise<KanbanColumn> =>
@@ -41,7 +41,7 @@ export const kanbanApi = {
 
   updateColumn: (
     id: string,
-    body: { name?: string; rank?: string; default_agent?: string | null; default_platform?: string | null; default_model?: string | null; max_sessions?: number | null }
+    body: { name?: string; rank?: string; default_agent?: string | null; default_provider?: string | null; default_model?: string | null; max_sessions?: number | null }
   ): Promise<KanbanColumn> =>
     apiClient<KanbanColumn>(`${BASE}/columns/${id}`, {
       method: "PATCH",

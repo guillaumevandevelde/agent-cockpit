@@ -15,12 +15,12 @@ import { resolveLeaderNavigationTarget } from './leaderNavigation'
 import type { CCSession, LeaderNavigationDirection } from './types'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import { useSystemStatus } from '@/hooks/useSystemStatus'
-import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
+import type { AgenticCliId, AgenticCliStatus } from '@/types/providers'
 
 const MAX_GRID_PANES = 4
 const FOCUSED_PANE_RING_CLASS =
   "after:pointer-events-none after:absolute after:inset-0 after:z-10 after:ring-2 after:ring-primary after:ring-inset after:content-['']"
-type ProviderFilter = 'all' | AgentProviderId
+type ProviderFilter = 'all' | AgenticCliId
 
 const PROVIDER_FILTERS: { value: ProviderFilter; label: string }[] = [
   { value: 'all', label: 'All agents' },
@@ -70,12 +70,12 @@ export function CCBridgePage() {
     ? ungrouped
     : ungrouped.filter((s) => s.provider === providerFilter)
 
-  const providersById = providers.reduce<Partial<Record<AgentProviderId, AgentProviderStatus>>>((acc, provider) => {
+  const providersById = providers.reduce<Partial<Record<AgenticCliId, AgenticCliStatus>>>((acc, provider) => {
     acc[provider.id] = provider
     return acc
   }, {})
 
-  const canProviderSpawn = (provider: AgentProviderStatus | undefined) => (
+  const canProviderSpawn = (provider: AgenticCliStatus | undefined) => (
     Boolean(provider?.installed)
     && provider?.capability_details?.spawn?.state !== 'unsupported'
     && provider?.capability_details?.spawn?.state !== 'read_only'

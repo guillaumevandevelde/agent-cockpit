@@ -14,11 +14,11 @@ import { kanbanApi } from '@/features/kanban/api'
 import type { SlashCommandListResponse } from '@/types/commands'
 import type { MCPServerListResponse } from '@/types/mcp'
 import type { SkillListResponse } from '@/types/agents'
-import type { AgentProviderId, AgentProviderStatus } from '@/types/providers'
+import type { AgenticCliId, AgenticCliStatus } from '@/types/providers'
 import type { ProjectResponse } from '@/types/projects'
 import type { PaletteItem } from './types'
 
-function navigationItems(providerId: AgentProviderId, provider: AgentProviderStatus | null, navigate: (path: string) => void): PaletteItem[] {
+function navigationItems(providerId: AgenticCliId, provider: AgenticCliStatus | null, navigate: (path: string) => void): PaletteItem[] {
   return getNavigation(providerId)
     .flatMap((group) => group.items)
     .filter((item) => supportsProvider(item, provider))
@@ -108,8 +108,8 @@ export interface UseCommandPaletteDataResult {
 }
 
 export function useCommandPaletteData(
-  providerId: AgentProviderId,
-  provider: AgentProviderStatus | null,
+  providerId: AgenticCliId,
+  provider: AgenticCliStatus | null,
   activeProject: ProjectResponse | null
 ): UseCommandPaletteDataResult {
   const navigate = useNavigate()

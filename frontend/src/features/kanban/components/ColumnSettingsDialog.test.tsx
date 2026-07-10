@@ -7,7 +7,7 @@ const { getModelOptions, refreshModelOptions, updateColumn } = vi.hoisted(() => 
   refreshModelOptions: vi.fn(async () => ({ provider: "claude-code", options: ["sonnet", "opus", "haiku", "fable"] })),
   updateColumn: vi.fn(async (id: string, body: Record<string, unknown>) => ({
     id, project_key: "P", name: "engineer", rank: "0",
-    default_agent: "engineer", default_platform: null, default_model: null,
+    default_agent: "engineer", default_provider: null, default_model: null,
     max_sessions: null, created_at: "", updated_at: "",
     ...body,
   })),
@@ -26,7 +26,7 @@ import { ColumnSettingsDialog } from "./ColumnSettingsDialog";
 
 const COLUMN = {
   id: "c1", project_key: "P", name: "engineer", rank: "0",
-  default_agent: "engineer", default_platform: null, default_model: null,
+  default_agent: "engineer", default_provider: null, default_model: null,
   max_sessions: null, created_at: "", updated_at: "",
 };
 

@@ -27,7 +27,7 @@ import type { PermissionListResponse } from '@/types/permissions';
 import type { SlashCommandListResponse } from '@/types/commands';
 import type { ActiveSessionsResponse, ActiveSessionContext } from '@/types/context';
 import type {
-  AgentProviderId,
+  AgenticCliId,
   CodexConfigResponse,
   CodexFeatureInventoryResponse,
   CodexMcpInventoryResponse,
@@ -35,7 +35,7 @@ import type {
 } from '@/types/providers';
 
 export interface DashboardStats {
-  providerId: AgentProviderId;
+  providerId: AgenticCliId;
   providerDisplayName: string;
   mcpServerCount: number;
   commandCount: number | null;

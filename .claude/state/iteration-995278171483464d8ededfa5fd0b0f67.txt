@@ -1,0 +1,5 @@
+2026-07-10T17:07:48Z | preset=verify | iter=0 | setup | starting frontend rename: AgentProvider* → AgenticCli*, default_platform → default_provider, subscriptions copy audit
+2026-07-10T17:20:44Z | preset=verify | iter=1 | cd frontend && npm run lint && npm run build | starting
+2026-07-10T17:20:44Z | preset=verify | iter=1 | npm test (vitest) | 13 files, 79 tests, all passed
+2026-07-10T17:20:44Z | preset=verify | iter=1 | lint=0 errors 101 pre-existing warnings (unchanged baseline); build=✓ built in 615ms 0 errors | clean
+2026-07-10T17:21:06Z | preset=verify | iter=1 | outcome | clean: lint 0 errors, build green, all 79 vitest tests pass

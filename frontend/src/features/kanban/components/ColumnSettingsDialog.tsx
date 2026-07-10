@@ -18,12 +18,12 @@ import {
 } from "@/components/ui/select";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
-import { PLATFORMS, DEFAULT_MODEL_SUGGESTIONS } from "../types";
+import { PROVIDERS, DEFAULT_MODEL_SUGGESTIONS } from "../types";
 import type { KanbanColumn } from "../types";
 
 const BACKLOG_COLUMN = "Backlog";
-const DEFAULT_PLATFORM_SENTINEL = "__default__";
-const PLATFORM_LABELS: Record<string, string> = {
+const DEFAULT_PROVIDER_SENTINEL = "__default__";
+const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
   bedrock: "Bedrock",
   minimax: "MiniMax",
@@ -49,7 +49,7 @@ export function ColumnSettingsDialog({
   const [selectedAgent, setSelectedAgent] = useState<string>("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAgent, setEditAgent] = useState<string>("");
-  const [editPlatform, setEditPlatform] = useState<string>(DEFAULT_PLATFORM_SENTINEL);
+  const [editProvider, setEditProvider] = useState<string>(DEFAULT_PROVIDER_SENTINEL);
   const [editModel, setEditModel] = useState<string>("");
   const [editMaxSessions, setEditMaxSessions] = useState<number | null>(null);
   const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
@@ -105,12 +105,12 @@ export function ColumnSettingsDialog({
 
   const handleUpdate = async (id: string) => {
     const agent = editAgent.trim() || null;
-    const platform = editPlatform === DEFAULT_PLATFORM_SENTINEL ? null : editPlatform;
+    const provider = editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider;
     const model = editModel.trim() || null;
     try {
       const col = await kanbanApi.updateColumn(id, {
         default_agent: agent,
-        default_platform: platform,
+        default_provider: provider,
         default_model: model,
         max_sessions: editMaxSessions,
       });
@@ -178,17 +178,17 @@ export function ColumnSettingsDialog({
                     </SelectContent>
                   </Select>
                   <Select
-                    value={editPlatform}
-                    onValueChange={setEditPlatform}
+                    value={editProvider}
+                    onValueChange={setEditProvider}
                   >
                     <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Platform" />
+                      <SelectValue placeholder="Provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={DEFAULT_PLATFORM_SENTINEL}>Default (Anthropic)</SelectItem>
-                      {PLATFORMS.map((p) => (
+                      <SelectItem value={DEFAULT_PROVIDER_SENTINEL}>Default (Anthropic)</SelectItem>
+                      {PROVIDERS.map((p) => (
                         <SelectItem key={p} value={p}>
-                          {PLATFORM_LABELS[p]}
+                          {PROVIDER_LABELS[p]}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -255,9 +255,9 @@ export function ColumnSettingsDialog({
                         Agent: {col.default_agent}
                       </div>
                     )}
-                    {col.default_platform && (
+                    {col.default_provider && (
                       <div className="text-xs text-muted-foreground">
-                        Platform: {PLATFORM_LABELS[col.default_platform] ?? col.default_platform}
+                        Provider: {PROVIDER_LABELS[col.default_provider] ?? col.default_provider}
                       </div>
                     )}
                     {col.default_model && (
@@ -277,7 +277,7 @@ export function ColumnSettingsDialog({
                         onClick={() => {
                           setEditingId(col.id);
                           setEditAgent(col.default_agent ?? "");
-                          setEditPlatform(col.default_platform ?? DEFAULT_PLATFORM_SENTINEL);
+                          setEditProvider(col.default_provider ?? DEFAULT_PROVIDER_SENTINEL);
                           setEditModel(col.default_model ?? "");
                           setEditMaxSessions(col.max_sessions ?? 0);
                         }}
