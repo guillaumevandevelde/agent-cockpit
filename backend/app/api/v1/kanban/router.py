@@ -15,6 +15,8 @@ from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     WORK_TYPES,
     ActivityEntry,
+    AddPlanAttachmentRequest,
+    AddPlanAttachmentResponse,
     AgentStatsResponse,
     AttachRequest,
     AutodispatchRequest,
@@ -451,6 +453,105 @@ async def update_plan_attachment(cid: str, payload: UpdatePlanAttachmentRequest)
             entity_id=cid, payload=payload.model_dump())
         await s.commit()
         return await _reload(s, cid)
+
+
+# Cap mirrors backend/app/kanban/mcp_server.MAX_CHILDREN_PER_PLAN. Keep the
+# two constants in sync — bumping one without the other would let the REST
+# path accept a plan the MCP path would reject (or vice versa).
+_MAX_CHILDREN_PER_PLAN = 50
+
+
+@router.post("/cards/{cid}/plan-attachment",
+             response_model=AddPlanAttachmentResponse)
+async def add_plan_attachment(cid: str, payload: AddPlanAttachmentRequest):
+    """REST mirror of the MCP `add_plan_attachment` tool.
+
+    Persists a plan on a parent card and wires `plan_ref` deliverables to each
+    child. Identical semantics to the MCP version — same op-log, same
+    validation (parent existence, parent_mismatch, child_not_found,
+    cycle_detected, too_many_children). Use this entry point when the
+    kanban MCP layer is unreachable (e.g. its working directory was removed
+    out from under it by `worktree-gc.sh`).
+
+    Returns the new `plan_deliverable_id` plus the wired child card ids on
+    success. On validation failure returns 4xx with the error code in the
+    `detail` field (matches the MCP error-dict contract).
+    """
+    from app.kanban import dep_resolver
+    from app.kanban.models import KanbanCard, KanbanDeliverable
+
+    if len(payload.child_card_ids) > _MAX_CHILDREN_PER_PLAN:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "too_many_children",
+                "max": _MAX_CHILDREN_PER_PLAN,
+            },
+        )
+
+    deps = payload.depends_on_graph or {}
+    cycle = dep_resolver.detect_cycle(
+        {c: list(deps.get(c, []) or []) for c in payload.child_card_ids}
+    )
+    if cycle is not None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": "cycle_detected", "cycle": cycle},
+        )
+
+    async with KanbanSessionLocal() as s:
+        parent = await s.get(KanbanCard, cid)
+        if parent is None:
+            raise HTTPException(404, "card not found")
+
+        for child_id in payload.child_card_ids:
+            child = await s.get(KanbanCard, child_id)
+            if child is None:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={"error": "child_not_found", "card_id": child_id},
+                )
+            if child.parent_card_id != cid:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "error": "parent_mismatch",
+                        "card_id": child_id,
+                        "expected_parent": cid,
+                    },
+                )
+
+        project_key = parent.project_key
+        await apply_operation(
+            s, op_type="add_plan_attachment", entity_type="deliverable",
+            project_key=project_key, entity_id=cid,
+            payload={"plan_markdown": payload.plan_markdown},
+        )
+        plan_deliverable_id = (
+            await s.execute(
+                select(KanbanDeliverable)
+                .where(KanbanDeliverable.card_id == cid,
+                       KanbanDeliverable.kind == "plan")
+                .order_by(KanbanDeliverable.created_at.desc())
+            )
+        ).scalars().first().id
+
+        for child_id in payload.child_card_ids:
+            await apply_operation(
+                s, op_type="link_plan_ref", entity_type="deliverable",
+                project_key=project_key, entity_id=child_id,
+                payload={"ref_json": json.dumps({
+                    "parent_card_id": cid,
+                    "plan_deliverable_id": plan_deliverable_id,
+                }), "depends_on": list(deps.get(child_id, []) or [])},
+            )
+        await s.commit()
+
+    return AddPlanAttachmentResponse(
+        parent_card_id=cid,
+        plan_deliverable_id=plan_deliverable_id,
+        child_card_ids=list(payload.child_card_ids),
+    )
 
 
 @router.post("/cards/{cid}/gates", response_model=GateResponse, status_code=status.HTTP_201_CREATED)

@@ -175,3 +175,25 @@ dispatchen" maar "opnieuw plannen vanaf nul". Twee opties:
   over te slaan.** De analyst is dan niet écht gedraaid; de kind-kaarten
   ontvangen een corrupt of leeg plan. Gebruik in plaats daarvan de
   REST PATCH om `analyst_run_id` juist op `null` te zetten.
+
+## 7. REST-fallback voor `add_plan_attachment`
+
+`add_plan_attachment` is primair een MCP-tool. Het heeft sinds de
+"[problem] worktree-gc verwijdert branch/worktree van actieve analyst-sessie"
+fix een REST-tegenhanger:
+
+- `POST /api/v1/kanban/cards/{cid}/plan-attachment`
+  met body `{plan_markdown, child_card_ids, depends_on_graph?}`
+  → retourneert `{parent_card_id, plan_deliverable_id, child_card_ids}`.
+
+De validatie is identiek aan de MCP-versie (`parent_mismatch`,
+`child_not_found`, `cycle_detected`, `too_many_children`) — dezelfde
+op-log, dezelfde schemas. Gebruik dit entry-point wanneer de kanban
+MCP-server onbereikbaar is maar de REST API nog wel werkt (bv. de MCP-
+proces-cwd is weggehaald door een eerder gc-incident; de REST-mount op
+`:8000` heeft daar geen last van). De frontend-wrapper zit in
+`frontend/src/features/kanban/api.ts` als `kanbanApi.addPlanAttachment`.
+
+De PATCH `/cards/{cid}/plan-attachment` blijft bestaan voor het
+overschrijven van een bestaand plan-attachment (de Plan-tab "Opslaan"-
+knop in de CardDrawer gebruikt die).
