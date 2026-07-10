@@ -34,10 +34,21 @@ _GATE_POLL_INTERVAL_SECONDS = 2
 _GATE_DEFAULT_TIMEOUT_SECONDS = 1800
 
 
-def _card_dict(card) -> dict:
+async def _card_dict(s, card) -> dict:
+    """JSON-serialisable dict for a card ORM instance, enriched with the
+    op-log-derived `done_summary` / `completed_at` fields so the MCP layer
+    returns the same shape the REST API does (see CardResponse).
+
+    All callers have an active session, so we require it as a parameter
+    instead of opening a second one. `None` cards short-circuit to the
+    `{error: not_found}` payload without touching the session."""
     if card is None:
         return {"error": _NOT_FOUND}
-    return CardResponse.model_validate(card).model_dump(mode="json")
+    done_summary, completed_at = await service.enrich_done_info(s, card.id)
+    return CardResponse.model_validate(card).model_copy(update={
+        "done_summary": done_summary,
+        "completed_at": completed_at,
+    }).model_dump(mode="json")
 
 
 async def _require_card(s, card_id: str):
@@ -83,7 +94,7 @@ async def list_cards(project: str, column: str | None = None) -> list[dict]:
     """
     async with KanbanSessionLocal() as s:
         rows = await service.list_cards(s, project, column)
-        return [_card_dict(c) for c in rows]
+        return [await _card_dict(s, c) for c in rows]
 
 
 @mcp.tool()
@@ -94,7 +105,7 @@ async def get_card(card_id: str) -> dict:
         if card is None:
             logger.debug("get_card: %s not found", card_id)
             return {"error": _NOT_FOUND, "card_id": card_id}
-        return _card_dict(card)
+        return await _card_dict(s, card)
 
 
 @mcp.tool()
@@ -159,7 +170,7 @@ async def create_card(project: str, title: str, description: str = "",
         card = await service.get_card(s, cid)
         logger.info("create_card: %s in %s (%s, work_type=%s, agent=%s)",
                     cid, project, column, work_type, resolved_agent)
-        return _card_dict(card)
+        return await _card_dict(s, card)
 
 
 @mcp.tool()
@@ -177,7 +188,7 @@ async def claim_card(card_id: str, claimed_by: str) -> dict:
             return {"error": "already_claimed", "owner": e.current_owner}
         await s.commit()
         logger.info("claim_card: %s claimed by %s", card_id, claimed_by)
-        return _card_dict(await service.get_card(s, card_id))
+        return await _card_dict(s, await service.get_card(s, card_id))
 
 
 # Landing a card here without a word of what happened makes the board useless as a
@@ -226,7 +237,7 @@ async def move_card(card_id: str, column: str, summary: str | None = None) -> di
                 payload={"text": f"**{label}:** {summary}"})
         await s.commit()
         logger.info("move_card: %s → %s", card_id, column)
-        return _card_dict(await service.get_card(s, card_id))
+        return await _card_dict(s, await service.get_card(s, card_id))
 
 
 @mcp.tool()
@@ -251,7 +262,7 @@ async def update_card(card_id: str, title: str | None = None,
         await apply_operation(s, op_type="update", entity_type="card",
             project_key="", entity_id=card_id, payload=payload)
         await s.commit()
-        return _card_dict(await service.get_card(s, card_id))
+        return await _card_dict(s, await service.get_card(s, card_id))
 
 
 @mcp.tool()
@@ -277,7 +288,7 @@ async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
             project_key="", entity_id=card_id, payload={"kind": kind, "ref": ref})
         await s.commit()
         logger.info("attach_deliverable: %s kind=%s ref=%s", card_id, kind, ref)
-        return _card_dict(await service.get_card(s, card_id))
+        return await _card_dict(s, await service.get_card(s, card_id))
 
 
 @mcp.tool()
@@ -292,7 +303,7 @@ async def release_card(card_id: str) -> dict:
             project_key="", entity_id=card_id, payload={})
         await s.commit()
         logger.info("release_card: %s", card_id)
-        return _card_dict(await service.get_card(s, card_id))
+        return await _card_dict(s, await service.get_card(s, card_id))
 
 
 @mcp.tool()
@@ -321,7 +332,7 @@ async def report_impediment(card_id: str, question: str) -> dict:
 
         await s.commit()
         logger.info("report_impediment: %s — %s", card_id, question[:80])
-        return _card_dict(await service.get_card(s, card_id))
+        return await _card_dict(s, await service.get_card(s, card_id))
 
 
 @mcp.tool()
@@ -401,7 +412,7 @@ async def set_resume(card_id: str, session_id: str,
         await apply_operation(s, op_type="update", entity_type="card",
             project_key="", entity_id=card_id, payload=payload)
         await s.commit()
-        return _card_dict(await service.get_card(s, card_id))
+        return await _card_dict(s, await service.get_card(s, card_id))
 
 
 @mcp.tool()

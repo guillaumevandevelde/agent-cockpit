@@ -94,6 +94,39 @@ async def card_activity(session, card_id: str):
     return (await session.execute(stmt)).scalars().all()
 
 
+# Prefix used by mcp_server.move_card when a card lands on Done — see
+# mcp_server._SUMMARY_REQUIRED_COLUMNS ("Done": "Summary"). The Done comment
+# is posted as `**Summary:** <text>`; matching on the literal label keeps
+# this enrichment decoupled from column state (a card moved back to Backlog
+# still surfaces its summary) and from `**Impediment:**` comments (which
+# belong to the Impediment column and are not a "done" event).
+_DONE_SUMMARY_PREFIX = "**Summary:** "
+
+
+async def enrich_done_info(session, card_id: str) -> tuple[str | None, datetime | None]:
+    """Return the summary text + timestamp of the most recent
+    `**Summary:** ...` comment op on this card, or (None, None).
+
+    The enrichment is request-time (not materialized) so a card can move
+    between columns without the summary field going stale. The op-log
+    stays the source of truth, and a rematerialize rebuild reproduces the
+    same answer because the comment op itself is what carries the text.
+    """
+    stmt = (
+        select(KanbanOp)
+        .where(KanbanOp.entity_id == card_id)
+        .where(KanbanOp.op_type == "comment")
+        .where(KanbanOp.payload["text"].as_string().like(f"{_DONE_SUMMARY_PREFIX}%"))
+        .order_by(KanbanOp.hlc.desc())
+        .limit(1)
+    )
+    op = (await session.execute(stmt)).scalar_one_or_none()
+    if op is None:
+        return None, None
+    text = op.payload.get("text") or ""
+    return text[len(_DONE_SUMMARY_PREFIX):], op.created_at
+
+
 async def list_project_ops(session, project_key: str):
     """All op-log entries for a project's cards. Ops carry project_key="" for
     move/claim/comment (set by the router), so we join by card id instead."""

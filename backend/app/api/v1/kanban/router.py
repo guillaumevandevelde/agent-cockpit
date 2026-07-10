@@ -207,14 +207,25 @@ async def list_cards(
             s, project_key, column,
             ready=ready, blocking=blocking,
         )
-        return {"items": [CardResponse.model_validate(c) for c in rows]}
+        items = []
+        for c in rows:
+            done_summary, completed_at = await service.enrich_done_info(s, c.id)
+            items.append(CardResponse.model_validate(c).model_copy(update={
+                "done_summary": done_summary,
+                "completed_at": completed_at,
+            }))
+        return {"items": items}
 
 
 async def _reload(s, cid: str) -> CardResponse:
     card = await service.get_card(s, cid)
     if card is None:
         raise HTTPException(404, "card not found")
-    return CardResponse.model_validate(card)
+    done_summary, completed_at = await service.enrich_done_info(s, cid)
+    return CardResponse.model_validate(card).model_copy(update={
+        "done_summary": done_summary,
+        "completed_at": completed_at,
+    })
 
 
 @router.post("/cards", response_model=CardResponse, status_code=status.HTTP_201_CREATED)
