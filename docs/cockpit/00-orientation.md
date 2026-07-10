@@ -80,6 +80,10 @@ docker compose up -d        # UI op http://localhost:8000
 
 ## Documenten
 
+Voor de canonieke naamgeving van de kernbegrippen (Agent / Provider / CLI / Model / Run) zie
+**`terminology.md`** — bron van waarheid voor naamgeving, vastgelegd door kind-kaart 1 van het
+terminologie-parent-project. Latere kind-kaarten renamen code naar deze glossary toe.
+
 Er zijn **drie parallelle plan-/spec-bomen** in `docs/`. De regel welke leidend is:
 
 | Boom | Doel | Leidend? |
