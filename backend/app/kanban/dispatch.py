@@ -1209,6 +1209,15 @@ _DISPATCH_COLUMNS = ("Backlog", "To Resume")  # new cards from Backlog, resumed 
 _PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
 
 
+def _priority_key(card) -> int:
+    """Sort key for priority-aware dispatch: higher value wins. Unknown / None
+    priority collapses to 0 so the rank order still determines the tie-break
+    (stable sort preserves within-priority rank order). Shared between the
+    auto-tick's _next_card and the bulk paths (dispatch_all_pending,
+    redispatch_all_orphans) so the three call sites can't drift."""
+    return _PRIORITY_RANK.get(getattr(card, "priority", None), 0)
+
+
 def _is_due(card: KanbanCard) -> bool:
     """True unless `card.scheduled_at` names a not-yet-reached future time.
 
@@ -1234,7 +1243,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
         if col_cards:
             # list_cards is ordered by rank; stable-sort by priority on top of that
             # so higher-priority cards jump the queue within the same column.
-            col_cards.sort(key=lambda c: _PRIORITY_RANK.get(c.priority, 0), reverse=True)
+            col_cards.sort(key=_priority_key, reverse=True)
             return col_cards[0]
 
     # Fall back to orphans: cards left unclaimed in an agent column, most commonly
@@ -1246,7 +1255,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     from app.kanban.schemas import COLUMNS
     orphans = [c for c in cards if c.column not in COLUMNS and not c.claimed_by and _is_due(c)]
     if orphans:
-        orphans.sort(key=lambda c: _PRIORITY_RANK.get(c.priority, 0), reverse=True)
+        orphans.sort(key=_priority_key, reverse=True)
         return orphans[0]
     return None
 
@@ -2100,6 +2109,11 @@ async def dispatch_all_pending(
         transport = await get_transport_for_project(project_path)
     from app.kanban.service import list_pending_cards
     pending = [c for c in await list_pending_cards(session, project_key) if _is_due(c)]
+    # list_pending_cards returns rows ordered by rank. Stable-sort by priority
+    # descending so an operator clicking "Dispatch All" gets the same priority-
+    # aware ordering the auto-tick already gives — high jumps the queue, low
+    # sinks. Within-priority ties keep their existing rank order (stable sort).
+    pending.sort(key=_priority_key, reverse=True)
     column_caps = await _column_max_sessions(session, project_key)
     results = []
     # Apply the same depends_on gate the auto-dispatch tick uses so a "Dispatch All"
@@ -2155,6 +2169,10 @@ async def redispatch_all_orphans(
     """
     from app.kanban.service import list_orphaned_cards
     orphans = await list_orphaned_cards(session, project_key)
+    # list_orphaned_cards returns rows ordered by rank. Stable-sort by priority
+    # descending so the bulk orphan redispatch matches the auto-tick's
+    # _next_card behaviour: high-priority orphans jump the queue, low sinks.
+    orphans.sort(key=_priority_key, reverse=True)
     # Snapshot the lookup once for the gate — `orphan.column` may flip to a fixed
     # column mid-loop on a successful redispatch, so don't reuse the per-card
     # `orphans` iterable for "current column".
