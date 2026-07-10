@@ -65,13 +65,15 @@ export function ColumnSettingsDialog({
 
   useEffect(() => {
     if (!open) return;
-    kanbanApi.getModelOptions().then((r) => setModelOptions(r.options)).catch(() => {});
+    kanbanApi.getModelOptions()
+      .then((r) => { if (Array.isArray(r?.options)) setModelOptions(r.options); })
+      .catch(() => {});
   }, [open]);
 
   const handleRefreshModels = async () => {
     try {
       const r = await kanbanApi.refreshModelOptions();
-      setModelOptions(r.options);
+      if (Array.isArray(r?.options)) setModelOptions(r.options);
     } catch {
       toast.error("Failed to refresh model list");
     }

@@ -13,6 +13,12 @@ vi.mock("@/features/cc-bridge/api", () => ({
   fetchResumableSessions: vi.fn(async () => ({ sessions: [] })),
 }));
 
+vi.mock("../api", () => ({
+  kanbanApi: {
+    getModelOptions: vi.fn(async () => ({ provider: "claude-code", options: ["sonnet", "opus", "haiku"] })),
+  },
+}));
+
 import { CardEditDialog } from "./CardEditDialog";
 
 afterEach(() => {
@@ -89,5 +95,37 @@ describe("CardEditDialog", () => {
     // unchanged from unset → null
     expect(payload).toHaveProperty("work_type", null);
     expect(payload).not.toHaveProperty("column");
+  });
+
+  it("forwards the chosen model in the onSubmit payload", () => {
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        initial={{ title: "T", description: "" }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "opus" } });
+    screen.getByRole("button", { name: /update/i }).click();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload).toHaveProperty("model", "opus");
+  });
+
+  it("submits model: null when the field is left empty", () => {
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        initial={{ title: "T", description: "" }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    screen.getByRole("button", { name: /update/i }).click();
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload).toHaveProperty("model", null);
   });
 });

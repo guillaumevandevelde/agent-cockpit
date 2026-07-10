@@ -24,7 +24,8 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
 import { fetchResumableSessions } from "@/features/cc-bridge/api";
 import { useProviderContext } from "@/contexts/ProviderContext";
-import { PRIORITIES, WORK_TYPES, type Priority, type WorkType } from "../types";
+import { PRIORITIES, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, type Priority, type WorkType } from "../types";
+import { kanbanApi } from "../api";
 import type { ResumableSession } from "@/types/sessions";
 
 function parseLabels(raw: string): string[] {
@@ -60,6 +61,7 @@ export function CardEditDialog({
     priority?: string | null;
     labels?: string[] | null;
     work_type?: string | null;
+    model?: string | null;
     transport?: string | null;
     resume_session_id?: string | null;
     resume_project_folder?: string | null;
@@ -77,6 +79,7 @@ export function CardEditDialog({
     labels: string[];
     work_type: string | null;
     agent: string | null;
+    model: string | null;
     transport: string | null;
     resume_session_id: string | null;
     resume_project_folder: string | null;
@@ -97,6 +100,8 @@ export function CardEditDialog({
     (initial?.work_type as WorkType) ?? ""
   );
   const [agent, setAgent] = useState<string>(defaultAgent ?? AUTO);
+  const [model, setModel] = useState<string>(initial?.model ?? "");
+  const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
   const [analystAgentId, setAnalystAgentId] = useState<string>(initial?.analyst_agent_id ?? AUTO);
   const [executorAgentId, setExecutorAgentId] = useState<string>(initial?.executor_agent_id ?? AUTO);
   const [transport, setTransport] = useState<string>(initial?.transport ?? "auto");
@@ -117,6 +122,13 @@ export function CardEditDialog({
   const [resumeTouched, setResumeTouched] = useState(false);
 
   const labels = parseLabels(labelsInput);
+
+  useEffect(() => {
+    if (!open) return;
+    kanbanApi.getModelOptions()
+      .then((r) => { if (Array.isArray(r?.options)) setModelOptions(r.options); })
+      .catch(() => {});
+  }, [open]);
 
   // Pre-select the existing resume session when editing
   useEffect(() => {
@@ -230,6 +242,26 @@ export function CardEditDialog({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="card-model">Model</Label>
+            <input
+              id="card-model"
+              list="card-model-suggestions"
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+              placeholder="(unset — falls back to column/persona default)"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            />
+            <datalist id="card-model-suggestions">
+              {modelOptions.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+            <p className="text-xs text-muted-foreground">
+              Overrides the column default and persona frontmatter for this card only.
+            </p>
           </div>
 
           <div className="space-y-1">
@@ -446,6 +478,7 @@ export function CardEditDialog({
                 labels,
                 work_type: workType || null,
                 agent: agent === AUTO ? null : agent,
+                model: model.trim() || null,
                 transport: transport === "auto" ? null : transport,
                 resume_session_id,
                 resume_project_folder,
