@@ -2740,6 +2740,41 @@ class TestBuildCardPromptSessionEnd:
         ship_idx = prompt.index("Session-end workflow")
         assert ship_idx > main_idx, "Session-end workflow should appear after main instructions"
 
+    def test_impediment_prompt_renders_answer_as_authoritative(self):
+        """When resolve_impediment forwards a chosen gate answer as the separate
+        `impediment_answer` field, build_card_prompt must surface it under the
+        `## IMPEDIMENT` section as an authoritative decision — so the resumed
+        agent acts on it instead of re-asking the question."""
+        class _C:
+            title = "Bug"
+            description = "Fix the crash"
+        prompt = dispatch.build_card_prompt(
+            _C(), persona="You are a debugger.", ship_mode="direct",
+            impediment_question="Postgres or SQLite?",
+            impediment_answer="Postgres",
+        )
+        assert "## IMPEDIMENT" in prompt
+        assert "Postgres or SQLite?" in prompt
+        # The chosen answer is rendered as authoritative (decision language),
+        # not as an open question — so the resumed session acts on it.
+        assert "Postgres" in prompt
+        assert "authoritative" in prompt
+
+    def test_impediment_prompt_without_answer_keeps_legacy_question_framing(self):
+        """Backwards compat: when no answer was given (legacy free-text
+        impediment), the IMPEDIMENT section keeps the open-question framing
+        instead of the authoritative-decision framing."""
+        class _C:
+            title = "Bug"
+            description = "Fix the crash"
+        prompt = dispatch.build_card_prompt(
+            _C(), persona="You are a debugger.", ship_mode="direct",
+            impediment_question="Where is the crash?",
+        )
+        assert "## IMPEDIMENT" in prompt
+        assert "Where is the crash?" in prompt
+        assert "clarify what's needed" in prompt
+
 
 # ---- run_dispatch_tick honours the global usage-limit pause ----------------
 

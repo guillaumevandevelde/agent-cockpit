@@ -363,12 +363,30 @@ async def release_card(card_id: str) -> dict:
 
 
 @mcp.tool()
-async def report_impediment(card_id: str, question: str) -> dict:
-    """Report an impediment on a card. Moves it to Impediment column with a clear question.
+async def report_impediment(card_id: str, question: str,
+                            options: list[str] | None = None) -> dict:
+    """Report an impediment on a card. Moves it to Impediment column with a clear
+    question and (optionally) structured candidate answers.
 
-    Use this when you're stuck and need help from another agent (e.g., analyst for clarification
-    or planning, engineer for code issues or test failures). The question should be specific and
-    actionable so the other agent can help you resolve the blocker.
+    Use this when you need a human decision: you provide a `question`, plus an
+    optional `options` list of structured choices the human can pick from in the
+    UI. The card is moved to Impediment and the claim is released — this tool
+    does NOT block on an answer; the session ends here. The dispatch loop will
+    pick the card back up later; the resume prompt will receive the chosen
+    option (or the raw question when no options were supplied) via the existing
+    `**Impediment:**` comment + `impediment_question` channel
+    (dispatch.build_card_prompt + router.resolve_impediment).
+
+    When `options` is supplied a KanbanGate row is also created in status="open",
+    so the kanban UI can render choice buttons on the card in the Impediment
+    column. The chosen answer replaces the question in the resumed prompt.
+
+    This is the **standard question flow for all agents** — every human-decision
+    request goes here, not through the blocking `open_gate` tool, which would
+    keep this session (and its worktree) alive until a human happens to answer.
+
+    Backwards compatible: omitting `options` keeps the legacy free-text path
+    (no KanbanGate created).
     """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
@@ -383,11 +401,22 @@ async def report_impediment(card_id: str, question: str) -> dict:
             project_key="", entity_id=card_id,
             payload={"text": f"**Impediment:** {question}"})
 
+        # When structured options are supplied, also open a gate so the UI can
+        # render choice buttons. The gate carries the options + the question
+        # verbatim; answer_gate records the human's pick, which resolve_impediment
+        # then splices into the resumed session's prompt instead of the raw
+        # question text. See service.create_gate / answer_gate / GateResponse.
+        if options:
+            await service.create_gate(s, card_id=card_id,
+                project_key=card.project_key,
+                question=question, options=options)
+
         await apply_operation(s, op_type="release", entity_type="card",
             project_key="", entity_id=card_id, payload={})
 
         await s.commit()
-        logger.info("report_impediment: %s — %s", card_id, question[:80])
+        logger.info("report_impediment: %s — %s (options=%d)",
+                    card_id, question[:80], len(options or []))
         return await _card_dict(s, await service.get_card(s, card_id))
 
 

@@ -75,6 +75,109 @@ async def test_report_impediment_not_found():
     assert result.get("error") == "not_found"
 
 
+# --- report_impediment with structured options (gate-style) ---
+# Acceptance criterion: `report_impediment` accepts an optional
+# `options: list[str]`. When supplied, a KanbanGate row is created in addition
+# to the existing comment + release + move-to-Impediment sequence. The card's
+# activity feed gets the `**Impediment:** <question>` comment (matching the
+# existing extraction logic in dispatch.py + router.resolve_impediment) and
+# the gate carries the candidate options + status="open". The card is
+# released so the session ends — no blocking poll. See report_impediment in
+# mcp_server.py and the implementation of /cards/{cid}/resolve-impediment in
+# router.py for how the chosen option threads back into the resumed prompt.
+
+
+@pytest.mark.asyncio
+async def test_report_impediment_with_options_creates_open_gate():
+    """options= must materialize a KanbanGate row with status='open' so the UI
+    can render choice buttons on the card in the Impediment column (mirrors
+    the open_gate path)."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.models import KanbanGate
+
+    cid = (await m.create_card("P", "t", ""))["id"]
+    await m.claim_card(cid, "agent:sess1@devA")
+    await m.report_impediment(
+        cid,
+        "Postgres or SQLite?",
+        options=["Postgres", "SQLite", "Doesn't matter — pick one"],
+    )
+
+    async with KanbanSessionLocal() as s:
+        gates = (await s.execute(
+            __import__("sqlalchemy").select(KanbanGate)
+            .where(KanbanGate.card_id == cid)
+        )).scalars().all()
+
+    assert len(gates) == 1
+    gate = gates[0]
+    assert gate.question == "Postgres or SQLite?"
+    assert gate.options == ["Postgres", "SQLite", "Doesn't matter — pick one"]
+    assert gate.status == "open"
+    assert gate.answer is None
+
+
+@pytest.mark.asyncio
+async def test_report_impediment_with_options_releases_claim():
+    """options= must NOT change the existing release-on-impediment semantics —
+    the calling session ends immediately so the worktree can be GC'd. Verifies
+    the 'sessie sluit, blokkeert niet' acceptance criterion."""
+    cid = (await m.create_card("P", "t", ""))["id"]
+    await m.claim_card(cid, "agent:sess1@devA")
+    result = await m.report_impediment(
+        cid, "Pick A or B", options=["A", "B"],
+    )
+    assert result["claimed_by"] is None
+    assert result["column"] == "Impediment"
+
+
+@pytest.mark.asyncio
+async def test_report_impediment_without_options_still_works():
+    """Backwards compat: omitting options keeps the legacy free-text path —
+    no KanbanGate is created, no exceptions, comment + move + release only.
+    Mirrors the existing call site in engineer.md / analyst.md that pass
+    only `question`."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.models import KanbanGate
+
+    cid = (await m.create_card("P", "t", ""))["id"]
+    await m.claim_card(cid, "agent:sess1@devA")
+    result = await m.report_impediment(cid, "Need a human, please answer in chat.")
+
+    assert result["claimed_by"] is None
+    assert result["column"] == "Impediment"
+
+    async with KanbanSessionLocal() as s:
+        gates = (await s.execute(
+            __import__("sqlalchemy").select(KanbanGate)
+            .where(KanbanGate.card_id == cid)
+        )).scalars().all()
+    assert gates == []
+
+
+@pytest.mark.asyncio
+async def test_report_impediment_with_options_posts_impediment_comment():
+    """The `**Impediment:** <question>` comment must still be posted when
+    options= is supplied — the same prefix dispatch.extract_revisit_question
+    and router.resolve_impediment walk to find the question. Otherwise the
+    resume prompt would lose the question text the gate doesn't surface on
+    its own."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.service import card_activity
+
+    cid = (await m.create_card("P", "t", ""))["id"]
+    await m.claim_card(cid, "agent:sess1@devA")
+    await m.report_impediment(
+        cid, "Postgres or SQLite?", options=["Postgres", "SQLite"],
+    )
+
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, cid)
+    comment_ops = [o for o in ops if o.op_type == "comment"]
+    assert any("**Impediment:** Postgres or SQLite?" in o.payload["text"]
+               for o in comment_ops)
+
+
 # --- comment works even for non-existent card (pure log entry) ---
 
 @pytest.mark.asyncio

@@ -62,10 +62,13 @@ apart workflow-systeem dat je output parseert:
 - `add_plan_attachment` — kind-kaarten aan de parent koppelen + dep-graph + plan-markdown.
 - `move_card` — parent naar `Done` als exit-signaal.
 - `report_impediment` — als je écht vastloopt tijdens analyse (bijv. de kaart is
-  onduidelijk of de scope is te groot): verplaats de parent naar `Impediment` met
-  een concrete vraag en geef de claim vrij.
-- `open_gate` — als je een menselijke beslissing nodig hebt die de sessie niet kan
-  maken (bijv. "wilt u Postgres of SQLite?"): open een in-line decision gate.
+  onduidelijk of de scope is te groot), **óf** als je een menselijke beslissing nodig
+  hebt: verplaats de parent naar `Impediment` met een concrete, actionable
+  `question` en (bij voorkeur) `options: list[str]` met kandidaat-antwoorden. De
+  claim wordt vrijgegeven en de sessie eindigt direct — geen blokkerende poll, geen
+  open sessie. Dit is de standaard vraagflow. Een hervattende sessie leest het gekozen
+  antwoord via dezelfde `impediment_question`-pipeline die `dispatch.build_card_prompt`
+  in de `## IMPEDIMENT`-sectie van de prompt zet.
 
 NIET doen: `attach_deliverable`, `comment` op kind-kaarten, sessie verlengen
 na de `Done`-move. Die zijn voor de executor.

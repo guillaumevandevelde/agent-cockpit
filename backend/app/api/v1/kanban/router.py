@@ -1031,14 +1031,31 @@ async def clear_column(payload: ColumnClearRequest):
 
 @router.post("/cards/{cid}/resolve-impediment", response_model=CardResponse)
 async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
-    """Resolve an impediment by dispatching to a specific agent."""
+    """Resolve an impediment by dispatching to a specific agent.
+
+    Composes the resumed session's `## IMPEDIMENT` prompt section from up to
+    three sources, in the order they appear in `build_card_prompt`:
+
+    1. The most recent `**Impediment:**` comment (set by `report_impediment`).
+    2. If the card has an answered KanbanGate (the human picked one of the
+       structured options `report_impediment(options=[...])` advertised),
+       that pick is forwarded as `impediment_answer` so the resumed session
+       sees the human's decision as authoritative — even when the resolver
+       didn't supply an `answer` field of their own.
+    3. If `payload.answer` is supplied, it's stamped as a durable
+       `**Resolution:**` comment (free-text path) and read back via
+       `dispatch.extract_impediment_answer` so it survives a re-resolve.
+
+    When both (2) and (3) are present, the gate pick wins — it's the more
+    recent, structured decision from the dedicated choice UI.
+    """
     from app.kanban import dispatch
-    
+
     async with KanbanSessionLocal() as s:
         card = await service.get_card(s, cid)
         if card is None:
             raise HTTPException(404, "card not found")
-        
+
         if card.column != "Impediment":
             raise HTTPException(422, "card is not in Impediment column")
 
@@ -1067,7 +1084,18 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
         if not impediment_question:
             impediment_question = "No impediment question found"
 
-        impediment_answer = dispatch.extract_impediment_answer(activity)
+        # Resolve in priority order:
+        # 1. Structured-options gate answer (the new report_impediment
+        #    options= path): when the human clicked a choice button, that's the
+        #    most recent, structured decision — it wins over a free-text
+        #    resolution comment on the same card.
+        # 2. Free-text `**Resolution:**` comment (legacy / resolve-impediment
+        #    payload.answer path).
+        gate_answer = await service.latest_gate_answer(s, cid)
+        if gate_answer is not None:
+            impediment_answer = gate_answer
+        else:
+            impediment_answer = dispatch.extract_impediment_answer(activity)
 
         # Determine target agent based on workflow rules or override
         target_agent = payload.target_agent
@@ -1075,7 +1103,7 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
             current_agent = card.agent or "engineer"
             possible_agents = _IMPEDIMENT_AGENTS.get(current_agent, ["engineer"])
             target_agent = possible_agents[0] if possible_agents else "engineer"
-        
+
         try:
             res = await dispatch.dispatch_impediment_card(
                 s, card_id=cid, project_path=payload.project_path,
@@ -1085,7 +1113,7 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
         except Exception as e:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"dispatch failed: {e}")
         await s.commit()
-    
+
     if res is None:
         raise HTTPException(status.HTTP_409_CONFLICT,
             "could not dispatch impediment (card missing or already claimed)")
