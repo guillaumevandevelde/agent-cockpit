@@ -312,27 +312,29 @@ export const kanbanApi = {
       method: "PATCH",
       body: JSON.stringify({ plan_markdown: planMarkdown }),
     }),
-};
 
-export async function addPlanAttachment(
-  cardId: string,
-  planMarkdown: string,
-  childCardIds: string[],
-  dependsOnGraph: Record<string, string[]> = {},
-): Promise<
-  | { parent_card_id: string; plan_deliverable_id: string; child_card_ids: string[] }
-  | { error: string; max?: number; cycle?: string[]; card_id?: string }
-> {
-  return apiClient<
+  addPlanAttachment: (
+    cardId: string,
+    planMarkdown: string,
+    childCardIds: string[],
+    dependsOnGraph: Record<string, string[]> = {},
+  ): Promise<
     | { parent_card_id: string; plan_deliverable_id: string; child_card_ids: string[] }
     | { error: string; max?: number; cycle?: string[]; card_id?: string }
-  >(`${BASE}/cards/${cardId}/plan-attachment`, {
-    method: "POST",
-    body: JSON.stringify({
-      card_id: cardId,
-      plan_markdown: planMarkdown,
-      child_card_ids: childCardIds,
-      depends_on_graph: dependsOnGraph,
+  > =>
+    apiClient<
+      | { parent_card_id: string; plan_deliverable_id: string; child_card_ids: string[] }
+      | { error: string; max?: number; cycle?: string[]; card_id?: string }
+    >(`${BASE}/cards/${cardId}/plan-attachment`, {
+      method: "POST",
+      body: JSON.stringify({
+        plan_markdown: planMarkdown,
+        child_card_ids: childCardIds,
+        depends_on_graph: dependsOnGraph,
+      }),
     }),
-  });
-}
+};
+
+// Backwards-compatible re-export for callers that imported the free function
+// before it moved onto `kanbanApi`. Mirrors the new shape exactly.
+export const addPlanAttachment = kanbanApi.addPlanAttachment;

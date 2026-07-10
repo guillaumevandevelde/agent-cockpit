@@ -8,12 +8,20 @@
 # for cards that actually reach Done — merged-but-not-Done or manually created
 # worktrees leak. This script reclaims the leaked ones, safely.
 #
-# A worktree is REMOVED only when BOTH are true:
-#   1. its working tree is CLEAN (no uncommitted / untracked changes), and
+# A worktree is REMOVED only when ALL THREE are true:
+#   1. its working tree is CLEAN (no uncommitted / untracked changes),
 #   2. its branch is fully merged into master (every commit's patch is already
-#      in master — detected with `git cherry`, so squash-merges count as merged).
+#      in master — detected with `git cherry`, so squash-merges count as merged),
+#   3. no kanban card currently holds an active agent claim on it. A kanban
+#      card whose `claimed_by` is `agent:<worktree_name>` and whose column is
+#      NOT Done/Impediment is a live session that would be killed by removal —
+#      exactly the failure this check guards against (see the
+#      "worktree-gc verwijdert branch/worktree van actieve analyst-sessie"
+#      postmortem). An Analyst-only session never commits, so its branch is
+#      trivially "merged+clean" from the moment it's created — without this
+#      guard, the next gc run kills it.
 #
-# Anything dirty or carrying unmerged commits is KEPT and reported. The bare
+# Anything dirty, unmerged, or actively claimed is KEPT and reported. The bare
 # top-level checkout and the `master` branch are never touched.
 #
 # Usage:
@@ -39,9 +47,15 @@ done
 
 # Resolve the repository (common) root as an ABSOLUTE path so it matches the
 # absolute paths that `git worktree list` prints. Works from the bare top-level
-# or from inside any linked worktree.
-ROOT="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
-ROOT="$(dirname "$ROOT")"
+# or from inside any linked worktree. WORKTREE_GC_ROOT (env) overrides the
+# discovery — used by the bash test harness so each test can run against an
+# isolated temp git repo instead of touching the live checkout.
+if [ -n "${WORKTREE_GC_ROOT:-}" ]; then
+  ROOT="$(cd "$WORKTREE_GC_ROOT" && pwd -P)"
+else
+  ROOT="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+  ROOT="$(dirname "$ROOT")"
+fi
 cd "$ROOT"
 
 if ! git rev-parse --verify --quiet "$BASE_BRANCH" >/dev/null; then
@@ -53,6 +67,20 @@ echo "worktree-gc: base=$BASE_BRANCH  mode=$([ "$APPLY" = 1 ] && echo APPLY || e
 echo
 
 git worktree prune
+
+# Kanban DB lives at ~/.claude-registry/kanban.db by default (see
+# backend/app/config.py:_default_kanban_database_url). The helper script
+# accepts an explicit path so tests can inject a temp DB; if it's missing
+# or unreadable the helper prints nothing and we fall through to the
+# merge+clean logic — never crash gc on a board-side outage.
+KANBAN_DB="${KANBAN_DB:-$HOME/.claude-registry/kanban.db}"
+declare -A ACTIVE_WTS=()
+if [ -r "$KANBAN_DB" ]; then
+  while IFS=$'\t' read -r wt_name wt_branch; do
+    [ -n "$wt_name" ] || continue
+    ACTIVE_WTS["$wt_name"]=1
+  done < <(python3 "$(dirname "$0")/kanban_active_worktrees.py" --db "$KANBAN_DB" 2>/dev/null || true)
+fi
 
 removed=0 kept=0
 
@@ -71,6 +99,14 @@ while IFS= read -r line; do
   # remove the redundant checkout, never the branch itself.
   is_base=0
   [ "$branch" = "$BASE_BRANCH" ] && is_base=1
+
+  # 0. Active kanban claim? (analyst/engineer session still alive)
+  wt_name="$(basename "$path")"
+  if [ -n "${ACTIVE_WTS[$wt_name]:-}" ]; then
+    printf 'KEEP   %-40s  active claim (kanban card agent:%s still alive)\n' \
+      "$wt_name" "$wt_name"
+    kept=$((kept+1)); continue
+  fi
 
   # 1. Clean?
   if [ -n "$(git -C "$path" status --porcelain)" ]; then

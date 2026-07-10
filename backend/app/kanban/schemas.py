@@ -145,6 +145,27 @@ class UpdatePlanAttachmentRequest(BaseModel):
     plan_markdown: str
 
 
+class AddPlanAttachmentRequest(BaseModel):
+    """REST mirror of the MCP `add_plan_attachment` tool.
+
+    The analyst-fase flow posts this from the UI / scripted REST client as a
+    fallback when the MCP layer is unreachable (e.g. cwd of the MCP server was
+    removed out from under it by an overzealous `worktree-gc.sh` — see the
+    "[problem] worktree-gc verwijdert branch/worktree van actieve analyst-sessie"
+    postmortem). The MCP and REST paths share the same op-log; either entry
+    point produces an identical board state.
+    """
+    plan_markdown: str
+    child_card_ids: list[str]
+    depends_on_graph: dict[str, list[str]] | None = None
+
+
+class AddPlanAttachmentResponse(BaseModel):
+    parent_card_id: str
+    plan_deliverable_id: str
+    child_card_ids: list[str]
+
+
 class ActivityEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     hlc: str
