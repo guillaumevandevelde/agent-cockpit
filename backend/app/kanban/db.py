@@ -153,6 +153,8 @@ async def _ensure_column_table(conn) -> None:
     cols = {r[1] for r in rows}
     if "default_platform" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN default_platform VARCHAR(16)")
+    if "max_sessions" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN max_sessions INTEGER")
 
 
 async def _ensure_work_type_mapping_table(conn) -> None:
