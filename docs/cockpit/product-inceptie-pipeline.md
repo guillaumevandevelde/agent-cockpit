@@ -386,7 +386,66 @@ Ter herinnering — deze facet zegt niets over:
 De synthese-kaart (E, `c980a926f…`) beslist over implementatie-volgorde
 en kruipt door de overlap met B en D.
 
-## 9. Kernbevinding (voor de ouder-comment)
+## 9. Design-beslissing (na synthese)
+
+> **Beslissing (kanban card c33b2f14, 2026-07-11):** **Optie 2 — Twee-staps
+> intake** is geïmplementeerd. De intake-kolom is een nieuwe vaste kolom op
+> `COLUMNS` (`backend/app/kanban/schemas.py`), de dispatcher slaat 'm
+> automatisch over (`_DISPATCH_COLUMNS` blijft `("Backlog", "To Resume")`),
+> en de MCP-actie `kanban.create_project_from_intake` (sibling kanban card
+> `0260dbcd`) is de canonieke ingang. Zie PR-thread voor de rationale.
+
+### Waarom Optie 2 (en niet 1 of 3)?
+
+De drie opties uit §4 wegen op drie assen:
+
+| As | Optie 1 | Optie 2 (gekozen) | Optie 3 |
+|---|---|---|---|
+| Past binnen bestaande flows | Volledig | Grotendeels | Grotendeels |
+| Bootstrapt nieuwe infra | Minimaal | 1 kolom + 1 MCP-actie | 1 sessie-mode + actie |
+| First-class traceability | Zwak (kaart op verkeerd project) | **Sterk** (dedicated kolom + deliverable) | Zwak (sessie als opslag) |
+| Past bij drie-bomen-regel | Nee — plan-deliverable blijft op meta-project | **Ja** — kind-kaart staat meteen in het nieuwe project | Nee — plan leeft buiten kanban |
+
+Optie 2 is de enige variant die de drie-bomen-regel uit
+`00-orientation.md` respecteert: plannen/kaarten leven in de kanban-DB, niet
+in losse markdown-files of tmux-sessies. Optie 1 zou een "kind-kaart" op het
+meta-project leggen — letterlijk het kip-en-ei-probleem uit §2.3 in stand
+houden. Optie 3 heeft geen first-class kanban-Trace.
+
+### Implementatie-paden (gecoördineerd)
+
+Deze kaart implementeert de **plumbing** (kolom + dispatcher-skip + REST/MCP-actie
++ frontend-knop). De sibling-kaarten uit §7 vullen de details aan:
+
+- **`[feature][inceptie] MCP-actie kanban.create_project_from_intake`**
+  (`0260dbcd`) — de canonieke actie. **Geïmplementeerd in PR met deze kaart**
+  als één service + REST/MCP-entry-point (zie `backend/app/services/inception_service.py`,
+  `POST /api/v1/kanban/projects/from-intake`, `mcp__cockpit-kanban__create_project_from_intake`).
+- **`[feature][inceptie] project_blueprint — declaratieve `.claude/`-seed`**
+  (`395590d`) — vervangt de `.claude/CLAUDE.md`-placeholder door een echte
+  `BlueprintService.apply()` met skills/agents/settings. **Out of scope van
+  deze PR**; InceptionService laat expliciet een TODO achter zodat de
+  overgang later naadloos is.
+- **`[feature][inceptie] Plans ↔ kanban-DB fusie` (`727470a`)** — vandaag
+  leeft plan-markdown in een `kind="plan"` deliverable op de intake-kaart
+  (kanban-DB, niet in `~/.claude/plans/`). De wire-up via `link_plan_ref`
+  werkt daarom al; sibling #3 maakt plannen first-class in plaats van
+  deliverable-shape, zonder gedragsverandering.
+- **`[work-type][inceptie] Routing van intake-kaarten` (`071172d`)** — intake
+  kaarten worden nooit door de dispatcher opgepakt, ook niet als ze later
+  een work_type krijgen. `_DISPATCH_COLUMNS` is expliciet `("Backlog", "To Resume")`
+  en de `_persona_filename("intake")` resolved naar `None`. **Geen aparte
+  work_type nodig in deze PR**.
+
+### Verificatie
+
+`backend/tests/test_inception.py` dekt: happy path, intake-not-in-column,
+missing card, target-already-exists, project-already-registered, git-init
+fails (rollback), en de twee kruimels (autodispatch-meta geflipt, intake
+zonder plan-deliverable). Frontend `CardItem.test.tsx` dekt de Promote-knop
+(visible-only-on-intake, klikbaar-zonder-drawer).
+
+## 10. Kernbevinding (voor de ouder-comment)
 
 > Cockpit heeft vandaag **twee** van de drie ontbrekende bouwstenen
 > (markdown-only intake via `brainstorming` + een bestaande spec→plan→executors-

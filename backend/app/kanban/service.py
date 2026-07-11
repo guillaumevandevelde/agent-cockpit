@@ -555,6 +555,42 @@ async def ensure_analyst_column(session, project_key: str) -> bool:
     return True
 
 
+async def ensure_intake_column(session, project_key: str) -> bool:
+    """Idempotent: create the 'intake' kanban_columns row for this project
+    if one doesn't already exist. Returns True iff a new column was created.
+
+    The inceptie-pipeline (kanban card c33b2f14 / facet A of
+    platform-as-app-factory) puts idea-cards on the meta-project's `intake`
+    column before they're promoted to a new project via
+    `create_project_from_intake`. For projects that enabled kanban before
+    `intake` was added to `COLUMNS` (schemas.py), this helper back-fills the
+    kanban_columns row so the column renders on the board. For new projects
+    it stays out of the way — the row is created lazily the first time an
+    intake card is created OR the project is re-enabled (which iterates
+    `COLUMNS` and creates any missing entries).
+    """
+    existing = await list_columns(session, project_key)
+    if any(c.name == "intake" for c in existing):
+        return False
+    # Insert at the top of the board (rank=0) so intake is the leftmost column,
+    # matching the natural flow "intake → Backlog → … → Done".
+    rank = "0000"
+    for col in existing:
+        try:
+            if int(col.rank) >= int(rank):
+                # Shift everyone else down by 1. Bump-only-if-conflict keeps
+                # the existing rank order stable when intake wasn't there.
+                col.rank = f"{int(col.rank) + 1:04d}"
+        except (TypeError, ValueError):
+            # Non-numeric ranks (uuid4 hex) — leave alone; intake is fine
+            # sitting at rank=0000 since the order is dominated by created_at
+            # ties anyway.
+            pass
+    await create_column(session, project_key, name="intake", rank=rank)
+    await session.flush()
+    return True
+
+
 # Decision gates
 
 

@@ -10,6 +10,7 @@ export function Board({
   onReorderColumns,
   cardMeta,
   projectPath,
+  onPromote,
 }: {
   columns: KanbanColumn[];
   cards: Card[];
@@ -20,6 +21,9 @@ export function Board({
   // Threaded down to Column → CardItem so the Impediment `dispatch_failed`
   // badge can render a Redispatch quick-action.
   projectPath?: string;
+  // Inceptie-pipeline entry point — threaded to intake cards so the
+  // Promote-to-project button can open the dialog at the page level.
+  onPromote?: (c: Card) => void;
 }) {
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
@@ -42,6 +46,7 @@ export function Board({
           }}
           cardMeta={cardMeta}
           projectPath={projectPath}
+          onPromote={onPromote}
         />
       ))}
     </div>

@@ -377,8 +377,12 @@ _PERSONA_BY_COLUMN = {}  # Dynamic - loaded from project agents
 
 def _persona_filename(column: str) -> str | None:
     """Get the persona filename for a column. For agent columns, the column name IS the agent name."""
-    # Fixed columns don't have personas
-    if column in ("Backlog", "Impediment", "Done", "To Resume"):
+    # Fixed columns (incl. `intake`, added for the inceptie-pipeline — kanban
+    # card c33b2f14) don't have personas. Reading from `COLUMNS` instead of a
+    # hard-coded tuple means adding a new fixed column is one edit (schemas.py)
+    # not two.
+    from app.kanban.schemas import COLUMNS
+    if column in COLUMNS:
         return None
     # Agent columns: column name matches agent filename
     return f"{column}.md"

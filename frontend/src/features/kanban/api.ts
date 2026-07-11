@@ -52,6 +52,31 @@ export const kanbanApi = {
   deleteColumn: (id: string): Promise<void> =>
     apiClient<void>(`${BASE}/columns/${id}`, { method: "DELETE" }),
 
+  /**
+   * Promote an intake card on the meta-project to a brand-new project on
+   * the kanban board (inceptie-pipeline / kanban card c33b2f14 — facet A of
+   * platform-as-app-factory). The action is atomic: any failure between
+   * the 6 steps rolls back filesystem + kanban-DB + Project row +
+   * autodispatch-meta so the system is never left half-registered.
+   */
+  createProjectFromIntake: (body: {
+    intake_card_id: string;
+    project_name: string;
+    target_path: string;
+  }): Promise<{
+    project_id: number;
+    new_project_key: string;
+    first_card_id: string;
+  }> =>
+    apiClient<{
+      project_id: number;
+      new_project_key: string;
+      first_card_id: string;
+    }>(`${BASE}/projects/from-intake`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   listCards: (projectKey: string, column?: string): Promise<{ items: Card[] }> => {
     const params = new URLSearchParams({ project_key: projectKey });
     if (column) params.append("column", column);

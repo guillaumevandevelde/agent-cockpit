@@ -16,10 +16,11 @@ import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
 import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
+import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
-const FIXED_COLUMNS = new Set(["Backlog", "Impediment", "Done", "To Resume"]);
+const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Done", "To Resume"]);
 const DISPATCH_COLUMNS = new Set(["Backlog", "To Resume"]);
 const POLL_INTERVAL_MS = 5000;
 const AGENT_CLAIM_PREFIX = "agent:";
@@ -35,6 +36,10 @@ export default function KanbanPage() {
   const [creating, setCreating] = useState(false);
   const [editingColumns, setEditingColumns] = useState(false);
   const [editingWorkTypeMappings, setEditingWorkTypeMappings] = useState(false);
+  // Inceptie-pipeline (kanban card c33b2f14): the intake card currently
+  // selected for promotion. Set by `onPromote` (passed down to CardItem
+  // via Board → Column); the dialog reads it and renders a confirmation.
+  const [promotingCard, setPromotingCard] = useState<Card | null>(null);
   const draggingRef = useRef(false);
   const mutatingRef = useRef(0);
 
@@ -303,6 +308,7 @@ export default function KanbanPage() {
         onOpen={setOpen}
         onDropCardAt={onDropCardAt}
         projectPath={projectPath}
+        onPromote={setPromotingCard}
         onReorderColumns={async (sourceId, targetId) => {
           const source = columns.find((c) => c.id === sourceId);
           const target = columns.find((c) => c.id === targetId);
@@ -391,6 +397,23 @@ export default function KanbanPage() {
           projectKey={projectKey}
           onClose={() => setEditingWorkTypeMappings(false)}
           onChanged={reload}
+        />
+      )}
+      {promotingCard && (
+        <PromoteToProjectDialog
+          open
+          intakeCardId={promotingCard.id}
+          intakeCardTitle={promotingCard.title}
+          defaultTargetPath={(() => {
+            // Suggest `<parent-of-active-project>/<slug-from-title>`. We don't
+            // know the actual parent's path here without an extra API call —
+            // use the active project path itself as a sensible fallback; the
+            // operator can edit before confirming.
+            const base = activeProject?.path ?? "/tmp";
+            return `${base}/${promotingCard.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+          })()}
+          onClose={() => setPromotingCard(null)}
+          onPromoted={() => void reload()}
         />
       )}
     </div>

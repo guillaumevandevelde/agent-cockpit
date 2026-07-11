@@ -436,3 +436,63 @@ describe("CardItem dispatch_failed Redispatch quick-action", () => {
     );
   });
 });
+
+describe("CardItem inceptie-pipeline Promote-to-project quick-action", () => {
+  it("renders the Promote button on an intake card when onPromote is wired", () => {
+    const onPromote = vi.fn();
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "intake" }}
+        onOpen={() => {}}
+        onPromote={onPromote}
+      />,
+    );
+    const btn = screen.getByTestId("promote-to-project-quick-action");
+    expect(btn).not.toBeNull();
+    expect(btn.textContent).toMatch(/Promote to project/);
+  });
+
+  it("does NOT render the Promote button on a non-intake card", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "Backlog" }}
+        onOpen={() => {}}
+        onPromote={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("promote-to-project-quick-action")).toBeNull();
+  });
+
+  it("does NOT render the Promote button on an intake card when onPromote is absent", () => {
+    // Defensive: callers that haven't wired onPromote (legacy boards / unit
+    // tests) get a read-only intake card, not a broken button.
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "intake" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("promote-to-project-quick-action")).toBeNull();
+  });
+
+  it("calls onPromote(card) on click, not onOpen", () => {
+    const onPromote = vi.fn();
+    const onOpen = vi.fn();
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "intake" }}
+        onOpen={onOpen}
+        onPromote={onPromote}
+      />,
+    );
+    const btn = screen.getByTestId("promote-to-project-quick-action");
+    fireEvent.click(btn);
+    expect(onPromote).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "card-1", column: "intake" }),
+    );
+    // The click on the button must NOT bubble to the card's outer click
+    // handler that opens the drawer — a button inside a clickable card
+    // can't also trigger the card's primary action.
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});

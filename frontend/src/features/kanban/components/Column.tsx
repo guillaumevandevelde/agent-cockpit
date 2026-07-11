@@ -18,6 +18,7 @@ export function Column({
   onDropColumn,
   cardMeta,
   projectPath,
+  onPromote,
 }: {
   column: Col;
   kanbanColumn?: KanbanColumn;
@@ -31,6 +32,10 @@ export function Column({
   // quick-action can call kanbanApi.redispatch without bouncing through
   // the drawer. Optional for backwards compat with tests that don't care.
   projectPath?: string;
+  // Inceptie-pipeline entry point. CardItem renders the Promote button
+  // only when this is set AND the card's column is "intake" — keeps the
+  // button out of the way on every other column.
+  onPromote?: (c: Card) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -100,6 +105,7 @@ export function Column({
                 readyState={meta?.readyState}
                 blockerTitles={meta?.blockerTitles}
                 projectPath={projectPath}
+                onPromote={onPromote}
               />
             </div>
           );
