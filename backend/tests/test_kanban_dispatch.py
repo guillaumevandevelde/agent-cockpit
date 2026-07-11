@@ -2890,6 +2890,52 @@ class TestBuildCardPromptSessionEnd:
         assert "clarify what's needed" in prompt
 
 
+class TestBuildCardPromptHostCardId:
+    """The dispatched agent must see its host card's full id in the prompt
+    header, so it can call `comment`/`attach_deliverable`/`move_card` on the
+    right card by id instead of guessing from the prose (which may quote other
+    card ids, leading to short-prefix collisions — see kanban card "Executor
+    prompt omits host card_id; ids in card text mislead MCP calls")."""
+
+    def test_executor_prompt_includes_host_card_id_label(self):
+        class _C:
+            title = "T"
+            description = ""
+            id = "abcdef1234567890"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        assert "Host card id: abcdef1234567890" in prompt
+
+    def test_analyst_prompt_includes_host_card_id_label(self):
+        """Analyst phase renders a lighter ship-instructions block, but the
+        host-card-id line lives above the phase split and must surface in
+        both phases."""
+        class _C:
+            title = "T"
+            description = ""
+            id = "abcdef1234567890"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct",
+                                            phase="analyst")
+        assert "Host card id: abcdef1234567890" in prompt
+
+    def test_host_card_id_appears_unambiguously_when_description_quotes_other_ids(self):
+        """Regression for the actual bug: the card description cites another
+        card's short id (`3ffdc75e`), and the agent mistook it for the host
+        id. With an explicit `Host card id:` label, the agent copies the
+        labeled value verbatim instead of scraping ids from prose."""
+        class _C:
+            title = "Self-improve card"
+            description = (
+                "Earlier evidence mentioned card 3ffdc75e but that's a "
+                "different Done card. This card's id is the real one."
+            )
+            id = "5b63cafe00000001"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        assert "Host card id: 5b63cafe00000001" in prompt
+        # The misleading short id still appears in the description (that's
+        # fine — it's evidence text), but the host id is unambiguous.
+        assert "Host card id: 3ffdc75e" not in prompt
+
+
 # ---- run_dispatch_tick honours the global usage-limit pause ----------------
 
 @pytest.mark.asyncio
