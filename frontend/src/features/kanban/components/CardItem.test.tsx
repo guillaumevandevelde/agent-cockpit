@@ -53,6 +53,84 @@ describe("CardItem work_type badge", () => {
   });
 });
 
+describe("CardItem To Resume auto-resume badge", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows 'Auto in <relative>' for a To Resume card with a future scheduled_at", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "To Resume", scheduled_at: "2026-01-01T02:14:00Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("Auto in 2h 14m")).not.toBeNull();
+  });
+
+  it("shows only the 'Auto' label (no timestamp) when scheduled_at is unset", () => {
+    render(
+      <CardItem card={{ ...baseCard, column: "To Resume", scheduled_at: null }} onOpen={() => {}} />,
+    );
+    expect(screen.getByText("Auto")).not.toBeNull();
+    expect(screen.queryByText(/Auto in/)).toBeNull();
+  });
+
+  it("shows 'Auto soon' when scheduled_at is under a minute away", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "To Resume", scheduled_at: "2026-01-01T00:00:30Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("Auto soon")).not.toBeNull();
+  });
+
+  it("shows 'Auto pending' when scheduled_at is in the past", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "To Resume", scheduled_at: "2025-12-31T23:00:00Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("Auto pending")).not.toBeNull();
+  });
+
+  it("exposes the UTC ISO timestamp and local time via the title tooltip", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "To Resume", scheduled_at: "2026-01-01T02:14:00Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByText("Auto in 2h 14m");
+    expect(badge.getAttribute("title")).toBe(
+      `2026-01-01T02:14:00Z (local: ${new Date("2026-01-01T02:14:00Z").toLocaleString()})`,
+    );
+  });
+
+  it("does not show the Auto label or a countdown on a Backlog card", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "Backlog", scheduled_at: "2026-01-01T02:14:00Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByText("Auto")).toBeNull();
+    expect(screen.queryByText(/Auto in/)).toBeNull();
+    expect(screen.queryByText("Auto soon")).toBeNull();
+    expect(screen.queryByText("Auto pending")).toBeNull();
+  });
+});
+
 describe("CardItem ReadyStateBadge", () => {
   it("renders a 'Ready' badge when readyState='ready' is supplied", () => {
     render(
