@@ -183,6 +183,49 @@ describe("CardEditDialog", () => {
     expect(onSubmit.mock.calls[0][0]).toHaveProperty("column_overrides", null);
   });
 
+  it("does not render the multi-agent split section on a new card", () => {
+    render(
+      <CardEditDialog
+        open
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    // New card (no `initial`) is single-agent only — the advanced split
+    // toggle should not exist.
+    expect(screen.queryByText(/Multi-agent split/i)).toBeNull();
+  });
+
+  it("still renders the multi-agent split section when editing an existing card", () => {
+    render(
+      <CardEditDialog
+        open
+        initial={{ title: "T", description: "" }}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Multi-agent split/i)).toBeTruthy();
+  });
+
+  it("still forwards analyst/executor ids (null) on a new card submit", () => {
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "New card" },
+    });
+    screen.getByRole("button", { name: /create/i }).click();
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload).toHaveProperty("analyst_agent_id", null);
+    expect(payload).toHaveProperty("executor_agent_id", null);
+  });
+
   it("pre-fills existing column_overrides from initial", async () => {
     const onSubmit = vi.fn();
     render(

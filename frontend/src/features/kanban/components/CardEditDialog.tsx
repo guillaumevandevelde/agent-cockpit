@@ -393,6 +393,7 @@ export function CardEditDialog({
             </div>
           )}
 
+          {initial && (
           <div className="space-y-2 rounded-md border p-3">
             <button
               type="button"
@@ -446,6 +447,7 @@ export function CardEditDialog({
               </div>
             )}
           </div>
+          )}
 
           <div className="space-y-2">
             <Label>Transport</Label>
