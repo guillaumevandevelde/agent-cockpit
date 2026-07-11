@@ -40,7 +40,6 @@ vi.mock("./api", async (importOriginal) => {
   stub.getShipMode = vi.fn(async () => ({ mode: "direct" }));
   stub.getSkipPermissions = vi.fn(async () => ({ enabled: false }));
   stub.getAutodispatch = vi.fn(async () => ({ enabled: false }));
-  stub.getMaxSessions = vi.fn(async () => ({ max_sessions: 1 }));
   stub.getDefaultTransport = vi.fn(async () => ({ transport: "tmux" }));
   return { kanbanApi: stub };
 });

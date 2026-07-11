@@ -13,7 +13,6 @@ import { McpHealthBadge } from "./components/McpHealthBadge";
 import { ShipModeToggle } from "./components/ShipModeToggle";
 import { SkipPermissionsToggle } from "./components/SkipPermissionsToggle";
 import { AutodispatchToggle } from "./components/AutodispatchToggle";
-import { MaxSessionsControl } from "./components/MaxSessionsControl";
 import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
 import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
@@ -265,7 +264,6 @@ export default function KanbanPage() {
           <ShipModeToggle projectKey={projectKey} />
           <SkipPermissionsToggle projectKey={projectKey} />
           <AutodispatchToggle projectKey={projectKey} />
-          <MaxSessionsControl projectKey={projectKey} />
           <DefaultTransportSelect projectKey={projectKey} />
           <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
             Columns

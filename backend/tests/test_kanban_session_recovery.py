@@ -191,19 +191,30 @@ async def test_recover_project_ignores_live_human_and_fixed_columns():
 
 
 @pytest.mark.asyncio
-async def test_recover_project_respects_max_sessions_cap():
-    """Startup recovery must never resume more sessions than the project's
-    configured cap allows -- otherwise a project that accumulated more dead
-    claims than its cap (e.g. via repeated dev-server restarts) bursts all of
-    them back to life at once, blowing straight past "Max sessions: N"."""
+async def test_recover_project_respects_session_budget(monkeypatch):
+    """Startup recovery must never resume more sessions than the shared
+    hardware-aware session budget allows -- otherwise a project with more dead
+    claims than that budget (e.g. via repeated dev-server restarts) would burst
+    them all back to life at once. After dropping the per-project cap, the
+    budget comes from session_registry.effective_max_sessions."""
     calls = []
 
     async def fake_redispatch(session, *, card_id, project_path):
         calls.append(card_id)
         return {"card_id": card_id, "session_name": f"k-new-{card_id}"}
 
+    class FakeRegistry:
+        effective_max_sessions = 2
+
+        @property
+        def session_count(self):
+            return 0
+
+    fake_registry = FakeRegistry()
+    from app.services.scheduling import session_registry as registry_mod
+    monkeypatch.setattr(registry_mod, "session_registry", fake_registry)
+
     async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 2)
         dead_cards = [
             await _make_card(s, title=f"wip-{i}", column="engineer")
             for i in range(3)
@@ -218,23 +229,34 @@ async def test_recover_project_respects_max_sessions_cap():
         )
         await s.commit()
 
-    # Cap is 2 -> only 2 of the 3 dead sessions may be resumed this pass.
+    # Budget is 2 -> only 2 of the 3 dead sessions may be resumed this pass.
     assert len(recovered) == 2
     assert len(calls) == 2
 
 
 @pytest.mark.asyncio
-async def test_recover_project_counts_live_sessions_against_cap_budget():
-    """A card whose session is already live still occupies a cap slot, so
-    recovery must leave that slot out of its budget for resuming dead ones."""
+async def test_recover_project_counts_live_sessions_against_session_budget(monkeypatch):
+    """A card whose session is already live still occupies a session-budget
+    slot, so recovery must leave that slot out of its budget for resuming dead
+    ones."""
     calls = []
 
     async def fake_redispatch(session, *, card_id, project_path):
         calls.append(card_id)
         return {"card_id": card_id, "session_name": f"k-new-{card_id}"}
 
+    class FakeRegistry:
+        effective_max_sessions = 2
+
+        @property
+        def session_count(self):
+            return 0
+
+    fake_registry = FakeRegistry()
+    from app.services.scheduling import session_registry as registry_mod
+    monkeypatch.setattr(registry_mod, "session_registry", fake_registry)
+
     async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 2)
         alive = await _make_card(s, title="alive", column="engineer")
         await _claim(s, alive, "agent:k-alive-0001")
         dead_cards = [
@@ -251,7 +273,7 @@ async def test_recover_project_counts_live_sessions_against_cap_budget():
         )
         await s.commit()
 
-    # Cap is 2, one slot already taken by the live session -> only 1 free slot.
+    # Budget is 2, one slot already taken by the live session -> only 1 free.
     assert len(recovered) == 1
     assert len(calls) == 1
 

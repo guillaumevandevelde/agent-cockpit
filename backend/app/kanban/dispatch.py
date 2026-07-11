@@ -142,11 +142,6 @@ SHIPMODE_PREFIX = "shipmode:"
 SKIP_PERMISSIONS_PREFIX = "skip_permissions:"
 SHIP_MODES = ("pull-request", "direct")
 DEFAULT_SHIP_MODE = "pull-request"
-MAX_SESSIONS_PREFIX = "max_sessions:"
-# Conservative default for a shared box: the pre-push gate now serializes the heavy
-# test/build across sessions, so this mainly bounds concurrent agent processes.
-# Override per-project via set_max_sessions.
-DEFAULT_MAX_SESSIONS = 3
 TRANSPORT_PREFIX = "transport:"
 TRANSPORTS = ("worktree", "sandcastle")
 DEFAULT_TRANSPORT = "worktree"
@@ -207,29 +202,6 @@ async def set_skip_permissions(session, project_key: str, enabled: bool) -> None
         session.add(row)
     else:
         row.value = "1" if enabled else "0"
-    await session.flush()
-
-
-async def get_max_sessions(session, project_key: str) -> int:
-    row = await session.get(KanbanMeta, MAX_SESSIONS_PREFIX + project_key)
-    if row is None:
-        return DEFAULT_MAX_SESSIONS
-    try:
-        n = int(row.value)
-    except (TypeError, ValueError):
-        return DEFAULT_MAX_SESSIONS
-    return n if n >= 1 else DEFAULT_MAX_SESSIONS
-
-
-async def set_max_sessions(session, project_key: str, n: int) -> None:
-    if n < 1:
-        raise ValueError("max_sessions must be >= 1")
-    key = MAX_SESSIONS_PREFIX + project_key
-    row = await session.get(KanbanMeta, key)
-    if row is None:
-        session.add(KanbanMeta(key=key, value=str(n)))
-    else:
-        row.value = str(n)
     await session.flush()
 
 
@@ -2184,12 +2156,13 @@ async def dispatch_project(
     sandcastle_live: set[str] | None = None,
 ) -> dict | None:
     """Claim+move+spawn the next card for one project. Returns a result dict or
-    None when there is nothing to do (no candidate card, or project is busy).
+    None when there is nothing to do (no candidate card, or the per-column cap
+    blocks dispatch for every candidate).
 
     When `live_sessions` is provided, stale `agent:` claims on Doing cards whose
     session is no longer alive are reaped first, so a dead session can never wedge
-    the busy cap. Passing None skips reaping (used by unit tests that exercise the
-    cap directly).
+    a per-column cap slot. Passing None skips reaping (used by unit tests that
+    exercise the cap directly).
     
     If transport is None, the appropriate transport is automatically selected based
     on the project's sandcastle configuration."""
@@ -2201,13 +2174,13 @@ async def dispatch_project(
         ):
             cards = await list_cards(session, project_key)
 
-    cap = await get_max_sessions(session, project_key)
     column_caps = await _column_max_sessions(session, project_key)
     last_result: dict | None = None
 
-    # Fill every free slot in this tick, re-listing after each dispatch so the
-    # claim just made counts toward the cap.
-    while _active_session_count(cards) < cap:
+    # Fill every dispatchable card in this tick. The per-column cap (when set)
+    # is the only structural limit at this level; the hardware/OS-level cap
+    # checked inside the transport enforces the actual memory bound.
+    while True:
         card = _next_card(cards)
         if card is None:
             break
@@ -2849,23 +2822,13 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                     pending_queue.dequeue(card.card_id)
                     continue
 
-                # Honour the per-project session cap. Memory may be free again, but
-                # the project can still be at its user-set cap; retrying past it is
-                # exactly how a cap of 3 ends up running 6 sessions. A cap hold is not
-                # a failed dispatch, so leave the card untouched in the queue (don't
-                # mark_retry, which would count toward max_retries and eventually drop
-                # a card that is merely waiting for a slot).
-                cards = await list_cards(ks, card.project_key)
-                cap = await get_max_sessions(ks, card.project_key)
-                if _active_session_count(cards) >= cap:
-                    logger.info(
-                        f"Card {card.card_id} held back: project {card.project_key} "
-                        f"at session cap ({cap})"
-                    )
-                    continue
-
                 # Per-column cap check: if the card's target column has a
-                # per-column max_sessions, respect it before retrying.
+                # per-column max_sessions, respect it before retrying. The cap
+                # hold is not a failed dispatch, so leave the card untouched in
+                # the queue (don't mark_retry, which would count toward
+                # max_retries and eventually drop a card that is merely waiting
+                # for a slot).
+                cards = await list_cards(ks, card.project_key)
                 column_caps = await _column_max_sessions(ks, card.project_key)
                 if column_caps:
                     target_column = _resolve_target_column(card_data, card.project_path)
