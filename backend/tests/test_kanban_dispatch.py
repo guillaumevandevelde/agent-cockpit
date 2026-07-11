@@ -3111,6 +3111,91 @@ async def test_run_dispatch_tick_runs_normally_when_not_paused(monkeypatch):
     list_mock.assert_called_once()
 
 
+# ---- clear_dispatch_pause (manual operator override) ----------------------
+
+@pytest.mark.asyncio
+async def test_clear_dispatch_pause_clears_an_active_pause():
+    from datetime import datetime, timedelta
+
+    from app.kanban.dispatch_pause import is_dispatch_paused, set_paused_until
+
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(s, datetime.now(UTC) + timedelta(minutes=10))
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cleared, was_paused = await dispatch.clear_dispatch_pause(s)
+        await s.commit()
+        assert (cleared, was_paused) == (True, True)
+
+    async with KanbanSessionLocal() as s:
+        assert await is_dispatch_paused(s) is False
+
+
+@pytest.mark.asyncio
+async def test_clear_dispatch_pause_is_noop_when_not_paused():
+    async with KanbanSessionLocal() as s:
+        cleared, was_paused = await dispatch.clear_dispatch_pause(s)
+        assert (cleared, was_paused) == (False, False)
+
+
+@pytest.mark.asyncio
+async def test_clear_dispatch_pause_comments_on_to_resume_cards():
+    from datetime import datetime, timedelta
+
+    from app.kanban.dispatch_pause import set_paused_until
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="Rate limited", column="To Resume")
+        other_cid = await _make_card(s, title="Untouched", column="Backlog")
+        await set_paused_until(s, datetime.now(UTC) + timedelta(minutes=10))
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cleared, was_paused = await dispatch.clear_dispatch_pause(s)
+        await s.commit()
+        assert (cleared, was_paused) == (True, True)
+
+    async with KanbanSessionLocal() as s:
+        to_resume_activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in to_resume_activity if op.op_type == "comment"
+        ]
+        assert any("cleared manually" in text for text in comment_texts)
+
+        other_activity = await service.card_activity(s, other_cid)
+        assert not any(op.op_type == "comment" for op in other_activity)
+
+
+@pytest.mark.asyncio
+async def test_clear_dispatch_pause_lets_next_tick_run(monkeypatch):
+    """After a manual clear, the next dispatch tick must not be skipped -- this
+    is the actual point of the override: unstick a tick the auto-detection
+    paused incorrectly, without waiting for the wall-clock deadline."""
+    import unittest.mock as mock
+    from datetime import datetime, timedelta
+
+    import app.kanban.db as kdb
+    from app.kanban.dispatch_pause import set_paused_until
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(s, datetime.now(UTC) + timedelta(minutes=10))
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.clear_dispatch_pause(s)
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_retry_queued_cards") as retry_mock, \
+         mock.patch.object(dispatch, "list_autodispatch_projects", return_value=[]) as list_mock:
+        await dispatch.run_dispatch_tick()
+
+    retry_mock.assert_called_once()
+    list_mock.assert_called_once()
+
+
 # ---- dead-on-arrival circuit breaker (dispatch_failures -> Impediment) ----
 #
 # A session that dies within seconds of being claimed (stale --resume worktree,

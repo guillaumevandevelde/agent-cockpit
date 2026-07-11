@@ -804,6 +804,20 @@ async def get_dispatch_pause():
             "paused_until": paused_until.isoformat() if paused_until else None}
 
 
+@router.delete("/dispatch-pause")
+async def clear_dispatch_pause():
+    """Manually clear the global auto-dispatch pause -- an operator override for
+    when the automatic 429-detection was wrong. Idempotent: clearing when
+    nothing is paused is a no-op that reports {cleared: false, was_paused: false}."""
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        cleared, was_paused = await dispatch.clear_dispatch_pause(s)
+        if cleared:
+            await s.commit()
+    logger.info("dispatch-pause manually cleared via API (was_paused=%s)", was_paused)
+    return {"cleared": cleared, "was_paused": was_paused}
+
+
 @router.get("/shipmode")
 async def get_shipmode(project_key: str = Query(...)):
     from app.kanban import dispatch

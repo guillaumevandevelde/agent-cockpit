@@ -353,3 +353,36 @@ async def test_list_cards_blocking_query_param_filters_via_http():
         assert parent_id in ids
         assert child_id not in ids
         assert standalone_id not in ids
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_pause_clears_an_active_pause():
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import set_paused_until
+
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(s, datetime.now(UTC) + timedelta(minutes=10))
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        assert r.json()["paused"] is True
+
+        r = await ac.delete("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"cleared": True, "was_paused": True}
+
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        assert r.json()["paused"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_pause_is_idempotent_when_not_paused():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.delete("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        assert r.json() == {"cleared": False, "was_paused": False}
