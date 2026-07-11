@@ -37,7 +37,10 @@ the branch diff:
 git fetch origin -q
 FRONTEND_TOUCHED=$( { git diff --name-only origin/master -- frontend/; git ls-files --others --exclude-standard -- frontend/; } | head -1 )
 if [ -n "$FRONTEND_TOUCHED" ]; then
-  ( cd frontend && npm run lint && npm run build )   # only proceed once green
+  # Fresh worktree has no node_modules (gitignored) — install once so the
+  # checks don't die with `eslint: not found`. Guard on missing node_modules
+  # so a re-run in the same session skips the ~40s `npm ci`.
+  ( cd frontend && { [ -d node_modules ] || npm ci; } && npm run lint && npm run build )   # only proceed once green
 else
   echo 'geen frontend-diff — gate overgeslagen'
 fi
@@ -45,7 +48,9 @@ fi
 
 A branch that *does* touch `frontend/` (including a mixed frontend+docs diff)
 runs the gate unconditionally; only a branch with no `frontend/` change skips
-it.
+it. The worktree is a fresh `git worktree add` off origin/master, so its
+`node_modules` is absent on the first run — the guarded `npm ci` installs deps
+before lint/build (matching CI's `quality.yml`).
 
 Do **not** run backend pytest locally in this repo — that step was removed
 deliberately: this is a shared box, and concurrent dispatched sessions each
