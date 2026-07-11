@@ -218,6 +218,11 @@ export const kanbanApi = {
   dispatchPause: (): Promise<DispatchPauseStatus> =>
     apiClient<DispatchPauseStatus>(`${BASE}/dispatch-pause`),
 
+  clearDispatchPause: (): Promise<{ cleared: boolean; was_paused: boolean }> =>
+    apiClient<{ cleared: boolean; was_paused: boolean }>(`${BASE}/dispatch-pause`, {
+      method: "DELETE",
+    }),
+
   enable: (projectPath: string, slug?: string): Promise<{ project_key: string }> =>
     apiClient<{ project_key: string }>(`${BASE}/enable`, {
       method: "POST",

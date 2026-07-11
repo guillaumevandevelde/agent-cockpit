@@ -1896,6 +1896,46 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
         return moved
 
 
+async def clear_dispatch_pause(session) -> tuple[bool, bool]:
+    """Manually clear the global dispatch pause (operator override).
+
+    For when the 429 auto-detection got it wrong -- garbled limit-message
+    parsing, a missed Notification hook, or a provider whose limit actually
+    reset before the parsed deadline. Posts an audit comment on every "To
+    Resume" card (across all projects -- the pause itself is account-wide,
+    not project-scoped, per dispatch_pause.py) so a later "why did dispatch
+    start again" question has an answer on the card, not just in the log.
+
+    Returns (cleared, was_paused). Idempotent: calling this when nothing is
+    paused returns (False, False) without raising. Caller is responsible for
+    committing the session.
+    """
+    from sqlalchemy import select
+
+    from app.kanban import dispatch_pause
+
+    was_paused = await dispatch_pause.is_dispatch_paused(session)
+    if not was_paused:
+        return False, False
+
+    await dispatch_pause.set_paused_until(session, None)
+
+    to_resume = (
+        await session.execute(select(KanbanCard).where(KanbanCard.column == "To Resume"))
+    ).scalars().all()
+    for card in to_resume:
+        await apply_operation(
+            session, op_type="comment", entity_type="comment",
+            project_key=card.project_key, entity_id=card.id,
+            payload={"text": "Auto-dispatch pause cleared manually by an operator "
+                              "(overriding the auto-detected usage-limit reset time)."},
+        )
+    logger.info(
+        "dispatch pause manually cleared (to_resume_cards=%d)", len(to_resume),
+    )
+    return True, True
+
+
 async def post_agent_status_comment(cwd: str, text: str) -> bool:
     """Post a comment to the kanban card owned by the session running in `cwd`.
 

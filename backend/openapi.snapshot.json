@@ -22458,6 +22458,24 @@
       }
     },
     "/api/v1/kanban/dispatch-pause": {
+      "delete": {
+        "description": "Manually clear the global auto-dispatch pause -- an operator override for\nwhen the automatic 429-detection was wrong. Idempotent: clearing when\nnothing is paused is a no-op that reports {cleared: false, was_paused: false}.",
+        "operationId": "clear_dispatch_pause_api_v1_kanban_dispatch_pause_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Clear Dispatch Pause",
+        "tags": [
+          "Kanban"
+        ]
+      },
       "get": {
         "description": "Whether auto-dispatch is globally paused after a Claude usage-limit hit,\nand until when. Not scoped to a project: the underlying limit is account-wide.",
         "operationId": "get_dispatch_pause_api_v1_kanban_dispatch_pause_get",
