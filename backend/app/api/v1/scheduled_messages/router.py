@@ -186,15 +186,6 @@ async def hook_event(ev: HookEvent):
         )
 
         if kind == "limit":
-            # Kanban-dispatched session hit its usage limit and is stuck open: move its
-            # card to "To Resume" and kill the tmux session now, rather than leaving it
-            # dangling until a human notices. No-op for non-kanban sessions.
-            from app.kanban.dispatch import move_limited_session_to_resume
-            try:
-                await move_limited_session_to_resume(ev.cwd)
-            except Exception:
-                logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
-
             parsed = auto_resume_service.parse_reset_time(ev.message)
 
             # The usage limit is account-wide: every session hits the same wall for
@@ -216,6 +207,20 @@ async def hook_event(ev: HookEvent):
                     "%sh dispatch pause: %r",
                     ev.cwd, FALLBACK_PAUSE_HOURS, ev.message,
                 )
+
+            # Kanban-dispatched session hit its usage limit and is stuck open: move its
+            # card to "To Resume" and kill the tmux session now, rather than leaving it
+            # dangling until a human notices. Carries the same reset time as the global
+            # pause below, so the card's own scheduled_at makes it dispatch-eligible
+            # again as soon as the limit actually resets -- not only once the (broader,
+            # account-wide) global pause happens to expire. No-op for non-kanban sessions.
+            from app.kanban.dispatch import move_limited_session_to_resume
+            try:
+                await move_limited_session_to_resume(
+                    ev.cwd, scheduled_at=pause_until.isoformat(),
+                )
+            except Exception:
+                logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
 
             from app.kanban.db import KanbanSessionLocal
             from app.kanban.dispatch_pause import set_paused_until

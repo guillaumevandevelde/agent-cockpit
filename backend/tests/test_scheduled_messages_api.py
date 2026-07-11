@@ -190,10 +190,17 @@ async def test_hook_event_populates_session_registry():
 @pytest.mark.asyncio
 async def test_hook_event_limit_notification_moves_kanban_card_to_resume():
     """A "hit your session limit" Notification triggers the kanban To-Resume move,
-    independent of whether the scheduled-messages auto-resume toggle is on."""
+    independent of whether the scheduled-messages auto-resume toggle is on. The
+    parsed reset time is passed through as scheduled_at so the card's own
+    _is_due check (not just the global dispatch pause) knows when it's eligible
+    again."""
     from unittest import mock
 
     import app.kanban.dispatch as dispatch
+    from app.services.scheduling.auto_resume import auto_resume_service
+
+    message = "You've hit your session limit · resets 11:10pm (Europe/Brussels)"
+    expected_reset_time, _tz = auto_resume_service.parse_reset_time(message)
 
     transport = ASGITransport(app=app)
     with mock.patch.object(
@@ -204,11 +211,14 @@ async def test_hook_event_limit_notification_moves_kanban_card_to_resume():
                 "/api/v1/scheduled-messages/hook-event",
                 json={"event": "Notification", "session_id": "s2",
                       "cwd": "/p/.claude/worktrees/k-limit-0001",
-                      "message": "You've hit your session limit · resets 11:10pm (Europe/Brussels)"},
+                      "message": message},
             )
             assert r.status_code == 200
 
-    move_mock.assert_awaited_once_with("/p/.claude/worktrees/k-limit-0001")
+    move_mock.assert_awaited_once_with(
+        "/p/.claude/worktrees/k-limit-0001",
+        scheduled_at=expected_reset_time.isoformat(),
+    )
 
 
 @pytest.mark.asyncio

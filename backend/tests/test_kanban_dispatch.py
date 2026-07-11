@@ -2177,6 +2177,39 @@ async def test_move_to_resume_moves_card_to_to_resume():
 
 
 @pytest.mark.asyncio
+async def test_move_to_resume_sets_scheduled_at_when_provided():
+    """_move_to_resume writes an explicit scheduled_at onto the card, so the
+    dispatch tick's _is_due check can hold it out of auto-dispatch until then."""
+    import unittest.mock as mock
+
+    from app.kanban import session_recovery
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="context-limit-scheduled", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-0005"},
+        )
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=("sess-abc", "proj-folder"),
+    ):
+        with mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+            async with KanbanSessionLocal() as s:
+                card = await get_card(s, cid)
+                result = await dispatch._move_to_resume(
+                    s, card=card, project_key=PK, project_path="/p",
+                    scheduled_at="2026-07-11T23:10:00+02:00",
+                )
+                await s.commit()
+                card = await get_card(s, cid)
+
+    assert result is True
+    assert card.scheduled_at == "2026-07-11T23:10:00+02:00"
+
+
+@pytest.mark.asyncio
 async def test_move_to_resume_returns_false_when_no_resume_target():
     """_move_to_resume returns False when no resumable transcript is found."""
     import unittest.mock as mock
@@ -2261,6 +2294,48 @@ async def test_reaper_moves_resumable_dead_session_to_to_resume():
 
 
 @pytest.mark.asyncio
+async def test_reaper_move_to_resume_sets_fallback_scheduled_at():
+    """The reaper never has a parsed reset time (only tmux pane content, no
+    Notification message) -- it must fall back to now + FALLBACK_PAUSE_HOURS so
+    the card doesn't get immediately re-picked up by the next dispatch tick
+    while the rate limit is still in effect."""
+    import unittest.mock as mock
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban import session_recovery
+    from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="resumable-dead-fallback", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-0006"},
+        )
+        await s.commit()
+
+    before = datetime.now(UTC)
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=("sess-fb", "proj-folder"),
+    ):
+        with mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+            async with KanbanSessionLocal() as s:
+                reaped = await dispatch.reap_stale_claims(
+                    s, project_key=PK, cards=await list_cards(s, PK),
+                    live_sessions=set(), project_path="/p",
+                )
+                await s.commit()
+                card = await get_card(s, cid)
+    after = datetime.now(UTC)
+
+    assert reaped == 1
+    assert card.column == "To Resume"
+    assert card.scheduled_at is not None
+    fire_at = datetime.fromisoformat(card.scheduled_at)
+    assert before + timedelta(hours=FALLBACK_PAUSE_HOURS) <= fire_at
+    assert fire_at <= after + timedelta(hours=FALLBACK_PAUSE_HOURS)
+
+
+@pytest.mark.asyncio
 async def test_reaper_without_project_path_plain_release():
     """reap_stale_claims without project_path falls back to plain release for dead sessions."""
     import unittest.mock as mock
@@ -2333,6 +2408,46 @@ async def test_move_limited_session_to_resume_moves_matching_card(monkeypatch):
     assert card.resume_session_id == "sess-live"
     assert card.claimed_by is None
     kill_mock.assert_called_once_with("k-live-0001")
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_sets_scheduled_at_from_parsed_reset(monkeypatch):
+    """When the Notification hook path has already parsed the reset time, it's
+    passed through to move_limited_session_to_resume and lands on the card's
+    scheduled_at so _is_due keeps the card out of dispatch until then --
+    independent of when the global dispatch_pause expires."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="limit-hit-scheduled", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-live-0007"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-live-2", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-live-0007",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert result is True
+    assert card.column == "To Resume"
+    assert card.scheduled_at == "2026-07-11T23:10:00+02:00"
 
 
 @pytest.mark.asyncio

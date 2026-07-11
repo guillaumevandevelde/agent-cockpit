@@ -1758,6 +1758,7 @@ async def _run_card(
 
 async def _move_to_resume(
     session, *, card, project_key: str, project_path: str,
+    scheduled_at: str | None = None,
 ) -> bool:
     """When a dead agent session has a resumable worktree, move its card to "To Resume".
 
@@ -1766,6 +1767,13 @@ async def _move_to_resume(
     the dead tmux session, and releases the agent claim. Returns True when a resume
     target was found and the card was moved; False when the worktree has no resumable
     transcript — the caller should fall back to a plain claim release (reaper default).
+
+    ``scheduled_at`` (ISO8601, optional) is written onto the card alongside the resume
+    fields so ``_is_due`` holds it out of auto-dispatch until then, instead of relying
+    solely on the global dispatch pause. Callers pass the parsed usage-limit reset time
+    when known (Notification hook path) or a conservative fallback (reaper, which only
+    sees tmux pane content and never a parsed reset time); a caller with no signal at
+    all leaves it ``None``, making the card immediately dispatchable.
 
     Accepts cards on agent columns AND Backlog/Impediment (but not on fixed
     end-state columns "Done" / "To Resume" — those are terminal). Extending to
@@ -1799,7 +1807,8 @@ async def _move_to_resume(
         session, op_type="update", entity_type="card", project_key=project_key,
         entity_id=card.id,
         payload={"resume_session_id": session_id,
-                 "resume_project_folder": project_folder},
+                 "resume_project_folder": project_folder,
+                 "scheduled_at": scheduled_at},
     )
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=project_key,
@@ -1830,7 +1839,7 @@ def _resume_target_from_cwd(cwd: str) -> tuple[str, str] | None:
     return str(worktree.parent.parent.parent), worktree.name
 
 
-async def move_limited_session_to_resume(cwd: str) -> bool:
+async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None = None) -> bool:
     """When a live kanban-dispatched session hits its Claude usage/session limit,
     move its card to "To Resume" and kill the tmux session right away.
 
@@ -1847,6 +1856,11 @@ async def move_limited_session_to_resume(cwd: str) -> bool:
     waiting for dispatch_failures to cross MAX_DISPATCH_FAILURES, and a Notification
     hook event for its 429 then arrives). Cards on fixed columns (Done / To Resume)
     are left alone.
+
+    ``scheduled_at`` (ISO8601, optional) is the caller's already-parsed usage-limit
+    reset time (`auto_resume_service.parse_reset_time`); passed straight through to
+    `_move_to_resume` so `_is_due` can hold the card out of auto-dispatch until the
+    limit actually resets, rather than only until the global dispatch pause expires.
     """
     from app.kanban.db import KanbanSessionLocal
 
@@ -1875,6 +1889,7 @@ async def move_limited_session_to_resume(cwd: str) -> bool:
             return False
         moved = await _move_to_resume(
             ks, card=card, project_key=project_key, project_path=project_path,
+            scheduled_at=scheduled_at,
         )
         if moved:
             await ks.commit()
@@ -2012,9 +2027,20 @@ async def reap_stale_claims(
 
         # If we know the project path, try resume recovery first
         if project_path is not None:
+            # The reaper only sees tmux pane content, never a parsed usage-limit
+            # reset time -- fall back to a conservative fixed pause (same
+            # duration as _cleanup_stuck_session's global pause) so the card
+            # doesn't get immediately re-picked up by the next dispatch tick
+            # while the rate limit is still in effect.
+            from datetime import timedelta
+
+            from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
+            fallback_scheduled_at = (
+                datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+            ).isoformat()
             if await _move_to_resume(
                 session, card=card, project_key=project_key,
-                project_path=project_path,
+                project_path=project_path, scheduled_at=fallback_scheduled_at,
             ):
                 reaped += 1
                 continue
