@@ -43,35 +43,42 @@ afgedwongen. Nu:
 ## Promotie-ledger
 
 Status: **✅ gepromoot** (canoniek doc bestaat / is opgenomen) · **⏳ pending** (werk kan
-geland zijn, maar nog geen canoniek `docs/cockpit/`-doc — staat op de Fase 0b-kaart).
+geland zijn, maar nog geen canoniek `docs/cockpit/`-doc — nog te promoten). Sinds Fase 0b
+(2026-07-11) staat alles op ✅; nieuwe rijen beginnen ⏳ tot ze gepromoot zijn.
 
 | Taak | Plan-file (`plans/`) | Spec-file (`specs/`) | Status | Canoniek doeldoc |
 |---|---|---|---|---|
-| Agent Bridge — Bedrock/provider selectie | `2026-05-29-agent-bridge-bedrock-platform.md` | `2026-05-29-agent-bridge-bedrock-platform-design.md` | ⏳ pending | — |
+| Agent Bridge — Bedrock/provider selectie | `2026-05-29-agent-bridge-bedrock-platform.md` | `2026-05-29-agent-bridge-bedrock-platform-design.md` | ✅ gepromoot | `cockpit/agent-bridge.md` (Platform-selectie) |
 | Claude Cockpit rebrand | `2026-06-11-claude-cockpit-rebrand.md` | `2026-06-11-claude-cockpit-rebrand-design.md` | ✅ gepromoot | `cockpit/00-orientation.md` + `CLAUDE.md` |
-| Agent Bridge — session rename | `2026-06-12-agent-bridge-session-rename.md` | `2026-06-12-agent-bridge-session-rename-design.md` | ⏳ pending | — |
+| Agent Bridge — session rename | `2026-06-12-agent-bridge-session-rename.md` | `2026-06-12-agent-bridge-session-rename-design.md` | ✅ gepromoot | `cockpit/agent-bridge.md` (Session rename) |
 | Self-healing dev supervisor | `2026-06-12-backend-selfhealing-supervisor.md` | `2026-06-12-backend-selfhealing-supervisor-design.md` | ✅ gepromoot | `CLAUDE.md` (Self-healing dev stack) |
-| Resume worktree sessions | `2026-06-12-resume-worktree-sessions.md` | `2026-06-12-resume-worktree-sessions-design.md` | ⏳ pending | — |
+| Resume worktree sessions | `2026-06-12-resume-worktree-sessions.md` | `2026-06-12-resume-worktree-sessions-design.md` | ✅ gepromoot | `cockpit/agent-bridge.md` (Resume across worktrees) |
 | Scheduled session resume | `2026-06-14-scheduled-session-resume.md` | `2026-06-13-scheduled-session-resume-design.md` | ✅ gepromoot | `cockpit/fase-2-spec.md` + `cockpit/fase-2-plan.md` |
 | Kanban dispatch agents | `2026-06-15-kanban-dispatch-agents.md` | `2026-06-15-kanban-agents-design.md` | ✅ gepromoot | `cockpit/kanban-dispatch-spec.md` |
-| Kanban MCP robustness | `2026-06-27-kanban-mcp-robustness.md` | `2026-06-27-kanban-mcp-robustness-design.md` | ⏳ pending | — |
-| Skill stats | — | `2026-06-27-skill-stats-design.md` | ⏳ pending | — |
-| Agent Bridge — image paste | — | `2026-06-29-agent-bridge-image-paste-design.md` | ⏳ pending | — |
+| Kanban MCP robustness | `2026-06-27-kanban-mcp-robustness.md` | `2026-06-27-kanban-mcp-robustness-design.md` | ✅ gepromoot | `cockpit/kanban-dispatch-spec.md` (MCP-robustness & health) |
+| Skill stats | — | `2026-06-27-skill-stats-design.md` | ✅ gepromoot | `cockpit/skill-stats.md` |
+| Agent Bridge — image paste | — | `2026-06-29-agent-bridge-image-paste-design.md` | ✅ gepromoot | `cockpit/agent-bridge.md` (Image paste) |
 | Kanban dispatch transport | `2026-06-29-kanban-dispatch-transport.md` | `2026-06-29-kanban-dispatch-transport-design.md` | ✅ gepromoot | `cockpit/kanban-dispatch-spec.md` |
-| Kanban card-edit provider dropdown | `2026-07-03-card-edit-provider-dropdown.md` | `2026-07-03-card-edit-provider-dropdown-design.md` | ⏳ pending | — |
+| Kanban card-edit provider dropdown | `2026-07-03-card-edit-provider-dropdown.md` | `2026-07-03-card-edit-provider-dropdown-design.md` | ✅ gepromoot | `cockpit/kanban-dispatch-spec.md` (Provider vs. persona) |
 | Pre-push gate onder concurrency | — | `2026-07-03-prepush-gate-concurrency-design.md` | ✅ gepromoot | `CLAUDE.md` (gate later verwijderd 2026-07-05) |
-| MiniMax providers page | `2026-07-04-minimax-providers-page.md` | `2026-07-04-minimax-providers-page-design.md` | ⏳ pending | — |
-| Code drift detection | `2026-07-05-code-drift-detection.md` | `2026-07-05-code-drift-detection-design.md` | ⏳ pending | — |
+| MiniMax providers page | `2026-07-04-minimax-providers-page.md` | `2026-07-04-minimax-providers-page-design.md` | ✅ gepromoot | `cockpit/subscriptions.md` (MiniMax-credential relocatie) |
+| Code drift detection | `2026-07-05-code-drift-detection.md` | `2026-07-05-code-drift-detection-design.md` | ✅ gepromoot | `cockpit/spec-driven-development-analysis.md` (CI/drift-signaal, Fase 2) |
 | Agent Mail | `2026-07-08-agent-mail-implementation.md` | — | ✅ gepromoot | `cockpit/agent-mail-spec.md` |
 | Multi-agent kanban | `2026-07-08-multi-agent-kanban.md` | `2026-07-08-multi-agent-kanban-design.md` | ✅ gepromoot | `cockpit/multi-agent-kanban.md` |
-| Subscription usage leftover | `2026-07-08-subscription-usage-leftover-plan.md` | `2026-07-08-subscription-usage-leftover-design.md` | ⏳ pending | — |
-| Kanban model override | `2026-07-10-kanban-model-override.md` | `2026-07-10-kanban-model-override-design.md` | ⏳ pending | — |
-| Settings-gap update | — | `2026-04-10-settings-gap-update-design.md` | ⏳ pending | — |
+| Subscription usage leftover | `2026-07-08-subscription-usage-leftover-plan.md` | `2026-07-08-subscription-usage-leftover-design.md` | ✅ gepromoot | `cockpit/subscriptions.md` (Per-provider usage/quota) |
+| Kanban model override | `2026-07-10-kanban-model-override.md` | `2026-07-10-kanban-model-override-design.md` | ✅ gepromoot | `cockpit/kanban-model-override.md` |
+| Settings-gap update | — | `2026-04-10-settings-gap-update-design.md` | ✅ gepromoot | opgenomen in `CLAUDE.md` (Config-feature)¹ |
 
-> De **⏳ pending**-rijen worden gepromoot onder de follow-up-kaart
-> *`[spec-ssot]` Fase 0b: promoot resterende superpowers-plans naar canonieke docs/cockpit-docs*.
-> Zolang die kaart open staat is de checker groen (advies) — hij eist alleen dat elke file
-> **hier geregistreerd** is, niet dat elke file al ✅ is.
+> **Fase 0b afgerond (2026-07-11):** alle voorheen ⏳ pending-rijen zijn gepromoot naar een
+> canoniek `docs/cockpit/`-doc (of expliciet als "opgenomen in `CLAUDE.md`" gemarkeerd). De
+> ledger is nu volledig ✅. De checker eist alleen dat elke file **hier geregistreerd** is
+> (advies, niet-blokkerend).
+>
+> ¹ De Settings-editor-uitbreiding (Auto Mode, Plugins, Sandbox-FS, hook-events) is
+> feature-pariteitswerk voor Claude Code's eigen `settings.json`, geen fork-specifieke
+> architectuur — daarom gemarkeerd als opgenomen in de **Config**-feature (`CLAUDE.md`
+> Features-lijst) i.p.v. een eigen cockpit-doc te krijgen. Dat is de door het promotie-contract
+> toegestane escape-hatch voor "kleine of volledig in `CLAUDE.md` opgenomen features".
 
 ## Een nieuwe superpowers-plan toevoegen
 
