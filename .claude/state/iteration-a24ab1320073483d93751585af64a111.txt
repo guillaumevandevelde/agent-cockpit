@@ -1,0 +1,1 @@
+2026-07-11T13:19:30Z | preset=verify | iter=1 | backend pytest test_kanban_dispatch.py+test_scheduled_messages_api.py + ruff, frontend lint+build | clean (4 pre-existing unrelated failures confirmed on base commit)
