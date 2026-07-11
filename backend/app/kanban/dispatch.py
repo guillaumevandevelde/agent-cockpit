@@ -1545,10 +1545,39 @@ def _is_due(card: KanbanCard) -> bool:
     return fire_at <= datetime.now(UTC)
 
 
+def _awaiting_plan_ref(card) -> bool:
+    """True when a child card (has a ``parent_card_id``) has not yet received
+    its ``plan_ref`` deliverable from the analyst's ``add_plan_attachment`` call.
+
+    Closes the create_card→add_plan_attachment race: the analyst creates a child
+    (step 3) directly into a dispatch-eligible column, but only links the plan
+    (step 4) a few seconds later. A dispatch tick firing in that window would
+    spawn an executor whose prompt renders the generic "Plan niet beschikbaar"
+    placeholder (`_plan_context_section`) — indistinguishable from a genuinely
+    missing plan — forcing a needless report_impediment. Holding such a child out
+    of dispatch until its ``plan_ref`` exists makes it dispatch-eligible only once
+    the plan it points at is actually attached. See the [self-improve] kanban card
+    "Child card becomes dispatch-eligible before analyst's add_plan_attachment
+    runs (race)".
+
+    A card with no ``parent_card_id`` (an ordinary top-level card) is never
+    gated — it never carries a ``plan_ref`` in the first place.
+    """
+    if not getattr(card, "parent_card_id", None):
+        return False
+    return not any(
+        d.kind == "plan_ref" for d in getattr(card, "deliverables", []) or []
+    )
+
+
 def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     cards = list(cards)
     for col in _DISPATCH_COLUMNS:
-        col_cards = [c for c in cards if c.column == col and not c.claimed_by and _is_due(c)]
+        col_cards = [
+            c for c in cards
+            if c.column == col and not c.claimed_by and _is_due(c)
+            and not _awaiting_plan_ref(c)
+        ]
         if col_cards:
             # list_cards is ordered by rank; stable-sort by priority on top of that
             # so higher-priority cards jump the queue within the same column.
@@ -1562,7 +1591,11 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     # human notices and hits "redispatch" by hand (see kanban card "auto dispatch
     # nakijken": auto-dispatch looked stuck even though it was enabled).
     from app.kanban.schemas import COLUMNS
-    orphans = [c for c in cards if c.column not in COLUMNS and not c.claimed_by and _is_due(c)]
+    orphans = [
+        c for c in cards
+        if c.column not in COLUMNS and not c.claimed_by and _is_due(c)
+        and not _awaiting_plan_ref(c)
+    ]
     if orphans:
         orphans.sort(key=_priority_key, reverse=True)
         return orphans[0]
