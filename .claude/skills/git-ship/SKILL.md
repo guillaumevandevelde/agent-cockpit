@@ -68,14 +68,18 @@ git add -A && git commit -m "<descriptive summary>"
 
 ## 4a. Ship mode `direct` — merge to master
 
-Only when every test passed:
+Only when every test passed. You are in a linked worktree while `master` is
+checked out in the main working copy, so checking out `master` here fails with
+`'master' is already used by worktree at ...`. Merge through a throwaway
+detached worktree instead — it never touches your current checkout:
 
 ```bash
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git checkout master
-git merge --no-ff "$BRANCH"
-git push origin HEAD:master
-git checkout "$BRANCH"   # back so the worktree stays valid
+TMP=$(mktemp -d)
+git worktree add --detach "$TMP/m" origin/master
+git -C "$TMP/m" merge --no-ff "$BRANCH" -m "Merge $BRANCH"
+git -C "$TMP/m" push origin HEAD:master
+git worktree remove "$TMP/m" --force
 ```
 
 Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`), **run the session-end

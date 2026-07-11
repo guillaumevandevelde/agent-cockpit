@@ -2795,8 +2795,13 @@ class TestBuildShipInstructions:
 
     def test_direct_mode_includes_merge_commands(self):
         instructions = dispatch._build_ship_instructions("direct")
-        assert "git merge --no-ff" in instructions
-        assert "git push origin HEAD:master" in instructions
+        # Merge happens through a throwaway detached worktree, not `git checkout
+        # master` (which deterministically fails in a linked worktree — see the
+        # [self-improve] card that motivated this recipe).
+        assert "git worktree add --detach \"$TMP/m\" origin/master" in instructions
+        assert "git checkout master" not in instructions
+        assert "merge --no-ff" in instructions
+        assert "push origin HEAD:master" in instructions
         assert "git fetch origin" in instructions
         assert "venv/bin/activate" not in instructions  # local pytest dropped, see feedback_no_local_pytest memory
         assert "pytest -q" not in instructions
@@ -2817,7 +2822,8 @@ class TestBuildShipInstructions:
         assert 'kind="pr"' in instructions
         assert 'move_card' in instructions
         assert '"Done"' in instructions
-        assert "git merge --no-ff" not in instructions
+        assert "merge --no-ff" not in instructions
+        assert "git worktree add --detach" not in instructions
 
     def test_both_modes_instruct_running_tests_before_shipping(self):
         for mode in ("direct", "pull-request"):
@@ -2951,8 +2957,8 @@ class TestBuildCardPromptSessionEnd:
             description = "Do the thing"
         prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
         assert "Session-end workflow" in prompt
-        assert "git merge --no-ff" in prompt
-        assert "git push origin HEAD:master" in prompt
+        assert "merge --no-ff" in prompt
+        assert "push origin HEAD:master" in prompt
         assert "move_card" in prompt
         assert '"Done"' in prompt
 
