@@ -663,6 +663,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         f"{preamble}"
         "You are picking up a Kanban card from the Claude Cockpit board. "
         'It is already claimed by you and moved to "Doing".\n\n'
+        f"Host card id: {getattr(card, 'id', '') or ''}\n"
         f"# {card.title}\n"
         f"{getattr(card, 'description', '') or ''}\n"
         f"{impediment_section}\n"
