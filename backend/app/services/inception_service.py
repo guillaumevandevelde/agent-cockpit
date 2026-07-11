@@ -15,12 +15,9 @@ back off, and reverts the intake-card move) so the system is never left
 half-registered.
 
 This module is *the* canonical entry point for "an idea on the meta-project
-becomes a new project" — sibling kanban card 0260dbcd adds the matching MCP
-actie + REST endpoint on top of the same logic, and kanban card 395590d
-will eventually swap the inline `.claude/CLAUDE.md` placeholder for a real
-`BlueprintService.apply()`. Until then, the placeholder is intentional: the
-inceptie-pipeline is functional end-to-end, and the proper blueprint
-(recipes for skills/agents/settings) is a separate, version-pinned concern.
+becomes a new project" — sibling kanban card 0260dbcd added the matching MCP
+actie + REST endpoint on top of the same logic, and sibling kanban card
+395590d landed `BlueprintService.apply()` which step 4 now delegates to.
 """
 from __future__ import annotations
 
@@ -33,12 +30,14 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.kanban import dispatch, service as kanban_service
+from app.kanban import dispatch
+from app.kanban import service as kanban_service
 from app.kanban.models import KanbanCard
 from app.kanban.operations import apply_operation
 from app.kanban.project_key import resolve_project_key
 from app.models.database import Project
 from app.models.schemas import ProjectCreate
+from app.services.blueprint import Blueprint, BlueprintService, BlueprintServiceError
 from app.services.project_service import ProjectService
 
 logger = logging.getLogger(__name__)
@@ -143,22 +142,25 @@ class InceptionService:
                     f"git init failed at {target}: {exc}"
                 ) from exc
 
-            # ---- step 4: minimal .claude/CLAUDE.md seed --------------------
-            # Placeholder until `BlueprintService.apply()` lands (sibling
-            # kanban card 395590d). The seed marks the project as born from
-            # an inceptie promotion so an operator can distinguish it from a
-            # manually-cloned repo later.
-            claude_dir = target / ".claude"
-            claude_dir.mkdir()
-            (claude_dir / "CLAUDE.md").write_text(
-                f"# {project_name}\n\n"
-                f"Born from an inceptie-pipeline promotion (intake card "
-                f"`{intake_card_id}`).\n\n"
-                f"_This is a placeholder seed; a real `BlueprintService` "
-                f"recipe will replace it once sibling kanban card 395590d "
-                f"lands._\n",
-                encoding="utf-8",
-            )
+            # ---- step 4: blueprint-apply (.claude/ + CLAUDE.md seed) -------
+            # Delegates to BlueprintService.apply (sibling kanban card
+            # 395590d) which writes settings.json + the standard subdirs
+            # atomically. A failure here unwinds via the rmtarget closure
+            # registered in step 2. The `claudemd` field carries the
+            # inceptie-provenance note so an operator can distinguish this
+            # project from a manually-cloned repo later.
+            try:
+                BlueprintService(
+                    Blueprint(claudemd=(
+                        f"# {project_name}\n\n"
+                        f"Born from an inceptie-pipeline promotion (intake "
+                        f"card `{intake_card_id}`).\n"
+                    )),
+                ).apply(str(target))
+            except BlueprintServiceError as exc:
+                raise RuntimeError(
+                    f"blueprint apply failed at {target}: {exc}"
+                ) from exc
 
             # ---- step 5: ProjectService.add_project ------------------------
             # add_project commits internally; rollback below handles the
@@ -291,7 +293,7 @@ class InceptionService:
 
 
 def _rmtarget_factory(target: Path):
-    async def _cleanup(self: "InceptionService") -> None:
+    async def _cleanup(self: InceptionService) -> None:
         # Filesystem op — sync, no session needed.
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
@@ -299,7 +301,7 @@ def _rmtarget_factory(target: Path):
 
 
 def _delete_project_factory(project_id: int):
-    async def _cleanup(self: "InceptionService") -> None:
+    async def _cleanup(self: InceptionService) -> None:
         proj = await self.app.get(Project, project_id)
         if proj is not None:
             await self.app.delete(proj)
@@ -308,7 +310,7 @@ def _delete_project_factory(project_id: int):
 
 
 def _set_autodispatch_factory(project_key: str, enabled: bool):
-    async def _cleanup(self: "InceptionService") -> None:
+    async def _cleanup(self: InceptionService) -> None:
         await dispatch.set_autodispatch(self.kanban, project_key, enabled)
         # Already flushed by set_autodispatch; commit only when changing
         # the on-disk-visible state during rollback.
@@ -317,7 +319,7 @@ def _set_autodispatch_factory(project_key: str, enabled: bool):
 
 
 def _delete_card_factory(card_id: str):
-    async def _cleanup(self: "InceptionService") -> None:
+    async def _cleanup(self: InceptionService) -> None:
         card = await self.kanban.get(KanbanCard, card_id)
         if card is not None:
             # ORM relationship cascades to deliverables (FK on
