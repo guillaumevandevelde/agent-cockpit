@@ -2836,6 +2836,24 @@ class TestBuildShipInstructions:
             instructions = dispatch._build_ship_instructions(mode)
             assert "git fetch origin" in instructions
 
+    def test_frontend_gate_is_conditional_on_frontend_diff(self):
+        """The frontend lint+build gate must only run when the branch actually
+        touches ``frontend/`` — a docs-/backend-only branch would otherwise pay
+        a multi-minute ``npm ci`` + build for zero coverage. The instructions
+        must (a) probe the branch diff scoped to ``frontend/``, (b) keep the
+        lint+build command for the touched case, and (c) emit a visible skip
+        log for the untouched case."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            # (a) diff probe scoped to frontend/ against the branch base
+            assert "git diff --name-only origin/master -- frontend/" in instructions
+            # untracked frontend files count too (fresh files not yet committed)
+            assert "git ls-files --others --exclude-standard -- frontend/" in instructions
+            # (b) the actual gate command survives, guarded by the probe
+            assert "npm run lint && npm run build" in instructions
+            # (c) explicit skip log when there is no frontend diff
+            assert "geen frontend-diff — gate overgeslagen" in instructions
+
     def test_pull_request_mode_polls_for_merge_before_done(self):
         instructions = dispatch._build_ship_instructions("pull-request")
         assert "gh pr ready" in instructions
