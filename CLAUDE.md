@@ -147,6 +147,7 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 ## Code Style
 
 - **Frontend**: ESLint + TypeScript strict mode (`noUnusedLocals`, `noUnusedParameters`). Path alias `@/*` → `./src/*`
+- **No impure calls in render**: the react-compiler ESLint rule rejects `Date.now()` / `Math.random()` (etc.) called directly in a component's render body — including as an inline argument expression, e.g. `formatLabel(Date.now())` inside JSX/render. Move the impure call inside the helper function itself instead (see `isFutureSchedule` in `frontend/src/features/kanban/components/CardItem.tsx`), otherwise `npm run lint` fails with `Cannot call impure function during render`.
 - **Backend**: Type hints throughout, async/await patterns, pydantic models for validation
 
 ## UI Conventions
