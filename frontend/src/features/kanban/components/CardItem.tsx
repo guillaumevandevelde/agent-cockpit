@@ -4,6 +4,7 @@ import {
   HelpCircle,
   MessageSquareWarning,
   RefreshCw,
+  Rocket,
   type LucideProps,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -109,6 +110,7 @@ export function CardItem({
   readyState,
   blockerTitles,
   projectPath,
+  onPromote,
 }: {
   card: Card;
   onOpen: (c: Card) => void;
@@ -117,6 +119,9 @@ export function CardItem({
   // Needed for the dispatch_failed → Redispatch quick-action so the card can
   // call `kanbanApi.redispatch` directly without bouncing through the drawer.
   projectPath?: string;
+  // Inceptie-pipeline entry point. Only meaningful on intake cards;
+  // CardItem renders the Promote button iff this is set AND column=intake.
+  onPromote?: (c: Card) => void;
 }) {
   const priority = card.priority && card.priority !== "none" ? card.priority : null;
   const labels = card.labels ?? [];
@@ -136,6 +141,14 @@ export function CardItem({
   const impedimentSpec = impedimentStatus ? IMPEDIMENT_BADGE[impedimentStatus] : null;
   const canRedispatch =
     impedimentStatus === "dispatch_failed" && !!projectPath;
+
+  // Inceptie-pipeline entry point (kanban card c33b2f14 / facet A). Intake
+  // cards are human-only — they never auto-dispatch — but the human can
+  // promote them to a brand-new project via the Promote-to-project action.
+  // The button is only rendered when the parent KanbanPage wires
+  // `onPromote` down; otherwise intake cards are read-only until the page
+  // decides otherwise.
+  const isIntake = card.column === "intake";
 
   // Local "redispatching…" state so the compact button can show a brief
   // busy state without taking over the card. The parent board's 5s poll
@@ -266,6 +279,26 @@ export function CardItem({
           >
             <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
             {redispatching ? "Redispatching…" : "Redispatch"}
+          </Button>
+        )}
+        {isIntake && onPromote && (
+          <Button
+            size="sm"
+            variant="default"
+            className="h-6 px-2 text-[10px]"
+            onClick={(e) => {
+              // Same rationale as Redispatch: a button inside a clickable
+              // card must NOT open the drawer — only the button's own
+              // handler runs.
+              e.stopPropagation();
+              onPromote(card);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+            data-testid="promote-to-project-quick-action"
+            title="Promote this intake card to a brand-new project on the kanban board"
+          >
+            <Rocket className="mr-1 h-3 w-3" aria-hidden="true" />
+            Promote to project
           </Button>
         )}
       </div>

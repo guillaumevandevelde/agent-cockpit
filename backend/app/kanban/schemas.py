@@ -3,7 +3,14 @@ from datetime import datetime
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-COLUMNS = ["Backlog", "Impediment", "Done", "To Resume"]
+# Fixed kanban columns. Cards on a fixed column are never auto-dispatched
+# (dispatch pulls from `_DISPATCH_COLUMNS` in dispatch.py, which is the
+# explicit "Backlog" + "To Resume" pair). The `intake` column was added
+# for the inceptie-pipeline (facet A of platform-as-app-factory,
+# `docs/cockpit/product-inceptie-pipeline.md` §4 optie 2): humans put an
+# idea on `intake` and the inceptie-action promotes it to a new project
+# via `create_project_from_intake`. See sibling kanban card c33b2f14.
+COLUMNS = ["intake", "Backlog", "Impediment", "Done", "To Resume"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
 
 # Machine-readable card → spec-doc link (spec-driven-development Fase 1). A
@@ -238,6 +245,25 @@ class DefaultTransportRequest(BaseModel):
 class DispatchRequest(BaseModel):
     project_path: str
     agent: str | None = None  # override: use this agent instead of card's agent
+
+
+class CreateProjectFromIntakeRequest(BaseModel):
+    """Body for POST /api/v1/kanban/projects/from-intake.
+
+    Drives the inceptie-pipeline (facet A of platform-as-app-factory,
+    `docs/cockpit/product-inceptie-pipeline.md` §4 optie 2): an intake card
+    on the meta-project becomes a brand-new project on the kanban board in
+    one atomic transaction. See kanban card c33b2f14."""
+    intake_card_id: str
+    project_name: str
+    target_path: str  # absolute path; mkdir + git init land here
+
+
+class CreateProjectFromIntakeResponse(BaseModel):
+    """Return shape after a successful inceptie-pipeline promotion."""
+    project_id: int
+    new_project_key: str
+    first_card_id: str
 
 
 class RedispatchRequest(BaseModel):

@@ -627,3 +627,70 @@ async def add_plan_attachment(
             "plan_deliverable_id": plan_deliverable_id,
             "child_card_ids": list(child_card_ids),
         }
+
+
+@mcp.tool()
+async def create_project_from_intake(
+    intake_card_id: str,
+    project_name: str,
+    target_path: str,
+) -> dict:
+    """Promote an intake card on the meta-project to a brand-new project on
+    the kanban board.
+
+    Drives the inceptie-pipeline (kanban card c33b2f14, facet A of
+    platform-as-app-factory — `docs/cockpit/product-inceptie-pipeline.md`
+    §4 optie 2). The action is atomic: any failure between the 6 steps
+    rolls back filesystem + kanban-DB + Project row + autodispatch-meta
+    so the system is never left half-registered. The intake card lands on
+    Done with a `**Promoted to project:** …` comment when the action
+    succeeds.
+
+    Steps:
+      1. Validate the card is in the `intake` column on its current project.
+      2. mkdir `target_path` (refuses to clobber).
+      3. `git init --initial-branch=main <target_path>`.
+      4. Write minimal `.claude/CLAUDE.md` (placeholder until sibling kanban
+         card 395590d lands `BlueprintService.apply()`).
+      5. `ProjectService.add_project(name, target_path)`.
+      6. `KanbanMeta:autodispatch:<new_project_key>` = enabled.
+      7. Create the first kanban card in the new project's Backlog (carrying
+         over the intake card's title + description + metadata; with a
+         `plan_ref` deliverable linking back to the intake card).
+      8. Move the intake card to Done with a `**Promoted to project:** …`
+         comment so the meta-project's activity feed shows the birth.
+
+    Args:
+        intake_card_id: The id of the intake card to promote. Must be in the
+            `intake` column — cards on Backlog/Doing/etc. are rejected.
+        project_name: The new project's display name (and `Project.name`).
+        target_path: Absolute filesystem path for the new project. Must not
+            exist yet; the action refuses to clobber.
+
+    Returns:
+        On success: `{"project_id": int, "new_project_key": str,
+        "first_card_id": str}`. The new project is reachable as a kanban
+        bucket and the dispatcher will pick up the first card on its next
+        tick (autodispatch is enabled).
+
+        On failure: `{"error": "<reason>", ...}`. Nothing was registered —
+        the action's own rollback ran.
+    """
+    from app.database import AsyncSessionLocal
+    from app.services.inception_service import InceptionService
+
+    try:
+        async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            result = await svc.create_project_from_intake(
+                intake_card_id=intake_card_id,
+                project_name=project_name,
+                target_path=target_path,
+            )
+        return result
+    except ValueError as e:
+        return {"error": "validation_failed", "message": str(e)}
+    except FileExistsError as e:
+        return {"error": "target_path_exists", "message": str(e)}
+    except RuntimeError as e:
+        return {"error": "scaffold_failed", "message": str(e)}
