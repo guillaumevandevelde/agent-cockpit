@@ -222,11 +222,6 @@ class SkipPermissionsRequest(BaseModel):
     enabled: bool
 
 
-class MaxSessionsRequest(BaseModel):
-    project_key: str
-    max_sessions: int
-
-
 class DefaultTransportRequest(BaseModel):
     project_key: str
     transport: str
