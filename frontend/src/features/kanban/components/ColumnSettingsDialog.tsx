@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
-import { PROVIDERS, PROVIDER_LABELS, DEFAULT_MODEL_SUGGESTIONS } from "../types";
+import { PROVIDERS, PROVIDER_LABELS, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider } from "../types";
 import type { KanbanColumn } from "../types";
 
 const BACKLOG_COLUMN = "Backlog";
@@ -201,7 +201,10 @@ export function ColumnSettingsDialog({
                       onChange={(e) => setEditModel(e.target.value)}
                     />
                     <datalist id={`model-suggestions-${col.id}`}>
-                      {modelOptions.map((m) => (
+                      {modelSuggestionsForProvider(
+                        editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider,
+                        modelOptions,
+                      ).map((m) => (
                         <option key={m} value={m} />
                       ))}
                     </datalist>

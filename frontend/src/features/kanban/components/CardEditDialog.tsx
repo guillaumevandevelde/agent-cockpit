@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
 import { fetchResumableSessions } from "@/features/cc-bridge/api";
 import { useProviderContext } from "@/contexts/ProviderContext";
-import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, type Priority, type WorkType, type ColumnOverride, type KanbanColumn } from "../types";
+import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider, type Priority, type WorkType, type ColumnOverride, type KanbanColumn } from "../types";
 import { kanbanApi } from "../api";
 import type { ResumableSession } from "@/types/sessions";
 
@@ -344,6 +344,13 @@ export function CardEditDialog({
                   const draft = overrideDrafts[col.name];
                   const modelValue = draft?.model ?? "";
                   const providerValue = draft?.provider ?? DEFAULT_PROVIDER_SENTINEL;
+                  // The effective provider drives which model list is suggested:
+                  // an explicit override wins, else the column default. When it
+                  // resolves to minimax the datalist swaps to minimax models.
+                  const effectiveProvider =
+                    providerValue === DEFAULT_PROVIDER_SENTINEL ? col.default_provider : providerValue;
+                  const rowSuggestions = modelSuggestionsForProvider(effectiveProvider, modelOptions);
+                  const rowListId = `card-model-suggestions-${col.id}`;
                   const defaultLabel = [
                     col.default_model || null,
                     col.default_provider
@@ -359,12 +366,17 @@ export function CardEditDialog({
                       </span>
                       <input
                         aria-label={`Model for ${col.name}`}
-                        list="card-model-suggestions"
+                        list={rowListId}
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                         placeholder={col.default_model || "(column default)"}
                         value={modelValue}
                         onChange={(e) => setOverride(col.name, { model: e.target.value })}
                       />
+                      <datalist id={rowListId}>
+                        {rowSuggestions.map((m) => (
+                          <option key={m} value={m} />
+                        ))}
+                      </datalist>
                       <Select
                         value={providerValue}
                         onValueChange={(v) => setOverride(col.name, { provider: v })}
