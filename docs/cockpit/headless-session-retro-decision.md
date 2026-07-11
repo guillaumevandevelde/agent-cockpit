@@ -1,81 +1,114 @@
-# Session-retro trigger: dispatch-prompt injection, not a headless `SessionEnd` hook
+# Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies
 
-## Beslissing
+**Status:** besloten (mens-beslissing op de impediment).
+**TL;DR:** de *headless* `SessionEnd`-retro voor willekeurige **interactieve**
+sessies wordt **niet gebouwd**. In plaats daarvan breiden we de bestaande
+**in-session** retro uit naar **álle gedispatchte** sessies — concreet: het
+**analyst**-gat sluiten. Dat is één engineer-kind-kaart.
 
-`session-retro` draait via de bestaande dispatch-prompt-injectie
-(`_build_session_retro_step` in `backend/app/kanban/dispatch.py`), voor
-**alle gedispatchte fases** — zowel `executor`/`engineer`-kaarten (na
-shippen, vóór `move_card → Done`) als `analyst`-kaarten (vóór
-`move_parent → Done`). Een generieke, headless `SessionEnd`-hook die de
-skill voor élke Claude Code-sessie afvuurt — inclusief interactieve
-sessies die niet via het kanban-bord gedispatcht zijn — is **bewust
-afgewezen**.
+## 1. Vraagstelling van deze analyse-kaart
 
-> Noot bij deze versie van het document: de volledige, oorspronkelijke
-> argumentatie stond in de plan-attachment van de parent-kaart, maar die
-> was op het moment van schrijven niet meer laadbaar (plan-attachment
-> ontbrak/kon niet worden opgehaald). Onderstaande redenen zijn de
-> kernoverwegingen zoals vastgelegd in de kaartbeschrijving en afgeleid
-> uit hoe de dispatch-flow feitelijk werkt; als de oorspronkelijke
-> plan-tekst later alsnog terugkomt, dit document daarmee aanvullen.
+De sister-kaart wired de `session-retro`-skill in de **executor/engineer**
+session-end workflow. Deze kaart vroeg: willen we `session-retro` óók draaien
+voor willekeurige **interactieve** Claude Code-sessies (de mens werkt zelf in de
+repo), via een echte `SessionEnd`-hook die de backend een headless
+`claude -p`-reviewer laat spawnen?
 
-## Waarom de headless-`SessionEnd`-variant is afgewezen
+## 2. Mens-beslissing (autoritatief)
 
-Een `SessionEnd`-hook (zie `docs/api/hooks.md`) vuurt voor **iedere**
-Claude Code-sessie af, ongeacht of die sessie via de kanban-dispatcher is
-gestart. Dat past niet bij hoe `session-retro` is ontworpen:
+> "gedispatchte sessies is goed, maar mag dus voor alle gedispatchte sessies"
 
-1. **Geen kanban-kaart om op te schrijven.** De skill sluit af met een
-   verplichte `comment(card_id=..., ...)` op de host-kaart (Stap 6) en
-   filet bevindingen naar Backlog via `create_card`/`comment` in hetzelfde
-   project. Een interactieve, niet-gedispatchte sessie heeft geen
-   host-kaart en vaak geen eenduidig kanban-project — een hook zou de
-   project key moeten *raden*, wat exact het lek is dat `resolve_project_key`
-   (Stap 1 van de skill) juist voorkomt.
-2. **Ruis op sessies zonder "werk".** Elke lokale, interactieve sessie
-   (een losse vraag, een korte lees-taak, een chatje over architectuur)
-   zou een retro-pass triggeren. De skill zelf waarschuwt al tegen
-   retro's op triviale sessies ("When NOT to use" / Step 5: "0 findings is
-   een legitieme uitkomst, forceer geen kaart"). Een ongerichte hook
-   vermenigvuldigt dat probleem naar élke sessie in plaats van alleen de
-   sessies die daadwerkelijk kanban-werk verzetten.
-3. **Dispatch-prompt-injectie is al de juiste plek voor gedispatchte
-   sessies.** De dispatcher weet exact welke fase (`executor` vs
-   `analyst`), welke kaart, en welk project een sessie bedient — die
-   context wordt toch al doorgegeven in de prompt. Een prompt-instructie
-   die de skill expliciet aanroept vóór de laatste `move_card`, is
-   goedkoper en betrouwbaarder dan een hook die achteraf moet
-   reconstrueren "was dit een gedispatchte sessie, en zo ja, welke kaart
-   hoorde erbij?".
-4. **Losse cyclus t.o.v. het gate-mechanisme.** Deze codebase heeft al
-   afscheid genomen van blokkerende gates in de sessie-flow (zie
-   `report_impediment`-conventie in `CLAUDE.md`/dispatch-instructies: "geen
-   blokkerende `open_gate` meer — die houdt de sessie open en laat de
-   worktree als 'dood' reaperen"). Een `SessionEnd`-hook die probeert een
-   MCP-retro-call af te dwingen ná sessie-einde loopt tegen hetzelfde
-   probleem aan: op het moment dat `SessionEnd` vuurt, is de
-   agent-sessie al aan het afsluiten en is er geen garantie dat een
-   nieuwe tool-call daar nog betrouwbaar in past.
+Interpretatie: de in-session (gedispatchte) aanpak is de juiste; de
+headless-voor-interactieve variant is **niet** gewenst. Maar de retro moet
+gelden voor **alle** gedispatchte sessies, niet enkel executors.
 
-## Gekozen richting (samengevat)
+## 3. Huidige staat (read-only geverifieerd)
 
-- `session-retro` wordt aangeroepen **in-sessie**, als expliciete stap
-  in de prompt die de dispatcher opbouwt (`build_card_prompt` /
-  `_build_ship_instructions` voor executor, `_build_analyst_session_end_instructions`
-  voor analyst), vlak vóór de laatste `move_card`-aanroep.
-- `phase` wordt doorgegeven aan `build_card_prompt` zodat elke fase zijn
-  eigen, fase-passende afsluiting krijgt: executor/engineer behoudt de
-  volledige ship-workflow (sync → tests → commit → ship → retro → Done);
-  analyst krijgt alleen retro → `move_card(parent → Done)`, zonder
-  merge/frontend-stappen die niet op een planning-only sessie van
-  toepassing zijn.
-- Niet-gedispatchte, interactieve sessies krijgen (nog) geen automatische
-  retro-trigger. Een mens kan de skill altijd handmatig aanroepen
-  ("doe een retro op deze sessie").
+- Er zijn precies **twee** dispatch-fases: `analyst` en `executor`
+  (`dispatch.py:_phase_target_agent`, `resolve_phase`).
+- **Executor** krijgt de retro al: `_build_ship_instructions` injecteert
+  `_build_session_retro_step` (stap 6 in direct-mode, 7 in PR-mode) tussen
+  `attach_deliverable` en `move_card → Done`.
+- **Analyst** was het gat. `build_card_prompt` (`dispatch.py:684-701`) hing de
+  **volledige engineer ship-workflow** (`git merge` naar master, frontend-checks,
+  retro, move-to-Done) **onvoorwaardelijk** aan élke prompt — óók analyst. Dat is
+  incoherent: de analyst-rol is planning-only en exit't via
+  `move_card(parent → Done)`, niet via merge-naar-master. De retro-stap was er dus
+  wél in de prompt-tekst, maar begraven in een ship-workflow die de analyst
+  expliciet moest negeren.
+- De skill zélf sloot analyst voorheen **expliciet uit**:
+  `.claude/skills/session-retro/SKILL.md` "When NOT to use" → "You're in an
+  analyst session … retro is wired only for executor/engineer". En de docstring
+  van `_build_session_retro_step` (dispatch.py ~991-993) bevestigde datzelfde.
 
-## Scope van deze kaart
+Netto: analyst-sessies hadden géén coherente, bedoelde retro. Dat was precies het
+"alle gedispatchte sessies"-gat dat de mens gesloten wil zien.
 
-Deze kaart lost het gat op dat `session-retro` alléén voor executor-fase
-draaide; met deze wijziging draait de skill voor **alle gedispatchte**
-fases (executor + analyst). De headless-`SessionEnd`-variant blijft
-buiten scope — zie hierboven waarom.
+## 4. Waarom NIET de headless-voor-interactieve variant
+
+1. **Dubbele-kaart-risico & board-ruis.** Een headless reviewer op elke
+   interactieve SessionEnd zou `[self-improve]`-kaarten filen over het handwerk
+   van de mens — terwijl die mens al in-the-loop is en zelf kan triageren/filen.
+   Elke losse interactieve sessie zou de Backlog kunnen volspammen.
+2. **Spawn-overhead & kosten.** Elke SessionEnd zou een `claude -p`-proces
+   starten dat de volledige JSONL-transcript inleest en parse't — reële
+   compute/token-kost per sessie, voor sessies waar de mens sowieso aanwezig is.
+3. **Transcript-parsing fragiliteit.** Out-of-band de JSONL parsen (i.p.v. de
+   in-session agent die de context al gratis heeft) is broos en dupliceert wat de
+   in-session retro voor niks krijgt.
+4. **Signaalkwaliteit.** Het four-pass-filter van de retro is getuned op
+   *gedispatchte agent-proces*-frictie (dispatcher-prompt-gaten, tool-failures,
+   ontbrekende automatisering). Interactief mens-werk heeft een ander
+   frictieprofiel; een headless reviewer die een mens-sessie "grade't" is
+   laag-signaal — en grade't feitelijk andermans huiswerk.
+5. **Mens is al in-the-loop.** Een interactieve sessie heeft een aanwezige mens
+   die desgewenst `/session-retro` handmatig kan aanroepen of direct een
+   `flag-problem`-kaart kan filen. De automatisering koopt weinig extra's.
+
+De hook-infra (`hook_installer.py` additief+idempotent mergen, `hook_script.py`
+POST `session-end`) *zou* het technisch mogelijk maken — dat is niet de blokker.
+De baten/kosten-balans is dat wel.
+
+## 5. Gekozen richting
+
+Sluit het analyst-gat zodat de retro voor **beide** dispatch-fases coherent
+draait:
+
+- Geef de **analyst**-fase een analyst-passende session-end afsluiting: run de
+  `session-retro`-skill, dán de bestaande `move_card(parent → Done)`-exit —
+  zónder de engineer merge/frontend-ship-stappen die niet op een planning-only
+  sessie slaan.
+- Hef de analyst-uitsluiting in `session-retro/SKILL.md` op.
+
+Analyst-sessies zijn een legitieme signaalbron: ze lopen tegen onduidelijke
+kaarten, ontbrekende plan-attachments (déze kaart startte met "Plan niet
+beschikbaar" — zie ook het gerelateerde `[problem]`/`[self-improve]`-paar over
+de `-32602` MCP-handshake-race), scope-ambiguïteit en MCP-tool-failures. Precies
+het materiaal waar de retro voor bedoeld is.
+
+## Implementatie (deze kaart)
+
+- `build_card_prompt` (`backend/app/kanban/dispatch.py`) krijgt een `phase`
+  parameter; voor `phase == "analyst"` wordt `_build_analyst_session_end_instructions()`
+  gebruikt in plaats van `_build_ship_instructions(ship_mode)` — retro +
+  `move_card(parent → Done)`, geen merge/frontend-stappen.
+  `_build_analyst_session_end_instructions` hergebruikt `_build_session_retro_step`
+  (DRY met de executor-variant).
+- Het aanroeppunt (`dispatch.py:~1613`) geeft `phase` door aan `build_card_prompt`.
+- `ANALYST_PROMPT` (`backend/app/kanban/analyst_prompt.py`) noemt de retro-stap
+  expliciet vóór de move-naar-Done-exit.
+- `.claude/skills/session-retro/SKILL.md` sluit analyst-sessies niet langer uit;
+  de "When to use"-sectie noemt beide fases expliciet.
+- Regressietests in `backend/tests/test_kanban_dispatch.py` dekken dat het
+  analyst-prompt de retro-stap wél, en de engineer-ship-tekst (merge/frontend
+  checks) niét bevat, en dat het executor-prompt ongewijzigd blijft.
+
+## Bekende risico's / aandachtspunten (uit de analyse)
+
+- **Dubbele retro bij analyst vermeden.** De analyst krijgt precies één
+  retro-pad: het engineer-ship-blok wordt voor de analyst-fase *vervangen*,
+  niet aangevuld.
+- **Fase wordt expliciet doorgegeven**, niet geraden op basis van persona-tekst.
+- **Skill blijft source of truth** voor de volledige retro-procedure;
+  `_build_session_retro_step` inlinet bewust een getrimde kopie — beide blijven
+  in sync gehouden.
