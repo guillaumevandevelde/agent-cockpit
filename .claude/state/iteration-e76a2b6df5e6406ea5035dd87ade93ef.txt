@@ -1,0 +1,4 @@
+2026-07-11T00:00:00Z preset=verify iter=1 action=pytest tests/test_kanban_dispatch.py::TestBuildCardPromptHostCardId outcome=PASS (3/3 new tests pass: executor label, analyst label, description-quotes-other-ids regression)
+2026-07-11T00:00:01Z preset=verify iter=1 action=full pytest tests/test_kanban_dispatch.py outcome=PASS (168/172 tests; 4 pre-existing failures unrelated to host-card-id change: worktree_transport tests need git repo plumbing, _awaiting_plan_ref race test)
+2026-07-11T00:00:02Z preset=verify iter=1 action=check frontend diff outcome=SKIP (no frontend files touched; per CLAUDE.md/git-ship gate recipe, frontend checks skipped for backend-only diff)
+2026-07-11T00:00:03Z preset=verify iter=1 action=spot-check rendered prompt outcome=PASS (Host card id: <id> renders between claim line and # title, ahead of all other content where the agent sees it first)

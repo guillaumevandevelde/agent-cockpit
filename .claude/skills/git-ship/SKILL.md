@@ -25,14 +25,32 @@ scope here.
 git fetch origin
 ```
 
-## 2. Run frontend checks yourself before shipping
+## 2. Run frontend checks yourself before shipping (only when the branch touches `frontend/`)
 
 There is no local pre-push gate — nothing blocks a red push. Run the frontend
-checks yourself in this worktree before merging/pushing:
+checks yourself before merging/pushing — but **only when this branch actually
+changed frontend code**. A docs-/backend-only branch would otherwise pay a
+multi-minute `npm ci` + build for zero frontend coverage, so gate the check on
+the branch diff:
 
 ```bash
-cd frontend && npm run lint && npm run build
+git fetch origin -q
+FRONTEND_TOUCHED=$( { git diff --name-only origin/master -- frontend/; git ls-files --others --exclude-standard -- frontend/; } | head -1 )
+if [ -n "$FRONTEND_TOUCHED" ]; then
+  # Fresh worktree has no node_modules (gitignored) — install once so the
+  # checks don't die with `eslint: not found`. Guard on missing node_modules
+  # so a re-run in the same session skips the ~40s `npm ci`.
+  ( cd frontend && { [ -d node_modules ] || npm ci; } && npm run lint && npm run build )   # only proceed once green
+else
+  echo 'geen frontend-diff — gate overgeslagen'
+fi
 ```
+
+A branch that *does* touch `frontend/` (including a mixed frontend+docs diff)
+runs the gate unconditionally; only a branch with no `frontend/` change skips
+it. The worktree is a fresh `git worktree add` off origin/master, so its
+`node_modules` is absent on the first run — the guarded `npm ci` installs deps
+before lint/build (matching CI's `quality.yml`).
 
 Do **not** run backend pytest locally in this repo — that step was removed
 deliberately: this is a shared box, and concurrent dispatched sessions each
@@ -55,14 +73,18 @@ git add -A && git commit -m "<descriptive summary>"
 
 ## 4a. Ship mode `direct` — merge to master
 
-Only when every test passed:
+Only when every test passed. You are in a linked worktree while `master` is
+checked out in the main working copy, so checking out `master` here fails with
+`'master' is already used by worktree at ...`. Merge through a throwaway
+detached worktree instead — it never touches your current checkout:
 
 ```bash
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git checkout master
-git merge --no-ff "$BRANCH"
-git push origin HEAD:master
-git checkout "$BRANCH"   # back so the worktree stays valid
+TMP=$(mktemp -d)
+git worktree add --detach "$TMP/m" origin/master
+git -C "$TMP/m" merge --no-ff "$BRANCH" -m "Merge $BRANCH"
+git -C "$TMP/m" push origin HEAD:master
+git worktree remove "$TMP/m" --force
 ```
 
 Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`), **run the session-end

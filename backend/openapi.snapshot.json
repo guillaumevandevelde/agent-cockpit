@@ -7829,24 +7829,6 @@
         "title": "MarketplacePlugin",
         "type": "object"
       },
-      "MaxSessionsRequest": {
-        "properties": {
-          "max_sessions": {
-            "title": "Max Sessions",
-            "type": "integer"
-          },
-          "project_key": {
-            "title": "Project Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project_key",
-          "max_sessions"
-        ],
-        "title": "MaxSessionsRequest",
-        "type": "object"
-      },
       "MemoryFileResponse": {
         "description": "Response for a memory file.",
         "properties": {
@@ -22565,83 +22547,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/GateResponse"
                 }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Answer Gate",
-        "tags": [
-          "Kanban"
-        ]
-      }
-    },
-    "/api/v1/kanban/max-sessions": {
-      "get": {
-        "operationId": "get_max_sessions_api_v1_kanban_max_sessions_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project_key",
-            "required": true,
-            "schema": {
-              "title": "Project Key",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Max Sessions",
-        "tags": [
-          "Kanban"
-        ]
-      },
-      "post": {
-        "operationId": "set_max_sessions_api_v1_kanban_max_sessions_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MaxSessionsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
               }
             },
             "description": "Successful Response"

@@ -472,7 +472,6 @@ async def test_dispatch_picks_first_todo_by_rank():
     async with KanbanSessionLocal() as s:
         first = await _make_card(s, title="A")
         await _make_card(s, title="B")
-        await dispatch.set_max_sessions(s, PK, 1)
         await s.commit()
         await dispatch.dispatch_project(
             s, project_key=PK, project_path="/p", transport=transport,
@@ -480,27 +479,7 @@ async def test_dispatch_picks_first_todo_by_rank():
         await s.commit()
         card = await get_card(s, first)
     assert card.column == "engineer"        # first card got picked
-    assert len(transport.calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_dispatch_skips_when_project_already_busy():
-    transport = RecordingTransport()
-    async with KanbanSessionLocal() as s:
-        # a card already being worked by an agent
-        busy = await _make_card(s, title="busy", column="developer")
-        await apply_operation(
-            s, op_type="claim", entity_type="card", project_key=PK,
-            entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
-        )
-        await _make_card(s, title="waiting", column="Backlog")
-        await dispatch.set_max_sessions(s, PK, 1)
-        await s.commit()
-        result = await dispatch.dispatch_project(
-            s, project_key=PK, project_path="/p", transport=transport,
-        )
-    assert result is None
-    assert transport.calls == []
+    assert len(transport.calls) == 2        # both dispatchable cards get claimed
 
 
 @pytest.mark.asyncio
@@ -547,25 +526,12 @@ def test_active_session_count_counts_agent_claims_in_agent_columns():
 
 
 @pytest.mark.asyncio
-async def test_get_max_sessions_defaults_to_3():
-    async with KanbanSessionLocal() as s:
-        assert await dispatch.get_max_sessions(s, PK) == dispatch.DEFAULT_MAX_SESSIONS
-        assert dispatch.DEFAULT_MAX_SESSIONS == 3
-
-
-@pytest.mark.asyncio
-async def test_set_then_get_max_sessions_roundtrips():
-    async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 2)
-        await s.commit()
-        assert await dispatch.get_max_sessions(s, PK) == 2
-
-
-@pytest.mark.asyncio
-async def test_dispatch_fills_up_to_cap_then_stops():
+async def test_dispatch_fills_every_pending_card_in_one_tick():
+    """Without a project-level cap, dispatch_project dispatches every
+    dispatchable card in a single tick; per-column caps (when set) are the only
+    structural limit at the dispatcher level."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 2)
         for i in range(4):
             await _make_card(s, title=f"c{i}", column="Backlog")
         await s.commit()
@@ -574,34 +540,7 @@ async def test_dispatch_fills_up_to_cap_then_stops():
         )
         await s.commit()
     assert result is not None
-    assert len(transport.calls) == 2  # fills exactly the 2 free slots in one tick
-
-
-@pytest.mark.asyncio
-async def test_dispatch_freed_slot_is_reusable():
-    transport = RecordingTransport()
-    async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 1)
-        busy = await _make_card(s, title="busy", column="engineer")
-        await apply_operation(
-            s, op_type="claim", entity_type="card", project_key=PK,
-            entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
-        )
-        await _make_card(s, title="waiting", column="Backlog")
-        await s.commit()
-        # cap full -> no dispatch
-        assert await dispatch.dispatch_project(
-            s, project_key=PK, project_path="/p", transport=transport) is None
-        # free the slot, then exactly one dispatches
-        await apply_operation(
-            s, op_type="release", entity_type="card", project_key=PK,
-            entity_id=busy, payload={})
-        await s.commit()
-        result = await dispatch.dispatch_project(
-            s, project_key=PK, project_path="/p", transport=transport)
-        await s.commit()
-    assert result is not None
-    assert len(transport.calls) == 1
+    assert len(transport.calls) == 4
 
 
 # ---- per-column session cap -------------------------------------------------
@@ -639,7 +578,6 @@ async def test_dispatch_respects_per_column_cap(project_with_agents):
     dispatching cards to that column once the cap is reached."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 10)
         await service.create_column(s, project_key=PK, name="engineer",
                                      default_agent="engineer", max_sessions=1)
         await service.create_column(s, project_key=PK, name="review",
@@ -668,7 +606,6 @@ async def test_per_column_cap_does_not_block_other_columns(project_with_agents):
     block cards targeting the review column."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 10)
         await service.create_column(s, project_key=PK, name="engineer",
                                      default_agent="engineer", max_sessions=1)
         await service.create_column(s, project_key=PK, name="review",
@@ -704,10 +641,10 @@ async def test_per_column_cap_does_not_block_other_columns(project_with_agents):
 
 @pytest.mark.asyncio
 async def test_column_cap_defaults_null_means_no_per_column_limit(project_with_agents):
-    """A column with max_sessions=NULL (unset) falls back to the project cap."""
+    """A column with max_sessions=NULL (unset) does not gate dispatch -- all
+    dispatchable cards in that column get claimed in one tick."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 2)
         await service.create_column(s, project_key=PK, name="engineer",
                                      default_agent="engineer", max_sessions=None)
         await service.create_column(s, project_key=PK, name="analyst",
@@ -727,7 +664,7 @@ async def test_column_cap_defaults_null_means_no_per_column_limit(project_with_a
         await s.commit()
 
     assert result is not None
-    assert len(transport.calls) == 2
+    assert len(transport.calls) == 4
 
 
 @pytest.mark.asyncio
@@ -761,12 +698,10 @@ async def test_column_max_sessions_can_be_updated():
 
 
 @pytest.mark.asyncio
-async def test_retry_queued_cards_respects_per_project_cap(monkeypatch):
-    """Retrying memory-queued cards must honour the per-project session cap.
-
-    Regression: the retry path dispatched every retryable card, checking only the
-    hardware/memory limit, so queued cards could push a project past its cap (e.g.
-    3 running from the normal loop + 3 retried = 6 sessions)."""
+async def test_retry_queued_cards_drains_every_dispatchable_card(monkeypatch):
+    """Without a per-project session cap, _retry_queued_cards dispatches every
+    dispatchable queued card in one tick; per-column caps (when set) are the only
+    structural limit at the retry path."""
     from types import SimpleNamespace
 
     import app.kanban.db as kdb
@@ -784,7 +719,6 @@ async def test_retry_queued_cards_respects_per_project_cap(monkeypatch):
     transport = RecordingTransport()
     ids = []
     async with KanbanSessionLocal() as s:
-        await dispatch.set_max_sessions(s, PK, 2)
         for i in range(4):
             ids.append(await _make_card(s, title=f"q{i}", column="Backlog"))
         await s.commit()
@@ -794,10 +728,8 @@ async def test_retry_queued_cards_respects_per_project_cap(monkeypatch):
 
     await dispatch._retry_queued_cards(transport)
 
-    assert len(transport.calls) == 2  # never exceeds the cap of 2
-    assert fresh_queue.size == 2       # the over-cap cards stay queued for later
-    # A cap hold is not a failed dispatch, so it must not burn retry budget.
-    assert all(c.retry_count == 0 for c in fresh_queue._queue.values())
+    assert len(transport.calls) == 4
+    assert fresh_queue.size == 0
 
 
 @pytest.mark.asyncio
@@ -928,35 +860,6 @@ async def test_spawn_failure_releases_and_returns_card_to_todo():
 
 # ---- stale-claim reaping (tmux-liveness) ----------------------------------
 
-@pytest.mark.asyncio
-async def test_reaps_dead_agent_claim_in_doing_and_dispatches_next():
-    # A session died without moving its card out of Doing. With no matching live
-    # tmux session, the stale claim is released so the next Todo card dispatches.
-    # Cap pinned to 1 so this test isolates the reap-then-dispatch-next-Backlog-card
-    # behavior from the orphan-redispatch fallback covered separately below.
-    transport = RecordingTransport()
-    async with KanbanSessionLocal() as s:
-        dead = await _make_card(s, title="orphaned", column="developer")
-        await apply_operation(
-            s, op_type="claim", entity_type="card", project_key=PK,
-            entity_id=dead, payload={"claimed_by": "agent:k-dead-0001"},
-        )
-        waiting = await _make_card(s, title="waiting", column="Backlog")
-        await dispatch.set_max_sessions(s, PK, 1)
-        await s.commit()
-        result = await dispatch.dispatch_project(
-            s, project_key=PK, project_path="/p", transport=transport,
-            live_sessions=set(),  # no live sessions -> the agent claim is stale
-        )
-        await s.commit()
-        dead_card = await get_card(s, dead)
-        waiting_card = await get_card(s, waiting)
-    assert dead_card.claimed_by is None       # stale claim reaped
-    assert dead_card.column == "developer"    # cap full after "waiting" -> not yet redispatched
-    assert result is not None                 # cap freed -> next card dispatched
-    assert waiting_card.column == "engineer"
-    assert len(transport.calls) == 1
-
 
 @pytest.mark.asyncio
 async def test_orphaned_agent_column_card_redispatched_when_cap_has_room():
@@ -982,13 +885,12 @@ async def test_orphaned_agent_column_card_redispatched_when_cap_has_room():
 @pytest.mark.asyncio
 async def test_orphaned_agent_column_card_waits_for_backlog_cards_first():
     # When both a fresh Backlog card and a leftover orphan are available, the
-    # Backlog card is prioritised (it's new work); the orphan only fills cap
-    # room left over after Backlog/To Resume are exhausted.
+    # Backlog card is prioritised (it's new work); the orphan is dispatched
+    # afterwards, in the same tick when no per-column cap blocks it.
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         orphan = await _make_card(s, title="orphaned", column="developer")
         waiting = await _make_card(s, title="waiting", column="Backlog")
-        await dispatch.set_max_sessions(s, PK, 1)
         await s.commit()
         await dispatch.dispatch_project(
             s, project_key=PK, project_path="/p", transport=transport,
@@ -996,32 +898,12 @@ async def test_orphaned_agent_column_card_waits_for_backlog_cards_first():
         await s.commit()
         orphan_card = await get_card(s, orphan)
         waiting_card = await get_card(s, waiting)
-    assert waiting_card.claimed_by is not None   # Backlog card wins the single slot
-    assert orphan_card.claimed_by is None        # orphan still waiting for room
-    assert len(transport.calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_live_agent_claim_in_doing_still_blocks():
-    transport = RecordingTransport()
-    async with KanbanSessionLocal() as s:
-        busy = await _make_card(s, title="busy", column="developer")
-        await apply_operation(
-            s, op_type="claim", entity_type="card", project_key=PK,
-            entity_id=busy, payload={"claimed_by": "agent:k-alive-0001"},
-        )
-        await _make_card(s, title="waiting", column="Backlog")
-        await dispatch.set_max_sessions(s, PK, 1)
-        await s.commit()
-        result = await dispatch.dispatch_project(
-            s, project_key=PK, project_path="/p", transport=transport,
-            live_sessions={"k-alive-0001"},  # session is still alive
-        )
-        await s.commit()
-        busy_card = await get_card(s, busy)
-    assert result is None                          # still busy
-    assert busy_card.claimed_by == "agent:k-alive-0001"
-    assert transport.calls == []
+    assert waiting_card.claimed_by is not None   # Backlog card wins the priority
+    assert orphan_card.claimed_by is not None    # orphan also dispatched this tick
+    # Backlog card must be picked before the orphan in this tick.
+    assert len(transport.calls) == 2
+    assert "waiting" in transport.calls[0]["session_name"]
+    assert "orphaned" in transport.calls[1]["session_name"]
 
 
 @pytest.mark.asyncio
@@ -1084,29 +966,6 @@ async def test_reaper_reaps_dead_sandcastle_claim():
         card = await get_card(s, sc)
     assert reaped == 1
     assert card.claimed_by is None
-
-
-@pytest.mark.asyncio
-async def test_dispatch_without_live_sessions_does_not_reap():
-    # The default (live_sessions=None) preserves the old behavior: an agent claim
-    # blocks the cap, because we never reap without a liveness snapshot.
-    transport = RecordingTransport()
-    async with KanbanSessionLocal() as s:
-        busy = await _make_card(s, title="busy", column="developer")
-        await apply_operation(
-            s, op_type="claim", entity_type="card", project_key=PK,
-            entity_id=busy, payload={"claimed_by": "agent:k-x-0001"},
-        )
-        await _make_card(s, title="waiting", column="Backlog")
-        await dispatch.set_max_sessions(s, PK, 1)
-        await s.commit()
-        result = await dispatch.dispatch_project(
-            s, project_key=PK, project_path="/p", transport=transport)
-        await s.commit()
-        busy_card = await get_card(s, busy)
-    assert result is None
-    assert busy_card.claimed_by == "agent:k-x-0001"
-    assert transport.calls == []
 
 
 def test_live_sessions_parses_names(monkeypatch):
@@ -2795,8 +2654,13 @@ class TestBuildShipInstructions:
 
     def test_direct_mode_includes_merge_commands(self):
         instructions = dispatch._build_ship_instructions("direct")
-        assert "git merge --no-ff" in instructions
-        assert "git push origin HEAD:master" in instructions
+        # Merge happens through a throwaway detached worktree, not `git checkout
+        # master` (which deterministically fails in a linked worktree — see the
+        # [self-improve] card that motivated this recipe).
+        assert "git worktree add --detach \"$TMP/m\" origin/master" in instructions
+        assert "git checkout master" not in instructions
+        assert "merge --no-ff" in instructions
+        assert "push origin HEAD:master" in instructions
         assert "git fetch origin" in instructions
         assert "venv/bin/activate" not in instructions  # local pytest dropped, see feedback_no_local_pytest memory
         assert "pytest -q" not in instructions
@@ -2817,7 +2681,8 @@ class TestBuildShipInstructions:
         assert 'kind="pr"' in instructions
         assert 'move_card' in instructions
         assert '"Done"' in instructions
-        assert "git merge --no-ff" not in instructions
+        assert "merge --no-ff" not in instructions
+        assert "git worktree add --detach" not in instructions
 
     def test_both_modes_instruct_running_tests_before_shipping(self):
         for mode in ("direct", "pull-request"):
@@ -2835,6 +2700,38 @@ class TestBuildShipInstructions:
         for mode in ("direct", "pull-request"):
             instructions = dispatch._build_ship_instructions(mode)
             assert "git fetch origin" in instructions
+
+    def test_frontend_gate_is_conditional_on_frontend_diff(self):
+        """The frontend lint+build gate must only run when the branch actually
+        touches ``frontend/`` — a docs-/backend-only branch would otherwise pay
+        a multi-minute ``npm ci`` + build for zero coverage. The instructions
+        must (a) probe the branch diff scoped to ``frontend/``, (b) keep the
+        lint+build command for the touched case, and (c) emit a visible skip
+        log for the untouched case."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            # (a) diff probe scoped to frontend/ against the branch base
+            assert "git diff --name-only origin/master -- frontend/" in instructions
+            # untracked frontend files count too (fresh files not yet committed)
+            assert "git ls-files --others --exclude-standard -- frontend/" in instructions
+            # (b) the actual gate command survives, guarded by the probe
+            assert "npm run lint && npm run build" in instructions
+            # (c) explicit skip log when there is no frontend diff
+            assert "geen frontend-diff — gate overgeslagen" in instructions
+
+    def test_frontend_gate_installs_deps_when_node_modules_missing(self):
+        """A dispatched worktree is a fresh ``git worktree add`` off
+        origin/master with no ``node_modules`` (gitignored), so the frontend
+        gate must install deps before running lint/build — otherwise the first
+        run dies with ``eslint: not found`` / ``vite: not found``. The install
+        must be guarded on a missing ``node_modules`` so repeat runs within the
+        same session don't re-pay the ~40s install."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            # reproducible install matching CI (quality.yml uses `npm ci`)
+            assert "npm ci" in instructions
+            # only install when node_modules is absent
+            assert "-d node_modules" in instructions or "-d frontend/node_modules" in instructions
 
     def test_pull_request_mode_polls_for_merge_before_done(self):
         instructions = dispatch._build_ship_instructions("pull-request")
@@ -2933,8 +2830,8 @@ class TestBuildCardPromptSessionEnd:
             description = "Do the thing"
         prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
         assert "Session-end workflow" in prompt
-        assert "git merge --no-ff" in prompt
-        assert "git push origin HEAD:master" in prompt
+        assert "merge --no-ff" in prompt
+        assert "push origin HEAD:master" in prompt
         assert "move_card" in prompt
         assert '"Done"' in prompt
 
@@ -3005,6 +2902,52 @@ class TestBuildCardPromptSessionEnd:
         assert "## IMPEDIMENT" in prompt
         assert "Where is the crash?" in prompt
         assert "clarify what's needed" in prompt
+
+
+class TestBuildCardPromptHostCardId:
+    """The dispatched agent must see its host card's full id in the prompt
+    header, so it can call `comment`/`attach_deliverable`/`move_card` on the
+    right card by id instead of guessing from the prose (which may quote other
+    card ids, leading to short-prefix collisions — see kanban card "Executor
+    prompt omits host card_id; ids in card text mislead MCP calls")."""
+
+    def test_executor_prompt_includes_host_card_id_label(self):
+        class _C:
+            title = "T"
+            description = ""
+            id = "abcdef1234567890"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        assert "Host card id: abcdef1234567890" in prompt
+
+    def test_analyst_prompt_includes_host_card_id_label(self):
+        """Analyst phase renders a lighter ship-instructions block, but the
+        host-card-id line lives above the phase split and must surface in
+        both phases."""
+        class _C:
+            title = "T"
+            description = ""
+            id = "abcdef1234567890"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct",
+                                            phase="analyst")
+        assert "Host card id: abcdef1234567890" in prompt
+
+    def test_host_card_id_appears_unambiguously_when_description_quotes_other_ids(self):
+        """Regression for the actual bug: the card description cites another
+        card's short id (`3ffdc75e`), and the agent mistook it for the host
+        id. With an explicit `Host card id:` label, the agent copies the
+        labeled value verbatim instead of scraping ids from prose."""
+        class _C:
+            title = "Self-improve card"
+            description = (
+                "Earlier evidence mentioned card 3ffdc75e but that's a "
+                "different Done card. This card's id is the real one."
+            )
+            id = "5b63cafe00000001"
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        assert "Host card id: 5b63cafe00000001" in prompt
+        # The misleading short id still appears in the description (that's
+        # fine — it's evidence text), but the host id is unambiguous.
+        assert "Host card id: 3ffdc75e" not in prompt
 
 
 # ---- run_dispatch_tick honours the global usage-limit pause ----------------
@@ -3731,3 +3674,104 @@ async def test_post_agent_status_comment_skips_cards_in_terminal_columns(monkeyp
             f"post_agent_status_comment must skip cards on {terminal_col}"
         )
 
+
+
+# ---- child-card plan_ref dispatch gate (create_card→add_plan_attachment race) --
+
+async def _make_child(s, *, parent_card_id, title="child", column="Backlog"):
+    cid = await apply_operation(
+        s, op_type="create", entity_type="card", project_key=PK,
+        entity_id=None,
+        payload={"title": title, "column": column,
+                 "parent_card_id": parent_card_id},
+    )
+    await s.flush()
+    return cid
+
+
+async def _link_plan_ref(s, *, child_id, parent_id, plan_deliverable_id="plan-1"):
+    import json
+    await apply_operation(
+        s, op_type="link_plan_ref", entity_type="deliverable",
+        project_key=PK, entity_id=child_id,
+        payload={"ref_json": json.dumps({
+            "parent_card_id": parent_id,
+            "plan_deliverable_id": plan_deliverable_id,
+        }), "depends_on": []},
+    )
+    await s.flush()
+
+
+@pytest.mark.asyncio
+async def test_child_without_plan_ref_is_not_dispatched():
+    """Race case: the analyst created a child (create_card) but hasn't attached
+    the plan yet (add_plan_attachment). The child must NOT be dispatched — it
+    would otherwise get the 'Plan niet beschikbaar' placeholder prompt."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Done")
+        child = await _make_child(s, parent_card_id=parent, title="child")
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        child_card = await get_card(s, child)
+    assert transport.calls == []            # nothing spawned
+    assert child_card.column == "Backlog"   # child stayed put, unclaimed
+    assert not child_card.claimed_by
+
+
+@pytest.mark.asyncio
+async def test_child_with_plan_ref_is_dispatched():
+    """Once add_plan_attachment has linked the plan_ref, the same child becomes
+    dispatch-eligible and is spawned normally."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Done")
+        child = await _make_child(s, parent_card_id=parent, title="child")
+        await _link_plan_ref(s, child_id=child, parent_id=parent)
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        child_card = await get_card(s, child)
+    assert len(transport.calls) == 1        # child got spawned
+    assert child_card.column != "Backlog"   # moved into an agent column
+    assert child_card.claimed_by
+
+
+@pytest.mark.asyncio
+async def test_next_card_gate_distinguishes_race_from_genuine_miss():
+    """The plan_ref gate keeps the race case (plan attached moments later) out of
+    dispatch, while the genuine-miss placeholder path is only reached by a child
+    that DOES hold a plan_ref pointing at a now-missing parent/plan."""
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Done")
+        # Race case: child without plan_ref -> gated, _next_card skips it.
+        raced = await _make_child(s, parent_card_id=parent, title="raced")
+        await s.commit()
+        cards = await list_cards(s, PK)
+        raced_card = next(c for c in cards if c.id == raced)
+        assert dispatch._awaiting_plan_ref(raced_card) is True
+        assert dispatch._next_card([raced_card]) is None
+
+        # Genuine-miss case: child holds a plan_ref, but the parent is gone.
+        await _link_plan_ref(
+            s, child_id=raced, parent_id="deleted-parent",
+            plan_deliverable_id="gone",
+        )
+        await s.commit()
+        cards = await list_cards(s, PK)
+        missed_card = next(c for c in cards if c.id == raced)
+        # No longer gated — it IS eligible now (plan_ref present).
+        assert dispatch._awaiting_plan_ref(missed_card) is False
+        # ...and resolving its plan yields nothing, so the executor prompt would
+        # render the genuine-miss placeholder.
+        plan_md, _, _ = await dispatch._resolve_plan_for_child(s, missed_card)
+    assert plan_md is None
+    section = dispatch._plan_context_section(
+        plan_markdown=None, plan_deliverable_id=None, parent_card_id=None,
+    )
+    assert "Plan niet beschikbaar" in section

@@ -131,32 +131,6 @@ async def test_enable_mcp_url_honours_public_base_url(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_max_sessions_defaults_to_3():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-        r = await ac.get("/api/v1/kanban/max-sessions", params={"project_key": "p1"})
-        assert r.status_code == 200
-        assert r.json()["max_sessions"] == 3
-
-
-@pytest.mark.asyncio
-async def test_set_max_sessions_roundtrip():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-        r = await ac.post("/api/v1/kanban/max-sessions",
-                          json={"project_key": "p1", "max_sessions": 3})
-        assert r.status_code == 200
-        g = await ac.get("/api/v1/kanban/max-sessions", params={"project_key": "p1"})
-        assert g.json()["max_sessions"] == 3
-
-
-@pytest.mark.asyncio
-async def test_set_max_sessions_rejects_zero():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
-        r = await ac.post("/api/v1/kanban/max-sessions",
-                          json={"project_key": "p1", "max_sessions": 0})
-        assert r.status_code == 422
-
-
-@pytest.mark.asyncio
 async def test_transport_defaults_worktree_and_roundtrips():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.get("/api/v1/kanban/transport", params={"project_key": "p2"})

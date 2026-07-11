@@ -166,3 +166,195 @@ def _last_touching_commit(repo_root: Path, relative_file_path: str) -> str | Non
         text=True,
     ).strip()
     return out or None
+
+
+# --- spec-drift helpers (spec-ssot Fase 2) -----------------------------------
+# Mechanical model: spec-driven-development Fase 2 (§6 in
+# docs/cockpit/spec-driven-development-analysis.md) — a signal-only drift
+# check that compares a card's `metadata.spec_doc` against the functional
+# surface touched by its closing merge. This is the same shape as
+# `check_openapi_snapshot.py` (live spec vs committed snapshot), but with a
+# prose spec (path in `docs/cockpit/`) and the merge-commit diff as the
+# "live" side. It is INTENTIONALLY signal-only — drift is recorded as
+# advice on the weekly drift report and a `[spec-update]` backlog card,
+# not as a build-blocking gate. See analysis §4-5 (table row C).
+
+# What counts as "functional". A pragmatic path-prefix heuristic — a merge
+# that touches any of these prefixes is presumed to change behaviour the
+# linked spec should describe. Excludes `backend/scripts/`, `backend/tests/`,
+# `docs/`, `frontend/src/components/ui/` (shadcn primitives) etc., because
+# those are tooling/test/doc surfaces where drift is much less likely to
+# change the user-visible behaviour the spec describes.
+DEFAULT_FUNCTIONAL_GLOBS: tuple[str, ...] = (
+    "backend/app/",
+    "frontend/src/features/",
+    "frontend/src/lib/",
+)
+
+# What counts as "spec". Only `docs/cockpit/` is the canonical tree after
+# Fase 0 consolidation (see docs/cockpit/spec-driven-development-fase-0-
+# decision.md); other doc trees (`docs/superpowers/`, `docs/plans/`) are
+# either workoutput or legacy and would only add false positives.
+DEFAULT_SPEC_GLOBS: tuple[str, ...] = ("docs/cockpit/",)
+
+
+class SpecDriftFinding:
+    """One card's spec-drift report.
+
+    `changed_functional_paths` and `changed_spec_paths` are the path lists
+    from `git diff --name-only` against the merge's first parent; they keep
+    the a/b prefix stripped via `parse_diff_path_list`.
+    """
+
+    __slots__ = (
+        "card_id",
+        "changed_functional_paths",
+        "changed_spec_paths",
+        "spec_doc",
+    )
+
+    def __init__(
+        self,
+        card_id: str,
+        spec_doc: str,
+        changed_functional_paths: list[str],
+        changed_spec_paths: list[str],
+    ) -> None:
+        self.card_id = card_id
+        self.spec_doc = spec_doc
+        self.changed_functional_paths = changed_functional_paths
+        self.changed_spec_paths = changed_spec_paths
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, SpecDriftFinding):
+            return NotImplemented
+        return (
+            self.card_id == other.card_id
+            and self.spec_doc == other.spec_doc
+            and self.changed_functional_paths == other.changed_functional_paths
+            and self.changed_spec_paths == other.changed_spec_paths
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"SpecDriftFinding(card_id={self.card_id!r}, spec_doc={self.spec_doc!r}, "
+            f"functional={self.changed_functional_paths!r}, spec={self.changed_spec_paths!r})"
+        )
+
+
+def parse_diff_path_list(raw: str) -> list[str]:
+    """Parse `git diff --name-only` output.
+
+    Strips the `a/` / `b/` prefixes that `git diff` prepends and skips blank
+    lines. Returns paths in the same order git emitted them (the CLI sorts
+    by working-tree-relative path, which is what consumers expect)."""
+    paths: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("a/") or line.startswith("b/"):
+            line = line[2:]
+        paths.append(line)
+    return paths
+
+
+def _paths_matching(paths: list[str], prefixes: tuple[str, ...]) -> list[str]:
+    return [p for p in paths if any(p.startswith(prefix) for prefix in prefixes)]
+
+
+def _diff_name_only(repo_root: Path, parent_sha: str, merge_sha: str) -> list[str]:
+    """Return repo-relative paths changed between two commits.
+
+    `git diff <parent> <merge> --name-only` is the merge-vs-parent diff that
+    isolates the work landed by the merge. Empty output (or a non-existent
+    SHA) yields an empty list — callers can treat that as 'no change'."""
+    try:
+        out = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "diff",
+                "--name-only",
+                parent_sha,
+                merge_sha,
+            ],
+            text=True,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError:
+        return []
+    return parse_diff_path_list(out)
+
+
+def _first_parent(repo_root: Path, merge_sha: str) -> str | None:
+    """Return the first parent SHA of a merge commit, or None for non-merges
+    or unknown SHAs."""
+    try:
+        out = subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                f"{merge_sha}^1",
+            ],
+            text=True,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    return out.strip() or None
+
+
+def find_spec_drift_for_card(
+    repo_root: Path,
+    card_id: str,
+    spec_doc: str,
+    merge_sha: str,
+    functional_glob: tuple[str, ...] = DEFAULT_FUNCTIONAL_GLOBS,
+    spec_glob: tuple[str, ...] = DEFAULT_SPEC_GLOBS,
+) -> list[SpecDriftFinding]:
+    """Return a single-element list when the card's merge touched functional
+    paths but not its linked spec-doc; otherwise an empty list.
+
+    Drift = the merge's functional surface grew without the spec-doc growing
+    alongside it. We can't tell from a path list whether the *content* of the
+    spec-doc needed an update — that requires an LLM (Fase 3). But a merge
+    that touched zero `spec_glob` paths is a confident-enough signal to
+    surface as advice, matching Fase 1's "plan-attachment counts as the spec
+    by default" stance: the prose spec should be touched when the linked
+    code changed.
+
+    Special cases (all return empty list, never raise):
+      * `spec_doc` is a URL (no repo path to compare against) — drift can't
+        be checked mechanically.
+      * `merge_sha` doesn't resolve or has no first parent — caller filters
+        out before we get here, but defensive.
+      * merge has zero functional paths in its diff — nothing to flag.
+    """
+    if spec_doc.startswith(("http://", "https://")):
+        return []
+
+    parent = _first_parent(repo_root, merge_sha)
+    if parent is None:
+        return []
+
+    changed = _diff_name_only(repo_root, parent, merge_sha)
+    if not changed:
+        return []
+
+    functional = _paths_matching(changed, functional_glob)
+    spec = _paths_matching(changed, spec_glob)
+    if not functional:
+        return []
+    if spec_doc in spec:
+        return []
+
+    return [SpecDriftFinding(
+        card_id=card_id,
+        spec_doc=spec_doc,
+        changed_functional_paths=functional,
+        changed_spec_paths=spec,
+    )]

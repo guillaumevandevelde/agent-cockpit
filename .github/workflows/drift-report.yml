@@ -83,6 +83,25 @@ jobs:
           } || true
         working-directory: backend
 
+      - name: Spec drift signal (spec-ssot Fase 2)
+        id: spec-drift
+        # Signal-only: flags Done cards with `metadata.spec_doc` whose closing
+        # merge touched `backend/app/` or `frontend/src/features/` without
+        # touching the linked spec-doc. Outputs a markdown summary; the
+        # `[spec-update]` backlog-card filing is a separate, human-triggered
+        # step (file_spec_drift_cards.py) because the workflow has no kanban
+        # credentials.
+        run: |
+          {
+            python scripts/check_spec_drift.py \
+              --repo-root "$GITHUB_WORKSPACE" \
+              --project-key "git:github.com/${GITHUB_REPOSITORY#*/}" \
+              --kanban-base "http://localhost:8000/api/v1/kanban" \
+              > /tmp/spec_drift_status 2>&1
+            cat /tmp/spec_drift_summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          } || true
+        working-directory: backend
+
       - name: Write summary
         run: |
           {
@@ -93,6 +112,7 @@ jobs:
             echo "- Features → docs: $(cat /tmp/feature_docs_status)"
             echo "- Agent role consistency: $(cat /tmp/agent_roles_status)"
             echo "- CLAUDE.md age: $(cat /tmp/claude_md_age_status)"
+            echo "- Spec drift: $(cat /tmp/spec_drift_status)"
             echo ""
             echo "See the Quality and Security workflow runs for lint/type/coverage/security detail."
           } >> "$GITHUB_STEP_SUMMARY"

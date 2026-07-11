@@ -5,6 +5,15 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 COLUMNS = ["Backlog", "Impediment", "Done", "To Resume"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
+
+# Machine-readable card → spec-doc link (spec-driven-development Fase 1). A
+# functional card names the canonical `docs/cockpit/` doc it implements/updates
+# by storing its repo-relative path (or a URL) under `card.metadata[SPEC_DOC_META_KEY]`.
+# Reuses the existing free-form `metadata` bag — NO new datamodel — so Fase 2
+# drift-detection has a single, unambiguous anchor to read. Analyst plan-attachments
+# count as the spec by definition, so a card that carries a plan deliverable needs
+# no explicit link. See docs/cockpit/spec-driven-development-analysis.md §6 (Fase 1).
+SPEC_DOC_META_KEY = "spec_doc"
 # Structured routing hint for auto-dispatch. Distinct from `labels` (free-form
 # tags). Add new values here AND in frontend/src/features/kanban/types.ts
 # WORK_TYPES. See docs/cockpit/work-type-routing-analysis.md §2A.
@@ -211,11 +220,6 @@ class ShipModeRequest(BaseModel):
 class SkipPermissionsRequest(BaseModel):
     project_key: str
     enabled: bool
-
-
-class MaxSessionsRequest(BaseModel):
-    project_key: str
-    max_sessions: int
 
 
 class DefaultTransportRequest(BaseModel):

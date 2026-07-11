@@ -36,7 +36,6 @@ from app.kanban.schemas import (
     GateOpenRequest,
     GateResponse,
     ImpedimentResolveRequest,
-    MaxSessionsRequest,
     MoveRequest,
     RedispatchRequest,
     ReopenRequest,
@@ -840,26 +839,6 @@ async def set_skip_permissions(payload: SkipPermissionsRequest):
         await dispatch.set_skip_permissions(s, payload.project_key, payload.enabled)
         await s.commit()
     return {"project_key": payload.project_key, "enabled": payload.enabled}
-
-
-@router.get("/max-sessions")
-async def get_max_sessions(project_key: str = Query(...)):
-    from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        return {"project_key": project_key,
-                "max_sessions": await dispatch.get_max_sessions(s, project_key)}
-
-
-@router.post("/max-sessions")
-async def set_max_sessions(payload: MaxSessionsRequest):
-    from app.kanban import dispatch
-    async with KanbanSessionLocal() as s:
-        try:
-            await dispatch.set_max_sessions(s, payload.project_key, payload.max_sessions)
-        except ValueError as e:
-            raise HTTPException(422, str(e))
-        await s.commit()
-    return {"project_key": payload.project_key, "max_sessions": payload.max_sessions}
 
 
 @router.get("/transport")

@@ -26,8 +26,12 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | **Scheduled messages** | [`fase-2-spec.md`](./fase-2-spec.md) (spec) + [`fase-2-plan.md`](./fase-2-plan.md) (plan) | `specs/2026-06-13-scheduled-session-resume-design.md`, `plans/2026-06-14-scheduled-session-resume.md` |
 | **Scheduled — runtime-checklist** | [`fase-1-validation.md`](./fase-1-validation.md) | — |
 | **Kanban v1 (passief bord)** | [`kanban-spec.md`](./kanban-spec.md) + [`kanban-plan.md`](./kanban-plan.md) | — |
-| **Kanban auto-dispatch** | [`kanban-dispatch-spec.md`](./kanban-dispatch-spec.md) | `specs/2026-06-15-kanban-agents-design.md`, `specs/2026-06-29-kanban-dispatch-transport-design.md` |
+| **Kanban auto-dispatch** | [`kanban-dispatch-spec.md`](./kanban-dispatch-spec.md) | `specs/2026-06-15-kanban-agents-design.md`, `specs/2026-06-29-kanban-dispatch-transport-design.md`, `specs/2026-06-27-kanban-mcp-robustness-design.md`, `specs/2026-07-03-card-edit-provider-dropdown-design.md` |
+| **Kanban model-override** | [`kanban-model-override.md`](./kanban-model-override.md) | `specs/2026-07-10-kanban-model-override-design.md`, `plans/2026-07-10-kanban-model-override.md` |
 | **Multi-agent kanban** | [`multi-agent-kanban.md`](./multi-agent-kanban.md) | `specs/2026-07-08-multi-agent-kanban-design.md`, `plans/2026-07-08-multi-agent-kanban.md` |
+| **Agent Bridge (Runs)** | [`agent-bridge.md`](./agent-bridge.md) | `specs/2026-05-29-agent-bridge-bedrock-platform-design.md`, `specs/2026-06-12-agent-bridge-session-rename-design.md`, `specs/2026-06-12-resume-worktree-sessions-design.md`, `specs/2026-06-29-agent-bridge-image-paste-design.md` |
+| **Subscriptions-pagina** | [`subscriptions.md`](./subscriptions.md) | `specs/2026-07-04-minimax-providers-page-design.md`, `specs/2026-07-08-subscription-usage-leftover-design.md` |
+| **Skill stats** | [`skill-stats.md`](./skill-stats.md) | `specs/2026-06-27-skill-stats-design.md` |
 | **Kanban follow-up pool** | [`kanban-followups.md`](./kanban-followups.md) | — |
 | **Agent Mail** | [`agent-mail-spec.md`](./agent-mail-spec.md) | `plans/2026-07-08-agent-mail-implementation.md` |
 | **Pane-gerichte attentie** | [`pane-attention-spec.md`](./pane-attention-spec.md) + [`pane-attention-plan.md`](./pane-attention-plan.md) | — |

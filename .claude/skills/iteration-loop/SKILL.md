@@ -76,7 +76,9 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 ### `verify` — test + lint + build (default end-of-card gate)
 
 - **Runs:** the in-worktree checks from `git-ship` step 2 — `cd frontend
-  && npm run lint && npm run build`. Backend `pytest` is **not** run
+  && { [ -d node_modules ] || npm ci; } && npm run lint && npm run
+  build` (the guarded `npm ci` installs deps on a fresh worktree so lint
+  doesn't die with `eslint: not found`). Backend `pytest` is **not** run
   locally on this box (see CLAUDE.md / `git-ship` rationale — the
   shared box's concurrent sessions caused multi-minute stalls under
   full pytest). The loop trusts GitHub Actions `quality.yml` for the

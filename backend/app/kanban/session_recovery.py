@@ -18,7 +18,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from app.kanban.dispatch import CLAIMANT_PREFIX, get_max_sessions
+from app.kanban.dispatch import CLAIMANT_PREFIX
 from app.utils.path_utils import convert_path_to_folder_name, get_claude_projects_dir
 
 logger = logging.getLogger(__name__)
@@ -82,25 +82,25 @@ async def recover_project(
     resolve: ResolveFn = _resolve_resume_target,
     redispatch: RedispatchFn | None = None,
 ) -> list[dict]:
-    """Resume every recoverable interrupted session in one project, up to the
-    project's configured session cap.
+    """Resume every recoverable interrupted session in one project, bounded by
+    the shared hardware-aware session budget.
 
     For each dead-session card that still has a resumable transcript: persist the
     resume session id/folder, then re-dispatch (which selects the resume transport).
     Per-card failures are logged and skipped so one bad card can't block the rest.
 
-    ``redispatch_card`` deliberately bypasses the per-project cap for its normal
-    (single-card, human-triggered) use, so this loop must enforce the cap itself.
-    Without it, a project that accumulated more dead claims than its cap allows
-    (e.g. via repeated dev-server restarts) would burst-resume all of them at
-    startup, blowing straight past "Max sessions: N". Cards already claimed by a
-    session that's still live count against the budget too; cards left over once
-    the budget is exhausted are untouched here -- the reaper picks them up (via
-    the same ``_move_to_resume``) on the next cap-respecting dispatch tick.
+    ``redispatch_card`` deliberately bypasses per-project limits for its normal
+    (single-card, human-triggered) use, so this loop must enforce a safety bound
+    itself. Without it, a project that accumulated many dead claims (e.g. via
+    repeated dev-server restarts) would burst-resume all of them at startup,
+    exhausting the global session budget regardless of per-column caps.
+    Cards left over once the budget is exhausted are untouched here -- the
+    reaper picks them up (via the same ``_move_to_resume``) on the next dispatch
+    tick.
     """
     from app.kanban.operations import apply_operation
-    from app.kanban.schemas import COLUMNS
     from app.kanban.service import list_cards
+    from app.services.scheduling.session_registry import session_registry
 
     if redispatch is None:
         from app.kanban.dispatch import redispatch_card as redispatch
@@ -108,14 +108,17 @@ async def recover_project(
     recovered: list[dict] = []
     cards = await list_cards(session, project_key)
 
-    cap = await get_max_sessions(session, project_key)
+    # Bound by the shared hardware-aware session budget, not a per-project cap.
+    # Cards already claimed by a session that's still live count toward that
+    # global count, so we subtract them from the budget for resuming dead ones.
+    from app.kanban.schemas import COLUMNS
     live_active = sum(
         1 for c in cards
         if c.column not in COLUMNS
         and (c.claimed_by or "").startswith(CLAIMANT_PREFIX)
         and (c.claimed_by or "")[len(CLAIMANT_PREFIX):] in live_sessions
     )
-    budget = max(cap - live_active, 0)
+    budget = max(session_registry.effective_max_sessions - live_active, 0)
 
     for card in cards:
         if budget <= 0:

@@ -105,6 +105,7 @@ export const kanbanApi = {
       scheduled_at?: string | null;
       analyst_agent_id?: string | null;
       executor_agent_id?: string | null;
+      metadata?: Record<string, unknown> | null;
     }
   ): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}`, {
@@ -266,17 +267,6 @@ export const kanbanApi = {
     apiClient<{ enabled: boolean }>(`${BASE}/autodispatch`, {
       method: "POST",
       body: JSON.stringify({ project_key: projectKey, enabled }),
-    }),
-
-  getMaxSessions: (projectKey: string): Promise<{ max_sessions: number }> =>
-    apiClient<{ max_sessions: number }>(
-      `${BASE}/max-sessions?project_key=${encodeURIComponent(projectKey)}`
-    ),
-
-  setMaxSessions: (projectKey: string, n: number): Promise<{ max_sessions: number }> =>
-    apiClient<{ max_sessions: number }>(`${BASE}/max-sessions`, {
-      method: "POST",
-      body: JSON.stringify({ project_key: projectKey, max_sessions: n }),
     }),
 
   getDefaultTransport: (projectKey: string): Promise<{ transport: string }> =>

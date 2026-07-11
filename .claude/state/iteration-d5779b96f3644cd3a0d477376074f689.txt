@@ -1,0 +1,1 @@
+2026-07-11T12:55:46Z	verify	1	cd frontend && npm install && npm run lint && npm run build	clean: lint 0 errors / 101 pre-existing warnings; build ✓ built in 654ms (backend pytest intentionally skipped locally per CLAUDE.md git-ship rationale; CI quality.yml is the backend gate)

@@ -853,3 +853,68 @@ describe("CardDrawer Impediment column: structured-options gate", () => {
     expect(screen.queryByTestId("resolve-impediment-button")).toBeNull();
   });
 });
+
+describe("CardDrawer spec link", () => {
+  it("shows the linked spec doc path from metadata.spec_doc", () => {
+    const card: Card = {
+      ...baseCard,
+      metadata: { spec_doc: "docs/cockpit/agent-mail-spec.md" },
+    };
+    render(
+      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+    const section = screen.getByTestId("spec-link-section");
+    expect(section.textContent).toMatch(/docs\/cockpit\/agent-mail-spec\.md/);
+  });
+
+  it("renders a URL spec_doc as a clickable link", () => {
+    const card: Card = {
+      ...baseCard,
+      metadata: { spec_doc: "https://example.com/spec.md" },
+    };
+    render(
+      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+    const link = screen.getByTestId("spec-link-value").querySelector("a");
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toBe("https://example.com/spec.md");
+  });
+
+  it("treats a plan-attachment as the spec when no explicit spec_doc is set", () => {
+    const card: Card = {
+      ...baseCard,
+      deliverables: [
+        { id: "d1", kind: "plan", ref: "# Plan\n...", created_at: "2026-01-01T00:00:00Z" },
+      ],
+    };
+    render(
+      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+    expect(screen.getByTestId("spec-from-plan")).not.toBeNull();
+  });
+
+  it("saves an edited spec_doc into metadata via updateCard, preserving other keys", async () => {
+    const updateMock = kanbanApi.updateCard as ReturnType<typeof vi.fn>;
+    updateMock.mockResolvedValue({});
+    const card: Card = {
+      ...baseCard,
+      metadata: { reviewed_card_id: "abc" },
+    };
+    render(
+      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+
+    fireEvent.click(screen.getByTestId("spec-link-edit"));
+    fireEvent.change(screen.getByTestId("spec-link-input"), {
+      target: { value: "docs/cockpit/foo.md" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("spec-link-save"));
+    });
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalled());
+    expect(updateMock).toHaveBeenCalledWith("card-1", {
+      metadata: { reviewed_card_id: "abc", spec_doc: "docs/cockpit/foo.md" },
+    });
+  });
+});

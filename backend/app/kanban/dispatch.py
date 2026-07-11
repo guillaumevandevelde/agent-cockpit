@@ -142,11 +142,6 @@ SHIPMODE_PREFIX = "shipmode:"
 SKIP_PERMISSIONS_PREFIX = "skip_permissions:"
 SHIP_MODES = ("pull-request", "direct")
 DEFAULT_SHIP_MODE = "pull-request"
-MAX_SESSIONS_PREFIX = "max_sessions:"
-# Conservative default for a shared box: the pre-push gate now serializes the heavy
-# test/build across sessions, so this mainly bounds concurrent agent processes.
-# Override per-project via set_max_sessions.
-DEFAULT_MAX_SESSIONS = 3
 TRANSPORT_PREFIX = "transport:"
 TRANSPORTS = ("worktree", "sandcastle")
 DEFAULT_TRANSPORT = "worktree"
@@ -207,29 +202,6 @@ async def set_skip_permissions(session, project_key: str, enabled: bool) -> None
         session.add(row)
     else:
         row.value = "1" if enabled else "0"
-    await session.flush()
-
-
-async def get_max_sessions(session, project_key: str) -> int:
-    row = await session.get(KanbanMeta, MAX_SESSIONS_PREFIX + project_key)
-    if row is None:
-        return DEFAULT_MAX_SESSIONS
-    try:
-        n = int(row.value)
-    except (TypeError, ValueError):
-        return DEFAULT_MAX_SESSIONS
-    return n if n >= 1 else DEFAULT_MAX_SESSIONS
-
-
-async def set_max_sessions(session, project_key: str, n: int) -> None:
-    if n < 1:
-        raise ValueError("max_sessions must be >= 1")
-    key = MAX_SESSIONS_PREFIX + project_key
-    row = await session.get(KanbanMeta, key)
-    if row is None:
-        session.add(KanbanMeta(key=key, value=str(n)))
-    else:
-        row.value = str(n)
     await session.flush()
 
 
@@ -691,6 +663,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         f"{preamble}"
         "You are picking up a Kanban card from the Claude Cockpit board. "
         'It is already claimed by you and moved to "Doing".\n\n'
+        f"Host card id: {getattr(card, 'id', '') or ''}\n"
         f"# {card.title}\n"
         f"{getattr(card, 'description', '') or ''}\n"
         f"{impediment_section}\n"
@@ -911,9 +884,29 @@ def _build_ship_instructions(ship_mode: str) -> str:
         "1. **Sync** — `git fetch origin` so you are up to date with the remote.\n"
     )
     tests = (
-        "2. **Run frontend checks yourself before shipping** — there is no pre-push "
-        "gate; nothing blocks a red push.  Run them in this worktree: "
-        "``cd frontend && npm run lint && npm run build``.  Only proceed once green.  "
+        "2. **Run frontend checks yourself before shipping (only when the branch "
+        "touches ``frontend/``)** — there is no pre-push gate; nothing blocks a "
+        "red push.  First check whether this branch changed any frontend code, "
+        "and run ``npm run lint && npm run build`` only if it did — a docs-/"
+        "backend-only branch would otherwise pay a multi-minute ``npm ci`` + "
+        "build for zero frontend coverage:\n"
+        "   ```bash\n"
+        "   git fetch origin -q\n"
+        "   FRONTEND_TOUCHED=$( { git diff --name-only origin/master -- frontend/; "
+        "git ls-files --others --exclude-standard -- frontend/; } | head -1 )\n"
+        "   if [ -n \"$FRONTEND_TOUCHED\" ]; then\n"
+        "     # A fresh worktree has no node_modules (gitignored) — install once "
+        "so ``npm run lint`` / ``npm run build`` don't die with ``eslint: not "
+        "found``. Guard on a missing node_modules so a re-run in the same "
+        "session skips the ~40s ``npm ci``.\n"
+        "     ( cd frontend && { [ -d node_modules ] || npm ci; } && npm run lint && npm run build )   # only proceed once green\n"
+        "   else\n"
+        "     echo 'geen frontend-diff — gate overgeslagen'\n"
+        "   fi\n"
+        "   ```\n"
+        "   A branch that *does* touch ``frontend/`` (including a mixed "
+        "frontend+docs diff) runs the gate unconditionally; only a branch with "
+        "no ``frontend/`` change skips it.  "
         "Do **not** run backend pytest locally in this repo — that step was removed "
         "deliberately (shared box; concurrent dispatched sessions running full pytest "
         "caused multi-minute stalls / SSH idle-disconnects).  GitHub Actions "
@@ -933,13 +926,19 @@ def _build_ship_instructions(ship_mode: str) -> str:
 
     if ship_mode == "direct":
         shipping = (
-            "4. **Ship (direct mode)** — merge your branch into master and push:\n"
+            "4. **Ship (direct mode)** — merge your branch into master and push. "
+            "You are in a linked worktree while ``master`` is checked out in the "
+            "main working copy, so checking out ``master`` here fails with "
+            "``'master' is already used by worktree at ...``. Merge through a "
+            "throwaway detached worktree instead — it never touches your current "
+            "checkout:\n"
             "   ```bash\n"
             "   BRANCH=$(git rev-parse --abbrev-ref HEAD)\n"
-            "   git checkout master\n"
-            "   git merge --no-ff \"$BRANCH\"\n"
-            "   git push origin HEAD:master\n"
-            "   git checkout \"$BRANCH\"   # back so the worktree stays valid\n"
+            "   TMP=$(mktemp -d)\n"
+            "   git worktree add --detach \"$TMP/m\" origin/master\n"
+            "   git -C \"$TMP/m\" merge --no-ff \"$BRANCH\" -m \"Merge $BRANCH\"\n"
+            "   git -C \"$TMP/m\" push origin HEAD:master\n"
+            "   git worktree remove \"$TMP/m\" --force\n"
             "   ```\n"
             "5. **Attach the deliverable** — ``attach_deliverable`` with "
             "``kind=\"branch\"`` and ``ref=<your-branch-name>``.\n"
@@ -1523,10 +1522,39 @@ def _is_due(card: KanbanCard) -> bool:
     return fire_at <= datetime.now(UTC)
 
 
+def _awaiting_plan_ref(card) -> bool:
+    """True when a child card (has a ``parent_card_id``) has not yet received
+    its ``plan_ref`` deliverable from the analyst's ``add_plan_attachment`` call.
+
+    Closes the create_card→add_plan_attachment race: the analyst creates a child
+    (step 3) directly into a dispatch-eligible column, but only links the plan
+    (step 4) a few seconds later. A dispatch tick firing in that window would
+    spawn an executor whose prompt renders the generic "Plan niet beschikbaar"
+    placeholder (`_plan_context_section`) — indistinguishable from a genuinely
+    missing plan — forcing a needless report_impediment. Holding such a child out
+    of dispatch until its ``plan_ref`` exists makes it dispatch-eligible only once
+    the plan it points at is actually attached. See the [self-improve] kanban card
+    "Child card becomes dispatch-eligible before analyst's add_plan_attachment
+    runs (race)".
+
+    A card with no ``parent_card_id`` (an ordinary top-level card) is never
+    gated — it never carries a ``plan_ref`` in the first place.
+    """
+    if not getattr(card, "parent_card_id", None):
+        return False
+    return not any(
+        d.kind == "plan_ref" for d in getattr(card, "deliverables", []) or []
+    )
+
+
 def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     cards = list(cards)
     for col in _DISPATCH_COLUMNS:
-        col_cards = [c for c in cards if c.column == col and not c.claimed_by and _is_due(c)]
+        col_cards = [
+            c for c in cards
+            if c.column == col and not c.claimed_by and _is_due(c)
+            and not _awaiting_plan_ref(c)
+        ]
         if col_cards:
             # list_cards is ordered by rank; stable-sort by priority on top of that
             # so higher-priority cards jump the queue within the same column.
@@ -1540,7 +1568,11 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     # human notices and hits "redispatch" by hand (see kanban card "auto dispatch
     # nakijken": auto-dispatch looked stuck even though it was enabled).
     from app.kanban.schemas import COLUMNS
-    orphans = [c for c in cards if c.column not in COLUMNS and not c.claimed_by and _is_due(c)]
+    orphans = [
+        c for c in cards
+        if c.column not in COLUMNS and not c.claimed_by and _is_due(c)
+        and not _awaiting_plan_ref(c)
+    ]
     if orphans:
         orphans.sort(key=_priority_key, reverse=True)
         return orphans[0]
@@ -2129,12 +2161,13 @@ async def dispatch_project(
     sandcastle_live: set[str] | None = None,
 ) -> dict | None:
     """Claim+move+spawn the next card for one project. Returns a result dict or
-    None when there is nothing to do (no candidate card, or project is busy).
+    None when there is nothing to do (no candidate card, or the per-column cap
+    blocks dispatch for every candidate).
 
     When `live_sessions` is provided, stale `agent:` claims on Doing cards whose
     session is no longer alive are reaped first, so a dead session can never wedge
-    the busy cap. Passing None skips reaping (used by unit tests that exercise the
-    cap directly).
+    a per-column cap slot. Passing None skips reaping (used by unit tests that
+    exercise the cap directly).
     
     If transport is None, the appropriate transport is automatically selected based
     on the project's sandcastle configuration."""
@@ -2146,13 +2179,13 @@ async def dispatch_project(
         ):
             cards = await list_cards(session, project_key)
 
-    cap = await get_max_sessions(session, project_key)
     column_caps = await _column_max_sessions(session, project_key)
     last_result: dict | None = None
 
-    # Fill every free slot in this tick, re-listing after each dispatch so the
-    # claim just made counts toward the cap.
-    while _active_session_count(cards) < cap:
+    # Fill every dispatchable card in this tick. The per-column cap (when set)
+    # is the only structural limit at this level; the hardware/OS-level cap
+    # checked inside the transport enforces the actual memory bound.
+    while True:
         card = _next_card(cards)
         if card is None:
             break
@@ -2794,23 +2827,13 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                     pending_queue.dequeue(card.card_id)
                     continue
 
-                # Honour the per-project session cap. Memory may be free again, but
-                # the project can still be at its user-set cap; retrying past it is
-                # exactly how a cap of 3 ends up running 6 sessions. A cap hold is not
-                # a failed dispatch, so leave the card untouched in the queue (don't
-                # mark_retry, which would count toward max_retries and eventually drop
-                # a card that is merely waiting for a slot).
-                cards = await list_cards(ks, card.project_key)
-                cap = await get_max_sessions(ks, card.project_key)
-                if _active_session_count(cards) >= cap:
-                    logger.info(
-                        f"Card {card.card_id} held back: project {card.project_key} "
-                        f"at session cap ({cap})"
-                    )
-                    continue
-
                 # Per-column cap check: if the card's target column has a
-                # per-column max_sessions, respect it before retrying.
+                # per-column max_sessions, respect it before retrying. The cap
+                # hold is not a failed dispatch, so leave the card untouched in
+                # the queue (don't mark_retry, which would count toward
+                # max_retries and eventually drop a card that is merely waiting
+                # for a slot).
+                cards = await list_cards(ks, card.project_key)
                 column_caps = await _column_max_sessions(ks, card.project_key)
                 if column_caps:
                     target_column = _resolve_target_column(card_data, card.project_path)
