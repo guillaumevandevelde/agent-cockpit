@@ -30,6 +30,9 @@ jobs:
         continue-on-error: true
       - run: python scripts/check_openapi_snapshot.py
         working-directory: backend
+      - name: Superpowers promotion ledger (advisory)
+        run: bash scripts/check-superpowers-promotions.sh
+        continue-on-error: true
       - run: pytest -q
         working-directory: backend
 
