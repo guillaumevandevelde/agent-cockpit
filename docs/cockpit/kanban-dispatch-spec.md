@@ -144,3 +144,42 @@ A resolved Impediment card without a gate (legacy free-text
 `report_impediment(question=...)`) gets the raw question back — backwards
 compatible.
 
+## Provider vs. persona: het `card.agent`-veld
+
+> Gepromoot uit [`../superpowers/specs/2026-07-03-card-edit-provider-dropdown-design.md`](../superpowers/specs/2026-07-03-card-edit-provider-dropdown-design.md).
+
+`card.agent` (nullable string) is bewust overladen en wordt door `dispatch.py`
+gedisambigueerd via string-match tegen de bekende-provider-ids:
+
+- een **provider-id** (`claude-code`, `open-code`, `codex-cli`, `mimo-code`) → welke CLI
+  spawnt, of
+- een **persona-naam** (`.claude/agents/<name>.md`) → expliciete override van de
+  kolom-afgeleide persona.
+
+De UI presenteert dit veld als een **Provider-dropdown** (zowel `CardEditDialog` als
+`CardDrawer`), met een `AUTO`-sentinel die naar `null` mapt (= gebruik de globaal gekozen
+provider). Beide widgets schrijven dus provider-id-vormige waarden; het edit-veld heet
+**"Provider"**, niet meer het dubbelzinnige "Agent". De kolom→persona-mapping
+(`ColumnSettingsDialog`'s "default agent", `dispatch._persona_for_card`) blijft ongewijzigd —
+persona-selectie leeft nu in de standalone Agents-pagina, niet als tweede per-card-widget.
+Een stale persona-waarde op een oude card self-healt bij de volgende save (geen migratie
+nodig).
+
+## MCP-robustness & health
+
+> Gepromoot uit [`../superpowers/specs/2026-06-27-kanban-mcp-robustness-design.md`](../superpowers/specs/2026-06-27-kanban-mcp-robustness-design.md).
+
+De kanban-MCP wordt via een SSE-server aan agents blootgesteld. Twee robustness-lagen:
+
+- **Health-probe i.p.v. config-check.** `GET /api/v1/kanban/mcp-health` doet een interne
+  HTTP-probe naar de SSE-mount en geeft `{healthy, latency_ms, error}` terug (incl.
+  auth-header, zodat token-problemen ook zichtbaar worden). De frontend pollt dit elke 30s
+  wanneer MCP enabled is en toont een **persistente** rode banner + status-dot bij
+  onbereikbaarheid — geen vluchtige toast, want het oude "MCP: enabled" las de config, niet de
+  realiteit (crash/token-rotatie/SSE-breuk bleef onzichtbaar).
+- **Error-boundary op elke tool.** Een `_safe`-decorator vangt alle excepties, logt met
+  traceback server-side, en geeft `{"error": <msg>, "type": <ClassName>}` terug i.p.v. te
+  raisen — de MCP-sessie crasht nooit op een tool-fout en de agent krijgt een actionable
+  gestructureerde fout. Transiente `OperationalError: database is locked` krijgt één retry na
+  100ms (SQLite-contention onder concurrent dispatch).
+
