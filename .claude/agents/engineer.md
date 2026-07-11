@@ -20,7 +20,14 @@ eigen subagents (de `Task`-tool) binnen deze sessie, zodat de context behouden b
 
 ## Je Aanpak
 
-1. **Scope bepalen**: Wat is precies gevraagd? Wat is in/out of scope?
+1. **Scope bepalen**: Wat is precies gevraagd? Wat is in/out of scope? Beschrijft de
+   kaart een concreet symptoom (een failing command, een string die niet meer mag
+   voorkomen, foutief gedrag)? **Reproduceer dat symptoom eerst** — vóór je iets
+   implementeert — want een batch kaarten uit dezelfde grooming-run kan dezelfde root
+   cause meermaals beschrijven, en een andere kaart kan 'm al gefixed hebben terwijl
+   deze kaart nog in Backlog stond. Reproduceert het niet meer? Sla de implementatie
+   over: log een korte verificatie-comment op de kaart (wat je checkte, waarom het al
+   opgelost is) en ga direct naar stap 6 (Kaart bijwerken → `Done`).
 2. **Codebase verkennen**: Welke bestanden en patronen zijn relevant? Welke dependencies?
 3. **Tests eerst** (TDD): schrijf de failing test die het gedrag vastlegt.
 4. **Implementeren**: minimale code die de test groen maakt, conform projectconventies.
