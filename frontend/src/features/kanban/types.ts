@@ -150,6 +150,19 @@ export interface Card {
   // the CardDrawer shows a banner only when both are set.
   done_summary?: string | null;
   completed_at?: string | null;
+  // Impediment-lane classification. Populated by
+  // `service.impediment_status_for_card` from open KanbanGate rows + the
+  // op-log comment feed; `null` for cards outside the Impediment column.
+  // Drives the per-cause badge (and Redispatch quick-action for
+  // `dispatch_failed`) in the column view so an operator can tell at a
+  // glance whether a blocked card needs a human decision or an infra
+  // redispatch. See kanban card `c5eb6f89`.
+  impediment_status?:
+    | "needs_answer"
+    | "dispatch_failed"
+    | "resolved"
+    | "no_question"
+    | null;
   // Free-form key/value bag mirrored from the backend `metadata` column. The
   // spec-driven-development Fase 1 card→spec link lives at `metadata[SPEC_DOC_META_KEY]`.
   metadata?: Record<string, unknown> | null;

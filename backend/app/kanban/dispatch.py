@@ -2156,16 +2156,24 @@ async def _move_to_impediment_after_repeated_failures(
     actually start (bad transport config, missing sandcastle setup, a stale
     --resume worktree, ...) needs a human, not an infinite retry loop burning
     dispatch ticks."""
+    # Comment is prefixed with the structured `[dispatch-failure]` marker so
+    # the board UI can classify the card via
+    # `service.impediment_status_for_card` (see
+    # `service._DISPATCH_FAILURE_COMMENT_PREFIX`) and surface a "dispatch
+    # failed" badge + Redispatch button instead of the default
+    # "needs human answer" affordance — the appropriate remedy here is
+    # infrastructure (fix the spawn target), not a written answer.
     await apply_operation(
         session, op_type="comment", entity_type="comment",
         project_key=project_key, entity_id=card.id,
         payload={"text": (
-            f"Session `{session_name}` failed to dispatch {failures} times in a "
-            "row — moved to Impediment instead of retrying again. This usually "
-            "means the dispatch target is broken (a stale --resume worktree, a "
-            "missing sandcastle config, ...) rather than the task itself failing. "
-            "Check the backend logs for the actual spawn error, fix the underlying "
-            "issue, then redispatch."
+            f"[dispatch-failure] Session `{session_name}` failed to dispatch "
+            f"{failures} times in a row — moved to Impediment instead of "
+            "retrying again. This usually means the dispatch target is broken "
+            "(a stale --resume worktree, a missing sandcastle config, ...) "
+            "rather than the task itself failing. Check the backend logs for "
+            "the actual spawn error, fix the underlying issue, then "
+            "redispatch."
         )},
     )
     await apply_operation(

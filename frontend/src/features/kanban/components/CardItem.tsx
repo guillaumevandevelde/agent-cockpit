@@ -1,7 +1,17 @@
-import { RefreshCw } from "lucide-react";
+import { useState } from "react";
+import {
+  AlertTriangle,
+  HelpCircle,
+  MessageSquareWarning,
+  RefreshCw,
+  type LucideProps,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Card as UiCard } from "@/components/ui/card";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { CLICKABLE_CARD } from "@/lib/constants";
+import { kanbanApi } from "../api";
 import type { Card } from "../types";
 import { WORK_TYPES, WORK_TYPE_ICONS, type WorkType } from "../types";
 import { ReadyStateBadge, type ReadyState } from "./ReadyStateBadge";
@@ -32,16 +42,81 @@ function formatAutoResumeLabel(scheduledAt: string): string {
   return `Auto in ${minutes}m`;
 }
 
+// Impediment-lane badge map. Per kanban card `c5eb6f89` we distinguish four
+// sub-states for cards on the Impediment column so the operator can tell
+// at a glance whether a blocked card needs a written answer, an infra
+// redispatch, or neither:
+//
+//   - "needs_answer"      → an open KanbanGate / `**Impediment:**` question
+//     waits for a human decision. Drives the existing ResolveImpediment
+//     control inside the drawer; the column badge is just an at-a-glance hint.
+//   - "dispatch_failed"   → the 3×-dispatch-failure auto-move fired; the
+//     right action is `Redispatch` (infra), not a written answer. The card
+//     also gets a compact Redispatch button in the badge row.
+//   - "resolved"          → a `**Resolution:**` answer was posted but the
+//     card hasn't been moved off Impediment yet (transient, between
+//     answer-click and Resolve-click). Distinguishes "answer recorded" from
+//     "no question set" so the operator doesn't panic-think the answer
+//     got lost.
+//   - "no_question"       → bare-move state: the card sits on Impediment
+//     but has no question and no failure-marker. Subtle hint only — the
+//     drawer no longer pretends an answer is needed.
+type ImpedimentStatus = NonNullable<Card["impediment_status"]>;
+
+interface ImpedimentBadgeSpec {
+  label: string;
+  variant: BadgeProps["variant"];
+  // Lucide icon component type — accepts the same `className` /
+  // `aria-hidden` props we pass at the call sites.
+  Icon: React.ComponentType<LucideProps>;
+  title: string;
+}
+
+const IMPEDIMENT_BADGE: Record<ImpedimentStatus, ImpedimentBadgeSpec> = {
+  needs_answer: {
+    label: "needs answer",
+    variant: "default",
+    Icon: MessageSquareWarning,
+    title:
+      "Card is on Impediment with a pending question — click to open the drawer and answer.",
+  },
+  dispatch_failed: {
+    label: "dispatch failed",
+    variant: "destructive",
+    Icon: AlertTriangle,
+    title:
+      "Auto-dispatch failed 3 times in a row — fix the spawn target (stale --resume worktree, missing sandcastle config, …) and Redispatch.",
+  },
+  resolved: {
+    label: "resolved",
+    variant: "secondary",
+    Icon: HelpCircle,
+    title:
+      "A resolution was posted but the card hasn't moved off Impediment yet — click 'Resolve impediment' in the drawer to dispatch the resumed session.",
+  },
+  no_question: {
+    label: "no question",
+    variant: "outline",
+    Icon: HelpCircle,
+    title:
+      "Card is on Impediment without a question or a known dispatch failure — likely a manual move; no answer expected.",
+  },
+};
+
 export function CardItem({
   card,
   onOpen,
   readyState,
   blockerTitles,
+  projectPath,
 }: {
   card: Card;
   onOpen: (c: Card) => void;
   readyState?: ReadyState;
   blockerTitles?: string[];
+  // Needed for the dispatch_failed → Redispatch quick-action so the card can
+  // call `kanbanApi.redispatch` directly without bouncing through the drawer.
+  projectPath?: string;
 }) {
   const priority = card.priority && card.priority !== "none" ? card.priority : null;
   const labels = card.labels ?? [];
@@ -56,6 +131,35 @@ export function CardItem({
     ? (card.work_type as WorkType)
     : null);
 
+  const isImpediment = card.column === "Impediment";
+  const impedimentStatus = isImpediment ? card.impediment_status ?? null : null;
+  const impedimentSpec = impedimentStatus ? IMPEDIMENT_BADGE[impedimentStatus] : null;
+  const canRedispatch =
+    impedimentStatus === "dispatch_failed" && !!projectPath;
+
+  // Local "redispatching…" state so the compact button can show a brief
+  // busy state without taking over the card. The parent board's 5s poll
+  // picks up the new session name when the call returns; toast surfaces the
+  // success/failure so the operator gets immediate feedback either way.
+  const [redispatching, setRedispatching] = useState(false);
+  const redispatch = async (e: React.MouseEvent | React.KeyboardEvent) => {
+    // Stop the click/keypress from bubbling up to the card's onOpen / onKeyDown
+    // — a Redispatch button inside a clickable card must NOT open the drawer.
+    e.stopPropagation();
+    if (!projectPath || redispatching) return;
+    setRedispatching(true);
+    try {
+      const r = await kanbanApi.redispatch(
+        card.id, projectPath, card.agent ?? undefined,
+      );
+      toast.success(`Re-dispatched — session ${r.session_name}`);
+    } catch {
+      toast.error("Re-dispatch failed — the spawn may have errored");
+    } finally {
+      setRedispatching(false);
+    }
+  };
+
   return (
     <UiCard
       className={`${CLICKABLE_CARD} p-3 mb-2`}
@@ -68,19 +172,34 @@ export function CardItem({
           onOpen(card);
         }
       }}
+      data-card-id={card.id}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium text-sm">{card.title}</div>
-        {isToResume && (
-          <Badge
-            variant="outline"
-            className="shrink-0 text-[10px] font-normal border text-muted-foreground"
-            title={autoResumeTooltip}
-          >
-            <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
-            {autoResumeLabel}
-          </Badge>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+          {isToResume && (
+            <Badge
+              variant="outline"
+              className="text-[10px] font-normal border text-muted-foreground"
+              title={autoResumeTooltip}
+            >
+              <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
+              {autoResumeLabel}
+            </Badge>
+          )}
+          {impedimentSpec && (
+            <Badge
+              variant={impedimentSpec.variant}
+              className="text-[10px] font-normal"
+              title={impedimentSpec.title}
+              data-testid="impediment-status-badge"
+              data-impediment-status={impedimentStatus}
+            >
+              <impedimentSpec.Icon className="mr-1 h-3 w-3" aria-hidden="true" />
+              {impedimentSpec.label}
+            </Badge>
+          )}
+        </div>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {readyState && (
@@ -124,6 +243,26 @@ export function CardItem({
         )}
         {card.deliverables.length > 0 && (
           <span>&#128206; {card.deliverables.length}</span>
+        )}
+        {canRedispatch && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 px-2 text-[10px]"
+            disabled={redispatching}
+            onClick={redispatch}
+            onKeyDown={(e) => {
+              // Buttons natively handle Enter/Space via onClick; we only
+              // need to stop propagation so the card's outer onKeyDown
+              // (which opens the drawer) doesn't double-fire.
+              e.stopPropagation();
+            }}
+            data-testid="redispatch-quick-action"
+            title="Re-attempt dispatch after fixing the spawn target"
+          >
+            <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
+            {redispatching ? "Redispatching…" : "Redispatch"}
+          </Button>
         )}
       </div>
     </UiCard>

@@ -2,7 +2,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import selectinload
 
@@ -122,6 +122,89 @@ async def enrich_done_info(session, card_id: str) -> tuple[str | None, datetime 
         return None, None
     text = op.payload.get("text") or ""
     return text[len(_DONE_SUMMARY_PREFIX):], op.created_at
+
+
+# Markers used by `impediment_status_for_card` to classify why an Impediment
+# card is there. The `[dispatch-failure]` prefix is written by
+# `dispatch._move_to_impediment_after_repeated_failures` — keep the producer
+# and consumer in sync. The `**Impediment:** ` and `**Resolution:** ` labels
+# are the canonical labels for those columns / actions; see
+# `mcp_server._SUMMARY_REQUIRED_COLUMNS` + the report_impediment / resolve
+# flows for the producers.
+_DISPATCH_FAILURE_COMMENT_PREFIX = "[dispatch-failure]"
+_IMPEDIMENT_QUESTION_PREFIX = "**Impediment:** "
+_RESOLUTION_ANSWER_PREFIX = "**Resolution:** "
+
+
+async def impediment_status_for_card(session, card) -> str | None:
+    """Classify why an Impediment card is there, for the board UI.
+
+    Returns ``None`` when the card is not on the Impediment column — the
+    field is null on the wire for every other column so existing consumers
+    stay backwards-compatible. For Impediment cards, returns one of:
+
+      * ``"needs_answer"``  – an open KanbanGate, or the latest matching
+        comment is an ``**Impediment:**`` question without a later
+        ``**Resolution:**`` answer.
+      * ``"dispatch_failed"`` – the latest matching comment is the
+        ``[dispatch-failure]`` auto-move comment posted by
+        ``dispatch._move_to_impediment_after_repeated_failures`` after
+        ``MAX_DISPATCH_FAILURES`` consecutive spawn failures. The
+        recommended remedy is a **Redispatch**, not a human answer.
+      * ``"resolved"`` – the latest matching comment is a
+        ``**Resolution:**`` answer. This is a transient state (the card
+        sits on Impediment briefly between the human picking/typing an
+        answer and the operator clicking "Resolve impediment" to dispatch
+        the resumed session); the UI uses it to distinguish "answer was
+        recorded but card hasn't moved yet" from a bare no-question state.
+      * ``"no_question"`` – the card sits on Impediment but neither a
+        ``**Impediment:**`` comment nor an open gate exists. Typical for a
+        bare move (e.g. the `fab0719c` go/no-go card).
+
+    Walks the activity feed newest-first so the most recent signal wins —
+    e.g. a later ``**Impediment:**`` question re-opens the card after a
+    prior ``**Resolution:**`` answer.
+
+    See kanban card `c5eb6f89` ("Onderscheid dispatch-failure-impediment
+    van human-decision-impediment op het bord") — the field that surfaces
+    this classification is ``CardResponse.impediment_status``.
+    """
+    if card.column != "Impediment":
+        return None
+
+    # Open KanbanGate is the strongest "needs answer" signal — even a later
+    # `**Resolution:**` comment doesn't close an open gate (the gate
+    # transitions via its own answer endpoint, not via a comment). Frontend
+    # mirrors this: the gate's choice buttons stay live until the gate's
+    # status flips, regardless of any answer-comment posted alongside.
+    open_gate_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(KanbanGate)
+            .where(KanbanGate.card_id == card.id)
+            .where(KanbanGate.status == "open")
+        )
+    ).scalar_one()
+    if open_gate_count > 0:
+        return "needs_answer"
+
+    # Walk the comment op-log newest-first so the most recent signal wins.
+    stmt = (
+        select(KanbanOp)
+        .where(KanbanOp.entity_id == card.id)
+        .where(KanbanOp.op_type == "comment")
+        .order_by(KanbanOp.hlc.desc())
+    )
+    for op in (await session.execute(stmt)).scalars().all():
+        text = op.payload.get("text") or ""
+        if text.startswith(_DISPATCH_FAILURE_COMMENT_PREFIX):
+            return "dispatch_failed"
+        if text.startswith(_IMPEDIMENT_QUESTION_PREFIX):
+            return "needs_answer"
+        if text.startswith(_RESOLUTION_ANSWER_PREFIX):
+            # The latest resolution wins: the impediment is no longer pending.
+            return "resolved"
+    return "no_question"
 
 
 # Prefix for the comment posted on the *original* Done card when a human
