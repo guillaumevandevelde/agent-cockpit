@@ -1,8 +1,22 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { CardItem } from "./CardItem";
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("../api", async (importOriginal) => {
+  const actual = (await importOriginal()) as { kanbanApi: Record<string, unknown> };
+  const stub: Record<string, ReturnType<typeof vi.fn>> = {};
+  for (const key of Object.keys(actual.kanbanApi)) {
+    stub[key] = vi.fn(async () => ({}));
+  }
+  return { kanbanApi: stub };
+});
+
+const { kanbanApi } = await import("../api");
+const { CardItem } = await import("./CardItem");
 import type { Card } from "../types";
 
 const baseCard: Card = {
@@ -201,5 +215,224 @@ describe("CardItem ReadyStateBadge", () => {
     expect(screen.queryByText("Ready")).toBeNull();
     expect(screen.queryByText("Blocked")).toBeNull();
     expect(screen.queryByText("Dispatching")).toBeNull();
+  });
+});
+
+// Per kanban card `c5eb6f89`: the Impediment column can hold cards for three
+// different reasons (open question / dispatch failure / bare move), and the
+// board UI must show a different affordance per cause so the operator can
+// tell at a glance whether a blocked card needs a written answer or an
+// infra redispatch.
+describe("CardItem Impediment status badge", () => {
+  it("renders no badge for an Impediment card without an impediment_status", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "Impediment" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("impediment-status-badge")).toBeNull();
+  });
+
+  it("renders a 'needs answer' badge when impediment_status='needs_answer'", () => {
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "needs_answer",
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByTestId("impediment-status-badge");
+    expect(badge.getAttribute("data-impediment-status")).toBe("needs_answer");
+    expect(badge.textContent).toMatch(/needs answer/);
+  });
+
+  it("renders a 'dispatch failed' (destructive) badge when impediment_status='dispatch_failed'", () => {
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "dispatch_failed",
+        }}
+        onOpen={() => {}}
+        projectPath="/proj"
+      />,
+    );
+    const badge = screen.getByTestId("impediment-status-badge");
+    expect(badge.getAttribute("data-impediment-status")).toBe("dispatch_failed");
+    expect(badge.textContent).toMatch(/dispatch failed/);
+  });
+
+  it("renders a 'resolved' badge for an answered impediment", () => {
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "resolved",
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByTestId("impediment-status-badge");
+    expect(badge.getAttribute("data-impediment-status")).toBe("resolved");
+    expect(badge.textContent).toMatch(/resolved/);
+  });
+
+  it("renders a subtle 'no question' badge for a bare-move Impediment card", () => {
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "no_question",
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByTestId("impediment-status-badge");
+    expect(badge.getAttribute("data-impediment-status")).toBe("no_question");
+    expect(badge.textContent).toMatch(/no question/);
+  });
+
+  it("does NOT render an impediment badge for cards outside the Impediment column", () => {
+    // Defensive: the field is null on the wire for non-Impediment cards, but
+    // even if a stale state somehow hands a status to a Backlog card, the
+    // UI must not show the badge — the operator should treat Backlog /
+    // Doing / etc. the same as before.
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Backlog",
+          impediment_status: "needs_answer",
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("impediment-status-badge")).toBeNull();
+  });
+});
+
+describe("CardItem dispatch_failed Redispatch quick-action", () => {
+  afterEach(() => {
+    vi.mocked(kanbanApi.redispatch).mockReset();
+  });
+
+  it("renders a Redispatch button for dispatch_failed Impediment cards when projectPath is set", () => {
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "dispatch_failed",
+        }}
+        onOpen={() => {}}
+        projectPath="/proj"
+      />,
+    );
+    expect(screen.getByTestId("redispatch-quick-action")).not.toBeNull();
+  });
+
+  it("does NOT render the Redispatch button for non-dispatch_failed Impediment cards", () => {
+    // `needs_answer`, `resolved`, and `no_question` should not get a
+    // Redispatch quick-action — only the infrastructure-broken cause needs
+    // a clickable Redispatch here.
+    for (const status of ["needs_answer", "resolved", "no_question"] as const) {
+      const { unmount } = render(
+        <CardItem
+          card={{
+            ...baseCard,
+            column: "Impediment",
+            impediment_status: status,
+          }}
+          onOpen={() => {}}
+          projectPath="/proj"
+        />,
+      );
+      expect(screen.queryByTestId("redispatch-quick-action")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("does NOT render the Redispatch button when projectPath is missing", () => {
+    // Defensive: tests / stories sometimes pass a card without a project.
+    // Without a path the API call would fail; better to hide the button
+    // entirely than to render a broken one.
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "dispatch_failed",
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("redispatch-quick-action")).toBeNull();
+  });
+
+  it("calls kanbanApi.redispatch and stops propagation on click", async () => {
+    vi.mocked(kanbanApi.redispatch).mockResolvedValue({
+      session_name: "k-test-abcd",
+    });
+    const onOpen = vi.fn();
+
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "dispatch_failed",
+          agent: "engineer",
+        }}
+        onOpen={onOpen}
+        projectPath="/proj"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("redispatch-quick-action"));
+
+    await waitFor(() =>
+      expect(kanbanApi.redispatch).toHaveBeenCalledWith(
+        baseCard.id, "/proj", "engineer",
+      ),
+    );
+    // The card's outer onClick must NOT have fired — Redispatch is a
+    // quick-action that bypasses the drawer.
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("falls back to passing agent=undefined when card.agent is unset", async () => {
+    // Mirror the existing redispatchNow() in CardDrawer: missing card.agent
+    // means the API picks the column default. CardItem mirrors this so the
+    // two call sites can't drift.
+    vi.mocked(kanbanApi.redispatch).mockResolvedValue({
+      session_name: "k-test-efgh",
+    });
+
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "dispatch_failed",
+        }}
+        onOpen={() => {}}
+        projectPath="/proj"
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("redispatch-quick-action"));
+
+    await waitFor(() =>
+      expect(kanbanApi.redispatch).toHaveBeenCalledWith(
+        baseCard.id, "/proj", undefined,
+      ),
+    );
   });
 });

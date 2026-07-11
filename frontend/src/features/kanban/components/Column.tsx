@@ -17,6 +17,7 @@ export function Column({
   onDragStartColumn,
   onDropColumn,
   cardMeta,
+  projectPath,
 }: {
   column: Col;
   kanbanColumn?: KanbanColumn;
@@ -26,6 +27,10 @@ export function Column({
   onDragStartColumn?: (columnId: string) => void;
   onDropColumn?: (targetColumnId: string) => void;
   cardMeta?: Map<string, CardMeta>;
+  // Threaded down to CardItem so the dispatch_failed → Redispatch
+  // quick-action can call kanbanApi.redispatch without bouncing through
+  // the drawer. Optional for backwards compat with tests that don't care.
+  projectPath?: string;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -94,6 +99,7 @@ export function Column({
                 onOpen={onOpen}
                 readyState={meta?.readyState}
                 blockerTitles={meta?.blockerTitles}
+                projectPath={projectPath}
               />
             </div>
           );

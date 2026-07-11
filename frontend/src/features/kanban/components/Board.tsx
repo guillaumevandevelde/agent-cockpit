@@ -9,6 +9,7 @@ export function Board({
   onDropCardAt,
   onReorderColumns,
   cardMeta,
+  projectPath,
 }: {
   columns: KanbanColumn[];
   cards: Card[];
@@ -16,6 +17,9 @@ export function Board({
   onDropCardAt: (cardId: string, column: string, index: number) => void;
   onReorderColumns?: (sourceId: string, targetId: string) => void;
   cardMeta?: Map<string, CardMeta>;
+  // Threaded down to Column → CardItem so the Impediment `dispatch_failed`
+  // badge can render a Redispatch quick-action.
+  projectPath?: string;
 }) {
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
 
@@ -37,6 +41,7 @@ export function Board({
             setDraggedColumn(null);
           }}
           cardMeta={cardMeta}
+          projectPath={projectPath}
         />
       ))}
     </div>

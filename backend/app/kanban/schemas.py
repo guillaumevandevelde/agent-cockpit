@@ -85,6 +85,14 @@ class CardResponse(BaseModel):
     # in Done). Both null when no such op exists. See service.enrich_done_info.
     done_summary: str | None = None
     completed_at: datetime | None = None
+    # Classification of *why* the card is in the Impediment column, so the
+    # board UI can render a different affordance per cause (operator needs
+    # to know "needs an answer" vs. "needs a Redispatch" vs. "no question
+    # set"). One of ``"needs_answer"`` / ``"dispatch_failed"`` /
+    # ``"resolved"`` / ``"no_question"``; ``None`` for cards outside
+    # Impediment. Derived at request time from open KanbanGate rows + the
+    # op-log comment feed — see service.impediment_status_for_card.
+    impediment_status: str | None = None
 
 
 class CardCreate(BaseModel):

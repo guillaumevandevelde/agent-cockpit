@@ -302,6 +302,7 @@ export default function KanbanPage() {
         cardMeta={cardMeta}
         onOpen={setOpen}
         onDropCardAt={onDropCardAt}
+        projectPath={projectPath}
         onReorderColumns={async (sourceId, targetId) => {
           const source = columns.find((c) => c.id === sourceId);
           const target = columns.find((c) => c.id === targetId);

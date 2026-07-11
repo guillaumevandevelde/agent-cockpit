@@ -2164,17 +2164,21 @@ async def _move_to_impediment_after_repeated_failures(
 
     Tags the card with the ``error`` label so the board can visually distinguish
     a *technical* dispatch failure (rendered red in the UI) from a card that a
-    human deliberately parked in Impediment for a decision."""
+    human deliberately parked in Impediment for a decision. The comment itself
+    carries a structured ``[dispatch-failure]`` prefix so the per-card
+    classification in `service.impediment_status_for_card` can detect this
+    state deterministically (a substring on prose would be fragile)."""
     await apply_operation(
         session, op_type="comment", entity_type="comment",
         project_key=project_key, entity_id=card.id,
         payload={"text": (
-            f"Session `{session_name}` failed to dispatch {failures} times in a "
-            "row — moved to Impediment instead of retrying again. This usually "
-            "means the dispatch target is broken (a stale --resume worktree, a "
-            "missing sandcastle config, ...) rather than the task itself failing. "
-            "Check the backend logs for the actual spawn error, fix the underlying "
-            "issue, then redispatch."
+            f"[dispatch-failure] Session `{session_name}` failed to dispatch "
+            f"{failures} times in a row — moved to Impediment instead of "
+            "retrying again. This usually means the dispatch target is broken "
+            "(a stale --resume worktree, a missing sandcastle config, ...) "
+            "rather than the task itself failing. Check the backend logs for "
+            "the actual spawn error, fix the underlying issue, then "
+            "redispatch."
         )},
     )
     labels = list(card.labels or [])

@@ -244,9 +244,11 @@ async def list_cards(
         items = []
         for c in rows:
             done_summary, completed_at = await service.enrich_done_info(s, c.id)
+            impediment_status = await service.impediment_status_for_card(s, c)
             items.append(CardResponse.model_validate(c).model_copy(update={
                 "done_summary": done_summary,
                 "completed_at": completed_at,
+                "impediment_status": impediment_status,
             }))
         return {"items": items}
 
@@ -256,9 +258,11 @@ async def _reload(s, cid: str) -> CardResponse:
     if card is None:
         raise HTTPException(404, "card not found")
     done_summary, completed_at = await service.enrich_done_info(s, cid)
+    impediment_status = await service.impediment_status_for_card(s, card)
     return CardResponse.model_validate(card).model_copy(update={
         "done_summary": done_summary,
         "completed_at": completed_at,
+        "impediment_status": impediment_status,
     })
 
 
