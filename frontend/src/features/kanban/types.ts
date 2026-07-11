@@ -125,8 +125,15 @@ export interface Card {
   // the CardDrawer shows a banner only when both are set.
   done_summary?: string | null;
   completed_at?: string | null;
+  // Free-form key/value bag mirrored from the backend `metadata` column. The
+  // spec-driven-development Fase 1 card→spec link lives at `metadata[SPEC_DOC_META_KEY]`.
+  metadata?: Record<string, unknown> | null;
   deliverables: Deliverable[];
 }
+
+// Machine-readable card → spec-doc link key inside `Card.metadata`. Mirrors the
+// backend `SPEC_DOC_META_KEY` in app/kanban/schemas.py — keep the two in sync.
+export const SPEC_DOC_META_KEY = "spec_doc";
 
 export interface Gate {
   id: string;

@@ -105,6 +105,7 @@ export const kanbanApi = {
       scheduled_at?: string | null;
       analyst_agent_id?: string | null;
       executor_agent_id?: string | null;
+      metadata?: Record<string, unknown> | null;
     }
   ): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}`, {
