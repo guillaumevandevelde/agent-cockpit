@@ -95,19 +95,25 @@ Voor de canonieke naamgeving van de kernbegrippen (Agent / Provider / CLI / Mode
 **`terminology.md`** — bron van waarheid voor naamgeving, vastgelegd door kind-kaart 1 van het
 terminologie-parent-project. Latere kind-kaarten renamen code naar deze glossary toe.
 
-Er zijn **drie parallelle plan-/spec-bomen** in `docs/`. De regel welke leidend is:
+Er zijn **drie plan-/spec-bomen** in `docs/`, maar precies **één is canoniek**. De
+volledige, afdwingbare index staat in **[`docs/cockpit/README.md`](./README.md)**; de
+regel welke leidend is:
 
 | Boom | Doel | Leidend? |
 |---|---|---|
-| `docs/cockpit/` | Langlevende fork-architectuur, ontwerp, beslissingen, follow-ups. Topic-naam, niet gedateerd. | **Ja — bron van waarheid voor "hoe werkt de fork vandaag".** |
-| `docs/superpowers/{plans,specs}/` | Werkoutput van de `superpowers:writing-plans` / `superpowers:brainstorming`-skills: één paar `<datum>-<naam>-design.md` + `<datum>-<naam>.md` per taak. | Nee — taak-specifiek, wordt verplaatst naar `docs/cockpit/` zodra het werk landt. |
-| `docs/plans/` | Pre-fork claude-deck plans (VitePress-site). Geen kanban-inhoud. | **Nee — legacy, niet meer gebruiken voor nieuw werk.** |
+| `docs/cockpit/` | Langlevende fork-architectuur, ontwerp, beslissingen, follow-ups. Topic-naam, niet gedateerd. | **Ja — bron van waarheid voor "hoe werkt de fork vandaag".** Index: [`README.md`](./README.md). |
+| `docs/superpowers/{plans,specs}/` | Werkoutput van de `superpowers:writing-plans` / `superpowers:brainstorming`-skills: één paar `<datum>-<naam>-design.md` + `<datum>-<naam>.md` per taak. **Promoot naar `docs/cockpit/` zodra het werk landt** — promotie-contract + ledger in [`../superpowers/README.md`](../superpowers/README.md), advies-check `scripts/check-superpowers-promotions.sh`. | Nee — taak-specifieke werkoutput. |
+| `docs/plans-legacy/` | Pre-fork claude-deck plans (gearchiveerd 2026-07-10, voorheen `docs/plans/`). Geen kanban-inhoud. | **Nee — legacy, niet meer gebruiken.** Zie [`../plans-legacy/README.md`](../plans-legacy/README.md). |
 
 Bij overlap tussen cockpit en superpowers (bijv. kanban, scheduled-messages, agent-mail):
 **lees `docs/cockpit/` eerst**, en gebruik `docs/superpowers/` alleen om de TDD-stappen
 of ontwerp-rationale van één specifieke taak te volgen. Een superpowers-plan dat in
 `docs/cockpit/` is samengevat is geen "tweede waarheid" — het cockpit-document is
 canoniek en het plan is de uitvoering ervan.
+
+> **Consolidatie-achtergrond:** deze drie-bomen-regel is in Fase 0 van de spec-SSOT-lijn
+> van proza naar *afdwingbaar* getild — zie
+> [`spec-driven-development-fase-0-decision.md`](./spec-driven-development-fase-0-decision.md).
 
 ### Documenten-overzicht
 

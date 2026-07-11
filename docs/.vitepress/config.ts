@@ -10,7 +10,7 @@ export default defineConfig({
   ],
 
   srcExclude: [
-    'plans/**',
+    'plans-legacy/**',
     'superpowers/**',
     'cockpit/**',
   ],
