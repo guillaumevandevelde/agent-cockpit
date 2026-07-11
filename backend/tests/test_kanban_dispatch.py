@@ -113,6 +113,32 @@ def test_card_prompt_includes_problem_flag_reminder():
     assert "create_card" in prompt
 
 
+def test_card_prompt_executor_phase_has_retro_and_ship_steps():
+    class _C:
+        title = "T"
+        description = ""
+    prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct",
+                                        phase="executor")
+    assert "session-retro" in prompt
+    assert "merge your branch into master" in prompt
+    assert "npm run lint && npm run build" in prompt
+
+
+def test_card_prompt_analyst_phase_has_retro_but_no_ship_steps():
+    """Analyst cards are planning-only: they get the retro step and the
+    move-to-Done exit, but none of the engineer merge/frontend-ship steps
+    (see docs/cockpit/headless-session-retro-decision.md)."""
+    class _C:
+        title = "T"
+        description = ""
+    prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct",
+                                        phase="analyst")
+    assert "session-retro" in prompt
+    assert "Move the parent card to Done" in prompt
+    assert "merge your branch into master" not in prompt
+    assert "npm run lint && npm run build" not in prompt
+
+
 # ---- dispatch_project: the core ------------------------------------------
 
 @pytest.mark.asyncio
