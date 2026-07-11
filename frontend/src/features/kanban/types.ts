@@ -48,6 +48,31 @@ export interface ColumnOverride {
 // docs/superpowers/specs/2026-07-10-kanban-model-override-design.md).
 export const DEFAULT_MODEL_SUGGESTIONS = ["sonnet", "opus", "haiku"] as const;
 
+// Model suggestions for the MiniMax provider. MiniMax exposes its models via
+// the Anthropic-compatible endpoint (the ANTHROPIC_MODEL env var — see
+// backend/app/services/agentic_cli/provider_env.py MINIMAX_DEFAULT_MODEL). The
+// dynamic getModelOptions() list is claude-code-only, so without this a
+// minimax column/override would suggest sonnet/opus/haiku, which MiniMax
+// rejects. Not an enum -- free text is still accepted; these only back the
+// datalist. Keep in sync with the backend default by hand.
+export const MINIMAX_MODEL_SUGGESTIONS = ["MiniMax-M3[1m]", "MiniMax-M3"] as const;
+
+// Providers with a static, non-claude model suggestion list. Providers absent
+// here fall back to the dynamic claude-code options from getModelOptions().
+export const PROVIDER_MODEL_SUGGESTIONS: Record<string, readonly string[]> = {
+  minimax: MINIMAX_MODEL_SUGGESTIONS,
+};
+
+// Resolve which model suggestions to show for a given provider. Falls back to
+// the dynamic claude-code list when the provider has no static list (or is
+// unset / the "column default" sentinel).
+export function modelSuggestionsForProvider(
+  provider: string | null | undefined,
+  fallback: readonly string[],
+): readonly string[] {
+  return (provider && PROVIDER_MODEL_SUGGESTIONS[provider]) || fallback;
+}
+
 // Work-type → persona routing. Mirrors backend/app/kanban/schemas.py
 // WORK_TYPE_PERSONA_DEFAULTS. Kept in sync by hand — there are only four
 // work_types and the mapping rarely changes; promote to a generated
