@@ -612,6 +612,7 @@ def extract_revisit_question(activity) -> str | None:
 
 
 def build_card_prompt(card, *, persona: str | None, ship_mode: str,
+                      phase: str = "executor",
                       impediment_question: str | None = None,
                       impediment_answer: str | None = None,
                       revisit_question: str | None = None,
@@ -674,11 +675,15 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         revisit_section = "".join(parts)
 
     # Standardised session-end workflow — provider-agnostic, works with any
-    # coding agent (Claude Code, OpenCode, Codex CLI, …).  The agent runs
-    # tests → ships (merge/PR) → attaches the deliverable → moves the card
-    # to Done.  The backend then kills the tmux session and removes the
-    # worktree automatically.
-    ship_instructions = _build_ship_instructions(ship_mode)
+    # coding agent (Claude Code, OpenCode, Codex CLI, …). Executor/engineer
+    # sessions run tests → ship (merge/PR) → attach the deliverable → retro →
+    # move the card to Done. Analyst sessions never ship code (planning-only,
+    # exits via move_parent → Done) so they get a lighter retro-then-move
+    # workflow instead of the full engineer ship instructions.
+    if phase == "analyst":
+        ship_instructions = _build_analyst_session_end_instructions()
+    else:
+        ship_instructions = _build_ship_instructions(ship_mode)
     problem_flag_instructions = _build_problem_flag_instructions()
 
     return (
@@ -979,22 +984,22 @@ def _build_ship_instructions(ship_mode: str) -> str:
 
 
 def _build_session_retro_step(step_number: int = 6) -> str:
-    """Step injected between ``attach_deliverable`` and ``move_card → Done``.
+    """Step injected before ``move_card → Done`` (after ``attach_deliverable``
+    for executor/engineer cards; directly before the parent move for analyst
+    cards).
 
     Inlines the headless-trim version of the ``session-retro`` skill so the
     step works for any spawned agent (whether or not it can read the skill
     files). Mirrors the source of truth at
     ``.claude/skills/session-retro/SKILL.md`` — keep them in sync.
 
-    The retro runs *after* the work is shipped and the deliverable is attached,
-    *before* the card moves to ``Done`` (the step number shifts accordingly in
-    the caller). It's wired only for executor/engineer cards: analyst cards
-    exit via the ``move_parent → Done`` path in ``analyst_prompt.py`` and have
-    no ship step, so a retro there is a separate (small) wiring decision.
+    Wired for both phases: executor/engineer cards run it after shipping,
+    analyst cards run it right before the ``move_parent → Done`` exit (see
+    ``_build_analyst_session_end_instructions``).
 
     The ``step_number`` argument lets the caller pick the right place in the
     numbered sequence — 6 in direct mode (attach=5, move=7), 7 in
-    pull-request mode (attach=6, move=8).
+    pull-request mode (attach=6, move=8), 1 in the analyst flow (move=2).
     """
     return (
         f"{step_number}. **Run the session-end retro** — invoke the "
@@ -1008,6 +1013,25 @@ def _build_session_retro_step(step_number: int = 6) -> str:
         "~3–5 tool calls; don't burn the ship budget writing lengthy "
         "descriptions.\n"
     )
+
+
+def _build_analyst_session_end_instructions() -> str:
+    """Session-end workflow for analyst-phase cards.
+
+    Analyst sessions are planning-only — no code is shipped, no worktree
+    merge happens — so they get a lighter close than
+    ``_build_ship_instructions``: run the retro, then the existing
+    ``move_card(parent → Done)`` exit. No sync/test/commit/merge steps.
+    """
+    retro = _build_session_retro_step(step_number=1)
+    move = (
+        "2. **Move the parent card to Done** — ``move_card`` on the parent "
+        "with ``column=\"Done\"`` and a summary of the plan (``summary`` is "
+        "required for this move; the call is rejected without it). This is "
+        "your exit signal — the backend then kills this session and removes "
+        "the worktree.\n"
+    )
+    return retro + move
 
 
 
@@ -1611,6 +1635,7 @@ async def _run_card(
         override_model, card.model, column_default_model, persona_model,
     )
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
+        phase=phase,
         impediment_question=impediment_question,
         impediment_answer=impediment_answer,
         revisit_question=revisit_question,

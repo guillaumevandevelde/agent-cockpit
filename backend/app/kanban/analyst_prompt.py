@@ -26,9 +26,11 @@ Werkwijze:
    plan-fase. Direct uitvoerbare kinderen krijgen een passend work_type
    (feature/bug/chore) of laten het veld leeg.
 4. Schrijf een plan-attachment op de parent via add_plan_attachment.
-5. Verplaats de parent-kaart naar 'Done' met summary
+5. Draai de session-retro (zie sectie "Session-end workflow" in je
+   dispatch-prompt) vóórdat je de parent naar Done verplaatst.
+6. Verplaats de parent-kaart naar 'Done' met summary
    'Plan opgesplitst in N taken'.
-6. Stop de sessie (move_card naar Done is je exit-signaal).
+7. Stop de sessie (move_card naar Done is je exit-signaal).
 
 Review-kaarten (metadata.reviewed_card_id):
 Als de kaart een `metadata.reviewed_card_id` heeft, beoordeel je al-opgeleverd

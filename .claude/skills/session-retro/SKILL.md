@@ -1,6 +1,6 @@
 ---
 name: session-retro
-description: Use when an engineer or executor session is about to close (right before move_card → Done) and you want to harvest self-improvement insights from THIS session — workflow friction, repeated tool failures, missed automations, surfaced tech debt, or instruction ambiguity that ate real time — and surface them as Backlog kanban cards so they survive past this transcript. Distinct from flag-problem (one-off in-session observation) and session-problem-scan (sweep over OTHER sessions).
+description: Use when any dispatched session — executor/engineer or analyst — is about to close (right before move_card → Done) and you want to harvest self-improvement insights from THIS session — workflow friction, repeated tool failures, missed automations, surfaced tech debt, or instruction ambiguity that ate real time — and surface them as Backlog kanban cards so they survive past this transcript. Distinct from flag-problem (one-off in-session observation) and session-problem-scan (sweep over OTHER sessions).
 ---
 
 # session-retro
@@ -26,21 +26,24 @@ transcripts; this skill reads your own. Don't substitute one for the other.
 ## When to use
 
 - The host card's prompt told you to invoke it (dispatcher injects this
-  in the session-end workflow of executor/engineer cards).
+  in the session-end workflow of **every** dispatched card — executor
+  and analyst alike).
 - A human says "do a retro on this session" / "what could have gone
   better".
 - You're about to move_card → Done and want one last pass to harvest
   lessons before the transcript closes.
+
+This applies to analyst sessions too: even though no code ships, an
+analyst session still burns tool calls, reads context, and can surface
+process friction (a confusing card description, a missing plan
+attachment, a dedupe miss) worth capturing. The retro runs right
+before the `move_parent → Done` exit, not after a ship step.
 
 ## When NOT to use
 
 - The session barely ran (one trivial task, nothing to learn from). A
   forced retro on a 3-tool-call session is noise — say "no findings" and
   skip to Step 6.
-- You're in an analyst session (no code shipped, transcript is mostly
-  research + a plan-attachment). Analyst cards exit via the
-  move_parent→Done path; retro is wired only for executor/engineer
-  (see plan § Ontwerpkeuzes).
 - The improvement is the task itself — just do it, don't file a card
   about the card you're closing. Same gotcha as `flag-problem`.
 - The finding belongs to a different mechanism: a hard blocker you can't
