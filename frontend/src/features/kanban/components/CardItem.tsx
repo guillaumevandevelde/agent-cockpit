@@ -100,7 +100,11 @@ export function CardItem({
           </Badge>
         )}
         {labels.map((l) => (
-          <Badge key={l} variant="outline" className="text-[10px] font-normal">
+          <Badge
+            key={l}
+            variant={l === "error" ? "destructive" : "outline"}
+            className="text-[10px] font-normal"
+          >
             {l}
           </Badge>
         ))}

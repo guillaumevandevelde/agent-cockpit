@@ -157,6 +157,11 @@ MAX_DISPATCH_FAILURES = 3
 # says nothing about whether the dispatch *target* itself is broken — see
 # _release_dead_claim.
 DEAD_ON_ARRIVAL_SECONDS = 30
+# Label applied to a card auto-moved to Impediment by a *technical* dispatch
+# failure (repeated spawn failures), so the board can render it red and
+# distinguish it from a card a human parked in Impediment for a decision. The
+# frontend special-cases this exact string (see CardItem.tsx).
+ERROR_LABEL = "error"
 
 
 # ---- enablement: device-local, stored in KanbanMeta (not part of the op-log) ----
@@ -2155,7 +2160,11 @@ async def _move_to_impediment_after_repeated_failures(
     move it to Impediment instead of retrying again — a card that can never
     actually start (bad transport config, missing sandcastle setup, a stale
     --resume worktree, ...) needs a human, not an infinite retry loop burning
-    dispatch ticks."""
+    dispatch ticks.
+
+    Tags the card with the ``error`` label so the board can visually distinguish
+    a *technical* dispatch failure (rendered red in the UI) from a card that a
+    human deliberately parked in Impediment for a decision."""
     await apply_operation(
         session, op_type="comment", entity_type="comment",
         project_key=project_key, entity_id=card.id,
@@ -2168,6 +2177,13 @@ async def _move_to_impediment_after_repeated_failures(
             "issue, then redispatch."
         )},
     )
+    labels = list(card.labels or [])
+    if ERROR_LABEL not in labels:
+        labels.append(ERROR_LABEL)
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key=project_key, entity_id=card.id, payload={"labels": labels},
+        )
     await apply_operation(
         session, op_type="move", entity_type="card",
         project_key=project_key, entity_id=card.id, payload={"column": "Impediment"},

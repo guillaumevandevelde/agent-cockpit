@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shlex
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -60,6 +62,49 @@ def _session_name_for(directory: str, preferred: str | None = None) -> str:
     basename = Path(directory).name or "project"
     safe_basename = _sanitize_session_name(basename) or "project"
     return f"{safe_basename}-{uuid.uuid4().hex[:4]}"
+
+
+def _prompt_file_shell_command(command: list[str], prompt: str) -> tuple[str, str]:
+    """Deliver ``prompt`` to the tmux pane via a temp file instead of inlining it.
+
+    tmux caps a single ``new-session`` command at ~16KB (its imsg buffer) and
+    rejects anything larger with ``command too long``. Rendered card prompts —
+    especially executor child cards that prepend an 8KB+ ``PLAN CONTEXT`` section
+    to an already ~11KB base prompt — routinely blow past that, which made
+    ``spawn_session`` raise and the kanban dispatcher loop the card into
+    Impediment with only a generic "check the logs" comment. Writing the prompt to
+    a temp file and having the pane's shell ``cat`` it back keeps the tmux command
+    line tiny while claude still receives the full prompt (subject only to
+    ARG_MAX, ~2MB). The pane removes the file as soon as it has read it; the
+    caller unlinks it if the spawn never reaches the pane.
+
+    The prompt token is substituted in place wherever the CLI put it (trailing
+    positional for claude/codex/mimo, ``--prompt``/``-i`` for opencode/copilot),
+    so this works regardless of prompt placement. ``$(cat …)`` strips any trailing
+    newline from the delivered prompt, which is immaterial for an agent prompt.
+    """
+    fd, path = tempfile.mkstemp(prefix="cck-prompt-", suffix=".txt")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+    parts = [
+        '"$CCK_PROMPT"' if part == prompt else shlex.quote(part)
+        for part in command
+    ]
+    qpath = shlex.quote(path)
+    shell_command = (
+        f'CCK_PROMPT="$(cat {qpath})"; rm -f {qpath}; exec ' + " ".join(parts)
+    )
+    return shell_command, path
+
+
+def _unlink_prompt_file(path: str | None) -> None:
+    """Best-effort remove a prompt temp file after a spawn that never ran the pane."""
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def _spawn_session_remote(
@@ -141,8 +186,16 @@ def spawn_session(
         env_flags += ["-e", f"{key}={value}"]
 
     if host_data:
+        # Remote still inlines the command over SSH — a separate transport with
+        # its own arg limits; the tmux ~16KB imsg cap is a local-socket concern.
         _spawn_session_remote(host_data, cli.display_name, name, directory, shell_command, env_flags)
     else:
+        # Deliver the prompt via a temp file so a large prompt never overflows
+        # tmux's ~16KB command-line limit ("command too long"). See
+        # _prompt_file_shell_command.
+        prompt_file: str | None = None
+        if options.prompt:
+            shell_command, prompt_file = _prompt_file_shell_command(command, options.prompt)
         try:
             result = subprocess.run(
                 ["tmux", "new-session", "-d", "-s", name, "-c", directory, *env_flags, shell_command],
@@ -152,10 +205,17 @@ def spawn_session(
             )
             if result.returncode != 0:
                 raise ValueError(f"tmux new-session failed: {result.stderr.strip()}")
-        except FileNotFoundError:
-            raise ValueError("tmux is not installed or not in PATH")
-        except subprocess.TimeoutExpired:
-            raise ValueError("tmux new-session timed out")
+        except FileNotFoundError as exc:
+            _unlink_prompt_file(prompt_file)
+            raise ValueError("tmux is not installed or not in PATH") from exc
+        except subprocess.TimeoutExpired as exc:
+            _unlink_prompt_file(prompt_file)
+            raise ValueError("tmux new-session timed out") from exc
+        except Exception:
+            # tmux returned non-zero (or any other failure): the pane never ran,
+            # so it will not remove the prompt file — clean it up here.
+            _unlink_prompt_file(prompt_file)
+            raise
 
     _spawned_sessions[name] = {
         "cli": cli.id,
