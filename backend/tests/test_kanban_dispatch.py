@@ -1129,7 +1129,7 @@ def test_worktree_transport_creates_from_origin_master(monkeypatch, tmp_path):
     import app.kanban.dispatch as d
     monkeypatch.setattr(d.subprocess, "run", fake_run)
     monkeypatch.setattr(
-        "app.services.agent_bridge.spawn.spawn_session", fake_spawn)
+        "app.services.runs.spawn.spawn_session", fake_spawn)
 
     res = d.worktree_transport(
         directory=str(tmp_path), prompt="hi", session_name="k-proj-abcd")
@@ -1161,7 +1161,7 @@ def test_worktree_transport_removes_worktree_when_spawn_fails(monkeypatch, tmp_p
 
     import app.kanban.dispatch as d
     monkeypatch.setattr(d.subprocess, "run", fake_run)
-    monkeypatch.setattr("app.services.agent_bridge.spawn.spawn_session", fake_spawn)
+    monkeypatch.setattr("app.services.runs.spawn.spawn_session", fake_spawn)
 
     with pytest.raises(RuntimeError):
         d.worktree_transport(
@@ -1196,7 +1196,7 @@ def test_mint_session_name_falls_back_to_project_path():
 
 def test_mint_session_name_avoids_collision_with_live_tmux_session(monkeypatch):
     # If the minted name happens to already be a running tmux session,
-    # spawn_session's own collision fallback (agent_bridge.spawn._session_name_for)
+    # spawn_session's own collision fallback (runs.spawn._session_name_for)
     # silently renames the *actual* tmux session -- but the kanban claim, git
     # worktree and git branch were already committed under the original name.
     # cleanup_session_for_card then looks up a tmux session that never existed
@@ -2060,7 +2060,7 @@ def test_make_resume_transport_records_call():
         return {"session_name": session_name}
 
     import unittest.mock as mock
-    with mock.patch("app.services.agent_bridge.spawn.spawn_session", fake_spawn), \
+    with mock.patch("app.services.runs.spawn.spawn_session", fake_spawn), \
          mock.patch("app.services.scheduling.session_registry.session_registry.can_add_session",
                     return_value=True):
         transport = dispatch.make_resume_transport(
@@ -3963,6 +3963,14 @@ async def test_next_card_gate_distinguishes_race_from_genuine_miss():
             plan_deliverable_id="gone",
         )
         await s.commit()
+
+    # Re-query with a fresh session, mirroring how a real dispatch tick always
+    # opens a new `KanbanSessionLocal()` (see `run_dispatch_tick`). Reusing `s`
+    # above would serve `missed_card.deliverables` from the identity map's
+    # already-loaded (pre-link) collection instead of the just-committed row,
+    # since `expire_on_commit=False` never invalidates already-loaded
+    # relationships without an explicit `expire`/`refresh`.
+    async with KanbanSessionLocal() as s:
         cards = await list_cards(s, PK)
         missed_card = next(c for c in cards if c.id == raced)
         # No longer gated — it IS eligible now (plan_ref present).
