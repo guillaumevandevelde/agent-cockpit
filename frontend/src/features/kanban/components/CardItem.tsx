@@ -1,3 +1,4 @@
+import { RefreshCw } from "lucide-react";
 import { Card as UiCard } from "@/components/ui/card";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { CLICKABLE_CARD } from "@/lib/constants";
@@ -15,6 +16,22 @@ function isFutureSchedule(scheduledAt: string | null): boolean {
   return !!scheduledAt && new Date(scheduledAt).getTime() > Date.now();
 }
 
+// Formats the "To Resume" auto-resume badge text. Deliberately a compact
+// "Xh Ym" style rather than Intl.RelativeTimeFormat's "in 2 hours" — the
+// badge is small and stacked among other badges, so the terser form fits.
+function formatAutoResumeLabel(scheduledAt: string): string {
+  const deltaMs = new Date(scheduledAt).getTime() - Date.now();
+  if (deltaMs <= 0) return "Auto pending";
+  if (deltaMs < 60_000) return "Auto soon";
+  const totalMinutes = Math.round(deltaMs / 60_000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `Auto in ${days}d ${hours}h`;
+  if (hours > 0) return minutes > 0 ? `Auto in ${hours}h ${minutes}m` : `Auto in ${hours}h`;
+  return `Auto in ${minutes}m`;
+}
+
 export function CardItem({
   card,
   onOpen,
@@ -29,7 +46,12 @@ export function CardItem({
   const priority = card.priority && card.priority !== "none" ? card.priority : null;
   const labels = card.labels ?? [];
   const scheduledAt = card.scheduled_at ?? null;
+  const isToResume = card.column === "To Resume";
   const isPendingSchedule = isFutureSchedule(scheduledAt);
+  const autoResumeLabel = scheduledAt ? formatAutoResumeLabel(scheduledAt) : "Auto";
+  const autoResumeTooltip = scheduledAt
+    ? `${scheduledAt} (local: ${new Date(scheduledAt).toLocaleString()})`
+    : undefined;
   const workType = (card.work_type && (WORK_TYPES as readonly string[]).includes(card.work_type)
     ? (card.work_type as WorkType)
     : null);
@@ -47,7 +69,19 @@ export function CardItem({
         }
       }}
     >
-      <div className="font-medium text-sm">{card.title}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-medium text-sm">{card.title}</div>
+        {isToResume && (
+          <Badge
+            variant="outline"
+            className="shrink-0 text-[10px] font-normal border text-muted-foreground"
+            title={autoResumeTooltip}
+          >
+            <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
+            {autoResumeLabel}
+          </Badge>
+        )}
+      </div>
       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {readyState && (
           <ReadyStateBadge state={readyState} blockerTitles={blockerTitles} />
@@ -80,7 +114,7 @@ export function CardItem({
             &#129302; {card.agent}
           </Badge>
         )}
-        {isPendingSchedule && (
+        {isPendingSchedule && !isToResume && (
           <Badge variant="outline" className="text-[10px] font-normal">
             &#8987; {new Date(scheduledAt!).toLocaleString()}
           </Badge>
