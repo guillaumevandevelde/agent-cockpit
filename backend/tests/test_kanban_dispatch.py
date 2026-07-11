@@ -2719,6 +2719,20 @@ class TestBuildShipInstructions:
             # (c) explicit skip log when there is no frontend diff
             assert "geen frontend-diff — gate overgeslagen" in instructions
 
+    def test_frontend_gate_installs_deps_when_node_modules_missing(self):
+        """A dispatched worktree is a fresh ``git worktree add`` off
+        origin/master with no ``node_modules`` (gitignored), so the frontend
+        gate must install deps before running lint/build — otherwise the first
+        run dies with ``eslint: not found`` / ``vite: not found``. The install
+        must be guarded on a missing ``node_modules`` so repeat runs within the
+        same session don't re-pay the ~40s install."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            # reproducible install matching CI (quality.yml uses `npm ci`)
+            assert "npm ci" in instructions
+            # only install when node_modules is absent
+            assert "-d node_modules" in instructions or "-d frontend/node_modules" in instructions
+
     def test_pull_request_mode_polls_for_merge_before_done(self):
         instructions = dispatch._build_ship_instructions("pull-request")
         assert "gh pr ready" in instructions
