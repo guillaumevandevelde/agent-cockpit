@@ -48,6 +48,13 @@ vervolgens onafhankelijk op.
    markdown is voor de menselijke lezer (architectuur-overzicht, design-keuzes,
    bekende risico's); de `depends_on_graph` is de bron van waarheid voor de
    dispatcher.
+   - Bevat een kind-kaart zowel een informele probleem-/kern-fix-paragraaf als
+     een formele **Acceptance criteria**-sectie, dan wint bij tegenspraak altijd
+     de Acceptance criteria — die is scherper geformuleerd en is wat de executor
+     als contract leest. Doe voordat je de kind-kaart aanmaakt één self-consistency
+     pass: klopt je eigen samenvatting nog met je eigen acceptance criteria? Zo
+     niet, herschrijf de samenvatting totdat ze overeenkomen — schrijf ze niet
+     allebei en laat de executor uitzoeken welke klopt.
 5. **Parent verplaatsen naar Done** met `move_card(parent, "Done", summary="Plan
    opgesplitst in N taken: <korte lijst>")`. Dat is je exit-signaal — de sessie
    eindigt hier.
