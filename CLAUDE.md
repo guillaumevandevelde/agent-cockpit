@@ -186,3 +186,4 @@ GitHub Actions workflows in `.github/workflows/`:
 - Database lives at `backend/claude_registry.db`, created automatically on first run
 - No database migration system — schema changes require deleting the db
 - Backups stored in `~/.claude-registry/backups/`
+- `rm` is blocked via `.claude/settings.json` (`Bash(rm:*)` deny) — use `mv` to move unwanted files outside the repo, or `git clean -f -- <path>` for untracked files, instead
