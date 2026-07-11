@@ -1,6 +1,6 @@
 ---
 description: 'Voert een kanban-kaart end-to-end uit: analyse, implementatie, tests en zelf-review in één sessie'
-model: 'claude-opus-4-8'
+model: 'Sonnet-5
 tools: ['search/codebase', 'search/usages', 'read/readFile', 'edit/editFiles', 'execute/runInTerminal', 'execute/getTerminalOutput', 'web/fetch']
 name: 'engineer'
 ---
