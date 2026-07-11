@@ -200,6 +200,15 @@ drift een reëel, terugkerend probleem is.
   kaart.
 - *Waarom:* zonder machinaal leesbare kaart→spec-link is driftdetectie onmogelijk.
   *Aanname (executor bevestigt):* hergebruik `deliverable`/`meta` i.p.v. nieuw veld.
+- *Uitgevoerd (Fase 1):* **aanname bevestigd** — de bestaande `metadata`-bag volstaat,
+  geen nieuw kolom-veld nodig. De canonieke kaart→spec-link woont onder
+  `card.metadata["spec_doc"]` (repo-relatief pad naar een `docs/cockpit/`-doc, of een
+  URL). De sleutel is als één SSOT-constante vastgelegd: `SPEC_DOC_META_KEY` in
+  `backend/app/kanban/schemas.py` en gespiegeld in `frontend/src/features/kanban/types.ts`
+  — dit is het anker dat Fase 2 machinaal leest. Een analyst-plan-attachment
+  (`plan`/`plan_ref`-deliverable) geldt per definitie als de spec, dus zulke kaarten
+  hebben geen expliciete link nodig. De `CardDrawer` toont de link (of "Plan-attachment
+  geldt als de spec") en laat een mens hem inline zetten/wijzigen.
 
 **Fase 2 — Drift-signaal (hangt af van Fase 1)**
 - *Wat:* een check die een functionele diff flag't waarvan de gelinkte spec niet mee-

@@ -37,6 +37,7 @@ import { kanbanApi } from "../api";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
 import type { Card, ActivityEntry, Deliverable, Gate } from "../types";
+import { SPEC_DOC_META_KEY } from "../types";
 
 const LIVE_POLL_INTERVAL_MS = 3000;
 
@@ -589,6 +590,122 @@ function PlanTabContent({ card, onChanged }: { card: Card; onChanged: () => void
   );
 }
 
+// Card → spec-doc link (spec-driven-development Fase 1). A functional card names
+// the canonical `docs/cockpit/` doc it implements/updates under
+// `metadata[SPEC_DOC_META_KEY]` — the machine-readable anchor Fase 2 drift-
+// detection reads. Reuses the existing `metadata` bag (no new datamodel). An
+// analyst plan-attachment counts as the spec by definition, so a card with a
+// plan deliverable and no explicit link surfaces that instead.
+function SpecLinkSection({ card, onChanged }: { card: Card; onChanged: () => void }) {
+  const specDoc =
+    typeof card.metadata?.[SPEC_DOC_META_KEY] === "string"
+      ? (card.metadata[SPEC_DOC_META_KEY] as string).trim()
+      : "";
+  const hasPlan = card.deliverables.some(
+    (d) => d.kind === "plan" || d.kind === "plan_ref",
+  );
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(specDoc);
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = () => {
+    setDraft(specDoc);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const trimmed = draft.trim();
+    // metadata is replaced wholesale on update, so merge with the existing bag.
+    const rest = { ...(card.metadata ?? {}) };
+    if (trimmed) {
+      rest[SPEC_DOC_META_KEY] = trimmed;
+    } else {
+      delete rest[SPEC_DOC_META_KEY];
+    }
+    setSaving(true);
+    try {
+      await kanbanApi.updateCard(card.id, { metadata: rest });
+      setEditing(false);
+      onChanged();
+    } catch {
+      toast.error("Failed to save spec link");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isUrl = /^https?:\/\//i.test(specDoc);
+
+  return (
+    <div className="rounded-md border p-3 text-sm space-y-2" data-testid="spec-link-section">
+      <div className="text-xs font-semibold uppercase text-muted-foreground">
+        Spec
+      </div>
+      {editing ? (
+        <div className="space-y-2">
+          <input
+            className="w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="docs/cockpit/<doc>.md of https://…"
+            disabled={saving}
+            data-testid="spec-link-input"
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={save} disabled={saving} data-testid="spec-link-save">
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      ) : specDoc ? (
+        <div className="flex flex-wrap items-center gap-2" data-testid="spec-link-value">
+          <span className="font-mono">📄</span>
+          {isUrl ? (
+            <a
+              href={specDoc}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline break-all"
+            >
+              {specDoc}
+            </a>
+          ) : (
+            <span className="font-mono break-all">{specDoc}</span>
+          )}
+          <Button size="sm" variant="ghost" className="h-6 px-2" onClick={startEdit} data-testid="spec-link-edit">
+            Edit
+          </Button>
+        </div>
+      ) : hasPlan ? (
+        <div className="flex flex-wrap items-center gap-2" data-testid="spec-from-plan">
+          <span className="text-muted-foreground">
+            📋 Plan-attachment geldt als de spec.
+          </span>
+          <Button size="sm" variant="ghost" className="h-6 px-2" onClick={startEdit} data-testid="spec-link-edit">
+            Link doc
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted-foreground">Geen spec-link.</span>
+          <Button size="sm" variant="ghost" className="h-6 px-2" onClick={startEdit} data-testid="spec-link-edit">
+            Link doc
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CardDrawer({
   card,
   projectPath,
@@ -833,6 +950,8 @@ export function CardDrawer({
         <div className="text-sm">
           <MarkdownRenderer content={card.description || "_No description_"} />
         </div>
+
+        <SpecLinkSection card={card} onChanged={onChanged} />
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Select value={card.agent ?? AUTO} onValueChange={setAgent}>
