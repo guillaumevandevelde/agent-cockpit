@@ -53,6 +53,23 @@ describe("CardItem work_type badge", () => {
   });
 });
 
+describe("CardItem labels", () => {
+  it("renders the 'error' label as a red (destructive) badge", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, labels: ["error", "kanban"] }}
+        onOpen={() => {}}
+      />,
+    );
+    const errorBadge = screen.getByText("error");
+    // destructive variant uses the bg-destructive utility (see badge.tsx)
+    expect(errorBadge.className).toContain("bg-destructive");
+    // a normal label stays a plain outline badge
+    const plainBadge = screen.getByText("kanban");
+    expect(plainBadge.className).not.toContain("bg-destructive");
+  });
+});
+
 describe("CardItem To Resume auto-resume badge", () => {
   afterEach(() => {
     vi.useRealTimers();

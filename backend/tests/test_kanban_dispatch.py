@@ -3255,6 +3255,9 @@ async def test_reap_moves_to_impediment_after_max_dispatch_failures():
     assert card.column == "Impediment"
     assert card.claimed_by is None
     assert card.dispatch_failures == 0  # reset so a future redispatch starts fresh
+    # tagged so the board renders it red — a technical dispatch failure, not a
+    # human-parked impediment (see dispatch.ERROR_LABEL / CardItem.tsx)
+    assert dispatch.ERROR_LABEL in (card.labels or [])
 
 
 @pytest.mark.asyncio
@@ -3673,6 +3676,9 @@ async def test_reaper_stuck_session_repeated_failures_move_to_impediment(monkeyp
     assert card.column == "Impediment"
     assert card.claimed_by is None
     assert card.dispatch_failures == 0  # reset so a future redispatch starts fresh
+    # tagged so the board renders it red — a technical dispatch failure, not a
+    # human-parked impediment (see dispatch.ERROR_LABEL / CardItem.tsx)
+    assert dispatch.ERROR_LABEL in (card.labels or [])
 
 
 def test_capture_pane_content_returns_pane_text(monkeypatch):

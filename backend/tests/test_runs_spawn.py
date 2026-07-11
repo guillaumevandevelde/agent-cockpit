@@ -1,5 +1,7 @@
 """Tests for provider-aware tmux spawning."""
 import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 
@@ -247,6 +249,47 @@ def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
     assert argv[:7] == ["tmux", "new-session", "-d", "-s", "repo-abcd", "-c", str(tmp_path)]
     assert len(argv) == 8
     assert spawn.get_spawned_sessions()["repo-abcd"]["provider"] == "anthropic"
+
+
+def test_large_prompt_is_delivered_via_temp_file_not_inlined(monkeypatch, tmp_path):
+    """A prompt too large for tmux's ~16KB command-line limit must NOT be inlined
+    into `tmux new-session` — tmux rejects oversized commands with 'command too
+    long', which made the spawn raise and the kanban card loop into Impediment.
+    The prompt is delivered via a temp file the pane reads instead, keeping the
+    tmux command line tiny while claude still receives the full prompt.
+    """
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    big_prompt = "PLAN CONTEXT line with unique marker\n" * 1000  # ~37KB, well over the limit
+
+    spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", prompt=big_prompt),
+    )
+
+    shell_command = calls[0][-1]
+    # The raw prompt must not be inlined, and the whole tmux command stays small.
+    assert big_prompt not in shell_command
+    assert len(shell_command) < 16000
+    # ...and it is actually delivered: the pane reads it back from a temp file.
+    match = re.search(r"\$\(cat (.+?)\)", shell_command)
+    assert match, shell_command
+    prompt_path = Path(match.group(1).strip("'\""))
+    try:
+        assert prompt_path.read_text(encoding="utf-8") == big_prompt
+    finally:
+        prompt_path.unlink(missing_ok=True)
 
 
 def test_sanitize_session_name_strips_invalid_chars():
