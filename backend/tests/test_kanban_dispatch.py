@@ -3731,3 +3731,106 @@ async def test_post_agent_status_comment_skips_cards_in_terminal_columns(monkeyp
             f"post_agent_status_comment must skip cards on {terminal_col}"
         )
 
+
+
+# ---- child-card plan_ref dispatch gate (create_card→add_plan_attachment race) --
+
+async def _make_child(s, *, parent_card_id, title="child", column="Backlog"):
+    cid = await apply_operation(
+        s, op_type="create", entity_type="card", project_key=PK,
+        entity_id=None,
+        payload={"title": title, "column": column,
+                 "parent_card_id": parent_card_id},
+    )
+    await s.flush()
+    return cid
+
+
+async def _link_plan_ref(s, *, child_id, parent_id, plan_deliverable_id="plan-1"):
+    import json
+    await apply_operation(
+        s, op_type="link_plan_ref", entity_type="deliverable",
+        project_key=PK, entity_id=child_id,
+        payload={"ref_json": json.dumps({
+            "parent_card_id": parent_id,
+            "plan_deliverable_id": plan_deliverable_id,
+        }), "depends_on": []},
+    )
+    await s.flush()
+
+
+@pytest.mark.asyncio
+async def test_child_without_plan_ref_is_not_dispatched():
+    """Race case: the analyst created a child (create_card) but hasn't attached
+    the plan yet (add_plan_attachment). The child must NOT be dispatched — it
+    would otherwise get the 'Plan niet beschikbaar' placeholder prompt."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Done")
+        child = await _make_child(s, parent_card_id=parent, title="child")
+        await dispatch.set_max_sessions(s, PK, 3)
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        child_card = await get_card(s, child)
+    assert transport.calls == []            # nothing spawned
+    assert child_card.column == "Backlog"   # child stayed put, unclaimed
+    assert not child_card.claimed_by
+
+
+@pytest.mark.asyncio
+async def test_child_with_plan_ref_is_dispatched():
+    """Once add_plan_attachment has linked the plan_ref, the same child becomes
+    dispatch-eligible and is spawned normally."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Done")
+        child = await _make_child(s, parent_card_id=parent, title="child")
+        await _link_plan_ref(s, child_id=child, parent_id=parent)
+        await dispatch.set_max_sessions(s, PK, 3)
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        child_card = await get_card(s, child)
+    assert len(transport.calls) == 1        # child got spawned
+    assert child_card.column != "Backlog"   # moved into an agent column
+    assert child_card.claimed_by
+
+
+@pytest.mark.asyncio
+async def test_next_card_gate_distinguishes_race_from_genuine_miss():
+    """The plan_ref gate keeps the race case (plan attached moments later) out of
+    dispatch, while the genuine-miss placeholder path is only reached by a child
+    that DOES hold a plan_ref pointing at a now-missing parent/plan."""
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Done")
+        # Race case: child without plan_ref -> gated, _next_card skips it.
+        raced = await _make_child(s, parent_card_id=parent, title="raced")
+        await s.commit()
+        cards = await list_cards(s, PK)
+        raced_card = next(c for c in cards if c.id == raced)
+        assert dispatch._awaiting_plan_ref(raced_card) is True
+        assert dispatch._next_card([raced_card]) is None
+
+        # Genuine-miss case: child holds a plan_ref, but the parent is gone.
+        await _link_plan_ref(
+            s, child_id=raced, parent_id="deleted-parent",
+            plan_deliverable_id="gone",
+        )
+        await s.commit()
+        cards = await list_cards(s, PK)
+        missed_card = next(c for c in cards if c.id == raced)
+        # No longer gated — it IS eligible now (plan_ref present).
+        assert dispatch._awaiting_plan_ref(missed_card) is False
+        # ...and resolving its plan yields nothing, so the executor prompt would
+        # render the genuine-miss placeholder.
+        plan_md, _, _ = await dispatch._resolve_plan_for_child(s, missed_card)
+    assert plan_md is None
+    section = dispatch._plan_context_section(
+        plan_markdown=None, plan_deliverable_id=None, parent_card_id=None,
+    )
+    assert "Plan niet beschikbaar" in section
