@@ -25,14 +25,27 @@ scope here.
 git fetch origin
 ```
 
-## 2. Run frontend checks yourself before shipping
+## 2. Run frontend checks yourself before shipping (only when the branch touches `frontend/`)
 
 There is no local pre-push gate — nothing blocks a red push. Run the frontend
-checks yourself in this worktree before merging/pushing:
+checks yourself before merging/pushing — but **only when this branch actually
+changed frontend code**. A docs-/backend-only branch would otherwise pay a
+multi-minute `npm ci` + build for zero frontend coverage, so gate the check on
+the branch diff:
 
 ```bash
-cd frontend && npm run lint && npm run build
+git fetch origin -q
+FRONTEND_TOUCHED=$( { git diff --name-only origin/master -- frontend/; git ls-files --others --exclude-standard -- frontend/; } | head -1 )
+if [ -n "$FRONTEND_TOUCHED" ]; then
+  ( cd frontend && npm run lint && npm run build )   # only proceed once green
+else
+  echo 'geen frontend-diff — gate overgeslagen'
+fi
 ```
+
+A branch that *does* touch `frontend/` (including a mixed frontend+docs diff)
+runs the gate unconditionally; only a branch with no `frontend/` change skips
+it.
 
 Do **not** run backend pytest locally in this repo — that step was removed
 deliberately: this is a shared box, and concurrent dispatched sessions each
