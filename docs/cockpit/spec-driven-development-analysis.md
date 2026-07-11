@@ -216,6 +216,20 @@ drift een reëel, terugkerend probleem is.
   naar `check_openapi_snapshot.py`. Advies, niet blokkerend.
 - *Waarom:* dit is de "iedere verdere wijziging werkt de spec bij"-helft — maar als
   detecteerbaar signaal i.p.v. rot-gevoelige belofte.
+- *Uitgevoerd (Fase 2):* **aanname bevestigd** — de bestaande
+  `scripts.drift_checks`-helper-laag volstaat. Pure helpers (`SpecDriftFinding`,
+  `parse_diff_path_list`, `find_spec_drift_for_card`) zitten in
+  `backend/scripts/drift_checks.py`; CLI-wrapper
+  `backend/scripts/check_spec_drift.py` produceert het signaal-samenvatting
+  (model: `check_features_docs.py`); companion
+  `backend/scripts/file_spec_drift_cards.py` POST één `[spec-update]`-Backlog-kaart
+  per bevinding via de kanban REST API (idempotent op titel; `--dry-run` voor
+  pre-flight inspectie). De wekelijkse cron in `.github/workflows/drift-report.yml`
+  draait de detector signal-only; de card-filer is een aparte mens-getriggerde
+  stap omdat de workflow geen kanban-credentials heeft. De "functioneel"-heuristiek
+  is bewust grof: pad-prefixes `backend/app/`, `frontend/src/features/`,
+  `frontend/src/lib/`; false positives worden geaccepteerd als signaal — precies
+  de afspraak in §3 + §4.
 
 **Optioneel — Fase 3: LLM-prozareview**
 - Alleen na aangetoonde waarde van 1-2. Buiten scope van de eerste follow-ups.

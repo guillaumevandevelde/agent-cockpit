@@ -15,11 +15,14 @@ from pathlib import Path
 import pytest
 
 from scripts.drift_checks import (
+    SpecDriftFinding,
     claude_md_age_in_merges,
     collect_personas_from_routing,
     find_mismatched_personas,
     find_missing_feature_docs,
+    find_spec_drift_for_card,
     list_agent_names,
+    parse_diff_path_list,
 )
 
 # --- check 1: features -> docs mapping ---------------------------------------
@@ -263,3 +266,253 @@ def test_claude_md_age_in_merges_missing_file_returns_zero(
 
     assert count == 0
     assert stale is False
+
+
+# --- check 4: spec-drift signal (spec-ssot Fase 2) --------------------------
+
+
+def test_parse_diff_path_list_strips_a_b_prefixes():
+    """`git diff --name-only` output includes a/ and b/ prefixes; strip them."""
+    raw = "a/backend/app/main.py\nb/docs/cockpit/foo.md\n"
+    assert parse_diff_path_list(raw) == ["backend/app/main.py", "docs/cockpit/foo.md"]
+
+
+def test_parse_diff_path_list_skips_blank_lines():
+    raw = "a/backend/app/main.py\n\nb/docs/cockpit/foo.md\n\n"
+    assert parse_diff_path_list(raw) == ["backend/app/main.py", "docs/cockpit/foo.md"]
+
+
+def test_parse_diff_path_list_empty_input_returns_empty_list():
+    assert parse_diff_path_list("") == []
+    assert parse_diff_path_list("\n\n") == []
+
+
+def test_find_spec_drift_flags_functional_diff_without_spec_doc_update(
+    tmp_path: Path, isolated_git_env
+):
+    """A card links to docs/cockpit/foo.md, but its merge touched backend/app/
+    without touching the spec-doc → flag."""
+    _init_repo_with_master(tmp_path)
+    # baseline commit that creates the spec-doc
+    (tmp_path / "docs" / "cockpit").mkdir(parents=True)
+    (tmp_path / "docs" / "cockpit" / "foo.md").write_text("# foo\n")
+    _git(tmp_path, "add", "docs/cockpit/foo.md")
+    _git(tmp_path, "commit", "-q", "-m", "init foo spec")
+
+    # feature branch that touches only functional code
+    _git(tmp_path, "checkout", "-q", "-b", "feat")
+    (tmp_path / "backend" / "app").mkdir(parents=True)
+    (tmp_path / "backend" / "app" / "main.py").write_text("def hello():\n    return 1\n")
+    _git(tmp_path, "add", "backend/app/main.py")
+    _git(tmp_path, "commit", "-q", "-m", "add main")
+    _git(tmp_path, "checkout", "-q", "master")
+    merge_sha = _merge_with_sha(tmp_path, "feat", "merge feat")
+
+    findings = find_spec_drift_for_card(
+        tmp_path,
+        card_id="card-1",
+        spec_doc="docs/cockpit/foo.md",
+        merge_sha=merge_sha,
+        functional_glob=("backend/app/", "frontend/src/"),
+        spec_glob=("docs/cockpit/",),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].card_id == "card-1"
+    assert findings[0].spec_doc == "docs/cockpit/foo.md"
+    assert "backend/app/main.py" in findings[0].changed_functional_paths
+    assert findings[0].changed_spec_paths == []
+
+
+def test_find_spec_drift_clean_when_spec_doc_updated_alongside(
+    tmp_path: Path, isolated_git_env
+):
+    """When the merge touched the spec-doc, no drift is flagged."""
+    _init_repo_with_master(tmp_path)
+    (tmp_path / "docs" / "cockpit").mkdir(parents=True)
+    (tmp_path / "docs" / "cockpit" / "foo.md").write_text("# foo\n")
+    _git(tmp_path, "add", "docs/cockpit/foo.md")
+    _git(tmp_path, "commit", "-q", "-m", "init foo spec")
+
+    _git(tmp_path, "checkout", "-q", "-b", "feat")
+    (tmp_path / "backend" / "app").mkdir(parents=True)
+    (tmp_path / "backend" / "app" / "main.py").write_text("def hello():\n    return 1\n")
+    (tmp_path / "docs" / "cockpit" / "foo.md").write_text("# foo updated\n")
+    _git(tmp_path, "add", "backend/app/main.py", "docs/cockpit/foo.md")
+    _git(tmp_path, "commit", "-q", "-m", "add main + update spec")
+    _git(tmp_path, "checkout", "-q", "master")
+    merge_sha = _merge_with_sha(tmp_path, "feat", "merge feat")
+
+    findings = find_spec_drift_for_card(
+        tmp_path,
+        card_id="card-2",
+        spec_doc="docs/cockpit/foo.md",
+        merge_sha=merge_sha,
+        functional_glob=("backend/app/", "frontend/src/"),
+        spec_glob=("docs/cockpit/",),
+    )
+
+    assert findings == []
+
+
+def test_find_spec_drift_clean_when_only_spec_doc_changed(
+    tmp_path: Path, isolated_git_env
+):
+    """A pure spec-doc change (no functional path touched) → no drift."""
+    _init_repo_with_master(tmp_path)
+    (tmp_path / "docs" / "cockpit").mkdir(parents=True)
+    (tmp_path / "docs" / "cockpit" / "foo.md").write_text("# foo\n")
+    _git(tmp_path, "add", "docs/cockpit/foo.md")
+    _git(tmp_path, "commit", "-q", "-m", "init foo spec")
+
+    _git(tmp_path, "checkout", "-q", "-b", "spec-only")
+    (tmp_path / "docs" / "cockpit" / "foo.md").write_text("# foo elaborated\n")
+    _git(tmp_path, "add", "docs/cockpit/foo.md")
+    _git(tmp_path, "commit", "-q", "-m", "elaborate spec")
+    _git(tmp_path, "checkout", "-q", "master")
+    merge_sha = _merge_with_sha(tmp_path, "spec-only", "merge spec")
+
+    findings = find_spec_drift_for_card(
+        tmp_path,
+        card_id="card-3",
+        spec_doc="docs/cockpit/foo.md",
+        merge_sha=merge_sha,
+        functional_glob=("backend/app/", "frontend/src/"),
+        spec_glob=("docs/cockpit/",),
+    )
+
+    assert findings == []
+
+
+def test_find_spec_drift_ignores_unrelated_paths(
+    tmp_path: Path, isolated_git_env
+):
+    """A merge that touches only paths OUTSIDE functional_glob → no drift."""
+    _init_repo_with_master(tmp_path)
+    (tmp_path / "docs" / "cockpit").mkdir(parents=True)
+    (tmp_path / "docs" / "cockpit" / "foo.md").write_text("# foo\n")
+    _git(tmp_path, "add", "docs/cockpit/foo.md")
+    _git(tmp_path, "commit", "-q", "-m", "init foo spec")
+
+    _git(tmp_path, "checkout", "-q", "-b", "infra")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "scrub.py").write_text("#!/usr/bin/env python\n")
+    _git(tmp_path, "add", "scripts/scrub.py")
+    _git(tmp_path, "commit", "-q", "-m", "add script")
+    _git(tmp_path, "checkout", "-q", "master")
+    merge_sha = _merge_with_sha(tmp_path, "infra", "merge infra")
+
+    findings = find_spec_drift_for_card(
+        tmp_path,
+        card_id="card-4",
+        spec_doc="docs/cockpit/foo.md",
+        merge_sha=merge_sha,
+        functional_glob=("backend/app/", "frontend/src/"),
+        spec_glob=("docs/cockpit/",),
+    )
+
+    assert findings == []
+
+
+def test_find_spec_drift_handles_url_spec_doc_as_no_drift_signal(
+    tmp_path: Path, isolated_git_env
+):
+    """A URL spec-doc (not a repo path) has no local file to check → no signal.
+
+    Per Fase 1 schema (`SPEC_DOC_META_KEY`) a spec_doc can be a URL when the
+    authoritative spec lives outside the repo (e.g. an external doc). Without
+    a local file we can't mechanically detect drift; the script reports this
+    as 'out-of-scope', not as drift."""
+    _init_repo_with_master(tmp_path)
+    (tmp_path / "backend" / "app").mkdir(parents=True)
+    (tmp_path / "backend" / "app" / "main.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "backend/app/main.py")
+    _git(tmp_path, "commit", "-q", "-m", "init")
+    merge_sha = _git_revparse(tmp_path, "HEAD")
+
+    findings = find_spec_drift_for_card(
+        tmp_path,
+        card_id="card-5",
+        spec_doc="https://example.com/spec.md",
+        merge_sha=merge_sha,
+        functional_glob=("backend/app/", "frontend/src/"),
+        spec_glob=("docs/cockpit/",),
+    )
+
+    assert findings == []
+
+
+def test_find_spec_drift_handles_missing_merge_sha_gracefully(
+    tmp_path: Path, isolated_git_env
+):
+    """An invalid merge SHA returns no findings (not a crash) — caller filters
+    non-existent cards out before we ever get here, but defensive anyway."""
+    _init_repo_with_master(tmp_path)
+    # No merge commits; pass the init SHA but make it look like a 'merge' that
+    # is also empty.
+    findings = find_spec_drift_for_card(
+        tmp_path,
+        card_id="card-6",
+        spec_doc="docs/cockpit/missing.md",
+        merge_sha="0" * 40,
+        functional_glob=("backend/app/",),
+        spec_glob=("docs/cockpit/",),
+    )
+
+    assert findings == []
+
+
+# --- helpers used only by the new tests -------------------------------------
+
+
+def _git_revparse(cwd: Path, ref: str) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(cwd), "rev-parse", ref], text=True
+    ).strip()
+
+
+def _merge_with_sha(cwd: Path, branch: str, message: str) -> str:
+    """Merge branch back to master with --no-ff and return the merge SHA."""
+    subprocess.run(
+        ["git", "-C", str(cwd), "merge", "--no-ff", "-q", branch, "-m", message],
+        check=True,
+        capture_output=True,
+    )
+    return _git_revparse(cwd, "HEAD")
+
+
+def test_render_summary_ok_when_no_findings():
+    from scripts.check_spec_drift import render_summary
+
+    body, status = render_summary([])
+
+    assert status == "ok"
+    assert "**Status:** ok" in body
+    assert "[spec-update]" not in body
+
+
+def test_render_summary_lists_drifts_with_paths():
+    from scripts.check_spec_drift import render_summary
+
+    findings = [
+        SpecDriftFinding(
+            card_id="c1",
+            spec_doc="docs/cockpit/foo.md",
+            changed_functional_paths=["backend/app/main.py", "frontend/src/features/x/foo.tsx"],
+            changed_spec_paths=[],
+        ),
+        SpecDriftFinding(
+            card_id="c2",
+            spec_doc="docs/cockpit/bar.md",
+            changed_functional_paths=["backend/app/svc.py"] * 7,
+            changed_spec_paths=[],
+        ),
+    ]
+
+    body, status = render_summary(findings)
+
+    assert status == "drifted: 2"
+    assert "**Status:** drifted" in body
+    assert "[spec-update]" in body
+    assert "`c1` → `docs/cockpit/foo.md`" in body
+    assert "+2 more" in body  # 7 paths, only 5 listed inline
