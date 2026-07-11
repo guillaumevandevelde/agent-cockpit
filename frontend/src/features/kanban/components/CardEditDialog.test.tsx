@@ -226,6 +226,35 @@ describe("CardEditDialog", () => {
     expect(payload).toHaveProperty("executor_agent_id", null);
   });
 
+  it("suggests minimax models for a column whose default provider is minimax", async () => {
+    render(
+      <CardEditDialog
+        open
+        projectKey="proj"
+        initial={{ title: "T", description: "" }}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    // The engineer column defaults to the minimax provider (see listColumnsMock).
+    const engineerModel = (await screen.findByLabelText("Model for engineer")) as HTMLInputElement;
+    const listId = engineerModel.getAttribute("list")!;
+    const values = Array.from(
+      document.getElementById(listId)!.querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toContain("MiniMax-M3[1m]");
+    expect(values).not.toContain("sonnet");
+
+    // The analyst column has no provider override -> keeps the claude-code list.
+    const analystModel = (await screen.findByLabelText("Model for analyst")) as HTMLInputElement;
+    const analystListId = analystModel.getAttribute("list")!;
+    const analystValues = Array.from(
+      document.getElementById(analystListId)!.querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(analystValues).toContain("sonnet");
+    expect(analystValues).not.toContain("MiniMax-M3[1m]");
+  });
+
   it("pre-fills existing column_overrides from initial", async () => {
     const onSubmit = vi.fn();
     render(
