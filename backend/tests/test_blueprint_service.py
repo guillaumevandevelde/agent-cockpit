@@ -7,6 +7,7 @@ Acceptance criteria from facet A sibling #4 (card 395590d7) and the
   half-written `.claude/`
 - `apply()` is idempotent: rerunning on a populated `.claude/` is a no-op
 - `apply(force=True)` overwrites
+- `apply()` honours skills / agents / statusline / output_style fields
 """
 import json
 
@@ -15,8 +16,11 @@ import pytest
 from app.services.blueprint import (
     AuditResult,
     Blueprint,
+    BlueprintAgent,
     BlueprintApplyFailed,
     BlueprintService,
+    BlueprintSettings,
+    BlueprintSkill,
     apply_blueprint,
 )
 
@@ -163,3 +167,179 @@ def test_apply_returns_audit_result_dataclass(tmp_path):
     assert isinstance(audit, AuditResult)
     assert audit.project_path == str(project)
     assert ".claude/settings.json" in audit.written_files
+
+
+# ---------------------------------------------------------------------------
+# Rich-field apply tests (skills / agents / statusline / output_style)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_writes_project_scoped_skill(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(
+        name="with-skill",
+        skills=[BlueprintSkill(name="frontend", source="project", version_pin="1.2.0")],
+    )
+    audit = BlueprintService(bp).apply(str(project))
+
+    skill_md = project / ".claude" / "skills" / "frontend" / "SKILL.md"
+    assert skill_md.is_file()
+    text = skill_md.read_text()
+    assert "name: frontend" in text
+    assert "version: 1.2.0" in text
+    assert ".claude/skills/frontend/SKILL.md" in audit.written_files
+    assert "frontend" in audit.applied_skills
+
+
+def test_apply_records_but_does_not_materialise_user_or_system_skill(tmp_path):
+    """User/system skills already live in the user's CC install; the
+    blueprint only declares them so the project knows to depend on them."""
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(
+        name="ref-only",
+        skills=[
+            BlueprintSkill(name="from-user", source="user"),
+            BlueprintSkill(name="from-system", source="system"),
+        ],
+    )
+    audit = BlueprintService(bp).apply(str(project))
+
+    # No skill files written — but audit lists the names.
+    assert not (project / ".claude" / "skills" / "from-user").exists()
+    assert not (project / ".claude" / "skills" / "from-system").exists()
+    assert audit.applied_skills == ["from-user", "from-system"]
+
+
+def test_apply_writes_agent_stub_with_frontmatter(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(
+        name="with-agent",
+        agents=[
+            BlueprintAgent(
+                name="planner",
+                model_default="opus",
+                tools=["Read", "Glob", "Grep"],
+            ),
+        ],
+    )
+    BlueprintService(bp).apply(str(project))
+
+    agent_md = project / ".claude" / "agents" / "planner.md"
+    assert agent_md.is_file()
+    text = agent_md.read_text()
+    assert "name: planner" in text
+    assert "model: opus" in text
+    assert "allowed-tools: Read, Glob, Grep" in text
+
+
+def test_apply_writes_statusline_script(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(
+        name="with-statusline",
+        statusline='#!/bin/sh\necho "model: opus"\n',
+    )
+    audit = BlueprintService(bp).apply(str(project))
+
+    script = project / ".claude" / "statusline.sh"
+    assert script.is_file()
+    assert script.read_text().startswith("#!/bin/sh")
+    assert ".claude/statusline.sh" in audit.written_files
+
+
+def test_apply_writes_output_style_stub(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(name="with-output-style", output_style="concise")
+    audit = BlueprintService(bp).apply(str(project))
+
+    style_md = project / ".claude" / "output-styles" / "concise.md"
+    assert style_md.is_file()
+    assert "name: concise" in style_md.read_text()
+    assert ".claude/output-styles/concise.md" in audit.written_files
+
+
+def test_apply_settings_renders_permission_mode_under_permissions(tmp_path):
+    """CC reads `permissions.defaultMode`, not a top-level `permission_mode`.
+
+    This is the one place the BlueprintSettings shape differs from how the
+    blueprint UI thinks of it — we re-nest here so the on-disk settings.json
+    is exactly what CC consumes.
+    """
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(
+        name="settings-test",
+        settings=BlueprintSettings(permission_mode="plan", model="opus"),
+    )
+    BlueprintService(bp).apply(str(project))
+
+    on_disk = json.loads((project / ".claude" / "settings.json").read_text())
+    assert on_disk == {
+        "permissions": {"defaultMode": "plan"},
+        "model": "opus",
+    }
+
+
+def test_apply_with_all_rich_fields_is_idempotent(tmp_path):
+    """Two applies with the same rich blueprint leave exactly the same
+    on-disk state — no duplicate skill/agent/statusline files."""
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(
+        name="rich",
+        skills=[BlueprintSkill(name="frontend", source="project", version_pin="1.0")],
+        agents=[BlueprintAgent(name="planner", model_default="opus")],
+        statusline='#!/bin/sh\necho ok\n',
+        output_style="concise",
+    )
+    BlueprintService(bp).apply(str(project))
+
+    files_after_first = sorted(
+        str(p.relative_to(project)) for p in project.rglob("*") if p.is_file()
+    )
+
+    audit2 = BlueprintService(bp).apply(str(project))
+    # Idempotency: second call must skip (the seeded `.claude/` is non-empty).
+    assert audit2.skipped_existing is True
+    # No duplicate SKILL.md / agent.md / statusline.sh etc.
+    files_after_second = sorted(
+        str(p.relative_to(project)) for p in project.rglob("*") if p.is_file()
+    )
+    assert files_after_first == files_after_second
+    # No leftover `.claude.tmp/` from the second call.
+    assert not (project / ".claude.tmp").exists()
+
+
+def test_apply_rejects_duplicate_subdirs(tmp_path):
+    """Two identical names in `subdirs` is a structural mistake — refuse it."""
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    bp = Blueprint(
+        name="dup-subdirs",
+        subdirs=["agents", "agents"],
+    )
+    with pytest.raises(BlueprintApplyFailed) as exc:
+        BlueprintService(bp).apply(str(project))
+    assert exc.value.step == "stage"
+
+
+def test_apply_records_blueprint_name_in_audit(tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    audit = BlueprintService(
+        Blueprint(name="named-bp", claudemd="hi"),
+    ).apply(str(project))
+    assert audit.blueprint_name == "named-bp"

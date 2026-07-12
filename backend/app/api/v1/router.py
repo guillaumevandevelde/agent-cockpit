@@ -5,6 +5,7 @@ from .agent_mail import router as agent_mail_router
 from .agents import router as agents_router
 from .apm import router as apm_router
 from .backup import router as backup_router
+from .blueprints import router as blueprints_router
 from .cc_bridge.router import router as cc_bridge_router
 from .cli import router as cli_router
 from .codex_config import router as codex_config_router
@@ -64,6 +65,7 @@ router.include_router(agent_mail_router, prefix="/agent-mail", tags=["Agent Mail
 router.include_router(external_agent_mail_router, prefix="/external/agent-mail", tags=["External Agent Mail"])
 router.include_router(backup_router, tags=["Backup"])
 router.include_router(output_styles_router, tags=["Output Styles"])
+router.include_router(blueprints_router, tags=["Blueprints"])
 router.include_router(statusline_router, tags=["Status Line"])
 router.include_router(sessions_router, tags=["Sessions"])
 router.include_router(usage_router, tags=["Usage"])

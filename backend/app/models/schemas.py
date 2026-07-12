@@ -4,6 +4,16 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Blueprint models re-exported so the API layer can hand them straight back
+# to the client. The canonical definitions live in
+# `app.services.blueprint`; the API layer must not duplicate them.
+from app.services.blueprint import (
+    Blueprint,
+    BlueprintAgent,
+    BlueprintSettings,
+    BlueprintSkill,
+)
+
 
 class ConfigFile(BaseModel):
     """Represents a configuration file."""
@@ -2021,3 +2031,85 @@ class BridgeAttachmentDeleteResponse(BaseModel):
     deleted: bool
     target: str
     attachment_id: int
+
+
+# ---------------------------------------------------------------------------
+# Blueprint CRUD schemas
+# ---------------------------------------------------------------------------
+#
+# The Blueprint / BlueprintSettings / BlueprintSkill / BlueprintAgent models
+# are imported from app.services.blueprint above so the API contract stays
+# in lock-step with the service model. The wrappers below only add the
+# request/response shapes the API needs on top of those.
+
+
+class BlueprintCreate(BaseModel):
+    """Request body for `POST /api/v1/blueprints`.
+
+    The `name` is the storage key — it must be unique across the store and
+    follow the slug rules enforced by `BlueprintStore.validate_name`. The
+    service layer re-runs validation so an API client cannot sneak past it.
+    """
+
+    name: str
+    description: str | None = None
+    settings: BlueprintSettings | None = None
+    skills: list[BlueprintSkill] = Field(default_factory=list)
+    agents: list[BlueprintAgent] = Field(default_factory=list)
+    statusline: str | None = None
+    output_style: str | None = None
+    claudemd: str | None = None
+
+
+class BlueprintUpdate(BaseModel):
+    """Request body for `PUT /api/v1/blueprints/{name}`.
+
+    Every field except `name` is optional; omitted fields are left as-is on
+    the stored blueprint. Pass `null` to clear a nullable field (e.g.
+    `claudemd`), and `[]` to clear a list field (e.g. `skills`).
+    """
+
+    description: str | None = None
+    settings: BlueprintSettings | None = None
+    skills: list[BlueprintSkill] | None = None
+    agents: list[BlueprintAgent] | None = None
+    statusline: str | None = None
+    output_style: str | None = None
+    claudemd: str | None = None
+    # `null` = "leave alone", explicit value = "set to this"
+    # `subdirs` is omitted from update — it's a structural choice made at
+    # create time. Editing it post-hoc has surprising blast radius
+    # (rewriting settings.json's subdirs list would invalidate any files
+    # the user dropped in), so we make it immutable on the wire.
+    model_config = ConfigDict(extra="forbid")
+
+
+class BlueprintListResponse(BaseModel):
+    """`GET /api/v1/blueprints` response."""
+
+    blueprints: list[Blueprint]
+
+
+class BlueprintApplyRequest(BaseModel):
+    """`POST /api/v1/blueprints/{name}/apply` request body."""
+
+    project_path: str
+    force: bool = False
+
+
+class BlueprintAuditWrittenFile(BaseModel):
+    """One entry in `BlueprintApplyResponse.written_files`."""
+
+    path: str  # relative to project root, e.g. ".claude/skills/foo/SKILL.md"
+
+
+class BlueprintApplyResponse(BaseModel):
+    """`POST /api/v1/blueprints/{name}/apply` response."""
+
+    blueprint_name: str
+    project_path: str
+    written_files: list[str] = Field(default_factory=list)
+    created_dirs: list[str] = Field(default_factory=list)
+    applied_skills: list[str] = Field(default_factory=list)
+    applied_agents: list[str] = Field(default_factory=list)
+    skipped_existing: bool = False
