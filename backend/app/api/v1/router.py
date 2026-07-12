@@ -24,6 +24,7 @@ from .output_styles import router as output_styles_router
 from .permissions import router as permissions_router
 from .plans import router as plans_router
 from .plugins import router as plugins_router
+from .portfolio import router as portfolio_router
 from .presence import router as presence_router
 from .projects import router as projects_router
 from .providers import router as providers_router
@@ -73,6 +74,7 @@ router.include_router(memory_router, tags=["Memory"])
 router.include_router(context_router, tags=["Context"])
 router.include_router(plans_router, tags=["Plans"])
 router.include_router(presence_router, prefix="/presence", tags=["Presence"])
+router.include_router(portfolio_router)
 router.include_router(cc_bridge_router, prefix="/cc-bridge", tags=["CC Bridge"])
 router.include_router(runs_router, prefix="/agent-bridge", tags=["Agent Bridge"])
 router.include_router(providers_router, tags=["Providers"])

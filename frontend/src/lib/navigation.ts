@@ -31,6 +31,7 @@ import {
   Castle,
   Globe,
   RefreshCw,
+  Building2,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -59,6 +60,7 @@ const commonNavigation: NavGroup[] = [
   {
     name: 'Operations',
     items: [
+      { name: 'Portfolio', href: '/portfolio', icon: Building2 },
       { name: 'APM', href: '/apm', icon: Boxes },
       { name: 'Presence', href: '/presence', icon: Radio },
       { name: 'Agent Mail', href: '/agent-mail', icon: Mail },
