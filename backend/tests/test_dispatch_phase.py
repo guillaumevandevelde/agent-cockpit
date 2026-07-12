@@ -198,7 +198,7 @@ async def test_run_card_skips_plan_context_for_legacy_cards(monkeypatch):
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, cli_id, provider):
+    def fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
         captured["prompt"] = prompt
         captured["session_name"] = session_name
         return {"session": session_name, "prompt": prompt}
@@ -255,7 +255,7 @@ async def test_run_card_prepends_plan_context_for_child_with_parent(monkeypatch)
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, cli_id, provider):
+    def fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
         captured["prompt"] = prompt
         captured["session_name"] = session_name
         return {"session": session_name, "prompt": prompt}
@@ -309,7 +309,7 @@ async def test_run_card_prepends_placeholder_for_child_with_missing_plan(monkeyp
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, cli_id, provider):
+    def fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
         captured["prompt"] = prompt
         return {"session": session_name, "prompt": prompt}
 
@@ -1125,7 +1125,7 @@ async def test_run_card_explicit_valid_card_agent_overrides_work_type_fallback(m
 # stubs the previous review flagged.
 
 
-def _fake_transport(directory, prompt, session_name, cli_id, provider):
+def _fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
     """No-op transport that returns a minimal result dict."""
     return {"session_name": session_name, "transport": "worktree"}
 
@@ -1145,3 +1145,215 @@ def _stub_default_work_type_mapping(monkeypatch):
         return WORK_TYPE_PERSONA_DEFAULTS.get(work_type, "engineer")
 
     monkeypatch.setattr(service, "get_work_type_persona", fake_get_work_type_persona)
+
+
+# ---- Leaf analyst spike override -------------------------------------------
+# Regression for kanban card a9c27beeb63e427a9c14ad98fa8380fe
+# ("[self-improve] analyst-persona + executor-ship-workflow botsen in één
+# prompt bij work_type=analysis spike-kaarten"). A `work_type='analysis'`
+# leaf card (no `analyst_agent_id`) was getting both the analyst persona
+# (which says "Verboden: geen Write/Edit") AND the executor ship workflow
+# (which says "write doc, commit, ship, attach branch, move THIS kaart
+# naar Done") in the same prompt — the agent had to reason out the
+# contradiction by hand. The fix prepends an override note to the persona
+# preamble that explicitly relaxes the prohibition and reframes the task as
+# "produce a single deliverable, ship it, move THIS card to Done".
+
+
+def test_is_analyst_leaf_spike_recognizes_work_type_analysis():
+    card = _FakeCard(work_type="analysis", agent=None)
+    assert dispatch._is_analyst_leaf_spike(card) is True
+
+
+def test_is_analyst_leaf_spike_recognizes_agent_analyst():
+    card = _FakeCard(work_type=None, agent="analyst")
+    assert dispatch._is_analyst_leaf_spike(card) is True
+
+
+def test_is_analyst_leaf_spike_recognizes_both():
+    card = _FakeCard(work_type="analysis", agent="analyst")
+    assert dispatch._is_analyst_leaf_spike(card) is True
+
+
+def test_is_analyst_leaf_spike_rejects_non_analyst_routing():
+    card = _FakeCard(work_type="feature", agent="engineer")
+    assert dispatch._is_analyst_leaf_spike(card) is False
+
+
+def test_is_analyst_leaf_spike_rejects_unset_card():
+    card = _FakeCard(work_type=None, agent=None)
+    assert dispatch._is_analyst_leaf_spike(card) is False
+
+
+def test_build_card_prompt_leaf_spike_prepends_override_note():
+    """A leaf analyst spike (work_type=analysis + no analyst_agent_id,
+    dispatched in executor phase) must get an override note that
+    reconciles the analyst persona's "Verboden: geen Write/Edit" with the
+    executor ship workflow's "write doc, commit, ship, attach". The
+    override must come BEFORE the prohibition in the rendered prompt so
+    the agent treats it as the operative instruction."""
+    card = _FakeCard(
+        title="Spike: db plafond",
+        description="Investigate SQLite vs Postgres for multi-agent write load.",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden:\n"
+        "- Zelf code wijzigen in het werkveld."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    override_marker = "Analyst-leaf-spike override"
+    assert override_marker in prompt, (
+        f"Leaf-spike override marker {override_marker!r} missing from prompt"
+    )
+    override_idx = prompt.index(override_marker)
+    verboden_idx = prompt.index("Verboden")
+    assert override_idx < verboden_idx, (
+        "Override must precede the 'Verboden' prohibition so the agent reads "
+        "it as the operative instruction. Got override_idx={override_idx}, "
+        "verboden_idx={verboden_idx}."
+    )
+    # The persona is still loaded (we keep the analyst voice); only the
+    # prohibition is relaxed.
+    assert "Verboden" in prompt
+    # The executor ship workflow is still present (no switch to analyst
+    # session-end for leaf spikes).
+    assert "Ship (direct mode)" in prompt
+    assert "merge --no-ff" in prompt
+    # And the override mentions the leaf-spike reframing explicitly.
+    assert "leaf spike" in prompt.lower()
+
+
+def test_build_card_prompt_analyst_classic_no_override():
+    """A real analyst card (analyst_agent_id set, no analyst_run_id,
+    phase='analyst') must NOT get the leaf-spike override. It keeps the
+    analyst session-end workflow (move parent → Done) and the analyst
+    persona unchanged. The override would corrupt the multi-agent
+    decomposition flow."""
+    card = _FakeCard(
+        title="Multi-agent parent",
+        description="Decompose this.",
+        work_type=None,
+        agent=None,
+        analyst_agent_id="claude-code",
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden:\n"
+        "- Zelf code wijzigen in het werkveld."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="analyst",
+    )
+
+    assert "Analyst-leaf-spike override" not in prompt
+    # Analyst session-end workflow: move parent → Done
+    assert "Move the parent card to Done" in prompt
+    # NOT the executor ship workflow — the analyst doesn't ship.
+    assert "Ship (direct mode)" not in prompt
+    assert "merge --no-ff" not in prompt
+
+
+def test_build_card_prompt_non_analyst_card_no_override():
+    """A non-analyst card (work_type=feature, agent=engineer) must NOT
+    get the leaf-spike override — there's no analyst persona to relax."""
+    card = _FakeCard(
+        title="Feature: add button",
+        description="",
+        work_type="feature",
+        agent="engineer",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = "You are an engineer. Write and ship."
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    assert "Analyst-leaf-spike override" not in prompt
+    assert "Ship (direct mode)" in prompt
+    assert "Move the parent card to Done" not in prompt
+
+
+def test_build_card_prompt_post_analyst_executor_with_work_type_analysis_gets_override():
+    """A card where the analyst already ran (analyst_agent_id +
+    analyst_run_id both set) but its work_type is still 'analysis' is
+    now dispatched in executor phase with the analyst persona. Same
+    contradiction as the leaf-spike case — same override needed."""
+    card = _FakeCard(
+        title="post-analyst child",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id="claude-code",
+        analyst_run_id="tmux-old",
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden:\n"
+        "- Zelf code wijzigen in het werkveld."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    assert "Analyst-leaf-spike override" in prompt
+    override_idx = prompt.index("Analyst-leaf-spike override")
+    verboden_idx = prompt.index("Verboden")
+    assert override_idx < verboden_idx
+    assert "Ship (direct mode)" in prompt
+
+
+def test_build_card_prompt_leaf_spike_with_only_agent_no_work_type():
+    """A leaf card without work_type=analysis but with card.agent='analyst'
+    (legacy routing — analyst.md exists but the card was tagged for analyst
+    manually) also gets the leaf-spike override."""
+    card = _FakeCard(
+        title="leaf spike",
+        description="",
+        work_type=None,
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden: geen Write/Edit."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    assert "Analyst-leaf-spike override" in prompt
+
+
+def test_build_card_prompt_no_persona_no_override_section_breakage():
+    """Edge case: persona is None (no analyst.md on disk). The leaf-spike
+    detection still applies (work_type='analysis'), but no preamble is
+    rendered — so the override is silently skipped (nothing to relax).
+    The executor ship workflow renders normally."""
+    card = _FakeCard(
+        title="leaf spike",
+        description="",
+        work_type="analysis",
+        agent=None,
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=None, ship_mode="direct", phase="executor",
+    )
+
+    # No override (no preamble to override)
+    assert "Analyst-leaf-spike override" not in prompt
+    # The ship workflow is intact
+    assert "Ship (direct mode)" in prompt
+    assert "merge --no-ff" in prompt
