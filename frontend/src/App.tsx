@@ -39,6 +39,7 @@ const HostsPage = lazy(() => import('./features/hosts/HostsPage').then((m) => ({
 const SubscriptionsPage = lazy(() => import('./features/subscriptions/SubscriptionsPage').then((m) => ({ default: m.SubscriptionsPage })))
 const UpdatesPage = lazy(() => import('./features/updates/UpdatesPage').then((m) => ({ default: m.UpdatesPage })))
 const BlueprintsPage = lazy(() => import('./features/blueprints').then((m) => ({ default: m.BlueprintsPage })))
+const PortfolioPage = lazy(() => import('./features/portfolio/PortfolioPage').then((m) => ({ default: m.PortfolioPage })))
 
 function App() {
   return (
@@ -85,6 +86,7 @@ function App() {
                 <Route path="subscriptions" element={<SubscriptionsPage />} />
                 <Route path="updates" element={<UpdatesPage />} />
                 <Route path="blueprints" element={<BlueprintsPage />} />
+                <Route path="portfolio" element={<PortfolioPage />} />
               </Route>
             </Routes>
             </Suspense>
