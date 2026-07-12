@@ -148,7 +148,7 @@ vóór de `"engineer"`-fallback) — robuuster tegen latere wijzigingen, maar ra
 dispatch-code die vandaag goed geïsoleerd getest is. **Voorkeur: aanmaak-tijd**, tenzij
 je verwacht dat `work_type` vaak wijzigt ná creatie.
 
-### C — Ruim de vestigial `developer`/`tester`/`code-review` restjes op
+### C — Ruim de vestigial `developer`/`tester`/`code-review` restjes op[text](about:blank#blocked)
 
 `_IMPEDIMENT_AGENTS` (router.py) en de docstring in `mcp_server.py:221` verwijzen naar
 rollen die niet bestaan. Twee opties, geen voorkeur zonder jouw input (zie §3, vraag 3):
