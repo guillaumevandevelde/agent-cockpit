@@ -1,6 +1,6 @@
 ---
 description: 'Splitst een kanban-kaart op in kind-kaarten met afhankelijkheden en schrijft een plan-attachment. Voert niets zelf uit.'
-model: 'claude-opus-4-8'
+model: 'opus'
 tools: ['search/codebase', 'search/usages', 'read/readFile', 'execute/runInTerminal', 'execute/getTerminalOutput']
 name: 'analyst'
 ---
