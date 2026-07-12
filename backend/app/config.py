@@ -1,9 +1,21 @@
 """Application configuration using pydantic-settings."""
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _default_portfolio_cap_value() -> int:
+    """Portfolio-cap default: the hardware-aware session budget, capped at 4.
+
+    Imported lazily so config import doesn't pull in the memory monitor /
+    session registry at module load (config.py is imported very early).
+    """
+    from app.services.scheduling.session_registry import session_registry
+
+    return min(session_registry.effective_max_sessions, 4)
 
 
 def _default_kanban_database_url() -> str:
@@ -73,6 +85,12 @@ class Settings(BaseSettings):
     # it explicitly for deployments where the request host isn't reachable by the
     # consumer, e.g. PUBLIC_BASE_URL=https://cockpit.example.com.
     public_base_url: str | None = None
+
+    # Portfolio-cap: gate the total number of concurrent agent-claims across all
+    # autodispatch-enabled projects in run_dispatch_tick. Off by default so rollout
+    # is gradual; when on, the whole tick is skipped once the sum hits the cap.
+    portfolio_cap_enabled: bool = False
+    portfolio_cap_value: int = Field(default_factory=_default_portfolio_cap_value)
 
     # Tunable operational constants (defaults match the historical hardcoded values)
     kanban_dispatch_interval_seconds: int = 10

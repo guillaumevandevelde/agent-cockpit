@@ -3526,6 +3526,101 @@ async def test_run_dispatch_tick_commits_compensating_ops_on_spawn_failure(monke
     assert len(transport.calls) == 1
 
 
+# ---- portfolio-cap: gate the sum of agent-claims across all projects -------
+
+
+async def _make_claimed_agent_card(s, project_key, session_name):
+    """Create a card, move it into an agent column with an `agent:` claim so it
+    counts toward _active_session_count for `project_key`."""
+    cid = await apply_operation(
+        s, op_type="create", entity_type="card", project_key=project_key,
+        entity_id=None, payload={"title": "busy", "column": "Backlog"},
+    )
+    await s.flush()
+    card = await get_card(s, cid)
+    card.column = "engineer"
+    card.claimed_by = f"agent:{session_name}"
+    await s.flush()
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_run_dispatch_tick_skips_when_portfolio_cap_reached(monkeypatch, caplog):
+    """5 autodispatch projects each holding 1 agent-claim (total 5) with cap=4:
+    the whole tick is skipped before any per-project dispatch runs."""
+    import logging
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    keys = [f"git:example.com/me/repo{i}" for i in range(5)]
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    monkeypatch.setattr(dispatch, "_retry_queued_cards", mock.AsyncMock())
+    monkeypatch.setattr(dispatch, "list_autodispatch_projects",
+                        mock.AsyncMock(return_value=keys))
+    monkeypatch.setattr(dispatch, "_registered_project_paths",
+                        mock.AsyncMock(return_value=["/p"]))
+    match_mock = mock.Mock(return_value={keys[0]: "/p"})
+    monkeypatch.setattr(dispatch, "match_project_paths", match_mock)
+    monkeypatch.setattr(dispatch.settings, "portfolio_cap_enabled", True)
+    monkeypatch.setattr(dispatch.settings, "portfolio_cap_value", 4)
+
+    async with KanbanSessionLocal() as s:
+        for i, key in enumerate(keys):
+            await _make_claimed_agent_card(s, key, session_name=f"s{i}")
+        # A dispatchable card that would be spawned if the tick weren't skipped.
+        await _make_card(s, title="pending", column="Backlog")
+        await s.commit()
+
+    transport = RecordingTransport()
+    with caplog.at_level(logging.INFO, logger="app.kanban.dispatch"):
+        await dispatch.run_dispatch_tick(transport=transport)
+
+    assert len(transport.calls) == 0          # returned before the dispatch loop
+    match_mock.assert_not_called()            # never reached path resolution
+    assert "portfolio-cap reached (5/4 active sessions across 5 projects)" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_dispatch_tick_ignores_portfolio_cap_when_disabled(monkeypatch):
+    """With the feature flag off, the same 5-claims-over-cap-4 state does not
+    short-circuit the tick — a pending card in an enabled project is dispatched."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    keys = [f"git:example.com/me/repo{i}" for i in range(5)]
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    monkeypatch.setattr(dispatch, "_retry_queued_cards", mock.AsyncMock())
+    monkeypatch.setattr(dispatch, "list_autodispatch_projects",
+                        mock.AsyncMock(return_value=keys))
+    monkeypatch.setattr(dispatch, "_registered_project_paths",
+                        mock.AsyncMock(return_value=["/p"]))
+    monkeypatch.setattr(dispatch, "match_project_paths",
+                        lambda *a, **kw: {keys[0]: "/p"})
+    monkeypatch.setattr(dispatch, "_live_sessions", lambda: set())
+    monkeypatch.setattr(dispatch, "_live_sandcastle_sessions",
+                        mock.AsyncMock(return_value=set()))
+    monkeypatch.setattr(dispatch.settings, "portfolio_cap_enabled", False)
+    monkeypatch.setattr(dispatch.settings, "portfolio_cap_value", 4)
+
+    async with KanbanSessionLocal() as s:
+        for i, key in enumerate(keys):
+            await _make_claimed_agent_card(s, key, session_name=f"s{i}")
+        # Pending card under the one project that maps to a local path, so the
+        # tick has something to dispatch once it does not short-circuit.
+        await apply_operation(
+            s, op_type="create", entity_type="card", project_key=keys[0],
+            entity_id=None, payload={"title": "pending", "column": "Backlog"},
+        )
+        await s.commit()
+
+    transport = RecordingTransport()
+    await dispatch.run_dispatch_tick(transport=transport)
+
+    assert len(transport.calls) >= 1          # dispatch proceeded despite 5 claims
+
+
 # ---- stuck-session reaper (alive in tmux, never sent hooks, 429/Token Plan
 # in pane content -> set dispatch_pause, kill, release) ----------------------
 

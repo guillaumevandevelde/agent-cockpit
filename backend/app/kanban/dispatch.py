@@ -21,6 +21,7 @@ from typing import Protocol
 
 import yaml
 
+from app.config import settings
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
 from app.kanban.dep_resolver import meets_dep_prerequisites
@@ -2817,6 +2818,24 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
         enabled = set(await list_autodispatch_projects(ks))
     if not enabled:
         return
+
+    # Portfolio-cap: gate the *sum* of agent-claims across all autodispatch-enabled
+    # projects, so one busy project can't starve the rest of the shared budget. The
+    # per-project/per-column caps only bound a single project. Off by default
+    # (feature flag) so rollout is gradual. Manual UI sessions bypass this entirely —
+    # the check only runs in the auto-dispatch tick.
+    if settings.portfolio_cap_enabled:
+        async with KanbanSessionLocal() as ks:
+            active = 0
+            for project_key in enabled:
+                active += _active_session_count(await list_cards(ks, project_key))
+        if active >= settings.portfolio_cap_value:
+            logger.info(
+                "portfolio-cap reached (%d/%d active sessions across %d projects); "
+                "skipping tick",
+                active, settings.portfolio_cap_value, len(enabled),
+            )
+            return
 
     paths = await _registered_project_paths()
     mapping = match_project_paths(enabled, paths)
