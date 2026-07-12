@@ -63,6 +63,30 @@ async def init_db() -> None:
     if settings.database_url.startswith("sqlite"):
         async with engine.begin() as conn:
             await _migrate_terminology_columns(conn)
+            await _migrate_project_columns(conn)
+
+
+async def _migrate_project_columns(conn) -> None:
+    """Add the portfolio ``kind``/``priority`` columns to an existing ``projects``.
+
+    ``create_all`` only creates missing tables — it never alters a table that
+    already exists — so a DB from before these columns needs an in-place
+    ``ALTER TABLE ... ADD COLUMN``. Mirrors the ``max_sessions`` pattern in
+    ``app/kanban/db.py``. Idempotent: skips when the column is already present
+    (fresh installs where ``create_all`` produced them, or a re-run).
+    """
+    rows = (await conn.exec_driver_sql("PRAGMA table_info(projects)")).fetchall()
+    cols = {row[1] for row in rows}
+    if not cols:
+        return  # table not created yet (non-sqlite path or first run mid-flight)
+    if "kind" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'product'"
+        )
+    if "priority" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE projects ADD COLUMN priority INTEGER"
+        )
 
 
 async def _migrate_terminology_columns(conn) -> None:

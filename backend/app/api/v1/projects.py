@@ -15,6 +15,7 @@ from app.models.schemas import (
     ProjectDiscoveryResponse,
     ProjectListResponse,
     ProjectResponse,
+    ProjectUpdate,
     SetActiveProjectRequest,
 )
 from app.services.project_service import ProjectService
@@ -130,6 +131,22 @@ async def clear_active_project(db: AsyncSession = Depends(get_db)):
 
 
 # Routes with path parameters - MUST be after /projects/active routes
+@router.patch("/projects/{project_id}", response_model=ProjectResponse)
+async def update_project(
+    project_id: int,
+    project_data: ProjectUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Patch mutable project fields (name, is_active, kind, priority)."""
+    service = ProjectService(db)
+    project = await service.update_project(project_id, project_data)
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return project
+
+
 @router.delete("/projects/{project_id}", response_model=MessageResponse)
 async def remove_project(
     project_id: int,
