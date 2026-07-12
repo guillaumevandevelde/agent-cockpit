@@ -5,12 +5,17 @@ These came out of the final code review (2026-06-14). The merge-blockers were fi
 
 ## Should fix before activating sync / multi-project hardening
 
-- **I4b — `.mcp.json` write path allowlisting.** `enable`/`disable` write `.mcp.json`
-  into any directory the backend user can write, reachable via the unauthenticated,
-  `0.0.0.0`-bound, open-CORS API. The atomic-write corruption risk is fixed; the
-  *write-anywhere* surface is not. This matches the whole app's existing
-  unauthenticated-local posture, so it's deferred — but before exposing Cockpit beyond
-  localhost, validate `project_path` against the known/registered projects list.
+- **I4b — `.mcp.json` write path allowlisting. — FIXED (2026-07-12).**
+  `_write_project_mcp_config` now validates `project_path` against the `projects`
+  table (`_assert_registered_project_path`): an explicit path that is not a
+  registered project raises `UnregisteredProjectPathError`, surfaced as a 403 by
+  the create/update/delete/registry-install endpoints. `project_path=None` still
+  falls back to the server cwd (server-controlled, not client-supplied) and is
+  allowed; read paths are unchanged. Covered by
+  `backend/tests/test_mcp_config_path_allowlist.py` (unknown path fails, known
+  path writes, race where the path is deregistered just before the write fails
+  cleanly). Out of scope (separate tracks): MCP-server trust-model hardening and a
+  general write-anywhere auditor for other endpoints.
 
 ## UX / polish
 

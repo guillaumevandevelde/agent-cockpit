@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schemas import MCPServerCreate
 from app.services.mcp_service import MCPService
@@ -164,6 +165,7 @@ class MCPRegistryService:
         scope: str,
         config: dict[str, Any],
         project_path: str | None = None,
+        db: AsyncSession | None = None,
     ) -> dict[str, Any]:
         """Install a registry server by writing config via MCPService.
 
@@ -183,6 +185,6 @@ class MCPRegistryService:
         )
 
         mcp_service = MCPService()
-        await mcp_service.add_server(server_create, project_path)
+        await mcp_service.add_server(server_create, project_path, db)
 
         return config

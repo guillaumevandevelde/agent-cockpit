@@ -23,6 +23,7 @@ from app.models.schemas import (
     MCPTestConnectionResponse,
 )
 from app.services.credentials_service import CredentialsService
+from app.services.mcp_config_service import UnregisteredProjectPathError
 from app.services.mcp_registry_service import MCPRegistryService
 from app.services.mcp_service import MCPService
 from app.services.oauth_service import MCPOAuthService
@@ -60,6 +61,7 @@ async def get_mcp_server(
 async def create_mcp_server(
     server: MCPServerCreate,
     project_path: str | None = Query(None, description="Optional project path"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Add a new MCP server."""
     # Validate server type
@@ -79,8 +81,10 @@ async def create_mcp_server(
         raise HTTPException(status_code=400, detail="URL is required for http/sse servers")
 
     try:
-        created_server = await mcp_service.add_server(server, project_path)
+        created_server = await mcp_service.add_server(server, project_path, db)
         return created_server
+    except UnregisteredProjectPathError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create server: {str(e)}")
 
@@ -91,6 +95,7 @@ async def update_mcp_server(
     server: MCPServerUpdate,
     scope: str = Query(..., description="Server scope (user or project)"),
     project_path: str | None = Query(None, description="Optional project path"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Update an existing MCP server configuration."""
     # Validate scope
@@ -98,12 +103,14 @@ async def update_mcp_server(
         raise HTTPException(status_code=400, detail="Server scope must be 'user' or 'project'")
 
     try:
-        updated_server = await mcp_service.update_server(name, server, scope, project_path)
+        updated_server = await mcp_service.update_server(name, server, scope, project_path, db)
         if not updated_server:
             raise HTTPException(status_code=404, detail=f"Server '{name}' not found in '{scope}' scope")
         return updated_server
     except HTTPException:
         raise
+    except UnregisteredProjectPathError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update server: {str(e)}")
 
@@ -113,13 +120,17 @@ async def delete_mcp_server(
     name: str,
     scope: str = Query(..., description="Server scope (user or project)"),
     project_path: str | None = Query(None, description="Optional project path"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Remove an MCP server from configuration."""
     # Validate scope
     if scope not in ["user", "project"]:
         raise HTTPException(status_code=400, detail="Server scope must be 'user' or 'project'")
 
-    success = await mcp_service.remove_server(name, scope, project_path)
+    try:
+        success = await mcp_service.remove_server(name, scope, project_path, db)
+    except UnregisteredProjectPathError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not success:
         raise HTTPException(status_code=404, detail=f"Server '{name}' not found in '{scope}' scope")
 
@@ -362,6 +373,7 @@ async def get_registry_server_versions(
 async def install_registry_server(
     request: MCPRegistryInstallRequest,
     project_path: str | None = Query(None, description="Project path for project scope"),
+    db: AsyncSession = Depends(get_db),
 ):
     """Install an MCP server from the registry into local config."""
     if request.scope not in ("user", "project"):
@@ -391,6 +403,7 @@ async def install_registry_server(
             scope=request.scope,
             config=config,
             project_path=project_path,
+            db=db,
         )
 
         return MCPRegistryInstallResponse(
@@ -401,5 +414,7 @@ async def install_registry_server(
         )
     except HTTPException:
         raise
+    except UnregisteredProjectPathError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to install server: {str(e)}")

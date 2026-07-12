@@ -3,8 +3,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.database import Project
 from app.models.schemas import (
     MCPPrompt,
     MCPResource,
@@ -26,6 +28,15 @@ from app.utils.path_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class UnregisteredProjectPathError(ValueError):
+    """Raised when a client-supplied project_path is not a registered project.
+
+    Writing a project-scoped ``.mcp.json`` is gated on the target path existing
+    in the ``projects`` table so an unauthenticated API caller can't have the
+    server write config into an arbitrary filesystem location.
+    """
 
 
 class MCPConfigService(MCPCacheService):
@@ -230,10 +241,43 @@ class MCPConfigService(MCPCacheService):
         return await write_json_file(user_config_path, config)
 
     @staticmethod
+    async def _assert_registered_project_path(
+        project_path: str | None, db: AsyncSession | None
+    ) -> None:
+        """Reject a client-supplied project_path that isn't a registered project.
+
+        ``project_path is None`` falls back to the server's cwd — not a
+        client-controlled location — so it's allowed. Any explicit path must
+        exist in the ``projects`` table; validating it requires a db session,
+        so a missing session with an explicit path is refused rather than
+        silently trusted.
+        """
+        if project_path is None:
+            return
+        if db is None:
+            raise UnregisteredProjectPathError(
+                f"Project path '{project_path}' cannot be validated without a "
+                "database session"
+            )
+        result = await db.execute(select(Project).where(Project.path == project_path))
+        if result.scalar_one_or_none() is None:
+            raise UnregisteredProjectPathError(
+                f"Project path '{project_path}' is not a registered project"
+            )
+
+    @staticmethod
     async def _write_project_mcp_config(
-        servers: dict[str, Any], project_path: str | None = None
+        servers: dict[str, Any],
+        project_path: str | None = None,
+        db: AsyncSession | None = None,
     ) -> bool:
-        """Write MCP configuration to project-level .mcp.json."""
+        """Write MCP configuration to project-level .mcp.json.
+
+        The target path is validated against the ``projects`` table first (see
+        ``_assert_registered_project_path``); an unregistered path raises
+        ``UnregisteredProjectPathError`` before anything is written.
+        """
+        await MCPConfigService._assert_registered_project_path(project_path, db)
         project_config_path = get_project_mcp_config_file(project_path)
         config = read_json_file(project_config_path) or {}
 
@@ -350,7 +394,10 @@ class MCPConfigService(MCPCacheService):
             return None
 
     async def add_server(
-        self, server: MCPServerCreate, project_path: str | None = None
+        self,
+        server: MCPServerCreate,
+        project_path: str | None = None,
+        db: AsyncSession | None = None,
     ) -> MCPServer:
         """
         Add a new MCP server to the appropriate config file.
@@ -358,6 +405,7 @@ class MCPConfigService(MCPCacheService):
         Args:
             server: MCP server configuration to add
             project_path: Optional path to project directory
+            db: Database session used to validate a project-scoped path
 
         Returns:
             Created MCPServer object
@@ -378,7 +426,7 @@ class MCPConfigService(MCPCacheService):
         else:
             servers = self._read_project_mcp_config(project_path)
             servers[server.name] = config
-            await self._write_project_mcp_config(servers, project_path)
+            await self._write_project_mcp_config(servers, project_path, db)
 
         logger.info("MCP server added", extra={"server": server.name, "scope": server.scope})
         return self._create_mcp_server(server.name, config, server.scope)
@@ -389,6 +437,7 @@ class MCPConfigService(MCPCacheService):
         server: MCPServerUpdate,
         scope: str,
         project_path: str | None = None,
+        db: AsyncSession | None = None,
     ) -> MCPServer | None:
         """
         Update an existing MCP server configuration.
@@ -398,6 +447,7 @@ class MCPConfigService(MCPCacheService):
             server: Updated server configuration
             scope: Server scope ("user" or "project")
             project_path: Optional path to project directory
+            db: Database session used to validate a project-scoped path
 
         Returns:
             Updated MCPServer object or None if not found
@@ -426,13 +476,17 @@ class MCPConfigService(MCPCacheService):
         if scope == "user":
             await self._write_user_mcp_config(servers)
         else:
-            await self._write_project_mcp_config(servers, project_path)
+            await self._write_project_mcp_config(servers, project_path, db)
 
         logger.info("MCP server updated", extra={"server": name, "scope": scope})
         return self._create_mcp_server(name, config, scope)
 
     async def remove_server(
-        self, name: str, scope: str, project_path: str | None = None
+        self,
+        name: str,
+        scope: str,
+        project_path: str | None = None,
+        db: AsyncSession | None = None,
     ) -> bool:
         """
         Remove an MCP server from configuration.
@@ -441,6 +495,7 @@ class MCPConfigService(MCPCacheService):
             name: Server name
             scope: Server scope ("user" or "project")
             project_path: Optional path to project directory
+            db: Database session used to validate a project-scoped path
 
         Returns:
             True if removed, False if not found
@@ -463,7 +518,7 @@ class MCPConfigService(MCPCacheService):
         if scope == "user":
             await self._write_user_mcp_config(servers)
         else:
-            await self._write_project_mcp_config(servers, project_path)
+            await self._write_project_mcp_config(servers, project_path, db)
 
         logger.info("MCP server removed", extra={"server": name, "scope": scope})
         return True
