@@ -1703,10 +1703,11 @@ class ActiveSessionsResponse(BaseModel):
 
 
 class PlanSummary(BaseModel):
-    """Summary of a plan file for list view."""
+    """Summary of a plan for list view."""
 
     filename: str
     slug: str
+    project_key: str
     title: str
     excerpt: str
     modified_at: str
@@ -1729,8 +1730,10 @@ class PlanDetail(BaseModel):
 
     filename: str
     slug: str
+    project_key: str
     title: str
     content: str
+    created_at: str | None = None
     modified_at: str
     size_bytes: int
     headings: list[str]

@@ -8,6 +8,13 @@ import pytest
 import pytest_asyncio
 
 import app.kanban.db as _kanban_db
+# Eagerly import the kanban models so every table registered on
+# ``KanbanBase.metadata`` is materialized by the test-DB reset fixture
+# below. Without this, tests that only import e.g. ``app.services.x`` and
+# never touch ``app.kanban.models`` directly would see a test DB missing
+# any model added after the conftest itself was last imported (e.g. the
+# ``kanban_plans`` table from kanban card 727470a8).
+import app.kanban.models  # noqa: F401
 from tests.kanban_test_db import TestSessionLocal, test_engine
 
 _test_sf = TestSessionLocal()
@@ -84,6 +91,13 @@ def _patch_kanban_db():
     import app.api.v1.kanban.router as _router
     originals[(_router, "KanbanSessionLocal")] = _router.KanbanSessionLocal
     _router.KanbanSessionLocal = _test_sf
+
+    # /api/v1/plans migrated to the kanban DB in kanban card 727470a8 — it
+    # imports KanbanSessionLocal the same way the kanban router does, so it
+    # needs the same test-DB swap or its endpoints hit the production engine.
+    import app.api.v1.plans as _plans_router
+    originals[(_plans_router, "KanbanSessionLocal")] = _plans_router.KanbanSessionLocal
+    _plans_router.KanbanSessionLocal = _test_sf
 
     import app.kanban.mcp_server as _mcp
     originals[(_mcp, "KanbanSessionLocal")] = _mcp.KanbanSessionLocal
