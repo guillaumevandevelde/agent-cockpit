@@ -13,6 +13,7 @@ import {
   Brain,
   Paintbrush,
   Activity,
+  Layers,
   MessageSquare,
   BarChart3,
   FolderOpen,
@@ -96,6 +97,7 @@ const providerNavigation: Record<AgenticCliId, NavGroup[]> = {
         { name: 'Memory', href: '/memory', icon: Brain, capability: 'memory' },
         { name: 'Output Styles', href: '/output-styles', icon: Paintbrush, capability: 'output_styles' },
         { name: 'Status Line', href: '/statusline', icon: Activity, capability: 'statusline' },
+        { name: 'Blueprints', href: '/blueprints', icon: Layers },
       ],
     },
     {

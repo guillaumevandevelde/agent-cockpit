@@ -38,6 +38,7 @@ const SandcastlePage = lazy(() => import('./features/sandcastle/SandcastlePage')
 const HostsPage = lazy(() => import('./features/hosts/HostsPage').then((m) => ({ default: m.HostsPage })))
 const SubscriptionsPage = lazy(() => import('./features/subscriptions/SubscriptionsPage').then((m) => ({ default: m.SubscriptionsPage })))
 const UpdatesPage = lazy(() => import('./features/updates/UpdatesPage').then((m) => ({ default: m.UpdatesPage })))
+const BlueprintsPage = lazy(() => import('./features/blueprints').then((m) => ({ default: m.BlueprintsPage })))
 
 function App() {
   return (
@@ -83,6 +84,7 @@ function App() {
                 <Route path="hosts" element={<HostsPage />} />
                 <Route path="subscriptions" element={<SubscriptionsPage />} />
                 <Route path="updates" element={<UpdatesPage />} />
+                <Route path="blueprints" element={<BlueprintsPage />} />
               </Route>
             </Routes>
             </Suspense>
