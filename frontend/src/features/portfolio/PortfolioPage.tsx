@@ -2,9 +2,21 @@ import { useCallback, useEffect, useState } from 'react'
 import { Building2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { RefreshButton } from '@/components/shared/RefreshButton'
 import { fetchPortfolioOverview } from './api'
 import type { PortfolioOverview, PortfolioProject, PortfolioTotals } from './types'
+
+const POLL_INTERVAL_MS = 10_000
+
+type KindFilter = 'all' | 'meta' | 'product' | 'archived'
+
+const FILTERS: { key: KindFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'meta', label: 'Meta only' },
+  { key: 'product', label: 'Product only' },
+  { key: 'archived', label: 'Archived' },
+]
 
 const KIND_VARIANT: Record<string, 'default' | 'secondary' | 'outline'> = {
   meta: 'default',
@@ -76,22 +88,34 @@ function ProjectRow({ project }: { project: PortfolioProject }) {
 export function PortfolioPage() {
   const [overview, setOverview] = useState<PortfolioOverview | null>(null)
   const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<KindFilter>('all')
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
     try {
       setOverview(await fetchPortfolioOverview())
     } catch {
       setOverview(null)
     }
-    setLoading(false)
+    if (!opts?.silent) setLoading(false)
   }, [])
 
   useEffect(() => {
     load()
   }, [load])
 
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.hidden) return
+      void load({ silent: true })
+    }, POLL_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [load])
+
   const totals = overview?.totals
+  const projects = overview?.projects ?? []
+  const visibleProjects =
+    filter === 'all' ? projects : projects.filter((p) => p.kind === filter)
 
   return (
     <div className="space-y-6">
@@ -105,7 +129,20 @@ export function PortfolioPage() {
             </p>
           </div>
         </div>
-        <RefreshButton onClick={load} loading={loading} />
+        <RefreshButton onClick={() => load()} loading={loading} />
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {FILTERS.map((f) => (
+          <Button
+            key={f.key}
+            size="sm"
+            variant={filter === f.key ? 'default' : 'outline'}
+            onClick={() => setFilter(f.key)}
+          >
+            {f.label}
+          </Button>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -131,6 +168,8 @@ export function PortfolioPage() {
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : !overview || overview.projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">No projects tracked yet.</p>
+          ) : visibleProjects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No projects match this filter.</p>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -148,7 +187,7 @@ export function PortfolioPage() {
                 </tr>
               </thead>
               <tbody>
-                {overview.projects.map((p) => (
+                {visibleProjects.map((p) => (
                   <ProjectRow key={p.project_key} project={p} />
                 ))}
               </tbody>
