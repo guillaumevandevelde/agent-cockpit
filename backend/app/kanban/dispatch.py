@@ -593,13 +593,92 @@ def extract_revisit_question(activity) -> str | None:
     return None
 
 
+def _is_analyst_leaf_spike(card) -> bool:
+    """True when the card is routed to the analyst column but does NOT have
+    a multi-agent decomposition pipeline attached.
+
+    Routing detection: ``work_type='analysis'`` (the structured routing hint
+    maps analysis → analyst by default — see ``WORK_TYPE_PERSONA_DEFAULTS``)
+    OR ``card.agent='analyst'`` (legacy/manual override that picks the
+    analyst column regardless of work_type). Either signals that the card's
+    target_agent resolved to "analyst" and its persona body is analyst.md
+    (or the hardcoded ``ANALYST_PROMPT`` fallback).
+
+    Without this distinction, ``build_card_prompt`` emitted both the
+    analyst persona ("Verboden: geen Write/Edit") AND the executor ship
+    workflow ("write doc + commit + ship + attach branch + move THIS kaart
+    naar Done") for the same card. The leaf analyst spike is a single
+    deliverable, not a multi-agent decomposition — there's no parent to
+    split, no child-cards to plan — so the standard analyst prohibitions
+    are inapplicable. See kanban card a9c27beeb63e427a9c14ad98fa8380fe.
+
+    Note: this helper only checks routing; the phase check (executor vs.
+    analyst) is applied in ``build_card_prompt``. A real analyst card
+    (``analyst_agent_id`` set, ``analyst_run_id`` not set, ``phase ==
+    'analyst'``) is consistent — persona + analyst session-end workflow
+    are both planning-only, no contradiction — so it does not need the
+    override.
+    """
+    work_type = getattr(card, "work_type", None)
+    agent = getattr(card, "agent", None)
+    return work_type == "analysis" or agent == "analyst"
+
+
+def _analyst_leaf_spike_override_note() -> str:
+    """Override note prepended to the persona preamble for leaf analyst
+    spikes. Explicitly relaxes the ``Verboden: geen Write/Edit`` prohibition
+    in analyst.md / ``ANALYST_PROMPT`` and reframes the task as "produce a
+    single deliverable (typically a decision doc), commit, ship, attach the
+    branch, move THIS card to Done" — matching the executor ship workflow
+    that follows in the prompt.
+
+    Lives as a separate helper (not inlined into ``build_card_prompt``) so
+    the marker text is greppable in tests and the override contract is
+    reviewable on its own.
+    """
+    return (
+        "## ⚠ Analyst-leaf-spike override\n"
+        "This card was dispatched in the **executor** phase (no "
+        "`analyst_agent_id` configured), but the routing placed you in the "
+        "analyst column via `work_type='analysis'` or `card.agent='analyst'`. "
+        "Because there is no multi-agent decomposition pipeline attached to "
+        "this card, **you are not running as the classic analyst** — the "
+        "standard `Verboden: geen Write/Edit` prohibition in the persona "
+        "below is **relaxed for this card**.\n\n"
+        "Your job here is a **leaf spike**: produce a single deliverable "
+        "(typically a decision doc in `docs/cockpit/`). Follow the "
+        "session-end workflow below exactly as for an engineer card — write "
+        "the doc, commit, ship (merge/PR), attach the branch as the "
+        "deliverable, then move **THIS** card to Done with a summary "
+        "describing what you produced.\n\n"
+        "---\n\n"
+    )
+
+
 def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       phase: str = "executor",
                       impediment_question: str | None = None,
                       impediment_answer: str | None = None,
                       revisit_question: str | None = None,
                       revisit_prior_decision: dict | None = None) -> str:
-    preamble = (persona.strip() + "\n\n") if persona else ""
+    # Leaf analyst spike override: a card dispatched in the executor phase
+    # (no `analyst_agent_id`) but routed to the analyst column via
+    # `work_type='analysis'` or `card.agent='analyst'` would otherwise get
+    # both the analyst.md persona (which forbids Write/Edit) AND the
+    # executor ship workflow (which requires writing a doc, committing,
+    # shipping, attaching a branch) — contradictory instructions in the
+    # same prompt. The override prepended here explicitly relaxes the
+    # "Verboden: geen Write/Edit" prohibition for this leaf case and
+    # reframes the task as "produce a single deliverable, ship it, move
+    # THIS card to Done", matching the executor session-end workflow that
+    # follows. See kanban card a9c27beeb63e427a9c14ad98fa8380fe for the
+    # original report (analyst + executor-session-end collide for
+    # work_type=analysis spike cards).
+    leaf_spike = phase == "executor" and persona and _is_analyst_leaf_spike(card)
+    if leaf_spike:
+        preamble = _analyst_leaf_spike_override_note() + persona.strip() + "\n\n"
+    else:
+        preamble = (persona.strip() + "\n\n") if persona else ""
     impediment_section = ""
     if impediment_question:
         impediment_section = (
