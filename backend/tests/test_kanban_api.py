@@ -386,3 +386,148 @@ async def test_delete_dispatch_pause_is_idempotent_when_not_paused():
         r = await ac.delete("/api/v1/kanban/dispatch-pause")
         assert r.status_code == 200, r.text
         assert r.json() == {"cleared": False, "was_paused": False}
+
+
+@pytest.mark.asyncio
+async def test_get_dispatch_pause_includes_paused_providers_field():
+    """GET /dispatch-pause must always carry a `paused_providers` list so the
+    frontend banner can show a per-provider pause without a second endpoint.
+    Empty list when nothing is paused -- no per-provider pause and no legacy
+    global pause either."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # Existing fields unchanged so consumers that only read those keep working.
+        assert body["paused"] is False
+        assert body["paused_until"] is None
+        # New field present and an empty list.
+        assert body["paused_providers"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_dispatch_pause_lists_active_per_provider_pauses():
+    """A per-provider pause must appear under `paused_providers` on GET. A
+    legacy global pause alone (no per-provider) leaves the list empty -- the
+    field is per-provider-only by design (the global pause has its own
+    `paused` flag for consumers that don't care about the split)."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import set_paused_until
+
+    transport = ASGITransport(app=app)
+
+    # Per-provider pause only.
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(
+            s, datetime.now(UTC) + timedelta(minutes=10), provider="minimax",
+        )
+        await s.commit()
+
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # Per-provider pause does NOT trip the legacy `paused` flag (its slot
+        # is independent -- see dispatch_pause.is_dispatch_paused provider=...).
+        assert body["paused"] is False
+        assert "minimax" in body["paused_providers"]
+
+
+@pytest.mark.asyncio
+async def test_get_dispatch_pause_paused_providers_only_lists_unexpired_entries():
+    """Expired per-provider entries must not show up -- they are stale rows
+    the next is_dispatch_paused tick will self-clear; listing them would
+    lie to the operator about what is currently frozen."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import set_paused_until
+
+    future = datetime.now(UTC) + timedelta(minutes=10)
+    past = datetime.now(UTC) - timedelta(minutes=1)
+
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(s, future, provider="minimax")
+        await set_paused_until(s, past, provider="bedrock")
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        body = r.json()
+        assert body["paused_providers"] == ["minimax"]
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_pause_clears_per_provider_pauses():
+    """The operator-override DELETE must wipe every per-provider pause, not
+    just the legacy global slot -- a single click should un-freeze the
+    whole device, regardless of which providers have per-provider deadlines."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import (
+        is_dispatch_paused,
+        list_paused_providers,
+        set_paused_until,
+    )
+
+    future = datetime.now(UTC) + timedelta(minutes=10)
+
+    async with KanbanSessionLocal() as s:
+        # Both legacy and per-provider slots active.
+        await set_paused_until(s, future)
+        await set_paused_until(s, future, provider="minimax")
+        await set_paused_until(s, future, provider="bedrock")
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.delete("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        # Existing response contract preserved (the global pause was active).
+        assert r.json() == {"cleared": True, "was_paused": True}
+
+        # GET now shows no legacy pause and no per-provider pauses.
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        body = r.json()
+        assert body["paused"] is False
+        assert body["paused_providers"] == []
+
+    # Belt-and-braces: read the slots directly. After the DELETE both must
+    # be empty -- the route must not have leaked any pause state behind the
+    # legacy-only path.
+    async with KanbanSessionLocal() as s:
+        assert await is_dispatch_paused(s) is False
+        assert await list_paused_providers(s) == []
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_pause_clears_only_per_provider_when_no_legacy():
+    """DELETE must wipe per-provider pauses even when no legacy global pause
+    was active. Otherwise an operator who only sees the per-provider banner
+    has no way to un-freeze via the API."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import (
+        list_paused_providers,
+        set_paused_until,
+    )
+
+    future = datetime.now(UTC) + timedelta(minutes=10)
+
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(s, future, provider="minimax")
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.delete("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+
+    async with KanbanSessionLocal() as s:
+        assert await list_paused_providers(s) == []

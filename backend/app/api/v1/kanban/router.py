@@ -847,25 +847,48 @@ async def create_project_from_intake(payload: CreateProjectFromIntakeRequest):
 @router.get("/dispatch-pause")
 async def get_dispatch_pause():
     """Whether auto-dispatch is globally paused after a Claude usage-limit hit,
-    and until when. Not scoped to a project: the underlying limit is account-wide."""
+    and until when. Not scoped to a project: the underlying limit is account-wide.
+
+    ``paused_providers`` lists every provider whose per-provider pause slot is
+    still in the future (independent of the legacy global ``paused`` flag -- a
+    per-provider pause does NOT trip the global flag and vice versa). Frontend
+    banner code consumes this list to render "minimax is paused" without a
+    second endpoint. Empty list when nothing is paused.
+    """
     from app.kanban import dispatch_pause
     async with KanbanSessionLocal() as s:
         paused = await dispatch_pause.is_dispatch_paused(s)
         paused_until = await dispatch_pause.get_paused_until(s) if paused else None
+        paused_providers = await dispatch_pause.list_paused_providers(s)
     return {"paused": paused,
-            "paused_until": paused_until.isoformat() if paused_until else None}
+            "paused_until": paused_until.isoformat() if paused_until else None,
+            "paused_providers": paused_providers}
 
 
 @router.delete("/dispatch-pause")
 async def clear_dispatch_pause():
     """Manually clear the global auto-dispatch pause -- an operator override for
     when the automatic 429-detection was wrong. Idempotent: clearing when
-    nothing is paused is a no-op that reports {cleared: false, was_paused: false}."""
-    from app.kanban import dispatch
+    nothing is paused is a no-op that reports {cleared: false, was_paused: false}.
+
+    Also wipes every per-provider pause slot via ``clear_all_pauses`` -- a
+    single operator click un-freezes the whole device, regardless of which
+    provider reported the limit. ``was_paused`` still reflects the legacy global
+    pause state (the audit-comment-on-To-Resume contract that downstream
+    consumers rely on is keyed off it); the per-provider clear runs even when
+    no global pause was active, so an operator who only sees a per-provider
+    banner can still un-freeze via this endpoint.
+    """
+    from app.kanban import dispatch, dispatch_pause
     async with KanbanSessionLocal() as s:
         cleared, was_paused = await dispatch.clear_dispatch_pause(s)
-        if cleared:
-            await s.commit()
+        await dispatch_pause.clear_all_pauses(s)
+        # Commit whenever the legacy clear ran (to persist the audit comment
+        # + global clear) OR whenever any per-provider pause existed (to
+        # persist the wipe). Without this a per-provider-only pause set
+        # without the global pause would be rolled back when the session
+        # exits the `async with` block.
+        await s.commit()
     logger.info("dispatch-pause manually cleared via API (was_paused=%s)", was_paused)
     return {"cleared": cleared, "was_paused": was_paused}
 
