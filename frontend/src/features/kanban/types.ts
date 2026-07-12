@@ -247,4 +247,10 @@ export interface McpHealth {
 export interface DispatchPauseStatus {
   paused: boolean;
   paused_until: string | null;
+  // Per-provider pause slots independently active from the legacy global
+  // ``paused`` flag (see kanban-limit cards). Optional so older responses
+  // without the field don't crash consumers — treat undefined as [] at the
+  // use site. Names are the same provider IDs the column override uses
+  // (``PROVIDER_LABELS`` maps them to display labels).
+  paused_providers?: string[];
 }
