@@ -180,7 +180,11 @@ class ReopenRequest(BaseModel):
 
 class AttachRequest(BaseModel):
     kind: str
-    ref: str
+    # ``spec`` is a markdown-body kind (companion of the analyst ``plan``);
+    # an empty body would render as a blank spec card on the board. The
+    # other kinds (pr/branch/commit/link/note) also have non-empty refs by
+    # construction, so the guard is universally safe.
+    ref: str = Field(..., min_length=1)
 
 
 class UpdatePlanAttachmentRequest(BaseModel):

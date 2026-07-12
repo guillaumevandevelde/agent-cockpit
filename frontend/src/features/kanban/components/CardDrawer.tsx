@@ -156,6 +156,21 @@ function DeliverableRow({ d }: { d: Deliverable }) {
           </div>
         </div>
       );
+    case "spec":
+      // Companion of `plan`: a brainstorming/design-doc artefact. Renders the
+      // markdown body inline like `plan`, but with a distinct icon + label so
+      // a card carrying both reads as "design + plan", not "two plans".
+      return (
+        <div className="text-xs flex flex-col gap-1" data-deliverable-kind={d.kind}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">📐 Spec document</span>
+            <span className="text-muted-foreground">· {created}</span>
+          </div>
+          <div className="ml-6">
+            <MarkdownRenderer content={d.ref} />
+          </div>
+        </div>
+      );
     case "plan_ref": {
       // The `ref` is a JSON payload `{parent_card_id, plan_deliverable_id}`
       // — surface a pointer to the parent plan for context.

@@ -108,7 +108,7 @@ export interface KanbanColumn {
 
 export interface Deliverable {
   id: string;
-  kind: "pr" | "branch" | "commit" | "link" | "note" | "plan" | "plan_ref";
+  kind: "pr" | "branch" | "commit" | "link" | "note" | "plan" | "plan_ref" | "spec";
   ref: string;
   created_at: string;
 }

@@ -989,6 +989,7 @@
             "type": "string"
           },
           "ref": {
+            "minLength": 1,
             "title": "Ref",
             "type": "string"
           }

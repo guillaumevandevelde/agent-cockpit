@@ -337,7 +337,18 @@ async def reopen_card(card_id: str, note: str) -> dict:
 
 @mcp.tool()
 async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
-    """Bind a deliverable (pr|branch|commit|link|note) as a portable reference."""
+    """Bind a deliverable (pr|branch|commit|link|note|spec) as a portable reference.
+
+    `spec` is the brainstorming/design-doc companion to `plan`: the
+    `brainstorming` skill writes a design-doc, and `attach_deliverable` lets
+    it land on the card as a first-class artefact, distinct from the
+    analyst plan-attachment. `ref` is the markdown body. Empty `ref` is
+    rejected — spec is a markdown body, an empty body would render as a
+    blank spec card.
+    """
+    if not ref:
+        return {"error": "invalid_ref", "card_id": card_id,
+                "message": "ref must be a non-empty string"}
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
         if card is None:
