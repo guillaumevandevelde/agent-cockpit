@@ -91,6 +91,11 @@ async def lifespan(app: FastAPI):
     scheduler_service.schedule_kanban_dispatch(
         interval_seconds=settings.kanban_dispatch_interval_seconds
     )
+    # Signal (never block) product-projects whose Backlog has stalled — posts a
+    # [portfolio-stale] comment, no Impediment move. See kanban/stale_detection.py.
+    scheduler_service.schedule_stale_detection(
+        interval_minutes=settings.stale_check_interval_minutes
+    )
     async with AsyncSessionLocal() as s:
         rows = (await s.execute(
             select(ScheduledMessage).where(ScheduledMessage.enabled == True)  # noqa: E712

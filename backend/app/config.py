@@ -92,6 +92,19 @@ class Settings(BaseSettings):
     portfolio_cap_enabled: bool = False
     portfolio_cap_value: int = Field(default_factory=_default_portfolio_cap_value)
 
+    # Stale-project detection: a scheduler task (see main.py lifespan) that signals
+    # — never blocks — when an autodispatch-enabled project's Backlog sits with no
+    # Done-move for too long. `stale_threshold_hours` is the age past which the
+    # last Done-move counts as stale; `stale_check_interval_minutes` is how often
+    # the detector runs. `stale_comment_template` is `.format(hours=..., backlog=...)`.
+    stale_threshold_hours: int = 24
+    stale_check_interval_minutes: int = 30
+    stale_comment_template: str = (
+        "[portfolio-stale] Dit project heeft al ~{hours}u geen Done-move gehad "
+        "terwijl er nog {backlog} kaart(en) in Backlog staan. Dit is een signaal, "
+        "geen blokkade — overweeg dit project dispatch-aandacht of prioritering te geven."
+    )
+
     # Tunable operational constants (defaults match the historical hardcoded values)
     kanban_dispatch_interval_seconds: int = 10
     provider_doctor_timeout_seconds: int = 30
