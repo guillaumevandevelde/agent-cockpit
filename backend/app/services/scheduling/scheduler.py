@@ -11,6 +11,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 logger = logging.getLogger(__name__)
 
 _KANBAN_DISPATCH_JOB_ID = "kanban-dispatch"
+_STALE_DETECTION_JOB_ID = "portfolio-stale-detection"
 _AUTO_BACKUP_JOB_ID = "auto-backup"
 
 
@@ -77,6 +78,22 @@ class SchedulerService:
             await run_dispatch_tick()
         except Exception:
             logger.exception("kanban dispatch tick failed")
+
+    def schedule_stale_detection(self, interval_minutes: int = 30) -> None:
+        """Periodically flag autodispatch projects whose Backlog has stalled."""
+        self._sched.add_job(
+            self._run_stale_detection,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id=_STALE_DETECTION_JOB_ID, replace_existing=True,
+            coalesce=True, max_instances=1, misfire_grace_time=interval_minutes * 60,
+        )
+
+    async def _run_stale_detection(self) -> None:
+        from app.kanban.stale_detection import run_stale_detection_tick
+        try:
+            await run_stale_detection_tick()
+        except Exception:
+            logger.exception("stale-project detection tick failed")
 
     def has_auto_backup(self) -> bool:
         return self._sched.get_job(_AUTO_BACKUP_JOB_ID) is not None
