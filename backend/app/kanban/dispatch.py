@@ -1292,24 +1292,44 @@ def _mint_session_name(
     return name
 
 
-def _resolve_target_column(card, project_path: str) -> str:
+async def _resolve_target_column(session, card, *, project_path: str,
+                                 project_key: str,
+                                 agent_override: str | None = None) -> str:
     """Resolve the agent column this card will be dispatched to (executor phase).
 
-    Mirrors the first half of _phase_target_agent without the work_type DB
-    fallback (the cap check is approximate — a card skipped due to a column
-    cap will be re-evaluated next tick when the per-column count drops).
+    Delegates to `_phase_target_agent` — the *same* resolver the real spawn
+    path (`_run_card`) uses — so the per-column cap gate can never route a card
+    to a different column than the one it is actually dispatched to.
+
+    Crucially this includes the `work_type` → persona fallback: a card whose
+    `agent` is a CLI id (e.g. "claude-code") rather than a persona file resolves
+    to its work_type persona ("analysis" → "analyst"), exactly as the spawn
+    does. The previous version mirrored only the *first half* of
+    `_phase_target_agent` and dropped this fallback, so such a card was gated
+    against the hardcoded "engineer" column instead of its real target
+    ("analyst"). A full engineer column then starved analysis cards that the
+    (empty) analyst column had room for — the analyst never picked them up. See
+    the "analyst neemt geen analyse-kaarten op" postmortem.
+
+    The work_type lookup mirrors `_run_card`'s try/except: a transient DB error
+    degrades to the legacy engineer routing rather than wedging the tick.
     """
-    agent_override = None
-    known_clis = _known_cli_ids()
-    if agent_override and agent_override not in known_clis:
-        return agent_override
-    agents_dir = Path(project_path) / ".claude" / "agents"
-    known_agents = {p.stem for p in agents_dir.glob("*.md")} if agents_dir.is_dir() else set()
-    card_agent = getattr(card, "agent", None)
-    if card_agent and card_agent in known_agents:
-        return card_agent
-    persona = _persona_for_card(project_path, card, card.column)
-    return _resolve_agent_from_persona(persona) or "engineer"
+    try:
+        fallback_persona = await _resolve_work_type_fallback(
+            session, project_key, card,
+        )
+    except Exception:
+        logger.exception(
+            "work_type fallback lookup failed for card %s in %s; cap gate "
+            "falling back to legacy engineer routing",
+            card.id, project_key,
+        )
+        fallback_persona = None
+    return _phase_target_agent(
+        card, project_path=project_path, phase="executor",
+        source_column=card.column, agent_override=agent_override,
+        known_clis=_known_cli_ids(), fallback_persona=fallback_persona,
+    )
 
 
 def _active_session_count(cards: Iterable[KanbanCard]) -> int:
@@ -2351,7 +2371,9 @@ async def dispatch_project(
         # resolved from its phase. Analyst phase always goes to "analyst";
         # executor phase uses the agent/persona/column resolution.
         phase = resolve_phase(card)
-        target_column = "analyst" if phase == "analyst" else _resolve_target_column(card, project_path)
+        target_column = "analyst" if phase == "analyst" else await _resolve_target_column(
+            session, card, project_path=project_path, project_key=project_key,
+        )
         col_cap = column_caps.get(target_column)
         if col_cap is not None:
             col_counts = _active_session_count_by_column(cards)
@@ -2675,7 +2697,9 @@ async def dispatch_all_pending(
         # structural limit, not a busy heuristic. Analyst phase always goes to
         # the "analyst" column; executor phase resolves via _resolve_target_column.
         phase = resolve_phase(card)
-        target_column = "analyst" if phase == "analyst" else _resolve_target_column(card, project_path)
+        target_column = "analyst" if phase == "analyst" else await _resolve_target_column(
+            session, card, project_path=project_path, project_key=project_key,
+        )
         col_cap = column_caps.get(target_column)
         if col_cap is not None:
             cards = await list_cards(session, project_key)
@@ -2991,7 +3015,11 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                 cards = await list_cards(ks, card.project_key)
                 column_caps = await _column_max_sessions(ks, card.project_key)
                 if column_caps:
-                    target_column = _resolve_target_column(card_data, card.project_path)
+                    target_column = await _resolve_target_column(
+                        ks, card_data, project_path=card.project_path,
+                        project_key=card.project_key,
+                        agent_override=card.agent_override,
+                    )
                     col_cap = column_caps.get(target_column)
                     if col_cap is not None:
                         col_counts = _active_session_count_by_column(cards)

@@ -667,6 +667,85 @@ async def test_column_cap_defaults_null_means_no_per_column_limit(project_with_a
     assert len(transport.calls) == 4
 
 
+@pytest.fixture
+def project_with_analyst(tmp_path):
+    """Project with engineer + analyst persona files, mirroring the real repo
+    layout, so a work_type='analysis' card resolves to the analyst column."""
+    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir.mkdir(parents=True)
+    for name in ("engineer", "analyst"):
+        (agents_dir / f"{name}.md").write_text(f"# {name}")
+    return str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_resolve_target_column_applies_work_type_fallback(project_with_analyst):
+    """The cap gate (`_resolve_target_column`) resolves a card whose `agent` is
+    a CLI id via the work_type fallback — the same way the spawn path
+    (`_phase_target_agent`) does. A work_type='analysis' card with
+    agent='claude-code' must resolve to 'analyst', not the hardcoded
+    'engineer' fallback."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="analyse-me", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "claude-code", "work_type": "analysis"},
+        )
+        await s.flush()
+        card = await get_card(s, cid)
+        col = await dispatch._resolve_target_column(
+            s, card, project_path=project_with_analyst, project_key=PK,
+        )
+    assert col == "analyst"
+
+
+@pytest.mark.asyncio
+async def test_analysis_card_gated_against_analyst_not_engineer(project_with_analyst):
+    """Regression: a work_type='analysis' card whose `agent` is a CLI id
+    ('claude-code', not a persona file) must be gated against its *real* target
+    column (analyst) — the column the spawn resolves via the work_type
+    fallback — not the hardcoded 'engineer' fallback. A saturated engineer
+    column must not starve it while the analyst column still has room.
+
+    Before the fix, `_resolve_target_column` dropped the work_type fallback and
+    mis-resolved the card to 'engineer'; with engineer at its cap the card was
+    skipped every tick and the analyst never picked it up."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(s, project_key=PK, name="engineer",
+                                     default_agent="engineer", max_sessions=1)
+        await service.create_column(s, project_key=PK, name="analyst",
+                                     default_agent="analyst", max_sessions=2)
+        # Saturate the engineer column with a live agent claim.
+        busy_id = await _make_card(s, title="eng-busy", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=busy_id, payload={"claimed_by": "agent:k-eng-0001"},
+        )
+        # An analysis card carrying a CLI id in `agent` (as real cards do when
+        # created with an explicit agent='claude-code').
+        cid = await _make_card(s, title="analyse-me", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "claude-code", "work_type": "analysis"},
+        )
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_analyst,
+            transport=transport,
+        )
+        await s.commit()
+
+        moved = await get_card(s, cid)
+
+    # The full engineer column did not block it; it was dispatched to analyst.
+    assert result is not None
+    assert len(transport.calls) == 1
+    assert moved.column == "analyst"
+    assert (moved.claimed_by or "").startswith("agent:")
+
+
 @pytest.mark.asyncio
 async def test_column_max_sessions_column_roundtrip():
     """max_sessions on a column can be set via create_column and read back."""
