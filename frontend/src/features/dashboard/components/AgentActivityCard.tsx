@@ -20,7 +20,7 @@ interface RunPreview {
 }
 
 interface RunActivityResponse {
-  runs: RunPreview[]
+  agents: RunPreview[]
   count: number
 }
 
@@ -71,7 +71,7 @@ export function AgentActivityCard() {
     setLoading(true)
     try {
       const data = await apiClient<RunActivityResponse>(buildEndpoint('agent-activity/live'))
-      setRuns(data.runs)
+      setRuns(data.agents ?? [])
     } catch {
       setRuns([])
     } finally {
