@@ -1,0 +1,38 @@
+# cockpit-baseline — the universal blueprint every product-project is born with.
+#
+# Read by `BaselineBlueprint.load()` and applied by `BlueprintService.apply()`.
+# The skills below are universal to *any* dispatched engineering work, so every
+# new project ships with them regardless of template choice. No project-owned
+# agents: a fresh project inherits Claude Code's defaults (see §4.2 of
+# docs/cockpit/repo-provisioning-bootstrap.md for the per-skill rationale).
+name: cockpit-baseline
+version: 1
+description: Universal baseline every product-project inherits at birth — process skills, no project agents.
+
+settings:
+  permission_mode: default
+  plansDirectory: ~/.claude/plans
+
+# Universal cockpit process skills (already live in this repo).
+skills:
+  - name: flag-problem
+    source: project
+  - name: context-map
+    source: project
+  - name: session-retro
+    source: project
+  - name: git-ship
+    source: project
+  - name: verification-before-completion
+    source: project
+  # Skills from the `superpowers:` plug-in — seeded for the inception flow
+  # (brainstorming / writing-plans) and dispatch context (git-worktrees).
+  - name: brainstorming
+    source: project
+  - name: writing-plans
+    source: project
+  - name: using-git-worktrees
+    source: project
+
+# No project-owned agents in the baseline: inherit Claude Code defaults.
+agents: []

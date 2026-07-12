@@ -257,6 +257,38 @@ is gevaarlijk (geen review), maar nuttig voor power-users.
 **Voorgestelde MVP-set:** alleen `cockpit-baseline`. De rest is een latere
 design-iteratie op basis van de eerste gebruikerservaring.
 
+#### 4.2.1 `cockpit-baseline` — geïmplementeerd (MVP)
+
+De baseline is een statisch, mens-leesbaar YAML-bestand op disk —
+`backend/app/services/blueprint/baseline_blueprint.yaml` — geladen via
+`BaselineBlueprint.load() -> Blueprint` en toegepast met de bestaande
+`BlueprintService.apply(project_path, blueprint)`-motor. Geen database-tabel;
+de baseline hoort bij de code die 'm zaait en is daarom in-repo reviewbaar.
+(De blueprint-code leeft in `app/services/blueprint/`, niet in een apart
+`repo_bootstrap/`-package — één blueprint-module houdt loader, model, store en
+apply-engine bij elkaar.)
+
+De baseline levert **8 universele process-skills** en **géén project-eigen
+agents** (een vers project erft de Claude Code defaults). Waarom elke skill
+universeel is — onafhankelijk van template of framework:
+
+| Skill | Herkomst | Waarom universeel |
+|---|---|---|
+| `flag-problem` | deze repo | Elke gedispatchte sessie stuit op out-of-scope problemen; deze skill maakt ze durable als kanban-kaart i.p.v. ze te laten verdampen. |
+| `context-map` | deze repo | Voor élke wijziging eerst de relevante bestanden in kaart brengen is basale engineering-hygiëne. |
+| `session-retro` | deze repo | Zelf-verbetering oogsten aan het einde van élke sessie — niet framework-gebonden. |
+| `git-ship` | deze repo | Gestandaardiseerde session-end ship-flow (test → merge/PR → deliverable → Done) geldt voor elk git-project. |
+| `verification-before-completion` | deze repo | "Evidence before assertions" — bewijs vóór je 'klaar' claimt — is universeel voor elke agent. |
+| `brainstorming` | `superpowers:` | Intentie verkennen vóór bouwen; nodig voor de latere inceptie-/intake-flow (facet A). |
+| `writing-plans` | `superpowers:` | Spec → plan vóór code; idem inceptie-flow. |
+| `using-git-worktrees` | `superpowers:` | Geïsoleerde workspaces — de dispatch-laag draait agents standaard in worktrees. |
+
+**Materialisatie:** alle baseline-skills staan als `source: project` in de YAML,
+zodat `apply()` een discoverable `SKILL.md`-stub schrijft onder
+`.claude/skills/<naam>/`. De apply is idempotent: een tweede run op een reeds
+gevulde `.claude/` is een no-op (`skipped_existing=True`). `commands`,
+`statusline`, `output_styles` en `claudemd` zijn in de MVP leeg.
+
 ### 4.3 Open ontwerp-beslissingen (input nodig van synthese)
 
 1. **Wordt `autodispatch` standaard aan of uit bij geboorte?**
