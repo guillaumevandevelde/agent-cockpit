@@ -2,15 +2,21 @@
  * TypeScript types for Project Management
  */
 
+export type ProjectKind = "meta" | "product" | "archived";
+
 export interface ProjectBase {
   name: string;
   path: string;
   source?: "configured" | "session_history" | "directory";
+  kind?: ProjectKind;
+  priority?: number | null;
 }
 
 export interface ProjectResponse extends ProjectBase {
   id: number;
   is_active: boolean;
+  kind: ProjectKind;
+  priority: number | null;
   last_accessed: string;
   created_at: string;
 }

@@ -3,10 +3,16 @@
  */
 import { useState } from 'react';
 import { useProjectContext } from '@/contexts/ProjectContext';
-import type { ProjectResponse } from '@/types/projects';
+import type { ProjectKind, ProjectResponse } from '@/types/projects';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+
+const KIND_BADGE_CLASS: Record<ProjectKind, string> = {
+  meta: 'border-transparent bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  product: 'border-transparent bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  archived: 'border-transparent bg-muted text-muted-foreground',
+};
 
 interface ProjectListProps {
   projects: ProjectResponse[];
@@ -69,6 +75,9 @@ export function ProjectList({ projects, loading }: ProjectListProps) {
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <CardTitle>{project.name}</CardTitle>
+                  <Badge variant="outline" className={KIND_BADGE_CLASS[project.kind]}>
+                    {project.kind}
+                  </Badge>
                   {project.is_active && (
                     <Badge variant="default">Active</Badge>
                   )}

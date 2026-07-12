@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import Project
-from app.models.schemas import ProjectBase, ProjectCreate, ProjectResponse
+from app.models.schemas import ProjectBase, ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services.config_service import ConfigService
 from app.utils.path_utils import (
     convert_path_to_folder_name,
@@ -17,6 +17,21 @@ from app.utils.path_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _to_response(project: Project) -> ProjectResponse:
+    """Serialize a ``Project`` ORM row to its API response schema."""
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        path=project.path,
+        kind=project.kind,
+        priority=project.priority,
+        is_active=project.is_active,
+        last_accessed=project.last_accessed.isoformat(),
+        created_at=project.created_at.isoformat(),
+    )
+
 
 class ProjectService:
     """Service for managing local projects."""
@@ -30,17 +45,7 @@ class ProjectService:
         result = await self.db.execute(select(Project).order_by(Project.last_accessed.desc()))
         projects = result.scalars().all()
 
-        return [
-            ProjectResponse(
-                id=p.id,
-                name=p.name,
-                path=p.path,
-                is_active=p.is_active,
-                last_accessed=p.last_accessed.isoformat(),
-                created_at=p.created_at.isoformat(),
-            )
-            for p in projects
-        ]
+        return [_to_response(p) for p in projects]
 
     async def add_project(self, project_data: ProjectCreate) -> ProjectResponse:
         """Add a project manually to the database."""
@@ -53,23 +58,20 @@ class ProjectService:
         if existing:
             # Update existing project
             existing.name = project_data.name
+            existing.kind = project_data.kind
+            existing.priority = project_data.priority
             existing.last_accessed = datetime.now(UTC)
             await self.db.commit()
             await self.db.refresh(existing)
 
-            return ProjectResponse(
-                id=existing.id,
-                name=existing.name,
-                path=existing.path,
-                is_active=existing.is_active,
-                last_accessed=existing.last_accessed.isoformat(),
-                created_at=existing.created_at.isoformat(),
-            )
+            return _to_response(existing)
 
         # Create new project
         new_project = Project(
             name=project_data.name,
             path=project_data.path,
+            kind=project_data.kind,
+            priority=project_data.priority,
             is_active=False,
             last_accessed=datetime.now(UTC),
             created_at=datetime.now(UTC),
@@ -79,14 +81,7 @@ class ProjectService:
         await self.db.commit()
         await self.db.refresh(new_project)
 
-        return ProjectResponse(
-            id=new_project.id,
-            name=new_project.name,
-            path=new_project.path,
-            is_active=new_project.is_active,
-            last_accessed=new_project.last_accessed.isoformat(),
-            created_at=new_project.created_at.isoformat(),
-        )
+        return _to_response(new_project)
 
     async def remove_project(self, project_id: int) -> bool:
         """Remove a project from the database."""
@@ -101,6 +96,31 @@ class ProjectService:
         await self.db.delete(project)
         await self.db.commit()
         return True
+
+    async def update_project(
+        self, project_id: int, data: ProjectUpdate
+    ) -> ProjectResponse | None:
+        """Patch mutable project fields (name, is_active, kind, priority).
+
+        Only fields explicitly set on ``data`` are applied, so a PATCH with
+        just ``{"kind": "meta"}`` leaves everything else untouched.
+        """
+        result = await self.db.execute(
+            select(Project).where(Project.id == project_id)
+        )
+        project = result.scalar_one_or_none()
+
+        if not project:
+            return None
+
+        updates = data.model_dump(exclude_unset=True)
+        for field, value in updates.items():
+            setattr(project, field, value)
+
+        await self.db.commit()
+        await self.db.refresh(project)
+
+        return _to_response(project)
 
     def discover_projects(self, base_path: str) -> list[ProjectBase]:
         """
@@ -206,14 +226,7 @@ class ProjectService:
         await self.db.commit()
         await self.db.refresh(project)
 
-        return ProjectResponse(
-            id=project.id,
-            name=project.name,
-            path=project.path,
-            is_active=project.is_active,
-            last_accessed=project.last_accessed.isoformat(),
-            created_at=project.created_at.isoformat(),
-        )
+        return _to_response(project)
 
     async def clear_active_project(self) -> bool:
         """Clear the active project (deactivate all projects)."""
@@ -241,14 +254,7 @@ class ProjectService:
         merged = config_service.get_merged_config(project_path=project.path)
 
         return {
-            "project": ProjectResponse(
-                id=project.id,
-                name=project.name,
-                path=project.path,
-                is_active=project.is_active,
-                last_accessed=project.last_accessed.isoformat(),
-                created_at=project.created_at.isoformat(),
-            ).model_dump(),
+            "project": _to_response(project).model_dump(),
             "config": merged.model_dump(),
         }
 
@@ -262,11 +268,4 @@ class ProjectService:
         if not project:
             return None
 
-        return ProjectResponse(
-            id=project.id,
-            name=project.name,
-            path=project.path,
-            is_active=project.is_active,
-            last_accessed=project.last_accessed.isoformat(),
-            created_at=project.created_at.isoformat(),
-        )
+        return _to_response(project)

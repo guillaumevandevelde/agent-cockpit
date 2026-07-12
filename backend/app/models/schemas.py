@@ -52,12 +52,19 @@ class RawFileContent(BaseModel):
 # Project Management Schemas
 
 
+# Portfolio tag: meta-work (claude-cockpit itself) vs product-work (apps built
+# by Cockpit). Enforced as an enum at the schema boundary — invalid values 422.
+ProjectKind = Literal["meta", "product", "archived"]
+
+
 class ProjectBase(BaseModel):
     """Base project schema."""
 
     name: str
     path: str
     source: str | None = None
+    kind: ProjectKind = "product"
+    priority: int | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -71,6 +78,8 @@ class ProjectUpdate(BaseModel):
 
     name: str | None = None
     is_active: bool | None = None
+    kind: ProjectKind | None = None
+    priority: int | None = None
 
 
 class ProjectResponse(ProjectBase):
