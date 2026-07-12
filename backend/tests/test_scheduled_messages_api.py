@@ -301,6 +301,119 @@ async def test_hook_event_limit_notification_without_reset_time_falls_back_to_co
 
 
 @pytest.mark.asyncio
+async def test_hook_event_limit_notification_pauses_only_affected_provider(monkeypatch):
+    """A limit hit on a minimax column pauses ONLY minimax: anthropic traffic
+    (and the legacy global slot) stays clear so a provider-wide outage does
+    not freeze unrelated subscriptions. Backed by a real DB row + the same
+    provider-resolution chain dispatch_project uses at spawn time."""
+    from unittest import mock
+
+    import app.kanban.db as kdb
+    import app.kanban.dispatch as dispatch
+    from app.kanban import dispatch_pause, service
+    from app.kanban.operations import apply_operation
+    from tests.kanban_test_db import TestSessionLocal
+    PK = "git:example.com/limit-test/repo"
+    KanbanSessionLocal = TestSessionLocal()
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        # Engineer column defaults to minimax (the subscription that hit 429).
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="minimax",
+        )
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card", project_key=PK,
+            entity_id=None,
+            payload={"title": "rl-card", "column": "engineer"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-rl-prov-0001"},
+        )
+        await s.commit()
+
+    # Patch the kanban DB the hook talks to so it sees our test card. The
+    # cwd's project path is a stub -- the hook only uses it via
+    # _provider_for_cwd -> _safe_resolve_key, which we monkeypatch too.
+    monkeypatch.setattr(
+        "app.kanban.dispatch._safe_resolve_key", lambda path: PK,
+    )
+
+    transport = ASGITransport(app=app)
+    # Skip the actual move (no project_path fixtures here) and the
+    # associated kill: the per-provider pause is what we're asserting on, and
+    # the move/cancel paths are already covered in test_kanban_dispatch.
+    with mock.patch.object(dispatch, "move_limited_session_to_resume", return_value=True):
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={
+                    "event": "Notification", "session_id": "s-rl-prov",
+                    "cwd": "/proj/.claude/worktrees/k-rl-prov-0001",
+                    "message": "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+                },
+            )
+            assert r.status_code == 200, r.text
+
+    async with KanbanSessionLocal() as s:
+        # Minimax is paused (the only slot the hook writes).
+        assert await dispatch_pause.is_dispatch_paused(s, provider="minimax") is True
+        minimax_until = await dispatch_pause.get_paused_until(s, provider="minimax")
+        assert minimax_until is not None
+        # Anthropic + bedrock slots are untouched.
+        assert await dispatch_pause.is_dispatch_paused(s, provider="anthropic") is False
+        assert await dispatch_pause.is_dispatch_paused(s, provider="bedrock") is False
+        # Legacy global slot is also untouched (no regression -- today's
+        # behaviour is "minimax slot set", which is *strictly more
+        # targeted*, not a regression).
+        assert await dispatch_pause.is_dispatch_paused(s) is False
+
+
+@pytest.mark.asyncio
+async def test_hook_event_limit_notification_falls_back_to_global_pause_when_no_card(monkeypatch):
+    """When no kanban card can be matched to the cwd (e.g. a manual session or
+    a non-worktree directory), the hook still pauses -- the legacy global
+    slot, not a per-provider one -- so behaviour outside kanban
+    dispatches stays identical to before."""
+    from unittest import mock
+
+    import app.kanban.db as kdb
+    import app.kanban.dispatch as dispatch
+    from app.kanban import dispatch_pause
+    from tests.kanban_test_db import TestSessionLocal
+    PK = "git:example.com/nocard-test/repo"
+    KanbanSessionLocal = TestSessionLocal()
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    monkeypatch.setattr(
+        "app.kanban.dispatch._safe_resolve_key", lambda path: PK,
+    )
+
+    transport = ASGITransport(app=app)
+    with mock.patch.object(dispatch, "move_limited_session_to_resume", return_value=False):
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                "/api/v1/scheduled-messages/hook-event",
+                json={
+                    "event": "Notification", "session_id": "s-rl-nomatch",
+                    "cwd": "/proj/.claude/worktrees/k-rl-nomatch",
+                    "message": "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+                },
+            )
+            assert r.status_code == 200, r.text
+
+    async with KanbanSessionLocal() as s:
+        # Legacy global slot: active.
+        assert await dispatch_pause.is_dispatch_paused(s) is True
+        # No per-provider slots touched.
+        assert await dispatch_pause.get_paused_until(s, provider="minimax") is None
+        assert await dispatch_pause.get_paused_until(s, provider="anthropic") is None
+        assert await dispatch_pause.get_paused_until(s, provider="bedrock") is None
+
+
+@pytest.mark.asyncio
 async def test_hook_event_agent_needs_input_posts_card_activity_comment():
     """CC 2.1.198+ `agent_needs_input` notifications must surface as a
     kanban activity comment so the operator can see "agent waiting" on

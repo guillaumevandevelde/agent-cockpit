@@ -3498,10 +3498,19 @@ async def test_reaper_reaps_stuck_session_with_429_and_pauses_dispatch(monkeypat
     assert killed == ["k-429-0001"]
     assert card.claimed_by is None
     assert card.dispatch_failures == 1
-    assert paused_until is not None
+    # The 429 path now pauses per-provider (anthropic by default -- no
+    # column default in this test, no override) rather than the legacy
+    # global slot. The legacy global slot is intentionally untouched so
+    # other providers' traffic is not collateral-frozen.
+    assert paused_until is None
+    async with KanbanSessionLocal() as s2:
+        paused_provider = await dispatch_pause.get_paused_until(
+            s2, provider="anthropic",
+        )
+    assert paused_provider is not None
     # FALLBACK_PAUSE_HOURS = 5 — accept any wall-clock drift up to 60s.
     expected = datetime.now(UTC) + timedelta(hours=5)
-    assert abs((paused_until - expected).total_seconds()) < 60
+    assert abs((paused_provider - expected).total_seconds()) < 60
 
 
 @pytest.mark.asyncio
@@ -3989,3 +3998,247 @@ async def test_next_card_gate_distinguishes_race_from_genuine_miss():
         plan_markdown=None, plan_deliverable_id=None, parent_card_id=None,
     )
     assert "Plan niet beschikbaar" in section
+
+
+# ---- per-provider pause for limit hits (kanban-limit feature) --------------
+
+@pytest.mark.asyncio
+async def test_provider_for_card_uses_per_column_override_when_present():
+    """When the card carries a column_overrides[<agent>].provider, that wins --
+    the per-provider pause must target the SAME subscription a fresh respawn
+    would (otherwise the pause would mismatch the subscription that hit its
+    429)."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"column_overrides": {
+                "engineer": {"provider": "bedrock"}}},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+        resolved = await dispatch._provider_for_card(s, PK, card, "engineer")
+
+    assert resolved == "bedrock"
+
+
+@pytest.mark.asyncio
+async def test_provider_for_card_falls_through_to_column_default():
+    """No per-column override -> column default_provider wins."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="minimax",
+        )
+        cid = await _make_card(s)
+        await s.commit()
+        card = await get_card(s, cid)
+
+        resolved = await dispatch._provider_for_card(s, PK, card, "engineer")
+
+    assert resolved == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_provider_for_card_falls_back_to_anthropic_when_nothing_configured():
+    """No override, no column default -> the dispatcher's hard-coded
+    PROVIDER_ANTHROPIC fallback (mirrors dispatch_card). A pause resolved here
+    still targets anthropic specifically (the only subscription the fresh
+    respawn would pick), not a global one."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        card = await get_card(s, cid)
+
+        resolved = await dispatch._provider_for_card(s, PK, card, "engineer")
+
+    assert resolved == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_provider_for_card_returns_none_when_inputs_insufficient():
+    """If the caller hands in no card or no agent column, the helper refuses to
+    guess a provider -- returning None so the caller can take the global-pause
+    fallback rather than silently targeting anthropic."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await s.commit()
+        card = await get_card(s, cid)
+
+    # No card -> None.
+    async with KanbanSessionLocal() as s:
+        assert await dispatch._provider_for_card(s, PK, None, "engineer") is None
+    # No agent column -> None (a stale call, e.g. column already moved).
+    async with KanbanSessionLocal() as s:
+        assert await dispatch._provider_for_card(s, PK, card, "") is None
+
+
+@pytest.mark.asyncio
+async def test_provider_for_cwd_returns_column_default_for_matching_session(monkeypatch):
+    """Hook-event path: with cwd matching a worktree, _provider_for_cwd
+    resolves (project, session, card) and returns the card's column default
+    provider. Mirrors move_limited_session_to_resume's lookup so both paths
+    agree on what counts as a 'matching' card."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="minimax",
+        )
+        cid = await _make_card(s, title="limax-card", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-prov-0001"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+        resolved = await dispatch._provider_for_cwd(
+            "/p/.claude/worktrees/k-prov-0001",
+        )
+
+    assert resolved == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_provider_for_cwd_returns_none_for_non_worktree_cwd(monkeypatch):
+    """A cwd that isn't <project>/.claude/worktrees/<name> isn't ours to touch --
+    same precondition move_limited_session_to_resume enforces, so the
+    fallback path stays consistent."""
+    import unittest.mock as mock
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+        resolved = await dispatch._provider_for_cwd("/home/me/some-project")
+
+    assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_provider_for_cwd_returns_none_when_no_card_claims_session(monkeypatch):
+    """No card claimed by that session -> None, the same condition under
+    which move_limited_session_to_resume no-ops. The hook keeps the legacy
+    global-pause behaviour in that case."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+        resolved = await dispatch._provider_for_cwd(
+            "/p/.claude/worktrees/k-prov-nonexistent",
+        )
+
+    assert resolved is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_session_pauses_only_affected_provider(monkeypatch):
+    """The reaper path must mirror the hook: a stuck session running on a
+    minimax column pauses only minimax. anthropic / bedrock stay clear so
+    other traffic flows."""
+    import unittest.mock as mock
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban import dispatch_pause
+    from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
+
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="minimax",
+        )
+        cid = await _make_card(s, title="stuck-rl", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-stuck-0001"},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    # Keep tmux out of the picture: _kill_agent_session would otherwise hit the
+    # host's tmux server (no such session here, returns None, harmless) but we
+    # want a tight deterministic test.
+    with mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        async with KanbanSessionLocal() as s:
+            await dispatch._cleanup_stuck_session(
+                s, card=card, project_key=PK,
+                session_name="k-stuck-0001", pane_content="rate limited",
+            )
+            await s.commit()
+
+    # Card's per-provider slot is set ...
+    async with KanbanSessionLocal() as s:
+        paused_minimax = await dispatch_pause.get_paused_until(
+            s, provider="minimax"
+        )
+        paused_minimax_active = await dispatch_pause.is_dispatch_paused(
+            s, provider="minimax"
+        )
+        # ... legacy global slot is NOT touched ...
+        paused_global = await dispatch_pause.get_paused_until(s)
+        paused_global_active = await dispatch_pause.is_dispatch_paused(s)
+        # ... and sibling providers stay clear.
+        paused_anthropic = await dispatch_pause.get_paused_until(
+            s, provider="anthropic"
+        )
+        paused_bedrock = await dispatch_pause.get_paused_until(
+            s, provider="bedrock"
+        )
+
+    expected_deadline = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+    assert paused_minimax is not None
+    assert paused_minimax_active is True
+    assert abs((paused_minimax - expected_deadline).total_seconds()) < 30
+    assert paused_global is None
+    assert paused_global_active is False
+    assert paused_anthropic is None
+    assert paused_bedrock is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_session_pauses_provider_from_column_override(monkeypatch):
+    """When the card carries a per-column provider override, the pause targets
+    THAT provider (bedrock here), not the column default -- a stale override
+    on a stale card would otherwise pause the wrong subscription."""
+    import unittest.mock as mock
+
+    from app.kanban import dispatch_pause
+
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="minimax",
+        )
+        cid = await _make_card(s, title="stuck-override", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"column_overrides": {
+                "engineer": {"provider": "bedrock"}}},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-stuck-0002"},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    with mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        async with KanbanSessionLocal() as s:
+            await dispatch._cleanup_stuck_session(
+                s, card=card, project_key=PK,
+                session_name="k-stuck-0002", pane_content="rate limited",
+            )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        assert await dispatch_pause.is_dispatch_paused(s, provider="bedrock") is True
+        assert await dispatch_pause.is_dispatch_paused(s, provider="minimax") is False
+        assert await dispatch_pause.is_dispatch_paused(s) is False
+

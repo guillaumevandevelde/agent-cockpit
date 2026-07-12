@@ -1443,7 +1443,13 @@ async def _cleanup_stuck_session(
     # Conservative fallback duration; the hook-event path has the parsed
     # reset time, but the reaper only sees tmux pane content.
     pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
-    await set_paused_until(session, pause_until)
+    # Per-provider pause: only the subscription this session was hitting
+    # (column override → column default → Anthropic) gets gated, so a
+    # bedrock outage doesn't freeze anthropic/minimax traffic. provider=None
+    # only happens when the card/column context is missing -- then the
+    # legacy global pause keeps today's behaviour intact.
+    provider = await _provider_for_card(session, project_key, card, card.column)
+    await set_paused_until(session, pause_until, provider=provider)
 
     # _kill_agent_session also calls clear_spawn on the registry, so
     # get_stuck_sessions won't keep flagging this name next tick.
@@ -1846,6 +1852,65 @@ def _resume_target_from_cwd(cwd: str) -> tuple[str, str] | None:
     if worktree.parent.name != "worktrees" or worktree.parent.parent.name != ".claude":
         return None
     return str(worktree.parent.parent.parent), worktree.name
+
+
+async def _provider_for_card(
+    session, project_key: str, card, agent_column: str,
+) -> str | None:
+    """Resolve the provider that `card` was authenticated against while it sat
+    in `agent_column`. Mirrors the precedence in `dispatch_card` (per-column
+    override → column default → PROVIDER_ANTHROPIC) so a per-provider pause
+    targets the same subscription a fresh respawn would.
+
+    Returns None ONLY when the caller hands in insufficient info (no card or
+    no agent column name) -- in that case callers must treat the limit as
+    global (``provider=None`` in ``set_paused_until``) rather than silently
+    targeting anthropic traffic via the hard-coded fallback. The card+column
+    path always resolves to a concrete provider, so it never needs to fall
+    back to None.
+    """
+    if card is None or not agent_column:
+        return None
+    column_override = (getattr(card, "column_overrides", None) or {}).get(agent_column) or {}
+    override_provider = column_override.get("provider") or None
+    return (
+        override_provider
+        or await get_column_default_provider(session, project_key, agent_column)
+        or PROVIDER_ANTHROPIC
+    )
+
+
+async def _provider_for_cwd(cwd: str) -> str | None:
+    """Resolve the provider for a card running in `cwd`, for callers that have
+    only a cwd (the Notification hook path). Looks up the card the same way as
+    `move_limited_session_to_resume` -- claimed by `agent:<session_name>`, on a
+    non-terminal column -- then delegates to `_provider_for_card`. Returns None
+    when no card can be matched, which is also the condition under which
+    `move_limited_session_to_resume` would no-op, so the caller can safely
+    fall back to the global pause.
+    """
+    from app.kanban.db import KanbanSessionLocal
+
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return None
+    project_path, session_name = target
+    project_key = _safe_resolve_key(project_path)
+    if project_key is None:
+        return None
+
+    claimant = CLAIMANT_PREFIX + session_name
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return None
+        return await _provider_for_card(ks, project_key, card, card.column)
 
 
 async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None = None) -> bool:
