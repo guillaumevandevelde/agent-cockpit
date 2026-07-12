@@ -429,6 +429,7 @@ describe("CardDrawer deliverables tab per-kind rendering", () => {
           ref: JSON.stringify({ parent_card_id: "parent-abcdef0123" }),
           created_at: "2026-07-10T10:05:00Z",
         },
+        { id: "d7", kind: "spec", ref: "# Spec\n\n## Problem\nbrainstorming output is invisible.", created_at: "2026-07-10T10:06:00Z" },
       ],
     };
 
@@ -485,6 +486,14 @@ describe("CardDrawer deliverables tab per-kind rendering", () => {
     expect(planRefRow).not.toBeNull();
     // parent_card_id "parent-abcdef0123" → first 8 chars = "parent-a"
     expect(planRefRow!.textContent).toMatch(/Verwijst naar parent-plan parent-a/);
+
+    const specRow = scope.querySelector('[data-deliverable-kind="spec"]');
+    expect(specRow).not.toBeNull();
+    // spec rows render their markdown body inline, like plan; the icon must be
+    // visually distinct from the 📋 plan icon so a card carrying both reads as
+    // "design + plan", not "two plans".
+    expect(specRow!.textContent).not.toMatch(/📋/);
+    expect(specRow!.textContent).toMatch(/brainstorming output is invisible/);
   });
 });
 

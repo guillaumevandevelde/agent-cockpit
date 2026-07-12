@@ -1,0 +1,5 @@
+2026-07-12T07:00:00Z | preset=verify | iter=1 | frontend lint+build | starting
+2026-07-12T07:00:30Z | preset=verify | iter=1 | npm run lint (frontend) | 0 errors, 104 warnings (all pre-existing baseline; 0 in files I touched)
+2026-07-12T07:00:45Z | preset=verify | iter=1 | npm run build (frontend) | built in 578ms
+2026-07-12T07:00:50Z | preset=verify | iter=1 | ruff | skipped — backend/.venv/bin/ruff absent (CI-only gate)
+2026-07-12T07:00:55Z | preset=verify | iter=1 | outcome | CLEAN (lint 0 errors on my changes, build green)

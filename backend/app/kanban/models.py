@@ -115,7 +115,7 @@ class KanbanDeliverable(KanbanBase):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     card_id: Mapped[str] = mapped_column(ForeignKey("kanban_cards.id"), index=True)
-    kind: Mapped[str] = mapped_column(String(16))   # pr|branch|commit|link|note
+    kind: Mapped[str] = mapped_column(String(16))   # pr|branch|commit|link|note|spec
     ref: Mapped[str] = mapped_column(Text)          # portable reference, never a local path
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
