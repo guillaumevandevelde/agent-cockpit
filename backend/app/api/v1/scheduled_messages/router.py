@@ -214,7 +214,22 @@ async def hook_event(ev: HookEvent):
             # pause below, so the card's own scheduled_at makes it dispatch-eligible
             # again as soon as the limit actually resets -- not only once the (broader,
             # account-wide) global pause happens to expire. No-op for non-kanban sessions.
-            from app.kanban.dispatch import move_limited_session_to_resume
+            from app.kanban.dispatch import (
+                _provider_for_cwd,
+                move_limited_session_to_resume,
+            )
+            try:
+                # Resolve provider BEFORE the move: move_limited_session_to_resume
+                # shifts the card to "To Resume", and the per-provider lookup wants
+                # the column the card sat in while the session was running (its
+                # agent column, not the post-move "To Resume"). None when no card
+                # is matched -- the move below also no-ops then, so a global
+                # pause is the right fallback.
+                provider = await _provider_for_cwd(ev.cwd)
+            except Exception:
+                logger.exception("failed to resolve provider for %s", ev.cwd)
+                provider = None
+
             try:
                 await move_limited_session_to_resume(
                     ev.cwd, scheduled_at=pause_until.isoformat(),
@@ -226,10 +241,10 @@ async def hook_event(ev: HookEvent):
             from app.kanban.dispatch_pause import set_paused_until
             try:
                 async with KanbanSessionLocal() as ks:
-                    await set_paused_until(ks, pause_until)
+                    await set_paused_until(ks, pause_until, provider=provider)
                     await ks.commit()
             except Exception:
-                logger.exception("failed to set global dispatch pause for %s", ev.cwd)
+                logger.exception("failed to set dispatch pause for %s", ev.cwd)
 
             # Auto-resume: schedule a resume job for the scheduled-messages feature,
             # for projects that opted in explicitly (independent of the kanban path).
