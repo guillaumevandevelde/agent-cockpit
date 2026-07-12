@@ -80,6 +80,12 @@ detached worktree instead — it never touches your current checkout:
 
 ```bash
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
+# Pre-flight: the detached worktree only sees COMMITTED state. Uncommitted/untracked
+# changes here merge as a silent no-op ("Everything up-to-date"), pushing nothing —
+# abort so you commit them (step 3) first.
+if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  echo 'ERROR: uncommitted/untracked changes — git add + git commit first, then re-run.' >&2; exit 1
+fi
 TMP=$(mktemp -d)
 git worktree add --detach "$TMP/m" origin/master
 git -C "$TMP/m" merge --no-ff "$BRANCH" -m "Merge $BRANCH"

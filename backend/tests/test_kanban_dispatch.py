@@ -124,6 +124,21 @@ def test_card_prompt_executor_phase_has_retro_and_ship_steps():
     assert "npm run lint && npm run build" in prompt
 
 
+def test_direct_ship_recipe_has_uncommitted_changes_preflight():
+    """Direct-mode ship recipe must guard against the silent no-op where the
+    detached worktree only sees COMMITTED state: uncommitted/untracked changes
+    in the source worktree merge as "Everything up-to-date" instead of shipping.
+    A pre-flight check must abort with an explicit error before the merge."""
+    instructions = dispatch._build_ship_instructions("direct")
+    assert "git diff --quiet HEAD" in instructions
+    assert "ls-files --others --exclude-standard" in instructions
+    assert "uncommitted" in instructions
+    # The guard must sit before the detached-worktree merge it protects.
+    assert instructions.index("git diff --quiet HEAD") < instructions.index(
+        "git worktree add --detach"
+    )
+
+
 def test_card_prompt_analyst_phase_has_retro_but_no_ship_steps():
     """Analyst cards are planning-only: they get the retro step and the
     move-to-Done exit, but none of the engineer merge/frontend-ship steps

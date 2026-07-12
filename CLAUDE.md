@@ -161,13 +161,21 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 
 - **Finishing a branch**: The default is to **merge back to `master` and push** — no need to ask. Skip the merge/PR/cleanup menu. If the main checkout's `master` is dirty (concurrent sessions share one working copy), do the merge in a temporary worktree. The exact recipe — note `--detach origin/master`, **not** `master`: checking out the branch name collides with the main worktree (`git worktree add` refuses two checkouts of one branch, failing with `'master' is already used by worktree at ...`). Run each git step as its own `Bash` call or chain with `&&` in one call — a bare `cd` in a separate `Bash` call does not persist cwd across tool calls, so `git merge` would silently run in the wrong worktree:
   ```bash
+  # Pre-flight: the detached worktree only sees COMMITTED state — uncommitted/untracked
+  # changes here merge as a silent no-op ("Everything up-to-date"). Commit first.
+  if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    echo 'ERROR: uncommitted/untracked changes — git add + git commit first, then re-run.' >&2; exit 1
+  fi
   TMP=$(mktemp -d)
   git worktree add --detach "$TMP/m" origin/master
   git -C "$TMP/m" merge --no-ff <branch> -m "Merge <branch>: <summary>"
   git -C "$TMP/m" push origin HEAD:master
   git worktree remove "$TMP/m" --force
   ```
-  Using `git -C "$TMP/m"` (instead of `cd`) sidesteps the lost-cwd trap entirely.
+  Using `git -C "$TMP/m"` (instead of `cd`) sidesteps the lost-cwd trap entirely. The
+  pre-flight guard catches the silent-no-op case where a docs-/quick-edit branch was
+  never committed: the detached worktree merges committed history only, so an
+  uncommitted file produces "Everything up-to-date" and pushes nothing.
 - **Worktree hygiene**: After merging, the finished worktree + branch should be removed so `.claude/worktrees/` doesn't accumulate leftovers. Kanban dispatch auto-removes on card→Done; for everything else run `scripts/worktree-gc.sh` (dry-run) then `--apply`. It only removes worktrees that are **(a)** clean, **(b)** fully merged into `master`, **and (c)** not currently held by an active kanban agent claim (`claimed_by LIKE 'agent:%'` AND column NOT IN Done/Impediment) — see the postmortem of the "[problem] worktree-gc verwijdert branch/worktree van actieve analyst-sessie" card for why (c) is load-bearing: an analyst-only session never commits, so its branch is trivially merged+clean from creation and would otherwise be killed by the first gc run). `cockpit.sh start` nudges when leftovers exist.
 - **Remote branch hygiene**: `delete_branch_on_merge` is enabled on the GitHub repo (set 2026-07-07), so any branch pushed for a PR (`git-ship`'s `pull-request` ship mode does `git push -u origin HEAD`) is deleted by GitHub the moment its PR merges — no manual sweep needed for the merged case anymore. Branches pushed for a PR that never merges (card hit `report_impediment`, `gh` was unavailable, checks never went green) still strand on `origin` — those need a human decision, not automation. Periodically check for them: `git branch -r | grep 'origin/k-'` then `git cherry master origin/<branch>` per candidate to see if it's actually merged (empty output) before deleting.
 - **No local pre-push gate**: removed 2026-07-05 — a shared box running many concurrent dispatched agents made the old `.githooks/pre-push` test gate (full backend pytest + frontend lint/build on every push, serialized via flock) a recurring source of multi-minute stalls and SSH idle-disconnects under contention. Backend pytest + ruff and frontend lint/test/build now run in CI (`quality.yml`) instead — push freely, watch the Actions run. Note: the old hook also refused any push that collapsed a branch's file tree (a test git-fixture once wiped `master` down to `a.txt` and it got pushed); that preventive check is gone too. `scripts/cockpit-doctor.sh` (or `cockpit.sh doctor`) still gives a read-only, *after-the-fact* health check for the same clobbered-tree scenario plus `core.bare` mismatch, stale checkout, and leftover worktrees.
