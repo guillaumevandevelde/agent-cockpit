@@ -1,0 +1,22 @@
+{
+  "templates": [
+    {
+      "name": "empty",
+      "dir": "empty",
+      "version": "1.0.0",
+      "description": "Bare repo: only a .gitignore and a README stub. For when you want to build the skeleton yourself."
+    },
+    {
+      "name": "python-fastapi",
+      "dir": "python-fastapi",
+      "version": "1.0.0",
+      "description": "FastAPI service skeleton with pyproject.toml, an app/ package, pytest smoke test, requirements.txt and a Dockerfile."
+    },
+    {
+      "name": "react-vite",
+      "dir": "react-vite-ts",
+      "version": "1.0.0",
+      "description": "React + Vite + TypeScript single-page app with tsconfig, vite config and ESLint."
+    }
+  ]
+}
