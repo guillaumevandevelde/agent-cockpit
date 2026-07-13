@@ -9,10 +9,10 @@ interface HealthStatusCardProps {
 
 export function HealthStatusCard({ health, onBuildImage }: HealthStatusCardProps) {
   // A podman-only host never has docker_available, so gating the build button on
-  // docker alone hid it entirely there — check both runtimes independently.
-  const imageMissing =
-    (health.docker_available && !health.docker_image_exists) ||
-    (health.podman_available && !health.podman_image_exists)
+  // docker alone hid it entirely there — surface the build affordance whenever a
+  // container runtime is present but the image isn't ready yet.
+  const hasContainerRuntime = health.docker_available || health.podman_available
+  const imageMissing = hasContainerRuntime && !health.image_ready
 
   return (
     <Card>
@@ -40,6 +40,12 @@ export function HealthStatusCard({ health, onBuildImage }: HealthStatusCardProps
             <div className={`h-2 w-2 rounded-full ${health.podman_available ? 'bg-green-500' : 'bg-yellow-500'}`} />
             <span className="text-sm">Podman {health.podman_version || '(not found)'}</span>
           </div>
+          {hasContainerRuntime && (
+            <div className="flex items-center gap-2">
+              <div className={`h-2 w-2 rounded-full ${health.image_ready ? 'bg-green-500' : 'bg-yellow-500'}`} />
+              <span className="text-sm">Sandbox Image {health.image_ready ? '(ready)' : '(not built)'}</span>
+            </div>
+          )}
           {health.docker_available && (
             <div className="flex items-center gap-2">
               <div className={`h-2 w-2 rounded-full ${health.docker_image_exists ? 'bg-green-500' : 'bg-yellow-500'}`} />

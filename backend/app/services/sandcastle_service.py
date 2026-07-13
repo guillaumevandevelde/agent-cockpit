@@ -327,6 +327,7 @@ class SandcastleService:
                 # Validate prerequisites
                 if not RUNNER_SCRIPT.exists():
                     raise FileNotFoundError(f"Runner script not found: {RUNNER_SCRIPT}")
+                await self._ensure_sandbox_image_ready(config)
 
                 # Build the command
                 cmd = self._build_run_command(config, run, branch_name, max_iterations)
@@ -942,7 +943,45 @@ class SandcastleService:
         node_modules_path = Path(__file__).parent.parent.parent / "node_modules" / "@ai-hero" / "sandcastle"
         health["npm_dependencies_installed"] = node_modules_path.exists()
 
+        # Unified, explicit "is the sandbox image built?" signal. True iff the image
+        # exists under at least one available container runtime; False when no runtime
+        # is available at all (nothing can run it), so a fresh host reads as not-ready.
+        health["image_ready"] = bool(
+            health.get("docker_image_exists") or health.get("podman_image_exists")
+        )
+
         return health
+
+    async def _container_image_present(self, runtime: str, image_name: str) -> bool:
+        """True if `image_name` exists locally under the given container runtime."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                runtime, "image", "inspect", image_name,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await process.communicate()
+            return process.returncode == 0
+        except FileNotFoundError:
+            return False
+
+    async def _ensure_sandbox_image_ready(self, config: SandcastleConfig) -> None:
+        """Fail fast with an actionable error if a container run's image is missing.
+
+        A fresh host can enable sandcastle with a container provider before ever
+        building `sandcastle:local`; without this guard the run would die deep inside
+        the node/sandcastle stack with an opaque "no such image" error. Non-container
+        providers (no-sandbox, vercel) need no local image and are skipped."""
+        if config.sandbox_provider not in _CONTAINER_PROVIDERS:
+            return
+        image_name = _resolve_docker_image(config.sandbox_provider, config.docker_image)
+        if not await self._container_image_present(config.sandbox_provider, image_name):
+            raise RuntimeError(
+                f"Sandbox image '{image_name}' is not built for "
+                f"'{config.sandbox_provider}'. Build it first via "
+                "POST /api/v1/sandcastle/build-image or "
+                "`node backend/scripts/sandcastle_runner.mjs --build-image`."
+            )
 
     async def list_running_containers(self) -> dict[str, Any]:
         """List running Docker and Podman containers whose name starts with 'sandcastle-'."""
@@ -1005,22 +1044,36 @@ class SandcastleService:
                     pass
 
     async def build_docker_image(
-        self, image_name: str = DEFAULT_DOCKER_IMAGE, runtime: str | None = None
+        self,
+        image_name: str = DEFAULT_DOCKER_IMAGE,
+        runtime: str | None = None,
+        force: bool = False,
     ) -> dict[str, Any]:
         """Build the sandcastle image with the given (or auto-detected) container runtime.
 
         `docker build` and `podman build` take identical arguments for this Dockerfile,
         so a podman-only host (no `docker` binary at all) can build the same image —
         it just needs the right binary name on the command line instead of a
-        hardcoded "docker"."""
+        hardcoded "docker".
+
+        Idempotent: if the image already exists under the chosen runtime it's a no-op
+        that returns success (exit 0), unless `force=True` requests a rebuild."""
         dockerfile_path = Path(__file__).parent.parent.parent.parent / ".sandcastle" / "Dockerfile"
         if not dockerfile_path.exists():
             return {"success": False, "error": f"Dockerfile not found at {dockerfile_path}"}
 
+        health = await self.check_health()
         if runtime is None:
-            runtime = _pick_default_sandbox_provider(await self.check_health())
+            runtime = _pick_default_sandbox_provider(health)
         if runtime not in _CONTAINER_PROVIDERS:
             return {"success": False, "error": "Neither Docker nor Podman is available"}
+
+        if not force and health.get(f"{runtime}_image_exists"):
+            return {
+                "success": True,
+                "already_present": True,
+                "message": f"Image {image_name} already present — nothing to build",
+            }
 
         try:
             process = await asyncio.create_subprocess_exec(

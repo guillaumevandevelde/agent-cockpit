@@ -41,12 +41,18 @@ class BuildImageRequest(BaseModel):
     """Request to build Docker image."""
     image_name: str = "sandcastle:local"
     runtime: str | None = None  # "docker" | "podman" | None (auto-detect)
+    force: bool = False  # rebuild even if the image already exists
 
 
 @router.post("/build-image")
 async def build_image(request: BuildImageRequest = BuildImageRequest()):
-    """Build the sandcastle image with the given (or auto-detected) container runtime."""
-    return await sandcastle_service.build_docker_image(request.image_name, request.runtime)
+    """Build the sandcastle image with the given (or auto-detected) container runtime.
+
+    Idempotent: a no-op returning success if the image already exists (pass
+    force=True to rebuild)."""
+    return await sandcastle_service.build_docker_image(
+        request.image_name, request.runtime, request.force
+    )
 
 
 @router.get("/config")
