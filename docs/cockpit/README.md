@@ -50,6 +50,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 - [`updates-feature-decision.md`](./updates-feature-decision.md) — self-update-feature.
 - [`upstream-agent-teams-decision.md`](./upstream-agent-teams-decision.md), [`upstream-docker-removal-decision.md`](./upstream-docker-removal-decision.md), [`upstream-presence-removal-decision.md`](./upstream-presence-removal-decision.md) — upstream-overname-keuzes.
 - [`recurring-cadence-proposal.md`](./recurring-cadence-proposal.md) — cadans zelfverbeteringsonderzoek.
+- [`build-prioriteiten-analyse.md`](./build-prioriteiten-analyse.md) — geordende bouw-prioriteitsstack (P0–P4) + externe ecosysteem-scan (Spec Kit, OpenHands, sandbox-consensus, Anthropic-abonnementsbeleid).
 - [`spike-claude-code-model-switching.md`](./spike-claude-code-model-switching.md), [`spike-declarative-workflow-orchestration.md`](./spike-declarative-workflow-orchestration.md) — spikes/ADR's.
 
 ## Regels
