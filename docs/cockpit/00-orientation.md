@@ -93,7 +93,9 @@ docker compose up -d        # UI op http://localhost:8000
 
 Voor de canonieke naamgeving van de kernbegrippen (Agent / Provider / CLI / Model / Run) zie
 **`terminology.md`** — bron van waarheid voor naamgeving, vastgelegd door kind-kaart 1 van het
-terminologie-parent-project. Latere kind-kaarten renamen code naar deze glossary toe.
+terminologie-parent-project. Code is inmiddels naar deze glossary gerenamed
+(`services/agentic_cli/`, `services/runs/`, `RunGroup`/`RunMembership`, `provider_env`/`build_provider_env`); deze kaart
+sweepet alleen de resterende docs-verwijzingen bij.
 
 Er zijn **drie plan-/spec-bomen** in `docs/`, maar precies **één is canoniek**. De
 volledige, afdwingbare index staat in **[`docs/cockpit/README.md`](./README.md)**; de

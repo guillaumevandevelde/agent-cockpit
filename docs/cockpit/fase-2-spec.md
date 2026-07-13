@@ -7,7 +7,7 @@
 
 Uit de bestaande claude-deck-code (zie `fase-1-validation.md` voor details):
 
-- **Discovery** — `app/services/agent_bridge/discovery.py::discover_agent_sessions()` →
+- **Discovery** — `app/services/runs/discovery.py::discover_agent_sessions()` →
   lijst van `{tmux_target, session_name, cwd, pid, status}`. Gebruik dit voor de Session
   Registry: map **project (cwd) → tmux_target**.
 - **Spawn** — `app/services/cc_bridge/spawn.py::spawn_session(directory, mode, …, skip_permissions)`

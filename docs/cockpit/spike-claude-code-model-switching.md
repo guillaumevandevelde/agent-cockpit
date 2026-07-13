@@ -26,15 +26,15 @@ geen van beide blokkeert de ander.
 ## 2. Bestaande situatie in Cockpit (grounded facts)
 
 Onderzocht: `backend/app/api/v1/providers.py`, `codex_config.py`,
-`backend/app/services/providers/`, `frontend/src/features/dashboard/components/EnhancedProviderCards.tsx`.
+`backend/app/services/agentic_cli/`, `frontend/src/features/dashboard/components/EnhancedProviderCards.tsx`.
 
-- `providers.py`/`services/providers/` is een **agent-CLI-registry** (welke
+- `providers.py`/`services/agentic_cli/` is een **agentic-CLI-registry** (welke
   coding-agent — Claude Code, Codex, OpenCode, MiMoCode — draait in een
   tmux-pane), **geen** LLM-vendor-abstractie. Er is geen "kies je LLM-provider"
-  concept in deze laag.
-- Het enige bestaande mechanisme dat wél Claude Code's *backend-platform* omschakelt
-  is `platform_env.py` (`build_platform_env`): een `platform`-veld
-  (`"anthropic"` | `"bedrock"`) dat env vars (`CLAUDE_CODE_USE_BEDROCK`,
+  concept in deze laag (wel een "kies je CLI"-concept — zie `terminology.md`).
+- Het enige bestaande mechanisme dat wél Claude Code's *backend-provider* omschakelt
+  is `provider_env.py` (`build_provider_env`, voorheen `platform_env.py`/`build_platform_env`):
+  een `provider`-veld (`"anthropic"` | `"bedrock"`) dat env vars (`CLAUDE_CODE_USE_BEDROCK`,
   `AWS_REGION`, `AWS_PROFILE`, `ANTHROPIC_MODEL`) injecteert via
   `SpawnCommandOptions` wanneer een Claude Code tmux-sessie gespawned wordt. Dit
   is precies het patroon waar een MiniMax-optie op zou aansluiten.
@@ -56,10 +56,10 @@ Onderzocht: `backend/app/api/v1/providers.py`, `codex_config.py`,
     `ANTHROPIC_BASE_URL` eerst gewist moeten worden om conflicten te vermijden.
 
   Dit is **exact dezelfde vorm** als de bestaande Bedrock-branch in
-  `platform_env.py` (env vars zetten, geen gateway-proces). Dit verandert de
+  `provider_env.py` (env vars zetten, geen gateway-proces). Dit verandert de
   aanbeveling: de kale "switch tussen Anthropic- en MiniMax-subscriptie"-vraag
   op de kaart heeft **geen CCR nodig** — dat kan met een directe uitbreiding van
-  `platform_env.py`. CCR blijft wél nodig voor het *adaptieve* deel (scenario-
+  `provider_env.py`. CCR blijft wél nodig voor het *adaptieve* deel (scenario-
   routing binnen één sessie, auto-failover) — zie herziene aanbeveling in §6.
 
 ## 3. Tool A — Clother (jolehuit/clother)
@@ -127,7 +127,7 @@ beide adaptieve voorbeelden op de kaart.
 | Adaptief/auto-switch | Expliciet **niet** ("no adaptive failover") | Routing rules + fallback targets (aanwezig; exacte trigger-conditie nog te verifiëren) |
 | Analyse-vs-uitvoering routing binnen 1 sessie | Nee (1 model per sessie) | Ja (`default`/`think` vs `background` scenario's, in de 1.x-vorm) |
 | Config-vorm | `secrets.env` + CLI-launcher-symlinks | `config.json` (1.x, headless) of SQLite via desktop-UI (2.x) — `ccr`-CLI-bin blijft aanwezig |
-| Past op Cockpit's bestaande uitbreidingspunt | Nee — vervangt hoe `claude` aangeroepen wordt | Ja — is niets meer dan een `ANTHROPIC_BASE_URL`-switch, exact het patroon dat `platform_env.py` al hanteert voor Bedrock |
+| Past op Cockpit's bestaande uitbreidingspunt | Nee — vervangt hoe `claude` aangeroepen wordt | Ja — is niets meer dan een `ANTHROPIC_BASE_URL`-switch, exact het patroon dat `provider_env.py` al hanteert voor Bedrock |
 
 ## 6. Aanbeveling (herzien na interview 2026-07-04)
 
@@ -136,7 +136,7 @@ beide adaptieve voorbeelden op de kaart.
 **Laag 1 — kale subscriptie-switch (geen CCR nodig).** MiniMax's endpoint is
 rechtstreeks Anthropic-Messages-compatible (§2). Dit dekt het eerste deel van de
 kaart ("ondersteuning van verschillende configuraties") met exact het bestaande
-`platform_env.py`-patroon: een nieuwe `PLATFORM_MINIMAX`-branch die
+`provider_env.py`-patroon: een nieuwe `PROVIDER_MINIMAX`-branch die
 `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_MODEL` zet, net zoals de
 Bedrock-branch dat vandaag doet. Kleinste, laagste-risico stap — geen extern
 proces, geen nieuwe dependency.
@@ -148,7 +148,7 @@ per-sessie env vars — dat kan geen van beide tools puur via env vars, maar CCR
 biedt het als kernfeature (scenario-routing + fallback-routing), terwijl
 Clother's eigen README dit expliciet uitsluit ("no adaptive failover"). CCR
 draait dan als lokale HTTP-gateway waar Claude Code via `ANTHROPIC_BASE_URL`
-naartoe wijst — nog steeds hetzelfde `platform_env.py`-patroon, alleen wijst de
+naartoe wijst — nog steeds hetzelfde `provider_env.py`-patroon, alleen wijst de
 URL nu naar de CCR-gateway in plaats van rechtstreeks naar MiniMax.
 
 **Caveat**: richt op de 1.x-achtige headless/`config.json`-werkwijze, niet op de
@@ -166,13 +166,15 @@ moet hands-on bevestigd worden vóórdat een vervolgkaart hierop bouwt.
 ## 7. Concreet integratievoorstel (voor de vervolgkaarten, niet nu bouwen)
 
 **Laag 1 (direct, geen CCR):**
-- Nieuwe constante `PLATFORM_MINIMAX` naast `PLATFORM_ANTHROPIC`/
-  `PLATFORM_BEDROCK` in `platform_env.py`.
-- `build_platform_env` krijgt een branch die, wanneer `platform ==
-  PLATFORM_MINIMAX`, `ANTHROPIC_BASE_URL` (international/China-varianten),
+- Nieuwe constante `PROVIDER_MINIMAX` naast `PROVIDER_ANTHROPIC`/
+  `PROVIDER_BEDROCK` in `provider_env.py` (na de rename; daarvoor:
+  `PLATFORM_MINIMAX`/`PLATFORM_ANTHROPIC`/`PLATFORM_BEDROCK` in
+  `platform_env.py`).
+- `build_provider_env` krijgt een branch die, wanneer `provider ==
+  PROVIDER_MINIMAX`, `ANTHROPIC_BASE_URL` (international/China-varianten),
   `ANTHROPIC_AUTH_TOKEN` en `ANTHROPIC_MODEL=MiniMax-M3[1m]` zet — hergebruik
   van de bestaande `SpawnCommandOptions`-injectiemechaniek, geen nieuwe.
-- UI: uitbreiden van de bestaande platform-selector (waar Bedrock nu gekozen
+- UI: uitbreiden van de bestaande provider-selector (waar Bedrock nu gekozen
   wordt, zie `EnhancedProviderCards.tsx`/`useProviders.ts`) met een
   "MiniMax"-optie.
 
@@ -182,7 +184,7 @@ moet hands-on bevestigd worden vóórdat een vervolgkaart hierop bouwt.
   (`sandcastle-integration-plan.md`), met een `config.json` die de
   scenario→model-mapping vastlegt (`default`/`think` → Anthropic Sonnet 5,
   `background` → MiniMax) plus een fallback-regel voor rate-limit-condities.
-- Wanneer een sessie voor CCR-routing kiest, wijst `platform_env.py` z'n
+- Wanneer een sessie voor CCR-routing kiest, wijst `provider_env.py` z'n
   `ANTHROPIC_BASE_URL` naar de lokale CCR-gateway in plaats van rechtstreeks
   naar MiniMax.
 - Geen wijziging aan `providers.py`/`codex_config.py` — die blijven
@@ -190,7 +192,7 @@ moet hands-on bevestigd worden vóórdat een vervolgkaart hierop bouwt.
 
 ## 8. Vervolgkaarten (aangemaakt op het bord, zie §10)
 
-1. **`PLATFORM_MINIMAX` toevoegen aan `platform_env.py`** (Laag 1) — directe
+1. **`PROVIDER_MINIMAX` toevoegen aan `provider_env.py`** (Laag 1) — directe
    subscriptie-switch, geen CCR, analoog aan de bestaande Bedrock-branch + tests.
 2. **CCR headless-haalbaarheid verifiëren** (Laag 2, voorwaarde voor kaart 3/4) —
    installeer `@musistudio/claude-code-router` in de WSL-omgeving, bevestig dat
@@ -223,7 +225,7 @@ moet hands-on bevestigd worden vóórdat een vervolgkaart hierop bouwt.
 ## 10. Kanban-vervolgkaarten
 
 Aangemaakt in de `Backlog`-kolom van dit project, gelinkt aan deze spike:
-- "MiniMax platform toevoegen aan platform_env.py (directe switch, geen CCR)"
+- "MiniMax provider toevoegen aan provider_env.py (directe switch, geen CCR)"
 - "Claude Code Router (CCR) headless-haalbaarheid verifiëren in WSL"
 - "CCR als gedeeld achtergrondproces opzetten voor scenario-routing"
 - "Adaptief-switch-gedrag (auto-failover bij sessielimiet) valideren via CCR — medium prioriteit"
@@ -243,7 +245,7 @@ opent de geconfigureerde poort (`127.0.0.1:8080` in de test), en `curl
 http://127.0.0.1:8080/providers` retourneert de geconfigureerde providers
 exact zoals in `config.json` opgegeven. `ccr code` zet `ANTHROPIC_BASE_URL=
 http://127.0.0.1:${port}` en start de echte `claude`-CLI — precies het
-`platform_env.py`-patroon. Voor deze twee versies raakt niets buiten het eigen
+`provider_env.py`-patroon. Voor deze twee versies raakt niets buiten het eigen
 `~/.claude-code-router/`-mapje aan.
 
 ### 11.2 config.json-schema (1.0.73/2.0.0, zoals het vandaag werkt)

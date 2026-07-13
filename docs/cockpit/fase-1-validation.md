@@ -45,7 +45,7 @@ claude                                       # binnen de tmux-sessie
 ### Code-level validatie (autonoom — 2026-06-11)
 
 Statische analyse van de bestaande bridge-code. Relevante bestanden:
-- `backend/app/services/agent_bridge/discovery.py` — `discover_agent_sessions()`
+- `backend/app/services/runs/discovery.py` — `discover_agent_sessions()`
 - `backend/app/services/cc_bridge/spawn.py` — `spawn_session()` / `kill_session()`
 - `backend/app/services/cc_bridge/pty_relay.py` — `PtyRelay` (live terminal)
 - `backend/app/api/v1/cc_bridge/router.py` — endpoints

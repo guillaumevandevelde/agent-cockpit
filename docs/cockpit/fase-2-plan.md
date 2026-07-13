@@ -580,7 +580,7 @@ Expected: FAIL (ModuleNotFoundError).
 import logging
 import os
 
-from app.services.agent_bridge.discovery import discover_agent_sessions
+from app.services.runs.discovery import discover_agent_sessions
 from app.services.cc_bridge.spawn import spawn_session
 
 logger = logging.getLogger(__name__)
@@ -629,7 +629,7 @@ git commit -m "feat(scheduling): session resolver (discovery) + permission flag 
 
 ### Task 6b: spawn_session uitbreiden met permission-mode
 
-**Files:** Modify `backend/app/services/cc_bridge/spawn.py`, `backend/tests/test_agent_bridge_spawn.py`
+**Files:** Modify `backend/app/services/cc_bridge/spawn.py`, `backend/tests/test_runs_spawn.py`
 
 - [ ] **Step 1: Failing test** — voeg een test toe die `spawn_session(..., extra_args=["--permission-mode","acceptEdits"])` verwacht in het `tmux new-session`-commando.
 ```python
@@ -647,7 +647,7 @@ def test_spawn_includes_extra_args(monkeypatch):
     assert "--permission-mode acceptEdits" in joined
 ```
 
-- [ ] **Step 2: Run → fail.** `cd backend && pytest tests/test_agent_bridge_spawn.py -k extra_args -v`
+- [ ] **Step 2: Run → fail.** `cd backend && pytest tests/test_runs_spawn.py -k extra_args -v`
 
 - [ ] **Step 3: Implementeer** — voeg `extra_args: list[str] | None = None` toe aan `spawn_session`, en na de mode-afhandeling: `if extra_args: command += extra_args`. Werk `spawn_for` (Task 6) bij om `extra_args=permission_flags(permission_mode)` door te geven i.p.v. de skip-bool-workaround.
 
@@ -655,7 +655,7 @@ def test_spawn_includes_extra_args(monkeypatch):
 
 - [ ] **Step 5: Commit**
 ```bash
-git add backend/app/services/cc_bridge/spawn.py backend/app/services/scheduling/session_resolver.py backend/tests/test_agent_bridge_spawn.py
+git add backend/app/services/cc_bridge/spawn.py backend/app/services/scheduling/session_resolver.py backend/tests/test_runs_spawn.py
 git commit -m "feat(scheduling): spawn_session extra_args + wire permission modes"
 ```
 
