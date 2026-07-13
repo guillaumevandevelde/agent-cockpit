@@ -27,7 +27,19 @@ Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur 
 
 ## Doelstelling & zelfverbetering
 
-Bouw een agentisch software engineering platform dat AI-agents inzet voor de ontwikkeling, het beheer en de evolutie van softwareapplicaties.
+Bouw een **agentic developers platform**: een agentisch software engineering platform dat
+AI-agents inzet voor de ontwikkeling, het beheer en de evolutie van softwareapplicaties.
+Dit heeft **twee even belangrijke, eersteklas doelen**:
+
+1. **Andere applicaties** — het platform bouwt en beheert externe/aparte doel-applicaties
+   (repos buiten Cockpit zelf): analyse, implementatie, tests, onderhoud en evolutie ervan
+   via agents. Dit is geen bijproduct; het is de primaire bestaansreden.
+2. **Zichzelf** — het platform bouwt, beheert en verbetert continu zijn eigen codebase
+   (zie **Zelfverbetering** hieronder).
+
+De orchestratie-kern (dispatch, worktrees, agent mail, dependency-DAG, session-lifecycle)
+moet daarom generiek zijn: agent-onafhankelijk én repo-onafhankelijk, zodat een willekeurige
+doel-applicatie er via dezelfde executie-primitieven op aangesloten kan worden.
 
 ### Kernprincipes
 
