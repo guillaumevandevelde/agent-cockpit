@@ -12,8 +12,10 @@
  */
 
 import { parseArgs } from "node:util";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 // Parse command line arguments
 const { values } = parseArgs({
@@ -21,9 +23,17 @@ const { values } = parseArgs({
     config: { type: "string" },
     "run-id": { type: "string" },
     mode: { type: "string", default: "single" }, // single | parallel
+    "build-image": { type: "boolean" }, // bootstrap the sandcastle:local image
+    image: { type: "string" }, // override the image name for --build-image
   },
   strict: false,
 });
+
+// --build-image is a standalone bootstrap action: build the container image from
+// the template Dockerfile, then exit. It doesn't need a run --config.
+if (values["build-image"]) {
+  process.exit(await buildImage());
+}
 
 if (!values.config) {
   console.error("Error: --config argument is required");
@@ -40,6 +50,60 @@ const config = JSON.parse(readFileSync(configPath, "utf-8"));
 const abortController = new AbortController();
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, () => abortController.abort(new Error(`received ${sig}`)));
+}
+
+// Run a subprocess to completion, resolving with its exit code. `quiet` swallows
+// stdout/stderr (used for probes); otherwise output is inherited so build logs stream.
+function runProcess(cmd, args, { quiet = false } = {}) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(cmd, args, { stdio: quiet ? "ignore" : "inherit" });
+    child.on("error", () => resolvePromise(127)); // binary not found
+    child.on("close", (code) => resolvePromise(code ?? 1));
+  });
+}
+
+// Bootstrap the sandcastle container image from the template Dockerfile.
+// Idempotent: a no-op (exit 0) when the image already exists; builds it otherwise.
+async function buildImage() {
+  const imageName = values.image || "sandcastle:local";
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  // backend/scripts/ -> repo root -> .sandcastle/
+  const contextDir = resolve(scriptDir, "..", "..", ".sandcastle");
+  const dockerfile = resolve(contextDir, "Dockerfile");
+
+  if (!existsSync(dockerfile)) {
+    console.error(`Error: Dockerfile not found at ${dockerfile}`);
+    return 1;
+  }
+
+  let runtime = null;
+  for (const candidate of ["docker", "podman"]) {
+    if ((await runProcess(candidate, ["--version"], { quiet: true })) === 0) {
+      runtime = candidate;
+      break;
+    }
+  }
+  if (!runtime) {
+    console.error("Error: neither docker nor podman is available to build the image");
+    return 1;
+  }
+
+  // Idempotency: if the image already exists, don't rebuild — just succeed.
+  if ((await runProcess(runtime, ["image", "inspect", imageName], { quiet: true })) === 0) {
+    console.log(`Image ${imageName} already present — nothing to build.`);
+    return 0;
+  }
+
+  console.error(`Building ${imageName} with ${runtime}...`);
+  const code = await runProcess(runtime, [
+    "build", "-t", imageName, "-f", dockerfile, contextDir,
+  ]);
+  if (code === 0) {
+    console.log(`Image ${imageName} built successfully.`);
+  } else {
+    console.error(`Build failed (exit ${code}).`);
+  }
+  return code;
 }
 
 // Helper to create sandbox provider
