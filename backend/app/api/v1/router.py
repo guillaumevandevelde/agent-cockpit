@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from .agent_mail import router as agent_mail_router
 from .agents import router as agents_router
 from .apm import router as apm_router
+from .app_runs.router import router as app_runs_router
 from .backup import router as backup_router
 from .blueprints import router as blueprints_router
 from .cc_bridge.router import router as cc_bridge_router
@@ -87,6 +88,7 @@ router.include_router(scheduled_messages_router)
 router.include_router(security_router)
 router.include_router(kanban_router)
 router.include_router(run_activity_router)
+router.include_router(app_runs_router)
 router.include_router(apm_router)
 router.include_router(files_router)
 router.include_router(mcp_server_router, tags=["MCP Server"])
