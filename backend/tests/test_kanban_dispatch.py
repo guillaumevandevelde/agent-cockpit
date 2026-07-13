@@ -2545,6 +2545,124 @@ async def test_move_limited_session_sets_scheduled_at_from_parsed_reset(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_move_limited_session_to_resume_posts_comment_with_reset_time(monkeypatch):
+    """After a successful move to To Resume, an activity comment surfaces WHY the
+    card is there ("Rate-limit hit") and WHEN it will auto-resume (parsed reset
+    time). Without this, the activity feed is silent and an operator has to dive
+    into dispatch.py logs to understand the move."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="limit-hit-3", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-live-0008"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-live-3", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-live-0008",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+    assert result is True
+
+    async with KanbanSessionLocal() as s:
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    assert any("Rate-limit hit" in t for t in comment_texts)
+    assert any("2026-07-11T23:10:00+02:00" in t for t in comment_texts)
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_posts_fallback_comment_when_no_reset(monkeypatch):
+    """When the Notification hook path couldn't parse a reset time, the
+    activity comment falls back to the same ~5h window the reaper uses -- the
+    activity feed mirrors what the global dispatch pause / scheduled_at tell the
+    dispatcher."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="limit-hit-4", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-live-0009"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-live-4", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-live-0009",
+        )
+
+    async with KanbanSessionLocal() as s:
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    assert any("fallback" in t for t in comment_texts)
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_no_comment_when_move_fails(monkeypatch):
+    """If the resume path can't find a resumable worktree (returns False), no
+    comment is posted -- the card wasn't moved and there's nothing to explain."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="no-resume", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-no-resume"},
+        )
+        await s.commit()
+
+    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target", return_value=None,
+         ):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-no-resume",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+    assert result is False
+
+    async with KanbanSessionLocal() as s:
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    assert not any("Rate-limit hit" in t for t in comment_texts)
+
+
+@pytest.mark.asyncio
 async def test_move_limited_session_to_resume_ignores_non_worktree_cwd():
     """A cwd that isn't a `<project>/.claude/worktrees/<name>` shape (e.g. a manual
     `claude` session, or the project root itself) is left untouched."""
@@ -2804,6 +2922,70 @@ async def test_next_card_picks_up_due_scheduled_card():
         next_card = dispatch._next_card(cards)
     assert next_card is not None
     assert next_card.title == "ready"
+
+
+@pytest.mark.asyncio
+async def test_auto_dispatch_tick_posts_comment_for_due_scheduled_card():
+    """When the auto-dispatch tick picks up a card whose `scheduled_at` was in
+    the past (i.e. auto-resuming, not force-dispatching), post an activity
+    comment with the original scheduled_at so the operator can see the tick
+    didn't force-dispatch early."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="auto-resume-me", column="To Resume",
+                                scheduled_at="2000-01-01T00:00:00+00:00")
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    assert any("Auto-resuming" in t for t in comment_texts)
+    assert any("2000-01-01T00:00:00+00:00" in t for t in comment_texts)
+
+
+@pytest.mark.asyncio
+async def test_auto_dispatch_tick_no_comment_for_unscheduled_card():
+    """A card without `scheduled_at` isn't 'auto-resuming' — it's just a normal
+    dispatch. No auto-resume comment should be posted."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="ordinary", column="Backlog")
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    assert not any("Auto-resuming" in t for t in comment_texts)
+
+
+@pytest.mark.asyncio
+async def test_manual_dispatch_card_does_not_post_auto_resume_comment():
+    """Manual `dispatch_card` is an explicit human override (UI button). It
+    shouldn't post the auto-resume comment that the auto-tick path posts — the
+    operator already knows they triggered this."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="manual-resume", column="To Resume",
+                                scheduled_at="2000-01-01T00:00:00+00:00")
+        await s.commit()
+        result = await dispatch.dispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    assert result is not None
+    assert not any("Auto-resuming" in t for t in comment_texts)
 
 
 @pytest.mark.asyncio
@@ -3700,6 +3882,48 @@ async def test_reaper_reaps_stuck_session_with_429_and_pauses_dispatch(monkeypat
     # FALLBACK_PAUSE_HOURS = 5 — accept any wall-clock drift up to 60s.
     expected = datetime.now(UTC) + timedelta(hours=5)
     assert abs((paused_provider - expected).total_seconds()) < 60
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_rate_limited_session_posts_comment(monkeypatch):
+    """When the stuck-session reaper reaps a 429 session, an activity comment
+    on the card surfaces what happened and why the card was released -- the
+    'tmux killed, claim released, dispatch paused for ~5h' lifecycle is otherwise
+    invisible from the activity feed."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-429-comment")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    pane = "API Error: 429 — Token Plan limit reached for this account"
+    monkeypatch.setattr(d, "_capture_pane_content", lambda name, *, lines=20: pane)
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: None)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck-429-comment", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-429-comment"},
+        )
+        await s.commit()
+        await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-429-comment"}, project_path="/p",
+        )
+        await s.commit()
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+
+    assert any("Stuck session" in t for t in comment_texts)
+    assert any("429" in t for t in comment_texts)
+    assert any("~5h" in t for t in comment_texts)
 
 
 @pytest.mark.asyncio
