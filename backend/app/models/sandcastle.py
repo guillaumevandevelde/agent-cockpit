@@ -1,7 +1,7 @@
 """ORM models for sandcastle integration."""
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -26,6 +26,13 @@ class SandcastleConfig(Base):
     max_iterations: Mapped[int] = mapped_column(Integer, default=1)
     idle_timeout_seconds: Mapped[int] = mapped_column(Integer, default=600)
     permission_mode: Mapped[str] = mapped_column(String(32), default="acceptEdits")
+    # --- resource / network hardening (see sandcastle_service._container_security_flags) ---
+    memory_limit_mb: Mapped[int | None] = mapped_column(Integer, nullable=True)  # container RAM cap; None = unbounded
+    cpu_quota: Mapped[float | None] = mapped_column(Float, nullable=True)  # 1.0 = 1 core (docker --cpus); None = unbounded
+    pids_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)  # max PIDs; None = unbounded
+    read_only_rootfs: Mapped[bool] = mapped_column(Boolean, default=False)  # --read-only + tmpfs for writable paths
+    network_mode: Mapped[str] = mapped_column(String(16), default="bridge")  # none | bridge | restricted
+    egress_allowlist: Mapped[list | None] = mapped_column(JSON, nullable=True)  # stored intent; enforced by egress-proxy spoor
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 

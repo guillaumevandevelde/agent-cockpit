@@ -44,6 +44,55 @@ def _overall_timeout(idle_timeout_seconds: int, max_iterations: int) -> int:
     return max(idle * iterations * 4, _OVERALL_TIMEOUT_FLOOR)
 
 
+# Named network an operator can pre-create (with firewall/egress rules) for
+# network_mode="restricted". We only attach the container to it; building the
+# actual egress policy engine is a separate spoor (out of scope for this card).
+_RESTRICTED_NETWORK_NAME = "sandcastle-restricted"
+
+# Writable paths a read-only-rootfs container still needs: /tmp for scratch and
+# /home/agent so the sandcastle library's parent-dir mkdir (for the credentials
+# mount) and the agent's home writes keep working. The git worktree itself is a
+# separate writable bind mount, so it is unaffected.
+_READ_ONLY_TMPFS_PATHS = ("/tmp", "/home/agent")
+
+
+def _container_security_flags(config: Any) -> list[str]:
+    """docker/podman `run` flags for the resource/fs hardening the sandcastle
+    library does NOT expose natively (it only supports cpus + network).
+
+    Returned as a flat arg list so the Node runner can splice them into the
+    `run` command via a PATH shim. Empty when nothing is configured, keeping the
+    default (unhardened) behaviour byte-for-byte unchanged."""
+    flags: list[str] = []
+    memory_limit_mb = getattr(config, "memory_limit_mb", None)
+    if memory_limit_mb:
+        # --memory-swap == --memory disables swap, so the run OOM-kills
+        # predictably at the limit instead of silently swapping.
+        flags += ["--memory", f"{int(memory_limit_mb)}m",
+                  "--memory-swap", f"{int(memory_limit_mb)}m"]
+    pids_limit = getattr(config, "pids_limit", None)
+    if pids_limit:
+        flags += ["--pids-limit", str(int(pids_limit))]
+    if getattr(config, "read_only_rootfs", False):
+        flags.append("--read-only")
+        for path in _READ_ONLY_TMPFS_PATHS:
+            flags += ["--tmpfs", path]
+    return flags
+
+
+def _network_option(network_mode: str | None) -> str | None:
+    """Map network_mode to the sandcastle provider's native `network` option.
+
+    - "none"       → "none" (fully isolated, no outbound)
+    - "restricted" → the pre-created _RESTRICTED_NETWORK_NAME network
+    - "bridge"/None → None (provider default bridge network)"""
+    if network_mode == "none":
+        return "none"
+    if network_mode == "restricted":
+        return _RESTRICTED_NETWORK_NAME
+    return None
+
+
 def _resolve_docker_image(sandbox_provider: str, docker_image: str | None) -> str | None:
     """Default the image for container providers; leave it unset otherwise."""
     if sandbox_provider in _CONTAINER_PROVIDERS and not docker_image:
@@ -436,6 +485,11 @@ class SandcastleService:
             "prompt": run.prompt,
             "project_path": config.project_path,
             "branch_name": branch_name,
+            "cpu_quota": getattr(config, "cpu_quota", None),
+            "network_mode": getattr(config, "network_mode", None),
+            "network": _network_option(getattr(config, "network_mode", None)),
+            "container_run_flags": _container_security_flags(config),
+            "egress_allowlist": getattr(config, "egress_allowlist", None),
         }
 
         # Write config to temp file
@@ -595,6 +649,11 @@ class SandcastleService:
             "project_path": config.project_path,
             "runs": runs_config,
             "use_shared_sandbox": use_shared_sandbox,
+            "cpu_quota": getattr(config, "cpu_quota", None),
+            "network_mode": getattr(config, "network_mode", None),
+            "network": _network_option(getattr(config, "network_mode", None)),
+            "container_run_flags": _container_security_flags(config),
+            "egress_allowlist": getattr(config, "egress_allowlist", None),
         }
 
         # Write config to temp file

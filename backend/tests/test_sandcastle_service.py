@@ -12,7 +12,10 @@ from types import SimpleNamespace
 import pytest
 
 from app.services.sandcastle_service import (
+    _RESTRICTED_NETWORK_NAME,
     SandcastleService,
+    _container_security_flags,
+    _network_option,
     _overall_timeout,
     _pick_default_sandbox_provider,
 )
@@ -29,6 +32,12 @@ def _config(tmp_path, **overrides):
         docker_image=None,
         max_iterations=1,
         idle_timeout_seconds=600,
+        memory_limit_mb=None,
+        cpu_quota=None,
+        pids_limit=None,
+        read_only_rootfs=False,
+        network_mode="bridge",
+        egress_allowlist=None,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -52,6 +61,81 @@ def test_overall_timeout_has_a_sane_floor():
 
 def test_overall_timeout_handles_zero_iterations():
     assert _overall_timeout(idle_timeout_seconds=600, max_iterations=0) >= 1800
+
+
+# ---- container security flags ----------------------------------------------
+#
+# The sandcastle library only exposes `cpus` and `network` natively, so memory /
+# pids / read-only rootfs are enforced via docker/podman `run` flags spliced in
+# by the runner's PATH shim. These tests lock down exactly which flags each
+# config field emits — the contract the shim (and thus the kernel) relies on.
+
+def test_security_flags_empty_when_nothing_configured():
+    assert _container_security_flags(_config_ns()) == []
+
+
+def test_security_flags_memory_limit_disables_swap_for_predictable_oom():
+    flags = _container_security_flags(_config_ns(memory_limit_mb=256))
+    # --memory-swap == --memory means the run OOM-kills at the cap instead of
+    # silently swapping past it.
+    assert "--memory" in flags and "256m" in flags
+    assert "--memory-swap" in flags
+    i = flags.index("--memory-swap")
+    assert flags[i + 1] == "256m"
+
+
+def test_security_flags_pids_limit():
+    flags = _container_security_flags(_config_ns(pids_limit=128))
+    assert flags[flags.index("--pids-limit") + 1] == "128"
+
+
+def test_security_flags_read_only_rootfs_adds_writable_tmpfs():
+    flags = _container_security_flags(_config_ns(read_only_rootfs=True))
+    assert "--read-only" in flags
+    # /tmp and /home/agent must stay writable or the agent + credentials mount break.
+    assert flags.count("--tmpfs") == 2
+    assert "/tmp" in flags and "/home/agent" in flags
+
+
+def test_security_flags_combined():
+    flags = _container_security_flags(
+        _config_ns(memory_limit_mb=512, pids_limit=64, read_only_rootfs=True)
+    )
+    assert "--memory" in flags and "--pids-limit" in flags and "--read-only" in flags
+
+
+def test_network_option_maps_modes():
+    assert _network_option("none") == "none"
+    assert _network_option("restricted") == _RESTRICTED_NETWORK_NAME
+    assert _network_option("bridge") is None
+    assert _network_option(None) is None
+
+
+def _config_ns(**overrides):
+    base = dict(memory_limit_mb=None, pids_limit=None, read_only_rootfs=False)
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+# ---- API boundary validation -----------------------------------------------
+
+def test_config_update_rejects_invalid_network_mode():
+    from app.api.v1.sandcastle.router import SandcastleConfigUpdate
+    with pytest.raises(ValueError):
+        SandcastleConfigUpdate(network_mode="nonee")
+
+
+def test_config_update_accepts_valid_network_modes():
+    from app.api.v1.sandcastle.router import SandcastleConfigUpdate
+    for mode in ("none", "bridge", "restricted"):
+        assert SandcastleConfigUpdate(network_mode=mode).network_mode == mode
+
+
+def test_config_update_rejects_non_positive_caps():
+    from app.api.v1.sandcastle.router import SandcastleConfigUpdate
+    for bad in (dict(memory_limit_mb=0), dict(pids_limit=-1), dict(cpu_quota=0)):
+        with pytest.raises(ValueError):
+            SandcastleConfigUpdate(**bad)
 
 
 # ---- single-run command building -------------------------------------------
@@ -90,6 +174,39 @@ def test_build_run_command_leaves_image_none_for_no_sandbox(tmp_path):
     assert data["docker_image"] is None
 
 
+def test_build_run_command_threads_resource_caps_into_config(tmp_path):
+    svc = SandcastleService()
+    config = _config(
+        tmp_path,
+        sandbox_provider="docker",
+        memory_limit_mb=256,
+        cpu_quota=1.5,
+        pids_limit=100,
+        read_only_rootfs=True,
+        network_mode="none",
+        egress_allowlist=["example.com"],
+    )
+    run = SimpleNamespace(id=3, prompt="x")
+    svc._build_run_command(config, run, branch_name=None, max_iterations=None)
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-3.json").read_text())
+    assert data["cpu_quota"] == 1.5
+    assert data["network"] == "none"
+    assert data["egress_allowlist"] == ["example.com"]
+    assert "--memory" in data["container_run_flags"]
+    assert "--read-only" in data["container_run_flags"]
+    assert "--pids-limit" in data["container_run_flags"]
+
+
+def test_build_run_command_no_caps_yields_empty_flags(tmp_path):
+    svc = SandcastleService()
+    config = _config(tmp_path, sandbox_provider="docker")  # all caps default/None
+    run = SimpleNamespace(id=4, prompt="x")
+    svc._build_run_command(config, run, branch_name=None, max_iterations=None)
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-4.json").read_text())
+    assert data["container_run_flags"] == []
+    assert data["network"] is None  # bridge => provider default
+
+
 # ---- parallel-run command building -----------------------------------------
 
 def test_build_parallel_command_threads_shared_sandbox_flag(tmp_path):
@@ -108,6 +225,20 @@ def test_build_parallel_command_defaults_docker_image(tmp_path):
     svc._build_parallel_run_command(config, runs, use_shared_sandbox=False)
     data = json.loads((Path(tmp_path) / ".sandcastle" / "parallel-config-9.json").read_text())
     assert data["docker_image"] == "sandcastle:local"
+
+
+def test_build_parallel_command_threads_resource_caps(tmp_path):
+    svc = SandcastleService()
+    config = _config(
+        tmp_path, sandbox_provider="docker", memory_limit_mb=256,
+        cpu_quota=2.0, read_only_rootfs=True, network_mode="restricted",
+    )
+    runs = [SimpleNamespace(id=11, prompt="a")]
+    svc._build_parallel_run_command(config, runs, use_shared_sandbox=False)
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "parallel-config-11.json").read_text())
+    assert data["cpu_quota"] == 2.0
+    assert data["network"] == _RESTRICTED_NETWORK_NAME
+    assert "--memory" in data["container_run_flags"]
 
 
 # ---- default sandbox provider selection ------------------------------------

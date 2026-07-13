@@ -3,11 +3,13 @@
 from datetime import UTC
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.services.sandcastle_service import sandcastle_service
 
 router = APIRouter(prefix="/sandcastle", tags=["sandcastle"])
+
+_NETWORK_MODES = {"none", "bridge", "restricted"}
 
 
 class SandcastleConfigUpdate(BaseModel):
@@ -21,6 +23,58 @@ class SandcastleConfigUpdate(BaseModel):
     max_iterations: int | None = None
     idle_timeout_seconds: int | None = None
     permission_mode: str | None = None
+    memory_limit_mb: int | None = None
+    cpu_quota: float | None = None
+    pids_limit: int | None = None
+    read_only_rootfs: bool | None = None
+    network_mode: str | None = None
+    egress_allowlist: list[str] | None = None
+
+    @field_validator("network_mode")
+    @classmethod
+    def _validate_network_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in _NETWORK_MODES:
+            raise ValueError(f"network_mode must be one of {sorted(_NETWORK_MODES)}")
+        return v
+
+    @field_validator("memory_limit_mb", "pids_limit")
+    @classmethod
+    def _validate_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("must be a positive integer")
+        return v
+
+    @field_validator("cpu_quota")
+    @classmethod
+    def _validate_cpu_quota(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("cpu_quota must be > 0")
+        return v
+
+
+def _serialize_config(config) -> dict:
+    """Full JSON view of a SandcastleConfig ORM row."""
+    return {
+        "id": config.id,
+        "project_path": config.project_path,
+        "enabled": config.enabled,
+        "sandbox_provider": config.sandbox_provider,
+        "agent_provider": config.agent_provider,
+        "model": config.model,
+        "branch_strategy": config.branch_strategy,
+        "docker_image": config.docker_image,
+        "max_iterations": config.max_iterations,
+        "idle_timeout_seconds": config.idle_timeout_seconds,
+        "permission_mode": config.permission_mode,
+        "memory_limit_mb": config.memory_limit_mb,
+        "cpu_quota": config.cpu_quota,
+        "pids_limit": config.pids_limit,
+        "read_only_rootfs": config.read_only_rootfs,
+        "network_mode": config.network_mode,
+        "egress_allowlist": config.egress_allowlist,
+        "created_at": config.created_at.isoformat() if config.created_at else None,
+        "updated_at": config.updated_at.isoformat() if config.updated_at else None,
+    }
 
 
 class SandcastleRunRequest(BaseModel):
@@ -73,22 +127,14 @@ async def get_config(project_path: str = Query(...)):
             "max_iterations": 1,
             "idle_timeout_seconds": 600,
             "permission_mode": "acceptEdits",
+            "memory_limit_mb": None,
+            "cpu_quota": None,
+            "pids_limit": None,
+            "read_only_rootfs": False,
+            "network_mode": "bridge",
+            "egress_allowlist": None,
         }
-    return {
-        "id": config.id,
-        "project_path": config.project_path,
-        "enabled": config.enabled,
-        "sandbox_provider": config.sandbox_provider,
-        "agent_provider": config.agent_provider,
-        "model": config.model,
-        "branch_strategy": config.branch_strategy,
-        "docker_image": config.docker_image,
-        "max_iterations": config.max_iterations,
-        "idle_timeout_seconds": config.idle_timeout_seconds,
-        "permission_mode": config.permission_mode,
-        "created_at": config.created_at.isoformat() if config.created_at else None,
-        "updated_at": config.updated_at.isoformat() if config.updated_at else None,
-    }
+    return _serialize_config(config)
 
 
 @router.put("/config")
@@ -96,21 +142,7 @@ async def update_config(project_path: str = Query(...), request: SandcastleConfi
     """Create or update sandcastle config for a project."""
     updates = request.model_dump(exclude_none=True)
     config = await sandcastle_service.update_config(project_path, updates)
-    return {
-        "id": config.id,
-        "project_path": config.project_path,
-        "enabled": config.enabled,
-        "sandbox_provider": config.sandbox_provider,
-        "agent_provider": config.agent_provider,
-        "model": config.model,
-        "branch_strategy": config.branch_strategy,
-        "docker_image": config.docker_image,
-        "max_iterations": config.max_iterations,
-        "idle_timeout_seconds": config.idle_timeout_seconds,
-        "permission_mode": config.permission_mode,
-        "created_at": config.created_at.isoformat() if config.created_at else None,
-        "updated_at": config.updated_at.isoformat() if config.updated_at else None,
-    }
+    return _serialize_config(config)
 
 
 @router.patch("/config/{config_id}/toggle")
