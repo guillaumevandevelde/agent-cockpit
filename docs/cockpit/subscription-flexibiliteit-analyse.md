@@ -257,4 +257,7 @@ risico/afhankelijkheid gemarkeerd i.p.v. stilzwijgend aangenomen.
 4. **Spillover-bij-limiet** (fase 2, hangt af van #3) — drempel-tak in de router die de
    per-provider pause proactief maakt.
 5. *(Voorwaardelijk, alleen als §7 "meerdere accounts binnen één vendor" is)* — spike
-   per-sessie credential-/HOME-isolatie voor parallelle same-vendor-accounts.
+   per-sessie credential-/HOME-isolatie voor parallelle same-vendor-accounts. **Spike
+   opgeleverd 2026-07-13:** [`spike-same-vendor-multi-account-isolation.md`](./spike-same-vendor-multi-account-isolation.md)
+   — conditionele GO (isolatie is goedkoop via `CLAUDE_CONFIG_DIR` op het bestaande
+   `spawn.py`-`-e`-injectiepunt); de §7-fork blijft een openstaande gebruikersbeslissing.
