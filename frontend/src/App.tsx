@@ -40,6 +40,7 @@ const SubscriptionsPage = lazy(() => import('./features/subscriptions/Subscripti
 const UpdatesPage = lazy(() => import('./features/updates/UpdatesPage').then((m) => ({ default: m.UpdatesPage })))
 const BlueprintsPage = lazy(() => import('./features/blueprints').then((m) => ({ default: m.BlueprintsPage })))
 const PortfolioPage = lazy(() => import('./features/portfolio/PortfolioPage').then((m) => ({ default: m.PortfolioPage })))
+const SecurityProfilePage = lazy(() => import('./features/security/SecurityProfilePage').then((m) => ({ default: m.SecurityProfilePage })))
 
 function App() {
   return (
@@ -87,6 +88,7 @@ function App() {
                 <Route path="updates" element={<UpdatesPage />} />
                 <Route path="blueprints" element={<BlueprintsPage />} />
                 <Route path="portfolio" element={<PortfolioPage />} />
+                <Route path="security" element={<SecurityProfilePage />} />
               </Route>
             </Routes>
             </Suspense>

@@ -32,6 +32,7 @@ from .run_activity import router as run_activity_router
 from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
 from .scheduled_messages.router import router as scheduled_messages_router
+from .security import router as security_router
 from .sessions import router as sessions_router
 from .status import router as status_router
 from .statusline import router as statusline_router
@@ -81,6 +82,7 @@ router.include_router(providers_router, tags=["Providers"])
 router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)
+router.include_router(security_router)
 router.include_router(kanban_router)
 router.include_router(run_activity_router)
 router.include_router(apm_router)
