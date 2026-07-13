@@ -1,0 +1,2 @@
+2026-07-13T18:54:59Z | preset=verify | iter=1 | run ruff on new backend files + pytest on test_blueprint_apply_engine.py | starting
+2026-07-13T18:55:18Z | preset=verify | iter=1 | ruff=clean pytest=33/33 green; no frontend diff so npm gate skipped; backend pytest gate is CI | clean
