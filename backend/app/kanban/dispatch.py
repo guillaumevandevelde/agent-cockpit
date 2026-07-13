@@ -1581,6 +1581,19 @@ async def _cleanup_stuck_session(
         project_key=project_key, entity_id=card.id, payload={},
     )
 
+    # Surface the cleanup on the card's activity feed. The pane content can
+    # be multiline + ANSI-encoded — collapse to the first 60 chars on one line
+    # so the comment stays readable in the activity feed.
+    pane_snippet = (pane_content or "").replace("\n", " ").replace("\r", " ")[:60]
+    text = (
+        f"🚦 Stuck session {session_name} detected with rate-limit message "
+        f"({pane_snippet!r}). Pausing auto-dispatch for ~{FALLBACK_PAUSE_HOURS}h; "
+        f"tmux killed, claim released."
+    )
+    await _post_rate_limit_activity_comment(
+        session, card=card, project_key=project_key, text=text,
+    )
+
 
 def _live_sessions() -> set[str] | None:
     """Names of tmux sessions alive on this device, or None when tmux cannot be
@@ -1713,6 +1726,7 @@ async def _run_card(
     revisit_prior_decision: dict | None = None,
     agent_override: str | None = None,
     live_sessions: set[str] | None = None,
+    auto_dispatch: bool = False,
 ) -> dict | None:
     """Claim+move-to-agent-column+spawn one specific card. Returns a result dict, or None if
     the claim was lost. The persona honours an explicit per-card agent over the column.
@@ -1728,10 +1742,22 @@ async def _run_card(
     `**Revisit:**`-prefixed comment exists — see `dispatch_project` and
     `_run_card`'s caller; manual `dispatch_card` callers (UI button) leave
     them None so the prompt doesn't leak prior-decision context the human
-    didn't ask for."""
+    didn't ask for.
+
+    `auto_dispatch=True` is set by the auto-tick (`dispatch_project`) so we
+    can tell apart a scheduled-resume pickup (the card had a `scheduled_at`
+    in the past, was held out of dispatch by `_is_due`) from a manual
+    force-dispatch via the UI. When set AND the card had `scheduled_at`,
+    post an `Auto-resuming (scheduled_at was <iso>)` activity comment so the
+    activity feed shows the tick didn't force-dispatch early."""
     source_column = card.column
     name = _mint_session_name(project_path, card.title, live_sessions=live_sessions)
     claimant = CLAIMANT_PREFIX + name
+
+    # Capture the original scheduled_at BEFORE the claim, so the auto-resume
+    # comment can echo it back. After the claim + move the card's column is no
+    # longer "To Resume" but the scheduled_at field is preserved on the row.
+    prior_scheduled_at = getattr(card, "scheduled_at", None)
 
     # Get the actual transport for this card (card transport > project default)
     card_transport = get_transport_for_card(card, transport)
@@ -1743,6 +1769,17 @@ async def _run_card(
         )
     except ClaimRejected:
         return None  # lost the race; another tick/device took it
+
+    # Auto-resume audit: when the auto-tick picked up a card that had a
+    # `scheduled_at` in the past (was held out by `_is_due`), record that
+    # fact on the activity feed so an operator reading the board later sees
+    # this wasn't a force-dispatch — the scheduled time arrived. Gated on
+    # `auto_dispatch=True` so manual UI dispatches don't get the same noise.
+    if auto_dispatch and prior_scheduled_at:
+        text = f"⏰ Auto-resuming (scheduled_at was {prior_scheduled_at})."
+        await _post_rate_limit_activity_comment(
+            session, card=card, project_key=project_key, text=text,
+        )
 
     # `agent_override` / `card.agent` overload two unrelated concepts:
     #   - a CLI id (claude-code, mimo-code, …) → which CLI spawns the session
@@ -2074,6 +2111,25 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
             scheduled_at=scheduled_at,
         )
         if moved:
+            # Surface the move on the card's activity feed so an operator
+            # looking at the board later sees *why* it landed here without
+            # having to dive into dispatch.py logs. The reset time is the
+            # Notification hook's parsed value when known; the `~5h fallback`
+            # branch covers reaper-style callers that couldn't parse one.
+            if scheduled_at:
+                text = (
+                    f"🚦 Rate-limit hit — session {session_name} moved to To "
+                    f"Resume. Auto-resume scheduled at {scheduled_at}."
+                )
+            else:
+                text = (
+                    f"🚦 Rate-limit hit — session {session_name} moved to To "
+                    f"Resume. Auto-resume in ~5h (fallback — couldn't parse "
+                    f"reset time)."
+                )
+            await _post_rate_limit_activity_comment(
+                ks, card=card, project_key=project_key, text=text,
+            )
             await ks.commit()
         return moved
 
@@ -2172,6 +2228,45 @@ async def post_agent_status_comment(cwd: str, text: str) -> bool:
             card.id, session_name, text,
         )
         return True
+
+
+async def _post_rate_limit_activity_comment(
+    session, *, card, project_key: str, text: str,
+) -> bool:
+    """Post a short audit comment explaining why a card landed on "To Resume".
+
+    Used by the three rate-limit lifecycle paths so a later "why is this card
+    parked?" reader can answer it from the activity feed in one second, rather
+    than diving into dispatch.py logs:
+
+      - ``move_limited_session_to_resume`` (Notification hook path, has parsed
+        reset time)
+      - ``_cleanup_stuck_session`` (reaper path, sees only tmux pane content)
+      - ``_run_card`` (auto-dispatch tick pickup of a due
+        scheduled_at card)
+
+    The caller owns the session/transaction (some callsites embed this in a
+    larger apply chain); we commit so the comment lands alongside the move /
+    release op even if the caller forgets — idempotent for sites that
+    commit afterwards. Returns True on success; never raises. Truncates
+    nothing: callers are responsible for keeping text under 200 chars.
+    """
+    try:
+        await apply_operation(
+            session, op_type="comment", entity_type="comment",
+            project_key=project_key, entity_id=card.id, payload={"text": text},
+        )
+        await session.commit()
+        logger.info(
+            "posted rate-limit activity comment to card %s: %s",
+            card.id, text,
+        )
+        return True
+    except Exception:
+        logger.exception(
+            "failed to post rate-limit activity comment to card %s", card.id,
+        )
+        return False
 
 
 async def reap_stale_claims(
@@ -2530,6 +2625,7 @@ async def dispatch_project(
                 revisit_question=revisit_question,
                 revisit_prior_decision=revisit_prior_decision,
                 live_sessions=live_sessions,
+                auto_dispatch=True,
             )
             if last_result is None:
                 break  # dispatch failed (e.g. memory) — let the tick queue/retry
@@ -2557,6 +2653,7 @@ async def dispatch_project(
             revisit_question=revisit_question,
             revisit_prior_decision=revisit_prior_decision,
             live_sessions=live_sessions,
+            auto_dispatch=True,
         )
         if last_result is None:
             break  # dispatch failed (e.g. memory) — let the tick queue/retry
