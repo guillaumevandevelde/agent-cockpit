@@ -176,7 +176,7 @@ te winnen — je kunt het scraping-residu vervangen door stream-json-parsing
 ### 4.4 Migratiekost
 **Hoog voor een big-bang, laag voor het incrementele pad.** Het tmux-substraat is
 load-bearing over `runs/`, `scheduling/`, `presence`, `kanban/dispatch`,
-`cc_bridge`, `agent_bridge`. Een volledige migratie raakt vrijwel al die modules
+`cc_bridge`. Een volledige migratie raakt vrijwel al die modules
 tegelijk — hoog risico, geen tussentijdse waarde. Het incrementele pad (transport
 naast transport, capability-gated) levert waarde per slice en houdt tmux als
 fallback. De `SpawnTransport`-Protocol + de bestaande transport-keuze
@@ -258,7 +258,5 @@ tussentijdse waarde (§4.4).
 - **Sandcastle/podman-transport.** Orthogonaal: dat is container-*isolatie*, een
   andere as dan tmux-vs-headless. Een headless-run kan later evengoed in een
   sandbox draaien.
-- **De LLM-provider-switch** (Anthropic/Bedrock/MiniMax via `platform_env.py`,
+- **De LLM-provider-switch** (Anthropic/Bedrock/MiniMax via `provider_env.py`,
   zie `spike-claude-code-model-switching.md`) — losstaand van het substraat.
-</content>
-</invoke>

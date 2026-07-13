@@ -1,0 +1,4 @@
+2026-07-13T18:31:58Z | preset=verify | iter=1 | docs-sweep: terminology in 4 cockpit docs + CLAUDE.md | pending
+2026-07-13T18:31:58Z | preset=verify | iter=1 | docs-only branch, no frontend diff, frontend gate skipped per git-ship rationale
+2026-07-13T18:31:58Z | preset=verify | iter=1 | grep sweep over docs/cockpit/ + backend/ + frontend/src/ | clean (remaining matches are intentional: terminology.md glossary references, 'voorheen' parentheticals in spike-decision.md, upstream's class-name mentions AgentTeamPreset/AgentTeamSlot)
+2026-07-13T18:31:58Z | preset=verify | iter=1 | docs terminology consistency (00-orientation ↔ terminology.md) | consistent after update

@@ -34,7 +34,7 @@ This is the "kanban as hoofdwerking" layer that was deferred from the board v1
 - **Auto-Doing.** On claim the card moves straight to **Doing**, so the board
   reflects that work has started.
 - **Scope = git worktree.** Sessions spawn with `mode="worktree"` via the existing
-  `agent_bridge/spawn.py`, isolating each card's work.
+  `services/runs/spawn.py`, isolating each card's work.
 - **Transport is abstracted.** The dispatcher calls a `SpawnTransport` callable;
   today it wraps `spawn_session` (tmux). Swapping to the rootless-podman wrapper
   later touches only the transport, not the dispatcher.

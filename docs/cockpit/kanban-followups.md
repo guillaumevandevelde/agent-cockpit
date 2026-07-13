@@ -53,12 +53,12 @@ Decision: **don't port upstream's Agent Team Presets/launch-orchestration/second
 Mail MCP shim** — see the trade-off in `upstream-agent-teams-decision.md`. It's a
 competing orchestration paradigm to our kanban-dispatch + kanban-based Agent Mail, not a
 complement. Only the universal provider-correctness bugs it surfaced were cherry-picked
-(Codex `reasoning_effort` support, the Bedrock-env fallthrough in `platform_env.py`,
+(Codex `reasoning_effort` support, the Bedrock-env fallthrough in `provider_env.py`,
 explicit OpenCode rejection of `reasoning_effort`).
 
 **If you're picking up the "Agent Bridge UI-cluster" card (team lanes/filter/roles):**
-build on the existing `backend/app/services/agent_bridge/teams.py` model (auto-detect +
-manual grouping of already-running sessions) — there is no preset/slot API, and that's
+build on the existing `backend/app/services/runs/groups.py` model (auto-detect +
+manual grouping of already-running runs) — there is no preset/slot API, and that's
 intentional, not an oversight.
 
 **Update (2026-07-08) — that card was picked up and the cluster was split, not built

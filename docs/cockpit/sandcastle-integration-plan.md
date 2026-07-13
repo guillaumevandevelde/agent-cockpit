@@ -52,13 +52,13 @@ Sandcastle should **complement** CC Bridge/Agent Bridge, not replace them:
 │  ┌──────────────────────────────────────────────────┐    │
 │  │              FastAPI Backend                       │    │
 │  │  ┌──────────┐ ┌────────────┐ ┌─────────────────┐ │    │
-│  │  │cc_bridge │ │agent_bridge│ │ sandcastle (NEW) │ │    │
-│  │  │/router   │ │/router     │ │ /router.py       │ │    │
+│  │  │cc_bridge │ │  runs/     │ │ sandcastle (NEW) │ │    │
+│  │  │/router   │ │ /router    │ │ /router.py       │ │    │
 │  │  └────┬─────┘ └─────┬──────┘ └────────┬────────┘ │    │
 │  │       │              │                 │           │    │
 │  │       ▼              ▼                 ▼           │    │
 │  │  ┌──────────┐ ┌────────────┐ ┌─────────────────┐ │    │
-│  │  │cc_bridge │ │agent_bridge│ │ sandcastle_svc   │ │    │
+│  │  │cc_bridge │ │  runs/     │ │ sandcastle_svc   │ │    │
 │  │  │/services │ │/services   │ │ (NEW)            │ │    │
 │  │  └──────────┘ └────────────┘ └────────┬────────┘ │    │
 │  │                                        │          │    │

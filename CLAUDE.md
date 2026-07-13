@@ -123,10 +123,10 @@ backend/                  # FastAPI + async SQLAlchemy + aiosqlite
 │   ├── config.py        # pydantic-settings (defaults in code, no .env required)
 │   ├── database.py      # Async SQLAlchemy engine + session
 │   ├── api/v1/          # 30 route modules (router.py aggregates all), incl. subdir routers:
-│   │                    #   agent_bridge/, cc_bridge/, kanban/, sandcastle/, scheduled_messages/
+│   │                    #   cc_bridge/, kanban/, runs/, sandcastle/, scheduled_messages/
 │   ├── models/          # database.py (ORM), schemas.py (Pydantic)
 │   ├── services/        # 58 service files (business logic), incl. subdirs:
-│   │                    #   agent_bridge/, cc_bridge/, providers/, scheduling/
+│   │                    #   agentic_cli/, agent_mail/, blueprint/, runs/, scheduling/, templates/
 │   └── utils/           # path_utils, file_utils
 
 frontend/                 # React 19 + Vite + TypeScript + shadcn/ui

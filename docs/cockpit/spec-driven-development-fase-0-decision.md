@@ -52,9 +52,10 @@ de content-authoring (groot, per-feature), zonder Optie B's reikwijdte te laten 
 ## Raakvlak met de "Docs-sweep"-kaart
 
 De bestaande Backlog-kaart *"Docs-sweep + consistentiecontrole terminologie"* overlapt **niet**:
-die gaat over **terminologie-consistentie** (oude termen als `platform_env`/`AgentTeam` vervangen
-volgens [`terminology.md`](./terminology.md)), Fase 0 gaat over **structuur-consistentie** (welke
-boom is canoniek). Orthogonale scopes → ze lopen **parallel**, Docs-sweep gaat niet op in Fase 0.
+die gaat over **terminologie-consistentie** (oude termen als `platform_env`/`AgentTeam`
+vervangen door `provider_env`/`RunGroup` etc. volgens [`terminology.md`](./terminology.md)),
+Fase 0 gaat over **structuur-consistentie** (welke boom is canoniek). Orthogonale scopes →
+ze lopen **parallel**, Docs-sweep gaat niet op in Fase 0.
 
 ## Niet gekozen
 

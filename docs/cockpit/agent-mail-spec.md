@@ -13,9 +13,9 @@ Geport uit upstream `adrirubio/claude-deck`, commits `52a5da1` (MVP) t/m `c24672
 - **`945d0bd`/`ee0d9e9` ("same-repo participants") — niet geport.** Die leunen op een
   aparte upstream-feature (Agent-Team-*presets/slots*, `agent_team_presets`/
   `agent_team_slots`) die niet in deze fork zit en niet in de gevraagde commit-lijst
-  stond. Deze fork heeft al een ander "Agent Teams"-concept (CC Bridge's
-  `AgentTeam`/`AgentTeamMember`, cwd-gebaseerde auto-grouping) — het upstream
-  preset/slot-model erbovenop zetten zou twee botsende team-concepten opleveren.
+  stond. Deze fork heeft al een ander groeperings-concept (`RunGroup`/`RunMembership`
+  in `services/runs/groups.py`, cwd-gebaseerde auto-grouping) — het upstream
+  preset/slot-model erbovenop zetten zou twee botsende groeperings-concepten opleveren.
   **v1 = één durable member per repo** (upstream's oorspronkelijke MVP-vorm, vóór
   945d0bd). Same-repo multi-participant is een expliciete, latere follow-up als de
   behoefte zich concreet aandient.
@@ -40,7 +40,7 @@ infra-lagen aan bestaande Cockpit-primitieven hangen:
 |---|---|---|
 | Eigen stdio MCP-shim (`mcp_shim/agent_mail_server.py`) + `codex mcp add`-installer per provider | Generieke, bearer-token-authed MCP-server (`app/mcp_server`, Streamable-HTTP op `/api/v1/mcp-server`, `MCPAccessToken` met `agent_name`) | Mail-tools registreren op de bestaande server (`app/mcp_server/tools/agent_mail.py`). Geen apart transport, geen Codex `mcp add`-installer nodig. |
 | Eigen tmux `send-keys`-nudge (`_send_tmux_inbox_check`) | `app/services/scheduling/tmux_inject.py::send_text()` — zelfde literal+Enter-tweestap | Hergebruiken i.p.v. dupliceren. |
-| Eigen tmux-pane-scanner voor "observed sessions" | `app/services/agent_bridge/discovery.py::discover_agent_sessions()` — scant al panes + matcht `claude-code`/`codex-cli`-processen | Hergebruiken in `sync_observed_sessions()`. |
+| Eigen tmux-pane-scanner voor "observed sessions" | `app/services/runs/discovery.py::discover_agent_sessions()` — scant al panes + matcht `claude-code`/`codex-cli`-processen | Hergebruiken in `sync_observed_sessions()`. |
 | Repo-identiteit (`repo_utils.py`, git-common-dir-gebaseerd) | Geen equivalent | Nieuw, bijna 1-op-1 geport (~40 regels). |
 | Claude Code hook-installer (curl-based, additive merge in `settings.json`) | Vergelijkbaar patroon in `scheduling/hook_installer.py`, maar andere events/URL | Nieuwe kleine module, zelfde idempotente-merge-vorm. |
 | Codex CLI hook-installer (`~/.codex/hooks.json` editen) + `codex mcp add` | Codex is al eersteklas provider (`providers/codex_cli.py`, `get_codex_home()`) maar geen bestaande hook-installer | Hooks.json-editing geport; MCP-registratie **niet** (zie boven — geen aparte shim nodig). |
@@ -92,7 +92,7 @@ team-slot-integratie):
   `_effective_status` (TTL/PID-gebaseerd: hook 180s, MCP 3600s + PID-liveness, observed
   300s).
 - **Discovery-sync**: `sync_observed_sessions(db)` — roept
-  `agent_bridge.discovery.discover_agent_sessions()` (hergebruik, zie boven), matcht
+  `runs.discovery.discover_agent_sessions()` (hergebruik, zie boven), matcht
   gevonden panes aan bestaande hook/MCP-sessies via PID-ancestry + repo-identiteit
   (voorkomt dubbele leden voor dezelfde logische sessie).
 - **Messaging**: `send_message` (valideert kind, sender-exclusiviteit member/actor,
