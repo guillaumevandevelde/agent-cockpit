@@ -6,11 +6,56 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from app.services.agentic_cli.provider_env import _clean
 from app.utils.git_ref import sanitize_git_branch_name
 
 logger = logging.getLogger(__name__)
 
 _spawned_sessions: dict[str, dict] = {}
+
+# Default transport when ``runtime`` is omitted. Backward compat for the
+# legacy CC Bridge route that doesn't yet pass the new env-injection
+# kwargs. See kanban card
+# `[security][D] Per-project env-injectie in spawn_session`.
+_DEFAULT_RUNTIME = "worktree"
+
+
+def _record_audit(
+    project_key: str | None,
+    runtime: str | None,
+    session_name: str,
+    env_var_names: list[str],
+) -> None:
+    """Audit-log sink for security-relevant spawn events.
+
+    No-op until follow-up #10 lands (``security_audit`` table). Same
+    surface as the same-named helper in ``services/runs/spawn.py`` —
+    the audit hook is the migration seam, not a feature of this card.
+    """
+    if not project_key:
+        return
+    logger.info(
+        "env_inject project_key=%s runtime=%s session=%s vars=%s",
+        project_key,
+        runtime or "-",
+        session_name,
+        sorted(env_var_names),
+    )
+
+
+def _clean_extra_env(extra_env: dict[str, str] | None) -> dict[str, str]:
+    """Reject control chars in caller-supplied env values (see spawn.py)."""
+    if not extra_env:
+        return {}
+    cleaned: dict[str, str] = {}
+    for key, value in extra_env.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("Environment key must be a non-empty string")
+        if not isinstance(value, str):
+            raise ValueError(f"Environment value for {key!r} must be a string")
+        _clean(value)
+        cleaned[key] = value
+    return cleaned
 
 
 def _resolve_project_directory(project_folder: str, session_id: str | None = None) -> str:
@@ -64,6 +109,10 @@ def spawn_session(
     project_folder: str | None = None,
     skip_permissions: bool = False,
     extra_args: list[str] | None = None,
+    *,
+    project_key: str | None = None,
+    runtime: str | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> dict:
     """Spawn a new Claude Code session inside a tmux session.
 
@@ -74,6 +123,14 @@ def spawn_session(
         session_id: Claude session ID to resume (mode="resume" only).
         project_folder: Claude project folder name (for resume mode directory resolution).
         skip_permissions: Append --dangerously-skip-permissions flag.
+        project_key: Optional project key (``git:host/path`` or ``slug:name``)
+            — when supplied, gets injected as ``COCKPIT_PROJECT_KEY``.
+        runtime: Transport hint (``worktree|sandcastle|headless|host``) —
+            when supplied, gets injected as ``COCKPIT_RUNTIME``. Defaults
+            to ``"worktree"`` for backward compat with existing callers.
+        extra_env: Explicit env vars to inject (``-e KEY=VALUE``) — caller-
+            resolved per-project secrets land here once follow-up #4 lands.
+            The backend's ``os.environ`` is **never** merged in.
 
     Returns:
         Dict with tmux_target and session_name.
@@ -132,11 +189,35 @@ def spawn_session(
     if extra_args:
         command += extra_args
 
+    # Build the explicit env dict for the spawned tmux session.
+    # NO ``os.environ.update`` — every var must come from an explicit,
+    # auditable input. See kanban card
+    # `[security][D] Per-project env-injectie in spawn_session`.
+    effective_runtime = runtime if runtime is not None else _DEFAULT_RUNTIME
+    cleaned_extras = _clean_extra_env(extra_env)
+    merged_env: dict[str, str] = {}
+    merged_env.update(cleaned_extras)
+    if project_key is not None:
+        merged_env["COCKPIT_PROJECT_KEY"] = project_key
+    if effective_runtime is not None:
+        merged_env["COCKPIT_RUNTIME"] = effective_runtime
+
+    env_flags: list[str] = []
+    for key, value in merged_env.items():
+        env_flags += ["-e", f"{key}={value}"]
+
+    _record_audit(
+        project_key=project_key,
+        runtime=effective_runtime,
+        session_name=name,
+        env_var_names=list(merged_env.keys()),
+    )
+
     # Spawn tmux session — tmux passes shell_command to $SHELL -c, so quote args
     shell_command = " ".join(shlex.quote(part) for part in command)
     try:
         result = subprocess.run(
-            ["tmux", "new-session", "-d", "-s", name, "-c", directory, shell_command],
+            ["tmux", "new-session", "-d", "-s", name, "-c", directory, *env_flags, shell_command],
             capture_output=True,
             text=True,
             timeout=10,
@@ -153,6 +234,9 @@ def spawn_session(
         "mode": mode,
         "directory": directory,
         "worktree_name": worktree_name or (name if mode == "worktree" else None),
+        "project_key": project_key,
+        "runtime": effective_runtime,
+        "env_var_names": sorted(merged_env.keys()),
     }
 
     logger.info("Spawned session %s in %s (mode=%s)", name, directory, mode)

@@ -14,13 +14,67 @@ from app.config import settings
 from app.services.agentic_cli import get_agentic_cli
 from app.services.agentic_cli.base import SpawnCommandOptions
 from app.services.agentic_cli.claude_code import ClaudeCodeCli
-from app.services.agentic_cli.provider_env import build_provider_env
+from app.services.agentic_cli.provider_env import _clean, build_provider_env
 from app.services.host_service import build_ssh_base
 from app.utils.git_ref import sanitize_git_branch_name
 
 logger = logging.getLogger(__name__)
 
 _spawned_sessions: dict[str, dict] = {}
+
+# Default transport when the caller doesn't pass ``runtime``. Backward
+# compat for every existing call-site (tests, dispatcher, REST bridge)
+# that omits the new ``runtime`` kwarg. See kanban card
+# `[security][D] Per-project env-injectie in spawn_session`.
+_DEFAULT_RUNTIME = "worktree"
+
+# Audit-log sink for security-relevant spawn events. Today this is a
+# no-op (no `security_audit` table yet — that's follow-up #10); once
+# that lands the implementation swaps to writing one row per spawn
+# with the names of injected vars. The contract here is the migration
+# surface: callers should not depend on this hook returning anything
+# (always callable, never raises), and var *names* are the only
+# stable identifier (no secret values).
+def _record_audit(
+    project_key: str | None,
+    runtime: str | None,
+    session_name: str,
+    env_var_names: list[str],
+) -> None:
+    """Log an env-injection event. No-op until follow-up #10 lands."""
+    if not project_key:
+        # Without a project_key we have no scope to audit against; skip
+        # rather than emit a row that's orphaned in the future table.
+        return
+    logger.info(
+        "env_inject project_key=%s runtime=%s session=%s vars=%s",
+        project_key,
+        runtime or "-",
+        session_name,
+        sorted(env_var_names),
+    )
+
+
+def _clean_extra_env(extra_env: dict[str, str] | None) -> dict[str, str]:
+    """Validate caller-supplied env values; reject control characters.
+
+    Mirrors ``_clean`` in ``provider_env``: any value containing ``\n``,
+    ``\r``, or ``\x00`` raises ``ValueError`` before it reaches tmux's
+    argv. An empty/None input returns an empty dict.
+    """
+    if not extra_env:
+        return {}
+    cleaned: dict[str, str] = {}
+    for key, value in extra_env.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("Environment key must be a non-empty string")
+        if not isinstance(value, str):
+            raise ValueError(f"Environment value for {key!r} must be a string")
+        # Reuse _clean for the value validation so the rule is one
+        # place to audit when tightening later.
+        _clean(value)
+        cleaned[key] = value
+    return cleaned
 
 
 def _validate_directory(directory: str) -> str:
@@ -143,11 +197,31 @@ def spawn_session(
     options: SpawnCommandOptions,
     session_name: str | None = None,
     host_data: dict | None = None,
+    *,
+    project_key: str | None = None,
+    runtime: str | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> dict:
     """Spawn a new agentic CLI session inside tmux.
 
     When *host_data* is provided the session is spawned on that remote host
     via SSH instead of locally.
+
+    The spawned tmux session receives an **explicit env** built from:
+
+    1. ``extra_env`` — caller-resolved secrets (today a dict; once
+       follow-up #4 lands this is where ``SecretStore.get(project_key, ...)``
+       results land).
+    2. Provider env from ``build_provider_env`` (Bedrock/AWS_REGION or
+       MiniMax creds).
+    3. ``COCKPIT_PROJECT_KEY=<project_key>`` when supplied.
+    4. ``COCKPIT_RUNTIME=<runtime>`` when supplied (defaults to
+       ``"worktree"`` for backward compat with existing callers).
+
+    The backend's ``os.environ`` is **never** merged into the spawn —
+    this is the security fix the card mandates. Host vars (e.g.
+    ``AWS_*``, ``GITHUB_TOKEN``) only reach the agent if the caller
+    explicitly passed them via ``extra_env`` or the provider-env builder.
     """
     cli = get_agentic_cli(cli_id)
     if isinstance(cli, ClaudeCodeCli):
@@ -181,9 +255,32 @@ def spawn_session(
         minimax_base_url=options.minimax_base_url or settings.minimax_base_url,
         cli_id=cli.id,
     )
+
+    # Build the explicit env dict for the spawned tmux session.
+    # NO ``os.environ.update`` — every var must come from an explicit,
+    # auditable input. Order: extras (project secrets) < provider env
+    # < cockpit context vars; later writes win on collision (which is
+    # fine: ``COCKPIT_*`` won't collide with provider/secrets vars).
+    effective_runtime = runtime if runtime is not None else _DEFAULT_RUNTIME
+    cleaned_extras = _clean_extra_env(extra_env)
+    merged_env: dict[str, str] = {}
+    merged_env.update(cleaned_extras)
+    merged_env.update(provider_env)
+    if project_key is not None:
+        merged_env["COCKPIT_PROJECT_KEY"] = project_key
+    if effective_runtime is not None:
+        merged_env["COCKPIT_RUNTIME"] = effective_runtime
+
     env_flags: list[str] = []
-    for key, value in provider_env.items():
+    for key, value in merged_env.items():
         env_flags += ["-e", f"{key}={value}"]
+
+    _record_audit(
+        project_key=project_key,
+        runtime=effective_runtime,
+        session_name=name,
+        env_var_names=list(merged_env.keys()),
+    )
 
     if host_data:
         # Remote still inlines the command over SSH — a separate transport with
@@ -227,6 +324,9 @@ def spawn_session(
         "provider": options.provider,
         "host_id": host_data["id"] if host_data else None,
         "host_alias": host_data["alias"] if host_data else None,
+        "project_key": project_key,
+        "runtime": effective_runtime,
+        "env_var_names": sorted(merged_env.keys()),
     }
 
     logger.info(
