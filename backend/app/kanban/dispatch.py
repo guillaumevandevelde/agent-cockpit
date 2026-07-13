@@ -22,6 +22,7 @@ from typing import Protocol
 import yaml
 
 from app.config import settings
+
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
 from app.kanban.dep_resolver import meets_dep_prerequisites
@@ -1211,13 +1212,25 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
              worktree_path, "origin/master"],
             capture_output=True, text=True, timeout=60, check=True)
 
+        # Resolve project_key for env-injection (card `[security][D]
+        # Per-project env-injectie in spawn_session`). Uses the safe
+        # helper — a project without a git remote still spawns, just
+        # without a `COCKPIT_PROJECT_KEY` to audit against.
+        project_key = _safe_resolve_key(repo)
+
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
             skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
             provider=provider, model=model,
         )
         try:
-            result = spawn_session(cli_id, options, session_name=session_name)
+            result = spawn_session(
+                cli_id,
+                options,
+                session_name=session_name,
+                project_key=project_key,
+                runtime="worktree",
+            )
         except Exception:
             subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
                            capture_output=True, text=True, timeout=30)
@@ -3133,7 +3146,17 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             provider=provider,
             model=model,
         )
-        result = spawn_session(cli_id, options, session_name=session_name)
+        # Resolve project_key for the audit log when the directory is a
+        # registered project root. Falls back to None on failure so the
+        # resume still works; the audit hook will skip logging in that case.
+        project_key = _safe_resolve_key(directory)
+        result = spawn_session(
+            cli_id,
+            options,
+            session_name=session_name,
+            project_key=project_key,
+            runtime="worktree",
+        )
         # Track the spawn so the dispatch reaper can detect a resumed session
         # that immediately hits a 429 Token Plan limit and never initialises
         # its hook scripts. See `make_worktree_transport` for the full rationale.

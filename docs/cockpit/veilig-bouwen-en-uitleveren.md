@@ -226,7 +226,44 @@ Elke laag vangt de fouten van de vorige. Vandaag ontbreken [A] (gedeeltelijk —
 
    `spawn_session` in `services/runs/spawn.py` moet vandaag filteren; vandaag erft het de parent-env grotendeels. Dit is een kritieke, kleine codewijziging met grote security-impact — zie `agentic_cli/provider_env.py` voor het patroon (expliciet `env["ANTHROPIC_AUTH_TOKEN"] = cleaned_key`, niet `env.update(os.environ)`).
 
+   **Geïmplementeerd contract** (kanban-kaart `b5c71e0c28c4481aa47569b3fc5b9489`,
+   follow-up #5 hieronder). Beide `spawn_session`-implementaties — de
+   agent-bridge in `services/runs/spawn.py` en de legacy Claude-Code bridge
+   in `services/runs/cc_spawn.py` — aanvaarden vandaag drie nieuwe
+   keyword-only kwargs:
+
+   | Kwarg | Type | Doel |
+   |---|---|---|
+   | `project_key` | `str \| None` | Wanneer gezet: geïnjecteerd als `COCKPIT_PROJECT_KEY`. |
+   | `runtime` | `str \| None` | Geïnjecteerd als `COCKPIT_RUNTIME`; default `"worktree"` voor backward compat. |
+   | `extra_env` | `dict[str, str] \| None` | Caller-resolved secrets. Hier landt straks `SecretStore.get(project_key, name)` zodra follow-up #4 shipet. |
+
+   De gespawnde tmux-sessie krijgt **alleen** deze drie inputs (plus de
+   provider-env die `build_provider_env` al expliciet bouwt). De backend's
+   `os.environ` wordt nooit meer gemerged in de tmux-argv: een host-var als
+   `STRIPE_KEY` uit de shell van de operator komt niet meer door bij de
+   agent, ook niet als die per ongeluk in de parent-env staat. Een
+   monkeypatch-test (`test_spawn_session_does_not_inherit_os_environ`) zet
+   een uniek-genaamde host-var en assertt dat 'ie niet in de tmux-argv
+   verschijnt — dit is de canary voor de security-fix.
+
+   Backward compat: bestaande call-sites (dispatcher, REST bridge, ~12
+   bestaande pytest-tests) blijven werken — `runtime`/`project_key`/`extra_env`
+   zijn allemaal optioneel met None-defaults. Een bestaande spawn zonder deze
+   kwargs krijgt alleen `COCKPIT_RUNTIME=worktree` extra; alle andere gedrag
+   blijft identiek.
+
 3. **Audit-log** — bij elke env-injectie een regel in `kanban.db` (of een aparte `security_audit`-tabel): `project_key`, `secret_name`, `session_name`, `injected_at`. Geen secret-waarde in de log. Bruikbaar voor "wie gebruikte wat wanneer" en voor rotatie-triggers.
+
+   **Geïmplementeerd contract** (zelfde kaart). Beide `spawn_session`-
+   implementaties roepen vandaag een `_record_audit(project_key, runtime,
+   session_name, env_var_names)` hook aan. De hook schrijft **alleen
+   var-namen, geen waarden** — een `STRIPE_KEY_A` komt in de log, de
+   waarde `sk_live_a` niet. Vandaag is de implementatie een `logger.info`
+   met de namen gesorteerd in de message; zodra follow-up #10 shipet
+   (`security_audit`-tabel + endpoint) wordt dit één rij per spawn met
+   `kind=env_inject`, dezelfde var-namen-lijst. Het hook-contract is
+   bewust klein gehouden zodat de swap geen API-breuk is.
 
 **Eerste stap:** een `SecretStore`-interface (`get/put/list/delete`) met een age-file-implementatie. Daarna de filter in `spawn_session`. Daarna de audit-log.
 
@@ -338,6 +375,11 @@ Deze sectie lijst de gaten die het bouwwerk vormen. **Niet** door dit document g
    alleen de secrets-store-entries voor die `project_key`, plus
    `COCKPIT_PROJECT_KEY`/`COCKPIT_RUNTIME`. Test: spawn in project A ziet
    `STRIPE_KEY_<B>` niet, wel `STRIPE_KEY_<A>` als geconfigureerd.
+   **Deel geïmplementeerd** (kaart `b5c71e0c28c4481aa47569b3fc5b9489`):
+   de filter + audit-hook in beide `spawn_session`-functies shippen;
+   `SecretStore`-koppeling blijft gaten omdat #4 nog niet shipet — de
+   `extra_env`-parameter vult vandaag het gat dat `SecretStore.get(...)`
+   straks vult. Zie §4.5 hierboven voor het contract.
 6. **`[security][D] `ProjectSecurityPolicy`-dataclass + storage.** —
    Eén dataclass met `risk_class`, `default_transport`, `default_skip_permissions`,
    `secrets_scope_id`, `resource_quota`, `network_policy`. Storage in een nieuwe
