@@ -237,7 +237,15 @@ gebouwd wordt:
 Deze analyse dekt de eerste (vendor-diverse) lezing volledig; de tweede is als expliciet
 risico/afhankelijkheid gemarkeerd i.p.v. stilzwijgend aangenomen.
 
-## 8. Voorgestelde vervolgkaarten (aanbevolen, niet in deze spike aangemaakt)
+## 8. Vervolgkaarten (aangemaakt 2026-07-13 via review-kaart `ce4d2fe0…`)
+
+> **Update 2026-07-13:** deze vervolgkaarten zijn oorspronkelijk *aanbevolen maar niet
+> aangemaakt* — een analyse-leaf-spike levert per ontwerp alleen dit beslisdocument op en
+> spawnt geen kaarten. Een opvolgende review-kaart (`ce4d2fe0…`) heeft ze alsnog op het
+> Backlog aangemaakt, met de fase-DAG als plan-attachment. De open fork uit §7 is beslist
+> op **vendor-diverse** (best-effort keuze op verzoek van de gebruiker); het same-vendor-
+> multi-account-alternatief is als conditionele spike (#5) bewaard i.p.v. aangenomen.
+
 
 1. **Globale actieve-subscription-override** (fase 0) — bord-brede pin + selector,
    precedentie boven kolom-defaults, backward-compat (unset = huidig gedrag).
