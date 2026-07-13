@@ -32,6 +32,7 @@ from .run_activity import router as run_activity_router
 from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
 from .scheduled_messages.router import router as scheduled_messages_router
+from .secrets import router as secrets_router
 from .sessions import router as sessions_router
 from .status import router as status_router
 from .statusline import router as statusline_router
@@ -89,3 +90,4 @@ router.include_router(mcp_server_router, tags=["MCP Server"])
 router.include_router(sandcastle_router, tags=["Sandcastle"])
 router.include_router(hosts_router, tags=["Hosts"])
 router.include_router(update_router)
+router.include_router(secrets_router, tags=["Secrets"])
