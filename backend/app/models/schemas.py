@@ -2122,3 +2122,62 @@ class BlueprintApplyResponse(BaseModel):
     applied_skills: list[str] = Field(default_factory=list)
     applied_agents: list[str] = Field(default_factory=list)
     skipped_existing: bool = False
+
+
+# ---------------------------------------------------------------------------
+# CI-template schemas
+# ---------------------------------------------------------------------------
+
+
+class CITemplateParameterInfo(BaseModel):
+    """One parametric knob exposed by a CI profile.
+
+    Surfaces the parameters a template declares so the UI / docs / REST client
+    can render a form before invoking `POST /api/v1/ci/templates/{profile}/apply`.
+    """
+
+    name: str
+    default: str | None = None
+
+
+class CITemplateInfo(BaseModel):
+    """`GET /api/v1/ci/templates` — one entry in the profile catalog.
+
+    Mirrors `app.services.ci_templates.CITemplateInfo` (a frozen dataclass)
+    with Pydantic-typed fields so FastAPI can serialise it directly. The
+    dataclass stays the source of truth; the API layer maps it.
+    """
+
+    name: str
+    description: str
+    filename: str
+    parameters: list[CITemplateParameterInfo] = Field(default_factory=list)
+
+
+class CITemplateListResponse(BaseModel):
+    """`GET /api/v1/ci/templates` response."""
+
+    templates: list[CITemplateInfo]
+
+
+class CITemplateApplyRequest(BaseModel):
+    """`POST /api/v1/ci/templates/{profile}/apply` request body.
+
+    `parameters` is a free-form `key=value` map (the wire shape is JSON object
+    with string keys); missing keys fall back to the profile's declared
+    defaults — same convention as the in-process `CITemplateService.apply`.
+    """
+
+    project_path: str
+    force: bool = False
+    parameters: dict[str, str] = Field(default_factory=dict)
+
+
+class CITemplateApplyResponse(BaseModel):
+    """`POST /api/v1/ci/templates/{profile}/apply` response."""
+
+    profile: str
+    project_path: str
+    written_file: str | None = None
+    skipped_existing: bool = False
+    force: bool = False

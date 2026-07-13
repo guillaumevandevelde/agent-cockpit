@@ -1,0 +1,24 @@
+name: Quality
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "{{ python_version }}"
+          cache: pip
+          cache-dependency-path: backend/{{ requirements_dev_path }}
+      - run: pip install -r {{ requirements_dev_path }}
+        working-directory: backend
+      - run: ruff check app tests
+        working-directory: backend
+      - run: pytest -q
+        working-directory: backend

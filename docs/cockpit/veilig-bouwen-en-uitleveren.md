@@ -387,11 +387,13 @@ Deze sectie lijst de gaten die het bouwwerk vormen. **Niet** door dit document g
    `KanbanMeta`). REST-CRUD. Tests: default-policy voor een nieuw product-project
    is `risk_class=product-staging`, `default_skip_permissions=False`,
    `default_transport=sandcastle`.
-7. **`[security][D] `CITemplateService` + drie templates.** —
-   Jinja-templates voor `python-strict`, `node-strict`, `minimal` in
-   `backend/app/services/ci_templates/`. `apply(project_path, profile=…)` schrijft
-   naar `.github/workflows/`, idempotent. Test: render + idempotency + parameter-
-   substitutie. Wordt aangeroepen door `RepoBootstrapService` (facet B).
+7. **`[security][D] `CITemplateService` + drie templates.** — ✅ Geleverd
+   (kaart `c66a93a20c0a`). Jinja-templates voor `python-strict`, `node-strict`,
+   `minimal` in `backend/app/services/ci_templates/`. `apply(project_path, profile=…)`
+   schrijft naar `.github/workflows/`, idempotent. Test: render + idempotency +
+   parameter-substitutie. Wordt aangeroepen door `RepoBootstrapService` (facet B).
+   REST-oppervlak: `GET /api/v1/ci/templates`, `POST /api/v1/ci/templates/{profile}/apply`.
+   Volledige doc: `docs/cockpit/ci-templates.md`.
 8. **`[feature][D] `RunService` — spawn de gebouwde app in een sandbox.** —
    Hergebruikt Sandcastle's container-mechaniek voor een ander doel: een
    FastAPI/Node/etc.-server starten in een container, poort exposen op

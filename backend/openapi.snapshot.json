@@ -2310,6 +2310,145 @@
         "title": "BulkResumeResult",
         "type": "object"
       },
+      "CITemplateApplyRequest": {
+        "description": "`POST /api/v1/ci/templates/{profile}/apply` request body.\n\n`parameters` is a free-form `key=value` map (the wire shape is JSON object\nwith string keys); missing keys fall back to the profile's declared\ndefaults \u2014 same convention as the in-process `CITemplateService.apply`.",
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Parameters",
+            "type": "object"
+          },
+          "project_path": {
+            "title": "Project Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_path"
+        ],
+        "title": "CITemplateApplyRequest",
+        "type": "object"
+      },
+      "CITemplateApplyResponse": {
+        "description": "`POST /api/v1/ci/templates/{profile}/apply` response.",
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "project_path": {
+            "title": "Project Path",
+            "type": "string"
+          },
+          "skipped_existing": {
+            "default": false,
+            "title": "Skipped Existing",
+            "type": "boolean"
+          },
+          "written_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Written File"
+          }
+        },
+        "required": [
+          "profile",
+          "project_path"
+        ],
+        "title": "CITemplateApplyResponse",
+        "type": "object"
+      },
+      "CITemplateInfo": {
+        "description": "`GET /api/v1/ci/templates` \u2014 one entry in the profile catalog.\n\nMirrors `app.services.ci_templates.CITemplateInfo` (a frozen dataclass)\nwith Pydantic-typed fields so FastAPI can serialise it directly. The\ndataclass stays the source of truth; the API layer maps it.",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/CITemplateParameterInfo"
+            },
+            "title": "Parameters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "filename"
+        ],
+        "title": "CITemplateInfo",
+        "type": "object"
+      },
+      "CITemplateListResponse": {
+        "description": "`GET /api/v1/ci/templates` response.",
+        "properties": {
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/CITemplateInfo"
+            },
+            "title": "Templates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "title": "CITemplateListResponse",
+        "type": "object"
+      },
+      "CITemplateParameterInfo": {
+        "description": "One parametric knob exposed by a CI profile.\n\nSurfaces the parameters a template declares so the UI / docs / REST client\ncan render a form before invoking `POST /api/v1/ci/templates/{profile}/apply`.",
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CITemplateParameterInfo",
+        "type": "object"
+      },
       "CLIExecuteRequest": {
         "description": "Schema for CLI execution request.",
         "properties": {
@@ -18859,6 +18998,83 @@
         "summary": "Get Terminal Token",
         "tags": [
           "CC Bridge"
+        ]
+      }
+    },
+    "/api/v1/ci/templates": {
+      "get": {
+        "description": "Return the registered CI profiles (sorted by name).",
+        "operationId": "list_ci_templates_api_v1_ci_templates_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CITemplateListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Ci Templates",
+        "tags": [
+          "CI Templates",
+          "CI Templates"
+        ]
+      }
+    },
+    "/api/v1/ci/templates/{profile}/apply": {
+      "post": {
+        "description": "Render ``profile`` and write it to ``<project>/.github/workflows/``.\n\nSee `CITemplateService.apply` for the on-disk behaviour; this endpoint\nonly maps errors to HTTP status codes.",
+        "operationId": "apply_ci_template_api_v1_ci_templates__profile__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "profile",
+            "required": true,
+            "schema": {
+              "title": "Profile",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CITemplateApplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CITemplateApplyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Ci Template",
+        "tags": [
+          "CI Templates",
+          "CI Templates"
         ]
       }
     },
