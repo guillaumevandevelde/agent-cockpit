@@ -310,6 +310,38 @@ export const kanbanApi = {
       body: JSON.stringify({ project_key: projectKey, transport }),
     }),
 
+  /** Active-subscription-override (fase 0 / quick win). `override` is
+   * `{provider: string, model?: string|null}` when pinning, or `null` to
+   * clear. Mirrors how the column/card-default precedence falls through
+   * when no pin is set (see backend kanban dispatch). */
+  getActiveSubscriptionOverride: (
+    projectKey: string,
+  ): Promise<{
+    project_key: string;
+    override: { provider: string; model: string | null } | null;
+  }> =>
+    apiClient<{
+      project_key: string;
+      override: { provider: string; model: string | null } | null;
+    }>(
+      `${BASE}/subscription-override?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
+  setActiveSubscriptionOverride: (
+    projectKey: string,
+    override: { provider: string; model?: string | null } | null,
+  ): Promise<{
+    project_key: string;
+    override: { provider: string; model?: string | null } | null;
+  }> =>
+    apiClient<{
+      project_key: string;
+      override: { provider: string; model?: string | null } | null;
+    }>(`${BASE}/subscription-override`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, override }),
+    }),
+
   listGates: (cardId: string): Promise<Gate[]> =>
     apiClient<Gate[]>(`${BASE}/cards/${cardId}/gates`),
 

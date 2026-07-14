@@ -15,6 +15,7 @@ from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     WORK_TYPES,
     ActivityEntry,
+    ActiveSubscriptionOverrideRequest,
     AddPlanAttachmentRequest,
     AddPlanAttachmentResponse,
     AgentStatsResponse,
@@ -964,6 +965,49 @@ async def set_transport(payload: DefaultTransportRequest):
             raise HTTPException(422, str(e))
         await s.commit()
     return {"project_key": payload.project_key, "transport": payload.transport}
+
+
+@router.get("/subscription-override")
+async def get_subscription_override(project_key: str = Query(...)):
+    """Read the board-wide active-subscription-override (fase 0 / quick win).
+
+    Returns ``{"project_key": ..., "override": <dict|None>}``. ``None`` means
+    no pin is set — the dispatcher falls back to per-column defaults exactly
+    as it does today. Mirrors the get/set shape of the shipmode / transport
+    endpoints so the frontend can reuse the same fetching pattern.
+    """
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {
+            "project_key": project_key,
+            "override": await dispatch.get_active_subscription_override(
+                s, project_key,
+            ),
+        }
+
+
+@router.post("/subscription-override")
+async def set_subscription_override(payload: ActiveSubscriptionOverrideRequest):
+    """Set or clear the board-wide active-subscription-override.
+
+    Pass ``override: null`` to clear (dispatcher falls back to per-column
+    defaults). Otherwise ``override`` is ``{provider: str, model?: str|null}``
+    — an unknown provider is rejected with 422 so the caller knows nothing
+    landed.
+    """
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            await dispatch.set_active_subscription_override(
+                s, payload.project_key, payload.override,
+            )
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        await s.commit()
+    return {
+        "project_key": payload.project_key,
+        "override": payload.override,
+    }
 
 
 @router.delete("/cards/{cid}", status_code=status.HTTP_204_NO_CONTENT)

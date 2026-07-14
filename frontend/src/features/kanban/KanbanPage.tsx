@@ -14,6 +14,7 @@ import { ShipModeToggle } from "./components/ShipModeToggle";
 import { SkipPermissionsToggle } from "./components/SkipPermissionsToggle";
 import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
+import { ActiveSubscriptionOverride } from "./components/ActiveSubscriptionOverride";
 import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
 import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
@@ -270,6 +271,7 @@ export default function KanbanPage() {
           <SkipPermissionsToggle projectKey={projectKey} />
           <AutodispatchToggle projectKey={projectKey} />
           <DefaultTransportSelect projectKey={projectKey} />
+          <ActiveSubscriptionOverride projectKey={projectKey} />
           <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
             Columns
           </Button>
