@@ -41,6 +41,21 @@ export interface ColumnOverride {
   provider: string | null;
 }
 
+// One entry in the subscription pool (fase 1b). Mirrors backend
+// app/kanban/subscription_pool.py PoolEntry exactly: `cli` is the
+// agentic CLI to spawn, `provider` is the vendor the CLI authenticates
+// against, `model` is an optional model pin (null = fall through to
+// the column/card/persona chain), and `drempel` is the fraction (0..1]
+// at which the router spills to the next entry. Priority is the
+// entry's position in the pool list — index 0 is the preferred
+// subscription.
+export interface PoolEntry {
+  cli: string;
+  provider: string;
+  model: string | null;
+  drempel: number;
+}
+
 // Seed suggestions shown in the model free-text field before the list has
 // ever been refreshed from the installed CLI. Mirrors backend/app/kanban/
 // dispatch.py MODEL_OPTIONS_SEED. Not an enum -- any string is accepted (see

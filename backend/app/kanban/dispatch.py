@@ -35,11 +35,17 @@ from app.kanban.service import (
     get_column_default_provider,
     list_cards,
 )
+from app.kanban.subscription_pool import (
+    PoolEntry,
+    get_subscription_pool,
+    pick_subscription,
+)
 from app.services.agentic_cli.provider_env import (
     PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
 )
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.scheduling.session_registry import session_registry
+from app.services.subscriptions.base import SubscriptionUsage
 from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
@@ -526,6 +532,100 @@ async def set_active_subscription_override(
     else:
         row.value = value
     await session.flush()
+
+
+# ---- subscription pool (fase 1b) -------------------------------------------
+#
+# A geordende pool van subscriptions met per-subscription drempels, gepickt
+# bij dispatch op basis van de per-subscription usage-snapshot (analyse
+# §4 / §5). De pure logica leeft in `app.kanban.subscription_pool`; dit
+# stuk verzamelt de snapshot-inputs (paused providers + per-subscription
+# usage) en geeft het gekozen ``PoolEntry`` terug aan ``_run_card``.
+#
+# The wiring is intentionally defensive:
+# - Providers that aren't wired (no concrete SubscriptionUsageProvider for
+#   the entry's {cli, provider}) contribute NO snapshot. The router
+#   treats missing snapshots as "no signal — always available" (analyse
+#   §6.3) — the per-provider pause is what gates the spawn downstream.
+# - A provider that raises during ``get_usage()`` is silently dropped
+#   from the snapshot map (the same defensive shape as the per-provider
+#   pause's read-only listing helper). The dispatcher must NEVER wedge
+#   on a flaky usage source.
+
+
+async def _gather_pool_usage_snapshots(
+    entries: list[PoolEntry],
+) -> dict[str, SubscriptionUsage]:
+    """Return ``{subscription_id: SubscriptionUsage}`` for the providers
+    that have a concrete ``SubscriptionUsageProvider`` registered.
+
+    Subscription identity follows analyse §3 (``{cli, provider}``); the
+    lookup mirrors ``SubscriptionUsageProvider.DEFAULT_ID`` so the
+    router's snapshot map aligns with the snapshot's own ``id`` field.
+    Missing snapshots (or snapshots that raise) are simply absent from
+    the returned dict — ``pick_subscription`` interprets absent as
+    "no signal → available", which is exactly analyse §6.3.
+    """
+    from app.services.subscriptions import registry as _registry
+
+    snapshots: dict[str, SubscriptionUsage] = {}
+    for entry in entries:
+        provider = await _registry.get_provider_for(
+            cli=entry.cli, provider=entry.provider,
+        )
+        if provider is None:
+            continue
+        try:
+            snap = await provider.get_usage()
+        except Exception:
+            logger.exception(
+                "subscription pool: %s raised in get_usage(); "
+                "treating as 'no signal'",
+                getattr(provider, "id", "<unknown>"),
+            )
+            continue
+        snapshots[snap.subscription_id] = snap
+    return snapshots
+
+
+async def _paused_providers_for_pool(
+    session,
+) -> set[str]:
+    """Return the set of providers whose per-provider pause is currently
+    active. Wraps ``dispatch_pause.list_paused_providers`` so the pool
+    router can consume the read-only shape directly."""
+    from app.kanban import dispatch_pause
+    paused = await dispatch_pause.list_paused_providers(session)
+    return {p for p in paused if p}
+
+
+async def _pick_pool_choice(
+    session, entries: list[PoolEntry], *, project_key: str,
+) -> PoolEntry | None:
+    """Run the pure ``pick_subscription`` against the live usage snapshot
+    map and the currently-paused providers.
+
+    Returns the chosen ``PoolEntry`` or ``None`` when the pool is empty
+    (handled by the pure router). A failure inside the live-snapshot
+    gathering falls back to "no signal → first entry wins" so a flaky
+    usage provider cannot block dispatch.
+    """
+    paused = await _paused_providers_for_pool(session)
+    try:
+        snapshots = await _gather_pool_usage_snapshots(entries)
+    except Exception:
+        # ``_gather_pool_usage_snapshots`` already swallows per-provider
+        # failures; this is a belt-and-braces guard against an unexpected
+        # error in the registry wiring itself. Treat as no-signal so the
+        # dispatch path falls through to the first pool entry rather than
+        # crashing the spawn loop.
+        logger.exception(
+            "subscription pool: usage-snapshot gather failed for %s; "
+            "falling back to 'no signal' (first pool entry wins)",
+            project_key,
+        )
+        snapshots = {}
+    return pick_subscription(entries, snapshots, paused_providers=paused)
 
 
 # ---- persona helpers -------------------------------------------------------
@@ -2096,39 +2196,69 @@ async def _run_card(
     # docs/cockpit/subscription-flexibiliteit-analyse.md): a board-wide pin that
     # routes every dispatch onto one subscription regardless of column or card
     # defaults. Stored as a single KanbanMeta row keyed by project_key. When
-    # set, it wins over BOTH the per-card column_overrides and the column
-    # defaults below — the explicit human "route everything to X" intent
-    # dominates any narrower per-card configuration. None = no override (the
-    # default; preserves today's dispatch behaviour exactly, see
-    # test_active_subscription_override).
+    # set, it wins over BOTH the subscription pool (fase 1b) and the per-card
+    # column_overrides and the column defaults below — the explicit human
+    # "route everything to X" intent dominates any narrower per-card
+    # configuration. None = no override (the default; preserves today's
+    # dispatch behaviour exactly, see test_active_subscription_override).
     global_override = await get_active_subscription_override(session, project_key)
+    # Subscription pool (fase 1b of the analyse): an ordered list of
+    # subscriptions with per-subscription drempels, picked at dispatch time
+    # against the per-subscription usage snapshot (analyse §4 / §5). When
+    # set AND no global_override dominates, the pool's chosen entry wins
+    # over both column_overrides and the column default for provider (and
+    # optionally model — same partial-override shape as column_overrides).
+    # When unset, dispatch falls through to the column-default chain
+    # exactly as before (backward-compat).
+    pool_entries = await get_subscription_pool(session, project_key)
+    pool_choice: PoolEntry | None = None
+    if pool_entries is not None and not global_override:
+        pool_choice = await _pick_pool_choice(
+            session, pool_entries, project_key=project_key,
+        )
     # A per-card override for this phase's resolved target column (persona) wins
     # over the column defaults for BOTH provider and model. Because analyst and
     # executor phases both reach this point with their own `target_agent`, each
     # phase automatically picks up its own override entry (if any). See
-    # KanbanCard.column_overrides.
+    # KanbanCard.column_overrides. NOTE: when the pool is set, the pool's
+    # choice beats the per-card override — a per-card override expresses
+    # "this card wants X", but the operator's pool expresses "right now the
+    # right answer for *all* cards is whatever the router picks". The
+    # precedence (highest first) is therefore:
+    #   1. global_override (board-wide pin)
+    #   2. pool_choice    (ordered, usage-aware; this block)
+    #   3. column_override
+    #   4. column.default_provider / column.default_model / card.model / persona
     column_override = (card.column_overrides or {}).get(target_agent) or {}
     override_provider = column_override.get("provider") or None
     override_model = column_override.get("model") or None
     # The target column decides which subscription/vendor the spawn authenticates
     # against (see KanbanColumn.default_provider); unset means the dispatcher's own
-    # default, the Anthropic subscription. A per-card override for this column
-    # takes precedence over the column default; the board-wide active-subscription
-    # override (when set) takes precedence over BOTH.
+    # default, the Anthropic subscription. The board-wide active-subscription
+    # override (when set) takes precedence over everything below; the pool
+    # (when set and no override dominates) sits between the global pin and the
+    # per-card override.
     provider = (
         (global_override or {}).get("provider")
+        or (pool_choice.provider if pool_choice else None)
         or override_provider
         or await get_column_default_provider(session, project_key, target_agent)
         or PROVIDER_ANTHROPIC
     )
     persona_model = _read_persona_model(project_path, f"{target_agent}.md")
     column_default_model = await get_column_default_model(session, project_key, target_agent)
-    # Model precedence mirrors provider: global override > column_override >
+    # Model precedence mirrors provider: global override > pool > column_override >
     # column.default_model > persona frontmatter. The global override only sets
     # the model when one is supplied (`None` falls through), so a
     # provider-only pin leaves the existing model chain intact — same shape as
     # a partial column-override, just one level higher in the precedence.
-    effective_model_override = (global_override or {}).get("model") or override_model
+    # Likewise for the pool: ``pool_choice.model is None`` falls through to
+    # the per-card / column / persona chain.
+    effective_model_override = (
+        (global_override or {}).get("model")
+        or (pool_choice.model if pool_choice else None)
+        or override_model
+    )
     effective_model = _effective_model(
         effective_model_override, card.model, column_default_model, persona_model,
         provider=provider,

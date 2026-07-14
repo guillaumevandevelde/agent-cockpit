@@ -16,6 +16,7 @@ import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
 import { ActiveSubscriptionOverride } from "./components/ActiveSubscriptionOverride";
 import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
+import { SubscriptionPool } from "./components/SubscriptionPool";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
 import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
@@ -257,6 +258,7 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-full gap-4 overflow-hidden">
       <DispatchPauseBanner />
+      <SubscriptionPool projectKey={projectKey} />
       <div className="flex items-center justify-between flex-shrink-0">
         <div>
           <div className="flex items-center gap-3">
