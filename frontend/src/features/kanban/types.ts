@@ -1,4 +1,3 @@
-export const DEFAULT_COLUMNS = ["Backlog", "Analysis", "Todo", "Doing", "Review", "Done"] as const;
 export type Column = string;
 
 export const PRIORITIES = ["none", "low", "medium", "high"] as const;
