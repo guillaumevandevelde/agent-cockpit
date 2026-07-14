@@ -148,7 +148,7 @@ def test_apply_staging_dir_is_promoted_atomically_at_end(tmp_path):
 
     bp = _make_blueprint_with_agents()
     with patch(
-        "app.services.config_service.ConfigService",
+        "app.services.blueprint.apply_engine.ConfigService",
         autospec=True,
     ) as mock_cfg:
         mock_cfg.return_value.update_settings.side_effect = fake_update_settings
@@ -226,7 +226,7 @@ def test_apply_existing_identical_agent_is_skipped(tmp_path):
     # the stub would refuse ("Agent already exists") which we don't want
     # for this test; identical content should be detected *before* CRUD.
     with patch(
-        "app.services.agent_service.AgentService.create_agent",
+        "app.services.blueprint.apply_engine.AgentService.create_agent",
         return_value=MagicMock(name="planner"),
     ) as create_agent:
         audit = BlueprintApplyEngine().apply(
@@ -274,10 +274,10 @@ def test_apply_rolls_back_when_agent_create_raises(tmp_path):
         raise RuntimeError("simulated agent-create failure")
 
     with patch(
-        "app.services.config_service.ConfigService",
+        "app.services.blueprint.apply_engine.ConfigService",
         autospec=True,
     ) as mock_cfg, patch(
-        "app.services.agent_service.AgentService.create_agent",
+        "app.services.blueprint.apply_engine.AgentService.create_agent",
         side_effect=boom_create_agent,
     ):
         mock_cfg.return_value.update_settings.side_effect = fake_update_settings
@@ -324,7 +324,7 @@ def test_apply_force_overwrites_conflicting_settings(tmp_path):
         return {"success": True, "path": str(target)}
 
     with patch(
-        "app.services.config_service.ConfigService",
+        "app.services.blueprint.apply_engine.ConfigService",
         autospec=True,
     ) as mock_cfg:
         mock_cfg.return_value.update_settings.side_effect = fake_update_settings
@@ -471,7 +471,7 @@ def test_engine_skips_actual_skill_install_when_blueprint_has_no_skills(tmp_path
         settings=BlueprintSettings(permission_mode="default"),
     )
     with patch(
-        "app.services.skills_registry_service.SkillsRegistryService.install_skill",
+        "app.services.blueprint.apply_engine.SkillsRegistryService.install_skill",
     ) as install_skill:
         BlueprintApplyEngine().apply(
             project_path=str(project),
@@ -489,7 +489,7 @@ def test_engine_does_not_create_command_when_blueprint_has_no_commands(tmp_path)
         settings=BlueprintSettings(permission_mode="default"),
     )
     with patch(
-        "app.services.command_service.CommandService.create_command",
+        "app.services.blueprint.apply_engine.CommandService.create_command",
     ) as create_command:
         BlueprintApplyEngine().apply(
             project_path=str(project),
@@ -525,7 +525,7 @@ def test_skill_install_calls_registry_with_correct_args(tmp_path):
         return {"success": True, "message": "ok"}
 
     with patch(
-        "app.services.skills_registry_service.SkillsRegistryService.install_skill",
+        "app.services.blueprint.apply_engine.SkillsRegistryService.install_skill",
         side_effect=fake_install_skill,
     ):
         BlueprintApplyEngine().apply(
