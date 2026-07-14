@@ -9,8 +9,15 @@ Query budget is flat, never per-project (no N+1):
   * one query over the main-DB ``projects`` table,
   * one bulk query over every ``KanbanCard``,
   * one bulk query over the ``KanbanOp`` log,
-  * one bulk query over ``KanbanMeta`` (autodispatch flags).
+  * one bulk query over ``KanbanMeta`` (autodispatch + stale-dedup flags).
 Everything else is Python aggregation.
+
+The ``stale`` signal is sourced from the dedup state already written by
+``app.kanban.stale_detection.run_stale_detection_tick``: every Backlog card that
+trips the threshold gets a ``portfolio_stale:<project_key>:<card_id>:last_posted_at``
+KanbanMeta row, refreshed once per stale window. We re-use it instead of
+recomputing here — the only cost is one extra filter on the bulk KanbanMeta
+query.
 """
 from __future__ import annotations
 
@@ -23,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.kanban.models import KanbanCard, KanbanMeta, KanbanOp
 from app.kanban.project_key import resolve_project_key
+from app.kanban.stale_detection import STALE_META_PREFIX
 from app.kanban.stats import AGENT_CLAIM_PREFIX
 from app.models.database import Project
 from app.utils.timeutils import ensure_aware
@@ -53,6 +61,13 @@ class PortfolioProject(BaseModel):
     totals: PortfolioTotals
     last_activity: str | None
     last_dispatch: str | None
+    # Derived from KanbanMeta dedup state written by stale_detection — ``True``
+    # iff a ``portfolio_stale:<key>:<card_id>:last_posted_at`` row exists for
+    # the project. ``stale_since`` is the freshest of those last_posted_at
+    # timestamps (ISO8601), or ``None`` when the project is not stale. The
+    # frontend surfaces this as a badge; no recomputation here.
+    stale: bool = False
+    stale_since: str | None = None
 
 
 class PortfolioOverview(BaseModel):
@@ -151,6 +166,26 @@ class PortfolioService:
             for r in meta_rows
             if r.key.startswith(_AUTODISPATCH_PREFIX) and r.value == "1"
         }
+        # ``portfolio_stale:<project_key>:<card_id>:last_posted_at`` rows are
+        # written by ``app.kanban.stale_detection`` — one per flagged Backlog
+        # card, refreshed once per stale window. Pick the freshest per project
+        # so the badge reflects "most recently observed as stale".
+        stale_since_by_key: dict[str, datetime] = {}
+        for r in meta_rows:
+            if not r.key.startswith(STALE_META_PREFIX):
+                continue
+            try:
+                when = ensure_aware(datetime.fromisoformat(r.value))
+            except ValueError:
+                continue
+            tail = r.key[len(STALE_META_PREFIX):]
+            try:
+                project_key, _card_id = tail.rsplit(":", 1)
+            except ValueError:
+                continue
+            current = stale_since_by_key.get(project_key)
+            if current is None or when > current:
+                stale_since_by_key[project_key] = when
 
         all_keys = set(project_by_key) | keys_with_cards
         rows: list[PortfolioProject] = []
@@ -159,6 +194,7 @@ class PortfolioService:
             proj = project_by_key.get(key)
             totals = totals_by_key.get(key, PortfolioTotals())
             totals.done_24h = len(done_recent.get(key, ()))
+            stale_since = stale_since_by_key.get(key)
             rows.append(
                 PortfolioProject(
                     id=proj.id if proj else None,
@@ -169,6 +205,8 @@ class PortfolioService:
                     totals=totals,
                     last_activity=_iso(last_activity.get(key)),
                     last_dispatch=_iso(last_dispatch.get(key)),
+                    stale=stale_since is not None,
+                    stale_since=_iso(stale_since),
                 )
             )
             for field in ("backlog", "todo", "doing", "impediment", "done_24h"):

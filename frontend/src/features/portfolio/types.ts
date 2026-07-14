@@ -15,6 +15,11 @@ export interface PortfolioProject {
   totals: PortfolioTotals
   last_activity: string | null
   last_dispatch: string | null
+  // Surfaced from the backend PortfolioService: True when stale_detection has
+  // flagged the project (Backlog sits past the threshold). stale_since is the
+  // ISO timestamp of the most recent flag — useful for "flagged Nm ago" UI.
+  stale: boolean
+  stale_since: string | null
 }
 
 export interface PortfolioOverview {
