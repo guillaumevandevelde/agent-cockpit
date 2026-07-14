@@ -53,6 +53,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 - [`recurring-cadence-proposal.md`](./recurring-cadence-proposal.md) — cadans zelfverbeteringsonderzoek.
 - [`build-prioriteiten-analyse.md`](./build-prioriteiten-analyse.md) — geordende bouw-prioriteitsstack (P0–P4) + externe ecosysteem-scan (Spec Kit, OpenHands, sandbox-consensus, Anthropic-abonnementsbeleid).
 - [`openhands-analyse.md`](./openhands-analyse.md) — diepere OpenHands-analyse: wat overnemen/leren (ACP-transport, path/keyword-skills, event-automations) + herziening van de "geen abonnementen"-premisse.
+- [`acp-transport-decision.md`](./acp-transport-decision.md) — go/no-go op ACP vs. per-CLI stream-json-parser als gestructureerd transport achter `SpawnTransport` (verenigt de headless-transportbeslissing uit `orchestration-substrate-decision.md` §6): conditionele go op stream-json eerst, ACP-isomorf event-model, ACP-adapter gepoort op tweede-provider-onboarding.
 - [`spike-claude-code-model-switching.md`](./spike-claude-code-model-switching.md), [`spike-declarative-workflow-orchestration.md`](./spike-declarative-workflow-orchestration.md) — spikes/ADR's.
 
 ## Regels
