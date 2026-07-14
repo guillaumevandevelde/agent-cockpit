@@ -153,6 +153,23 @@ Toets de twijfel tegen de werkelijke code (checkout de branch/PR uit de refs) en
   (`metadata.reviewed_card_id`); er is geen automatische aggregator die het
   origineel bijwerkt.
 
+## Kind-kaart vs. synchrone subagent
+
+Niet elk brok werk verdient een eigen kind-kaart. Een kind-kaart is een aparte sessie
+met context-overhead, een claim en een worktree; maak er alleen één voor iets dat **async**
+hoort te zijn — zodra *één* van deze geldt: het is groot/langlopend genoeg om de
+context-overhead te verdienen, het moet bordzichtbaar/auditbaar/crash-overlevend zijn, een
+mens moet het live kunnen overnemen (attachbare pane), het draait beter op een ander
+abonnement/model/provider, óf er zijn echte `depends_on`-contracten tussen brokken over
+sessiegrenzen heen. Werk dat **ephemeer** is (een read-heavy fan-out, een verse-context
+review, een deelontwerp waarvan alleen het resultaat telt) hoort géén kind-kaart te zijn —
+dat lost de executor binnen zijn eigen sessie op met een synchrone `Task`/`Agent`-subagent.
+Knip zulk ephemeer werk niet los, dan betaal je onnodige context-overhead. Bron van
+waarheid: [`docs/cockpit/sync-vs-async-delegation-decision.md`](../../docs/cockpit/sync-vs-async-delegation-decision.md).
+De grens werkt ook één laag dieper: een executor decomponeert niet zelf async door — vindt
+hij zijn kaart té groot, dan gaat dat via `report_impediment` terug naar een mens/analyst,
+niet via zelf-gespawnde kind-kaarten. De async-decompositie blijft één laag diep.
+
 ## Decompositie-tips
 
 - Eén backend-endpoint + één frontend-component + één test = vaak 3 kinderen.
