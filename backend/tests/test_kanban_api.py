@@ -302,6 +302,64 @@ async def test_create_card_with_analyst_agent_id_creates_analyst_column():
 
 
 @pytest.mark.asyncio
+async def test_list_cards_compact_returns_summary_shape_via_http():
+    """`?compact=true` must drop description, deliverables, labels, metadata
+    and the op-log-derived enrichments (done_summary, completed_at,
+    impediment_status). The remaining fields are exactly the dedupe surface
+    flag-problem / session-retro need: id, title, column, work_type, rank.
+    Confirms the API contract documented in the self-improve card
+    ('compact per-card shape: id, title, column, work_type')."""
+    import json as _json
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        # Build a card whose description alone is large enough to make
+        # bloat obvious — mirrors a real self-improve card body.
+        fat = "lorem ipsum " * 200
+        cid = (await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "COMPACT", "title": "fat card",
+                  "description": fat, "work_type": "bug"})).json()["id"]
+
+        # Default (full-detail) response: must still include description +
+        # deliverables so existing UI callers don't break.
+        r_full = await ac.get("/api/v1/kanban/cards",
+            params={"project_key": "COMPACT"})
+        assert r_full.status_code == 200, r_full.text
+        assert len(r_full.json()["items"]) == 1
+        full_item = r_full.json()["items"][0]
+        assert "description" in full_item
+        assert "deliverables" in full_item
+        full_size = len(_json.dumps(r_full.json()))
+
+        # Compact response: same status, different shape, much smaller.
+        r_compact = await ac.get("/api/v1/kanban/cards",
+            params={"project_key": "COMPACT", "compact": "true"})
+        assert r_compact.status_code == 200, r_compact.text
+        items = r_compact.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert set(item.keys()) == {"id", "title", "column", "work_type", "rank"}, (
+            f"compact shape drifted: keys={sorted(item.keys())}"
+        )
+        assert item["id"] == cid
+        assert item["title"] == "fat card"
+        assert item["column"] == "Backlog"
+        assert item["work_type"] == "bug"
+        # 'description' must not be present (or if present, must be empty).
+        assert "description" not in item
+        assert "deliverables" not in item
+        assert "done_summary" not in item
+        assert "impediment_status" not in item
+
+        compact_size = len(_json.dumps(r_compact.json()))
+        # At minimum the compact payload must be far smaller than the full one.
+        assert compact_size * 5 < full_size, (
+            f"compact payload ({compact_size}B) not substantially smaller "
+            f"than full ({full_size}B)"
+        )
+
+
+@pytest.mark.asyncio
 async def test_list_cards_ready_query_param_filters_via_http():
     """The router must forward ?ready=true to the service-layer filter so a
     frontend or planning agent can ask 'what is dispatchable right now?'

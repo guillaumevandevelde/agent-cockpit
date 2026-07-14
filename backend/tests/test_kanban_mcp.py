@@ -23,6 +23,58 @@ async def test_create_then_list_then_claim():
 
 
 @pytest.mark.asyncio
+async def test_list_cards_compact_returns_summary_shape_via_mcp():
+    """MCP `list_cards(compact=True)` returns the dedupe-friendly shape
+    (id, title, column, work_type, rank) and skips the per-card
+    enrich_done_info / impediment_status_for_card op-log walks so a 27+
+    card Backlog no longer overflows the MCP token cap.
+
+    The default path must stay untouched (existing agents depend on the
+    full CardResponse-shaped dicts)."""
+    import json as _json
+
+    fat = "long description body " * 50
+    cid = (await m.create_card("MCP-COMPACT", "Compact MCP card", fat,
+                                work_type="bug"))["id"]
+
+    default = await m.list_cards("MCP-COMPACT")
+    assert len(default) == 1
+    assert "description" in default[0]
+    assert "deliverables" in default[0]
+    assert "done_summary" in default[0]
+    default_size = len(_json.dumps(default))
+
+    compact = await m.list_cards("MCP-COMPACT", compact=True)
+    assert len(compact) == 1
+    assert set(compact[0].keys()) == {"id", "title", "column",
+                                       "work_type", "rank"}, (
+        f"MCP compact shape drifted: keys={sorted(compact[0].keys())}"
+    )
+    assert compact[0]["id"] == cid
+    assert compact[0]["title"] == "Compact MCP card"
+    assert compact[0]["column"] == "Backlog"
+    assert compact[0]["work_type"] == "bug"
+
+    compact_size = len(_json.dumps(compact))
+    # Compact must be substantially smaller than default.
+    assert compact_size * 5 < default_size, (
+        f"MCP compact ({compact_size}B) not substantially smaller than "
+        f"default ({default_size}B)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_cards_compact_default_is_false_backwards_compatible_mcp():
+    """Calling m.list_cards(project) without compact must still return the
+    full CardResponse-shaped dict (description present, etc.)."""
+    created = await m.create_card("MCP-BC", "T", "description here")
+    listed = await m.list_cards("MCP-BC")
+    assert len(listed) == 1
+    assert listed[0]["description"] == "description here"
+    assert "deliverables" in listed[0]
+
+
+@pytest.mark.asyncio
 async def test_claim_conflict_returns_error_dict():
     cid = (await m.create_card("P", "t", ""))["id"]
     await m.claim_card(cid, "first@d")
