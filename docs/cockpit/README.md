@@ -58,6 +58,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 - [`acp-transport-decision.md`](./acp-transport-decision.md) — go/no-go op ACP vs. per-CLI stream-json-parser als gestructureerd transport achter `SpawnTransport` (verenigt de headless-transportbeslissing uit `orchestration-substrate-decision.md` §6): conditionele go op stream-json eerst, ACP-isomorf event-model, ACP-adapter gepoort op tweede-provider-onboarding.
 - [`spike-claude-code-model-switching.md`](./spike-claude-code-model-switching.md), [`spike-declarative-workflow-orchestration.md`](./spike-declarative-workflow-orchestration.md) — spikes/ADR's.
 - [`analyse-orphaned-followups-audit.md`](./analyse-orphaned-followups-audit.md) — audit van voltooide analyses zonder aangemaakte vervolgkaarten: inventaris + verdict per analyse, 10 orphan-kaarten alsnog aangemaakt (per-provider pause, transport-laag, portfolio-migratie), 2 open beslissingen naar Impediment.
+- [`jira-lessen-analyse.md`](./jira-lessen-analyse.md) — kritische analyse "wat leren we van JIRA": drie primitieven die reële pijn oplossen (getypeerde bi-directionele links, zichtbaarheid van bestaande `depends_on`/parent-relaties, deep-linkbare full-page kaartweergave) + geprioriteerde aanbevelingen (P0–P2) en expliciete non-doelen (sprints/story-points/custom-field-schema's bewust niet overnemen).
 
 ## Regels
 
