@@ -1202,6 +1202,8 @@ def test_build_card_prompt_leaf_spike_prepends_override_note():
     )
     persona = (
         "Je bent de analyst voor een kanban-kaart.\n"
+        "### Modus 2 — Leaf design-deliverable\n"
+        "Schrijf, commit, ship.\n"
         "Verboden:\n"
         "- Zelf code wijzigen in het werkveld."
     )
@@ -1227,8 +1229,23 @@ def test_build_card_prompt_leaf_spike_prepends_override_note():
     # session-end for leaf spikes).
     assert "Ship (direct mode)" in prompt
     assert "merge --no-ff" in prompt
-    # And the override mentions the leaf-spike reframing explicitly.
-    assert "leaf spike" in prompt.lower()
+    # The persona still mentions leaf-spike reframing (the "Leaf
+    # design-deliverable" section is where the actual modus-2 contract
+    # lives; the override is just a pointer).
+    assert "Leaf design-deliverable" in prompt
+    # The override must defer to the persona's leaf-design-deliverable
+    # section (kanban card c2b478ca: the persona itself is the primary
+    # source of truth, the override is a safety-net pointer). It must
+    # reference both "leaf" + "design" so the agent knows the persona
+    # section to look at.
+    override_block = prompt[override_idx:prompt.index("\n\n---\n\n", override_idx)]
+    assert (
+        "leaf" in override_block.lower() and "design" in override_block.lower()
+    ), (
+        "Leaf-spike override must point at the persona's leaf-design-deliverable "
+        "section (so the persona itself is the primary source of truth). "
+        f"Override block was:\n{override_block}"
+    )
 
 
 def test_build_card_prompt_analyst_classic_no_override():
