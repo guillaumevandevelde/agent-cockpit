@@ -217,7 +217,14 @@ afwerking. Elke fase is los waardevol en los shipbaar.
    z'n eigen limiet benutten, niet credits ertussen verschuiven (dat kan technisch niet —
    spike §11.5).
 
-## 7. Open beslissing voor de gebruiker (fork die het ontwerp bijstuurt)
+## 7. Open beslissing voor de gebruiker (fork die het ontwerp bijstuurt) — ✅ BESLIST 2026-07-14: A / vendor-diverse
+
+> **Update 2026-07-14 (host-kaart `290f6fb7…`):** deze fork is beslist op **A — Nee, alleen
+> multi-vendor**. De gebruiker draait verschillende vendors naast elkaar (Anthropic + MiniMax
+> + Codex …), niet meerdere accounts binnen één vendor. Gevolg: subscription = `{cli, provider}`
+> blijft; fase 1 zoals hieronder volstaat; de conditionele spike
+> [`spike-same-vendor-multi-account-isolation.md`](./spike-same-vendor-multi-account-isolation.md)
+> is afgesloten als NO-GO en de C1–C4-decompositie wordt niet geopend. Nul nieuwe kaarten.
 
 Eén vraag bepaalt de exacte vorm van de pool en verdient bevestiging vóór fase 1
 gebouwd wordt:
@@ -260,4 +267,5 @@ risico/afhankelijkheid gemarkeerd i.p.v. stilzwijgend aangenomen.
    per-sessie credential-/HOME-isolatie voor parallelle same-vendor-accounts. **Spike
    opgeleverd 2026-07-13:** [`spike-same-vendor-multi-account-isolation.md`](./spike-same-vendor-multi-account-isolation.md)
    — conditionele GO (isolatie is goedkoop via `CLAUDE_CONFIG_DIR` op het bestaande
-   `spawn.py`-`-e`-injectiepunt); de §7-fork blijft een openstaande gebruikersbeslissing.
+   `spawn.py`-`-e`-injectiepunt). **~~Openstaand~~ → BESLIST 2026-07-14: A / vendor-diverse
+   (§7). Spike afgesloten als NO-GO; C1–C4 niet geopend.**

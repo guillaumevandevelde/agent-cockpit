@@ -1,11 +1,32 @@
 # Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor
 
 **Datum:** 2026-07-13
-**Status:** Spike / beslisdocument — géén implementatie (per opdracht)
-**Kaart:** `(Voorwaardelijk) Spike — per-sessie credential/HOME-isolatie` (host `e376f06a…`)
+**Status:** ✅ **AFGESLOTEN — NO-GO (fork beslist 2026-07-14)**. De §7-fork is door de
+gebruiker beantwoord met **A / vendor-diverse** (zie §0.1). Same-vendor-multi-account speelt
+niet; deze spike blijft geparkeerd als referentie mocht die beslissing ooit omdraaien. Geen
+kind-kaarten (C1–C4) aangemaakt.
+**Kaart:** `(Voorwaardelijk) Spike — per-sessie credential/HOME-isolatie` (host `e376f06a…`);
+fork-beslissing op host-kaart `290f6fb7…`
 **Bron:** [`subscription-flexibiliteit-analyse.md`](./subscription-flexibiliteit-analyse.md) §7 / §8 #5
 **Verwant:** [`subscriptions.md`](./subscriptions.md) (subscription-identiteit + usage-provider),
 [`kanban-dispatch-spec.md`](./kanban-dispatch-spec.md) (spawn-transport), [`agent-bridge.md`](./agent-bridge.md)
+
+---
+
+## 0.1 Fork-beslissing (2026-07-14) — A / vendor-diverse
+
+De open §7-fork (dit document + `subscription-flexibiliteit-analyse.md` §7) is beslist op
+**A — Nee, alleen multi-vendor**. De gebruiker draait verschillende vendors naast elkaar
+(Anthropic + MiniMax + Codex …), **niet** meerdere accounts binnen één vendor. Gevolg:
+
+- De subscription-identiteit blijft `{cli, provider}` — géén uitbreiding naar
+  `{cli, provider, account}`. Fase 1a/1b (`710c85a5`/`c7b05504`) worden **niet** geraakt.
+- De §6-decompositie (C1→C2→{C3,C4}) wordt **niet** geopend. Nul nieuwe kaarten.
+- Deze spike blijft als beslis-artefact bewaard: áls de gebruiker later same-vendor gaat
+  draaien, is de conditionele-GO-schets hieronder direct herbruikbaar.
+
+De rest van dit document beschrijft het scenario dat door beslissing A **niet** gebouwd wordt;
+het is bewust bewaard i.p.v. verwijderd, zodat de kost/ontwerp-grounding niet opnieuw hoeft.
 
 ---
 
