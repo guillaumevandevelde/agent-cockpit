@@ -48,8 +48,34 @@ class RuleInfo(BaseModel):
     relative_path: str
     frontmatter: dict[str, Any] = {}
     scoped_paths: list[str] = []
+    keywords: list[str] = []
     description: str = ""
     content_preview: str = ""
+
+
+class ResolvedRuleInfo(RuleInfo):
+    """Rule info as returned by /memory/rules/resolve, with the trigger labels
+    that fired for the given context."""
+
+    matched_triggers: list[str] = []
+
+
+class RulesResolveRequest(BaseModel):
+    """Request to resolve which rules apply to a given context."""
+
+    prompt: str = ""
+    touched_files: list[str] = []
+
+
+class RulesResolveResponse(BaseModel):
+    """Response from /memory/rules/resolve."""
+
+    matched_rules: list[ResolvedRuleInfo] = []
+    unmatched_rules: list[ResolvedRuleInfo] = []
+
+
+# Aliases keep existing imports working if any caller pinned to the old shape
+RuleMatch = ResolvedRuleInfo
 
 
 class RulesListResponse(BaseModel):
@@ -79,6 +105,7 @@ class CreateRuleRequest(BaseModel):
     name: str
     content: str
     paths: list[str] | None = None
+    keywords: list[str] | None = None
     description: str | None = None
 
 
@@ -207,12 +234,19 @@ async def create_rule(
 ):
     """
     Create a new rule file in .claude/rules/.
+
+    Triggers are declared via frontmatter:
+    - ``paths``: glob list — rule applies when any touched file matches.
+    - ``keywords``: keyword list — rule applies when the prompt contains
+      any keyword (case-insensitive).
+    A rule with neither trigger applies always.
     """
     result = MemoryService.create_rule(
         project_path=project_path,
         name=request.name,
         content=request.content,
         paths=request.paths,
+        keywords=request.keywords,
         description=request.description,
     )
 
@@ -222,6 +256,29 @@ async def create_rule(
         )
 
     return SaveMemoryResponse(**result)
+
+
+@router.post("/rules/resolve", response_model=RulesResolveResponse)
+async def resolve_rules(
+    request: RulesResolveRequest,
+    project_path: str = Query(..., description="Project path"),
+):
+    """
+    Resolve which rules in ``.claude/rules/`` apply to the given agent
+    context. A rule applies if its path-glob triggers match a file the agent
+    touched, its keyword triggers appear in the prompt, or it has no
+    triggers (always-on).
+
+    Returns matched rules (with the trigger labels that fired) and
+    unmatched rules in separate lists, so a UI can preview what would be
+    injected for a hypothetical prompt.
+    """
+    result = MemoryService.resolve_applicable_rules(
+        project_path=project_path,
+        prompt=request.prompt,
+        touched_files=request.touched_files,
+    )
+    return RulesResolveResponse(**result)
 
 
 @router.get("/auto-memory", response_model=AutoMemoryListResponse)
