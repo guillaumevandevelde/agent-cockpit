@@ -10,8 +10,16 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 # `docs/cockpit/product-inceptie-pipeline.md` §4 optie 2): humans put an
 # idea on `intake` and the inceptie-action promotes it to a new project
 # via `create_project_from_intake`. See sibling kanban card c33b2f14.
+#
+# When you change this list: the project-level column sync on
+# POST /api/v1/kanban/enable creates any missing `kanban_columns` rows.
+# Projects enabled BEFORE a new name was added here remain stale until
+# either re-enabled or until the matching `ensure_<name>_column` helper
+# in service.py runs. See docs/cockpit/kanban-conventions.md §1 for the
+# full convention map and scripts/check-kanban-conventions.sh for the
+# validator that catches the "stale column" bug class.
 COLUMNS = ["intake", "Backlog", "Impediment", "Done", "To Resume"]
-DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]
+DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]  # the short enum clients validate against; `plan`, `plan_ref`, `spec` are wired by their own tools — see docs/cockpit/kanban-conventions.md §3
 
 # Machine-readable card → spec-doc link (spec-driven-development Fase 1). A
 # functional card names the canonical `docs/cockpit/` doc it implements/updates
