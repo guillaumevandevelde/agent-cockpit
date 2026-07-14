@@ -3144,6 +3144,47 @@ class TestBuildShipInstructions:
             # only install when node_modules is absent
             assert "-d node_modules" in instructions or "-d frontend/node_modules" in instructions
 
+    def test_frontend_gate_symlinks_main_node_modules_when_lockfile_matches(self):
+        """Symptom (card 15cc257d…): a fresh worktree's `npm ci` adds ~40-90s
+        to every frontend-touching card. When ``frontend/package-lock.json``
+        is identical to origin/master, the main checkout's already-installed
+        ``frontend/node_modules`` is safe to symlink — the lockfile diff
+        against master is the correctness gate. The frontend gate must use
+        this fast path; only fall back to ``npm ci`` when the lockfile
+        diverged (a frontend-deps change)."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            # the shortcut itself: a symlink of the main checkout's node_modules
+            assert "ln -s" in instructions
+            # the lockfile-diff gate that decides whether the shortcut is safe
+            assert "package-lock.json" in instructions
+            # uses the same merge-base used by the FRONTEND_TOUCHED probe, so
+            # the comparison never lies when master advanced since the branch
+            # was cut (regression: card cd7ff20b)
+            assert "git merge-base HEAD origin/master" in instructions
+            # the fallback path remains documented — npm ci is the recovery
+            # when the lockfile diverges OR main's node_modules is absent
+            assert "npm ci" in instructions
+
+    def test_frontend_gate_moves_partial_node_modules_aside_before_symlinking(self):
+        """Secondary papercut (card 15cc257d…): an interrupted ``npm ci``
+        leaves a partial ``node_modules`` (some scoped dirs present but
+        missing ``.bin/``), which then fails confusingly with
+        ``eslint: not found`` and blocks a plain symlink until moved aside.
+        ``rm`` is deny-listed in ``.claude/settings.json``, so cleanup must
+        use ``mv`` and the gate must detect the partial state by the missing
+        ``.bin/`` directory."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            # detect partial install: node_modules exists but .bin/ does not
+            assert "node_modules/.bin" in instructions
+            # move it aside — `rm` is deny-listed, `mv` is the only safe move
+            assert " mv " in instructions or instructions.startswith("mv ")
+            # must NOT suggest `rm -rf node_modules` (rm is deny-listed)
+            assert "rm -rf" not in instructions
+            assert "rm -fr" not in instructions
+            assert "rm node_modules" not in instructions
+
     def test_pull_request_mode_polls_for_merge_before_done(self):
         instructions = dispatch._build_ship_instructions("pull-request")
         assert "gh pr ready" in instructions

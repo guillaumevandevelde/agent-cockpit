@@ -19,11 +19,27 @@ unused port, with no backend and no board data involved.
 A fresh worktree has no `frontend/node_modules` (gitignored). If it's
 missing, `npx vite` fetches a standalone `vite` package instead of using
 the local one, which then fails to resolve `vite.config.ts`'s imports
-(`vitest/config`, `@vitejs/plugin-react`). Install first:
+(`vitest/config`, `@vitejs/plugin-react`). Install first — fast path is
+to symlink the main checkout's already-installed `node_modules` when
+`frontend/package-lock.json` is unchanged vs `origin/master` (matches
+the session-end workflow's frontend gate in `git-ship` step 2):
 
 ```bash
 cd frontend
-[ -d node_modules ] || npm ci
+if [ -d node_modules ] && [ ! -d node_modules/.bin ]; then
+  # partial install from an interrupted `npm ci` — move aside (mv, not rm:
+  # `rm` is deny-listed in .claude/settings.json) before symlinking fresh state
+  mv node_modules "../node_modules.partial-$(date +%s)"
+fi
+if [ ! -d node_modules ]; then
+  BASE=$(git merge-base HEAD origin/master)
+  if git diff --quiet "$BASE" origin/master -- frontend/package-lock.json \
+     && [ -d /home/vdvgu/claude-cockpit/frontend/node_modules/.bin ]; then
+    ln -s /home/vdvgu/claude-cockpit/frontend/node_modules node_modules
+  else
+    npm ci
+  fi
+fi
 ```
 
 ## 1. Scratch entry point (not committed)

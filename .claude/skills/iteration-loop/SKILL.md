@@ -75,14 +75,18 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 
 ### `verify` — test + lint + build (default end-of-card gate)
 
-- **Runs:** the in-worktree checks from `git-ship` step 2 — `cd frontend
-  && { [ -d node_modules ] || npm ci; } && npm run lint && npm run
-  build` (the guarded `npm ci` installs deps on a fresh worktree so lint
-  doesn't die with `eslint: not found`). Backend `pytest` is **not** run
-  locally on this box (see CLAUDE.md / `git-ship` rationale — the
-  shared box's concurrent sessions caused multi-minute stalls under
-  full pytest). The loop trusts GitHub Actions `quality.yml` for the
-  backend gate and only verifies what is verifiable in-worktree.
+- **Runs:** the in-worktree checks from `git-ship` step 2 — the
+  `FRONTEND_TOUCHED` probe + symlink-or-`npm ci` bootstrap (when
+  `frontend/package-lock.json` matches origin/master, symlink the main
+  checkout's `frontend/node_modules` to skip the multi-minute install;
+  only fall back to `npm ci` when the lockfile diverged or main's
+  `node_modules` is missing/partial — partial is detected by a
+  `node_modules` dir without `.bin/` and moved aside via `mv` since
+  `rm` is deny-listed). Backend `pytest` is **not** run locally on this
+  box (see CLAUDE.md / `git-ship` rationale — the shared box's
+  concurrent sessions caused multi-minute stalls under full pytest).
+  The loop trusts GitHub Actions `quality.yml` for the backend gate and
+  only verifies what is verifiable in-worktree.
   If `ruff` is wired into the worktree (`backend/.venv/bin/ruff`), run
   that too; otherwise skip and note it in the progress file.
 - **Clean when:** lint passes AND build succeeds, with zero warnings

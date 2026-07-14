@@ -37,10 +37,32 @@ the branch diff:
 git fetch origin -q
 FRONTEND_TOUCHED=$( { BASE=$(git merge-base HEAD origin/master); git diff --name-only "$BASE" -- frontend/; git ls-files --others --exclude-standard -- frontend/; } | head -1 )
 if [ -n "$FRONTEND_TOUCHED" ]; then
-  # Fresh worktree has no node_modules (gitignored) — install once so the
-  # checks don't die with `eslint: not found`. Guard on missing node_modules
-  # so a re-run in the same session skips the ~40s `npm ci`.
-  ( cd frontend && { [ -d node_modules ] || npm ci; } && npm run lint && npm run build )   # only proceed once green
+  # Fresh worktrees have no node_modules (gitignored). Fast path: when
+  # frontend/package-lock.json is unchanged vs origin/master, symlink the main
+  # checkout's already-installed frontend/node_modules instead of paying a
+  # multi-minute `npm ci`. Fall back to `npm ci` when the lockfile diverged
+  # (frontend deps changed) or main's node_modules is absent / partial.
+  # Card 15cc257d… also handled the partial-install trap: an interrupted
+  # `npm ci` leaves some scoped dirs but no `.bin/`, which makes `npm run
+  # lint` die with `eslint: not found` and blocks a plain symlink. Move the
+  # partial aside (`mv`, not `rm` — `rm` is deny-listed) before bootstrapping.
+  ( cd frontend && \
+    if [ -d node_modules ] && [ ! -d node_modules/.bin ]; then \
+      mv node_modules "../node_modules.partial-$(date +%s)" && \
+      echo "moved partial node_modules aside (missing .bin/)"; \
+    fi && \
+    if [ ! -d node_modules ]; then \
+      BASE=$(git merge-base HEAD origin/master) && \
+      if git diff --quiet "$BASE" origin/master -- frontend/package-lock.json \
+         && [ -d /home/vdvgu/claude-cockpit/frontend/node_modules/.bin ]; then \
+        ln -s /home/vdvgu/claude-cockpit/frontend/node_modules node_modules && \
+        echo "bootstrapped frontend/node_modules via symlink (lockfile matches master)"; \
+      else \
+        npm ci; \
+      fi; \
+    fi && \
+    npm run lint && npm run build \
+  )   # only proceed once green
 else
   echo 'geen frontend-diff — gate overgeslagen'
 fi
