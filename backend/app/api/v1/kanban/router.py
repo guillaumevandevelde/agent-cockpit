@@ -47,6 +47,7 @@ from app.kanban.schemas import (
     ReviewRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
+    SubscriptionPoolRequest,
     UpdatePlanAttachmentRequest,
     WorkTypeMappingBulk,
     WorkTypeMappingResponse,
@@ -1007,6 +1008,56 @@ async def set_subscription_override(payload: ActiveSubscriptionOverrideRequest):
     return {
         "project_key": payload.project_key,
         "override": payload.override,
+    }
+
+
+@router.get("/subscription-pool")
+async def get_subscription_pool(project_key: str = Query(...)):
+    """Read the subscription pool (fase 1b of the analyse).
+
+    Returns ``{"project_key": ..., "pool": <list[PoolEntry]|None>}``.
+    ``None`` means no pool is configured — the dispatcher falls back to
+    today's column-default chain exactly as before. Each ``PoolEntry``
+    is shaped as ``{cli, provider, model|null, drempel}`` so the
+    frontend can render it verbatim without per-field reshaping."""
+    from app.kanban import subscription_pool as pool_mod
+    async with KanbanSessionLocal() as s:
+        entries = await pool_mod.get_subscription_pool(s, project_key)
+    if entries is None:
+        return {"project_key": project_key, "pool": None}
+    return {
+        "project_key": project_key,
+        "pool": [
+            {"cli": e.cli, "provider": e.provider,
+             "model": e.model, "drempel": e.drempel}
+            for e in entries
+        ],
+    }
+
+
+@router.post("/subscription-pool")
+async def set_subscription_pool(payload: SubscriptionPoolRequest):
+    """Set or clear the subscription pool.
+
+    Pass ``pool: null`` to clear (dispatcher falls back to per-column
+    defaults exactly as today). Otherwise ``pool`` is a non-empty list
+    of ``{cli, provider, model?, drempel}`` entries — providers are
+    validated against the same allow-list as the active-subscription-
+    override, drempel must be in (0, 1], and ``cli`` must be non-empty.
+    Invalid input is rejected with 422 so the caller knows nothing
+    landed."""
+    from app.kanban import subscription_pool as pool_mod
+    async with KanbanSessionLocal() as s:
+        try:
+            await pool_mod.set_subscription_pool(
+                s, payload.project_key, payload.entries,
+            )
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        await s.commit()
+    return {
+        "project_key": payload.project_key,
+        "pool": payload.pool,
     }
 
 

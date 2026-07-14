@@ -284,6 +284,51 @@ class ActiveSubscriptionOverrideRequest(BaseModel):
     override: dict | None
 
 
+class SubscriptionPoolEntry(BaseModel):
+    """One entry in the subscription pool (fase 1b).
+
+    ``cli`` is the agentic CLI to spawn (e.g. ``"claude-code"``); the
+    existing ``agentic_cli.registry`` keys these. ``provider`` is the
+    vendor the CLI authenticates against (validated against the same
+    allow-list as the active-subscription-override). ``model`` is
+    optional — ``None`` leaves the dispatch precedence chain (column
+    default / card model / persona) to fill it in. ``drempel`` is the
+    fraction (0..1] at which the router considers this entry "full"
+    and spills to the next entry."""
+    cli: str
+    provider: str
+    model: str | None = None
+    drempel: float
+
+
+class SubscriptionPoolRequest(BaseModel):
+    """Body for POST /api/v1/kanban/subscription-pool.
+
+    ``pool`` is the ordered list of entries (priority order = list
+    order — first entry is the preferred subscription). ``None``
+    clears the pool so dispatch falls back to today's per-column
+    behaviour (the backward-compat clause)."""
+    project_key: str
+    pool: list[SubscriptionPoolEntry] | None = None
+
+    @property
+    def entries(self) -> list | None:
+        """Materialise the validated ``SubscriptionPoolEntry`` list as
+        a list of ``PoolEntry`` so the storage layer can persist it
+        without re-parsing the request shape. Returns None when the
+        caller asked to clear the pool."""
+        from app.kanban.subscription_pool import PoolEntry
+        if self.pool is None:
+            return None
+        return [
+            PoolEntry(
+                cli=e.cli, provider=e.provider,
+                model=e.model, drempel=e.drempel,
+            )
+            for e in self.pool
+        ]
+
+
 class DispatchRequest(BaseModel):
     project_path: str
     agent: str | None = None  # override: use this agent instead of card's agent

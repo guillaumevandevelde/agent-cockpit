@@ -8,6 +8,7 @@ import type {
   McpHealth,
   DispatchPauseStatus,
   Gate,
+  PoolEntry,
   WorkType,
   WorkTypeMapping,
 } from "./types";
@@ -340,6 +341,39 @@ export const kanbanApi = {
     }>(`${BASE}/subscription-override`, {
       method: "POST",
       body: JSON.stringify({ project_key: projectKey, override }),
+    }),
+
+  /** Subscription pool (fase 1b). Ordered list of pool entries;
+   * `null` means the pool is unset and dispatch falls back to today's
+   * per-column defaults. Mirrors backend `KanbanMeta` storage; the
+   * kanban dispatcher picks the first under-drempel / non-paused entry
+   * and routes onto it. */
+  getSubscriptionPool: (
+    projectKey: string,
+  ): Promise<{
+    project_key: string;
+    pool: PoolEntry[] | null;
+  }> =>
+    apiClient<{
+      project_key: string;
+      pool: PoolEntry[] | null;
+    }>(
+      `${BASE}/subscription-pool?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
+  setSubscriptionPool: (
+    projectKey: string,
+    pool: PoolEntry[] | null,
+  ): Promise<{
+    project_key: string;
+    pool: PoolEntry[] | null;
+  }> =>
+    apiClient<{
+      project_key: string;
+      pool: PoolEntry[] | null;
+    }>(`${BASE}/subscription-pool`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, pool }),
     }),
 
   listGates: (cardId: string): Promise<Gate[]> =>
