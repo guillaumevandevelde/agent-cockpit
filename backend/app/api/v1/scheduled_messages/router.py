@@ -230,13 +230,13 @@ async def hook_event(ev: HookEvent):
                 logger.exception("failed to resolve provider for %s", ev.cwd)
                 provider = None
 
-            try:
-                await move_limited_session_to_resume(
-                    ev.cwd, scheduled_at=pause_until.isoformat(),
-                )
-            except Exception:
-                logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
-
+            # Set the per-provider pause BEFORE the move. Fase 2 spillover
+            # (`move_limited_session_to_resume`) may make the card immediately
+            # dispatch-eligible (scheduled_at=None) so the next tick re-routes
+            # it onto another subscription; pausing the just-limited provider
+            # first guarantees that re-dispatch skips it (pick_subscription
+            # consults the per-provider pause) instead of racing back onto the
+            # same wall.
             from app.kanban.db import KanbanSessionLocal
             from app.kanban.dispatch_pause import set_paused_until
             try:
@@ -245,6 +245,13 @@ async def hook_event(ev: HookEvent):
                     await ks.commit()
             except Exception:
                 logger.exception("failed to set dispatch pause for %s", ev.cwd)
+
+            try:
+                await move_limited_session_to_resume(
+                    ev.cwd, scheduled_at=pause_until.isoformat(),
+                )
+            except Exception:
+                logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
 
             # Auto-resume: schedule a resume job for the scheduled-messages feature,
             # for projects that opted in explicitly (independent of the kanban path).

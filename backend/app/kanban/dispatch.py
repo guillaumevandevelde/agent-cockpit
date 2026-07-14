@@ -38,6 +38,7 @@ from app.kanban.service import (
 from app.kanban.subscription_pool import (
     PoolEntry,
     get_subscription_pool,
+    has_available_spillover,
     pick_subscription,
 )
 from app.services.agentic_cli.provider_env import (
@@ -626,6 +627,46 @@ async def _pick_pool_choice(
         )
         snapshots = {}
     return pick_subscription(entries, snapshots, paused_providers=paused)
+
+
+async def _pool_spillover_available(
+    session, *, project_key: str, limited_provider: str,
+) -> bool:
+    """Fase 2 (analyse §4 Optie B / §5): can the just-limited card spill
+    over onto another subscription in the pool instead of waiting for
+    ``limited_provider`` to reset?
+
+    Threshold-/failover branch of the fase-1b pool router: mark
+    ``limited_provider`` (plus every already-paused provider) as
+    unavailable, then ask ``has_available_spillover`` whether the pool
+    still offers a genuinely-available subscription to route to. Returns
+    False when the project has no pool, or when every subscription is now
+    paused/exhausted — the reactive limit path then keeps its existing
+    behaviour (per-provider pause → "To Resume" + reset-time scheduled_at).
+
+    ``limited_provider`` is added explicitly (not only read from the
+    per-provider pause slots) so the decision is correct even when the
+    caller sets the pause *after* this check — the just-hit provider is
+    unavailable regardless of write ordering.
+    """
+    entries = await get_subscription_pool(session, project_key)
+    if not entries:
+        return False
+    paused = await _paused_providers_for_pool(session)
+    paused.add(limited_provider)
+    try:
+        snapshots = await _gather_pool_usage_snapshots(entries)
+    except Exception:
+        # Same defensive posture as ``_pick_pool_choice``: a flaky usage
+        # provider must never wedge the limit-handling path. No signal =
+        # analyse §6.3 (available until the pause catches it).
+        logger.exception(
+            "subscription pool: spillover snapshot gather failed for %s; "
+            "treating as 'no signal'",
+            project_key,
+        )
+        snapshots = {}
+    return has_available_spillover(entries, snapshots, paused_providers=paused)
 
 
 # ---- persona helpers -------------------------------------------------------
@@ -2490,6 +2531,16 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
     reset time (`auto_resume_service.parse_reset_time`); passed straight through to
     `_move_to_resume` so `_is_due` can hold the card out of auto-dispatch until the
     limit actually resets, rather than only until the global dispatch pause expires.
+
+    Fase 2 — spillover-bij-limiet (analyse §4 Optie B / §5): when the card's
+    project has a subscription pool with another genuinely-available
+    subscription (`_pool_spillover_available`), the card is instead made
+    *immediately* dispatch-eligible (``scheduled_at`` forced to None) so the
+    next tick re-routes it onto the spillover subscription via
+    ``pick_subscription`` — the just-limited provider is skipped because the
+    caller sets its per-provider pause. Only when every subscription in the
+    pool is exhausted does the reset-time pause below still apply. When no
+    pool is configured this is a no-op and the original behaviour holds.
     """
     from app.kanban.db import KanbanSessionLocal
 
@@ -2516,9 +2567,23 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
         )
         if card is None:
             return False
+
+        # Spillover decision (fase 2): resolve the provider this card was
+        # running against (its agent column, before the move) and ask the
+        # pool router whether another subscription is still available. When
+        # it is, drop scheduled_at so the card re-dispatches now instead of
+        # waiting for the limited provider to reset.
+        limited_provider = await _provider_for_card(ks, project_key, card, card.column)
+        spillover = False
+        if limited_provider is not None:
+            spillover = await _pool_spillover_available(
+                ks, project_key=project_key, limited_provider=limited_provider,
+            )
+        effective_scheduled_at = None if spillover else scheduled_at
+
         moved = await _move_to_resume(
             ks, card=card, project_key=project_key, project_path=project_path,
-            scheduled_at=scheduled_at,
+            scheduled_at=effective_scheduled_at,
         )
         if moved:
             # Surface the move on the card's activity feed so an operator
@@ -2526,7 +2591,13 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
             # having to dive into dispatch.py logs. The reset time is the
             # Notification hook's parsed value when known; the `~5h fallback`
             # branch covers reaper-style callers that couldn't parse one.
-            if scheduled_at:
+            if spillover:
+                text = (
+                    f"🔀 Rate-limit hit on '{limited_provider}' — spilling over "
+                    f"to the next subscription in the pool. Session {session_name} "
+                    f"moved to To Resume and is immediately re-dispatchable."
+                )
+            elif scheduled_at:
                 text = (
                     f"🚦 Rate-limit hit — session {session_name} moved to To "
                     f"Resume. Auto-resume scheduled at {scheduled_at}."
