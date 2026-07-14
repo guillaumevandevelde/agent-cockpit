@@ -83,5 +83,8 @@ apm_modules/
 # superpowers subagent-driven-development scratch (briefs/reports/diffs/ledger)
 .superpowers/
 
+# iteration-loop progress files (per-card, transient until worktree is reaped)
+.claude/state/
+
 # Personal/business notes not meant for the public repo (see docs/cockpit history)
 .local-notes/
