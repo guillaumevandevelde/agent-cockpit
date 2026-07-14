@@ -42,6 +42,7 @@ from .status import router as status_router
 from .statusline import router as statusline_router
 from .update.router import router as update_router
 from .usage import router as usage_router
+from .webhooks.router import router as webhooks_router
 
 router = APIRouter()
 
@@ -87,6 +88,7 @@ router.include_router(providers_router, tags=["Providers"])
 router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)
+router.include_router(webhooks_router)
 router.include_router(security_router)
 router.include_router(kanban_router)
 router.include_router(run_activity_router)
