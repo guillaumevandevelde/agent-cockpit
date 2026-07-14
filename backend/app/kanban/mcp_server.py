@@ -18,7 +18,7 @@ from app.kanban.db import KanbanSessionLocal
 from app.kanban.models import KanbanDeliverable
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key as _resolve_project_key
-from app.kanban.schemas import CardResponse
+from app.kanban.schemas import CardResponse, CardSummaryResponse
 
 logger = logging.getLogger(__name__)
 
@@ -88,15 +88,26 @@ async def resolve_project_key(project_path: str) -> dict:
 
 
 @mcp.tool()
-async def list_cards(project: str, column: str | None = None) -> list[dict]:
+async def list_cards(project: str, column: str | None = None,
+                     compact: bool = False) -> list[dict]:
     """List cards for a project, optionally filtered by column.
 
     `project` must be the exact project key — use `resolve_project_key` first
     if you're not certain of it. A mistyped or guessed key won't error; it
     just returns an empty (or wrong) list from an unrelated bucket.
+
+    `compact=True` returns the dedupe-friendly per-card shape
+    (id, title, column, work_type, rank) and skips the per-card op-log
+    enrichments (done_summary, completed_at, impediment_status) so a
+    50+ card Backlog stops blowing the MCP token cap during dedupe passes.
+    Default False preserves the full CardResponse shape every existing
+    agent expects. Backwards-compatible opt-in.
     """
     async with KanbanSessionLocal() as s:
-        rows = await service.list_cards(s, project, column)
+        rows = await service.list_cards(s, project, column, compact=compact)
+        if compact:
+            return [CardSummaryResponse.model_validate(c).model_dump()
+                    for c in rows]
         return [await _card_dict(s, c) for c in rows]
 
 

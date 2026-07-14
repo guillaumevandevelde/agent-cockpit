@@ -23,6 +23,7 @@ async def list_cards(
     *,
     ready: bool | None = None,
     blocking: bool | None = None,
+    compact: bool = False,
 ):
     """List cards for a project.
 
@@ -35,13 +36,22 @@ async def list_cards(
     dispatch tick agree on what is dispatchable. `blocking` answers "which
     cards are still being waited on?" — a card X is blocking when some other
     non-Done card lists X in its `depends_on`.
+
+    `compact=True` skips the deliverables eager-load — the
+    selectinload(KanbanCard.deliverables) is the single biggest chunk of
+    payload weight on a 50+ card board (full response was 126KB on a
+    48-card Backlog). The caller is expected to serialize via
+    CardSummaryResponse (id, title, column, work_type, rank) and not touch
+    the relationship. Default False preserves the prior behaviour for
+    every existing caller (REST + MCP `_card_dict`).
     """
     stmt = (
         select(KanbanCard)
         .where(KanbanCard.project_key == project_key)
-        .options(selectinload(KanbanCard.deliverables))
         .order_by(KanbanCard.rank.asc())
     )
+    if not compact:
+        stmt = stmt.options(selectinload(KanbanCard.deliverables))
     if column is not None:
         stmt = stmt.where(KanbanCard.column == column)
     rows = list((await session.execute(stmt)).scalars().all())

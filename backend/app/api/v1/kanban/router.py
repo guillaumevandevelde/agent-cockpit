@@ -22,6 +22,7 @@ from app.kanban.schemas import (
     AutodispatchRequest,
     CardCreate,
     CardResponse,
+    CardSummaryResponse,
     CardUpdate,
     ClaimRequest,
     ColumnClearRequest,
@@ -237,12 +238,27 @@ async def list_cards(
             "Omit to skip the filter."
         ),
     ),
+    compact: bool = Query(
+        False,
+        description=(
+            "When true, return only the dedupe-friendly per-card shape "
+            "(id, title, column, work_type, rank) and skip description, "
+            "deliverables, labels, metadata and the op-log-derived "
+            "enrichments. Backwards-compatible opt-in: omit or set false "
+            "to keep the full CardResponse shape every existing caller uses."
+        ),
+    ),
 ):
     async with KanbanSessionLocal() as s:
         rows = await service.list_cards(
             s, project_key, column,
-            ready=ready, blocking=blocking,
+            ready=ready, blocking=blocking, compact=compact,
         )
+        if compact:
+            return {"items": [
+                CardSummaryResponse.model_validate(c).model_dump()
+                for c in rows
+            ]}
         items = []
         for c in rows:
             done_summary, completed_at = await service.enrich_done_info(s, c.id)

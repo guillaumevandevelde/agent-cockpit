@@ -16,6 +16,64 @@ async def _tables():
 
 
 @pytest.mark.asyncio
+async def test_list_cards_compact_skips_deliverables_eager_load():
+    """compact=True must NOT trigger the deliverables selectinload — that's
+    the single biggest chunk of payload weight (a 126KB / 48-card board
+    response drops to ~3KB once deliverables + description are excluded).
+    We assert the eager-load side-effect via SQLAlchemy's session
+    `is_loaded`: after the call with compact=True the relationship is
+    unloaded, while the default (compact=False) call leaves it loaded so
+    existing callers (REST + MCP _card_dict) can serialize it as before.
+    """
+    from app.kanban.models import KanbanDeliverable
+
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="COMPACT", entity_id=None,
+            payload={"title": "c1", "description": "x" * 200})
+        # Attach a deliverable so the eager load would have a row to fetch.
+        from app.kanban.operations import apply_operation as _apply
+        await _apply(s, op_type="attach", entity_type="deliverable",
+            project_key="COMPACT", entity_id=cid,
+            payload={"kind": "note", "ref": "abcdefg"})
+        await s.commit()
+
+        async with KanbanSessionLocal() as s:
+            default_rows = await service.list_cards(s, "COMPACT")
+            assert len(default_rows) == 1
+            assert "deliverables" in default_rows[0].__dict__, (
+                "default mode should have the relationship populated "
+                "(existing REST/MCP callers rely on it)"
+            )
+
+        async with KanbanSessionLocal() as s:
+            compact_rows = await service.list_cards(s, "COMPACT", compact=True)
+            assert len(compact_rows) == 1
+            assert "deliverables" not in compact_rows[0].__dict__, (
+                "compact mode must NOT trigger the selectinload"
+            )
+
+
+@pytest.mark.asyncio
+async def test_list_cards_compact_default_is_false_backwards_compatible():
+    """Calling list_cards() with no compact kwarg must behave identically to
+    the pre-change signature (compact=False): same number of rows, same
+    deliverables relationship loaded. Pinning this guards against an
+    accidental keyword-only-after-positional refactor that breaks callers
+    using service.list_cards(s, project_key, column)."""
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="BC", entity_id=None,
+            payload={"title": "x", "column": "Backlog"})
+        await s.commit()
+
+        async with KanbanSessionLocal() as s:
+            rows = await service.list_cards(s, "BC")
+            assert len(rows) == 1
+            assert "deliverables" in rows[0].__dict__
+
+
+@pytest.mark.asyncio
 async def test_list_cards_filters_by_project_and_column():
     async with KanbanSessionLocal() as s:
         await apply_operation(s, op_type="create", entity_type="card",

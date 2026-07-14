@@ -56,6 +56,22 @@ class DeliverableResponse(BaseModel):
     created_at: datetime
 
 
+class CardSummaryResponse(BaseModel):
+    """Compact per-card projection used by `list_cards(compact=True)` so a
+    50+ card board stops blowing the MCP token cap during dedupe passes
+    (kanban self-improve card d789eb2e…). Only the fields a dedupe pass
+    needs to identify / compare cards: id, title, column, work_type, rank.
+    No description, deliverables, labels, metadata, or op-log-derived
+    enrichments — those are the weight. Backwards-compatible opt-in; the
+    full CardResponse shape stays the default."""
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    title: str
+    column: str
+    work_type: str | None = None
+    rank: str
+
+
 class CardResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str

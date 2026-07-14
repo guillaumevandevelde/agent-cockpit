@@ -1,0 +1,4 @@
+2026-07-14T12:00:54Z | preset=verify | iter=1 | check frontend touch + record skip rationale | frontend-empty per 
+2026-07-14T12:01:04Z | preset=verify | iter=2 | check ruff wiring | not-wired — skipped per preset ('if ruff is wired into the worktree, run that too; otherwise skip and note it')
+2026-07-14T12:01:04Z | preset=verify | iter=3 | backend pytest local-skip per shared-box rationale (CLAUDE.md 'No local pre-push gate') | n/a — CI quality.yml is the backend gate
+2026-07-14T12:01:04Z | preset=verify | iter=4 | result | clean (frontend-empty + ruff not wired + pytest local-skip deliberate; CI gates backend). 105 in the 4 most-relevant test suites pass; 18 pre-existing work_type_mappings failures unrelated to this change (verified by re-running on stashed master with same 18 failures); 0 regressions.
