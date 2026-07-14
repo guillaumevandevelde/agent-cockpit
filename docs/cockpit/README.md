@@ -50,6 +50,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 - [`reviewer-agent-decision.md`](./reviewer-agent-decision.md) — reviewer-agent + review-kolom.
 - [`reopen-completed-decision-analysis.md`](./reopen-completed-decision-analysis.md) — completed kaart heropenen met context.
 - [`updates-feature-decision.md`](./updates-feature-decision.md) — self-update-feature.
+- [`plans-feature-decision.md`](./plans-feature-decision.md) — waarom de Plans-pagina leeg is (verweesde `kanban_plans`-tabel, geen live writer) + aanbeveling om 'm te herbestemmen tot read-only mensvenster op de spec-/plan-laag (analyst-plan-attachments + `docs/cockpit/`-docs) en de tabel uit te faseren.
 - [`upstream-agent-teams-decision.md`](./upstream-agent-teams-decision.md), [`upstream-docker-removal-decision.md`](./upstream-docker-removal-decision.md), [`upstream-presence-removal-decision.md`](./upstream-presence-removal-decision.md) — upstream-overname-keuzes.
 - [`recurring-cadence-proposal.md`](./recurring-cadence-proposal.md) — cadans zelfverbeteringsonderzoek.
 - [`build-prioriteiten-analyse.md`](./build-prioriteiten-analyse.md) — geordende bouw-prioriteitsstack (P0–P4) + externe ecosysteem-scan (Spec Kit, OpenHands, sandbox-consensus, Anthropic-abonnementsbeleid).
