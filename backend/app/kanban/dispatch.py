@@ -38,6 +38,7 @@ from app.kanban.service import (
 from app.services.agentic_cli.provider_env import PROVIDER_ANTHROPIC
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.scheduling.session_registry import session_registry
+from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -1768,9 +1769,7 @@ def _is_due(card: KanbanCard) -> bool:
         fire_at = datetime.fromisoformat(scheduled_at)
     except ValueError:
         return True
-    if fire_at.tzinfo is None:
-        fire_at = fire_at.replace(tzinfo=UTC)
-    return fire_at <= datetime.now(UTC)
+    return ensure_aware(fire_at) <= datetime.now(UTC)
 
 
 def _awaiting_plan_ref(card) -> bool:
@@ -2493,9 +2492,7 @@ def _claim_age_seconds(card) -> float | None:
     claimed_at = card.claimed_at
     if claimed_at is None:
         return None
-    if claimed_at.tzinfo is None:
-        claimed_at = claimed_at.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - claimed_at).total_seconds()
+    return (datetime.now(UTC) - ensure_aware(claimed_at)).total_seconds()
 
 
 async def _clear_stale_resume_fields(session, *, card, project_key: str) -> None:

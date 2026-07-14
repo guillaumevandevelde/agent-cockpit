@@ -25,6 +25,12 @@ class KanbanBase(DeclarativeBase):
 
 kanban_engine = create_async_engine(settings.kanban_database_url, future=True)
 
+# SQLite + SQLAlchemy drops ``tzinfo`` on write, so every
+# ``DateTime(timezone=True)`` column reads back as a naive ``datetime`` here.
+# Use ``app.utils.timeutils.ensure_aware`` before comparing against
+# ``datetime.now(UTC)`` — inline ``replace(tzinfo=UTC)`` guards have caused
+# multiple ``can't compare offset-naive and offset-aware datetimes`` bugs.
+
 if settings.kanban_database_url.startswith("sqlite"):
     @event.listens_for(kanban_engine.sync_engine, "connect")
     def _set_sqlite_pragma(dbapi_conn, _):
