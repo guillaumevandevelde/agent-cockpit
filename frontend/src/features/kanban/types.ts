@@ -254,3 +254,32 @@ export interface DispatchPauseStatus {
   // (``PROVIDER_LABELS`` maps them to display labels).
   paused_providers?: string[];
 }
+
+// Mirrors backend/app/services/run_service.py RunInstance. Used by the
+// "Run this branch" preview flow on Done cards (kanban-card d2689f2d).
+export type RunStatus =
+  | "pending"
+  | "starting"
+  | "healthy"
+  | "unhealthy"
+  | "failed"
+  | "stopped";
+
+export interface RunInstance {
+  id: number;
+  instance_id: string;
+  project_path: string;
+  command: string[];
+  env_keys: string[];
+  port: number;
+  url: string;
+  health_path: string | null;
+  status: RunStatus;
+  transport: "container" | "subprocess";
+  container_id: string | null;
+  pid: number | null;
+  log_path: string | null;
+  error: string | null;
+  started_at: string;
+  stopped_at: string | null;
+}

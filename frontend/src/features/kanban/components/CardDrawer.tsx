@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
+import { Loader2, Play } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -34,12 +35,16 @@ import { MarkdownPreviewToggle } from "@/components/shared/MarkdownPreviewToggle
 import { MODAL_SIZES } from "@/lib/constants";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { kanbanApi } from "../api";
+import { appsApi } from "../appsApi";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
-import type { Card, ActivityEntry, Deliverable, Gate } from "../types";
+import { PreviewPane } from "./PreviewPane";
+import type { Card, ActivityEntry, Deliverable, Gate, RunInstance } from "../types";
 import { SPEC_DOC_META_KEY } from "../types";
 
 const LIVE_POLL_INTERVAL_MS = 3000;
+const PREVIEW_POLL_INTERVAL_MS = 1500;
+const PREVIEW_POLL_TIMEOUT_MS = 35_000;
 
 const AUTO = "__auto__"; // sentinel: agent chosen by column default
 const DONE_COLUMN = "Done";
@@ -387,6 +392,137 @@ function ReopenControl({
           {submitting ? "Heropenen…" : "Heropen met feedback"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+// "Run this branch" control shown on Done cards. Spins up a RunService
+// instance for the card's project, polls until it reaches ``healthy`` (or
+// fails), posts the preview-URL as an activity-comment, and renders a
+// PreviewPane with the iframe. Part of the kanban-card d2689f2d
+// preview-URL feature.
+function CardPreviewControl({
+  card,
+  projectPath,
+}: {
+  card: Card;
+  projectPath: string;
+}) {
+  const [instance, setInstance] = useState<RunInstance | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [errored, setErrored] = useState<string | null>(null);
+
+  const start = async () => {
+    setStarting(true);
+    setErrored(null);
+    try {
+      const started = await appsApi.startRun({
+        project_path: projectPath,
+        // MVP: boot a tiny static HTTP server so the preview flow has a live
+        // URL to render. Real project-start-command detection is a separate
+        // facet-D follow-up.
+        command: ["python3", "-m", "http.server", "4123"],
+        health_path: "/",
+        health_timeout_s: 30,
+      });
+      setInstance(started);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to start run";
+      setErrored(msg);
+      toast.error(msg);
+      setStarting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!instance) return;
+    if (instance.status !== "starting") return;
+    let cancelled = false;
+    const startedAt = Date.now();
+    const tick = async () => {
+      try {
+        const fresh = await appsApi.getRun(instance.instance_id);
+        if (cancelled) return;
+        setInstance(fresh);
+        if (fresh.status === "healthy" || fresh.status === "failed") {
+          const text =
+            fresh.status === "healthy"
+              ? `Preview live: ${fresh.url}`
+              : `Preview failed: ${fresh.error ?? "unknown error"}`;
+          try {
+            await kanbanApi.comment(card.id, text);
+          } catch {
+            // Best-effort: the run lifecycle is the source of truth; the
+            // comment is a human-friendly breadcrumb.
+          }
+        }
+      } catch {
+        // Transient — try again next tick.
+      }
+    };
+    const interval = setInterval(tick, PREVIEW_POLL_INTERVAL_MS);
+    void tick();
+    const timeout = setTimeout(() => {
+      cancelled = true;
+      clearInterval(interval);
+      setStarting(false);
+    }, PREVIEW_POLL_TIMEOUT_MS);
+    void startedAt;
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(timeout);
+      setStarting(false);
+    };
+  }, [instance, card.id]);
+
+  const onStopped = () => {
+    setInstance(null);
+    setStarting(false);
+  };
+
+  return (
+    <div
+      className="rounded-md border p-3 text-sm space-y-2"
+      data-testid="run-this-branch-control"
+    >
+      <div className="text-xs font-semibold uppercase text-muted-foreground">
+        Preview
+      </div>
+      {!instance && !errored && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-muted-foreground">
+            Spin up a sandboxed instance of this branch and surface the URL.
+          </span>
+          <Button
+            size="sm"
+            onClick={start}
+            disabled={starting}
+            data-testid="run-this-branch-button"
+          >
+            <Play className="mr-1 h-3 w-3" aria-hidden="true" />
+            Run this branch
+          </Button>
+        </div>
+      )}
+      {starting && !instance && (
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+          Starting…
+        </div>
+      )}
+      {errored && !instance && (
+        <div className="text-destructive">Failed to start: {errored}</div>
+      )}
+      {instance && instance.status === "starting" && (
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+          Health-checking {instance.url}…
+        </div>
+      )}
+      {instance && instance.status !== "starting" && (
+        <PreviewPane instance={instance} onStopped={onStopped} />
+      )}
     </div>
   );
 }
@@ -948,6 +1084,7 @@ export function CardDrawer({
         {card.column === DONE_COLUMN && (
           <>
             <DoneSummaryBanner card={card} />
+            <CardPreviewControl card={card} projectPath={projectPath} />
             <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
             <ReopenControl card={card} onChanged={onChanged} />
           </>

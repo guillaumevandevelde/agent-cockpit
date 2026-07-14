@@ -105,3 +105,4 @@ The board is stored in its own SQLite file (`kanban.db` by default), separate fr
 - [Agent Mail](./agent-mail.md) — cross-session coordination layer
 - [CC Bridge](./cc-bridge.md) — terminal view of the session that's working the card
 - [Agent Performance](./agent-performance.md) — per-agent stats over completed cards
+- [Preview](./preview.md) — "Run this branch"-actie op Done-kaarten (live URL via RunService)
