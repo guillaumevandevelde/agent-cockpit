@@ -41,6 +41,64 @@ from app.services.scheduling.session_registry import session_registry
 
 logger = logging.getLogger(__name__)
 
+
+# ---- security-audit invulpunten -------------------------------------------
+#
+# Dispatch mutates ``KanbanMeta`` (in the kanban DB) while the security-audit
+# table lives in the app DB (per docs/cockpit/veilig-bouwen-en-uitleveren.md
+# §4.8 "Apart"). The two stores have no shared transaction, so the audit
+# insert runs in its own short-lived session and is **best-effort**: a failed
+# audit row is logged and dropped, never propagated back to the caller. The
+# meta-flip is the security-relevant action; the audit is observability.
+#
+# ``actor`` is the request-level actor (user/operator). For dispatch we use
+# the same constant the REST router uses — there's no per-user identity
+# layer yet, so anything that mutates the board via the REST API is
+# attributed to the same default actor. Per-user attribution is follow-up.
+
+
+async def _record_audit(
+    kanban_session,
+    *,
+    kind: str,
+    project_key: str,
+    payload_ref: dict,
+) -> None:
+    """Insert one security-audit row, swallowing all errors.
+
+    The leading ``kanban_session`` is the kanban-DB session the caller is
+    already using for the meta write above; it's accepted (and ignored)
+    purely so the call-site reads naturally as a sibling of the meta
+    write. The audit insert runs against the **app DB** (``security_audit``
+    lives there — see veilig-bouwen-en-uitleveren.md §4.8) via its own
+    short-lived session.
+
+    Best-effort: a failed audit row is logged and dropped, never
+    propagated back to the caller. The meta-flip is the security-relevant
+    action; the audit is observability.
+    """
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.security_audit import SecurityAuditKind
+        from app.services.security_audit_service import record
+
+        async with AsyncSessionLocal() as db:
+            await record(
+                db,
+                kind=SecurityAuditKind(kind),
+                project_key=project_key,
+                actor="dispatch-api",
+                payload_ref=payload_ref,
+            )
+            await db.commit()
+    except Exception:
+        logger.exception(
+            "security_audit insert failed (kind=%s project_key=%s); "
+            "the dispatch write itself was NOT rolled back",
+            kind,
+            project_key,
+        )
+
 # Known CLI IDs are registered in app.services.agentic_cli; re-derived here
 # so the phase router doesn't depend on that module being imported at typing time.
 def _phase_cli_id(card, *, phase: str, known_clis: set | None = None) -> str:
@@ -182,6 +240,12 @@ async def set_autodispatch(session, project_key: str, enabled: bool) -> None:
     else:
         row.value = "1" if enabled else "0"
     await session.flush()
+    await _record_audit(
+        session,
+        kind="autodispatch_change",
+        project_key=project_key,
+        payload_ref={"enabled": enabled},
+    )
 
 
 async def list_autodispatch_projects(session) -> list[str]:
@@ -210,6 +274,12 @@ async def set_skip_permissions(session, project_key: str, enabled: bool) -> None
     else:
         row.value = "1" if enabled else "0"
     await session.flush()
+    await _record_audit(
+        session,
+        kind="skip_permissions_flip",
+        project_key=project_key,
+        payload_ref={"enabled": enabled},
+    )
 
 
 async def get_default_transport(session, project_key: str) -> str:
@@ -224,12 +294,19 @@ async def set_default_transport(session, project_key: str, value: str) -> None:
         raise ValueError(f"unknown transport: {value}")
     key = TRANSPORT_PREFIX + project_key
     row = await session.get(KanbanMeta, key)
+    before = row.value if row is not None else None
     if row is None:
         session.add(KanbanMeta(key=key, value=value))
     else:
         row.value = value
     await session.flush()
     await _sync_sandcastle_enabled(project_key, value == "sandcastle")
+    await _record_audit(
+        session,
+        kind="transport_change",
+        project_key=project_key,
+        payload_ref={"before": before, "after": value},
+    )
 
 
 # ---- model options: device-local cache of `claude -p "/model"`'s alias list ----

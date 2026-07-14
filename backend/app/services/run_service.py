@@ -285,12 +285,14 @@ class RunService:
             serialized = _serialize(row)
 
         # Audit BEFORE the spawn so a crashed subprocess still leaves a
-        # trail. Follow-up #10 will swap this for a real row.
+        # trail. Persists a ``run_start`` row to the security_audit
+        # table (best-effort — failures are logged, never raised).
         _record_audit(
             _project_key(project_path),
             transport,
             instance_id,
             env_keys,
+            kind="run_start",
         )
         logger.info(
             "run_service.start instance_id=%s transport=%s port=%d command=%s env_keys=%s",
@@ -556,6 +558,7 @@ class RunService:
             instance_id,
             # env *names* only — same contract as start()
             sorted([]),
+            kind="run_stop",
         )
         logger.info("run_service.stop instance_id=%s port=%d", instance_id, port)
         return True

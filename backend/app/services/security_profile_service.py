@@ -4,10 +4,9 @@ The service is the single read/write path for security profiles. The REST
 layer (`app/api/v1/security.py`) delegates here so the same semantics are
 re-usable from internal call-sites (Blueprint apply, repo bootstrap, etc).
 
-Audit logging today is the standard `logging` logger — mirroring
-``app.services.runs.spawn._record_audit``. A dedicated ``security_audit``
-table is follow-up #10; when that lands this service swaps its `_audit`
-helper for a real row insert without changing the call-site contract.
+Audit logging writes to the dedicated ``security_audit`` table on every
+real risk-class transition. The ``record`` helper is best-effort so a
+broken audit insert never aborts the profile write itself.
 """
 from __future__ import annotations
 
@@ -17,10 +16,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.security_audit import SecurityAuditKind
 from app.models.security_profile import (
     DEFAULT_PRODUCT_RESOURCE_QUOTA,
     ProjectSecurityProfile,
 )
+from app.services.security_audit_service import record as audit_record
 
 logger = logging.getLogger(__name__)
 
@@ -43,22 +44,35 @@ def _default_for_product() -> dict[str, Any]:
     }
 
 
-def _audit_risk_class_transition(
+async def _audit_risk_class_transition(
+    db: AsyncSession,
     project_path: str,
     before: str,
     after: str,
 ) -> None:
-    """Emit one audit line per risk_class change.
+    """Persist a ``security_profile_change`` row for the transition.
 
-    Names + values are intentionally human-readable so the log can be parsed
-    with simple `grep`-style tooling until follow-up #10 swaps this for a
-    proper security_audit table.
+    Best-effort: a failed insert logs and continues. The profile write
+    above is the security-relevant action; this is observability.
+
+    Also keeps emitting the human-readable ``logger.info`` line that the
+    pre-table world relied on (see ``test_risk_class_transition_logs_audit_event``).
+    Both surfaces describe the same event — the table for queries,
+    the logger for grep — and a future migration that drops the logger
+    line can do so cleanly.
     """
     logger.info(
         "security.risk_class_transition project_path=%s before=%s after=%s",
         project_path,
         before,
         after,
+    )
+    await audit_record(
+        db,
+        kind=SecurityAuditKind.SECURITY_PROFILE_CHANGE,
+        project_key=project_path,
+        actor="security-profile-api",
+        payload_ref={"field": "risk_class", "before": before, "after": after},
     )
 
 
@@ -156,7 +170,7 @@ class SecurityProfileService:
         # as a creation, not a transition — even though the final value matches
         # the default, the user is explicitly setting it for the first time.
         if "risk_class" in payload and before_risk is not None and before_risk != row.risk_class:
-            _audit_risk_class_transition(project_path, before_risk, row.risk_class)
+            await _audit_risk_class_transition(self.db, project_path, before_risk, row.risk_class)
 
         return row
 
@@ -186,7 +200,7 @@ class SecurityProfileService:
         await self.db.refresh(row)
 
         if "risk_class" in payload and before_risk != row.risk_class:
-            _audit_risk_class_transition(project_path, before_risk, row.risk_class)
+            await _audit_risk_class_transition(self.db, project_path, before_risk, row.risk_class)
 
         return row
 

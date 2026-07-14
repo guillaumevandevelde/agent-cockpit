@@ -2,8 +2,8 @@
 
 Covers the default policy for a new product project, the REST CRUD contract,
 PUT idempotency, and the audit log on a risk_class transition. The security
-audit sink is the standard ``logging`` logger — matches the existing pattern
-in ``app.services.runs.spawn._record_audit`` (a real table is follow-up #10).
+audit sink writes both a structured row to the ``security_audit`` table and
+the legacy ``logging`` line — see ``veilig-bouwen-en-uitleveren.md`` §4.8.
 """
 import logging
 
@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.database import Base, get_db
 from app.main import app
+
+# Import every model so ``Base.metadata.create_all`` knows about every
+# table — each test fixture spins up an in-memory SQLite, and a missing
+# import means a missing table.
+from app.models import security_audit as _security_audit_model  # noqa: F401
 from app.models.security_profile import (
     DEFAULT_PRODUCT_RESOURCE_QUOTA,
 )
