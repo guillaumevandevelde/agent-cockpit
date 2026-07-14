@@ -2,6 +2,7 @@
 import json
 import logging
 import uuid
+from datetime import UTC
 
 import pytest
 from fastapi import FastAPI
@@ -79,3 +80,46 @@ def test_correlation_id_injected_into_log_record(capfd):
             assert parsed["correlation_id"] == test_cid
             return
     pytest.fail("Expected log line not found")
+
+
+def test_json_formatter_emits_utc_iso_timestamp(capfd):
+    """``timestamp`` must be UTC ISO 8601 with ``Z`` suffix so log-dive
+    sessions can grep logs by kanban-card UTC timestamp without applying
+    a local-time offset (host is CEST / UTC+2 — see kanban card
+    ``72dc97c0…``: "Dispatched debug-cards geven UTC-timestamps maar
+    backend-logs zijn CEST — 2u offset misleidt log-diving").
+    """
+    import re
+    from datetime import datetime, timedelta
+
+    configure_logging()
+    logger = logging.getLogger("test.utc_format")
+    logger.info("utc ts")
+    out, _ = capfd.readouterr()
+
+    pattern = re.compile(
+        r'"timestamp":\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)"'
+    )
+    matched = pattern.findall(out)
+    assert matched, f"No UTC ISO 8601 timestamp found in: {out!r}"
+
+    ts = datetime.strptime(matched[-1], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
+        tzinfo=UTC
+    )
+    now = datetime.now(UTC)
+    # Allow a few seconds for test execution; if the formatter were still
+    # emitting local time tagged with ``Z`` the delta would be ~2h.
+    assert abs((now - ts).total_seconds()) < 5, (
+        f"timestamp {ts} not within 5s of UTC now {now} — "
+        "formatter likely still emits local time"
+    )
+    # Belt-and-suspenders: explicitly refute the "local-time + Z" failure
+    # mode. If the test ran at 14:00 CEST and a buggy formatter wrote
+    # local time with a ``Z``, ``ts`` would land at 14:00 UTC vs real
+    # 12:00 UTC, a 2h delta.
+    local_offset = timedelta(hours=2)  # CEST in summer
+    fake_local_as_utc = now + local_offset
+    assert abs((fake_local_as_utc - ts).total_seconds()) > 60 * 30, (
+        f"timestamp {ts} is too close to local-time-as-UTC "
+        f"({fake_local_as_utc}) — formatter probably mis-tagging local time"
+    )
