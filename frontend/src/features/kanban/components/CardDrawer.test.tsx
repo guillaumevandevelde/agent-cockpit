@@ -21,7 +21,19 @@ vi.mock("../api", async (importOriginal) => {
   return { kanbanApi: stub };
 });
 
+vi.mock("../appsApi", () => {
+  return {
+    appsApi: {
+      startRun: vi.fn(async () => ({})),
+      getRun: vi.fn(async () => ({})),
+      listRuns: vi.fn(async () => ({ runs: [] })),
+      stopRun: vi.fn(async () => ({ success: true, instance_id: "" })),
+    },
+  };
+});
+
 const { kanbanApi } = await import("../api");
+const { appsApi } = await import("../appsApi");
 const { CardDrawer } = await import("./CardDrawer");
 
 const baseCard: Card = {
@@ -925,5 +937,169 @@ describe("CardDrawer spec link", () => {
     expect(updateMock).toHaveBeenCalledWith("card-1", {
       metadata: { reviewed_card_id: "abc", spec_doc: "docs/cockpit/foo.md" },
     });
+  });
+});
+
+// --- Preview-URL per kanban-kaart (kanban-card d2689f2d) -----------------
+// Done cards expose a "Run this branch" control that spins up a RunService
+// instance, posts the live URL as an activity comment, and renders a
+// PreviewPane with an iframe + Stop button. The backend already exposes
+// /api/v1/runs/app; this layer only wires the UI on top.
+
+function makeRunInstance(overrides: Partial<{
+  instance_id: string;
+  url: string;
+  status: string;
+  error: string | null;
+}> = {}) {
+  return {
+    id: 1,
+    instance_id: overrides.instance_id ?? "inst-abc",
+    project_path: "/proj",
+    command: ["python3", "-m", "http.server", "4123"],
+    env_keys: [],
+    port: 4123,
+    url: overrides.url ?? "http://127.0.0.1:4123",
+    health_path: "/",
+    status: overrides.status ?? "starting",
+    transport: "subprocess",
+    container_id: null,
+    pid: 1234,
+    log_path: null,
+    error: overrides.error ?? null,
+    started_at: "2026-07-14T10:00:00Z",
+    stopped_at: null,
+  };
+}
+
+describe("CardDrawer preview control — rendering", () => {
+  it("does not render the Run this branch control when the card is not Done", () => {
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+    render(
+      <CardDrawer card={doingCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+    expect(screen.queryByTestId("run-this-branch-control")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Run this branch/i })).toBeNull();
+  });
+
+  it("renders the Run this branch control on a Done card", () => {
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    render(
+      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+    const control = screen.getByTestId("run-this-branch-control");
+    expect(control).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Run this branch/i })).not.toBeNull();
+  });
+});
+
+describe("CardDrawer preview control — start", () => {
+  it("starts a run, polls until healthy, posts activity comment with the preview URL, and shows the PreviewPane", async () => {
+    const startMock = appsApi.startRun as ReturnType<typeof vi.fn>;
+    const getRunMock = appsApi.getRun as ReturnType<typeof vi.fn>;
+    const commentMock = kanbanApi.comment as ReturnType<typeof vi.fn>;
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    startMock.mockResolvedValue(makeRunInstance({ status: "starting" }));
+    // First poll returns starting; second poll returns healthy — drives the
+    // terminal-state branch the component watches for.
+    getRunMock
+      .mockResolvedValueOnce(makeRunInstance({ status: "starting" }))
+      .mockResolvedValue(makeRunInstance({ status: "healthy" }));
+    commentMock.mockResolvedValue({ ...baseCard });
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    render(
+      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Run this branch/i }));
+    });
+
+    await waitFor(() => expect(startMock).toHaveBeenCalledTimes(1));
+    const [startBody] = startMock.mock.calls[0];
+    expect(startBody.project_path).toBe("/proj");
+    expect(Array.isArray(startBody.command)).toBe(true);
+
+    await waitFor(() => expect(getRunMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(commentMock).toHaveBeenCalledWith(
+        "card-1",
+        "Preview live: http://127.0.0.1:4123",
+      ),
+    );
+
+    // PreviewPane renders with the iframe pointing at the live URL.
+    await waitFor(() => expect(screen.getByTestId("preview-pane")).not.toBeNull());
+    const iframe = screen.getByTestId("preview-pane-iframe") as HTMLIFrameElement;
+    expect(iframe.getAttribute("src")).toBe("http://127.0.0.1:4123");
+    expect(screen.getByRole("button", { name: /Stop preview/i })).not.toBeNull();
+  });
+
+  it("posts an error activity comment when the run fails the health check", async () => {
+    const startMock = appsApi.startRun as ReturnType<typeof vi.fn>;
+    const getRunMock = appsApi.getRun as ReturnType<typeof vi.fn>;
+    const commentMock = kanbanApi.comment as ReturnType<typeof vi.fn>;
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    startMock.mockResolvedValue(makeRunInstance({ status: "starting" }));
+    getRunMock.mockResolvedValue(
+      makeRunInstance({ status: "failed", error: "health check did not pass within timeout" }),
+    );
+    commentMock.mockResolvedValue({ ...baseCard });
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    render(
+      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Run this branch/i }));
+    });
+
+    await waitFor(() =>
+      expect(commentMock).toHaveBeenCalledWith(
+        "card-1",
+        expect.stringMatching(/Preview failed:.*health check/),
+      ),
+    );
+    // The PreviewPane container is shown with the error block, but the iframe
+    // is NOT rendered when the run failed.
+    expect(screen.queryByTestId("preview-pane")).not.toBeNull();
+    expect(screen.queryByTestId("preview-pane-iframe")).toBeNull();
+  });
+});
+
+describe("CardDrawer preview control — stop", () => {
+  it("Stop preview button calls appsApi.stopRun with the active instance id", async () => {
+    const startMock = appsApi.startRun as ReturnType<typeof vi.fn>;
+    const getRunMock = appsApi.getRun as ReturnType<typeof vi.fn>;
+    const stopRunMock = appsApi.stopRun as ReturnType<typeof vi.fn>;
+    const commentMock = kanbanApi.comment as ReturnType<typeof vi.fn>;
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    startMock.mockResolvedValue(makeRunInstance({ status: "starting" }));
+    getRunMock.mockResolvedValue(makeRunInstance({ status: "healthy" }));
+    commentMock.mockResolvedValue({ ...baseCard });
+    stopRunMock.mockResolvedValue({ success: true, instance_id: "inst-abc" });
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    render(
+      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Run this branch/i }));
+    });
+
+    const stopBtn = await screen.findByRole("button", { name: /Stop preview/i });
+    await act(async () => {
+      fireEvent.click(stopBtn);
+    });
+
+    await waitFor(() =>
+      expect(stopRunMock).toHaveBeenCalledWith("inst-abc"),
+    );
   });
 });
