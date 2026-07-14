@@ -43,3 +43,20 @@ def resolve_project_key(
     if remote:
         return f"git:{normalize_remote(remote)}"
     return f"slug:{_slug(Path(project_path).name)}"
+
+
+def safe_resolve_project_key(
+    project_path: str,
+    _remote_getter: Callable[[str], str | None] = _git_remote,
+) -> str | None:
+    """Resolve a project key without surfacing failures.
+
+    Wraps `resolve_project_key` in a catch-all so call sites that must not
+    fail-open (e.g. env-injection / audit rows in spawn_session) can pass a
+    `None` project_key instead of letting the bare exception escape. Returns
+    `None` on any failure; never raises.
+    """
+    try:
+        return resolve_project_key(project_path, _remote_getter=_remote_getter)
+    except Exception:
+        return None

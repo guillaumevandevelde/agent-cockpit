@@ -28,7 +28,7 @@ from app.config import settings
 from app.kanban.dep_resolver import meets_dep_prerequisites
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
-from app.kanban.project_key import resolve_project_key
+from app.kanban.project_key import resolve_project_key, safe_resolve_project_key
 from app.kanban.service import (
     get_card,
     get_column_default_model,
@@ -401,7 +401,7 @@ async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
         async with AsyncSessionLocal() as db:
             paths = (await db.execute(select(Project.path))).scalars().all()
             target = next(
-                (p for p in paths if _safe_resolve_key(p) == project_key), None
+                (p for p in paths if safe_resolve_project_key(p) == project_key), None
             )
             if target is None:
                 return
@@ -422,13 +422,6 @@ async def _sync_sandcastle_enabled(project_key: str, enabled: bool) -> None:
                 await db.commit()
     except Exception:
         logger.exception("failed to sync sandcastle enabled for %s", project_key)
-
-
-def _safe_resolve_key(path: str) -> str | None:
-    try:
-        return resolve_project_key(path)
-    except Exception:
-        return None
 
 
 async def get_ship_mode(session, project_key: str) -> str:
@@ -1327,7 +1320,7 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         # Per-project env-injectie in spawn_session`). Uses the safe
         # helper — a project without a git remote still spawns, just
         # without a `COCKPIT_PROJECT_KEY` to audit against.
-        project_key = _safe_resolve_key(repo)
+        project_key = safe_resolve_project_key(repo)
 
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
@@ -2184,7 +2177,7 @@ async def _provider_for_cwd(cwd: str) -> str | None:
     if target is None:
         return None
     project_path, session_name = target
-    project_key = _safe_resolve_key(project_path)
+    project_key = safe_resolve_project_key(project_path)
     if project_key is None:
         return None
 
@@ -2231,7 +2224,7 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
     if target is None:
         return False
     project_path, session_name = target
-    project_key = _safe_resolve_key(project_path)
+    project_key = safe_resolve_project_key(project_path)
     if project_key is None:
         return False
 
@@ -2343,7 +2336,7 @@ async def post_agent_status_comment(cwd: str, text: str) -> bool:
     if target is None:
         return False
     project_path, session_name = target
-    project_key = _safe_resolve_key(project_path)
+    project_key = safe_resolve_project_key(project_path)
     if project_key is None:
         return False
 
@@ -3257,7 +3250,7 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
     """
     from app.kanban.db import KanbanSessionLocal
 
-    project_key = _safe_resolve_key(project_path)
+    project_key = safe_resolve_project_key(project_path)
     if project_key is None:
         return make_worktree_transport(skip_permissions=True)
 
@@ -3305,7 +3298,7 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
         # Resolve project_key for the audit log when the directory is a
         # registered project root. Falls back to None on failure so the
         # resume still works; the audit hook will skip logging in that case.
-        project_key = _safe_resolve_key(directory)
+        project_key = safe_resolve_project_key(directory)
         result = spawn_session(
             cli_id,
             options,
