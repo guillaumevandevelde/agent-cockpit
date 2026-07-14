@@ -336,9 +336,9 @@ async def test_hook_event_limit_notification_pauses_only_affected_provider(monke
 
     # Patch the kanban DB the hook talks to so it sees our test card. The
     # cwd's project path is a stub -- the hook only uses it via
-    # _provider_for_cwd -> _safe_resolve_key, which we monkeypatch too.
+    # _provider_for_cwd -> safe_resolve_project_key, which we monkeypatch too.
     monkeypatch.setattr(
-        "app.kanban.dispatch._safe_resolve_key", lambda path: PK,
+        "app.kanban.dispatch.safe_resolve_project_key", lambda path: PK,
     )
 
     transport = ASGITransport(app=app)
@@ -388,7 +388,7 @@ async def test_hook_event_limit_notification_falls_back_to_global_pause_when_no_
     monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
 
     monkeypatch.setattr(
-        "app.kanban.dispatch._safe_resolve_key", lambda path: PK,
+        "app.kanban.dispatch.safe_resolve_project_key", lambda path: PK,
     )
 
     transport = ASGITransport(app=app)

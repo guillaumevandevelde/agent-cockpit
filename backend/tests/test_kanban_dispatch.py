@@ -906,7 +906,9 @@ async def test_get_transport_for_project_uses_meta_sandcastle(monkeypatch):
     async def _noop(project_key, enabled):
         return None
     monkeypatch.setattr(dispatch, "_sync_sandcastle_enabled", _noop)
-    monkeypatch.setattr(dispatch, "_safe_resolve_key", lambda p: PK)
+    monkeypatch.setattr(
+        "app.kanban.dispatch.safe_resolve_project_key", lambda p: PK
+    )
     async with KanbanSessionLocal() as s:
         await dispatch.set_default_transport(s, PK, "sandcastle")
         await s.commit()
@@ -916,7 +918,9 @@ async def test_get_transport_for_project_uses_meta_sandcastle(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_transport_for_project_defaults_worktree(monkeypatch):
-    monkeypatch.setattr(dispatch, "_safe_resolve_key", lambda p: PK)
+    monkeypatch.setattr(
+        "app.kanban.dispatch.safe_resolve_project_key", lambda p: PK
+    )
     t = await dispatch.get_transport_for_project("/any/path")
     assert t is not dispatch.sandcastle_transport  # a worktree transport callable
 
@@ -2500,7 +2504,9 @@ async def test_move_limited_session_to_resume_moves_matching_card(monkeypatch):
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
          mock.patch.object(
              session_recovery, "_resolve_resume_target",
              return_value=("sess-live", "proj-folder"),
@@ -2541,7 +2547,9 @@ async def test_move_limited_session_sets_scheduled_at_from_parsed_reset(monkeypa
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
          mock.patch.object(
              session_recovery, "_resolve_resume_target",
              return_value=("sess-live-2", "proj-folder"),
@@ -2581,7 +2589,9 @@ async def test_move_limited_session_to_resume_posts_comment_with_reset_time(monk
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
          mock.patch.object(
              session_recovery, "_resolve_resume_target",
              return_value=("sess-live-3", "proj-folder"),
@@ -2623,7 +2633,9 @@ async def test_move_limited_session_to_resume_posts_fallback_comment_when_no_res
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
          mock.patch.object(
              session_recovery, "_resolve_resume_target",
              return_value=("sess-live-4", "proj-folder"),
@@ -2660,7 +2672,9 @@ async def test_move_limited_session_to_resume_no_comment_when_move_fails(monkeyp
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
          mock.patch.object(
              session_recovery, "_resolve_resume_target", return_value=None,
          ):
@@ -2699,7 +2713,9 @@ async def test_move_limited_session_to_resume_returns_false_when_no_matching_car
         await _make_card(s, title="unrelated", column="engineer")
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
         result = await dispatch.move_limited_session_to_resume(
             "/p/.claude/worktrees/k-no-such-session",
         )
@@ -2713,7 +2729,9 @@ async def test_move_limited_session_to_resume_returns_false_when_project_key_unr
     before touching the kanban DB at all."""
     import unittest.mock as mock
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=None):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=None
+    ):
         result = await dispatch.move_limited_session_to_resume(
             "/p/.claude/worktrees/k-live-0002",
         )
@@ -2744,7 +2762,9 @@ async def test_move_limited_session_to_resume_handles_backlog_card(monkeypatch):
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
          mock.patch.object(
              session_recovery, "_resolve_resume_target",
              return_value=("sess-backlog", "proj-folder"),
@@ -2783,7 +2803,9 @@ async def test_move_limited_session_to_resume_handles_impediment_card(monkeypatc
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK), \
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
          mock.patch.object(
              session_recovery, "_resolve_resume_target",
              return_value=("sess-imp", "proj-folder"),
@@ -4427,7 +4449,9 @@ async def test_post_agent_status_comment_writes_to_claimed_card(monkeypatch):
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
         result = await dispatch.post_agent_status_comment(
             "/p/.claude/worktrees/k-bg-0001", "Session reported completion",
         )
@@ -4480,7 +4504,9 @@ async def test_post_agent_status_comment_returns_false_when_no_matching_card(mon
         await _make_card(s, title="unrelated", column="engineer")
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
         result = await dispatch.post_agent_status_comment(
             "/p/.claude/worktrees/k-no-such-session", "Session reported completion",
         )
@@ -4493,7 +4519,9 @@ async def test_post_agent_status_comment_returns_false_when_project_key_unresolv
     """Unresolvable project path -> bail out before touching the DB."""
     import unittest.mock as mock
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=None):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=None
+    ):
         result = await dispatch.post_agent_status_comment(
             "/p/.claude/worktrees/k-unknown-0001", "Session is waiting for input",
         )
@@ -4524,7 +4552,9 @@ async def test_post_agent_status_comment_skips_cards_in_terminal_columns(monkeyp
             )
             await s.commit()
 
-        with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+        with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
             result = await dispatch.post_agent_status_comment(
                 f"/p/.claude/worktrees/k-term-{terminal_col}",
                 "Session reported completion",
@@ -4743,7 +4773,9 @@ async def test_provider_for_cwd_returns_column_default_for_matching_session(monk
         )
         await s.commit()
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
         resolved = await dispatch._provider_for_cwd(
             "/p/.claude/worktrees/k-prov-0001",
         )
@@ -4758,7 +4790,9 @@ async def test_provider_for_cwd_returns_none_for_non_worktree_cwd(monkeypatch):
     fallback path stays consistent."""
     import unittest.mock as mock
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
         resolved = await dispatch._provider_for_cwd("/home/me/some-project")
 
     assert resolved is None
@@ -4775,7 +4809,9 @@ async def test_provider_for_cwd_returns_none_when_no_card_claims_session(monkeyp
 
     monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
 
-    with mock.patch.object(dispatch, "_safe_resolve_key", return_value=PK):
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
         resolved = await dispatch._provider_for_cwd(
             "/p/.claude/worktrees/k-prov-nonexistent",
         )
