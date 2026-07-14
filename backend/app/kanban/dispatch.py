@@ -1668,9 +1668,16 @@ async def _cleanup_stuck_session(
     await _clear_stale_resume_fields(session, card=card, project_key=project_key)
     failures = await _bump_dispatch_failures(session, card=card, project_key=project_key)
     if failures >= MAX_DISPATCH_FAILURES:
+        # We already captured the pane (the rate-limit pattern that
+        # triggered this branch), so thread it into the impediment comment.
+        # `_move_to_impediment_after_repeated_failures` truncates to a
+        # single 300-char line, mirroring `_cleanup_stuck_session`'s own
+        # pane-snippet pattern below. See kanban card
+        # 5ec5a68013da4422b0a49fb2731cb8a7.
         await _move_to_impediment_after_repeated_failures(
             session, card=card, project_key=project_key,
             session_name=session_name, failures=failures,
+            last_error=pane_content,
         )
     else:
         logger.info(
@@ -1993,7 +2000,7 @@ async def _run_card(
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
                                  cli_id=cli_id, provider=provider, model=effective_model)
-    except Exception:
+    except Exception as exc:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,
             entity_id=card.id, payload={},
@@ -2008,9 +2015,14 @@ async def _run_card(
         await _clear_stale_resume_fields(session, card=card, project_key=project_key)
         failures = await _bump_dispatch_failures(session, card=card, project_key=project_key)
         if failures >= MAX_DISPATCH_FAILURES:
+            # Thread `str(exc)` into the impediment comment so the operator
+            # sees the actual error (`tmux new-session failed: command too
+            # long`, etc.) without diving into the backend logs. See kanban
+            # card 5ec5a68013da4422b0a49fb2731cb8a7.
             await _move_to_impediment_after_repeated_failures(
                 session, card=card, project_key=project_key,
                 session_name=name, failures=failures,
+                last_error=str(exc),
             )
         else:
             await apply_operation(
@@ -2539,6 +2551,7 @@ async def _reset_dispatch_failures(session, *, card, project_key: str) -> None:
 
 async def _move_to_impediment_after_repeated_failures(
     session, *, card, project_key: str, session_name: str, failures: int,
+    last_error: str | None = None,
 ) -> None:
     """Once a card hits MAX_DISPATCH_FAILURES with no successful run in between,
     move it to Impediment instead of retrying again — a card that can never
@@ -2546,23 +2559,49 @@ async def _move_to_impediment_after_repeated_failures(
     --resume worktree, ...) needs a human, not an infinite retry loop burning
     dispatch ticks.
 
+    ``last_error`` (optional) is the most recent spawn error, when known —
+    typically ``str(exc)`` from the synchronous spawn exception in ``_run_card``
+    (the ``tmux new-session failed: command too long`` case that motivated
+    kanban card 5ec5a68013da4422b0a49fb2731cb8a7), or captured tmux pane
+    content for the rate-limit path in ``_cleanup_stuck_session``. Truncated
+    to a single line and 300 chars so the activity-feed comment stays
+    readable without scrolling — mirrors the pane-snippet pattern in
+    ``_cleanup_stuck_session``. When ``last_error`` is None (e.g. the
+    dead-on-arrival reaper path, where the session was already gone before
+    we could capture anything), the comment falls back to the legacy
+    "Check the backend logs" hint so operators still know where to look.
+
     Tags the card with the ``error`` label so the board can visually distinguish
     a *technical* dispatch failure (rendered red in the UI) from a card that a
     human deliberately parked in Impediment for a decision. The comment itself
     carries a structured ``[dispatch-failure]`` prefix so the per-card
     classification in `service.impediment_status_for_card` can detect this
     state deterministically (a substring on prose would be fragile)."""
+    if last_error:
+        # Collapse to a single line and cap at 300 chars — mirrors the
+        # pane-snippet pattern in `_cleanup_stuck_session` (line ~1689).
+        # 300 chars is large enough for a ValueError + message but small
+        # enough to keep the comment from dominating the activity feed;
+        # a runaway traceback still produces a single readable line.
+        sanitized = last_error.replace("\r", " ").replace("\n", " ")
+        if len(sanitized) > 300:
+            sanitized = sanitized[:297] + "..."
+        error_clause = f" Last spawn error: `{sanitized}`."
+        log_hint = ""
+    else:
+        error_clause = ""
+        log_hint = " Check the backend logs for the actual spawn error."
+
     await apply_operation(
         session, op_type="comment", entity_type="comment",
         project_key=project_key, entity_id=card.id,
         payload={"text": (
             f"[dispatch-failure] Session `{session_name}` failed to dispatch "
             f"{failures} times in a row — moved to Impediment instead of "
-            "retrying again. This usually means the dispatch target is broken "
-            "(a stale --resume worktree, a missing sandcastle config, ...) "
-            "rather than the task itself failing. Check the backend logs for "
-            "the actual spawn error, fix the underlying issue, then "
-            "redispatch."
+            f"retrying again.{error_clause} This usually means the dispatch "
+            f"target is broken (a stale --resume worktree, a missing "
+            f"sandcastle config, ...) rather than the task itself failing."
+            f"{log_hint} Fix the underlying issue, then redispatch."
         )},
     )
     labels = list(card.labels or [])

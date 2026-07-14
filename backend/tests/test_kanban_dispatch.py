@@ -3631,6 +3631,124 @@ async def test_repeated_synchronous_spawn_failures_move_to_impediment():
 
 
 @pytest.mark.asyncio
+async def test_synchronous_spawn_failure_comment_includes_last_error():
+    """When a synchronous spawn exception (str(exc)) trips
+    MAX_DISPATCH_FAILURES, the auto-move comment must include the actual
+    error message — not just the generic "Check the backend logs" hint —
+    so triage doesn't need a logs-dive. Verifies kanban card
+    5ec5a68013da4422b0a49fb2731cb8a7 ("Impediment-comment toont echte
+    spawn-error niet")."""
+    transport = RecordingTransport(fail=True)
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="explode-with-error", column="To Resume")
+        await s.commit()
+
+    for _ in range(dispatch.MAX_DISPATCH_FAILURES):
+        async with KanbanSessionLocal() as s:
+            with pytest.raises(RuntimeError):
+                await dispatch.dispatch_project(
+                    s, project_key=PK, project_path="/p", transport=transport,
+                )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, card.id)
+    assert card.column == "Impediment"
+    failure_comments = [
+        op.payload["text"] for op in activity
+        if op.op_type == "comment"
+        and op.payload["text"].startswith("[dispatch-failure]")
+    ]
+    assert failure_comments, "no dispatch-failure auto-move comment posted"
+    # RecordingTransport raises `RuntimeError("tmux exploded")` so str(exc)
+    # is "tmux exploded" — the comment must carry it (not just the legacy
+    # "check the logs" hint) for the operator to triage in one read.
+    assert "tmux exploded" in failure_comments[-1]
+    # The structured prefix must remain intact — `impediment_status_for_card`
+    # uses it to classify the card as dispatch_failed (not needs_answer).
+    assert failure_comments[-1].startswith("[dispatch-failure]")
+
+
+@pytest.mark.asyncio
+async def test_synchronous_spawn_failure_comment_truncates_long_error(monkeypatch):
+    """A pathological exception (10 KB of noise) still produces a
+    single-line, length-capped comment — the activity feed stays
+    readable, and a runaway traceback can't dominate the thread."""
+    class LoudTransport(RecordingTransport):
+        def __call__(self, **kwargs):
+            self.calls.append(kwargs)
+            # 1000-char message — the truncation caps the comment at 300.
+            raise ValueError("boom: " + ("x" * 1000))
+
+    transport = LoudTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="loud-explode", column="To Resume")
+        await s.commit()
+
+    for _ in range(dispatch.MAX_DISPATCH_FAILURES):
+        async with KanbanSessionLocal() as s:
+            with pytest.raises(ValueError):
+                await dispatch.dispatch_project(
+                    s, project_key=PK, project_path="/p", transport=transport,
+                )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, card.id)
+    assert card.column == "Impediment"
+    failure_comments = [
+        op.payload["text"] for op in activity
+        if op.op_type == "comment"
+        and op.payload["text"].startswith("[dispatch-failure]")
+    ]
+    assert failure_comments, "no dispatch-failure auto-move comment posted"
+    # The 300-char cap keeps the comment from absorbing a runaway exception
+    # verbatim; the "..." marker tells the reader it's truncated.
+    assert "..." in failure_comments[-1]
+
+
+@pytest.mark.asyncio
+async def test_reaper_dead_on_arrival_impediment_keeps_legacy_fallback():
+    """The reap path (`_release_dead_claim`'s dead-on-arrival branch)
+    doesn't see the original spawn exception — the session was spawned
+    successfully, then died. Without a captured pane the comment must
+    keep the legacy "Check the backend logs" hint so operators know where
+    to look. Bounds the no-last-error branch of `_move_to_impediment_after_..`."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="reap-fallback", column="engineer")
+        # Pre-arm dispatch_failures so the *next* do-a reap pushes the card
+        # past MAX_DISPATCH_FAILURES instead of just bumping the counter.
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"dispatch_failures":
+                                     dispatch.MAX_DISPATCH_FAILURES - 1},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-reap-fallback"},
+        )
+        await s.commit()
+        await _backdate_claim(s, cid, dispatch.DEAD_ON_ARRIVAL_SECONDS - 5)
+        await s.commit()
+        await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK), live_sessions=set())
+        await s.commit()
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, cid)
+    assert card.column == "Impediment"
+    failure_comments = [
+        op.payload["text"] for op in activity
+        if op.op_type == "comment"
+        and op.payload["text"].startswith("[dispatch-failure]")
+    ]
+    assert failure_comments, "no dispatch-failure auto-move comment posted"
+    # Reap path has no last_error → falls back to the legacy hint.
+    assert "Check the backend logs" in failure_comments[-1]
+
+
+@pytest.mark.asyncio
 async def test_synchronous_spawn_failure_clears_stale_resume_fields(monkeypatch):
     # The card has resume_session_id set, so get_transport_for_card always picks
     # the resume transport over the `transport` passed to dispatch_project (see
@@ -4117,6 +4235,59 @@ async def test_reaper_stuck_session_repeated_failures_move_to_impediment(monkeyp
     # tagged so the board renders it red — a technical dispatch failure, not a
     # human-parked impediment (see dispatch.ERROR_LABEL / CardItem.tsx)
     assert dispatch.ERROR_LABEL in (card.labels or [])
+
+
+@pytest.mark.asyncio
+async def test_reaper_stuck_session_impediment_comment_includes_pane(monkeypatch):
+    """When a 429 rate-limit session trips MAX_DISPATCH_FAILURES, the
+    dispatch-failure auto-move comment must surface the captured pane
+    content (`API Error: 429 …`) so the operator sees the actual rate-
+    limit reason — not just "Check the backend logs". See kanban card
+    5ec5a68013da4422b0a49fb2731cb8a7."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    monkeypatch.setattr(d, "session_registry", reg)
+    monkeypatch.setattr(
+        d, "_capture_pane_content",
+        lambda name, *, lines=20: "API Error: 429 rate limit reached",
+    )
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: None)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="repeat-429-with-pane", column="engineer")
+        await s.commit()
+
+    for _ in range(dispatch.MAX_DISPATCH_FAILURES):
+        reg.clear_spawn("k-imp-0002")
+        reg.mark_spawned("k-imp-0002")
+        clock.advance(200)
+        async with KanbanSessionLocal() as s:
+            await apply_operation(
+                s, op_type="claim", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"claimed_by": "agent:k-imp-0002"},
+            )
+            await s.commit()
+            await dispatch.reap_stale_claims(
+                s, project_key=PK, cards=await list_cards(s, PK),
+                live_sessions={"k-imp-0002"}, project_path="/p",
+            )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, cid)
+    assert card.column == "Impediment"
+    failure_comments = [
+        op.payload["text"] for op in activity
+        if op.op_type == "comment"
+        and op.payload["text"].startswith("[dispatch-failure]")
+    ]
+    assert failure_comments, "no dispatch-failure auto-move comment posted"
+    assert "API Error: 429" in failure_comments[-1]
 
 
 def test_capture_pane_content_returns_pane_text(monkeypatch):
