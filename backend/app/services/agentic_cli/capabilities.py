@@ -28,6 +28,7 @@ CAPABILITY_KEYS = (
     "doctor",
     "backup",
     "restore",
+    "headless_run",
 )
 SUPPORTED_STATES = {"supported", "read_only", "write_capable"}
 
@@ -61,6 +62,7 @@ AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "doctor": capability("unsupported", "Doctor", "Claude Code does not expose provider doctor diagnostics."),
         "backup": capability("write_capable", "Backup", "Claude Code backup and restore workflows are available."),
         "restore": capability("write_capable", "Restore", "Claude Code backup restore workflows are available."),
+        "headless_run": capability("supported", "Headless Structured Events", "Claude Code exposes a headless structured-event stream via `claude -p --output-format stream-json`, mapped onto the ACP-isomorphic event model."),
     },
     "codex-cli": {
         "config": capability("write_capable", "Configuration", "Safe Codex TOML settings can be viewed and edited."),
@@ -83,6 +85,7 @@ AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "doctor": capability("read_only", "Doctor", "Codex doctor diagnostics are available read-only."),
         "backup": capability("read_only", "Backup", "Codex export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic Codex restore is refused without a stable provider-owned restore API."),
+        "headless_run": capability("supported", "Headless Structured Events", "Codex exposes a headless JSONL event stream via `codex exec --json`, mappable onto the ACP-isomorphic event model."),
     },
     "mimo-code": {
         "config": capability("write_capable", "Configuration", "MiMoCode configuration files can be viewed and edited."),
@@ -105,6 +108,7 @@ AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "doctor": capability("unsupported", "Doctor", "MiMoCode does not expose provider doctor diagnostics."),
         "backup": capability("read_only", "Backup", "MiMoCode export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic MiMoCode restore is refused without a stable provider-owned restore API."),
+        "headless_run": capability("unknown", "Headless Structured Events", "MiMoCode headless structured-event support has not been verified against the ACP-isomorphic event model."),
     },
     "open-code": {
         "config": capability("write_capable", "Configuration", "OpenCode JSON configuration can be viewed and edited."),
@@ -127,6 +131,7 @@ AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "doctor": capability("unsupported", "Doctor", "OpenCode does not expose provider doctor diagnostics."),
         "backup": capability("read_only", "Backup", "OpenCode export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic OpenCode restore is refused without a stable provider-owned restore API."),
+        "headless_run": capability("supported", "Headless Structured Events", "OpenCode exposes a headless event stream via its `opencode serve` event API, mappable onto the ACP-isomorphic event model."),
     },
     "copilot-cli": {
         "config": capability("unsupported", "Configuration", "Copilot CLI configuration is detected but not editable in this build."),
@@ -149,6 +154,7 @@ AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "doctor": capability("unsupported", "Doctor", "Copilot CLI does not expose provider doctor diagnostics."),
         "backup": capability("unsupported", "Backup", "Copilot CLI backup/export is not supported in this build."),
         "restore": capability("unsupported", "Restore", "Copilot CLI restore is not supported in this build."),
+        "headless_run": capability("unsupported", "Headless Structured Events", "Copilot CLI does not expose a documented headless structured-event mode."),
     },
 }
 

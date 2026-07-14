@@ -204,7 +204,8 @@ Daarom is de beslissing nadrukkelijk **additief, geen migratie**:
    (message-chunk / tool-call / plan-update / permission-request / usage-result / error) zodat
    een latere ACP-backed implementatie hetzelfde schema hergebruikt. *Acceptance:* de
    capability-matrix classificeert per CLI de headless-modus; het geëmitteerde event-model is
-   gedocumenteerd en ACP-isomorf. *Voorwaarde voor kaart 3.*
+   gedocumenteerd en ACP-isomorf. *Voorwaarde voor kaart 3.* **→ geïmplementeerd:**
+   [`structured-events-schema.md`](./structured-events-schema.md).
 
 3. **[spike] Prototype headless stream-json-transport (Claude) achter `SpawnTransport`.**
    (= §6 kaart 1, verrijkt) Draai één autonoom-gedispatchte executor-kaart via `claude -p
