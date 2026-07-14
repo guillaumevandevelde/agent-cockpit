@@ -312,6 +312,44 @@ Elke laag vangt de fouten van de vorige. Vandaag ontbreken [A] (gedeeltelijk —
 - Een apart `security_audit`-endpoint (`GET /api/v1/security/audit?project_key=…&since=…`) dat de security-events als leesbare stream teruggeeft. Geen schrijf-API; alleen de activity-feed schrijft.
 - Geen SIEM-integratie in MVP — alleen lokaal leesbaar.
 
+**Implementatie (F1, geleverd):**
+
+De `security_audit`-tabel leeft in `backend/claude_registry.db` (de app-DB, niet `kanban.db`) — security-data heeft eigen retentie en mag niet mengen met feature-activiteit. De tabel heeft de volgende shape:
+
+| kolom | type | rol |
+|---|---|---|
+| `id` | int pk | autoincrement |
+| `kind` | string(64), indexed | enum: `skip_permissions_flip`, `transport_change`, `autodispatch_change`, `secrets_put`, `secrets_delete`, `env_inject`, `sandcastle_config_change`, `run_start`, `run_stop`, `security_profile_change` |
+| `project_key` | string(512), indexed | scope van de actie (foreign-key-achtig naar het project) |
+| `actor` | string(256) | wie heeft de actie gedaan (`dispatch-api`, `run-service`, `secrets-api`, `sandcastle-api`, `security-profile-api`) |
+| `payload_ref` | JSON | **enkel referenties** (naam, before/after, session-of-instance, env_var_names, …) — nooit een secret-waarde. Een sentinel-check weigert rijen waarvan de payload een bekende secret-prefix (`sk_`, `ghp_`, `xox`, `AKIA`, `AIza`, `ya29.`) bevat. |
+| `at` | DateTime(timezone=True), indexed | UTC; samengestelde index `(project_key, at)` voor de project-tijdlijn-query |
+
+**Endpoint** — `GET /api/v1/security/audit`:
+
+```
+?project_key=<key>&kind=<enum>&since=<iso>&until=<iso>&limit=<1..1000>
+```
+
+Antwoord: `{"entries": [...], "total": <pre-limit>, "limit": <effective>}`. Alleen lezen; geen POST/PUT/DELETE. Filters componeren met AND; limit klemt op `MAX_LIMIT=1000`.
+
+**Invulpunten** — schrijven gebeurt uitsluitend via deze productie-paden, elk via `security_audit_service.record(...)` (best-effort: een gefaalde audit faalt nooit de onderliggende actie):
+
+| Invulpunt | `kind` | Payload-sleutels | Broncode |
+|---|---|---|---|
+| `set_skip_permissions` (kanban) | `skip_permissions_flip` | `enabled` | `backend/app/kanban/dispatch.py` |
+| `set_default_transport` (kanban) | `transport_change` | `before`, `after` | `backend/app/kanban/dispatch.py` |
+| `set_autodispatch` (kanban) | `autodispatch_change` | `enabled` | `backend/app/kanban/dispatch.py` |
+| `SecretStore.put` (REST) | `secrets_put` | `name` | `backend/app/api/v1/secrets.py` |
+| `SecretStore.delete` (REST) | `secrets_delete` | `name` | `backend/app/api/v1/secrets.py` |
+| `spawn_session` env-inject | `env_inject` | `session_or_instance`, `runtime`, `env_var_names` (nooit values) | `backend/app/services/runs/spawn.py` |
+| `RunService.start` | `run_start` | idem | `backend/app/services/run_service.py` |
+| `RunService.stop` | `run_stop` | idem | `backend/app/services/run_service.py` |
+| `SandcastleService.update_config` / `toggle_config` | `sandcastle_config_change` | `changed: {field: {before, after}}` | `backend/app/services/sandcastle_service.py` |
+| `SecurityProfileService.upsert` / `patch` (risk-class transitie) | `security_profile_change` | `field`, `before`, `after` | `backend/app/services/security_profile_service.py` |
+
+**Out-of-scope (bewust):** SIEM-export, lange-termijn-retentie, externe audit-systemen. De endpoint blijft lokaal leesbaar; aggregatie buiten de cockpit is een latere facet.
+
 ## 5. Gefaseerde aanpak + trade-offs
 
 ### 5.1 Drie fasen, bewust klein gehouden

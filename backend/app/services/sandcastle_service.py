@@ -12,6 +12,8 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models.sandcastle import SandcastleConfig, SandcastleRun
+from app.models.security_audit import SecurityAuditKind
+from app.services.security_audit_service import record as audit_record
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +224,9 @@ class SandcastleService:
                 config = SandcastleConfig(project_path=project_path)
                 session.add(config)
 
+            # Snapshot the changed fields *before* the write so the audit
+            # row carries the delta, not just the post-state.
+            before = {k: getattr(config, k, None) for k in updates if hasattr(config, k)}
             for key, value in updates.items():
                 if hasattr(config, key):
                     setattr(config, key, value)
@@ -229,6 +234,21 @@ class SandcastleService:
             config.updated_at = datetime.now(UTC)
             await session.commit()
             await session.refresh(config)
+
+            changed = {
+                k: {"before": before.get(k), "after": getattr(config, k, None)}
+                for k in updates
+                if hasattr(config, k) and before.get(k) != getattr(config, k, None)
+            }
+            if changed:
+                await audit_record(
+                    session,
+                    kind=SecurityAuditKind.SANDCASTLE_CONFIG_CHANGE,
+                    project_key=project_path,
+                    actor="sandcastle-api",
+                    payload_ref={"changed": changed},
+                )
+                await session.commit()
             return config
 
     async def toggle_config(self, config_id: int) -> SandcastleConfig:
@@ -241,10 +261,24 @@ class SandcastleService:
             if not config:
                 raise ValueError(f"Config {config_id} not found")
 
+            before_enabled = config.enabled
             config.enabled = not config.enabled
             config.updated_at = datetime.now(UTC)
             await session.commit()
             await session.refresh(config)
+
+            await audit_record(
+                session,
+                kind=SecurityAuditKind.SANDCASTLE_CONFIG_CHANGE,
+                project_key=config.project_path,
+                actor="sandcastle-api",
+                payload_ref={
+                    "changed": {
+                        "enabled": {"before": before_enabled, "after": config.enabled},
+                    },
+                },
+            )
+            await session.commit()
             return config
 
     async def list_configs(self) -> list[SandcastleConfig]:

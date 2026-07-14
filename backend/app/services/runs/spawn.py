@@ -28,31 +28,80 @@ _spawned_sessions: dict[str, dict] = {}
 # `[security][D] Per-project env-injectie in spawn_session`.
 _DEFAULT_RUNTIME = "worktree"
 
-# Audit-log sink for security-relevant spawn events. Today this is a
-# no-op (no `security_audit` table yet — that's follow-up #10); once
-# that lands the implementation swaps to writing one row per spawn
-# with the names of injected vars. The contract here is the migration
-# surface: callers should not depend on this hook returning anything
-# (always callable, never raises), and var *names* are the only
-# stable identifier (no secret values).
+# Audit-log sink for security-relevant spawn events. Persists one row per
+# invocation to the ``security_audit`` table; best-effort by design —
+# callers must not depend on this hook returning anything (always
+# callable, never raises) and var *names* are the only stable identifier
+# (no secret values).
+#
+# The function is **sync** because it lives in a sync call-site
+# (``spawn_session`` runs tmux via subprocess, not in an await chain).
+# The actual DB write is dispatched to the running event loop via
+# ``asyncio.ensure_future``; if no loop is running (sync tooling,
+# test fixtures without an async context), the write is dropped — the
+# ``logger.info`` line is the contract for that case.
+#
+# The function also still emits the structured ``logger.info`` line that
+# ``test_runs_spawn_env_isolation`` and the grep-style tooling rely on,
+# so an upgrade to a real table doesn't drop the log signal.
 def _record_audit(
     project_key: str | None,
     runtime: str | None,
     session_name: str,
     env_var_names: list[str],
+    kind: str = "env_inject",
 ) -> None:
-    """Log an env-injection event. No-op until follow-up #10 lands."""
+    """Insert one ``security_audit`` row for an env-inject / run-start / run-stop."""
     if not project_key:
         # Without a project_key we have no scope to audit against; skip
-        # rather than emit a row that's orphaned in the future table.
+        # rather than emit a row that's orphaned in the table.
         return
     logger.info(
-        "env_inject project_key=%s runtime=%s session=%s vars=%s",
+        "%s project_key=%s runtime=%s session=%s vars=%s",
+        kind,
         project_key,
         runtime or "-",
         session_name,
         sorted(env_var_names),
     )
+    try:
+        import asyncio
+
+        from app.database import AsyncSessionLocal
+        from app.models.security_audit import SecurityAuditKind
+        from app.services.security_audit_service import record
+
+        async def _do_record() -> None:
+            async with AsyncSessionLocal() as db:
+                await record(
+                    db,
+                    kind=SecurityAuditKind(kind),
+                    project_key=project_key,
+                    actor="run-service",
+                    payload_ref={
+                        "session_or_instance": session_name,
+                        "runtime": runtime,
+                        "env_var_names": sorted(env_var_names),
+                    },
+                )
+                await db.commit()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            # Inside an event loop — schedule without blocking the
+            # originating sync call. Tests can monkeypatch this helper
+            # directly (see test_runs_spawn_env_isolation) when they
+            # need to capture the audit payload without a DB.
+            loop.create_task(_do_record())
+    except Exception:
+        logger.exception(
+            "security_audit insert failed (kind=%s project_key=%s)",
+            kind,
+            project_key,
+        )
 
 
 def _clean_extra_env(extra_env: dict[str, str] | None) -> dict[str, str]:

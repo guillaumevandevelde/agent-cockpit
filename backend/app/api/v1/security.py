@@ -16,10 +16,18 @@ Behavioural notes:
 """
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.security_audit import SecurityAuditKind
+from app.models.security_audit_schemas import (
+    SecurityAuditEntry,
+    SecurityAuditListResponse,
+)
 from app.models.security_profile_schemas import (
     SecurityProfileDeleteResponse,
     SecurityProfilePatch,
@@ -27,6 +35,8 @@ from app.models.security_profile_schemas import (
     SecurityProfileUpsert,
     to_response,
 )
+from app.services.security_audit_service import DEFAULT_LIMIT, MAX_LIMIT
+from app.services.security_audit_service import query as audit_query
 from app.services.security_profile_service import SecurityProfileService
 
 router = APIRouter(prefix="/security", tags=["Security"])
@@ -82,4 +92,61 @@ async def delete_profile(
         project_path=project_path,
         deleted=deleted,
         recreated_default=to_response(recreated),
+    )
+
+
+@router.get("/audit", response_model=SecurityAuditListResponse)
+async def list_audit(
+    project_key: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=512,
+            description="Filter to a single project_key (git:host/owner/repo or slug:…)",
+        ),
+    ] = None,
+    kind: Annotated[
+        SecurityAuditKind | None,
+        Query(description="Filter to a single kind; must be one of the enum values"),
+    ] = None,
+    since: Annotated[
+        datetime | None,
+        Query(description="ISO8601 lower bound on ``at`` (inclusive)"),
+    ] = None,
+    until: Annotated[
+        datetime | None,
+        Query(description="ISO8601 upper bound on ``at`` (inclusive)"),
+    ] = None,
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=MAX_LIMIT,
+            description=f"Page size; default {DEFAULT_LIMIT}, hard cap {MAX_LIMIT}",
+        ),
+    ] = DEFAULT_LIMIT,
+    db: AsyncSession = Depends(get_db),
+) -> SecurityAuditListResponse:
+    """Read-only stream of security-audit events, newest first.
+
+    Filters compose with AND semantics. ``total`` is the count *after*
+    filters but *before* ``limit``, so the UI can render "showing N of M"
+    without a second query.
+
+    There is intentionally no POST/PUT/DELETE handler for this table —
+    rows are only inserted by the invulpunten listed in
+    ``docs/cockpit/veilig-bouwen-en-uitleveren.md`` §6 follow-up #10.
+    """
+    rows, total = await audit_query(
+        db,
+        project_key=project_key,
+        kind=kind,
+        since=since,
+        until=until,
+        limit=limit,
+    )
+    return SecurityAuditListResponse(
+        entries=[SecurityAuditEntry.model_validate(r) for r in rows],
+        total=total,
+        limit=limit,
     )

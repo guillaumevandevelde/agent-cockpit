@@ -325,9 +325,10 @@ async def test_start_writes_audit_with_command_no_env_values(monkeypatch, projec
     monkeypatch.setattr(
         run_service_module,
         "_record_audit",
-        lambda project_key, transport, instance_id, env_keys: captured.append(
+        lambda project_key, transport, instance_id, env_keys, **kw: captured.append(
             {"project_key": project_key, "transport": transport,
-             "instance_id": instance_id, "env_keys": env_keys}
+             "instance_id": instance_id, "env_keys": env_keys,
+             "kind": kw.get("kind")}
         ),
     )
 

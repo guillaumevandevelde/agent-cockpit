@@ -238,12 +238,13 @@ def test_spawn_session_audit_log_records_names_without_values(monkeypatch, tmp_p
 
     audit_calls = []
 
-    def fake_audit(project_key, runtime, session_name, env_var_names):
+    def fake_audit(project_key, runtime, session_name, env_var_names, **kw):
         audit_calls.append({
             "project_key": project_key,
             "runtime": runtime,
             "session_name": session_name,
             "env_var_names": sorted(env_var_names),
+            "kind": kw.get("kind"),
         })
 
     # Direct attribute swap; the module reads `spawn._record_audit` lazily
