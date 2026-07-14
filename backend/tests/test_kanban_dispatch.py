@@ -3118,7 +3118,11 @@ class TestBuildShipInstructions:
         for mode in ("direct", "pull-request"):
             instructions = dispatch._build_ship_instructions(mode)
             # (a) diff probe scoped to frontend/ against the branch base
-            assert "git diff --name-only origin/master -- frontend/" in instructions
+            # (merge-base variant — origin/master alone false-positives when
+            # master advanced on frontend/ since the branch was cut; card cd7ff20b)
+            assert "git merge-base HEAD origin/master" in instructions
+            assert "git diff --name-only \"$BASE\"" in instructions
+            assert "git diff --name-only origin/master -- frontend/" not in instructions
             # untracked frontend files count too (fresh files not yet committed)
             assert "git ls-files --others --exclude-standard -- frontend/" in instructions
             # (b) the actual gate command survives, guarded by the probe

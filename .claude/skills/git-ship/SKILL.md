@@ -35,7 +35,7 @@ the branch diff:
 
 ```bash
 git fetch origin -q
-FRONTEND_TOUCHED=$( { git diff --name-only origin/master -- frontend/; git ls-files --others --exclude-standard -- frontend/; } | head -1 )
+FRONTEND_TOUCHED=$( { BASE=$(git merge-base HEAD origin/master); git diff --name-only "$BASE" -- frontend/; git ls-files --others --exclude-standard -- frontend/; } | head -1 )
 if [ -n "$FRONTEND_TOUCHED" ]; then
   # Fresh worktree has no node_modules (gitignored) — install once so the
   # checks don't die with `eslint: not found`. Guard on missing node_modules
