@@ -35,7 +35,9 @@ from app.kanban.service import (
     get_column_default_provider,
     list_cards,
 )
-from app.services.agentic_cli.provider_env import PROVIDER_ANTHROPIC
+from app.services.agentic_cli.provider_env import (
+    PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
+)
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.scheduling.session_registry import session_registry
 from app.utils.timeutils import ensure_aware
@@ -440,6 +442,89 @@ async def set_ship_mode(session, project_key: str, mode: str) -> None:
         session.add(KanbanMeta(key=key, value=mode))
     else:
         row.value = mode
+    await session.flush()
+
+
+# ---- active subscription override (fase 0 / quick win) -------------------
+#
+# A single board-wide pin that routes ALL auto-dispatch onto one subscription,
+# regardless of per-column or per-card defaults. Stored in KanbanMeta so the
+# existing key-value table carries it without a schema migration. Precedence
+# (in _run_card): override > card.column_overrides[col] > column.default_*.
+# `None` = exactly today's behaviour — see test_active_subscription_override.
+
+SUBSCRIPTION_OVERRIDE_PREFIX = "subscription_override:"
+_ALLOWED_OVERRIDE_PROVIDERS = (
+    PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
+)
+
+
+async def get_active_subscription_override(
+    session, project_key: str,
+) -> dict | None:
+    """Return the board-wide subscription override for `project_key`, or None.
+
+    Shape when set: ``{"provider": "anthropic|bedrock|minimax", "model": str|None}``.
+    ``model`` is optional — an override that pins only the provider leaves the
+    model to fall through to the column default / card model / persona
+    frontmatter chain (same shape as a partial column-override, just one level
+    higher in the precedence)."""
+    row = await session.get(
+        KanbanMeta, SUBSCRIPTION_OVERRIDE_PREFIX + project_key,
+    )
+    if row is None:
+        return None
+    try:
+        parsed = json.loads(row.value)
+    except (TypeError, ValueError):
+        # Corrupt row — treat as no override rather than wedging dispatch.
+        logger.warning(
+            "corrupt subscription_override row for %s; ignoring", project_key,
+        )
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    provider = parsed.get("provider")
+    if provider not in _ALLOWED_OVERRIDE_PROVIDERS:
+        return None
+    model = parsed.get("model")
+    return {"provider": provider, "model": model if isinstance(model, str) else None}
+
+
+async def set_active_subscription_override(
+    session, project_key: str, override: dict | None,
+) -> None:
+    """Persist (or clear, when `None`) the board-wide subscription override.
+
+    ``override`` is validated against the allow-list before storage; an
+    unknown provider raises ValueError so the caller surfaces a 422 instead
+    of writing a row that the dispatcher would then refuse to honour.
+
+    Storing `None` deletes the row entirely so a follow-up read sees no
+    override and falls through to the column-default precedence — keeping
+    the "unset = exact pre-feature behaviour" contract testable."""
+    key = SUBSCRIPTION_OVERRIDE_PREFIX + project_key
+    if override is None:
+        row = await session.get(KanbanMeta, key)
+        if row is not None:
+            await session.delete(row)
+            await session.flush()
+        return
+    provider = override.get("provider")
+    if provider not in _ALLOWED_OVERRIDE_PROVIDERS:
+        raise ValueError(
+            f"unknown provider: {provider!r}; "
+            f"expected one of {_ALLOWED_OVERRIDE_PROVIDERS}",
+        )
+    model = override.get("model")
+    if model is not None and not isinstance(model, str):
+        raise ValueError("override.model must be a string or null")
+    value = json.dumps({"provider": provider, "model": model if model else None})
+    row = await session.get(KanbanMeta, key)
+    if row is None:
+        session.add(KanbanMeta(key=key, value=value))
+    else:
+        row.value = value
     await session.flush()
 
 
@@ -1967,6 +2052,16 @@ async def _run_card(
     else:
         persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
+    # Active-subscription-override (fase 0 of
+    # docs/cockpit/subscription-flexibiliteit-analyse.md): a board-wide pin that
+    # routes every dispatch onto one subscription regardless of column or card
+    # defaults. Stored as a single KanbanMeta row keyed by project_key. When
+    # set, it wins over BOTH the per-card column_overrides and the column
+    # defaults below — the explicit human "route everything to X" intent
+    # dominates any narrower per-card configuration. None = no override (the
+    # default; preserves today's dispatch behaviour exactly, see
+    # test_active_subscription_override).
+    global_override = await get_active_subscription_override(session, project_key)
     # A per-card override for this phase's resolved target column (persona) wins
     # over the column defaults for BOTH provider and model. Because analyst and
     # executor phases both reach this point with their own `target_agent`, each
@@ -1978,16 +2073,24 @@ async def _run_card(
     # The target column decides which subscription/vendor the spawn authenticates
     # against (see KanbanColumn.default_provider); unset means the dispatcher's own
     # default, the Anthropic subscription. A per-card override for this column
-    # takes precedence over the column default.
+    # takes precedence over the column default; the board-wide active-subscription
+    # override (when set) takes precedence over BOTH.
     provider = (
-        override_provider
+        (global_override or {}).get("provider")
+        or override_provider
         or await get_column_default_provider(session, project_key, target_agent)
         or PROVIDER_ANTHROPIC
     )
     persona_model = _read_persona_model(project_path, f"{target_agent}.md")
     column_default_model = await get_column_default_model(session, project_key, target_agent)
+    # Model precedence mirrors provider: global override > column_override >
+    # column.default_model > persona frontmatter. The global override only sets
+    # the model when one is supplied (`None` falls through), so a
+    # provider-only pin leaves the existing model chain intact — same shape as
+    # a partial column-override, just one level higher in the precedence.
+    effective_model_override = (global_override or {}).get("model") or override_model
     effective_model = _effective_model(
-        override_model, card.model, column_default_model, persona_model,
+        effective_model_override, card.model, column_default_model, persona_model,
         provider=provider,
     )
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,

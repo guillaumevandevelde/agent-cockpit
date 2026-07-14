@@ -270,6 +270,20 @@ class DefaultTransportRequest(BaseModel):
     transport: str
 
 
+class ActiveSubscriptionOverrideRequest(BaseModel):
+    """Body for POST /api/v1/kanban/subscription-override.
+
+    ``override`` is the board-wide pin (fase 0 of
+    docs/cockpit/subscription-flexibiliteit-analyse.md): routes every dispatch
+    onto one subscription regardless of column/card defaults. ``None`` clears
+    the pin so dispatch falls back to today's per-column behaviour. The model
+    field is optional — a provider-only pin lets the column-default model
+    still apply (mirrors the per-card column_override shape).
+    """
+    project_key: str
+    override: dict | None
+
+
 class DispatchRequest(BaseModel):
     project_path: str
     agent: str | None = None  # override: use this agent instead of card's agent
