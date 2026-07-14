@@ -13,6 +13,12 @@ Het zwaartepunt van de **actieve** ontwikkeling ligt nu bij de kanban-/multi-age
 - **Multi-agent kanban** — analyst-fase splitst parent-kaarten op in kind-kaarten met
   afhankelijkheids-DAG en plan-attachment; executors wachten op hun deps
   (`docs/cockpit/multi-agent-kanban.md`).
+- **Kanban string-conventies** — vast kolommen (`COLUMNS` vs `_DISPATCH_COLUMNS`),
+  comment-prefix-contract (`**Summary:**`/`**Impediment:**`/`**Resolution:**`/…),
+  deliverable-kinds (`pr`/`branch`/`commit`/`link`/`note`/`plan`/`plan_ref`/`spec`).
+  Lees vóór je een nieuwe vaste kolom introduceert of een Done/Impediment-comment
+  post: `docs/cockpit/kanban-conventions.md`. Validatiescript:
+  `scripts/check-kanban-conventions.sh`.
 - **Agent Mail** — cross-session berichten tussen willekeurige sessies met durable
   repo-identiteit en inspectable mailbox (`docs/cockpit/agent-mail-spec.md`).
 

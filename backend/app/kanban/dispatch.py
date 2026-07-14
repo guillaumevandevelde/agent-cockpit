@@ -1729,6 +1729,15 @@ def _live_sessions() -> set[str] | None:
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
 
 
+# Auto-dispatch scans ONLY this allow-list. Cards on any other column
+# (agent columns, Done, Impediment, …) are NEVER auto-dispatched; they
+# reach the agent only through explicit `report_impediment` → resume,
+# analyst-fase promotion, or `redispatch_card`. Extending this tuple is
+# not the way to "let a new column dispatch" — both the kanban-DB
+# (`COLUMNS` in schemas.py) and the frontend's `FIXED_COLUMNS` set stay
+# the source of truth for "what is a fixed column"; a column outside
+# this tuple is by definition not auto-dispatched. See
+# docs/cockpit/kanban-conventions.md §1 for the full convention map.
 _DISPATCH_COLUMNS = ("Backlog", "To Resume")  # new cards from Backlog, resumed cards from To Resume
 _PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
 
