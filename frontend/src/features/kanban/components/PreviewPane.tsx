@@ -82,6 +82,28 @@ export function PreviewPane({
             </div>
           </div>
         </div>
+      ) : instance.status === "stopped" ? (
+        // The bind no longer exists, so pointing an iframe at ``instance.url``
+        // just shows a browser "connection refused" tab — confusingly framed
+        // as the preview UI. Render a static status block instead and let
+        // the parent "Run this branch" control re-spawn a fresh instance.
+        <div
+          className="flex items-start gap-2 text-xs text-muted-foreground"
+          data-testid="preview-stopped-message"
+        >
+          <Square
+            className="mt-0.5 h-4 w-4 shrink-0"
+            aria-hidden="true"
+            fill="currentColor"
+          />
+          <div>
+            <div className="font-medium">Preview stopped</div>
+            <div className="text-muted-foreground">
+              The instance has been torn down. Start a new run above to
+              preview the branch again.
+            </div>
+          </div>
+        </div>
       ) : (
         <iframe
           src={instance.url}
