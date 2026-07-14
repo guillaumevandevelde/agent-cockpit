@@ -1374,3 +1374,302 @@ def test_build_card_prompt_no_persona_no_override_section_breakage():
     # The ship workflow is intact
     assert "Ship (direct mode)" in prompt
     assert "merge --no-ff" in prompt
+
+
+# ---- Leaf-spike follow-up cards clause -------------------------------------
+# Continuation of the kanban card a9c27bee override. The override relaxed
+# Write/Edit so the leaf-spike could write its doc, but it said nothing about
+# the create_card/add_plan_attachment prohibitions carried over from the
+# analyst persona. Result: a leaf-spike session that recommends concrete
+# acceptance-criteria-level follow-up cards would leave them as §-prose in
+# the doc and move THIS card to Done — forcing a manual review round-trip
+# for what is mechanically deterministic work (kanban card 75b54887).
+#
+# The fix extends `_analyst_leaf_spike_override_note` with an explicit
+# follow-up cards clause that:
+#   (a) relaxes the create_card/add_plan_attachment prohibition for the
+#       leaf case (analogous to Write/Edit);
+#   (b) instructs: if the deliverable recommends concrete acceptance-
+#       criteria-level follow-ups, create them in the SAME session via
+#       create_card (+ add_plan_attachment when they form a DAG) BEFORE
+#       moving THIS card to Done;
+#   (c) carries the spam guards (acceptance-criteria level only,
+#       dedup-pass via list_cards, depends_on only on real contracts);
+#   (d) carries the scoped impediment-escape (report_impediment only for
+#       real unresolved product forks; responsible forks decided
+#       best-effort with the alternative preserved as a conditional card).
+#
+# Marker: "Leaf-spike follow-up cards clause" — greppable, mirrors the
+# existing "Analyst-leaf-spike override" marker pattern from kanban card
+# a9c27bee so test-side scanning is consistent.
+
+LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER = "Leaf-spike follow-up cards clause"
+
+
+def _leaf_spike_clause_block(prompt: str) -> str:
+    """Return the text of the leaf-spike follow-up cards clause block from
+    a rendered prompt (from the clause marker through the override's
+    `\\n\\n---\\n\\n` terminator). Empty string when the clause isn't in
+    the prompt."""
+    if LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER not in prompt:
+        return ""
+    start = prompt.index(LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER)
+    end_marker = "\n\n---\n\n"
+    end = prompt.find(end_marker, start)
+    if end == -1:
+        # Clause rendered without the trailing separator (defensive — every
+        # current path includes it). Return the rest of the prompt so the
+        # assertion still inspects something meaningful.
+        return prompt[start:]
+    return prompt[start:end]
+
+
+def test_build_card_prompt_leaf_spike_contains_follow_up_cards_clause():
+    """A leaf analyst spike (work_type='analysis' + no analyst_agent_id,
+    dispatched in executor phase) MUST contain the follow-up cards clause.
+    The clause is what makes the leaf-spike session autonomous over its
+    own recommendations — without it, the recommendations stay as
+    §-prose and the autonomy contract is silently violated.
+    """
+    card = _FakeCard(
+        title="Spike: follow-up cards",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden:\n"
+        "- Zelf code wijzigen in het werkveld."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    assert LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER in prompt, (
+        f"Leaf-spike follow-up cards clause marker "
+        f"{LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER!r} missing from leaf-spike "
+        f"prompt. The clause is required so leaf-spike sessions create "
+        f"follow-up cards in the same session instead of leaving "
+        f"recommendations as §-prose (kanban card 75b54887)."
+    )
+
+
+def test_build_card_prompt_regular_executor_no_follow_up_cards_clause():
+    """A regular executor card (work_type=feature, agent=engineer) must
+    NOT receive the leaf-spike follow-up cards clause. The clause is
+    specifically the relaxation of the analyst persona's create_card
+    prohibition for the leaf case — applying it to a non-leaf engineer
+    card would mean engineers start creating their own follow-up cards
+    (changing the executor/analyst contract), which is out of scope for
+    this card.
+    """
+    card = _FakeCard(
+        title="Feature: add button",
+        description="",
+        work_type="feature",
+        agent="engineer",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = "You are an engineer. Write and ship."
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    assert LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER not in prompt
+
+
+def test_build_card_prompt_real_analyst_no_follow_up_cards_clause():
+    """A real analyst card (analyst_agent_id set, dispatched in
+    phase='analyst') must NOT receive the leaf-spike follow-up cards
+    clause. The classic analyst persona already has its own
+    create_card/add_plan_attachment contract (that's the analyst's
+    primary job). Duplicating that contract via the leaf-spike clause
+    would create contradictory instructions — the persona says
+    "create kind-cards via add_plan_attachment", the leaf-spike clause
+    says "create follow-up cards via create_card" — and the two are
+    subtly different operations.
+    """
+    card = _FakeCard(
+        title="Multi-agent parent",
+        description="",
+        work_type=None,
+        agent=None,
+        analyst_agent_id="claude-code",
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden:\n"
+        "- Zelf code wijzigen in het werkveld."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="analyst",
+    )
+
+    assert LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER not in prompt
+
+
+def test_build_card_prompt_leaf_spike_follow_up_clause_has_spam_guards():
+    """The follow-up cards clause must contain the three spam guards:
+
+    1. Acceptance-criteria level only — speculation stays as §-prose.
+    2. Dedup-pass via list_cards (Backlog/Impediment), comment on match
+       instead of duplicating — same discipline as the flag-problem skill.
+    3. depends_on only on a real contract — pure sequence without a
+       contract is not a dependency.
+
+    Without these guards, the relaxed create_card permission would
+    spawn Backlog-spam (every leaf-spike dumps its brainstorm as N
+    cards) and reverse the autonomy principle into over-escalation.
+    """
+    card = _FakeCard(
+        title="Spike: with guards",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden: geen Write/Edit."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    clause_block = _leaf_spike_clause_block(prompt)
+    assert clause_block, (
+        "Leaf-spike follow-up cards clause marker missing from prompt — "
+        "test_build_card_prompt_leaf_spike_contains_follow_up_cards_clause "
+        "should have failed first; check test ordering or merge conflicts."
+    )
+
+    # Guard 1: acceptance-criteria level only.
+    assert (
+        "acceptance-criteria" in clause_block.lower()
+        or "acceptance criteria" in clause_block.lower()
+    ), (
+        "Follow-up cards clause must require acceptance-criteria-level "
+        "scope to prevent Backlog-spam (speculative ideas stay as prose)."
+    )
+
+    # Guard 2: dedup-pass first via list_cards.
+    assert "list_cards" in clause_block, (
+        "Follow-up cards clause must require a dedup-pass via list_cards "
+        "before creating, with `comment` on match instead of duplicating."
+    )
+    assert "comment" in clause_block.lower(), (
+        "Follow-up cards clause must instruct `comment` on a dedup match "
+        "(same discipline as the flag-problem skill)."
+    )
+
+    # Guard 3: depends_on only on a real contract.
+    assert "depends_on" in clause_block, (
+        "Follow-up cards clause must address depends_on — only on a real "
+        "contract, not pure sequence without a contract."
+    )
+
+
+def test_build_card_prompt_leaf_spike_follow_up_clause_relaxes_create_card():
+    """The follow-up cards clause must explicitly RELAX the
+    create_card/add_plan_attachment prohibition for the leaf case
+    (analogous to how the existing override relaxes Write/Edit). The
+    relaxation is the load-bearing part: without an explicit
+    permission, the agent reads the persona's "Verboden" and skips
+    card creation, defeating the entire clause.
+    """
+    card = _FakeCard(
+        title="Spike: relaxed create_card",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden: geen Write/Edit."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    clause_block = _leaf_spike_clause_block(prompt)
+    assert clause_block
+
+    # Both create_card and add_plan_attachment must be referenced — the
+    # decision doc prescribes create_card for standalone follow-ups and
+    # add_plan_attachment when the cards form a DAG.
+    assert "create_card" in clause_block
+    assert "add_plan_attachment" in clause_block
+    # The relaxation language must be explicit — paraphrase markers:
+    # "relaxed", "permitted", or "allowed" in conjunction with the verbs.
+    clause_lower = clause_block.lower()
+    assert any(
+        marker in clause_lower
+        for marker in ("relaxed", "relax", "permitted", "allowed", "toegestaan")
+    ), (
+        "Follow-up cards clause must explicitly state that create_card / "
+        "add_plan_attachment is RELAXED for the leaf case — a vague "
+        "mention leaves the agent reading the persona's Verboden and "
+        "skipping card creation."
+    )
+
+
+def test_build_card_prompt_leaf_spike_follow_up_clause_has_scoped_impediment_escape():
+    """The follow-up cards clause must contain the scoped impediment-
+    escape: report_impediment(options=[…]) is reserved for an
+    UNRESOLVED PRODUCT FORK that changes WHAT the cards should be
+    (the autonomy-eerst pattern from the decision doc — kanban card
+    75b54887 §5.3). Responsible forks are decided best-effort with
+    the alternative preserved as a conditional card. Without this
+    scope, the clause over-corrects: leaf-spike sessions escalate
+    every minor fork to a human, re-institutionalising the autonomy
+    violation in reverse.
+    """
+    card = _FakeCard(
+        title="Spike: scoped impediment",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden: geen Write/Edit."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    clause_block = _leaf_spike_clause_block(prompt)
+    assert clause_block
+
+    # The escape mechanism: report_impediment must be referenced.
+    assert "report_impediment" in clause_block, (
+        "Follow-up cards clause must reference report_impediment so the "
+        "leaf-spike session knows the scoped escape exists for real "
+        "unresolved product forks."
+    )
+
+    # The scope: best-effort + conditional must be present so the agent
+    # has a default other than escalating every fork.
+    clause_lower = clause_block.lower()
+    assert (
+        "best-effort" in clause_lower or "best effort" in clause_lower
+    ), (
+        "Follow-up cards clause must mention best-effort as the default "
+        "for responsible forks (escalate only the knot you cannot "
+        "responsibly cut)."
+    )
+    assert "conditional" in clause_lower, (
+        "Follow-up cards clause must mention preserving the alternative "
+        "as a conditional card (the autonomy-eerst pattern: escalate "
+        "the unresolved knot, not the routine fork)."
+    )

@@ -803,6 +803,16 @@ def _analyst_leaf_spike_override_note() -> str:
     override is just a safety-net pointer so a fresh session doesn't miss
     that modus 2 is in effect.
 
+    As of kanban card 75b54887 the override also carries a **Leaf-spike
+    follow-up cards clause** that relaxes the ``create_card`` /
+    ``add_plan_attachment`` prohibition (analogous to the Write/Edit
+    relaxation) and instructs the leaf-spike session to create concrete,
+    acceptance-criteria-level follow-up cards in the SAME session before
+    moving THIS card to Done. Without this clause, leaf-spike
+    recommendations stayed as §-prose and required a manual review
+    round-trip to materialise as cards — an autonomy violation (kanban
+    card 75b54887 §5).
+
     Lives as a separate helper (not inlined into ``build_card_prompt``) so
     the marker text is greppable in tests and the override contract is
     reviewable on its own.
@@ -817,6 +827,36 @@ def _analyst_leaf_spike_override_note() -> str:
         "artefact, commit, ship, attach the branch, move **THIS** card to "
         "Done. The `Verboden` prohibition is scoped to modus 1 and does NOT "
         "apply to this card.\n\n"
+        "### Leaf-spike follow-up cards clause\n"
+        "Unlike the classic analyst persona (modus 1), this leaf case "
+        "delegates execution back to **you** — which means the analyst's "
+        "`Verboden: zelf code wijzigen` extends only to *product code*. "
+        "**Kanban card creation is relaxed for this leaf case** "
+        "(analogous to the Write/Edit relaxation above): if your "
+        "deliverable recommends concrete, scoped vervolgtaken op "
+        "acceptance-criteria-niveau, create those in the **same session** "
+        "as Backlog cards via `create_card` (and `add_plan_attachment` "
+        "when they form a dependency DAG) **before** moving THIS card to "
+        "Done. The §-in-the-doc stays the human-readable justification; "
+        "the cards are the executable record.\n\n"
+        "**Guards against Backlog-spam** (apply unconditionally):\n"
+        "- **Acceptance-criteria level only** — a card requires a title "
+        "plus 2-5 zinnen acceptance criteria. Speculative/soft ideas stay "
+        "as §-prose in the doc, no card.\n"
+        "- **Dedup-pass first** — `list_cards` on Backlog/Impediment "
+        "before creating. On a match: `comment` on the existing card "
+        "instead of duplicating (same discipline as the `flag-problem` "
+        "skill).\n"
+        "- **`depends_on` only on a real contract** — child B waits on an "
+        "output of child A (e.g. A creates an abstraction B consumes). "
+        "Pure sequence without a contract is not a dependency.\n\n"
+        "**Scoped impediment-escape:** reserve "
+        "`report_impediment(options=[…])` for an **unresolved product "
+        "fork** that changes *what* the cards should be (e.g. multi-"
+        "vendor vs single-vendor subscription model). For responsible "
+        "forks you CAN decide best-effort: document the assumption and "
+        "preserve the alternative as a conditional spike-card. Escalate "
+        "only the knot you cannot responsibly cut.\n\n"
         "---\n\n"
     )
 
