@@ -14,6 +14,7 @@ from .codex_config import router as codex_config_router
 from .commands import router as commands_router
 from .config import router as config_router
 from .context import router as context_router
+from .deploy import router as deploy_router
 from .external_agent_mail import router as external_agent_mail_router
 from .files import router as files_router
 from .hooks import router as hooks_router
@@ -98,3 +99,4 @@ router.include_router(hosts_router, tags=["Hosts"])
 router.include_router(update_router)
 router.include_router(security_router)
 router.include_router(secrets_router, tags=["Secrets"])
+router.include_router(deploy_router)
