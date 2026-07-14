@@ -133,6 +133,42 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 - **Default iteration cap:** 3 — the loop is meant to drain a small
   batch, not to chew through a month of backlog.
 
+### `pytest-attr` — attribute pytest failures to engineer vs pre-existing
+
+- **Use when:** an engineer card touches `backend/` and the engineer
+  wants to know "is this `FAILED` mine or one of the ~15-20 pre-existing
+  failures on `origin/master`?" without running `git stash + pytest +
+  git stash pop` four extra times per session (the pain that motivated
+  kanban card 4c7c5346). Pairs with `scripts/pytest-baseline.sh` (one-
+  shot baseline capture) and `scripts/pytest-compare.sh` (current-vs-
+  baseline attribution).
+- **Runs:**
+  1. If `.claude/state/pytest-baseline.txt` is missing or older than
+     `--max-age-hours` (env `PYTEST_BASELINE_MAX_AGE_HOURS`, default 24),
+     run `scripts/pytest-baseline.sh` to refresh it on a clean detached
+     worktree of `origin/master`. No-op if a fresh cache already exists.
+  2. Run `scripts/pytest-compare.sh` to capture the current failure set
+     and classify each test as `pre-existing`, `NEW (your fault)`, or
+     `FIXED by your changes`.
+- **Clean when:** `pytest-compare.sh` exits 0 — every current failure
+  is also in the baseline (no new failures). Pre-existing + FIXED-only
+  diffs are fine; the loop's job is "did this card add any new reds?",
+  not "is master 100% green?".
+- **Blocked when:** `pytest-compare.sh` exits 1 — at least one `NEW`
+  failure. The attribution output is what the engineer triages; the
+  loop emits `<loop-blocked>` and the engineer fixes the named tests.
+- **Caveat — when NOT to use:** this preset overrides the shared-box
+  rationale that backend `pytest` is normally NOT run locally (see
+  `git-ship` step 2 / CLAUDE.md "No local pre-push gate"). It exists
+  for engineers who *choose* to debug their backend changes with a
+  local pytest run; CI's `quality.yml` is still the canonical backend
+  gate. Default to `verify` for the standard end-of-card gate; use
+  `pytest-attr` only when an engineer session is explicitly debugging
+  a failing test.
+- **Default iteration cap:** 3 — usually one pass is enough; more is
+  needed when the engineer is iterating on a fix (each pass reruns
+  pytest + comparison, which is fast since the baseline is cached).
+
 ## Per-iteration protocol
 
 ```
@@ -174,6 +210,7 @@ After `<loop-complete>` or `<loop-blocked>`:
 | Drain a batch of `code-review` findings on a small diff | `simplify` |
 | Sweep for one specific pattern across the worktree without changing anything | `investigate` |
 | Work through `[problem]` cards that match this card's scope | `flag-cycle` |
+| Attribute pytest failures to "yours" vs "pre-existing on master" | `pytest-attr` |
 
 If you're not sure, **start with `verify`** — it's the cheapest and the
 most universally applicable.
