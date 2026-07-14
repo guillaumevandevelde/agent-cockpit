@@ -716,11 +716,13 @@ def _is_analyst_leaf_spike(card) -> bool:
 
 def _analyst_leaf_spike_override_note() -> str:
     """Override note prepended to the persona preamble for leaf analyst
-    spikes. Explicitly relaxes the ``Verboden: geen Write/Edit`` prohibition
-    in analyst.md / ``ANALYST_PROMPT`` and reframes the task as "produce a
-    single deliverable (typically a decision doc), commit, ship, attach the
-    branch, move THIS card to Done" — matching the executor ship workflow
-    that follows in the prompt.
+    spikes. Points at the persona's own **Leaf design-deliverable** section
+    (which is the primary source of truth — kanban card c2b478ca) and
+    explicitly relaxes the ``Verboden: geen Write/Edit`` prohibition that
+    otherwise contradicts the executor ship workflow injected below the
+    persona. Kept short on purpose: the persona describes the contract, the
+    override is just a safety-net pointer so a fresh session doesn't miss
+    that modus 2 is in effect.
 
     Lives as a separate helper (not inlined into ``build_card_prompt``) so
     the marker text is greppable in tests and the override contract is
@@ -731,16 +733,11 @@ def _analyst_leaf_spike_override_note() -> str:
         "This card was dispatched in the **executor** phase (no "
         "`analyst_agent_id` configured), but the routing placed you in the "
         "analyst column via `work_type='analysis'` or `card.agent='analyst'`. "
-        "Because there is no multi-agent decomposition pipeline attached to "
-        "this card, **you are not running as the classic analyst** — the "
-        "standard `Verboden: geen Write/Edit` prohibition in the persona "
-        "below is **relaxed for this card**.\n\n"
-        "Your job here is a **leaf spike**: produce a single deliverable "
-        "(typically a decision doc in `docs/cockpit/`). Follow the "
-        "session-end workflow below exactly as for an engineer card — write "
-        "the doc, commit, ship (merge/PR), attach the branch as the "
-        "deliverable, then move **THIS** card to Done with a summary "
-        "describing what you produced.\n\n"
+        "**Read the *Leaf design-deliverable* section of the persona below "
+        "before doing anything** — that's your modus-2 contract: write the "
+        "artefact, commit, ship, attach the branch, move **THIS** card to "
+        "Done. The `Verboden` prohibition is scoped to modus 1 and does NOT "
+        "apply to this card.\n\n"
         "---\n\n"
     )
 
