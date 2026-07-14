@@ -1103,3 +1103,41 @@ describe("CardDrawer preview control — stop", () => {
     );
   });
 });
+
+describe("CardDrawer preview control — backend reports stopped", () => {
+  it("does not render the iframe when the polled run is stopped", async () => {
+    const startMock = appsApi.startRun as ReturnType<typeof vi.fn>;
+    const getRunMock = appsApi.getRun as ReturnType<typeof vi.fn>;
+    const commentMock = kanbanApi.comment as ReturnType<typeof vi.fn>;
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    startMock.mockResolvedValue(makeRunInstance({ status: "starting" }));
+    // First poll still says "starting"; all subsequent polls say "stopped"
+    // — the backend has externally torn the run down (or another tab hit
+    // DELETE). The PreviewPane must not point an iframe at the dead URL.
+    getRunMock
+      .mockResolvedValueOnce(makeRunInstance({ status: "starting" }))
+      .mockResolvedValue(makeRunInstance({ status: "stopped" }));
+    commentMock.mockResolvedValue({ ...baseCard });
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    render(
+      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Run this branch/i }));
+    });
+
+    // Wait for the polling tick to land on "stopped". The pane stays
+    // mounted (the run was attached) but the iframe must NOT be in the
+    // DOM and a clear "stopped" message is rendered in its place.
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("preview-status-badge").getAttribute("data-status"),
+      ).toBe("stopped"),
+    );
+    expect(screen.queryByTestId("preview-pane-iframe")).toBeNull();
+    expect(screen.getByTestId("preview-stopped-message")).not.toBeNull();
+  });
+});
