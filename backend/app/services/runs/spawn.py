@@ -14,7 +14,11 @@ from app.config import settings
 from app.services.agentic_cli import get_agentic_cli
 from app.services.agentic_cli.base import SpawnCommandOptions
 from app.services.agentic_cli.claude_code import ClaudeCodeCli
-from app.services.agentic_cli.provider_env import _clean, build_provider_env
+from app.services.agentic_cli.provider_env import (
+    _record_audit,
+    build_provider_env,
+    build_spawn_env,
+)
 from app.services.host_service import build_ssh_base
 from app.utils.git_ref import sanitize_git_branch_name
 
@@ -28,102 +32,12 @@ _spawned_sessions: dict[str, dict] = {}
 # `[security][D] Per-project env-injectie in spawn_session`.
 _DEFAULT_RUNTIME = "worktree"
 
-# Audit-log sink for security-relevant spawn events. Persists one row per
-# invocation to the ``security_audit`` table; best-effort by design —
-# callers must not depend on this hook returning anything (always
-# callable, never raises) and var *names* are the only stable identifier
-# (no secret values).
-#
-# The function is **sync** because it lives in a sync call-site
-# (``spawn_session`` runs tmux via subprocess, not in an await chain).
-# The actual DB write is dispatched to the running event loop via
-# ``asyncio.ensure_future``; if no loop is running (sync tooling,
-# test fixtures without an async context), the write is dropped — the
-# ``logger.info`` line is the contract for that case.
-#
-# The function also still emits the structured ``logger.info`` line that
-# ``test_runs_spawn_env_isolation`` and the grep-style tooling rely on,
-# so an upgrade to a real table doesn't drop the log signal.
-def _record_audit(
-    project_key: str | None,
-    runtime: str | None,
-    session_name: str,
-    env_var_names: list[str],
-    kind: str = "env_inject",
-) -> None:
-    """Insert one ``security_audit`` row for an env-inject / run-start / run-stop."""
-    if not project_key:
-        # Without a project_key we have no scope to audit against; skip
-        # rather than emit a row that's orphaned in the table.
-        return
-    logger.info(
-        "%s project_key=%s runtime=%s session=%s vars=%s",
-        kind,
-        project_key,
-        runtime or "-",
-        session_name,
-        sorted(env_var_names),
-    )
-    try:
-        import asyncio
-
-        from app.database import AsyncSessionLocal
-        from app.models.security_audit import SecurityAuditKind
-        from app.services.security_audit_service import record
-
-        async def _do_record() -> None:
-            async with AsyncSessionLocal() as db:
-                await record(
-                    db,
-                    kind=SecurityAuditKind(kind),
-                    project_key=project_key,
-                    actor="run-service",
-                    payload_ref={
-                        "session_or_instance": session_name,
-                        "runtime": runtime,
-                        "env_var_names": sorted(env_var_names),
-                    },
-                )
-                await db.commit()
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop is not None:
-            # Inside an event loop — schedule without blocking the
-            # originating sync call. Tests can monkeypatch this helper
-            # directly (see test_runs_spawn_env_isolation) when they
-            # need to capture the audit payload without a DB.
-            loop.create_task(_do_record())
-    except Exception:
-        logger.exception(
-            "security_audit insert failed (kind=%s project_key=%s)",
-            kind,
-            project_key,
-        )
-
-
-def _clean_extra_env(extra_env: dict[str, str] | None) -> dict[str, str]:
-    """Validate caller-supplied env values; reject control characters.
-
-    Mirrors ``_clean`` in ``provider_env``: any value containing ``\n``,
-    ``\r``, or ``\x00`` raises ``ValueError`` before it reaches tmux's
-    argv. An empty/None input returns an empty dict.
-    """
-    if not extra_env:
-        return {}
-    cleaned: dict[str, str] = {}
-    for key, value in extra_env.items():
-        if not isinstance(key, str) or not key:
-            raise ValueError("Environment key must be a non-empty string")
-        if not isinstance(value, str):
-            raise ValueError(f"Environment value for {key!r} must be a string")
-        # Reuse _clean for the value validation so the rule is one
-        # place to audit when tightening later.
-        _clean(value)
-        cleaned[key] = value
-    return cleaned
+# ``_record_audit`` is re-exported from ``provider_env`` (the sole
+# env-construction module) so existing import surfaces — ``run_service``
+# does ``from app.services.runs.spawn import _record_audit`` — keep
+# working without churn, and tests can still monkeypatch
+# ``spawn._record_audit`` to capture the payload.
+__all__ = ["_record_audit"]
 
 
 def _validate_directory(directory: str) -> str:
@@ -305,30 +219,27 @@ def spawn_session(
         cli_id=cli.id,
     )
 
-    # Build the explicit env dict for the spawned tmux session.
-    # NO ``os.environ.update`` — every var must come from an explicit,
-    # auditable input. Order: extras (project secrets) < provider env
-    # < cockpit context vars; later writes win on collision (which is
-    # fine: ``COCKPIT_*`` won't collide with provider/secrets vars).
+    # Build the explicit env dict for the spawned tmux session. Single
+    # entry point lives in ``provider_env.build_spawn_env``; the
+    # precedence (extras < provider_env < cockpit_*) and the control-char
+    # guard are owned there so the legacy ``cc_spawn`` path can't drift.
     effective_runtime = runtime if runtime is not None else _DEFAULT_RUNTIME
-    cleaned_extras = _clean_extra_env(extra_env)
-    merged_env: dict[str, str] = {}
-    merged_env.update(cleaned_extras)
-    merged_env.update(provider_env)
-    if project_key is not None:
-        merged_env["COCKPIT_PROJECT_KEY"] = project_key
-    if effective_runtime is not None:
-        merged_env["COCKPIT_RUNTIME"] = effective_runtime
+    spawn_env = build_spawn_env(
+        provider_env=provider_env,
+        extra_env=extra_env,
+        project_key=project_key,
+        runtime=effective_runtime,
+    )
 
     env_flags: list[str] = []
-    for key, value in merged_env.items():
+    for key, value in spawn_env.env.items():
         env_flags += ["-e", f"{key}={value}"]
 
     _record_audit(
         project_key=project_key,
         runtime=effective_runtime,
         session_name=name,
-        env_var_names=list(merged_env.keys()),
+        env_var_names=list(spawn_env.env.keys()),
     )
 
     if host_data:
@@ -375,7 +286,7 @@ def spawn_session(
         "host_alias": host_data["alias"] if host_data else None,
         "project_key": project_key,
         "runtime": effective_runtime,
-        "env_var_names": sorted(merged_env.keys()),
+        "env_var_names": spawn_env.names,
     }
 
     logger.info(
