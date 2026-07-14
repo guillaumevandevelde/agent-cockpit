@@ -45,6 +45,55 @@ eigen subagents (de `Task`-tool) binnen deze sessie, zodat de context behouden b
    preset `investigate` (read-only sweep) gebruikt worden. Verander
    nooit een test om een bug te maskeren.
 
+## Werkomgeving in worktree: venv & cwd-veiligheid
+
+Worktree-sessies (`.claude/worktrees/<branch>/`) hebben **geen lokale Python
+venv** — `.gitignore` sluit `venv/` uit en `scripts/install.sh` is hier nooit
+gedraaid. De enige venv is in de gedeelde hoofd-checkout
+(`/home/vdvgu/claude-cockpit/backend/venv`).
+
+### Backend tests/lint draaien — veilig patroon
+
+Gebruik de hoofd-venv's interpreter via **absoluut pad** terwijl je cwd in je
+worktree blijft. Bash start standaard in de worktree-root, dus een relatieve
+`cd backend` blijft binnen je worktree:
+
+```bash
+cd backend && /home/vdvgu/claude-cockpit/backend/venv/bin/python -m pytest tests/...
+/home/vdvgu/claude-cockpit/backend/venv/bin/ruff check backend/
+```
+
+Hierdoor ziet pytest de code van **jouw** worktree (niet van de gedeelde
+checkout), en kan geen enkel git-commando ooit per ongeluk op de
+hoofd-checkout landen. Hetzelfde patroon geldt voor elke andere repo-tooling
+(`cockpit.sh`, `pytest-baseline.sh`, …): draai het vanuit je worktree-cwd,
+niet vanuit de hoofd-checkout.
+
+### cwd-trap — git-mutaties op de verkeerde checkout
+
+Bash-cwd reset **niet** automatisch tussen tool-calls. Dat betekent: een
+`cd /home/vdvgu/claude-cockpit/...` in één `Bash`-call *blijft* hangen voor
+de rest van die call, maar een nieuwe `Bash`-call begint weer vanuit je
+worktree. De valkuil is dus **binnen één call**:
+`cd /home/vdvgu/claude-cockpit/backend && git stash` laat de `git stash`
+op de **gedeelde hoofd-checkout** landen — niet op jouw worktree. In een
+drukke sessie kan dat een andere tegelijk-draaiende sessie raken: haar
+werkboom verstoren, een merge-conflict veroorzaken die je niet aan jouw
+kaart kunt toeschrijven, of — in het slechtste geval — op `master` committen.
+
+Vuistregels:
+
+- **Nooit** `cd /home/vdvgu/claude-cockpit/...` in een worktree-sessie —
+  niet voor tests, niet voor tooling, niet "even tussendoor".
+- Run git altijd als `git -C <worktree>` of houd cwd binnen je worktree.
+- Run backend-tooling als
+  `/home/vdvgu/claude-cockpit/backend/venv/bin/{python,pytest,ruff}` vanuit
+  je worktree-cwd — geen `cd` naar de hoofd-checkout.
+
+(CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$TMP/m"`-patroon
+voor de merge-stap; dit is de algemene variant voor élke git-mutatie binnen
+een worktree-sessie.)
+
 ## Kaart bijwerken (VERPLICHT)
 
 Gebruik de `cockpit-kanban` MCP-tools om de kaart te sturen — er is **geen** apart
