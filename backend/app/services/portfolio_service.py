@@ -25,6 +25,7 @@ from app.kanban.models import KanbanCard, KanbanMeta, KanbanOp
 from app.kanban.project_key import resolve_project_key
 from app.kanban.stats import AGENT_CLAIM_PREFIX
 from app.models.database import Project
+from app.utils.timeutils import ensure_aware
 
 # Device-local autodispatch flag, stored in KanbanMeta as
 # ``autodispatch:<project_key>`` = "1" | "0". Mirrors dispatch.META_PREFIX;
@@ -79,15 +80,6 @@ def _bucket(column: str | None) -> str | None:
     return "doing"
 
 
-def _aware(dt: datetime) -> datetime:
-    """Coerce a naive DB timestamp to UTC so it compares with ``now(UTC)``.
-
-    SQLite drops tzinfo on write, so ``DateTime(timezone=True)`` rows read back
-    naive — mirror dispatch.py's ``replace(tzinfo=UTC)`` guard.
-    """
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
-
-
 def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt is not None else None
 
@@ -140,7 +132,7 @@ class PortfolioService:
             key = key_by_card.get(entity_id)
             if key is None:
                 continue
-            created_at = _aware(created_at)
+            created_at = ensure_aware(created_at)
             if last_activity.get(key) is None or created_at > last_activity[key]:
                 last_activity[key] = created_at
             payload = payload or {}
