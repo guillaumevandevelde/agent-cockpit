@@ -6,7 +6,7 @@ import subprocess
 import uuid
 from pathlib import Path
 
-from app.services.agentic_cli.provider_env import _clean
+from app.services.agentic_cli.provider_env import _record_audit, build_spawn_env
 from app.utils.git_ref import sanitize_git_branch_name
 
 logger = logging.getLogger(__name__)
@@ -18,44 +18,6 @@ _spawned_sessions: dict[str, dict] = {}
 # kwargs. See kanban card
 # `[security][D] Per-project env-injectie in spawn_session`.
 _DEFAULT_RUNTIME = "worktree"
-
-
-def _record_audit(
-    project_key: str | None,
-    runtime: str | None,
-    session_name: str,
-    env_var_names: list[str],
-) -> None:
-    """Audit-log sink for security-relevant spawn events.
-
-    No-op until follow-up #10 lands (``security_audit`` table). Same
-    surface as the same-named helper in ``services/runs/spawn.py`` —
-    the audit hook is the migration seam, not a feature of this card.
-    """
-    if not project_key:
-        return
-    logger.info(
-        "env_inject project_key=%s runtime=%s session=%s vars=%s",
-        project_key,
-        runtime or "-",
-        session_name,
-        sorted(env_var_names),
-    )
-
-
-def _clean_extra_env(extra_env: dict[str, str] | None) -> dict[str, str]:
-    """Reject control chars in caller-supplied env values (see spawn.py)."""
-    if not extra_env:
-        return {}
-    cleaned: dict[str, str] = {}
-    for key, value in extra_env.items():
-        if not isinstance(key, str) or not key:
-            raise ValueError("Environment key must be a non-empty string")
-        if not isinstance(value, str):
-            raise ValueError(f"Environment value for {key!r} must be a string")
-        _clean(value)
-        cleaned[key] = value
-    return cleaned
 
 
 def _resolve_project_directory(project_folder: str, session_id: str | None = None) -> str:
@@ -189,28 +151,28 @@ def spawn_session(
     if extra_args:
         command += extra_args
 
-    # Build the explicit env dict for the spawned tmux session.
-    # NO ``os.environ.update`` — every var must come from an explicit,
-    # auditable input. See kanban card
-    # `[security][D] Per-project env-injectie in spawn_session`.
+    # Build the explicit env dict for the spawned tmux session. Single
+    # entry point lives in ``provider_env.build_spawn_env`` — shares the
+    # extras-cleaning + cockpit-injection contract with the agent-bridge
+    # ``spawn.py`` so a security fix lands in both. No provider env here
+    # (the legacy CC-bridge doesn't have a provider abstraction).
     effective_runtime = runtime if runtime is not None else _DEFAULT_RUNTIME
-    cleaned_extras = _clean_extra_env(extra_env)
-    merged_env: dict[str, str] = {}
-    merged_env.update(cleaned_extras)
-    if project_key is not None:
-        merged_env["COCKPIT_PROJECT_KEY"] = project_key
-    if effective_runtime is not None:
-        merged_env["COCKPIT_RUNTIME"] = effective_runtime
+    spawn_env = build_spawn_env(
+        provider_env={},
+        extra_env=extra_env,
+        project_key=project_key,
+        runtime=effective_runtime,
+    )
 
     env_flags: list[str] = []
-    for key, value in merged_env.items():
+    for key, value in spawn_env.env.items():
         env_flags += ["-e", f"{key}={value}"]
 
     _record_audit(
         project_key=project_key,
         runtime=effective_runtime,
         session_name=name,
-        env_var_names=list(merged_env.keys()),
+        env_var_names=list(spawn_env.env.keys()),
     )
 
     # Spawn tmux session — tmux passes shell_command to $SHELL -c, so quote args
@@ -236,7 +198,7 @@ def spawn_session(
         "worktree_name": worktree_name or (name if mode == "worktree" else None),
         "project_key": project_key,
         "runtime": effective_runtime,
-        "env_var_names": sorted(merged_env.keys()),
+        "env_var_names": spawn_env.names,
     }
 
     logger.info("Spawned session %s in %s (mode=%s)", name, directory, mode)
