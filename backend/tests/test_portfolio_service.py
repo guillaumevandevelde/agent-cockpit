@@ -124,6 +124,10 @@ async def test_aggregate_per_project_and_totals(main_db):
     assert cockpit.totals.done_24h == 0
     assert cockpit.last_activity is not None
     assert cockpit.last_dispatch is not None  # agent claim on c3
+    # No portfolio_stale:* meta row was seeded for cockpit in this test —
+    # the stale field must default to False/None.
+    assert cockpit.stale is False
+    assert cockpit.stale_since is None
 
     app_a = by_name["app-a"]
     assert app_a.kind == "product"
@@ -131,6 +135,8 @@ async def test_aggregate_per_project_and_totals(main_db):
     assert app_a.totals.todo == 1
     assert app_a.totals.done_24h == 1  # a2 recent; a3 stale (48h) excluded
     assert app_a.last_dispatch is None  # no agent claim
+    assert app_a.stale is False
+    assert app_a.stale_since is None
 
     app_b = by_name["app-b"]
     assert app_b.totals.backlog == 0
@@ -168,3 +174,61 @@ async def test_overview_endpoint(main_db, monkeypatch):
         "cockpit", "app-a", "app-b", ORPHAN_KEY
     }
     assert body["totals"]["backlog"] == 3
+
+
+@pytest.mark.asyncio
+async def test_aggregate_stale_field(main_db):
+    """A ``portfolio_stale:*`` KanbanMeta row flags the project as stale.
+
+    Mirrors the dedup state ``app.kanban.stale_detection`` writes — the service
+    must read it instead of recomputing the threshold, so this seeds the meta
+    rows directly. ``cockpit`` has TWO dedup rows; the freshest should win.
+    """
+    await _seed(main_db)
+    ck = "git:github.com/x/cockpit"
+    ak = "git:github.com/x/app-a"
+    older = (datetime.now(UTC) - timedelta(hours=3)).isoformat()
+    newer = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    async with KanbanSessionLocal() as k:
+        k.add_all([
+            KanbanMeta(
+                key=f"portfolio_stale:{ck}:c1:last_posted_at", value=older,
+            ),
+            KanbanMeta(
+                key=f"portfolio_stale:{ck}:c2:last_posted_at", value=newer,
+            ),
+            # Garbage value (non-ISO): must not crash the aggregator. Other
+            # rows for the same project must still surface.
+            KanbanMeta(
+                key=f"portfolio_stale:{ak}:a1:last_posted_at", value="not-a-date",
+            ),
+        ])
+        await k.commit()
+
+    async with KanbanSessionLocal() as k:
+        overview = await PortfolioService(main_db, k).aggregate(key_resolver=_resolver)
+
+    by_name = {p.name: p for p in overview.projects}
+    cockpit = by_name["cockpit"]
+    assert cockpit.stale is True
+    assert cockpit.stale_since == newer
+
+    app_a = by_name["app-a"]
+    assert app_a.stale is False
+    assert app_a.stale_since is None
+
+    # And the endpoint round-trips it.
+    app.dependency_overrides[get_db] = lambda: main_db
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.get("/api/v1/portfolio/overview")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert r.status_code == 200, r.text
+    by_key = {p["name"]: p for p in r.json()["projects"]}
+    assert by_key["cockpit"]["stale"] is True
+    assert by_key["cockpit"]["stale_since"] == newer
+    assert by_key["app-a"]["stale"] is False
+    assert by_key["app-a"]["stale_since"] is None

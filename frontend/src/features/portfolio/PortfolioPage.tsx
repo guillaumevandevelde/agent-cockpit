@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Building2 } from 'lucide-react'
+import { AlertTriangle, Building2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -55,7 +55,21 @@ function ProjectRow({ project }: { project: PortfolioProject }) {
   return (
     <tr className="border-t hover:bg-muted/40">
       <td className="py-2 pr-3">
-        <div className="font-medium">{project.name}</div>
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{project.name}</span>
+          {project.stale && (
+            <Badge
+              variant="destructive"
+              className="gap-1"
+              data-testid="stale-badge"
+              title={`Stale — last flagged ${formatWhen(project.stale_since)}`}
+              aria-label={`Project is stale (last flagged ${formatWhen(project.stale_since)})`}
+            >
+              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+              stale
+            </Badge>
+          )}
+        </div>
         <div className="text-xs text-muted-foreground truncate max-w-[22rem]">
           {project.project_key}
         </div>
