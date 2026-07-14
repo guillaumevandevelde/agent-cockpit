@@ -1,0 +1,1 @@
+2026-07-14T15:37:35Z | preset=verify | iter=1 | ruff: clean (3 files) | pytest 17/17 apply-engine tests pass; frontend gate skipped (no frontend diff); backend full suite skipped per shared-box rationale (CI gate) | clean

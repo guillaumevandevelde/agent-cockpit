@@ -50,6 +50,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ...models.schemas import AgentCreate, SlashCommandCreate
+from ..agent_service import AgentService
+from ..command_service import CommandService
+from ..config_service import ConfigService
+from ..skills_registry_service import SkillsRegistryService
 from . import Blueprint
 
 logger = logging.getLogger(__name__)
@@ -274,10 +279,6 @@ class BlueprintApplyEngine:
                                target_label=_SETTINGS_REL_PATH):
             return
 
-        # Lazy import: keep the engine importable even when CRUD
-        # modules aren't available (e.g. packaging smoke tests).
-        from ..config_service import ConfigService
-
         ConfigService().update_settings(
             scope="project",
             settings=settings_dict,
@@ -312,10 +313,6 @@ class BlueprintApplyEngine:
         """
         if not blueprint.agents:
             return
-
-        # Lazy imports: keep the module importable in isolation.
-        from ...models.schemas import AgentCreate
-        from ..agent_service import AgentService
 
         for agent in blueprint.agents:
             target_rel = f".claude/agents/{agent.name}.md"
@@ -363,8 +360,6 @@ class BlueprintApplyEngine:
         if not blueprint.skills:
             return
 
-        from ..skills_registry_service import SkillsRegistryService
-
         for skill in blueprint.skills:
             result = SkillsRegistryService.install_skill(
                 source=skill.source,
@@ -403,9 +398,6 @@ class BlueprintApplyEngine:
         commands = getattr(blueprint, "commands", None) or []
         if not commands:
             return
-
-        from ...models.schemas import SlashCommandCreate
-        from ..command_service import CommandService
 
         for cmd in commands:
             target_rel = f".claude/commands/{cmd.name}.md"
