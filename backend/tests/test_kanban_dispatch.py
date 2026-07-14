@@ -322,6 +322,22 @@ def test_effective_model_precedence():
     assert dispatch._effective_model("", "", "", "") is None
 
 
+def test_effective_model_persona_fallback_suppressed_for_non_anthropic():
+    # A persona `model:` alias (e.g. "opus") is Anthropic-only. When the column
+    # routes to a non-Anthropic provider it must NOT leak in as --model, so the
+    # provider env's native model (e.g. MiniMax-M3) stays in effect.
+    assert dispatch._effective_model(None, None, None, "opus", provider="minimax") is None
+    assert dispatch._effective_model(None, None, None, "opus", provider="bedrock") is None
+    # Anthropic (or unknown/None provider) keeps the persona fallback.
+    assert dispatch._effective_model(None, None, None, "opus", provider="anthropic") == "opus"
+    assert dispatch._effective_model(None, None, None, "opus", provider=None) == "opus"
+    # Explicit column-default / card / override models still win for any provider —
+    # they may deliberately name a provider-native model.
+    assert dispatch._effective_model(None, None, "MiniMax-M3", "opus", provider="minimax") == "MiniMax-M3"
+    assert dispatch._effective_model(None, "MiniMax-M3", None, "opus", provider="minimax") == "MiniMax-M3"
+    assert dispatch._effective_model("MiniMax-M3", None, None, "opus", provider="minimax") == "MiniMax-M3"
+
+
 # ---- per-card column_overrides: model+provider per target column ----------
 
 @pytest.mark.asyncio

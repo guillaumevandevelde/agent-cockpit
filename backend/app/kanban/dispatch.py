@@ -470,14 +470,26 @@ def _read_persona_model(project_path: str, filename: str) -> str | None:
 
 def _effective_model(override_model: str | None, card_model: str | None,
                      column_default_model: str | None,
-                     persona_model: str | None) -> str | None:
+                     persona_model: str | None,
+                     provider: str | None = None) -> str | None:
     """Precedence: per-column override (`card.column_overrides[<target>].model`)
     > card.model > column.default_model > persona frontmatter `model:` > None
     (no --model flag, provider default applies). The per-column override is the
     most explicit intent the card author can express for a specific agent
     column, so it wins over the card-global `model`. Empty strings are treated
-    as unset, same as None."""
-    return override_model or card_model or column_default_model or persona_model or None
+    as unset, same as None.
+
+    `provider` gates the persona-frontmatter fallback: a persona's `model:` is an
+    Anthropic-subscription alias (e.g. `opus`), written before per-column provider
+    selection existed. When the column routes to a non-Anthropic provider
+    (minimax/bedrock), that alias is meaningless and — passed as `--model` — would
+    override the provider env's native model (`ANTHROPIC_MODEL=MiniMax-M3[1m]`),
+    silently running the wrong model against the wrong vendor. So the persona
+    fallback only applies for Anthropic (or when provider is unknown). The explicit
+    override/card/column-default models always win: those are deliberate choices
+    that may legitimately name a provider-native model."""
+    persona_fallback = persona_model if provider in (None, PROVIDER_ANTHROPIC) else None
+    return override_model or card_model or column_default_model or persona_fallback or None
 
 
 def _persona_for_card(project_path: str, card, column: str) -> str | None:
@@ -1870,6 +1882,7 @@ async def _run_card(
     column_default_model = await get_column_default_model(session, project_key, target_agent)
     effective_model = _effective_model(
         override_model, card.model, column_default_model, persona_model,
+        provider=provider,
     )
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         phase=phase,
