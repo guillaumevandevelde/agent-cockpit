@@ -3,6 +3,7 @@
 Patches KanbanSessionLocal in all modules so tests never touch the production DB.
 """
 import os
+import sys
 
 import pytest
 import pytest_asyncio
@@ -80,30 +81,54 @@ async def _cleanup_test_projects():
 
 @pytest_asyncio.fixture(autouse=True, scope="session")
 def _patch_kanban_db():
-    """Replace KanbanSessionLocal in all modules that import it."""
-    originals = {}
+    """Swap every ``KanbanSessionLocal`` / ``kanban_engine`` reference to the
+    test factory/engine, regardless of which module imported it.
 
-    originals[(_kanban_db, "kanban_engine")] = _kanban_db.kanban_engine
-    originals[(_kanban_db, "KanbanSessionLocal")] = _kanban_db.KanbanSessionLocal
+    Iterates ``sys.modules`` and rebinds every module whose attribute is the
+    prod reference (by identity). New modules that do
+    ``from app.kanban.db import KanbanSessionLocal`` at import time are picked
+    up automatically — no allow-list to maintain when a 5th router/service
+    starts talking to the kanban DB.
+
+    Self-improve kanban card 07d95f2c: the previous version of this fixture
+    hard-coded a list of known consumers (``app.api.v1.kanban.router``,
+    ``app.api.v1.plans``, ``app.kanban.mcp_server``). Each new consumer was a
+    silent prod-DB test until a failing test surfaced it. The fix is structural:
+    a module-level ``from app.kanban.db import KanbanSessionLocal`` binds the
+    prod factory into the importing module's ``__dict__`` at import time, so
+    any module that has the prod reference still sitting in it is a swap
+    candidate. Identity (``is``) comparison avoids touching unrelated
+    attributes — only modules whose attribute points at the *same* object as
+    ``app.kanban.db.KanbanSessionLocal`` (the prod factory) get rebound.
+    """
+    # Capture the prod references BEFORE patching the canonical module, so we
+    # can detect them on other modules by identity.
+    original_sf = _kanban_db.KanbanSessionLocal
+    original_engine = _kanban_db.kanban_engine
+
     _kanban_db.kanban_engine = test_engine
     _kanban_db.KanbanSessionLocal = _test_sf
 
-    import app.api.v1.kanban.router as _router
-    originals[(_router, "KanbanSessionLocal")] = _router.KanbanSessionLocal
-    _router.KanbanSessionLocal = _test_sf
-
-    # /api/v1/plans migrated to the kanban DB in kanban card 727470a8 — it
-    # imports KanbanSessionLocal the same way the kanban router does, so it
-    # needs the same test-DB swap or its endpoints hit the production engine.
-    import app.api.v1.plans as _plans_router
-    originals[(_plans_router, "KanbanSessionLocal")] = _plans_router.KanbanSessionLocal
-    _plans_router.KanbanSessionLocal = _test_sf
-
-    import app.kanban.mcp_server as _mcp
-    originals[(_mcp, "KanbanSessionLocal")] = _mcp.KanbanSessionLocal
-    _mcp.KanbanSessionLocal = _test_sf
+    rebound = []
+    for mod in list(sys.modules.values()):
+        if mod is None:
+            continue
+        try:
+            current_sf = getattr(mod, "KanbanSessionLocal", None)
+        except Exception:
+            current_sf = None
+        if current_sf is original_sf:
+            mod.KanbanSessionLocal = _test_sf
+            rebound.append((mod, "KanbanSessionLocal", current_sf))
+        try:
+            current_engine = getattr(mod, "kanban_engine", None)
+        except Exception:
+            current_engine = None
+        if current_engine is original_engine:
+            mod.kanban_engine = test_engine
+            rebound.append((mod, "kanban_engine", current_engine))
 
     yield
 
-    for (mod, attr), val in originals.items():
+    for mod, attr, val in rebound:
         setattr(mod, attr, val)
