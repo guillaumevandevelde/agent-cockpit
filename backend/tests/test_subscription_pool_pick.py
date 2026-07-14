@@ -27,6 +27,7 @@ from __future__ import annotations
 from app.services.subscriptions.base import SubscriptionUsage
 from app.kanban.subscription_pool import (
     PoolEntry,
+    has_available_spillover,
     pick_subscription,
 )
 
@@ -245,3 +246,67 @@ class TestPickSubscriptionEntryShape:
         )
         assert chosen is not None
         assert chosen.model is None
+
+
+class TestHasAvailableSpillover:
+    """Fase 2 (analyse §4 Optie B / §5): the threshold-/failover branch of
+    the pool router. When a subscription hits its limit the reactive path
+    marks its provider paused and asks whether the pool still offers a
+    genuinely-available subscription to spill to (True) or every entry is
+    now exhausted and the card must wait for a reset (False)."""
+
+    def test_spillover_available_when_next_entry_free(self):
+        """Anthropic just hit its limit (paused) → MiniMax is still free →
+        spill over instead of waiting."""
+        entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
+        assert has_available_spillover(
+            entries, usages={}, paused_providers={"anthropic"},
+        ) is True
+
+    def test_no_spillover_when_all_paused(self):
+        """Every provider paused → nothing to spill to → wait for reset."""
+        entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
+        assert has_available_spillover(
+            entries, usages={}, paused_providers={"anthropic", "minimax"},
+        ) is False
+
+    def test_no_spillover_when_only_free_entry_is_above_threshold(self):
+        """The one non-paused entry is estimated full (above drempel) → it
+        is not a real spillover target (would just re-hit a wall)."""
+        entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
+        usages = {
+            "claude-code:minimax": _usage(
+                subscription_id="claude-code:minimax",
+                drempel_gebruikt=0.95,
+            ),
+        }
+        assert has_available_spillover(
+            entries, usages, paused_providers={"anthropic"},
+        ) is False
+
+    def test_no_spillover_for_empty_pool(self):
+        """No pool configured → no spillover; caller keeps reset-time pause."""
+        assert has_available_spillover(
+            [], usages={}, paused_providers={"anthropic"},
+        ) is False
+
+    def test_no_spillover_for_single_exhausted_entry(self):
+        """A 1-entry pool whose only provider just hit its limit has no
+        fallback — even though ``pick_subscription`` returns that entry as
+        its deterministic 'laatste val-terug', it is paused, so no spill."""
+        entries = [_entry(provider="anthropic")]
+        assert has_available_spillover(
+            entries, usages={}, paused_providers={"anthropic"},
+        ) is False
+
+    def test_spillover_uses_priority_order(self):
+        """With the limited provider paused, the first *remaining* under-
+        threshold entry counts as the spillover target."""
+        entries = [
+            _entry(provider="anthropic"),
+            _entry(provider="minimax"),
+            _entry(provider="bedrock"),
+        ]
+        assert has_available_spillover(
+            entries, usages={}, paused_providers={"anthropic"},
+        ) is True

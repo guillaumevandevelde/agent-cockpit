@@ -150,6 +150,45 @@ def pick_subscription(
     return chosen
 
 
+def has_available_spillover(
+    entries: list[PoolEntry],
+    usages: dict[str, SubscriptionUsage],
+    *,
+    paused_providers: set[str],
+) -> bool:
+    """Fase 2 (analyse §4 Optie B / §5): is er nog een subscription om naar
+    over te *spillen* wanneer het huidige abonnement zijn limiet raakt?
+
+    Dit is de drempel-/failover-tak van de pool-router: de reactieve
+    limiet-lus (``dispatch.move_limited_session_to_resume``) voegt de
+    zojuist-gelimiteerde provider toe aan ``paused_providers`` en vraagt
+    hier of er dán nog een échte val-terug is. "Echt beschikbaar" betekent
+    de *schone* keuze-tak van ``pick_subscription`` — een entry die niet
+    gepauzeerd is én niet boven zijn drempel — niet louter de "laatste
+    val-terug" (die geeft ``pick_subscription`` ook terug als álles
+    uitgeput is, puur zodat de caller een deterministisch slot heeft).
+
+    Returns:
+        True  → er is een niet-gepauzeerde, onder-drempel subscription:
+                de kaart kan meteen doorschuiven i.p.v. te wachten op de
+                reset (analyse §2.3 "sluit de reactieve failover-lus").
+        False → lege pool, of elke subscription is nu gepauzeerd/uitgeput:
+                val terug op de bestaande per-provider pause (wachten tot
+                reset).
+    """
+    chosen = pick_subscription(entries, usages, paused_providers=paused_providers)
+    if chosen is None:
+        return False
+    if chosen.provider in paused_providers:
+        # ``pick_subscription`` viel terug op de "laatste val-terug" — die
+        # provider is zelf gepauzeerd, dus er is geen echte spillover-target.
+        return False
+    usage = usages.get(f"{chosen.cli}:{chosen.provider}")
+    # De fallback kan ook een niet-gepauzeerde maar bóven-drempel entry zijn
+    # (alles vol); dat telt niet als beschikbare spillover.
+    return not _is_above_threshold(chosen, usage)
+
+
 # ---- storage (KanbanMeta wrapper) ------------------------------------------
 #
 # A project's pool lives in a single JSON-encoded row keyed by

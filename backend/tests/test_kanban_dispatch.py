@@ -2823,6 +2823,163 @@ async def test_move_limited_session_to_resume_handles_impediment_card(monkeypatc
     assert card.claimed_by is None
 
 
+# ---- fase 2: spillover-bij-limiet (analyse §4 Optie B / §5) -----------------
+
+@pytest.mark.asyncio
+async def test_move_limited_session_spills_over_when_pool_has_capacity(monkeypatch):
+    """A limit-hit card whose project has a pool with another available
+    subscription is moved to To Resume WITHOUT a reset-time scheduled_at, so
+    the next tick immediately re-dispatches it onto the spillover subscription
+    (the just-limited provider is skipped via its per-provider pause). The
+    activity comment says it's spilling over, not waiting."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery, subscription_pool
+    from app.kanban.subscription_pool import PoolEntry
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    # No real usage signal in tests -> pick decision rides on paused providers.
+    async def _no_snapshots(entries):
+        return {}
+    monkeypatch.setattr(dispatch, "_gather_pool_usage_snapshots", _no_snapshots)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="spill-429", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-spill-0001"},
+        )
+        # Pool: anthropic (the card's default provider) then minimax.
+        await subscription_pool.set_subscription_pool(s, PK, [
+            PoolEntry(cli="claude-code", provider="anthropic", model=None, drempel=0.9),
+            PoolEntry(cli="claude-code", provider="minimax", model=None, drempel=0.9),
+        ])
+        await s.commit()
+
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-spill", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-spill-0001",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+
+    assert result is True
+    assert card.column == "To Resume"
+    # Spillover: scheduled_at dropped so the card is immediately dispatch-eligible.
+    assert card.scheduled_at is None
+    assert any("spilling over" in t for t in comment_texts)
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_pauses_when_all_subscriptions_exhausted(monkeypatch):
+    """When the pool has no other available subscription (single entry, whose
+    provider just hit its limit), the card falls back to the existing
+    per-provider pause: To Resume + reset-time scheduled_at, waiting for reset."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery, subscription_pool
+    from app.kanban.subscription_pool import PoolEntry
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    async def _no_snapshots(entries):
+        return {}
+    monkeypatch.setattr(dispatch, "_gather_pool_usage_snapshots", _no_snapshots)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="exhausted-429", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-exhaust-0001"},
+        )
+        # Single-entry pool: anthropic (the card's provider). Once it's limited
+        # there is nothing to spill to.
+        await subscription_pool.set_subscription_pool(s, PK, [
+            PoolEntry(cli="claude-code", provider="anthropic", model=None, drempel=0.9),
+        ])
+        await s.commit()
+
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-exhaust", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-exhaust-0001",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, cid)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+
+    assert result is True
+    assert card.column == "To Resume"
+    # No spillover: the reset-time pause is preserved so the card waits.
+    assert card.scheduled_at == "2026-07-11T23:10:00+02:00"
+    assert any("Auto-resume scheduled at" in t for t in comment_texts)
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_no_pool_keeps_reset_pause(monkeypatch):
+    """Backward-compat: with no subscription pool configured, the reactive
+    limit path is unchanged — reset-time scheduled_at is preserved."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="nopool-429", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-nopool-0001"},
+        )
+        await s.commit()
+
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-nopool", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-nopool-0001",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert result is True
+    assert card.column == "To Resume"
+    assert card.scheduled_at == "2026-07-11T23:10:00+02:00"
+
+
 @pytest.mark.asyncio
 async def test_active_session_count_excludes_to_resume():
     """Cards in To Resume are excluded from _active_session_count (fixed column)."""
