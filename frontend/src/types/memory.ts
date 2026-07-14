@@ -32,8 +32,23 @@ export interface RuleInfo {
   relative_path: string;
   frontmatter: Record<string, unknown>;
   scoped_paths: string[];
+  keywords: string[];
   description: string;
   content_preview: string;
+}
+
+export interface ResolvedRuleInfo extends RuleInfo {
+  matched_triggers: string[];
+}
+
+export interface RulesResolveRequest {
+  prompt: string;
+  touched_files: string[];
+}
+
+export interface RulesResolveResponse {
+  matched_rules: ResolvedRuleInfo[];
+  unmatched_rules: ResolvedRuleInfo[];
 }
 
 export interface RulesListResponse {

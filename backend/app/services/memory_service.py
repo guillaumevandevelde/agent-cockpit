@@ -1,4 +1,20 @@
-"""Service for managing Claude Code memory files (CLAUDE.md, rules, etc.)."""
+"""Service for managing Claude Code memory files (CLAUDE.md, rules, etc.).
+
+Trigger model
+-------------
+Rules in ``.claude/rules/`` may declare triggers in their YAML frontmatter that
+determine when they are injected into a session. Two trigger kinds are supported:
+
+- ``paths`` (list or string) — a glob that must match one of the files the
+  agent touched (e.g. ``backend/**/*.py``).
+- ``keywords`` (list or string) — a keyword that must appear in the prompt
+  (case-insensitive substring match).
+
+A rule with neither trigger applies always (equivalent to a CLAUDE.md chunk).
+A rule with one or more triggers applies when AT LEAST ONE of its triggers
+matches (OR semantics). See ``resolve_applicable_rules`` for the resolver.
+"""
+import fnmatch
 import logging
 import re
 from pathlib import Path
@@ -83,6 +99,70 @@ class MemoryService:
             return frontmatter, remaining
         except yaml.YAMLError:
             return {}, content
+
+    @classmethod
+    def _coerce_str_list(cls, value: Any) -> list[str]:
+        """Normalise a frontmatter value into a list of non-empty strings.
+
+        Accepts a list (already), a single string (split on commas and newlines),
+        or anything else (returned as ``[str(value)]`` if non-empty). Used for
+        both ``paths`` and ``keywords`` frontmatter fields so authors can write
+        ``keywords: deploy`` as well as ``keywords: [deploy, release]``.
+        """
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        if isinstance(value, str):
+            return [v.strip() for v in re.split(r"[,\n]", value) if v.strip()]
+        text = str(value).strip()
+        return [text] if text else []
+
+    @staticmethod
+    def _glob_match(pattern: str, candidate: str) -> bool:
+        """Match ``candidate`` against a shell-style glob ``pattern``.
+
+        ``fnmatch`` does not handle ``**`` specially (it treats ``*`` as "any
+        characters except /"), which is good enough for repo-relative glob
+        triggers like ``backend/**/*.py`` because the typical caller is a
+        file path under a known project root. Paths are compared verbatim,
+        so callers should pass project-relative or absolute consistently.
+        """
+        return fnmatch.fnmatch(candidate, pattern)
+
+    @staticmethod
+    def _keyword_match(keyword: str, prompt: str) -> bool:
+        """Case-insensitive substring match of ``keyword`` in ``prompt``."""
+        if not keyword or not prompt:
+            return False
+        return keyword.lower() in prompt.lower()
+
+    @classmethod
+    def _evaluate_rule(
+        cls,
+        rule: dict[str, Any],
+        prompt: str,
+        touched_files: list[str],
+    ) -> list[str]:
+        """Return the list of trigger labels that fired for ``rule``.
+
+        Empty list means the rule did not match. A rule with no triggers
+        (no ``paths`` and no ``keywords``) returns ``["always"]`` so it can
+        be distinguished from rules whose triggers simply didn't match.
+        """
+        paths = rule.get("scoped_paths") or []
+        keywords = rule.get("keywords") or []
+        if not paths and not keywords:
+            return ["always"]
+
+        matched: list[str] = []
+        for path_pattern in paths:
+            if any(cls._glob_match(path_pattern, f) for f in touched_files):
+                matched.append(f"path:{path_pattern}")
+        for keyword in keywords:
+            if cls._keyword_match(keyword, prompt):
+                matched.append(f"keyword:{keyword}")
+        return matched
 
     @staticmethod
     def _extract_imports(content: str) -> list[str]:
@@ -342,7 +422,10 @@ class MemoryService:
             project_path: Optional project directory path
 
         Returns:
-            List of rule info dicts
+            List of rule info dicts. Each carries ``scoped_paths`` (list of
+            glob path triggers from the ``paths`` frontmatter) and
+            ``keywords`` (list of keyword triggers from the ``keywords``
+            frontmatter). Both are empty lists if no triggers were declared.
         """
         rules_dir = cls._get_rules_dir(project_path)
         rules = []
@@ -355,10 +438,8 @@ class MemoryService:
             content = rule_file.read_text(encoding="utf-8")
             frontmatter, body = cls._parse_rule_frontmatter(content)
 
-            # Get paths from frontmatter (for path-scoped rules)
-            paths = frontmatter.get("paths", [])
-            if isinstance(paths, str):
-                paths = [paths]
+            paths = cls._coerce_str_list(frontmatter.get("paths"))
+            keywords = cls._coerce_str_list(frontmatter.get("keywords"))
 
             rules.append(
                 {
@@ -367,6 +448,7 @@ class MemoryService:
                     "relative_path": str(rel_path),
                     "frontmatter": frontmatter,
                     "scoped_paths": paths,
+                    "keywords": keywords,
                     "description": frontmatter.get("description", ""),
                     "content_preview": body[:200] if body else "",
                 }
@@ -375,12 +457,62 @@ class MemoryService:
         return rules
 
     @classmethod
+    def resolve_applicable_rules(
+        cls,
+        project_path: str,
+        prompt: str,
+        touched_files: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve which rules apply to a given agent context.
+
+        A rule applies if:
+          - It has no triggers (no ``paths`` and no ``keywords``), OR
+          - At least one of its path-glob triggers matches a file in
+            ``touched_files``, OR
+          - At least one of its keyword triggers appears in ``prompt``
+            (case-insensitive substring match).
+
+        Args:
+            project_path: Absolute path to the project root.
+            prompt: The current user/agent prompt text.
+            touched_files: Optional list of file paths the agent has touched
+                in the current session (typically repo-relative).
+
+        Returns:
+            Dict with:
+              - ``matched_rules``: list of rule info dicts (same shape as
+                ``list_rules``) augmented with a ``matched_triggers`` list
+                naming the trigger labels that fired (e.g. ``"keyword:deploy"``,
+                ``"path:backend/**/*.py"``, or ``["always"]``).
+              - ``unmatched_rules``: rule info dicts for rules whose triggers
+                did not fire.
+        """
+        rules = cls.list_rules(project_path)
+        touched = touched_files or []
+        matched: list[dict[str, Any]] = []
+        unmatched: list[dict[str, Any]] = []
+
+        for rule in rules:
+            triggers = cls._evaluate_rule(rule, prompt or "", touched)
+            rule_with_triggers = {**rule, "matched_triggers": triggers}
+            if triggers:
+                matched.append(rule_with_triggers)
+            else:
+                unmatched.append(rule_with_triggers)
+
+        return {
+            "matched_rules": matched,
+            "unmatched_rules": unmatched,
+        }
+
+    @classmethod
     def create_rule(
         cls,
         project_path: str | None,
         name: str,
         content: str,
         paths: list[str] | None = None,
+        keywords: list[str] | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
         """Create a new rule file.
@@ -389,7 +521,10 @@ class MemoryService:
             project_path: Project directory path
             name: Rule name (without .md extension)
             content: Rule content (markdown)
-            paths: Optional list of paths this rule applies to
+            paths: Optional list of glob path triggers — rule applies when
+                any touched file matches any of these globs.
+            keywords: Optional list of keyword triggers — rule applies when
+                any keyword appears in the prompt (case-insensitive).
             description: Optional description for frontmatter
 
         Returns:
@@ -408,6 +543,10 @@ class MemoryService:
             frontmatter_parts.append("paths:")
             for p in paths:
                 frontmatter_parts.append(f"  - {p}")
+        if keywords:
+            frontmatter_parts.append("keywords:")
+            for kw in keywords:
+                frontmatter_parts.append(f"  - {kw}")
 
         if frontmatter_parts:
             full_content = "---\n" + "\n".join(frontmatter_parts) + "\n---\n\n" + content

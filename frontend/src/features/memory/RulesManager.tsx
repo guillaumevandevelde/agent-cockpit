@@ -6,6 +6,7 @@ import {
   Trash2,
   FolderOpen,
   MapPin,
+  Hash,
   RefreshCw,
 } from "lucide-react";
 import {
@@ -54,6 +55,7 @@ interface CreateRuleForm {
   name: string;
   description: string;
   paths: string;
+  keywords: string;
   content: string;
 }
 
@@ -65,6 +67,7 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
     name: "",
     description: "",
     paths: "",
+    keywords: "",
     content: "",
   });
   const [creating, setCreating] = useState(false);
@@ -89,13 +92,19 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
     setCreating(true);
     try {
       const params = { project_path: projectPath };
+      const splitList = (raw: string): string[] | undefined =>
+        raw
+          ? raw
+              .split(",")
+              .map((p) => p.trim())
+              .filter(Boolean)
+          : undefined;
       const body = {
         name: createForm.name.trim(),
         content: createForm.content,
         description: createForm.description || undefined,
-        paths: createForm.paths
-          ? createForm.paths.split(",").map((p) => p.trim())
-          : undefined,
+        paths: splitList(createForm.paths),
+        keywords: splitList(createForm.keywords),
       };
 
       await apiClient<SaveMemoryResponse>(
@@ -108,7 +117,13 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
 
       toast.success(`Rule "${createForm.name}" created`);
       setCreateDialogOpen(false);
-      setCreateForm({ name: "", description: "", paths: "", content: "" });
+      setCreateForm({
+        name: "",
+        description: "",
+        paths: "",
+        keywords: "",
+        content: "",
+      });
       fetchRules();
       onRefresh();
     } catch (err) {
@@ -256,6 +271,14 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
                           </span>
                         </div>
                       )}
+                      {rule.keywords.length > 0 && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <Hash className="h-3 w-3 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground">
+                            Keywords: {rule.keywords.join(", ")}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -350,7 +373,24 @@ export function RulesManager({ projectPath, onRefresh }: RulesManagerProps) {
                 }
               />
               <p className="text-xs text-muted-foreground">
-                Comma-separated paths. Rule will only apply to matching files.
+                Comma-separated paths. Rule will only apply when an agent
+                touches a matching file.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="keywords">Keyword Triggers (optional)</Label>
+              <Input
+                id="keywords"
+                placeholder="e.g., deploy, release, security"
+                value={createForm.keywords}
+                onChange={(e) =>
+                  setCreateForm({ ...createForm, keywords: e.target.value })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Comma-separated keywords. Rule will only apply when a
+                keyword appears in the prompt (case-insensitive).
               </p>
             </div>
 
