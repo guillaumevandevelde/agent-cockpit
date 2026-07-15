@@ -28,18 +28,13 @@ import type { PoolEntry } from "../types";
  *  as `null`. Mirrors the previous `ActiveSubscriptionOverride` value. */
 const NONE_VALUE = "__none__";
 
-/** Per-CLI options for the cli select. Mirrors the value the previous
- *  SubscriptionPool component offered — only claude-code is wired for pool
- *  routing today (the dead-CLI-as defect is tracked separately on card
- *  `0b3ad6e2…`, explicitly out of scope here). */
-const CLI_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "claude-code", label: "claude-code" },
-];
-
 /** Sensible-default entry for the "Add first subscription" affordance —
- *  matches what the previous standalone SubscriptionPool seeded. */
+ *  matches what the previous standalone SubscriptionPool seeded. The
+ *  legacy `cli` field was dropped in card 0b3ad6e2… (analysis §3 D3):
+ *  the pool always routes through the single supported CLI
+ *  (claude-code) and there's no per-entry CLI choice to make. */
 function makeDefaultEntry(): PoolEntry {
-  return { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 };
+  return { provider: "anthropic", model: null, drempel: 0.9 };
 }
 
 /** Combined dialog for board-wide subscription routing:
@@ -392,31 +387,7 @@ export function SubscriptionPoolDialog({
                       </button>
                     </div>
 
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-2">
-                      <div className="sm:col-span-3">
-                        <label className="block text-xs text-muted-foreground mb-1">
-                          CLI
-                        </label>
-                        <Select
-                          value={entry.cli}
-                          onValueChange={(v) =>
-                            updateEntry(index, { cli: v })
-                          }
-                          disabled={overrideLockedPool}
-                        >
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CLI_OPTIONS.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-9 gap-2">
                       <div className="sm:col-span-3">
                         <label className="block text-xs text-muted-foreground mb-1">
                           Provider

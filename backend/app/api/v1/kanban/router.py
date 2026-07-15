@@ -1060,8 +1060,11 @@ async def get_subscription_pool(project_key: str = Query(...)):
     Returns ``{"project_key": ..., "pool": <list[PoolEntry]|None>}``.
     ``None`` means no pool is configured — the dispatcher falls back to
     today's column-default chain exactly as before. Each ``PoolEntry``
-    is shaped as ``{cli, provider, model|null, drempel}`` so the
-    frontend can render it verbatim without per-field reshaping."""
+    is shaped as ``{provider, model|null, drempel}`` so the frontend
+    can render it verbatim without per-field reshaping. The legacy
+    ``cli`` field that pre-fix builds carried on each entry was dropped
+    in kaart 0b3ad6e2… (the pool always routes through the single
+    supported CLI)."""
     from app.kanban import subscription_pool as pool_mod
     async with KanbanSessionLocal() as s:
         entries = await pool_mod.get_subscription_pool(s, project_key)
@@ -1070,7 +1073,7 @@ async def get_subscription_pool(project_key: str = Query(...)):
     return {
         "project_key": project_key,
         "pool": [
-            {"cli": e.cli, "provider": e.provider,
+            {"provider": e.provider,
              "model": e.model, "drempel": e.drempel}
             for e in entries
         ],
