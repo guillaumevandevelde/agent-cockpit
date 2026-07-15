@@ -33,6 +33,7 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | **Subscriptions-pagina** | [`subscriptions.md`](./subscriptions.md) | `specs/2026-07-04-minimax-providers-page-design.md`, `specs/2026-07-08-subscription-usage-leftover-design.md` |
 | **Abonnement-flexibiliteit (usage-aware routing)** | [`subscription-flexibiliteit-analyse.md`](./subscription-flexibiliteit-analyse.md) | — |
 | **Skill stats** | [`skill-stats.md`](./skill-stats.md) | `specs/2026-06-27-skill-stats-design.md` |
+| **Beslis-register (alle genomen beslissingen)** | [`decisions.md`](./decisions.md) | — |
 | **Kanban follow-up pool** | [`kanban-followups.md`](./kanban-followups.md) | — |
 | **Kanban string-conventies (vast kolommen, comment-prefixes, deliverable-kinds)** | [`kanban-conventions.md`](./kanban-conventions.md) | — |
 | **Agent Mail** | [`agent-mail-spec.md`](./agent-mail-spec.md) | `plans/2026-07-08-agent-mail-implementation.md` |
@@ -43,6 +44,12 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | **Sync / HLC-laag** | [`sync-hlc-freeze-vs-prune.md`](./sync-hlc-freeze-vs-prune.md) | — |
 
 ### Beslisdocumenten (ADR-achtig, geen feature-spec)
+
+> **Zoek je "is X al beslist, en wat kwam eruit?" — begin bij het beslis-register:
+> [`decisions.md`](./decisions.md).** Dat is de canonieke, chronologische index over álle
+> beslissingen (datum, vraag, uitkomst, doc-link, kaart-id). De lijst hieronder is de
+> thematische ingang op dezelfde documenten; het register is de chronologische.
+> `scripts/check-decision-register.sh` bewaakt dat elk `*-decision.md` in het register staat.
 
 Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canoniek voor
 "waarom hebben we X wel/niet gedaan":
