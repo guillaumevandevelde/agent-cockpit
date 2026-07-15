@@ -202,9 +202,40 @@ After `<loop-complete>` or `<loop-blocked>`:
 2. If `<loop-blocked>`, also `comment` on any specific Backlog cards
    the loop opened (via `flag-problem` etc.) so the trail is complete
    for whoever picks them up next.
-3. The progress file stays put for the duration of the worktree;
-   `scripts/worktree-gc.sh` cleans it up with the rest of the worktree
-   when the card moves to `Done`. No manual `rm` needed.
+3. **Lifecycle is git-driven, not worktree-gc-driven.** The progress
+   path `.claude/state/iteration-<card-id>.txt` is in `.gitignore`
+   (added by commit `31f3a51` "chore: gitignore iteration-loop
+   progress files"), so a file written there is ignored by git — the
+   ship pre-flight's `git ls-files --others --exclude-standard`
+   doesn't see it, and `scripts/worktree-gc.sh` treats the worktree
+   as clean and removes the whole `.claude/` subtree along with the
+   worktree when the card moves to `Done`. No manual `rm` needed.
+
+   Some past sessions have also committed these files into their
+   card's commit (search `git ls-files .claude/state/` — they're
+   still on `master`), but that was a workaround for the
+   pre-`31f3a51` state where the path wasn't gitignored. It is **not**
+   required today; if `git status` reports nothing under
+   `.claude/state/`, leave it alone.
+
+   **Subdir gotcha — the path is cwd-relative.** If a mid-session
+   `cd` left the loop running with cwd in a subdirectory (e.g.
+   `cd backend && …` for a pytest run, then a subsequent iteration
+   appending to `.claude/state/…` from that cwd), the file lands at
+   e.g. `backend/.claude/state/iteration-<card-id>.txt` — and the
+   gitignore pattern does **not** match nested paths, so the file
+   appears as untracked. That trips the ship pre-flight and forces
+   one of:
+   - `mv backend/.claude/state/iteration-<card-id>.txt .claude/state/`
+     so it lands in the gitignored path (then re-run pre-flight), or
+   - `git add -f .claude/state/iteration-<card-id>.txt && git commit
+     --amend` to ride it along with the card's commit (matches what
+     past sessions did).
+
+   If the pre-flight ever complains about an untracked
+   `iteration-*.txt` you didn't expect, `git status --ignored` will
+   tell you whether the loop wrote it under the gitignored root or
+   a non-ignored subdir.
 
 ## Choosing a preset — quick decision table
 
