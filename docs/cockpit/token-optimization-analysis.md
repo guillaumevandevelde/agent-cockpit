@@ -79,6 +79,10 @@ Belangrijkste observaties:
   Calendar, Atlassian, …) worden lazy geladen via `ToolSearch` i.p.v. hun volledige schemas
   vooraf in de system-prompt te zetten. Dit is precies de "trim MCP tool bloat"-techniek uit
   het webonderzoek en bespaart significant.
+  **Nagekomen correctie (2026-07-15):** dit geldt óók voor onze eigen `cockpit-kanban`-server
+  — gemeten kosten de 19 tools **388** i.p.v. ~4.994 tokens. Deze bullet had dus gelijk en
+  R3 hieronder had ongelijk; R3 is daarop afgewezen. Zie
+  [`per-persona-mcp-allowlist-decision.md`](./per-persona-mcp-allowlist-decision.md).
 - **Geen directe API-calls met opgeblazen payloads.** Doordat we de CLI spawnen, erven we
   Claude Code's eigen context-management (prompt-caching, compaction) gratis mee.
 - **Multi-agent kanban = subagent-patroon op sessie-niveau.** Analyst splitst → executors
@@ -94,7 +98,7 @@ Belangrijkste observaties:
 |---|---|---|---|---|
 | **R1** | **Sonnet-default per persona/kolom, Opus selectief.** Zet `engineer.md` frontmatter op `sonnet` (of laat leeg → platform-default) en houd Opus voor `analyst` + expliciete card-overrides. Evt. per-kolom `default_model`. | **Zeer hoog** (5×-input-verschil) | Laag (config) | Middel — kwaliteitsregressie op complexe engineer-kaarten; mitigatie: card/kolom-override laat je per kaart escaleren. |
 | **R2** | **CLAUDE.md afslanken tot <200 regels.** Verplaats de gedetailleerde git-ship-recepten (detached-worktree-merge, remote-branch-hygiene, pre-push-historie) naar een apart doc/skill dat alleen bij het shippen wordt geraadpleegd; houd CLAUDE.md bij oriëntatie + pointers. | Hoog (elke sessie × elke turn) | Laag–middel | Laag — recepten blijven bestaan, alleen niet meer als baseline. |
-| **R3** | **Per-persona MCP-tool-allowlist.** Een executor roept nooit `create_project_from_intake`, `add_plan_attachment`, `open_gate`, `redispatch_card` aan; een analyst nooit `attach_deliverable`. Onderzoek `--allowedTools` / een rol-gefilterde MCP-toolset zodat ongebruikte schemas niet in de system-prompt landen (bespaart tokens én voorkomt misfires). | Middel | Middel (onderzoek + CLI-flag-plumbing) | Laag–middel — verkeerde allowlist blokkeert een legitieme call; begin ruim. |
+| ~~**R3**~~ | ~~**Per-persona MCP-tool-allowlist.**~~ **AFGEWEZEN (2026-07-15) — zie [`per-persona-mcp-allowlist-decision.md`](./per-persona-mcp-allowlist-decision.md).** De premisse hieronder ("19 schemas in élke system-prompt") is **onjuist**: Claude Code defert MCP-schemas achter `ToolSearch`, dus de 19 tools kosten **388** i.p.v. ~4.994 tokens (1,1% van de baseline). `--allowedTools` filtert bovendien geen schemas — het is een permissie-poort en kost netto **+109** tokens. Max haalbare besparing 0,5%; risico: breekt de leaf-spike-analyst. | ~~Middel~~ **≈ nul** | ~~Middel~~ | ~~Laag–middel~~ |
 | **R4** | **Dispatch-boilerplate dedupliceren/verwijzen.** De MCP-fallback- en flag-problem-blokken dupliceren bestaande skills (`flag-problem`). Overweeg ze in te korten tot een verwijzing ("volg de `flag-problem`-skill") of te verplaatsen naar een stabiel, cachebaar promptsegment. | Middel | Middel | **Hoger** — dit is het contract dat de agent volgt; te agressief trimmen schaadt betrouwbaarheid. Meten vóór snijden. |
 | **R5** | **Verifieer MCP-isolatie van gedispatchte sessies.** Bevestig dat spawn draait met project-scoped MCP (evt. `--strict-mcp-config`) zodat een sessie nooit de globale/persoonlijke MCP-servers van de host-gebruiker erft. Nu lijkt dit oké (`.mcp.json` minimaal), maar het is niet afgedwongen. | Laag–middel (preventief) | Laag | Laag. |
 | **R6** | **Meet vóór/na.** Er is geen tokentelemetrie per dispatch. De `usage`-feature bestaat al; koppel per-kaart tokengebruik zodat R1–R4 meetbaar worden i.p.v. giswerk. | Middel (enabler) | Middel | Laag. |
@@ -111,7 +115,7 @@ Dit spike levert alleen dit doc op (geen code). De vervolgkaarten hieronder zijn
 |---|---|---|---|
 | 1 | `d17b6e6a` Sonnet-default voor engineer-persona, Opus selectief | R1 | chore |
 | 2 | `a738497d` CLAUDE.md < 200 regels: git-ship-recepten naar apart doc/skill | R2 | chore |
-| 3 | `28e1558e` Per-persona MCP-tool-allowlist voor gedispatchte sessies | R3 | analysis |
+| 3 | ~~`28e1558e` Per-persona MCP-tool-allowlist voor gedispatchte sessies~~ → **NO-GO** (2026-07-15), geen vervolgkaart — [beslisdoc](./per-persona-mcp-allowlist-decision.md) | R3 | analysis ✅ |
 | 4 | `8a2ad986` Per-dispatch tokentelemetrie koppelen aan de usage-feature | R6 | feature |
 | 5 | `00fa8325` Verifieer/enforce project-scoped MCP-config bij spawn | R5 | chore |
 
