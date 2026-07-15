@@ -14,8 +14,8 @@ from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     WORK_TYPES,
-    ActivityEntry,
     ActiveSubscriptionOverrideRequest,
+    ActivityEntry,
     AddPlanAttachmentRequest,
     AddPlanAttachmentResponse,
     AgentStatsResponse,

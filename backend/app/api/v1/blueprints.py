@@ -21,13 +21,11 @@ from fastapi import APIRouter, HTTPException
 
 from app.models.schemas import (
     Blueprint,
-    BlueprintAgent,
     BlueprintApplyRequest,
     BlueprintApplyResponse,
     BlueprintCreate,
     BlueprintListResponse,
     BlueprintSettings,
-    BlueprintSkill,
     BlueprintUpdate,
 )
 from app.services.blueprint import (

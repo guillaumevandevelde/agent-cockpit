@@ -36,7 +36,9 @@ from dataclasses import dataclass
 
 from app.kanban.models import KanbanMeta
 from app.services.agentic_cli.provider_env import (
-    PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
+    PROVIDER_ANTHROPIC,
+    PROVIDER_BEDROCK,
+    PROVIDER_MINIMAX,
 )
 from app.services.subscriptions.base import SubscriptionUsage
 

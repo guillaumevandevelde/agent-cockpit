@@ -24,12 +24,12 @@ can't silently invert any branch):
 """
 from __future__ import annotations
 
-from app.services.subscriptions.base import SubscriptionUsage
 from app.kanban.subscription_pool import (
     PoolEntry,
     has_available_spillover,
     pick_subscription,
 )
+from app.services.subscriptions.base import SubscriptionUsage
 
 
 def _entry(*, cli="claude-code", provider="anthropic", model=None, drempel=0.9):

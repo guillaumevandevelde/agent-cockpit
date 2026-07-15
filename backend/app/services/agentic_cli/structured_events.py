@@ -29,13 +29,13 @@ attribute events to the originating headless run.
 """
 from __future__ import annotations
 
-from enum import Enum
-from typing import Annotated, Any, Literal, Union
+from enum import StrEnum
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 
 
-class StructuredEventType(str, Enum):
+class StructuredEventType(StrEnum):
     """The six ACP-isomorphic event kinds a headless run may emit."""
 
     MESSAGE_CHUNK = "message_chunk"
@@ -46,7 +46,7 @@ class StructuredEventType(str, Enum):
     ERROR = "error"
 
 
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     """Author of a message chunk (mirrors ACP's message-chunk variants)."""
 
     ASSISTANT = "assistant"
@@ -54,7 +54,7 @@ class MessageRole(str, Enum):
     THOUGHT = "thought"
 
 
-class ToolCallStatus(str, Enum):
+class ToolCallStatus(StrEnum):
     """Lifecycle of a tool call (mirrors ACP ``ToolCallStatus``)."""
 
     PENDING = "pending"
@@ -63,7 +63,7 @@ class ToolCallStatus(str, Enum):
     FAILED = "failed"
 
 
-class PlanEntryStatus(str, Enum):
+class PlanEntryStatus(StrEnum):
     """Status of a single plan entry (mirrors ACP ``PlanEntryStatus``)."""
 
     PENDING = "pending"
@@ -71,7 +71,7 @@ class PlanEntryStatus(str, Enum):
     COMPLETED = "completed"
 
 
-class PlanEntryPriority(str, Enum):
+class PlanEntryPriority(StrEnum):
     """Priority of a single plan entry (mirrors ACP ``PlanEntryPriority``)."""
 
     HIGH = "high"
@@ -79,7 +79,7 @@ class PlanEntryPriority(str, Enum):
     LOW = "low"
 
 
-class PermissionOptionKind(str, Enum):
+class PermissionOptionKind(StrEnum):
     """Permission option semantics (mirrors ACP ``PermissionOptionKind``)."""
 
     ALLOW_ONCE = "allow_once"
@@ -167,14 +167,7 @@ class ErrorEvent(_StructuredEventBase):
 
 
 StructuredEvent = Annotated[
-    Union[
-        MessageChunkEvent,
-        ToolCallEvent,
-        PlanUpdateEvent,
-        PermissionRequestEvent,
-        UsageResultEvent,
-        ErrorEvent,
-    ],
+    MessageChunkEvent | ToolCallEvent | PlanUpdateEvent | PermissionRequestEvent | UsageResultEvent | ErrorEvent,
     Field(discriminator="type"),
 ]
 

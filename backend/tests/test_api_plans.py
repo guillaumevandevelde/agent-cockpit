@@ -79,10 +79,6 @@ async def test_get_plan_rejects_path_traversal():
 @pytest.mark.asyncio
 async def test_create_plan_persists_with_project_key_fk():
     """POST /plans writes a kanban_plans row with the resolved project_key."""
-    async with KanbanSessionLocal() as ks:
-        from app.kanban.models import KanbanPlan
-        from sqlalchemy import select
-
     async with _client() as ac:
         r = await ac.post(
             "/api/v1/plans",

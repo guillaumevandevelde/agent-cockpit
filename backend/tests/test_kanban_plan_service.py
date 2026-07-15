@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
-from app.kanban.db import KanbanBase
 from app.kanban.models import KanbanPlan
 from app.services.kanban_plan_service import KanbanPlanService
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
@@ -95,7 +94,7 @@ async def test_create_plan_persists_with_project_key_fk():
     assert plan["filename"] == "build-widget.md"
     assert plan["title"] == "Build widget"
     assert plan["size_bytes"] == len(
-        "# Plan: Build widget\n\nDo the widget.".encode("utf-8")
+        b"# Plan: Build widget\n\nDo the widget."
     )
 
     async with KanbanSessionLocal() as s:
@@ -163,11 +162,11 @@ async def test_list_plans_returns_only_project_scoped_rows():
 @pytest.mark.asyncio
 async def test_list_plans_sorted_by_updated_desc():
     async with KanbanSessionLocal() as s:
-        first = await KanbanPlanService.create_plan(
+        await KanbanPlanService.create_plan(
             s, project_key="p", slug="older", content="older",
         )
         await s.commit()
-        second = await KanbanPlanService.create_plan(
+        await KanbanPlanService.create_plan(
             s, project_key="p", slug="newer", content="newer",
         )
         await s.commit()

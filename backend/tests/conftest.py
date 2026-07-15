@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 
 import app.kanban.db as _kanban_db
+
 # Eagerly import the kanban models so every table registered on
 # ``KanbanBase.metadata`` is materialized by the test-DB reset fixture
 # below. Without this, tests that only import e.g. ``app.services.x`` and

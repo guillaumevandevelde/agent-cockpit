@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
-from app.kanban.db import KanbanBase
 from app.kanban.models import KanbanPlan
 from scripts.migrate_plans_to_kanban import (
     collect_plan_files,
@@ -22,7 +22,6 @@ from scripts.migrate_plans_to_kanban import (
     run_migration,
     slug_from_filename,
 )
-from sqlalchemy import delete, select
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()

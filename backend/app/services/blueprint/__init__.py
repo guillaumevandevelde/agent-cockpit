@@ -19,7 +19,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -140,9 +140,9 @@ class Blueprint(BaseModel):
     output_style: str | None = None
     claudemd: str | None = None
 
-    def touch(self) -> "Blueprint":
+    def touch(self) -> Blueprint:
         """Return a copy with ``updated_at`` set to now (UTC). Used by store."""
-        return self.model_copy(update={"updated_at": datetime.now(timezone.utc)})
+        return self.model_copy(update={"updated_at": datetime.now(UTC)})
 
 
 @dataclass

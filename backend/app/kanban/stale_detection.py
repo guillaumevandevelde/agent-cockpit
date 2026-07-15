@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from app.config import settings
-from app.kanban.models import KanbanCard, KanbanMeta, KanbanOp
+from app.kanban.models import KanbanMeta, KanbanOp
 from app.kanban.operations import apply_operation
 from app.utils.timeutils import ensure_aware
 

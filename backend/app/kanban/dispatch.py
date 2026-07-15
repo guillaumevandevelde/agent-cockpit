@@ -42,7 +42,9 @@ from app.kanban.subscription_pool import (
     pick_subscription,
 )
 from app.services.agentic_cli.provider_env import (
-    PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
+    PROVIDER_ANTHROPIC,
+    PROVIDER_BEDROCK,
+    PROVIDER_MINIMAX,
 )
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.scheduling.session_registry import session_registry

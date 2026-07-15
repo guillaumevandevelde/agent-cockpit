@@ -5,7 +5,6 @@ import os
 import pytest
 import pytest_asyncio
 
-from app.kanban import dispatch
 from app.kanban import session_recovery as recovery
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card
