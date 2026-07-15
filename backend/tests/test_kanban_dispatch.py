@@ -4580,6 +4580,117 @@ def test_is_rate_limited_session_matches_known_patterns():
     assert d._is_rate_limited_session("Compaction 1/2 complete") is False
 
 
+# ---- structured-signal fast path (acp-transport-decision.md §6 kaart 2) -----
+#
+# The reaper previously inspected tmux pane content for 429 substrings. The
+# card above (§6 kaart 1 / orchestration-substrate §6 kaart 2) replaces that
+# with typed Notification-classification signals recorded by the hook
+# endpoint. The tests below verify the fast path works and the pane-scan
+# fallback still kicks in for sessions that never fired a hook.
+
+
+@pytest.mark.asyncio
+async def test_reaper_stuck_session_uses_structured_signal_when_recorded(monkeypatch):
+    """The structured-signal fast path: when a Notification(kind=limit) has
+    already been recorded for the stuck session, the reaper must trigger
+    the full cleanup (kill tmux + dispatch pause + dispatch_failures bump)
+    without needing to scrape the pane. The pane may have been cleared by
+    the time the reaper runs, so a real-world test would have the capture
+    return None or unrelated text — we assert the structured signal alone
+    is enough to act."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+    from app.services.scheduling import session_signals as ssignals
+
+    ssignals.session_signals.clear("k-struct-0001")
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-struct-0001")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    # Record the structured signal before the reaper runs — this is the
+    # normal lifecycle: Notification hook fires, classify says "limit",
+    # registry records, then the reaper sweeps on its next tick.
+    ssignals.session_signals.record_limit(
+        "/p/.claude/worktrees/k-struct-0001",
+        "API Error: 429 rate limit reached",
+    )
+    # Pane scrape would return unrelated text or fail — the structured
+    # signal must still drive the cleanup.
+    monkeypatch.setattr(
+        d, "_capture_pane_content", lambda name, *, lines=20: None,
+    )
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck-struct", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-struct-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-struct-0001"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert killed == ["k-struct-0001"]
+    assert card.claimed_by is None  # claim released by the cleanup path
+    assert card.dispatch_failures == 1
+    ssignals.session_signals.clear("k-struct-0001")
+
+
+@pytest.mark.asyncio
+async def test_reaper_stuck_session_still_falls_back_to_pane_without_signal(monkeypatch):
+    """The fail-open path: when no structured signal has been recorded (the
+    classic 429-on-first-spawn case where the `claude` process died before
+    initialising hooks), the reaper must still catch the rate-limit via the
+    pane substring-match — that's the entire reason the pane scrape
+    survived this refactor."""
+    import app.kanban.dispatch as d
+    from app.services.scheduling import session_registry as sreg
+    from app.services.scheduling import session_signals as ssignals
+
+    ssignals.session_signals.clear("k-pane-0001")
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-pane-0001")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+    # No structured signal recorded — session never fired a hook.
+    monkeypatch.setattr(
+        d, "_capture_pane_content", lambda name, *, lines=20: "API Error: 429",
+    )
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="stuck-pane", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-pane-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-pane-0001"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert killed == ["k-pane-0001"]
+    assert card.dispatch_failures == 1
+    ssignals.session_signals.clear("k-pane-0001")
+
+
 # ---- post_agent_status_comment (CC 2.1.198+ background-agent notifications) -
 
 

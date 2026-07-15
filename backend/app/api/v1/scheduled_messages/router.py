@@ -20,6 +20,7 @@ from app.services.scheduling.hook_installer import get_hooks_status, install_mis
 from app.services.scheduling.idle_state import idle_state
 from app.services.scheduling.scheduler import scheduler_service
 from app.services.scheduling.session_registry import session_registry
+from app.services.scheduling.session_signals import session_signals
 
 logger = logging.getLogger(__name__)
 
@@ -180,12 +181,22 @@ async def hook_event(ev: HookEvent):
     session_registry.record(ev.event, session_id=ev.session_id, cwd=ev.cwd,
                             tmux_pane=ev.tmux_pane)
 
+    # Feed the structured-signal pipeline (see ``session_signals.py``) so the
+    # reaper's pane scrape and the delivery engine's readiness poll can be
+    # replaced with typed lookups. SessionStart is recorded immediately; the
+    # limit-signal branch lives inside the Notification block below so we
+    # classify exactly once and reuse the result for both the kanban move +
+    # dispatch-pause path and the structured-signal registry.
+    if ev.event == "SessionStart":
+        session_signals.record_started(ev.cwd)
+
     if ev.event == "Notification":
         kind = auto_resume_service.classify_notification(
             message=ev.message, notification_type=ev.notification_type,
         )
 
         if kind == "limit":
+            session_signals.record_limit(ev.cwd, message=ev.message or "")
             parsed = auto_resume_service.parse_reset_time(ev.message)
 
             # The usage limit is account-wide: every session hits the same wall for
