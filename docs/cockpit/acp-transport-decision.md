@@ -182,6 +182,14 @@ Daarom is de beslissing nadrukkelijk **additief, geen migratie**:
   kaart 4), niet iets dat deze transportbeslissing oplost. Tot die UX bestaat, blijven
   human-takeover-kaarten op het tmux-transport.
 
+> **Bijgewerkt 2026-07-15 — die UX bestaat nu.** Kaart 4 is beslist
+> ([`human-takeover-headless-decision.md`](./human-takeover-headless-decision.md)) en corrigeert
+> de laatste zin hierboven: er is **géén** categorie "human-takeover-kaarten" die op tmux moet
+> blijven. Takeover blijkt een **promotie** te zijn, geen transport-keuze — een headless run wordt
+> op afroep via `claude --resume <session_id>` een echte, attachbare tmux-pane mét volledige
+> historie (gemeten). De aanname in de §3-tabel dat de pane "verdwijnt" geldt over het *proces*,
+> niet over de *sessie*: die leeft in de transcript op schijf en is transport-overspannend.
+
 ## 6. Gescopete implementatiekaarten (voorstel; niet in deze kaart aangemaakt)
 
 > Deze spike maakt géén kanban-kaarten aan (leaf-spike-conventie, zoals de zusje-docs). De
@@ -228,7 +236,9 @@ Daarom is de beslissing nadrukkelijk **additief, geen migratie**:
    (stream-json/ACP) vs. tmux behouden als de interactieve transport. *Acceptance:* een besluit
    over de human-takeover-UX voor het autonome pad, of de expliciete keuze om
    human-takeover-kaarten op tmux te houden. *`depends_on`: kaart 3 (consumeert de
-   prototype-bevindingen).*
+   prototype-bevindingen).* **→ besloten (tmux blijft interactief; takeover = promotie via
+   `--resume`, geen input-streaming):**
+   [`human-takeover-headless-decision.md`](./human-takeover-headless-decision.md).
 
 5. **[spike, GEPOORT — pas activeren bij tweede-executor-provider-onboarding] ACP-adaptertransport
    als sibling.** Wanneer de `build-prioriteiten-analyse.md` §3.3-hedge een tweede executor-
