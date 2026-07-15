@@ -191,6 +191,28 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 - **Frontend**: ESLint + TypeScript strict mode (`noUnusedLocals`, `noUnusedParameters`). Path alias `@/*` → `./src/*`
 - **No impure calls in render**: the react-compiler ESLint rule rejects `Date.now()` / `Math.random()` (etc.) called directly in a component's render body — including as an inline argument expression, e.g. `formatLabel(Date.now())` inside JSX/render. Move the impure call inside the helper function itself instead (see `isFutureSchedule` in `frontend/src/features/kanban/components/CardItem.tsx`), otherwise `npm run lint` fails with `Cannot call impure function during render`.
 - **Backend**: Type hints throughout, async/await patterns, pydantic models for validation
+- **Test doubles: patch where the consumer looks; assert the double fired.** `from app.module import name` binds the function object into the consumer's namespace **at import time**, so a patch on the *source* module (`monkeypatch.setattr(src_module, "name", patched)`) does **not** reach that binding — the consumer keeps calling the original. Make this class of no-op patch impossible to write *or* detect by:
+  1. **Patch the consumer** (`monkeypatch.setattr(consumer_mod, "name", ...)`) — works regardless of how the consumer imports the symbol. This is the default.
+  2. **Or switch the consumer to module-attribute access** — `from app.module import consumer_mod` then `consumer_mod.name(...)`. Looks up the attribute on the module object at call time, so a patch on the source module IS visible. Use this when the consumer is genuinely a thin caller that you'd rather not patch directly.
+  3. **Always assert the double fired** (`patched.call_count == N`, explicit `calls == [...]`, or a sentinel the patched function mutates). Without that, a no-op patch is indistinguishable from a working one — the test passes green while injecting nothing.
+
+  **Concrete failure** (`backend/tests/test_subscription_pool_dispatch.py:110` vs `backend/app/kanban/dispatch.py:39-42`): the dispatch-tests did `monkeypatch.setattr(pool_mod, "pick_subscription", patched)` while `dispatch.py` had `from app.kanban.subscription_pool import pick_subscription`. The patches never reached the dispatcher; the 11 tests passed on the degenerate "entry #1 wins" behaviour (zie [subscription-pool-analyse §3](./docs/cockpit/subscription-pool-dispatch-analyse.md) / kanban-kaart `ea7e038b…`). D5-fix switched `dispatch.py` naar module-attribute-access **én** voegde een end-to-end spill-test toe die een no-op double niet kan faken.
+
+  **Reviewer grep-recept** — twee scans die de verdachte combinatie blootleggen:
+
+  ```bash
+  # 1. Tests die een source-module patchen (eerste twee args = module, naam).
+  #    Treffers zijn potentieel onzichtbaar als de consument `from X import name` doet.
+  grep -rnE 'monkeypatch\.setattr\(\s*[A-Za-z_][A-Za-z_0-9_.]*\s*,\s*"[A-Za-z_][A-Za-z_0-9]*"\s*,' \
+      backend/tests/
+
+  # 2. Per gevonden `(src, name)` paar: check of een consument
+  #    `from app.<src> import … <name>` doet — die ziet de patch NIET.
+  #    Handmatig per paar:
+  #      grep -rnE '^from\s+app\.<src>\s+import\b.*\<<name>\>' backend/app/
+  ```
+
+  Treffer op 1 + 2 = de patch is onzichtbaar voor die consument → óf de patch moet naar `consumer_mod`, óf de consument moet module-attribute-access gebruiken (zoals `dispatch.py` deed in de D5-fix).
 
 ## UI Conventions
 
