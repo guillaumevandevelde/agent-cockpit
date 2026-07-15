@@ -209,12 +209,20 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
     echo 'ERROR: uncommitted/untracked changes — git add + git commit first, then re-run.' >&2; exit 1
   fi
   TMP=$(mktemp -d)
-  git worktree add --detach "$TMP/m" origin/master
-  git -C "$TMP/m" merge --no-ff <branch> -m "Merge <branch>: <summary>"
-  git -C "$TMP/m" push origin HEAD:master
-  git worktree remove "$TMP/m" --force
+  # Slot name MUST be unique per session: git derives the `.git/worktrees/<name>`
+  # entry from the path's basename, so a fixed name (e.g. `m`) collides under
+  # concurrent dispatched sessions — both target the same gitdir slot, and a
+  # stale HEAD (or a half-pruned gitdir from a crashed predecessor) leaks into
+  # the fresh session's merge push, producing a spurious non-fast-forward
+  # rejection against origin/master. `$$` (this process's PID) guarantees a
+  # fresh slot per invocation — do NOT simplify back to a fixed name.
+  # (kanban card c23dfe46…)
+  git worktree add --detach "$TMP/merge-$$" origin/master
+  git -C "$TMP/merge-$$" merge --no-ff <branch> -m "Merge <branch>: <summary>"
+  git -C "$TMP/merge-$$" push origin HEAD:master
+  git worktree remove --force "$TMP/merge-$$"
   ```
-  Using `git -C "$TMP/m"` (instead of `cd`) sidesteps the lost-cwd trap entirely. The
+  Using `git -C "$TMP/merge-$$"` (instead of `cd`) sidesteps the lost-cwd trap entirely. The
   pre-flight guard catches the silent-no-op case where a docs-/quick-edit branch was
   never committed: the detached worktree merges committed history only, so an
   uncommitted file produces "Everything up-to-date" and pushes nothing.
