@@ -177,7 +177,7 @@ async def test_overview_endpoint(main_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_aggregate_stale_field(main_db):
+async def test_aggregate_stale_field(main_db, monkeypatch):
     """A ``portfolio_stale:*`` KanbanMeta row flags the project as stale.
 
     Mirrors the dedup state ``app.kanban.stale_detection`` writes — the service
@@ -217,7 +217,14 @@ async def test_aggregate_stale_field(main_db):
     assert app_a.stale is False
     assert app_a.stale_since is None
 
-    # And the endpoint round-trips it.
+    # And the endpoint round-trips it. The endpoint uses the real
+    # ``resolve_project_key`` which would resolve ``/repo/cockpit`` (not a real
+    # git repo) to ``slug:cockpit`` instead of the seeded
+    # ``git:github.com/x/cockpit`` — patch the resolver so the HTTP path sees
+    # the same keys the service-level call above used.
+    monkeypatch.setattr(
+        "app.services.portfolio_service.resolve_project_key", _resolver
+    )
     app.dependency_overrides[get_db] = lambda: main_db
     try:
         transport = ASGITransport(app=app)

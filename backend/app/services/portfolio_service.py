@@ -169,7 +169,12 @@ class PortfolioService:
         # ``portfolio_stale:<project_key>:<card_id>:last_posted_at`` rows are
         # written by ``app.kanban.stale_detection`` — one per flagged Backlog
         # card, refreshed once per stale window. Pick the freshest per project
-        # so the badge reflects "most recently observed as stale".
+        # so the badge reflects "most recently observed as stale". ``project_key``
+        # itself contains colons for ``git:``/``slug:`` keys, so we can't naively
+        # ``rsplit(":", 1)``: strip the fixed ``:last_posted_at`` suffix first,
+        # then peel the trailing ``<card_id>`` (card IDs are 64-char strings, no
+        # colons — safe to rsplit).
+        stale_suffix = ":last_posted_at"
         stale_since_by_key: dict[str, datetime] = {}
         for r in meta_rows:
             if not r.key.startswith(STALE_META_PREFIX):
@@ -179,9 +184,14 @@ class PortfolioService:
             except ValueError:
                 continue
             tail = r.key[len(STALE_META_PREFIX):]
+            if not tail.endswith(stale_suffix):
+                continue
+            head = tail[: -len(stale_suffix)]
             try:
-                project_key, _card_id = tail.rsplit(":", 1)
+                project_key, _card_id = head.rsplit(":", 1)
             except ValueError:
+                continue
+            if not project_key:
                 continue
             current = stale_since_by_key.get(project_key)
             if current is None or when > current:
