@@ -249,6 +249,13 @@ Daarom is de beslissing nadrukkelijk **additief, geen migratie**:
    permission` als getypeerde gating-haak (facet D). *Acceptance:* een go/no-go op ACP-per-vendor,
    gepoort op adapterrijpheid; bij go een ACP-transport die het bestaande event-model hergebruikt.
    **Bewust niet nu** — deze kaart activeert pas met een concrete tweede provider.
+   **→ status: poort nog dicht** (2026-07-15). De kaart werd autonoom gedispatcht ondanks de
+   poort; de go/no-go is bewust *niet* geproduceerd, want zonder tweede CLI-vendor is er geen
+   adapter om tegen zijn native headless-JSON af te wegen:
+   [`acp-transport-trigger-gate.md`](./acp-transport-trigger-gate.md). Dat doc legt ook vast
+   waarom de poort niet hield (ze was prosa; de dispatcher kent geen "niet nu") en houdt de
+   kandidatentabel klaar voor het moment dat P3 vuurt. Heropen deze kaart wanneer een tweede
+   CLI-vendor een kaart afrondt.
 
 ## 7. Bewust buiten scope
 
