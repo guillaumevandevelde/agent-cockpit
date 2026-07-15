@@ -133,6 +133,13 @@ fundament → franje:
    als de spec (SSOT-analyse §6, Fase 1); `card.metadata["spec_doc"]` legt de kaart→doc-
    koppeling al vast. Het aggregatorvenster leest exact die ankers — geen nieuw
    datamodel.
+   > ⚠️ **Bijgesteld door de review (zie §8).** Deze stap was te optimistisch: de
+   > `spec_doc`-link is vandaag **0× gepopuleerd** en heeft als enige writer een
+   > handmatig UI-veld. De B-kant (34 `plan`/`plan_ref`-deliverables) en de C-kant
+   > (66 `docs/cockpit/`-docs) zijn elk apart wél afleidbaar zonder anker; het is
+   > specifiek de **join** tussen B en C die op lucht rust. Een aggregator die op
+   > `spec_doc` leunt, herhaalt de "gedefinieerd, geen producent"-fout van
+   > `kanban_plans` zelf.
 4. **Werk `docs/features/plans.md` bij** zodra de richting vaststaat — het beschrijft nu
    de verouderde bestand-gebaseerde variant.
 
@@ -149,6 +156,9 @@ apart werk. Aanbevolen vervolgkaarten (indien go), grofweg in volgorde:
 - **[plans-window] Aggregator-backend** — endpoint(s) die B (`kind='plan'/'plan_ref'`-
   deliverables + `spec_doc`-links) en C (`docs/cockpit/`-index) samenvoegen tot één
   read-only lijst per project. Bouwt op bestaande kanban-queries; geen nieuw datamodel.
+  *(Review-correctie §8: de B↔C-**join** via `spec_doc` is géén gratis stap — dat anker
+  is 0× gepopuleerd. Lever B en C eerst naast elkaar; de join is een aparte kaart die
+  eerst een producent voor `spec_doc` nodig heeft.)*
 - **[plans-window] Frontend herbestemming** — Plans-pagina toont het aggregaat i.p.v.
   `kanban_plans`; detail linkt door naar kaart of `docs/cockpit/`-doc.
 - **[plans-window] `kanban_plans` uitfaseren** — demoteer/verwijder tabel + CRUD +
@@ -166,3 +176,51 @@ proces-/strategiebeslissing: de vervolgkaarten wachten op een expliciete go van 
 gebruiker op **Optie B** (herbestemmen als spec-/plan-venster, `kanban_plans`
 uitfaseren) vóórdat uitvoering start. Alternatieven blijven Optie A (volledig
 uitfaseren) en Optie C (writer aanhaken) — expliciet afgeraden in §4-5.
+
+**Status 2026-07-15:** deze go/no-go is nooit gegeven en stond ten onrechte als
+"beslist" in het register (zie §8.3). De vraag is bij review-kaart `a70a9272…` alsnog
+als impediment mét keuze-opties aan de gebruiker voorgelegd.
+
+## 8. Review-verificatie (2026-07-15, kaart `a70a9272…`)
+
+Een review-kaart ("Is er een gevolg voor deze analyse?") toetste dit doc tegen de
+werkelijke code + live DB. Uitkomst: **de diagnose klopt en was eerder te mild**, maar
+de aanbeveling had één zwakke poot en de status was verkeerd geboekt.
+
+**1. Diagnose bevestigd én gekwantificeerd.** Gemeten op `~/.claude-registry/kanban.db`:
+
+| Store | Meting | Zichtbaar in Plans |
+|---|---|---|
+| A `kanban_plans` | **0 rijen** | ja (leeg) |
+| B `plan`/`plan_ref`-deliverables | **34** | nee |
+| C `docs/cockpit/*.md` | **66** | nee |
+
+De pagina is dus een leeg venster naast ~100 reële artefacten. Geverifieerd: de enige
+writers naar A zijn `kanban_plan_service.py:201` (POST /plans) en
+`migrate_plans_to_kanban.py:138`; `createPlan`/`updatePlan` bestaan in
+`usePlansApi.ts` maar **geen enkele component roept ze aan**. `DEFAULT_PROJECT_KEY =
+"slug:global-plans"` (regel 48) bevestigt de bucket-mismatch.
+
+**2. Nieuw: de `spec_doc`-join rust op lucht.** §5 stap 3 rekende op de Fase-1-link als
+bestaand fundament. Realiteit: `SPEC_DOC_META_KEY` is gedefinieerd
+(`schemas.py:31`, `types.ts:188`), maar **0 kaarten** dragen 'm, en de enige writer is
+een handmatig veld in `CardDrawer.tsx:773` — geen enkele agent/automatisering vult 'm.
+Dit is dezelfde pathologie als `kanban_plans`: infra zonder producent. Optie B blijft
+haalbaar (B en C zijn los prima afleidbaar), maar wie de **B↔C-join** wil, moet eerst
+een producent voor `spec_doc` regelen — dat is echt werk, geen "geen nieuw datamodel".
+
+**3. De beslissing stond ten onrechte als genomen geboekt.** `decisions.md` voerde deze
+vraag sinds de register-backfill (`4101d56`, 2026-07-15) op met uitkomst
+"**Herbestemmen.**", terwijl §7 expliciet op een go/no-go wacht die nooit kwam. Omdat
+het register stelt *"staat er een uitkomst, dan is de vraag beslist"*, zat deze analyse
+in een **false-settled** toestand: heropening onderdrukt, uitvoering afwezig.
+Gecontroleerd of dit systemisch was — dat is het **niet**: de drie andere docs die op
+een go/no-go parkeren (`spec-driven-development-fase-0`, `acp-transport`,
+`orchestration-substrate`) kregen hun go aantoonbaar wél en zijn uitgevoerd
+(`docs/plans-legacy/`, `structured_events.py`, headless transport in `dispatch.py`).
+Plans is de enige uitzondering. De registerregel is bij deze review gecorrigeerd naar
+"nog niet beslist".
+
+**Antwoord op de reviewvraag ("is er een gevolg?"):** vandaag **nee** — geen
+vervolgkaarten, `kanban_plan_service.py` + tabel onaangeroerd, pagina nog steeds leeg.
+De go/no-go in §7 is daarmee nog steeds de enige blocker.
