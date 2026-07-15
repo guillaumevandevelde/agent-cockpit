@@ -36,54 +36,12 @@ Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur 
 
 ---
 
-## Doelstelling & zelfverbetering
+## Doel & oriëntatie
 
-Bouw een **agentic developers platform**: een agentisch software engineering platform dat
-AI-agents inzet voor de ontwikkeling, het beheer en de evolutie van softwareapplicaties.
-Dit heeft **twee even belangrijke, eersteklas doelen**:
-
-1. **Andere applicaties** — het platform bouwt en beheert externe/aparte doel-applicaties
-   (repos buiten Cockpit zelf): analyse, implementatie, tests, onderhoud en evolutie ervan
-   via agents. Dit is geen bijproduct; het is de primaire bestaansreden.
-2. **Zichzelf** — het platform bouwt, beheert en verbetert continu zijn eigen codebase
-   (zie **Zelfverbetering** hieronder).
-
-De orchestratie-kern (dispatch, worktrees, agent mail, dependency-DAG, session-lifecycle)
-moet daarom generiek zijn: agent-onafhankelijk én repo-onafhankelijk, zodat een willekeurige
-doel-applicatie er via dezelfde executie-primitieven op aangesloten kan worden.
-
-### Kernprincipes
-
-- Gebruik Claude Code als primaire AI-agent, maar ontwerp het platform agent-onafhankelijk zodat andere AI-agents eenvoudig kunnen worden geïntegreerd.
-- Automatiseer zoveel mogelijk werkzaamheden zonder de gebruiker uit de beslissingsketen te verwijderen.
-- Geef de gebruiker volledige transparantie over alle geplande, lopende en uitgevoerde acties, inclusief de motivatie, voortgang en resultaten.
-- Bewaak continu de doelstellingen van het platform en stuur werkzaamheden hier proactief op bij.
-- Verbeter het platform continu:
-  - **Functioneel** door nieuwe functionaliteit, workflows en automatiseringen voor te stellen en te implementeren.
-  - **Technisch** door technische schuld, bugs, beveiligingsrisico's, performantieproblemen, stabiliteitsproblemen en onderhoudsproblemen automatisch te detecteren, te analyseren en waar mogelijk zelfstandig te verhelpen.
-- Optimaliseer continu de eigen werking door inefficiënties te identificeren en processen, architectuur en configuratie te verbeteren.
-- Ontwerp alle functionaliteit modulair, uitbreidbaar en onderhoudbaar.
-- Zorg ervoor dat alle wijzigingen reproduceerbaar, controleerbaar en auditbaar zijn.
-- Respecteer de ingestelde autonomiegrenzen en vraag goedkeuring voor acties die buiten deze grenzen vallen.
-
-### Zelfverbetering
-
-Het platform streeft naar continue zelfoptimalisatie en moet onder andere in staat zijn om:
-
-- nieuwe functionaliteit voor te stellen en te ontwikkelen;
-- repetitieve taken verder te automatiseren;
-- codekwaliteit te verbeteren;
-- technische schuld te verminderen;
-- bugs proactief te detecteren en herstellen;
-- performantieknelpunten te identificeren en optimaliseren;
-- beveiligingsproblemen te detecteren en mitigeren;
-- foutieve configuraties te corrigeren;
-- zichzelf te monitoren en waar mogelijk zelfhelend op te treden;
-- architectuur en afhankelijkheden actueel en gezond te houden.
-
-### Succescriteria
-
-Het platform ontwikkelt zich continu verder, voert werkzaamheden steeds autonomer uit, blijft volledig transparant en wordt na verloop van tijd functioneel rijker, technisch robuuster en efficiënter.
+Agentic developers platform: agents bouwen/beheren (1) externe applicaties — primaire
+bestaansreden — en (2) deze codebase continu. De orchestratie-kern (dispatch, worktrees,
+agent mail, dependency-DAG, session-lifecycle) is agent- en repo-onafhankelijk ontworpen.
+Volledige missietekst, kernprincipes en zelfverbeteringsdoelen: `docs/cockpit/00-orientation.md`.
 
 ---
 
@@ -95,7 +53,7 @@ Web app for managing Claude Code configurations, MCP servers, commands, plugins,
 
 ```bash
 # Install
-./scripts/install.sh             # Setup venv, install deps, create dirs (requires Python 3.11+, Node 18+)
+./scripts/install.sh             # Setup venv, install deps, create dirs (Python 3.11+, Node 18+)
 
 # Development
 ./scripts/dev.sh                 # Start both backend + frontend servers (attached, Ctrl+C to stop)
@@ -103,8 +61,7 @@ cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8
 cd frontend && npm run dev       # Frontend only (port 5173)
 
 # Self-healing dev stack (detached supervisor: auto-restart on crash, logs to logs/, survives terminal close)
-# cockpit.sh start auto-installs missing/stale deps (npm install, pip install) before starting
-./scripts/cockpit.sh start       # Start backend+frontend supervised in the background
+./scripts/cockpit.sh start       # Start backend+frontend supervised (auto-installs missing/stale deps)
 ./scripts/cockpit.sh status      # Show supervisor/backend/frontend status
 ./scripts/cockpit.sh logs backend  # Follow backend logs (or: logs frontend)
 ./scripts/cockpit.sh restart     # Stop, then start
@@ -121,11 +78,7 @@ bash scripts/test_pytest_baseline.sh                      # Bash tests for pytes
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
 bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
 
-# Run a single pytest file/test (the documented exception to
-# `feedback_no_local_pytest` — the full suite is forbidden locally, but
-# a single-test run is <1.5s on this box and is the verification path
-# any "I added a new test" card should use). See kanban card
-# ed09173c14c248e0a7d4d413f7f2d945.
+# Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
 bash scripts/run-single-test.sh tests/test_x.py::test_y          # one test
 bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k filter
@@ -191,28 +144,7 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 - **Frontend**: ESLint + TypeScript strict mode (`noUnusedLocals`, `noUnusedParameters`). Path alias `@/*` → `./src/*`
 - **No impure calls in render**: the react-compiler ESLint rule rejects `Date.now()` / `Math.random()` (etc.) called directly in a component's render body — including as an inline argument expression, e.g. `formatLabel(Date.now())` inside JSX/render. Move the impure call inside the helper function itself instead (see `isFutureSchedule` in `frontend/src/features/kanban/components/CardItem.tsx`), otherwise `npm run lint` fails with `Cannot call impure function during render`.
 - **Backend**: Type hints throughout, async/await patterns, pydantic models for validation
-- **Test doubles: patch where the consumer looks; assert the double fired.** `from app.module import name` binds the function object into the consumer's namespace **at import time**, so a patch on the *source* module (`monkeypatch.setattr(src_module, "name", patched)`) does **not** reach that binding — the consumer keeps calling the original. Make this class of no-op patch impossible to write *or* detect by:
-  1. **Patch the consumer** (`monkeypatch.setattr(consumer_mod, "name", ...)`) — works regardless of how the consumer imports the symbol. This is the default.
-  2. **Or switch the consumer to module-attribute access** — `from app.module import consumer_mod` then `consumer_mod.name(...)`. Looks up the attribute on the module object at call time, so a patch on the source module IS visible. Use this when the consumer is genuinely a thin caller that you'd rather not patch directly.
-  3. **Always assert the double fired** (`patched.call_count == N`, explicit `calls == [...]`, or a sentinel the patched function mutates). Without that, a no-op patch is indistinguishable from a working one — the test passes green while injecting nothing.
-
-  **Concrete failure** (`backend/tests/test_subscription_pool_dispatch.py:110` vs `backend/app/kanban/dispatch.py:39-42`): the dispatch-tests did `monkeypatch.setattr(pool_mod, "pick_subscription", patched)` while `dispatch.py` had `from app.kanban.subscription_pool import pick_subscription`. The patches never reached the dispatcher; the 11 tests passed on the degenerate "entry #1 wins" behaviour (zie [subscription-pool-analyse §3](./docs/cockpit/subscription-pool-dispatch-analyse.md) / kanban-kaart `ea7e038b…`). D5-fix switched `dispatch.py` naar module-attribute-access **én** voegde een end-to-end spill-test toe die een no-op double niet kan faken.
-
-  **Reviewer grep-recept** — twee scans die de verdachte combinatie blootleggen:
-
-  ```bash
-  # 1. Tests die een source-module patchen (eerste twee args = module, naam).
-  #    Treffers zijn potentieel onzichtbaar als de consument `from X import name` doet.
-  grep -rnE 'monkeypatch\.setattr\(\s*[A-Za-z_][A-Za-z_0-9_.]*\s*,\s*"[A-Za-z_][A-Za-z_0-9]*"\s*,' \
-      backend/tests/
-
-  # 2. Per gevonden `(src, name)` paar: check of een consument
-  #    `from app.<src> import … <name>` doet — die ziet de patch NIET.
-  #    Handmatig per paar:
-  #      grep -rnE '^from\s+app\.<src>\s+import\b.*\<<name>\>' backend/app/
-  ```
-
-  Treffer op 1 + 2 = de patch is onzichtbaar voor die consument → óf de patch moet naar `consumer_mod`, óf de consument moet module-attribute-access gebruiken (zoals `dispatch.py` deed in de D5-fix).
+- **Test doubles: patch where the consumer looks; assert the double fired.** `from app.module import name` binds the function object into the consumer's namespace **at import time**, so a patch on the *source* module (`monkeypatch.setattr(src_module, "name", patched)`) does **not** reach that binding — the consumer keeps calling the original. Three rules to make this class of no-op patch impossible to write *or* detect: (1) patch the consumer, (2) or switch the consumer to module-attribute access, (3) always assert the double fired. Concrete failure + reviewer grep-recept: `docs/cockpit/test-doubles-convention.md` (zie ook [subscription-pool-analyse §3](./docs/cockpit/subscription-pool-dispatch-analyse.md) / kanban-kaart `ea7e038b…`).
 
 ## UI Conventions
 
@@ -223,34 +155,26 @@ All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins,
 
 ## Git Workflow
 
-- **Finishing a branch**: The default is to **merge back to `master` and push** — no need to ask. Skip the merge/PR/cleanup menu. If the main checkout's `master` is dirty (concurrent sessions share one working copy), do the merge in a temporary worktree. The exact recipe — note `--detach origin/master`, **not** `master`: checking out the branch name collides with the main worktree (`git worktree add` refuses two checkouts of one branch, failing with `'master' is already used by worktree at ...`). Run each git step as its own `Bash` call or chain with `&&` in one call — a bare `cd` in a separate `Bash` call does not persist cwd across tool calls, so `git merge` would silently run in the wrong worktree:
-  ```bash
-  # Pre-flight: the detached worktree only sees COMMITTED state — uncommitted/untracked
-  # changes here merge as a silent no-op ("Everything up-to-date"). Commit first.
-  if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-    echo 'ERROR: uncommitted/untracked changes — git add + git commit first, then re-run.' >&2; exit 1
-  fi
-  TMP=$(mktemp -d)
-  # Slot name MUST be unique per session: git derives the `.git/worktrees/<name>`
-  # entry from the path's basename, so a fixed name (e.g. `m`) collides under
-  # concurrent dispatched sessions — both target the same gitdir slot, and a
-  # stale HEAD (or a half-pruned gitdir from a crashed predecessor) leaks into
-  # the fresh session's merge push, producing a spurious non-fast-forward
-  # rejection against origin/master. `$$` (this process's PID) guarantees a
-  # fresh slot per invocation — do NOT simplify back to a fixed name.
-  # (kanban card c23dfe46…)
-  git worktree add --detach "$TMP/merge-$$" origin/master
-  git -C "$TMP/merge-$$" merge --no-ff <branch> -m "Merge <branch>: <summary>"
-  git -C "$TMP/merge-$$" push origin HEAD:master
-  git worktree remove --force "$TMP/merge-$$"
-  ```
-  Using `git -C "$TMP/merge-$$"` (instead of `cd`) sidesteps the lost-cwd trap entirely. The
-  pre-flight guard catches the silent-no-op case where a docs-/quick-edit branch was
-  never committed: the detached worktree merges committed history only, so an
-  uncommitted file produces "Everything up-to-date" and pushes nothing.
-- **Worktree hygiene**: After merging, the finished worktree + branch should be removed so `.claude/worktrees/` doesn't accumulate leftovers. Kanban dispatch auto-removes on card→Done; for everything else run `scripts/worktree-gc.sh` (dry-run) then `--apply`. It only removes worktrees that are **(a)** clean, **(b)** fully merged into `master`, **and (c)** not currently held by an active kanban agent claim (`claimed_by LIKE 'agent:%'` AND column NOT IN Done/Impediment) — see the postmortem of the "[problem] worktree-gc verwijdert branch/worktree van actieve analyst-sessie" card for why (c) is load-bearing: an analyst-only session never commits, so its branch is trivially merged+clean from creation and would otherwise be killed by the first gc run). `cockpit.sh start` nudges when leftovers exist.
-- **Remote branch hygiene**: `delete_branch_on_merge` is enabled on the GitHub repo (set 2026-07-07), so any branch pushed for a PR (`git-ship`'s `pull-request` ship mode does `git push -u origin HEAD`) is deleted by GitHub the moment its PR merges — no manual sweep needed for the merged case anymore. Branches pushed for a PR that never merges (card hit `report_impediment`, `gh` was unavailable, checks never went green) still strand on `origin` — those need a human decision, not automation. Periodically check for them: `git branch -r | grep 'origin/k-'` then `git cherry master origin/<branch>` per candidate to see if it's actually merged (empty output) before deleting.
-- **No local pre-push gate**: removed 2026-07-05 — a shared box running many concurrent dispatched agents made the old `.githooks/pre-push` test gate (full backend pytest + frontend lint/build on every push, serialized via flock) a recurring source of multi-minute stalls and SSH idle-disconnects under contention. Backend pytest + ruff and frontend lint/test/build now run in CI (`quality.yml`) instead — push freely, watch the Actions run. Note: the old hook also refused any push that collapsed a branch's file tree (a test git-fixture once wiped `master` down to `a.txt` and it got pushed); that preventive check is gone too. `scripts/cockpit-doctor.sh` (or `cockpit.sh doctor`) still gives a read-only, *after-the-fact* health check for the same clobbered-tree scenario plus `core.bare` mismatch, stale checkout, and leftover worktrees.
+Ship-recipes (sync, frontend-gate, detached-worktree merge, PR-poll, worktree-gc,
+regels) leven in **`.claude/skills/git-ship/SKILL.md`** — bron van waarheid. Dezelfde
+tekst wordt via `_build_ship_instructions` in `backend/app/kanban/dispatch.py`
+geïnlined in de dispatch-prompt voor agents die de skill niet kunnen lezen. Wijzig
+de skill **en** sync de dispatch.py-mirror in dezelfde commit (zie de drift-val uit
+Done-kaart `d9447e49`).
+
+- **Worktree-gc** (`scripts/worktree-gc.sh`): reclaimt merged-but-never-Done
+  worktrees — alleen als (a) clean, (b) gemerged in master, en (c) niet
+  vastgehouden door een actieve `agent:` claim (kaart niet in Done/Impediment).
+  `cockpit.sh start` nudged wanneer leftovers bestaan.
+- **Geen lokale pre-push gate** (sinds 2026-07-05): full pytest + lint/build liep
+  in CI (`quality.yml`). Backend pytest + ruff en frontend lint/test/build draaien
+  in CI als backend/frontend-gate; draai zelf de frontend-checks voor ships die
+  `frontend/` raken (zie git-ship §2). `scripts/cockpit-doctor.sh` is de
+  read-only health-check.
+- **Remote branch hygiene**: `delete_branch_on_merge` is enabled (2026-07-07),
+  dus PR-branches ruimen zichzelf op bij merge. Branches van PRs die nooit
+  mergen stranden op `origin` — handmatige `git cherry master origin/<branch>`
+  + delete.
 
 ## CI/CD
 
