@@ -1,6 +1,9 @@
 # backend/tests/test_kanban_personas.py
 from pathlib import Path
 
+import yaml
+
+import app.kanban.analyst_prompt as _analyst_prompt_module
 from app.kanban import dispatch
 
 
@@ -75,6 +78,80 @@ def test_read_persona_model_returns_none_for_malformed_yaml(tmp_path):
 # who customises the persona must not silently re-introduce the contradiction
 # that the leaf-spike runtime override was added to patch. See kanban card
 # c2b478ca396a473287aa0c04a79890e2.
+
+
+def test_project_analyst_md_frontmatter_description_covers_both_modes():
+    """The frontmatter `description:` of the shipped `.claude/agents/analyst.md`
+    must mention both modi — multi-agent decompositie AND leaf
+    design-deliverable. A bare 'Voert niets zelf uit' was the pre-leaf-spike
+    drift that this contract prevents from re-appearing: the description is
+    what an operator sees in the Cockpit agent-list UI and what
+    `AgentService._scan_agents_dir` exposes via the `description` field on
+    `/api/v1/agents`."""
+    repo_root = Path(__file__).resolve().parents[2]
+    persona_path = repo_root / ".claude" / "agents" / "analyst.md"
+    text = persona_path.read_text()
+    assert text.startswith("---\n"), "persona must start with YAML frontmatter"
+    end = text.find("\n---\n", 4)
+    assert end != -1, "persona must have a closing frontmatter delimiter"
+    frontmatter = yaml.safe_load(text[4:end])
+    assert isinstance(frontmatter, dict)
+    description = frontmatter.get("description") or ""
+    assert isinstance(description, str) and description.strip(), (
+        "analyst.md frontmatter must have a non-empty `description:` field"
+    )
+
+    # Modus 1 — multi-agent decomposition must be referenced.
+    desc_lower = description.lower()
+    assert (
+        "multi-agent" in desc_lower and "decompositie" in desc_lower
+    ), (
+        "analyst.md frontmatter description must mention multi-agent "
+        "decompositie (modus 1). "
+        f"Got description: {description!r}"
+    )
+
+    # Modus 2 — leaf design-deliverable must be referenced. Accept any of
+    # the conventional spellings; the persona body uses 'Leaf
+    # design-deliverable' (capitalised) but the frontmatter description
+    # case may vary.
+    assert (
+        "leaf design-deliverable" in desc_lower
+        or "leaf spike" in desc_lower
+        or "design-deliverable" in desc_lower
+    ), (
+        "analyst.md frontmatter description must mention leaf "
+        "design-deliverable (modus 2) so an operator doesn't think "
+        "the analyst persona can never execute. "
+        f"Got description: {description!r}"
+    )
+
+
+def test_analyst_prompt_module_docstring_covers_both_modes():
+    """The `analyst_prompt.py` module docstring is what an operator reads in
+    the IDE/docs when there's no project-local `analyst.md`. It must also
+    acknowledge both modi — a bare 'planning, not implementing' framing is
+    no longer accurate after the leaf-spike change, mirroring the
+    frontmatter-description drift that this contract guards against."""
+    doc = _analyst_prompt_module.__doc__ or ""
+    assert doc.strip(), "analyst_prompt.py must have a module docstring"
+
+    doc_lower = doc.lower()
+    assert (
+        "multi-agent" in doc_lower and "decompositie" in doc_lower
+    ), (
+        "analyst_prompt.py module docstring must mention multi-agent "
+        "decompositie (modus 1). "
+        f"Got docstring: {doc!r}"
+    )
+    assert (
+        "leaf design-deliverable" in doc_lower
+        or "leaf spike" in doc_lower
+    ), (
+        "analyst_prompt.py module docstring must mention leaf "
+        "design-deliverable (modus 2). "
+        f"Got docstring: {doc!r}"
+    )
 
 
 def test_project_analyst_md_covers_both_modes(tmp_path):

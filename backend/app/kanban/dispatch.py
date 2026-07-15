@@ -701,8 +701,22 @@ def _resolve_analyst_persona(project_path: str) -> str:
     analyst role locally); falls back to the hardcoded `ANALYST_PROMPT` in
     `analyst_prompt.py` when no project-local file exists, or when it exists
     but is empty (only frontmatter). Without this fallback, an analyst
-    session gets an empty preamble and behaves like a generic engineer card —
-    implementing the whole task instead of planning + splitting.
+    session gets an empty preamble.
+
+    The analyst persona runs in one of two modi — see the kanban card
+    c2b478ca396a473287aa0c04a79890e2 for the rationale:
+
+    - **Modus 1 — multi-agent decompositie** (default, `analyst_agent_id`
+      set on the card): the persona is a planner; it splits the card into
+      child cards with `depends_on`, writes a plan-attachment, and moves
+      the parent to Done. Implementing is the executor's job.
+    - **Modus 2 — leaf design-deliverable** (`work_type='analysis'` or
+      `card.agent='analyst'` without `analyst_agent_id`): the persona is
+      the implementer; it writes a single design-doc / prototype,
+      commits, ships to master, and moves THIS card to Done. No child
+      cards. The dispatch layer injects an `Analyst-leaf-spike override`
+      pointer that defers to the persona's own two-modi framing rather
+      than repeating the full modus-2 workflow here.
     """
     from app.kanban.analyst_prompt import ANALYST_PROMPT
     project_body = _read_persona_file(project_path, "analyst.md")
@@ -2255,7 +2269,9 @@ async def _run_card(
     # Load persona for the target agent. Analyst phase uses a dedicated
     # helper that falls back to the hardcoded ANALYST_PROMPT when no
     # `analyst.md` exists in the project — otherwise the analyst session
-    # gets an empty preamble and behaves like a generic engineer.
+    # gets an empty preamble. The analyst persona itself documents both
+    # modi (multi-agent decomposition + leaf design-deliverable), so the
+    # helper doesn't need to branch here — see `_resolve_analyst_persona`.
     if phase == "analyst":
         persona = _resolve_analyst_persona(project_path)
     else:
