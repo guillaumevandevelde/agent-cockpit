@@ -42,7 +42,7 @@ describe("ActiveSubscriptionOverride", () => {
     await waitFor(() =>
       expect(
         screen.getByText(/subscription: column defaults/i)
-      ).toBeTruthy()
+      ).toBeInTheDocument()
     );
   });
 
@@ -53,7 +53,7 @@ describe("ActiveSubscriptionOverride", () => {
     await waitFor(() =>
       expect(kanbanApi.getActiveSubscriptionOverride).toHaveBeenCalled()
     );
-    expect(screen.queryByRole("button", { name: /clear/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /clear/i })).not.toBeInTheDocument();
   });
 
   it("selects the pinned provider when an override is set", async () => {
@@ -67,11 +67,11 @@ describe("ActiveSubscriptionOverride", () => {
       expect(kanbanApi.getActiveSubscriptionOverride).toHaveBeenCalled()
     );
     await waitFor(() =>
-      expect(screen.getByText(/subscription: minimax/i)).toBeTruthy()
+      expect(screen.getByText(/subscription: minimax/i)).toBeInTheDocument()
     );
     expect(
       screen.getByRole("button", { name: /clear/i })
-    ).toBeTruthy();
+    ).toBeInTheDocument();
   });
 
   it("clicking Clear posts a null override and toggles state back to default", async () => {

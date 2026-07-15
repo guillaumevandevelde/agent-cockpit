@@ -39,6 +39,9 @@ export default defineConfig({
     },
   },
   test: {
+    // Registers `@testing-library/jest-dom` matchers (`toBeInTheDocument`,
+    // etc.) globally — see kanban card 84b7bc21981f40a6ab31d5a118a733aa.
+    setupFiles: ['./src/test-setup.ts'],
     exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 })
