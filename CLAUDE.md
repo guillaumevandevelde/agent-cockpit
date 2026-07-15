@@ -119,6 +119,16 @@ cd frontend && npm run build     # Same as above
 bash backend/test_commands_api.sh                         # Curl-based API tests
 bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
+bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
+
+# Run a single pytest file/test (the documented exception to
+# `feedback_no_local_pytest` — the full suite is forbidden locally, but
+# a single-test run is <1.5s on this box and is the verification path
+# any "I added a new test" card should use). See kanban card
+# ed09173c14c248e0a7d4d413f7f2d945.
+bash scripts/run-single-test.sh tests/test_x.py                  # whole file
+bash scripts/run-single-test.sh tests/test_x.py::test_y          # one test
+bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k filter
 
 # Docs / decision register
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
