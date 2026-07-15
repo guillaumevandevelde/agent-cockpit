@@ -430,3 +430,95 @@ async def test_mcp_create_card_then_add_plan_attachment_round_trip():
     )
     assert result["parent_card_id"] == parent["id"]
     assert result["child_card_ids"] == [child_a["id"], child_b["id"]]
+
+
+# --- depends_on on create_card / update_card --------------------------------
+# Regression: the REST CardCreate / CardUpdate schemas accept depends_on
+# (schemas.py:147, :169), the router honours it on PATCH
+# (api/v1/kanban/router.py:329-360 → apply_operation → _materialize), and
+# add_plan_attachment wires sibling deps via depends_on_graph. The MCP
+# create_card / update_card tools, however, didn't surface depends_on — so
+# any session that needed to wire sibling-deps on cards it just created
+# (or retroactive tracking after the plan-attachment flow ran) had to drop
+# to REST PATCH. Surface the field on both tools so it round-trips through
+# the create+update op-log the same way the REST path already does.
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_accepts_depends_on_and_persists_it():
+    """A `depends_on=[...]` passed at create time must round-trip through the
+    create op-log and be visible on the resulting card — so the dispatcher
+    gates this card on the named siblings reaching Done, without a follow-up
+    REST PATCH."""
+    sibling = await m.create_card("P", "Sibling")
+    card = await m.create_card(
+        "P", "Gated", depends_on=[sibling["id"]],
+    )
+    assert card["depends_on"] == [sibling["id"]]
+
+    # Reload via get_card to make sure the value landed in storage, not just
+    # the in-memory response.
+    fetched = await m.get_card(card["id"])
+    assert fetched["depends_on"] == [sibling["id"]]
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_omitted_depends_on_stays_none():
+    """Omitting depends_on on create must leave the column None (backwards
+    compat — pre-existing MCP callers don't suddenly sprout a list field)."""
+    card = await m.create_card("P", "Standalone")
+    assert card["depends_on"] is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_accepts_depends_on_and_round_trips():
+    """update_card(card_id, depends_on=[...]) must write the new list through
+    apply_operation("update") → _materialize, the same path the REST PATCH
+    endpoint uses. Setting and replacing both work."""
+    card = await m.create_card("P", "Gated")
+    assert card["depends_on"] is None
+
+    a = await m.create_card("P", "A")
+    updated = await m.update_card(card["id"], depends_on=[a["id"]])
+    assert updated["depends_on"] == [a["id"]]
+
+    b = await m.create_card("P", "B")
+    replaced = await m.update_card(card["id"], depends_on=[a["id"], b["id"]])
+    assert replaced["depends_on"] == [a["id"], b["id"]]
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_omitted_depends_on_preserves_existing():
+    """update_card(card_id, title=...) with no depends_on arg must not clobber
+    a previously-set depends_on — same "skip-when-None" semantics as the
+    other updatable fields (title/description/metadata)."""
+    card = await m.create_card("P", "Gated")
+    a = await m.create_card("P", "A")
+    await m.update_card(card["id"], depends_on=[a["id"]])
+
+    # Title-only update — must not touch depends_on.
+    updated = await m.update_card(card["id"], title="Renamed gated card")
+    assert updated["depends_on"] == [a["id"]]
+    assert updated["title"] == "Renamed gated card"
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_depends_on_survives_rematerialize():
+    """depends_on must survive the op-log → materialized-row replay that
+    rematerialize() performs — otherwise a DB rebuild would silently drop
+    the sibling-dep wiring, leaving the dispatcher to skip a card that
+    shouldn't be dispatchable yet."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import rematerialize
+
+    sibling = await m.create_card("P", "Sibling")
+    gated = await m.create_card(
+        "P", "Gated", depends_on=[sibling["id"]],
+    )
+
+    async with KanbanSessionLocal() as s:
+        await rematerialize(s)
+        await s.commit()
+
+    fetched = await m.get_card(gated["id"])
+    assert fetched["depends_on"] == [sibling["id"]]
