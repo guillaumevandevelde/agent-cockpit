@@ -214,7 +214,7 @@ SKIP_PERMISSIONS_PREFIX = "skip_permissions:"
 SHIP_MODES = ("pull-request", "direct")
 DEFAULT_SHIP_MODE = "pull-request"
 TRANSPORT_PREFIX = "transport:"
-TRANSPORTS = ("worktree", "sandcastle")
+TRANSPORTS = ("worktree", "sandcastle", "headless")
 DEFAULT_TRANSPORT = "worktree"
 # A card whose session dies within seconds of being dispatched, this many times in a
 # row with no successful run in between, is flagged to Impediment instead of being
@@ -1850,6 +1850,32 @@ async def _live_sandcastle_sessions() -> set[str]:
         return set()
 
 
+async def _live_headless_sessions() -> set[str]:
+    """Session names of headless ``stream-json`` subprocesses still running.
+
+    Third liveness source for ``reap_stale_claims`` — sits alongside
+    ``_live_sessions`` (tmux) and ``_live_sandcastle_sessions``. A headless
+    run has neither a tmux session nor a SandcastleRun row, so without this
+    third source the reaper would release + re-dispatch the card every
+    tick — exactly the dispatch-loop sandcastle had before its own second
+    source was added. See
+    ``docs/cockpit/headless-stream-json-transport-spike.md`` §5 for the
+    precedent; the liveness-orakel is the only one of the four identity
+    facets that changes (spike §5.1).
+
+    Defensive: any failure yields an empty set, which only makes the
+    reaper *more* eager — never less — so a transient registry hiccup
+    can't keep a truly-dead claim alive forever. Same contract as
+    ``_live_sandcastle_sessions``.
+    """
+    try:
+        from app.kanban.headless_runner import live_headless_sessions
+        return live_headless_sessions()
+    except Exception:
+        logger.exception("could not query live headless sessions")
+        return set()
+
+
 def _slug(name: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()
     return s or "project"
@@ -2942,6 +2968,7 @@ async def _post_rate_limit_activity_comment(
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
     sandcastle_live: set[str] | None = None,
+    headless_live: set[str] | None = None,
     project_path: str | None = None,
 ) -> int:
     """Release `agent:` claims on cards in agent columns whose session is gone.
@@ -2955,10 +2982,15 @@ async def reap_stale_claims(
     cap slot and nothing waiting in Backlog/To Resume — no human redispatch needed.
     Human (`me@ui`) claims are never touched. Returns the number reaped.
 
-    Liveness has two sources: `live_sessions` (tmux session names, for worktree-transport
-    cards) and `sandcastle_live` (session names of pending/running sandcastle runs).
-    Sandcastle cards have no tmux session, so without the second source every sandcastle
-    card would be reaped on the very next tick and re-dispatched in a loop.
+    Liveness has three sources: `live_sessions` (tmux session names, for
+    worktree-transport cards), `sandcastle_live` (session names of
+    pending/running sandcastle runs), and `headless_live` (session names of
+    running headless stream-json subprocesses). Sandcastle cards have no tmux
+    session, so without the second source every sandcastle card would be
+    reaped on the very next tick and re-dispatched in a loop. Headless cards
+    have neither tmux nor a SandcastleRun row — only the third source keeps
+    them alive. Same dispatch-loop precedent as sandcastle; see
+    ``docs/cockpit/headless-stream-json-transport-spike.md`` §5.
 
     When ``project_path`` is provided, dead sessions with a resumable transcript in
     their worktree are moved to the "To Resume" column (via ``_move_to_resume``)
@@ -2975,6 +3007,7 @@ async def reap_stale_claims(
     from app.kanban.schemas import COLUMNS
 
     sandcastle_live = sandcastle_live or set()
+    headless_live = headless_live or set()
     reaped = 0
 
     # Pre-compute the stuck set once per tick: get_stuck_sessions walks the
@@ -3029,7 +3062,7 @@ async def reap_stale_claims(
                 reaped += 1
                 continue
 
-        if name in live_sessions or name in sandcastle_live:
+        if name in live_sessions or name in sandcastle_live or name in headless_live:
             continue
 
         # If we know the project path, try resume recovery first
@@ -3232,6 +3265,7 @@ async def dispatch_project(
     session, *, project_key: str, project_path: str, transport: SpawnTransport | None = None,
     live_sessions: set[str] | None = None,
     sandcastle_live: set[str] | None = None,
+    headless_live: set[str] | None = None,
 ) -> dict | None:
     """Claim+move+spawn the next card for one project. Returns a result dict or
     None when there is nothing to do (no candidate card, or the per-column cap
@@ -3241,14 +3275,15 @@ async def dispatch_project(
     session is no longer alive are reaped first, so a dead session can never wedge
     a per-column cap slot. Passing None skips reaping (used by unit tests that
     exercise the cap directly).
-    
+
     If transport is None, the appropriate transport is automatically selected based
     on the project's sandcastle configuration."""
     cards = await list_cards(session, project_key)
     if live_sessions is not None:
         if await reap_stale_claims(
             session, project_key=project_key, cards=cards, live_sessions=live_sessions,
-            sandcastle_live=sandcastle_live, project_path=project_path,
+            sandcastle_live=sandcastle_live, headless_live=headless_live,
+            project_path=project_path,
         ):
             cards = await list_cards(session, project_key)
 
@@ -3755,6 +3790,7 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
 
     live_sessions = _live_sessions()  # one tmux query per tick, shared across projects
     sandcastle_live = await _live_sandcastle_sessions()  # sandcastle liveness, shared
+    headless_live = await _live_headless_sessions()  # headless subprocess liveness, shared
 
     for project_key, project_path in mapping.items():
         async with KanbanSessionLocal() as ks:
@@ -3763,6 +3799,7 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
                     ks, project_key=project_key, project_path=project_path,
                     transport=transport, live_sessions=live_sessions,
                     sandcastle_live=sandcastle_live,
+                    headless_live=headless_live,
                 )
                 await ks.commit()
                 
@@ -3824,8 +3861,8 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
     """Get the appropriate transport for a project.
 
     The authoritative source is the `transport:<project_key>` meta (worktree |
-    sandcastle), set via the project's Default-transport control. Worktree honors
-    the per-project skip_permissions flag.
+    sandcastle | headless), set via the project's Default-transport control.
+    Worktree honors the per-project skip_permissions flag.
     """
     from app.kanban.db import KanbanSessionLocal
 
@@ -3837,6 +3874,9 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
         transport_name = await get_default_transport(ks, project_key)
         if transport_name == "sandcastle":
             return sandcastle_transport
+        if transport_name == "headless":
+            from app.kanban.headless_runner import headless_transport
+            return headless_transport
         skip = await get_skip_permissions(ks, project_key)
 
     return make_worktree_transport(skip_permissions=skip)
@@ -3899,7 +3939,7 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
 
     Transport priority:
     1. Card's resume_session_id (resume mode — no worktree created)
-    2. Card's explicit transport setting (worktree | sandcastle)
+    2. Card's explicit transport setting (worktree | sandcastle | headless)
     3. Project's default transport (from sandcastle config)
 
     Returns the transport to use for this specific card.
@@ -3913,6 +3953,9 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
     # If card has explicit transport setting, use it
     if card.transport == "sandcastle":
         return sandcastle_transport
+    elif card.transport == "headless":
+        from app.kanban.headless_runner import headless_transport
+        return headless_transport
     elif card.transport == "worktree":
         return worktree_transport
 
