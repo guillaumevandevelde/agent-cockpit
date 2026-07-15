@@ -103,14 +103,21 @@ fi
 # untouched — no stash, no checkout dance. PYTEST_CWD is honored so the test
 # harness can inject a fake cwd and a fake pytest binary.
 TMP=$(mktemp -d)
-trap 'git -C "$REPO_ROOT" worktree remove --force --quiet "$TMP/m" >/dev/null 2>&1 || true; rm -rf "$TMP"' EXIT
+# Slot name MUST be unique per session: git derives the `.git/worktrees/<name>`
+# entry from the path's basename, so a fixed name (e.g. `m`) collides under
+# concurrent runs of this script (or with the CLAUDE.md merge recipe sharing
+# the same repo) — both target the same gitdir slot, and a stale HEAD leaks
+# into the fresh session. `$$` guarantees a fresh slot per invocation. See
+# kanban card c23dfe46…
+SLOT="pytest-$$"
+trap 'git -C "$REPO_ROOT" worktree remove --force --quiet "$TMP/$SLOT" >/dev/null 2>&1 || true; rm -rf "$TMP"' EXIT
 
 if [ -z "${PYTEST_FAKE_WORKTREE:-}" ]; then
-    if ! git -C "$REPO_ROOT" worktree add --detach "$TMP/m" origin/master >/dev/null; then
+    if ! git -C "$REPO_ROOT" worktree add --detach "$TMP/$SLOT" origin/master >/dev/null; then
         echo "error: could not create detached worktree of origin/master" >&2
         exit 1
     fi
-    PYTEST_CWD="$TMP/m/backend"
+    PYTEST_CWD="$TMP/$SLOT/backend"
 fi
 
 mkdir -p "$(dirname "$BASELINE")"

@@ -128,9 +128,10 @@ Vuistregels:
   `/home/vdvgu/claude-cockpit/backend/venv/bin/{python,pytest,ruff}` vanuit
   je worktree-cwd — geen `cd` naar de hoofd-checkout.
 
-(CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$TMP/m"`-patroon
-voor de merge-stap; dit is de algemene variant voor élke git-mutatie binnen
-een worktree-sessie.)
+(CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$TMP/merge-$$"`-patroon
+voor de merge-stap — de slot-naam `merge-$$` (per-proces uniek) voorkomt dat
+concurrent sessies dezelfde `.git/worktrees/`-gitdir hergebruiken; dit is de
+algemene variant voor élke git-mutatie binnen een worktree-sessie.)
 
 ## Kaart bijwerken (VERPLICHT)
 
