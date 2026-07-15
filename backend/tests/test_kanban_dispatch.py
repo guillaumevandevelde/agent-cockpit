@@ -312,6 +312,59 @@ async def test_dispatch_falls_back_to_persona_frontmatter_model(tmp_path):
     assert transport.calls[0]["model"] == "claude-opus-4-8"
 
 
+@pytest.mark.asyncio
+async def test_dispatch_card_model_beats_persona_frontmatter(tmp_path):
+    # Regression guard for kanban-chore k-chore-sonnet-*. The engineer
+    # persona now defaults to `sonnet` in frontmatter; if a card needs the
+    # heavier Opus (or any other model) it sets card.model. The override
+    # MUST beat the persona frontmatter -- otherwise the per-card escalation
+    # route is hollow and the Sonnet-default change is not safely reversible
+    # per card. See docs/cockpit/kanban-model-override.md.
+    transport = RecordingTransport()
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "engineer.md").write_text(
+        "---\nname: 'engineer'\nmodel: 'sonnet'\n---\nBe an engineer.\n"
+    )
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid, payload={"model": "opus"})
+        await s.commit()
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path=str(tmp_path), transport=transport,
+        )
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["model"] == "opus"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_column_default_model_beats_persona_frontmatter(tmp_path):
+    # Same property, one level up: column.default_model must beat the persona
+    # frontmatter. Lets an operator pin "all engineer work to opus again"
+    # without having to flip card.model on every backlog entry.
+    transport = RecordingTransport()
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "engineer.md").write_text(
+        "---\nname: 'engineer'\nmodel: 'sonnet'\n---\nBe an engineer.\n"
+    )
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_model="opus",
+        )
+        cid = await _make_card(s)
+        await s.commit()
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path=str(tmp_path), transport=transport,
+        )
+        await s.commit()
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["model"] == "opus"
+
+
 def test_effective_model_precedence():
     # per-column override > card.model > column.default_model > persona frontmatter
     assert dispatch._effective_model("m5", "opus", "sonnet", "haiku") == "m5"

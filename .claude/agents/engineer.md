@@ -1,6 +1,6 @@
 ---
 description: 'Voert een kanban-kaart end-to-end uit: analyse, implementatie, tests en zelf-review in één sessie'
-model: 'opus'
+model: 'sonnet'
 tools: ['search/codebase', 'search/usages', 'read/readFile', 'edit/editFiles', 'execute/runInTerminal', 'execute/getTerminalOutput', 'web/fetch']
 name: 'engineer'
 ---
@@ -55,6 +55,23 @@ async-decompositie blijft één laag diep aan de bordkant.
 - TDD-aanpak (failing test → minimale implementatie → groene test)
 - Bestaande patronen herkennen en toepassen i.p.v. nieuwe uitvinden
 - CLEAN code zonder premature abstracties
+
+## Model-default en escalatie
+
+Deze persona defaultt op **Sonnet** (`model: 'sonnet'` in de frontmatter). Opus is
+per-kaart beschikbaar wanneer een sessie dat echt nodig heeft:
+
+- **Per-kaart**: zet `card.model` op `opus` (of een ander model-alias) — wint van de
+  persona-frontmatter.
+- **Per-kolom**: zet `column.default_model` op `opus` — wint van de persona-frontmatter
+  en van `card.model` wanneer die niet gezet is.
+
+Volgorde (`card.column_overrides` voor die target-agent → `card.model` →
+`column.default_model` → persona-frontmatter → platform-default) staat in
+[`docs/cockpit/kanban-model-override.md`](../../docs/cockpit/kanban-model-override.md).
+De keten is end-to-end-getest in `backend/tests/test_kanban_dispatch.py`
+(`test_dispatch_*_model_*_persona_frontmatter`) — een per-kaart override komt
+altijd door.
 
 ## Je Aanpak
 
