@@ -34,7 +34,8 @@ stream-json) volgt in kaart 3.
 
 Gedefinieerd in
 [`backend/app/services/agentic_cli/structured_events.py`](../../backend/app/services/agentic_cli/structured_events.py)
-als Pydantic-modellen met een discriminated union op `type`. Zes varianten:
+als Pydantic-modellen met een discriminated union op `type`. Acht varianten — zes ACP-isomorf
+plus twee gedocumenteerde **super-set**-uitbreidingen (zie §2.1):
 
 | `type`                 | ACP-tegenhanger                                                     |
 |------------------------|---------------------------------------------------------------------|
@@ -44,6 +45,8 @@ als Pydantic-modellen met een discriminated union op `type`. Zes varianten:
 | `permission_request`   | `session/request_permission` (request)                             |
 | `usage_result`         | `session/prompt`-result (`stopReason`) + usage                     |
 | `error`                | JSON-RPC 2.0 error-object                                          |
+| `rate_limit`           | *(geen — gedocumenteerde super-set; zie §2.1)*                      |
+| `session_init`         | *(geen — gedocumenteerde super-set; zie §2.1)*                      |
 
 **Isomorfie, geen identiteit.** ACP gebruikt `camelCase` JSON-keys; dit model gebruikt
 `snake_case` (Cockpit/Python-conventie). Alleen de casing is de vertaling die een toekomstige
@@ -63,6 +66,14 @@ ACP-adapter doet — de *structuur en semantiek* zijn 1-op-1. Elk event draagt e
 - **`usage_result`** — `stop_reason`, `input_tokens`, `output_tokens`, `total_tokens`,
   `cost_usd`.
 - **`error`** — `code` (JSON-RPC), `message`, `data`.
+- **`rate_limit`** — `status` (`allowed`/`allowed_warning`/`rejected`), `resets_at` (unix-ts),
+  `rate_limit_type` (`five_hour`/`seven_day`/`seven_day_opus`/`monthly`), `utilization` (float
+  0..1), `is_using_overage` (bool), `surpassed_threshold` (float 0..1). Het
+  `status`-veld is verplicht (altijd door de CLI gezet); de rest is best-effort en mag in
+  toekomstige CLI-versies ontbreken.
+- **`session_init`** — `session_id` (verplicht — het is de readiness-handle), `cwd`, `model`,
+  `permission_mode`. Verdere velden die `stream-json` in de toekomst toevoegt worden getolereerd
+  door optioneel te zijn.
 
 ### Parsen
 
@@ -76,29 +87,48 @@ event = parse_structured_event({"type": "tool_call", "tool_call_id": "tc1", "sta
 De discriminator dispatcht op `type`; een onbekend type of een malformed payload gooit een
 `pydantic.ValidationError`.
 
-## 2.1 Bekend gat: twee events uit `stream-json` passen (nog) niet
+## 2.1 Super-set-uitbreidingen: `rate_limit` en `session_init`
 
-> Toegevoegd 2026-07-15 na kaart 3
-> ([`headless-stream-json-transport-spike.md`](./headless-stream-json-transport-spike.md) §4.1),
-> die de echte `claude -p --output-format stream-json`-stream heeft gemeten. **Deze zes
-> varianten dekken die stream nog niet volledig** — bouw er niet op alsof ze dat wel doen.
+> **Statuswijziging 2026-07-15 (kaart k-feature-trans-8631):** het "bekende gat" uit de eerdere
+> §2.1 is **gedicht** — `rate_limit` en `session_init` zijn nu eerste-klas varianten van de
+> discriminated union, met expliciete documentatie dát en wáárom ze buiten ACP's
+> `session/update`-vocabulaire vallen. De eerdere sectie-tekst is hieronder vervangen door een
+> verantwoording van de gekozen super-set-vorm.
 
-- **`rate_limit_event`** — `stream-json` emit een getypeerd rate-limit-event
-  (`status`/`resetsAt`/`rateLimitType`/`utilization`). ACP kent geen quota-notificatie, dus dit
-  model ook niet — terwijl dít nu net het event is dat de 429-substring-scrape overbodig maakt.
-  Het is geen `error` (`status: allowed_warning` = toegestaan) en geen `usage_result` (dat is
-  terminaal).
-- **`system/init`** — readiness + `session_id`. ACP's tegenhanger is de `session/new`-*response*,
-  geen `session/update`, vandaar de afwezigheid.
+### Waarom twee varianten bewust buiten ACP vallen
 
-Dit is de **grens van de isomorfie-strategie**: door ACP als vorm te nemen, erf je ACP's blinde
-vlekken. De voorgestelde remedie behoudt de strategie: beide toevoegen als bewust
-gedocumenteerde **super-set** van ACP (een latere ACP-adapter laat ze leeg).
+Door ACP als vorm te nemen, erf je ACP's *blinde vlekken*. Twee daarvan zijn operationeel
+relevant voor onze headless transport, en beide worden nu als **gedocumenteerde super-set**
+toegevoegd — niet door ze in een verkeerd bestaand ACP-event te wringen:
 
-Verder heeft `plan_update` geen native producer in Claude's stream (dichtstbijzijnde proxy:
-`TodoWrite`-`tool_use`), en heeft `permission_request` er geen onder `-p` +
-`--dangerously-skip-permissions` — die vereist `--permission-prompt-tool` of het bidirectionele
-control-protocol. ACP's getypeerde gating-haak komt dus **niet** gratis mee met stream-json.
+- **`rate_limit`** — ACP kent geen quota/rate-limit-notificatie: quota is een CLI-zijde
+  concern, geen transport-zijde concern, dus `session/update` draagt er nooit een. Maar
+  `claude -p --output-format stream-json` emit een getypeerd `rate_limit_event` mid-run — en
+  dát is precies het signaal dat de huidige 429-substring-scrape (`_is_rate_limited_session`)
+  overbodig maakt
+  ([`headless-stream-json-transport-spike.md`](./headless-stream-json-transport-spike.md) §4.1(a)
+  / §6.1). Het is geen `error` (`status: allowed_warning` = toegestaan, niet geweigerd) en geen
+  `usage_result` (terminaal; dit is mid-run). De remedie: nieuwe variant. Een toekomstige
+  ACP-adapter laat deze variant leeg — dat is geen bug, dat is het contract.
+
+- **`session_init`** — ACP's tegenhanger is de `session/new`-*response*, geen
+  `session/update`-notificatie; vandaar de afwezigheid in ACP's kernvocabulaire. Maar
+  `stream-json` emit een `system/init` als allereerste event, en dát is precies de
+  readiness-handle die de huidige box-drawing-scrape in `wait_for_pane_ready` vervangt (§2.3
+  van de substrate-beslissing). Zonder `session_init` heeft de headless transport nergens om
+  zijn readiness-signaal op te parkeren; wél erin hebben is geen ACP-beloftebreuk omdat ACP nooit
+  een notificatie van die aard heeft beloofd. Zelfde contract: een ACP-adapter mag deze variant
+  leeg laten.
+
+### Wat hierdoor **niet** is veranderd
+
+- `plan_update` heeft **geen native producer** in Claude's stream (dichtstbijzijnde proxy:
+  `TodoWrite`-`tool_use`). Geen schema-uitbreiding; de executor kiest later bewust of hij die
+  toolcall als `plan_update` interpreteert.
+- `permission_request` heeft **geen producer** onder `-p` + `--dangerously-skip-permissions`;
+  die vereist `--permission-prompt-tool` of het bidirectionele control-protocol. Geen
+  schema-uitbreiding — dit is een argument voor de ACP-poort-kaart
+  (`acp-transport-decision.md` §6 kaart 5), niet hier.
 
 ## 3. Waarom ACP-isomorf en niet ACP-native
 

@@ -18,6 +18,10 @@ from app.services.agentic_cli.structured_events import (
     PlanEntryPriority,
     PlanEntryStatus,
     PlanUpdateEvent,
+    RateLimitEvent,
+    RateLimitStatus,
+    RateLimitType,
+    SessionInitEvent,
     StructuredEventType,
     ToolCallEvent,
     ToolCallStatus,
@@ -58,7 +62,7 @@ def test_headless_run_declared_explicitly_for_all_known_clis():
 
 # --- ACP-isomorphic event model ---------------------------------------------
 
-def test_event_type_enum_covers_the_six_acp_variants():
+def test_event_type_enum_covers_the_eight_variants():
     assert {t.value for t in StructuredEventType} == {
         "message_chunk",
         "tool_call",
@@ -66,6 +70,8 @@ def test_event_type_enum_covers_the_six_acp_variants():
         "permission_request",
         "usage_result",
         "error",
+        "rate_limit",
+        "session_init",
     }
 
 
@@ -144,3 +150,96 @@ def test_discriminator_dispatches_by_type():
 def test_unknown_event_type_is_rejected():
     with pytest.raises(Exception):
         parse_structured_event({"type": "nonsense", "text": "x"})
+
+
+# --- ACP super-set variants (rate_limit + session_init) ----------------------
+#
+# These two are deliberately outside ACP's session/update vocabulary — see the
+# docstring on each model in structured_events.py and §2.1 of
+# docs/cockpit/structured-events-schema.md for why.
+
+
+def test_rate_limit_roundtrip():
+    event = RateLimitEvent(
+        status=RateLimitStatus.ALLOWED_WARNING,
+        resets_at=1784070000,
+        rate_limit_type=RateLimitType.FIVE_HOUR,
+        utilization=0.97,
+        is_using_overage=False,
+        surpassed_threshold=0.9,
+    )
+    parsed = parse_structured_event(event.model_dump(mode="json"))
+    assert isinstance(parsed, RateLimitEvent)
+    assert parsed.status is RateLimitStatus.ALLOWED_WARNING
+    assert parsed.resets_at == 1784070000
+    assert parsed.rate_limit_type is RateLimitType.FIVE_HOUR
+    assert parsed.utilization == 0.97
+    assert parsed.is_using_overage is False
+    assert parsed.surpassed_threshold == 0.9
+
+
+def test_rate_limit_malformed_payload_raises():
+    # `status` is the one field the model documents as non-optional; an unknown
+    # enum value must reject the payload before any consumer code sees it.
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        parse_structured_event(
+            {
+                "type": "rate_limit",
+                "status": "not_a_real_status",
+                "resets_at": 1784070000,
+                "rate_limit_type": "five_hour",
+                "utilization": 0.5,
+            }
+        )
+
+
+def test_session_init_roundtrip():
+    event = SessionInitEvent(
+        session_id="abc-123",
+        cwd="/home/v/proj",
+        model="claude-opus-4-8",
+        permission_mode="acceptEdits",
+    )
+    parsed = parse_structured_event(event.model_dump(mode="json"))
+    assert isinstance(parsed, SessionInitEvent)
+    assert parsed.session_id == "abc-123"
+    assert parsed.cwd == "/home/v/proj"
+    assert parsed.model == "claude-opus-4-8"
+    assert parsed.permission_mode == "acceptEdits"
+
+
+def test_session_init_malformed_payload_raises():
+    # session_id is the minimum required field (the one the readiness event is
+    # actually about); a missing one means the payload is incomplete, not just
+    # partially populated.
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        parse_structured_event({"type": "session_init", "model": "claude-opus-4-8"})
+
+
+def test_discriminator_dispatches_rate_limit_and_session_init():
+    parsed_rl = parse_structured_event(
+        {
+            "type": "rate_limit",
+            "status": "allowed_warning",
+            "resets_at": 1,
+            "rate_limit_type": "five_hour",
+            "utilization": 0.0,
+            "is_using_overage": False,
+            "surpassed_threshold": 0.0,
+        }
+    )
+    assert isinstance(parsed_rl, RateLimitEvent)
+    parsed_si = parse_structured_event(
+        {
+            "type": "session_init",
+            "session_id": "s1",
+            "cwd": "/",
+            "model": "m",
+            "permission_mode": "acceptEdits",
+        }
+    )
+    assert isinstance(parsed_si, SessionInitEvent)

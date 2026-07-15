@@ -23,6 +23,19 @@ casing is the only translation a future ACP adapter performs. The mapping:
 | ``permission_request``    | ``session/request_permission`` (request)           |
 | ``usage_result``          | ``session/prompt`` result (``stopReason``) + usage |
 | ``error``                 | JSON-RPC 2.0 error object                          |
+| ``rate_limit``            | *(none — deliberate ACP super-set; see below)*     |
+| ``session_init``          | *(none — deliberate ACP super-set; see below)*     |
+
+The last two (``rate_limit``, ``session_init``) are **deliberately outside ACP's
+``session/update`` vocabulary** — they're a conscious super-set of ACP, not an
+oversight. ACP has no quota/rate-limit notification (it's a CLI-side concern,
+not a transport concern) and no session-init notification either (ACP's
+counterpart is the ``session/new`` *response*, not a ``session/update``).
+``claude -p --output-format stream-json`` emits both, including the
+``rate_limit`` event that justifies the whole headless transport
+(`docs/cockpit/headless-stream-json-transport-spike.md` §4.1). A future
+ACP-backed transport is allowed to leave them empty without that being a bug
+— they exist here so the first (Claude) transport has somewhere to put them.
 
 Every event carries an optional ``session_id`` so a multiplexed transport can
 attribute events to the originating headless run.
@@ -36,7 +49,11 @@ from pydantic import BaseModel, Field, TypeAdapter
 
 
 class StructuredEventType(StrEnum):
-    """The six ACP-isomorphic event kinds a headless run may emit."""
+    """The event kinds a headless run may emit.
+
+    The first six are ACP-isomorphic; ``rate_limit`` and ``session_init`` are
+    documented super-set additions (see module docstring).
+    """
 
     MESSAGE_CHUNK = "message_chunk"
     TOOL_CALL = "tool_call"
@@ -44,6 +61,8 @@ class StructuredEventType(StrEnum):
     PERMISSION_REQUEST = "permission_request"
     USAGE_RESULT = "usage_result"
     ERROR = "error"
+    RATE_LIMIT = "rate_limit"
+    SESSION_INIT = "session_init"
 
 
 class MessageRole(StrEnum):
@@ -86,6 +105,29 @@ class PermissionOptionKind(StrEnum):
     ALLOW_ALWAYS = "allow_always"
     REJECT_ONCE = "reject_once"
     REJECT_ALWAYS = "reject_always"
+
+
+class RateLimitStatus(StrEnum):
+    """The ``status`` field of a Claude ``rate_limit_event``.
+
+    ``allowed_warning`` is the operationally interesting one: the request was
+    *allowed*, but utilisation crossed a threshold — so a consumer that
+    observes it can pause *before* the eventual 429, instead of scraping pane
+    text for the rejection after the fact.
+    """
+
+    ALLOWED = "allowed"
+    ALLOWED_WARNING = "allowed_warning"
+    REJECTED = "rejected"
+
+
+class RateLimitType(StrEnum):
+    """The window the rate-limit event applies to."""
+
+    FIVE_HOUR = "five_hour"
+    SEVEN_DAY = "seven_day"
+    SEVEN_DAY_OVERAGE = "seven_day_opus"
+    MONTHLY = "monthly"
 
 
 class _StructuredEventBase(BaseModel):
@@ -166,8 +208,79 @@ class ErrorEvent(_StructuredEventBase):
     data: dict[str, Any] | None = None
 
 
+class RateLimitEvent(_StructuredEventBase):
+    """A rate-limit / quota notification from the CLI.
+
+    **Deliberate ACP super-set.** ACP has no concept of rate-limit / quota
+    notifications — quota is a CLI-side concern, not a transport concern, so
+    ``session/update`` never carries one. But Claude's ``stream-json`` output
+    emits a typed ``rate_limit_event`` mid-run with the very fields that make
+    the headless transport worth shipping
+    (``status: allowed_warning`` at ``utilization: 0.97`` *before* the
+    eventual 429 — see
+    ``docs/cockpit/headless-stream-json-transport-spike.md`` §4.1(a) / §6.1).
+
+    Wrapping it as ``error`` would be wrong (``allowed_warning`` ≠ error);
+    wrapping it as ``usage_result`` would also be wrong (that's terminal, this
+    isn't). The fix is to extend the schema as a *documented* super-set of
+    ACP: a future ACP-backed transport is allowed to never emit one, without
+    that being a bug.
+
+    Note that ``status`` is the one field the original CLI always sets, so we
+    keep it required; everything else is best-effort and may be absent in
+    payloads from future CLI versions.
+    """
+
+    type: Literal[StructuredEventType.RATE_LIMIT] = StructuredEventType.RATE_LIMIT
+    status: RateLimitStatus
+    resets_at: int | None = None
+    rate_limit_type: RateLimitType | None = None
+    utilization: float | None = None
+    is_using_overage: bool | None = None
+    surpassed_threshold: float | None = None
+
+
+class SessionInitEvent(_StructuredEventBase):
+    """The CLI's first event: it has started, here's its session handle.
+
+    **Deliberate ACP super-set.** ACP's counterpart is the ``session/new``
+    *response*, not a ``session/update`` notification — so this event has no
+    place in the ACP-isomorphic core. But ``claude -p
+    --output-format stream-json`` emits a ``system/init`` as its very first
+    line, carrying exactly the readiness + session-handle signal the headless
+    transport needs (it replaces the box-drawing scrape that
+    ``wait_for_pane_ready`` does today). Mapping it as ``message_chunk`` would
+    lie about its semantics; mapping it as ``usage_result`` would lie even
+    worse. The fix is the same as ``rate_limit``: extend the schema as a
+    documented super-set of ACP and let a future ACP adapter never emit one.
+
+    ``session_id`` is required (it *is* the readiness signal — if it's
+    missing, the payload is incomplete, not just partial). The other fields
+    are what ``stream-json`` happens to set today; future CLI versions may add
+    more, which we tolerate by accepting the payload without them.
+    """
+
+    type: Literal[StructuredEventType.SESSION_INIT] = StructuredEventType.SESSION_INIT
+    # NB: this event's primary payload field is *also* named session_id — that
+    # is intentional (it matches Claude's stream-json field name) and distinct
+    # from the multiplexed-transport session_id inherited from the base.
+    # Both are preserved on the model; pydantic's default behaviour keeps both
+    # accessible as separate attributes.
+    session_id: str = Field(...)  # type: ignore[assignment]
+    cwd: str | None = None
+    model: str | None = None
+    permission_mode: str | None = None
+
+
 StructuredEvent = Annotated[
-    MessageChunkEvent | ToolCallEvent | PlanUpdateEvent | PermissionRequestEvent | UsageResultEvent | ErrorEvent,
+    MessageChunkEvent
+    | ToolCallEvent
+    | PlanUpdateEvent
+    | PermissionRequestEvent
+    | UsageResultEvent
+    | ErrorEvent
+    | RateLimitEvent
+    | SessionInitEvent,
     Field(discriminator="type"),
 ]
 
