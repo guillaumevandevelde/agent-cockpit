@@ -1082,6 +1082,118 @@ async def test_reaper_reaps_dead_sandcastle_claim():
     assert card.claimed_by is None
 
 
+@pytest.mark.asyncio
+async def test_reaper_spares_live_headless_claim_without_tmux():
+    # Regression guard for the dispatch-loop documented in
+    # docs/cockpit/headless-stream-json-transport-spike.md §5: a headless run has
+    # no tmux session AND no SandcastleRun row, so neither of the two original
+    # liveness sources can vouch for it. Without the third source (the
+    # _live_headless_sessions set plumbed into the reaper), the reaper would
+    # release + re-dispatch the card every tick — exactly the sandcastle bug
+    # the new sibling was introduced to prevent.
+    async with KanbanSessionLocal() as s:
+        hl = await _make_card(s, title="headless WIP", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=hl, payload={"claimed_by": "agent:k-hl-0001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions=set(), sandcastle_live=set(),
+            headless_live={"k-hl-0001"},
+        )
+        await s.commit()
+        card = await get_card(s, hl)
+    assert reaped == 0
+    assert card.claimed_by == "agent:k-hl-0001"
+
+
+@pytest.mark.asyncio
+async def test_reaper_reaps_dead_headless_claim():
+    # Same shape as test_reaper_reaps_dead_sandcastle_claim: when the headless
+    # subprocess is gone (not in headless_live) AND no tmux session AND no
+    # sandcastle row, the stale claim is reaped.
+    async with KanbanSessionLocal() as s:
+        hl = await _make_card(s, title="headless dead", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=hl, payload={"claimed_by": "agent:k-hl-dead"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions=set(), sandcastle_live=set(),
+            headless_live=set(),
+        )
+        await s.commit()
+        card = await get_card(s, hl)
+    assert reaped == 1
+    assert card.claimed_by is None
+
+
+# ---- transport selection ---------------------------------------------------
+
+
+def test_default_transport_accepts_headless():
+    # The TRANSPORTS tuple must include "headless" so it can be set as a
+    # per-project default via KanbanMeta. Unknown values fall back to the
+    # default ("worktree") — the legacy contract.
+    import asyncio
+
+    from app.kanban.models import KanbanMeta
+
+    async def _check():
+        async with KanbanSessionLocal() as s:
+            s.add(KanbanMeta(key=dispatch.TRANSPORT_PREFIX + PK, value="headless"))
+            await s.commit()
+            return await dispatch.get_default_transport(s, PK)
+
+    assert asyncio.run(_check()) == "headless"
+
+
+def test_default_transport_falls_back_on_unknown_value():
+    # Regression guard for the TRANSPORTS-tuple expansion: an unknown value
+    # in the meta row silently falls back to the project default rather
+    # than raising — the legacy contract that lets an operator recover from a
+    # bad value without a DB migration.
+    import asyncio
+
+    from app.kanban.models import KanbanMeta
+
+    async def _check():
+        async with KanbanSessionLocal() as s:
+            s.add(KanbanMeta(key=dispatch.TRANSPORT_PREFIX + PK, value="garbage"))
+            await s.commit()
+            return await dispatch.get_default_transport(s, PK)
+
+    assert asyncio.run(_check()) == "worktree"  # DEFAULT_TRANSPORT
+
+
+def test_get_transport_for_card_headless():
+    # A card with transport="headless" resolves to headless_transport;
+    # a card without it falls through to the project default. Resume
+    # priority is preserved (the resume check happens first).
+    from app.kanban.headless_runner import headless_transport
+
+    card_hl = KanbanCard(transport="headless", project_key=PK)
+    assert dispatch.get_transport_for_card(card_hl, default_transport=RecordingTransport()) is headless_transport
+
+    card_default = KanbanCard(transport=None, project_key=PK)
+    fallback = RecordingTransport()
+    assert dispatch.get_transport_for_card(card_default, default_transport=fallback) is fallback
+
+    # Resume still wins over an explicit transport= (legacy contract).
+    card_resume = KanbanCard(
+        transport="headless", project_key=PK,
+        resume_session_id="resume-1", resume_project_folder="-home-x-y",
+    )
+    chosen = dispatch.get_transport_for_card(card_resume, default_transport=fallback)
+    # Resume transports are unique per (session_id, folder); assert it's NOT
+    # the headless one (any non-headless transport is fine — that's the contract).
+    assert chosen is not headless_transport
+
+
 def test_live_sessions_parses_names(monkeypatch):
     import app.kanban.dispatch as d
 
