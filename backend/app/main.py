@@ -59,6 +59,20 @@ async def lifespan(app: FastAPI):
         logger.exception("Failed to clean up expired Agent Bridge attachments")
     from app.kanban.db import init_kanban_db
     await init_kanban_db()
+    # Seed the subscription-usage provider registry with honest no-signal
+    # stubs (UnknownUsageProvider) for every supported (cli, provider) pair
+    # — keeps the pool router's snapshot path alive even when no real
+    # provider is wired (analyse §6.3 "no fabrication"). The actual real
+    # providers (AnthropicUsageProvider / MinimaxUsageProvider) replace
+    # these stubs by id when their configuration becomes available; the
+    # default seed doesn't lock anything in. See kanban card ea7e038b…
+    # (D2 — "registry is never populated"). The seed is best-effort: a
+    # failed registration must not block backend startup.
+    from app.services.subscriptions import registry as _subscription_registry
+    try:
+        _subscription_registry.register_default_providers()
+    except Exception:
+        logger.exception("failed to seed default subscription providers")
     from app.database import engine
     from app.services.scheduling.schema_guard import (
         ensure_backup_columns,

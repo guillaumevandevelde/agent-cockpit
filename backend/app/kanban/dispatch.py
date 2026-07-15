@@ -22,6 +22,7 @@ from typing import Protocol
 import yaml
 
 from app.config import settings
+from app.kanban import subscription_pool
 
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
@@ -38,8 +39,6 @@ from app.kanban.service import (
 from app.kanban.subscription_pool import (
     PoolEntry,
     get_subscription_pool,
-    has_available_spillover,
-    pick_subscription,
 )
 from app.services.agentic_cli.provider_env import (
     PROVIDER_ANTHROPIC,
@@ -573,7 +572,12 @@ async def _gather_pool_usage_snapshots(
 
     snapshots: dict[str, SubscriptionUsage] = {}
     for entry in entries:
-        provider = await _registry.get_provider_for(
+        # ``get_provider_for`` is a synchronous dict lookup — awaiting it
+        # raises ``TypeError: object … can't be used in 'await' expression``,
+        # which the surrounding ``except Exception`` in ``_pick_pool_choice``
+        # silently swallows → empty snapshot map → drempel branch is dead
+        # code. Drop the ``await``. See kanban card ea7e038b… (D1).
+        provider = _registry.get_provider_for(
             cli=entry.cli, provider=entry.provider,
         )
         if provider is None:
@@ -628,7 +632,7 @@ async def _pick_pool_choice(
             project_key,
         )
         snapshots = {}
-    return pick_subscription(entries, snapshots, paused_providers=paused)
+    return subscription_pool.pick_subscription(entries, snapshots, paused_providers=paused)
 
 
 async def _pool_spillover_available(
@@ -668,7 +672,7 @@ async def _pool_spillover_available(
             project_key,
         )
         snapshots = {}
-    return has_available_spillover(entries, snapshots, paused_providers=paused)
+    return subscription_pool.has_available_spillover(entries, snapshots, paused_providers=paused)
 
 
 # ---- persona helpers -------------------------------------------------------
