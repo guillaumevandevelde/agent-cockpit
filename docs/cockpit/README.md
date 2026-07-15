@@ -32,6 +32,7 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | **Agent Bridge (Runs)** | [`agent-bridge.md`](./agent-bridge.md) | `specs/2026-05-29-agent-bridge-bedrock-platform-design.md`, `specs/2026-06-12-agent-bridge-session-rename-design.md`, `specs/2026-06-12-resume-worktree-sessions-design.md`, `specs/2026-06-29-agent-bridge-image-paste-design.md` |
 | **Subscriptions-pagina** | [`subscriptions.md`](./subscriptions.md) | `specs/2026-07-04-minimax-providers-page-design.md`, `specs/2026-07-08-subscription-usage-leftover-design.md` |
 | **Abonnement-flexibiliteit (usage-aware routing)** | [`subscription-flexibiliteit-analyse.md`](./subscription-flexibiliteit-analyse.md) | — |
+| **Subscription-pool × dispatch × kolommen (bevindingen)** | [`subscription-pool-dispatch-analyse.md`](./subscription-pool-dispatch-analyse.md) | — |
 | **Skill stats** | [`skill-stats.md`](./skill-stats.md) | `specs/2026-06-27-skill-stats-design.md` |
 | **Beslis-register (alle genomen beslissingen)** | [`decisions.md`](./decisions.md) | — |
 | **Kanban follow-up pool** | [`kanban-followups.md`](./kanban-followups.md) | — |

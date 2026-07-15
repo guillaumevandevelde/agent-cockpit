@@ -1,7 +1,15 @@
 # Analyse — Flexibel & maximaal gebruik van abonnementen (usage-aware dispatch-routing)
 
 **Datum:** 2026-07-13
-**Status:** Analyse / ontwerpvoorstel — implementatie niet gestart
+**Status:** Analyse / ontwerpvoorstel — fase 0/1b/2 zijn geïmplementeerd; **fase 1a niet**
+(zie waarschuwing hieronder)
+
+> ⚠️ **Update 2026-07-15 — fase 1b/2 zijn gebouwd op een niet-ingeloste fase 1a.**
+> De pool-router is geshipt (`7fb2df2`, `0122a82`), maar het usage-signaal dat hij
+> consumeert is dood: `get_provider_for` wordt ge-`await`-ed hoewel hij synchroon is, en
+> de provider-registry wordt nooit gevuld. De pool degradeert daardoor tot "kies altijd
+> entry #1" — de drempels uit §4/§5 worden nooit geëvalueerd. Volledige bevindingen +
+> vervolgkaarten: [`subscription-pool-dispatch-analyse.md`](./subscription-pool-dispatch-analyse.md).
 **Trigger:** kanban-kaart "Analyse - Maximaal gebruik abonnementen". Gebruiker:
 > "Ik moet nu telkens wanneer ik overschot heb op een abonnement agents wisselen op
 > de kolommen. Dit is niet echt praktisch. Analyseer hoe we flexibeler kunnen
