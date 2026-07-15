@@ -299,3 +299,103 @@ discipline). #2 en #3 zijn nieuw aangemaakt vanaf deze analyse.
 De `depends_on` van #3 op #1 staat als tekst in de kaartbeschrijving: de MCP
 `create_card` accepteert vandaag geen `depends_on` ondanks dat het onderliggende
 `CardCreate`-schema het wél kent (bekende bug, kaart `1778ea36…`).
+
+---
+
+## 7. Uitvoering — D3+D4: `PoolEntry.cli` geschrapt (kaart `0b3ad6e2…`)
+
+**Datum:** 2026-07-15
+**Status:** Beslist + geïmplementeerd op branch `k-chore-poolent-aac6`.
+
+### 7.1 De gekozen richting — schrappen, niet doorvoeren
+
+Van de twee opties in de acceptatiecriteria is **(b) schrappen** gekozen:
+
+- **`PoolEntry.cli` is weg** uit dataclass, schema, Pydantic, validatie,
+  storage-serialisatie, UI.
+- **De snapshot-lookup-sleutel** `f"{cli}:{provider}"` is gereduceerd tot
+  `f"{POOL_CLI}:{provider}"`, met `POOL_CLI = "claude-code"` als
+  module-constante.
+- **Een migratie-shim** in `_deserialize_entries` accepteert nog steeds
+  rijen die `cli` per entry meedragen en strip't het veld op read, zodat
+  een opgeslagen rij uit een pre-fix build (of een POST van een stale
+  UI-bundle) niet de dispatcher wurgt.
+
+### 7.2 Waarom niet (a) doorvoeren
+
+(a) had drie lastige randvoorwaarden, die stuk voor stuk buiten de
+`chore`-scope vielen:
+
+1. **`cli_id` doorvoeren in de precedentieketen** — `dispatch.py:2393-2399`
+   resolved `cli_id` uit `agent_override` / `analyst_agent_id` /
+   `executor_agent_id` / `card.agent` *vóór* de pool bevraagd wordt
+   (`pool_entries` op regel 2464). Om `pool_choice.cli` ergens te laten
+   landen zou een nieuwe cascade-regel nodig zijn ("pool_choice.cli mag
+   het eerdere `cli_id` overriden"), met bijbehorende test voor het
+   precedence-conflict tussen een expliciete `analyst_agent_id` en de
+   pool-keuze.
+2. **De allow-list openen voor codex/copilot** — `_ALLOWED_POOL_PROVIDERS`
+   staat op `(anthropic, bedrock, minimax)`. Codex gebruikt vendor
+   `codex`; copilot `copilot`. Beide bestaan nog niet als
+   `SubscriptionUsageProvider`, dus stap 1 (D2) was eigenlijk pas
+   afgerond voor de drie claude-vendoren — voor codex/copilot zou de
+   hele `register_default_providers`-keten opnieuw moeten.
+3. **Een integratietest die bewijst dat een pool-entry met een andere
+   `cli` daadwerkelijk die CLI spawnt** — dat vereist een werkende
+   `codex-cli` / `copilot-cli` `SpawnTransport`, en die zijn niet
+   aanwezig in de werkende stack. De test zou een echte CLI moeten
+   aanroepen of een dummy-transport moeten registreren — beide zijn
+   een nieuwe testoppervlak.
+
+Bovenop de technische last is de scope: dit is een `[chore]`, geen
+`[feature]`. Het kaartdoel was "promised-bleeding UI wegwerken", niet
+"de pool een tweede as laten routeren". (a) hoort dus bij een
+toekomstige `[feature] PoolEntry.cli: doorvoeren naar cli_id + transport
+voor codex/copilot` — out of scope voor deze kaart.
+
+### 7.3 Waarom (b) veilig is
+
+- **De CLI is vandaag al effectief vastgeklonken op `claude-code`**:
+  `column.default_agent` bereikt de dispatcher nooit
+  (`_phase_cli_id` filtert `card.agent` tegen `known_clis`; "engineer"
+  wordt dus weggegooid en de fallback `"claude-code"` wint — analyse §2.3).
+- **De registry seedt uitsluitend `claude-code:{provider}` stubs**
+  (`registry.py:79-83`): het verwijderen van `cli` als entry-veld
+  verandert geen feitelijke runtime-gedrag, want de lookup-key was
+  altijd al `claude-code:anthropic` / `claude-code:bedrock` /
+  `claude-code:minimax`.
+- **De UI beloofde al niets anders**: `CLI_OPTIONS` stond op één entry
+  (`SubscriptionPoolDialog.tsx` voor deze fix), met expliciete
+  docstring-verwijzing naar deze kaart. De gebruiker kon dus nooit een
+  niet-claude-code-CLI kiezen — de dode as was niet eens bereikbaar.
+
+### 7.4 Migratiecontract
+
+Twee tests bewaken de overgang:
+
+- `test_deserialize_tolerates_legacy_cli_field` (storage-laag): een
+  KanbanMeta-rij met `cli` per entry deserialiseert schoon; de
+  `PoolEntry` heeft geen `cli`-veld maar is verder intact
+  (`provider`, `model`, `drempel`).
+- `test_post_subscription_pool_strips_legacy_cli_field` (API-laag): een
+  `POST /api/v1/kanban/subscription-pool` met een body waar elke entry
+  nog `cli` bevat, wordt geaccepteerd (200) en de `GET` direct
+  erachter toont een rij *zonder* `cli`. Een stale UI-bundel hoeft
+  dus niet eerst een hard-refresh te krijgen voor de gebruiker kan
+  opslaan.
+
+### 7.5 Netto-effect op de tabel uit §3.1
+
+| Beloofd (UI + docstrings) | Werkelijk gedrag — pre-fix | Werkelijk gedrag — post-fix |
+|---|---|---|
+| Geordende pool, usage-aware | Statisch: entry #1, altijd | Idem (D1+D2 loste de drempel-tak al op) |
+| Per-entry drempel spilt door | Drempel wordt nooit geëvalueerd | Idem |
+| Spillover-bij-limiet (fase 2) | Alleen via de pause-tak | Idem |
+| Pool abstraheert CLI + provider | Alleen provider + model landen | Alleen provider + model landen — **CLI-as is geschrapt, niet verborgen** |
+
+De UI belooft niets meer dat de code niet doet (`SubscriptionPoolDialog`
+toont geen CLI-select meer). Als in een latere feature-kaart de
+CLI-as alsnog doorgevoerd wordt, kan `PoolEntry.cli` als
+terugkerend veld worden geïntroduceerd met de huidige
+`POOL_CLI`-constante als aanbevolen default.
+

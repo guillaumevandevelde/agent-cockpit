@@ -304,15 +304,22 @@ class ActiveSubscriptionOverrideRequest(BaseModel):
 class SubscriptionPoolEntry(BaseModel):
     """One entry in the subscription pool (fase 1b).
 
-    ``cli`` is the agentic CLI to spawn (e.g. ``"claude-code"``); the
-    existing ``agentic_cli.registry`` keys these. ``provider`` is the
+    The pool always routes through the single supported CLI (see
+    ``subscription_pool.POOL_CLI``); the ``cli`` field that earlier
+    builds carried was dropped in kaart 0b3ad6e2… because the
+    dispatcher never consumed it (analysis §3 D3). ``provider`` is the
     vendor the CLI authenticates against (validated against the same
     allow-list as the active-subscription-override). ``model`` is
     optional — ``None`` leaves the dispatch precedence chain (column
     default / card model / persona) to fill it in. ``drempel`` is the
     fraction (0..1] at which the router considers this entry "full"
-    and spills to the next entry."""
-    cli: str
+    and spills to the next entry.
+
+    Legacy payloads that still include a ``cli`` field on each entry
+    are accepted by the migration shim in
+    ``subscription_pool._deserialize_entries``; the field is silently
+    stripped on read so a stored row written by a pre-fix build still
+    loads without manual data surgery."""
     provider: str
     model: str | None = None
     drempel: float
@@ -339,7 +346,7 @@ class SubscriptionPoolRequest(BaseModel):
             return None
         return [
             PoolEntry(
-                cli=e.cli, provider=e.provider,
+                provider=e.provider,
                 model=e.model, drempel=e.drempel,
             )
             for e in self.pool

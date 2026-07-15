@@ -14,9 +14,10 @@ of which the caller already has). That keeps the function trivially
 unit-testable (see ``tests/test_subscription_pool_pick.py``) and makes the
 contract obvious: "given this state, pick this subscription".
 
-Subscription identity follows analyse §3: a subscription is a
-``{cli, provider}`` pair (vendor-diverse — same-vendor multi-account is
-out of scope per the analyse §7 fork decision 2026-07-14). ``model`` is
+Subscription identity follows analyse §3: a subscription is identified
+by its ``provider`` (the vendor the CLI authenticates against). The CLI
+is fixed — see ``POOL_CLI`` for the rationale (analysis §3 D3 + §2.3).
+``model`` is
 optional — a ``None`` model leaves the dispatch precedence chain (column
 default / card model / persona frontmatter) to fill it in, matching the
 shape of the existing per-card ``column_overrides[col]``.
@@ -26,7 +27,9 @@ table under ``subscription_pool:<project_key>`` (same shape as the
 board-wide active-subscription-override from fase 0 — see
 ``dispatch.SUBSCRIPTION_OVERRIDE_PREFIX``). That keeps the dispatcher
 free of schema migrations and keeps the precedence logic discoverable
-in one module.
+in one module. The JSON payload is ``[{"provider": ..., "model": ...,
+"drempel": ...}, ...]`` — pre-fix payloads that also carry ``cli`` are
+tolerated (the field is stripped on read; kaart 0b3ad6e2…).
 """
 from __future__ import annotations
 
@@ -53,18 +56,29 @@ _ALLOWED_POOL_PROVIDERS = (
     PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
 )
 
+# The single CLI the pool routes through today. ``column.default_agent``
+# never reaches the dispatcher (analysis §2.3), so the CLI axis is
+# board-wide pinned to claude-code regardless of what the pool says.
+# Earlier builds carried ``PoolEntry.cli`` and a UI select for it; that
+# field was validated and stored but **never consumed** — ``cli_id``
+# comes from ``agent_override`` / ``analyst_agent_id`` /
+# ``executor_agent_id`` / ``card.agent`` (``dispatch._phase_cli_id``),
+# resolved *before* the pool is queried (analyse §3 D3). The field was
+# dropped in kanban card ``0b3ad6e2…`` to stop promising a capability
+# the code does not have; the snapshot-lookup key uses this constant
+# instead of a per-entry value.
+POOL_CLI = "claude-code"
+
 
 @dataclass(frozen=True)
 class PoolEntry:
     """Eén subscription in de pool.
 
     Fields:
-        cli: the agentic CLI to spawn (e.g. ``"claude-code"``,
-            ``"codex-cli"``). Mirrors ``agentic_cli.registry``.
         provider: which vendor the CLI authenticates against
-            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"`` for
-            claude-code; for other CLIs this is the CLI's native vendor
-            identifier).
+            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"`` for the
+            ``claude-code`` CLI that the pool actually routes — see
+            ``POOL_CLI``).
         model: optional model pin. ``None`` = no model pin — dispatch
             falls through to the column/card/persona precedence chain.
             This mirrors the partial-override shape of the existing
@@ -78,7 +92,6 @@ class PoolEntry:
             — see ``SubscriptionUsage.drempel_gebruikt``.
     """
 
-    cli: str
     provider: str
     model: str | None
     drempel: float
@@ -144,7 +157,7 @@ def pick_subscription(
         if entry.provider in paused_providers:
             chosen = entry  # val terug op de laatst geziene entry
             continue
-        usage = usages.get(f"{entry.cli}:{entry.provider}")
+        usage = usages.get(f"{POOL_CLI}:{entry.provider}")
         if _is_above_threshold(entry, usage):
             chosen = entry
             continue
@@ -185,7 +198,7 @@ def has_available_spillover(
         # ``pick_subscription`` viel terug op de "laatste val-terug" — die
         # provider is zelf gepauzeerd, dus er is geen echte spillover-target.
         return False
-    usage = usages.get(f"{chosen.cli}:{chosen.provider}")
+    usage = usages.get(f"{POOL_CLI}:{chosen.provider}")
     # De fallback kan ook een niet-gepauzeerde maar bóven-drempel entry zijn
     # (alles vol); dat telt niet als beschikbare spillover.
     return not _is_above_threshold(chosen, usage)
@@ -212,8 +225,6 @@ def _validate_entries(entries: list[PoolEntry]) -> None:
     - ``drempel`` must be in ``(0, 1]`` — 0 would always be "above
       threshold" (silently disable the entry) and >1 disables the
       spillover entirely.
-    - ``cli`` must be non-empty (used as the lookup key for usage
-      snapshots).
     """
     if not entries:
         raise ValueError("subscription pool must not be empty (use null to clear)")
@@ -223,8 +234,6 @@ def _validate_entries(entries: list[PoolEntry]) -> None:
                 f"unknown provider: {entry.provider!r}; "
                 f"expected one of {_ALLOWED_POOL_PROVIDERS}",
             )
-        if not entry.cli:
-            raise ValueError("subscription pool entry.cli must be non-empty")
         if entry.drempel <= 0 or entry.drempel > 1:
             raise ValueError(
                 f"subscription pool entry.drempel must be in (0, 1]; "
@@ -235,7 +244,7 @@ def _validate_entries(entries: list[PoolEntry]) -> None:
 def _serialize_entries(entries: list[PoolEntry]) -> str:
     payload = [
         {
-            "cli": e.cli, "provider": e.provider,
+            "provider": e.provider,
             "model": e.model, "drempel": e.drempel,
         }
         for e in entries
@@ -256,18 +265,21 @@ def _deserialize_entries(value: str) -> list[PoolEntry] | None:
     for raw in parsed:
         if not isinstance(raw, dict):
             return None
-        cli = raw.get("cli")
+        # Migration shim (kaart 0b3ad6e2…): pre-fix rows carried a `cli`
+        # field on every entry. ``PoolEntry.cli` is gone, so the field
+        # is silently stripped on read instead of wedging the
+        # dispatcher on a legacy KanbanMeta row.
         provider = raw.get("provider")
         model = raw.get("model")
         drempel = raw.get("drempel")
-        if not isinstance(cli, str) or not isinstance(provider, str):
+        if not isinstance(provider, str):
             return None
         if model is not None and not isinstance(model, str):
             return None
         if not isinstance(drempel, (int, float)):
             return None
         out.append(PoolEntry(
-            cli=cli, provider=provider, model=model, drempel=float(drempel),
+            provider=provider, model=model, drempel=float(drempel),
         ))
     return out
 

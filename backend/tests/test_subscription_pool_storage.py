@@ -42,13 +42,14 @@ PK = "git:example.com/me/repo"
 
 def _valid_pool():
     """A pool that matches the allow-list; tests mutate it to exercise
-    invalid shapes."""
+    invalid shapes. The legacy ``cli`` field was dropped in kaart
+    0b3ad6e2…."""
     return [
         subscription_pool.PoolEntry(
-            cli="claude-code", provider="anthropic", model=None, drempel=0.9,
+            provider="anthropic", model=None, drempel=0.9,
         ),
         subscription_pool.PoolEntry(
-            cli="claude-code", provider="minimax", model="MiniMax-M3[1m]",
+            provider="minimax", model="MiniMax-M3[1m]",
             drempel=0.95,
         ),
     ]
@@ -95,7 +96,7 @@ async def test_set_pool_overwrites_previous():
         await subscription_pool.set_subscription_pool(
             s, PK,
             [subscription_pool.PoolEntry(
-                cli="claude-code", provider="bedrock", model=None, drempel=0.8,
+                provider="bedrock", model=None, drempel=0.8,
             )],
         )
         await s.commit()
@@ -124,7 +125,7 @@ async def test_set_pool_rejects_unknown_provider():
     active-subscription-override allow-list to keep both knobs
     consistent (analyse §2.1: providers are an enum-like set)."""
     bad = [subscription_pool.PoolEntry(
-        cli="claude-code", provider="openai", model=None, drempel=0.9,
+        provider="openai", model=None, drempel=0.9,
     )]
     async with KanbanSessionLocal() as s:
         with pytest.raises(ValueError):
@@ -137,30 +138,69 @@ async def test_set_pool_rejects_out_of_range_drempel():
     threshold") and >1 disables the spillover entirely. Reject up front
     so the router never sees a confusing value."""
     bad = [subscription_pool.PoolEntry(
-        cli="claude-code", provider="anthropic", model=None, drempel=0,
+        provider="anthropic", model=None, drempel=0,
     )]
     async with KanbanSessionLocal() as s:
         with pytest.raises(ValueError):
             await subscription_pool.set_subscription_pool(s, PK, bad)
     bad2 = [subscription_pool.PoolEntry(
-        cli="claude-code", provider="anthropic", model=None, drempel=1.5,
+        provider="anthropic", model=None, drempel=1.5,
     )]
     async with KanbanSessionLocal() as s:
         with pytest.raises(ValueError):
             await subscription_pool.set_subscription_pool(s, PK, bad2)
 
 
+# ---- the cli field was removed (card 0b3ad6e2…) -------------------------
+#
+# `PoolEntry.cli` was dropped because the dispatcher never consumed it
+# (analysis §3 D3) and the CLI is board-wide pinned to ``claude-code``
+# (analysis §2.3). The pool's snapshot lookup key uses the ``POOL_CLI``
+# constant instead — see subscription_pool.py.
+
 @pytest.mark.asyncio
-async def test_set_pool_rejects_empty_cli():
-    """cli must be non-empty — used to build the ``{cli}:{provider}``
-    subscription_id used by ``SubscriptionUsageProvider.id``. An empty
-    cli would make every lookup miss silently."""
-    bad = [subscription_pool.PoolEntry(
-        cli="", provider="anthropic", model=None, drempel=0.9,
-    )]
-    async with KanbanSessionLocal() as s:
-        with pytest.raises(ValueError):
-            await subscription_pool.set_subscription_pool(s, PK, bad)
+async def test_pool_entry_no_longer_accepts_cli_kwarg():
+    """PoolEntry's surface is now ``(provider, model, drempel)`` — the
+    legacy ``cli`` field is gone (analysis §3 D3 + card 0b3ad6e2…).
+
+    Constructing with ``cli=...`` must raise TypeError so a caller that
+    is still passing it (e.g. a stale UI bundle) fails loudly instead of
+    silently losing the field."""
+    with pytest.raises(TypeError):
+        subscription_pool.PoolEntry(
+            cli="claude-code", provider="anthropic", model=None, drempel=0.9,
+        )
+
+
+def test_deserialize_tolerates_legacy_cli_field():
+    """A row whose JSON still contains ``cli`` (from before this chore)
+    must round-trip cleanly — the field is silently stripped on read so
+    the dispatcher never wedges on a legacy KanbanMeta row.
+
+    Pins the migration contract: a stored row written by a pre-fix
+    build must still load without manual data surgery. See card
+    0b3ad6e2… acceptance criterion #3.
+
+    This test is synchronous but lives under the module-level
+    ``pytestmark = pytest.mark.asyncio`` (so it shares the async DB
+    fixtures with the rest of the file). pytest-asyncio emits a warning
+    about that — it's harmless and the test is wired correctly."""
+    import json as _json
+    legacy_row = _json.dumps([
+        {"cli": "claude-code", "provider": "anthropic",
+         "model": None, "drempel": 0.9},
+        {"cli": "claude-code", "provider": "minimax",
+         "model": "MiniMax-M3[1m]", "drempel": 0.95},
+    ])
+    result = subscription_pool._deserialize_entries(legacy_row)
+    assert result is not None
+    assert len(result) == 2
+    assert result[0].provider == "anthropic"
+    assert result[0].model is None
+    assert result[0].drempel == 0.9
+    assert result[1].provider == "minimax"
+    assert result[1].model == "MiniMax-M3[1m]"
+    assert result[1].drempel == 0.95
 
 
 # ---- the storage row is independent from the override row -------------------

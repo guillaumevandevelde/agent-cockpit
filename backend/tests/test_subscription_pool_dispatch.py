@@ -77,8 +77,8 @@ async def _make_card(s, title="Task", column="Backlog"):
     )
 
 
-def _entry(*, cli="claude-code", provider="anthropic", model=None, drempel=0.9):
-    return PoolEntry(cli=cli, provider=provider, model=model, drempel=drempel)
+def _entry(*, provider="anthropic", model=None, drempel=0.9):
+    return PoolEntry(provider=provider, model=model, drempel=drempel)
 
 
 def _patch_pool_pick(monkeypatch, snapshots):
@@ -89,10 +89,15 @@ def _patch_pool_pick(monkeypatch, snapshots):
     dispatcher's binding) sees the test version. The snapshots dict
     mirrors what a real ``SubscriptionUsageProvider.get_usage()`` call
     would produce.
+
+    The snapshot key is ``f"{POOL_CLI}:{provider}"`` (constant
+    ``claude-code`` prefix since the pool dropped its cli field —
+    kaart 0b3ad6e2…). Each test's entries lookup matches that.
     """
+    from app.kanban.subscription_pool import POOL_CLI
     import app.kanban.subscription_pool as pool_mod
     snapshot_map = {
-        f"{e.cli}:{e.provider}": snap
+        f"{POOL_CLI}:{e.provider}": snap
         for e, snap in snapshots.items()
     }
 
@@ -363,9 +368,8 @@ async def test_post_and_get_subscription_pool_endpoint():
     body = {
         "project_key": PK,
         "pool": [
-            {"cli": "claude-code", "provider": "anthropic",
-             "model": None, "drempel": 0.9},
-            {"cli": "claude-code", "provider": "minimax",
+            {"provider": "anthropic", "model": None, "drempel": 0.9},
+            {"provider": "minimax",
              "model": "MiniMax-M3[1m]", "drempel": 0.95},
         ],
     }
@@ -385,8 +389,7 @@ async def test_post_subscription_pool_clear():
         await c.post(
             "/api/v1/kanban/subscription-pool",
             json={"project_key": PK, "pool": [
-                {"cli": "claude-code", "provider": "minimax",
-                 "model": None, "drempel": 0.9},
+                {"provider": "minimax", "model": None, "drempel": 0.9},
             ]},
         )
         r = await c.post(
@@ -404,12 +407,41 @@ async def test_post_subscription_pool_clear():
 @pytest.mark.asyncio
 async def test_post_subscription_pool_invalid_provider():
     body = {"project_key": PK, "pool": [
-        {"cli": "claude-code", "provider": "openai",
-         "model": None, "drempel": 0.9},
+        {"provider": "openai", "model": None, "drempel": 0.9},
     ]}
     async with _client() as c:
         r = await c.post("/api/v1/kanban/subscription-pool", json=body)
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_strips_legacy_cli_field():
+    """A request payload that still carries ``cli`` on each entry (sent
+    by a pre-fix UI bundle, or by a hand-crafted curl during the
+    upgrade window) is accepted — the field is silently dropped by the
+    storage layer's migration shim (kaart 0b3ad6e2…).
+
+    Pins the migration contract on the POST side too: a stale UI does
+    not have to be force-refreshed before the user can save a pool.
+    The stored row carries ``provider / model / drempel`` only."""
+    body = {
+        "project_key": PK,
+        "pool": [
+            {"cli": "claude-code", "provider": "anthropic",
+             "model": None, "drempel": 0.9},
+        ],
+    }
+    async with _client() as c:
+        r = await c.post("/api/v1/kanban/subscription-pool", json=body)
+        assert r.status_code == 200
+        r2 = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK},
+        )
+    stored = r2.json()["pool"]
+    assert stored == [
+        {"provider": "anthropic", "model": None, "drempel": 0.9},
+    ]
 
 
 # ---- D1+D2+D5 regression tests ---------------------------------------------
@@ -504,10 +536,18 @@ async def test_gather_pool_usage_snapshots_returns_registered_fake_provider():
         regression that crashed the call path is exactly what D1 fixed.
       * The provider's ``get_usage()`` output must appear in the returned
         dict, keyed by its ``subscription_id`` (matching
-        ``f"{entry.cli}:{entry.provider}"``).
+        ``f"{POOL_CLI}:{entry.provider}"`` — the constant prefix that
+        replaced the per-entry ``cli`` field in kaart 0b3ad6e2…).
 
     Unregistered pairs continue to contribute no snapshot — backwards-
-    compatible with the legacy "no signal → available" clause."""
+    compatible with the legacy "no signal → available" clause.
+
+    The ``cli`` lookup key is the constant ``POOL_CLI`` (kaart
+    0b3ad6e2…) — ``PoolEntry`` no longer carries a per-entry CLI, so
+    ``_gather_pool_usage_snapshots`` builds the key from the constant
+    rather than a field on the entry. The historical key shape
+    (``f"{POOL_CLI}:{provider}"`` → ``claude-code:anthropic``) is
+    preserved so the registry's default providers still match."""
     entry = _entry(provider="anthropic")
     fake = _fake_usage_provider(
         subscription_id="claude-code:anthropic",

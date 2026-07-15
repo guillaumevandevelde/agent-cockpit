@@ -159,8 +159,8 @@ describe("SubscriptionPoolDialog — pool section", () => {
       .mockResolvedValue({
         project_key: PK,
         pool: [
-          { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
-          { cli: "claude-code", provider: "minimax", model: "MiniMax-M3[1m]", drempel: 0.95 },
+          { provider: "anthropic", model: null, drempel: 0.9 },
+          { provider: "minimax", model: "MiniMax-M3[1m]", drempel: 0.95 },
         ],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
@@ -189,7 +189,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
     (kanbanApi.setSubscriptionPool as ReturnType<typeof vi.fn>)
       .mockResolvedValue({
         project_key: PK,
-        pool: [{ cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 }],
+        pool: [{ provider: "anthropic", model: null, drempel: 0.9 }],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
       .mockResolvedValue({ project_key: PK, override: null });
@@ -207,7 +207,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
     );
     await waitFor(() =>
       expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
-        { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
+        { provider: "anthropic", model: null, drempel: 0.9 },
       ]),
     );
   });
@@ -216,7 +216,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
     (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         project_key: PK,
-        pool: [{ cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 }],
+        pool: [{ provider: "anthropic", model: null, drempel: 0.9 }],
       });
     (kanbanApi.setSubscriptionPool as ReturnType<typeof vi.fn>)
       .mockResolvedValue({ project_key: PK, pool: null });
@@ -250,7 +250,7 @@ describe("SubscriptionPoolDialog — override interaction with pool", () => {
       .mockResolvedValue({
         project_key: PK,
         pool: [
-          { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
+          { provider: "anthropic", model: null, drempel: 0.9 },
         ],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
@@ -277,7 +277,7 @@ describe("SubscriptionPoolDialog — override interaction with pool", () => {
       .mockResolvedValue({
         project_key: PK,
         pool: [
-          { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
+          { provider: "anthropic", model: null, drempel: 0.9 },
         ],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
@@ -306,7 +306,7 @@ describe("SubscriptionPoolDialog — override interaction with pool", () => {
       .mockResolvedValue({
         project_key: PK,
         pool: [
-          { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
+          { provider: "anthropic", model: null, drempel: 0.9 },
         ],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)

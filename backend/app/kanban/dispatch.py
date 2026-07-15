@@ -577,8 +577,15 @@ async def _gather_pool_usage_snapshots(
         # which the surrounding ``except Exception`` in ``_pick_pool_choice``
         # silently swallows → empty snapshot map → drempel branch is dead
         # code. Drop the ``await``. See kanban card ea7e038b… (D1).
+        #
+        # ``cli`` is no longer on ``PoolEntry`` (kaart 0b3ad6e2…) — the
+        # pool always routes through the single supported CLI (see
+        # ``subscription_pool.POOL_CLI``). The snapshot-lookup key keeps
+        # the historical ``{cli}:{provider}`` shape so the registry's
+        # default providers — registered as ``claude-code:{provider}``
+        # in ``services/subscriptions/registry.py`` — still match.
         provider = _registry.get_provider_for(
-            cli=entry.cli, provider=entry.provider,
+            cli=subscription_pool.POOL_CLI, provider=entry.provider,
         )
         if provider is None:
             continue

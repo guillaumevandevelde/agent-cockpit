@@ -42,15 +42,21 @@ export interface ColumnOverride {
 }
 
 // One entry in the subscription pool (fase 1b). Mirrors backend
-// app/kanban/subscription_pool.py PoolEntry exactly: `cli` is the
-// agentic CLI to spawn, `provider` is the vendor the CLI authenticates
-// against, `model` is an optional model pin (null = fall through to
-// the column/card/persona chain), and `drempel` is the fraction (0..1]
-// at which the router spills to the next entry. Priority is the
-// entry's position in the pool list — index 0 is the preferred
-// subscription.
+// app/kanban/subscription_pool.py PoolEntry exactly: `provider` is
+// the vendor the CLI authenticates against, `model` is an optional
+// model pin (null = fall through to the column/card/persona chain),
+// and `drempel` is the fraction (0..1] at which the router spills to
+// the next entry. Priority is the entry's position in the pool list —
+// index 0 is the preferred subscription.
+//
+// The legacy `cli` field that pre-fix builds carried on each entry
+// was dropped in kanban card 0b3ad6e2… (analysis §3 D3): the pool
+// always routes through the single supported CLI (claude-code), and
+// `cli_id` is resolved earlier in dispatch than the pool is even
+// consulted — so the field was a UI promise the backend never kept.
+// A backend migration shim strips the field on read so stale KanbanMeta
+// rows still load.
 export interface PoolEntry {
-  cli: string;
   provider: string;
   model: string | null;
   drempel: number;

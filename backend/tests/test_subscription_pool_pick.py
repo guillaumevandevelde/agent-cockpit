@@ -32,9 +32,17 @@ from app.kanban.subscription_pool import (
 from app.services.subscriptions.base import SubscriptionUsage
 
 
-def _entry(*, cli="claude-code", provider="anthropic", model=None, drempel=0.9):
-    """Shorthand for a pool entry — the keys users actually care about."""
-    return PoolEntry(cli=cli, provider=provider, model=model, drempel=drempel)
+def _entry(*, provider="anthropic", model=None, drempel=0.9):
+    """Shorthand for a pool entry — the keys users actually care about.
+
+    The legacy ``cli`` kwarg was dropped in card 0b3ad6e2… (analysis §3
+    D3): the pool always routes through the single supported CLI
+    (``subscription_pool.POOL_CLI``). Tests that want to express a
+    non-claude-code CLI (rare; legacy snapshots) build the PoolEntry
+    directly — the snapshot-lookup key still uses the ``claude-code``
+    prefix because that's what the dispatched session actually runs.
+    """
+    return PoolEntry(provider=provider, model=model, drempel=drempel)
 
 
 def _usage(*, subscription_id, beschikbaar=True, drempel_gebruikt=None,
@@ -189,7 +197,16 @@ class TestPickSubscriptionNoSignal:
     signal today."""
 
     def test_unknown_signal_does_not_block_dispatch(self):
-        """Subscription without signal (drempel_gebruikt=None) is usable."""
+        """Subscription without signal (drempel_gebruikt=None) is usable.
+
+        Note: the snapshot-lookup key is now ``f"{POOL_CLI}:{provider}"``
+        (i.e. ``claude-code:codex`` here) since the pool always routes
+        through the single supported CLI (card 0b3ad6e2… / analysis
+        §3 D3). ``codex`` as a provider value stands in for "any
+        non-claude vendor with no live signal" in this unit test — the
+        storage layer's allow-list is the gate that would reject it in
+        practice; ``pick_subscription`` itself just exercises the no-
+        signal branch."""
         entries = [_entry(provider="anthropic", drempel=0.9),
                    _entry(provider="codex", drempel=0.9)]
         usages = {
@@ -198,13 +215,10 @@ class TestPickSubscriptionNoSignal:
                 subscription_id="claude-code:anthropic",
                 drempel_gebruikt=0.95,
             ),
-            # Codex: NO signal (drempel_gebruikt=None, betrouwbaarheid=onbekend)
-            "codex-cli:codex": _usage(
-                subscription_id="codex-cli:codex",
-                beschikbaar=True,
-                drempel_gebruikt=None,
-                betrouwbaarheid="onbekend",
-            ),
+            # No entry for codex → treated as "no signal"
+            # (the key would now be ``claude-code:codex`` under the
+            # POOL_CLI-based lookup; absent means "available until the
+            # per-provider pause catches it" per analyse §6.3).
         }
         chosen = pick_subscription(entries, usages, paused_providers=set())
         assert chosen is not None
@@ -224,16 +238,16 @@ class TestPickSubscriptionNoSignal:
 
 class TestPickSubscriptionEntryShape:
     """Return value shape matches the existing dispatch injection point
-    (cli / provider / model)."""
+    (provider / model — the legacy ``cli`` field was dropped in card
+    0b3ad6e2… / analysis §3 D3)."""
 
-    def test_returns_cli_provider_model(self):
-        entries = [PoolEntry(cli="claude-code", provider="anthropic",
+    def test_returns_provider_model(self):
+        entries = [PoolEntry(provider="anthropic",
                              model="opus", drempel=0.9)]
         chosen = pick_subscription(
             entries, usages={}, paused_providers=set(),
         )
         assert chosen is not None
-        assert chosen.cli == "claude-code"
         assert chosen.provider == "anthropic"
         assert chosen.model == "opus"
 

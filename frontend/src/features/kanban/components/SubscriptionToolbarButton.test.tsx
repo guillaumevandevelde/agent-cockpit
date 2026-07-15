@@ -54,8 +54,8 @@ describe("SubscriptionToolbarButton", () => {
       .mockResolvedValue({
         project_key: PK,
         pool: [
-          { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
-          { cli: "claude-code", provider: "minimax", model: "MiniMax-M3[1m]", drempel: 0.95 },
+          { provider: "anthropic", model: null, drempel: 0.9 },
+          { provider: "minimax", model: "MiniMax-M3[1m]", drempel: 0.95 },
         ],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
@@ -70,7 +70,7 @@ describe("SubscriptionToolbarButton", () => {
       .mockResolvedValue({
         project_key: PK,
         pool: [
-          { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
+          { provider: "anthropic", model: null, drempel: 0.9 },
         ],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
@@ -98,7 +98,7 @@ describe("SubscriptionToolbarButton", () => {
       .mockResolvedValue({
         project_key: PK,
         pool: [
-          { cli: "claude-code", provider: "anthropic", model: null, drempel: 0.9 },
+          { provider: "anthropic", model: null, drempel: 0.9 },
         ],
       });
     (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)

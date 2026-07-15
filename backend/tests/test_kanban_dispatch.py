@@ -2964,8 +2964,8 @@ async def test_move_limited_session_spills_over_when_pool_has_capacity(monkeypat
         )
         # Pool: anthropic (the card's default provider) then minimax.
         await subscription_pool.set_subscription_pool(s, PK, [
-            PoolEntry(cli="claude-code", provider="anthropic", model=None, drempel=0.9),
-            PoolEntry(cli="claude-code", provider="minimax", model=None, drempel=0.9),
+            PoolEntry(provider="anthropic", model=None, drempel=0.9),
+            PoolEntry(provider="minimax", model=None, drempel=0.9),
         ])
         await s.commit()
 
@@ -3021,7 +3021,7 @@ async def test_move_limited_session_pauses_when_all_subscriptions_exhausted(monk
         # Single-entry pool: anthropic (the card's provider). Once it's limited
         # there is nothing to spill to.
         await subscription_pool.set_subscription_pool(s, PK, [
-            PoolEntry(cli="claude-code", provider="anthropic", model=None, drempel=0.9),
+            PoolEntry(provider="anthropic", model=None, drempel=0.9),
         ])
         await s.commit()
 
