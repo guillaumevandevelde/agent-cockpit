@@ -1,3 +1,4 @@
+from app.kanban import analyst_prompt as _analyst_prompt_module
 from app.kanban.analyst_prompt import ANALYST_PROMPT
 
 
@@ -60,4 +61,37 @@ def test_prompt_verboden_scoped_to_decomposition_mode():
         "'decompositie' so the prohibition is clearly scoped to the "
         "multi-agent decomposition path, not a blanket 'no Write/Edit' "
         f"rule. Got header: {header_line!r}"
+    )
+
+
+# ---- Module-docstring frontmatter contract ----
+# The `analyst_prompt.py` module docstring is the fallback persona's
+# "frontmatter" from an operator's perspective — it's what someone reads in
+# the IDE or docs when there's no project-local `analyst.md`. After the
+# leaf-spike change both modi are real, so the docstring must explicitly
+# name them — a bare "planning, not implementing" framing re-introduces the
+# same kind of contradiction the leaf-spike was added to fix. See kanban
+# card c2b478ca396a473287aa0c04a79890e2 for the original two-modi framing.
+
+
+def test_analyst_prompt_module_docstring_covers_both_modes():
+    doc = _analyst_prompt_module.__doc__ or ""
+    assert doc.strip(), "analyst_prompt.py must have a module docstring"
+
+    doc_lower = doc.lower()
+    assert (
+        "multi-agent" in doc_lower and "decompositie" in doc_lower
+    ), (
+        "analyst_prompt.py module docstring must mention multi-agent "
+        "decompositie (modus 1). "
+        f"Got docstring: {doc!r}"
+    )
+    assert (
+        "leaf design-deliverable" in doc_lower
+        or "leaf spike" in doc_lower
+    ), (
+        "analyst_prompt.py module docstring must mention leaf "
+        "design-deliverable (modus 2) so an operator reading the docstring "
+        "doesn't conclude the analyst persona can never execute. "
+        f"Got docstring: {doc!r}"
     )

@@ -1,11 +1,22 @@
 """Built-in fallback prompt for the analyst phase.
 
-Used when a project has no `.claude/agents/analyst.md`. Keep the body
-strict: the analyst's job is planning, not implementing — UNLESS the card
-is a leaf design-deliverable (modus 2), in which case the analyst writes,
-commits, ships, and moves THIS card to Done. See kanban card
-c2b478ca396a473287aa0c04a79890e2 for the report that motivated this
-two-modi framing.
+Used when a project has no `.claude/agents/analyst.md`. The analyst runs
+in one of two modi, and the prompt must acknowledge both so a fresh
+session never sees a contradiction between the persona rules and the
+session-end ship workflow injected at the bottom:
+
+- **Modus 1 — multi-agent decompositie** (default, when the card has
+  `analyst_agent_id` set): the analyst's job is planning + splitting —
+  decompose the parent into child cards with dependencies, write a
+  plan-attachment, and move the parent to Done. Nothing is implemented.
+- **Modus 2 — leaf design-deliverable** (when `work_type='analysis'` or
+  `card.agent='analyst'` but no `analyst_agent_id`): the analyst
+  delivers ONE concrete artefact (a `docs/cockpit/...` design-doc, a
+  prototype-dataclass, a prototype-script) directly — writes, commits,
+  ships to master, and moves THIS card to Done. No child cards.
+
+See kanban card c2b478ca396a473287aa0c04a79890e2 for the report that
+motivated this two-modi framing.
 """
 
 ANALYST_PROMPT = """\
