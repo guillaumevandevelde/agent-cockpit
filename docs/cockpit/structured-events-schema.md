@@ -76,6 +76,30 @@ event = parse_structured_event({"type": "tool_call", "tool_call_id": "tc1", "sta
 De discriminator dispatcht op `type`; een onbekend type of een malformed payload gooit een
 `pydantic.ValidationError`.
 
+## 2.1 Bekend gat: twee events uit `stream-json` passen (nog) niet
+
+> Toegevoegd 2026-07-15 na kaart 3
+> ([`headless-stream-json-transport-spike.md`](./headless-stream-json-transport-spike.md) §4.1),
+> die de echte `claude -p --output-format stream-json`-stream heeft gemeten. **Deze zes
+> varianten dekken die stream nog niet volledig** — bouw er niet op alsof ze dat wel doen.
+
+- **`rate_limit_event`** — `stream-json` emit een getypeerd rate-limit-event
+  (`status`/`resetsAt`/`rateLimitType`/`utilization`). ACP kent geen quota-notificatie, dus dit
+  model ook niet — terwijl dít nu net het event is dat de 429-substring-scrape overbodig maakt.
+  Het is geen `error` (`status: allowed_warning` = toegestaan) en geen `usage_result` (dat is
+  terminaal).
+- **`system/init`** — readiness + `session_id`. ACP's tegenhanger is de `session/new`-*response*,
+  geen `session/update`, vandaar de afwezigheid.
+
+Dit is de **grens van de isomorfie-strategie**: door ACP als vorm te nemen, erf je ACP's blinde
+vlekken. De voorgestelde remedie behoudt de strategie: beide toevoegen als bewust
+gedocumenteerde **super-set** van ACP (een latere ACP-adapter laat ze leeg).
+
+Verder heeft `plan_update` geen native producer in Claude's stream (dichtstbijzijnde proxy:
+`TodoWrite`-`tool_use`), en heeft `permission_request` er geen onder `-p` +
+`--dangerously-skip-permissions` — die vereist `--permission-prompt-tool` of het bidirectionele
+control-protocol. ACP's getypeerde gating-haak komt dus **niet** gratis mee met stream-json.
+
 ## 3. Waarom ACP-isomorf en niet ACP-native
 
 Zie [`acp-transport-decision.md`](./acp-transport-decision.md) §3.2 / §4: ACP's structurele

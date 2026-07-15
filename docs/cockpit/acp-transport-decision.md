@@ -215,7 +215,13 @@ Daarom is de beslissing nadrukkelijk **additief, geen migratie**:
    `orchestration-substrate-decision.md` §2.1). Map de stream-json-events op het ACP-isomorfe
    schema van kaart 2. *Acceptance:* go/no-go op de stream-json-transport met gemeten
    betrouwbaarheid; het worktree/claim-lifecycle werkt zonder tmux-naam-koppeling.
-   *`depends_on`: kaart 2.*
+   *`depends_on`: kaart 2.* **→ uitgevoerd (GO):**
+   [`headless-stream-json-transport-spike.md`](./headless-stream-json-transport-spike.md).
+   Kernbevindingen: een headless run matcht geen van de twee liveness-bronnen in
+   `reap_stale_claims` → een **derde** bron is voorwaarde vooraf (anders dispatch-loop); de
+   vier-in-één identiteit breekt niet (alleen het liveness-*orakel* is tmux-gebonden); en het
+   event-schema van kaart 2 mist een slot voor `rate_limit_event` — juist het event dat de
+   429-scrape vervangt.
 
 4. **[analysis] Human-takeover-UX voor headless sessies.** (= §6 kaart 4) Bepaal wat "bekijken &
    overnemen" wordt als een sessie geen tmux-pane meer heeft: sturen via input-streaming
