@@ -1903,6 +1903,34 @@ def _is_rate_limited_session(pane_content: str) -> bool:
     return auto_resume_service.is_limit_notification(pane_content)
 
 
+def _structured_rate_limit_signal(session_name: str) -> bool:
+    """True if the structured Notification pipeline has flagged `session_name`
+    as rate-limited.
+
+    This is the typed fast-path for the reaper's stuck-session sweep:
+    ``session_signals.record_limit`` is called from the hook endpoint
+    whenever a Notification event classifies as "limit" (canonical
+    "hit your session limit …", 429, Token Plan, "request rejected", or any
+    of the provider-specific variants the auto-resume detector recognises),
+    so a recorded signal is the same fact the hook path would have used to
+    drive ``move_limited_session_to_resume``. When the registry has no
+    entry for `session_name` we fall back to the pane scrape — the session
+    is either still booting or, the classic case the reaper exists for,
+    rate-limited on first invocation before its hook scripts ever ran.
+
+    The return type is intentionally bool, not ``bool | None``: the
+    reaper's decision tree is "structured-said-yes → cleanup, structured-said-no
+    → fall through to pane scrape, then fall through to dead-skip"; both
+    "no" and "no signal yet" collapse into the same branch, so a tri-state
+    answer would force the caller to special-case a value it has no use
+    for. The fail-open ``None`` semantics from the pane scraper still
+    apply — ``_capture_pane_content`` returning ``None`` is the existing
+    "we don't know" signal that keeps the reaper from acting on guesses.
+    """
+    from app.services.scheduling.session_signals import session_signals
+    return session_signals.is_rate_limited(session_name)
+
+
 async def _cleanup_stuck_session(
     session, *, card, project_key: str, session_name: str, pane_content: str,
 ) -> None:
@@ -2805,12 +2833,32 @@ async def reap_stale_claims(
             continue
 
         # New path: a session that's alive in tmux but never sent hooks is
-        # the signature of a 429 on first invocation. Inspect its pane and,
-        # if it shows a rate-limit pattern, full cleanup (incl. dispatch
-        # pause). If the pane shows ordinary work or we couldn't capture
-        # it, do nothing — the session is just slow, and falling through
-        # to the alive-skip branch keeps the existing reaper semantics.
+        # the signature of a 429 on first invocation. Prefer the typed
+        # Notification-classification signal when one is available (recorded
+        # by the hook endpoint from a previous Notification event — survives
+        # the pane being cleared, doesn't need to re-parse raw CC output);
+        # fall back to a pane-content scan only when no structured signal
+        # exists yet (the classic rate-limited-on-first-spawn case where
+        # the `claude` process died before initialising hooks). If the pane
+        # shows ordinary work or we couldn't capture it, do nothing — the
+        # session is just slow, and falling through to the alive-skip
+        # branch keeps the existing reaper semantics.
         if name in stuck_names:
+            if _structured_rate_limit_signal(name):
+                # Use the canonical CC notification message when the typed
+                # signal carries one; fall back to the pane snippet only
+                # when the signal was recorded without a message (older
+                # callers may pass "") so the activity comment always has
+                # *something* concrete to quote.
+                from app.services.scheduling.session_signals import session_signals
+                limit_msg = session_signals.limit_message(name) or ""
+                pane = _capture_pane_content(name) or limit_msg
+                await _cleanup_stuck_session(
+                    session, card=card, project_key=project_key,
+                    session_name=name, pane_content=pane,
+                )
+                reaped += 1
+                continue
             pane = _capture_pane_content(name)
             if pane is not None and _is_rate_limited_session(pane):
                 await _cleanup_stuck_session(
@@ -3565,6 +3613,7 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
 def _kill_agent_session(session_name: str) -> None:
     """Kill a tmux session belonging to an agent."""
     from app.services.scheduling.session_registry import session_registry
+    from app.services.scheduling.session_signals import session_signals
 
     try:
         subprocess.run(
@@ -3578,6 +3627,11 @@ def _kill_agent_session(session_name: str) -> None:
     # kill (next card) -- or after a human-driven redispatch that kills the
     # old session before re-spawning under the same name.
     session_registry.clear_spawn(session_name)
+    # Same reasoning for the structured-signal registry: a SessionStart or
+    # rate-limit signal recorded by the *previous* occupant must not survive
+    # into a re-spawn under the same name, or the new session could be
+    # misclassified as already-started or rate-limited on its very first tick.
+    session_signals.clear(session_name)
 
 
 class MemoryLimitExceeded(Exception):
