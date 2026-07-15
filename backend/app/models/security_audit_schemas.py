@@ -7,12 +7,13 @@ a thin filter-input model for the GET endpoint.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from app.models.security_audit import SecurityAuditKind
+from app.utils.timeutils import ensure_aware
 
 
 def _serialize_naive_as_utc(dt: datetime) -> datetime:
@@ -21,9 +22,7 @@ def _serialize_naive_as_utc(dt: datetime) -> datetime:
     Mirrors ``_as_utc_iso`` in ``scheduled_message_schemas.py`` — same
     DB-engine quirk, same fix.
     """
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
+    return ensure_aware(dt)
 
 
 class SecurityAuditEntry(BaseModel):

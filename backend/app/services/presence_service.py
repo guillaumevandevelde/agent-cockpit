@@ -18,6 +18,7 @@ from app.models.constants import SessionStatus
 from app.models.database import PresenceEvent, PresenceSession
 from app.models.schemas import PresenceSessionResponse
 from app.services.memory_monitor import get_dynamic_limits, get_memory_status_cached
+from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -405,8 +406,7 @@ class PresenceService:
             return
 
         # Make bucket_start timezone-aware if it isn't
-        if bucket_start.tzinfo is None:
-            bucket_start = bucket_start.replace(tzinfo=UTC)
+        bucket_start = ensure_aware(bucket_start)
 
         offset = int((now - bucket_start).total_seconds() / 60)
 

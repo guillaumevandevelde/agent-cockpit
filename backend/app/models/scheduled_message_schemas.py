@@ -1,8 +1,10 @@
 """Pydantic schemas for scheduled messages."""
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
+
+from app.utils.timeutils import ensure_aware
 
 TriggerType = Literal["once", "cron"]
 PermissionMode = Literal["default", "acceptEdits", "bypass"]
@@ -19,9 +21,7 @@ def _as_utc_iso(dt: datetime | None) -> str | None:
     """
     if dt is None:
         return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-    return dt.isoformat()
+    return ensure_aware(dt).isoformat()
 
 
 class ScheduledMessageCreate(BaseModel):

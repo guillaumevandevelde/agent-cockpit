@@ -29,6 +29,7 @@ from app.models.schemas import (
     SessionSummary,
 )
 from app.utils.path_utils import get_claude_projects_dir, get_project_display_name
+from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class SessionService:
             return None
 
         # Check if cache is stale (cached_at is stored naive-UTC in SQLite)
-        cached_at = cache_entry.cached_at.replace(tzinfo=UTC) if cache_entry.cached_at.tzinfo is None else cache_entry.cached_at
+        cached_at = ensure_aware(cache_entry.cached_at)
         if datetime.now(UTC) - cached_at > timedelta(minutes=self.CACHE_TTL_MINUTES):
             return None
 
@@ -515,9 +516,7 @@ class SessionService:
             cached_entries = result.scalars().all()
 
             for entry in cached_entries:
-                modified = entry.modified_at
-                if modified.tzinfo is None:
-                    modified = modified.replace(tzinfo=UTC)
+                modified = ensure_aware(entry.modified_at)
                 if modified >= today_start:
                     sessions_today += 1
                 if modified >= week_start:

@@ -36,6 +36,7 @@ from app.utils.path_utils import (
     convert_path_to_folder_name,
     get_claude_projects_dir,
 )
+from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +71,7 @@ class UsageService:
     @staticmethod
     def _as_utc(dt: datetime) -> datetime:
         """Treat naive datetimes as UTC and normalize aware datetimes to UTC."""
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt.astimezone(UTC)
+        return ensure_aware(dt).astimezone(UTC)
 
     # === Cache Management ===
 
@@ -105,7 +104,7 @@ class UsageService:
             return None
 
         # Check if cache is stale
-        if datetime.now(UTC) - cache_entry.cached_at.replace(tzinfo=UTC) > timedelta(
+        if datetime.now(UTC) - ensure_aware(cache_entry.cached_at) > timedelta(
             minutes=self.CACHE_TTL_MINUTES
         ):
             return None
