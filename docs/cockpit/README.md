@@ -37,6 +37,7 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | **Beslis-register (alle genomen beslissingen)** | [`decisions.md`](./decisions.md) | — |
 | **Kanban follow-up pool** | [`kanban-followups.md`](./kanban-followups.md) | — |
 | **Kanban string-conventies (vast kolommen, comment-prefixes, deliverable-kinds)** | [`kanban-conventions.md`](./kanban-conventions.md) | — |
+| **Kaart-referenties (id kopiëren, deep-link, klikbare verwijzingen)** | [`card-references-analysis.md`](./card-references-analysis.md) | — |
 | **Agent Mail** | [`agent-mail-spec.md`](./agent-mail-spec.md) | `plans/2026-07-08-agent-mail-implementation.md` |
 | **Pane-gerichte attentie** | [`pane-attention-spec.md`](./pane-attention-spec.md) + [`pane-attention-plan.md`](./pane-attention-plan.md) | — |
 | **Sandcastle** | [`sandcastle.md`](./sandcastle.md) + [`sandcastle-integration-plan.md`](./sandcastle-integration-plan.md) | — |
