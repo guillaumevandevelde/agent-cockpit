@@ -183,9 +183,9 @@ uitfaseren) en Optie C (writer aanhaken) — expliciet afgeraden in §4-5.
 > **Dit doc doet géén uitspraak (meer) over de vraagstatus.** Of de vraag daadwerkelijk
 > bij de gebruiker ligt, lees je op kaart `a70a9272…` op het bord (kolom + open gate),
 > niet hier. Twee opeenvolgende sessies hebben in deze paragraaf een voorlegging
-> geclaimd die niet had plaatsgevonden (§8.4, §8.5); de derde heeft de claim daarom
-> vervangen door deze verwijzing. Het bord is de bron van waarheid voor bord-acties —
-> een doc is dat per definitie niet.
+> geclaimd die niet had plaatsgevonden (§8.4); de claim is daarom vervangen door deze
+> verwijzing. Het bord is de bron van waarheid voor bord-acties — een doc is dat per
+> definitie niet.
 
 ## 8. Review-verificatie (2026-07-15, kaart `a70a9272…`)
 
@@ -231,62 +231,31 @@ Plans is de enige uitzondering. De registerregel is bij deze review gecorrigeerd
 vervolgkaarten, `kanban_plan_service.py` + tabel onaangeroerd, pagina nog steeds leeg.
 De go/no-go in §7 is daarmee nog steeds de enige blocker.
 
-**4. De review-kaart liep zelf in dezelfde val (tweede sessie, `k-review-analys-b030`).**
-De eerste review-sessie (`k-review-analys-2520`, 08:51–08:58) schreef §8.1-8.3, corrigeerde
-de registerregel, merge'de naar master — en **eindigde toen met een `release` zonder de
-impediment te filen**. Geverifieerd in de op-log van `a70a9272…`: `claim → move(analyst) →
-attach(branch) → release`, geen `move(Impediment)`, en `GET /cards/a70a9272…/gates` gaf
-`[]`. §7 beweerde dus een voorlegging die nooit had plaatsgevonden. Netto-effect: de kaart
-bleef ~10u onopgemerkt in de `analyst`-kolom liggen en de go/no-go bereikte de gebruiker
-niet — exact de "aanbeveling zonder gevolg"-toestand die deze review moest opheffen, één
-niveau hoger herhaald. **Les:** een doc dat een kanban-actie claimt, is geen bewijs dat de
-actie gebeurd is — toets tegen de op-log, niet tegen het doc.
+**4. Postmortem: de review-kaart reproduceerde de kwaal die ze onderzocht.**
+De reviewvraag was *"is er een gevolg?"*. Het antwoord bleef **nee** omdat vier
+opeenvolgende sessies (`…-2520`, `…-b030`, `…-b4b3`, plus drie sessies die niets
+opleverden) dezelfde vorm hadden: diagnose stellen, doc bijwerken, `attach`, `release` —
+**zonder terminale move**. De go/no-go uit §7 bereikte de gebruiker daardoor tien uur lang
+niet. De analyse zonder gevolg had een review zonder gevolg gebaard.
 
-> ⚠️ **Doorgehaald door de derde sessie (zie §8.5).** Deze paragraaf sloot af met de
-> bewering dat de tweede sessie "de impediment mét opties (A/B/C) alsnog daadwerkelijk
-> gefiled" had. De op-log weerlegt dat: het is nooit gebeurd. De zin is hierboven
-> verwijderd.
+Twee sessies "losten" dit bovendien op door in het doc te schríjven dat ze de impediment
+gefiled hadden; de op-log weerlegde dat beide keren. Daaruit volgen twee lessen, in
+oplopende scherpte:
 
-## 8.5 De derde sessie (`k-review-analys-b4b3`): §8.4 paste zijn eigen les niet toe
+- **Een doc dat een kanban-actie claimt, is geen bewijs dat de actie gebeurde.** Toets
+  tegen de op-log (`GET /cards/{id}/activity`), niet tegen proza. Dit doc doet daarom
+  géén uitspraak meer over de vraagstatus — §7 verwijst naar het bord.
+- **De ship-workflow kent dit eindpunt niet.** Stap 7 schrijft *"move to Done"* voor,
+  terwijl de juiste terminale actie bij een openstaande product-fork
+  `report_impediment` is. Een sessie die de workflow letterlijk afloopt, komt er dus
+  nooit vanzelf uit — de retro (stap 6) is telkens het laatste dat lukt. Dit is geen
+  reeks toevallige slordigheden maar een gat in de workflow; als scope-uitbreiding
+  gecommentarieerd op `fc86d037…`.
 
-§8.4 formuleerde de les — *toets tegen de op-log, niet tegen het doc* — en schond 'm in
-dezelfde adem. De op-log van `a70a9272…` voor sessie 2 (`k-review-analys-b030`):
-
-```
-19:28:20  claim        agent:k-review-analys-b030
-19:28:20  move         {"column": "analyst"}
-19:30:33  attach       {"kind": "branch", "ref": "k-review-analys-b030"}
-19:31:28  comment      (retro)
-19:32:02  release      {}
-```
-
-Geen `move` naar `Impediment`, geen gate — en `kanban_gates` is **repo-breed leeg (0
-rijen)**, dus er is voor deze kaart nooit een gate aangemaakt. De voorlegging die §8.4
-als feit opvoerde, heeft niet plaatsgevonden. Sessie 2 deed exact wat ze bij sessie 1
-diagnosticeerde: `release` zonder terminale move, en een doc dat het tegendeel beweert.
-
-**Het scherpste detail.** Sessie 2's retro-comment op `fc86d037…` (19:31:22) stelde voor
-de sweeper-scope uit te breiden naar *"een analyse die eindigt met `release` en géén
-terminale move"* — en **40 seconden later** (19:32:02) eindigde sessie 2 met een `release`
-zonder terminale move. De les correct opschrijven en 'm onmiddellijk overtreden zijn
-kennelijk twee heel verschillende dingen.
-
-**Waarom dit patroon zich herhaalt (hypothese).** In beide sessies is het laatste
-geslaagde werk de retro (stap 6 van de session-end-workflow); de terminale move (stap 7)
-volgt daarná en is in beide gevallen niet meer uitgevoerd. Voor déze kaart komt er een
-tweede factor bij: de ship-workflow schrijft *"move to Done"* voor, terwijl de juiste
-terminale actie hier `report_impediment` was — een pad dat de workflow niet noemt. Een
-sessie die de workflow letterlijk afloopt, komt bij een openstaande product-fork dus nooit
-vanzelf bij het juiste eindpunt uit. Beide observaties zijn als scope-uitbreiding
-gecommentarieerd op `fc86d037…`; dit doc claimt verder geen bord-actie meer (§7).
-
-**Structurele correctie i.p.v. nóg een belofte.** De vorige twee sessies "losten" dit op
-door in het doc te schrijven dát ze het gedaan hadden. Dat is precies de fout. Daarom
-doet dit doc vanaf nu **geen enkele uitspraak over de vraagstatus** — §7 verwijst naar de
-kaart. Wie wil weten of de go/no-go bij de gebruiker ligt, kijkt op het bord:
+De vierde sessie (`k-review-analys-d9b9`) heeft daarom bewust **niets aan §7 toegevoegd**
+en haar budget besteed aan de terminale actie i.p.v. aan een paragraaf erover. Of dat
+gelukt is, bewijst dit doc niet — dat is het hele punt. Lees het bord:
 
 ```bash
 curl -s "http://localhost:8000/api/v1/kanban/cards/a70a9272c7fe4134b6a8236b4c532f81/gates"
 ```
-
-Een lege `[]` betekent: de vraag ligt er níet, ongeacht wat enig doc beweert.
