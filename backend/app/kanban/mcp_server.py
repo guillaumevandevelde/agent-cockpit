@@ -128,6 +128,7 @@ async def create_card(project: str, title: str, description: str = "",
                       work_type: str | None = None,
                       agent: str | None = None,
                       parent_card_id: str | None = None,
+                      depends_on: list[str] | None = None,
                       metadata: dict | None = None) -> dict:
     """Create a new card (agents may decompose work into subtask cards).
 
@@ -146,6 +147,16 @@ async def create_card(project: str, title: str, description: str = "",
     `parent_card_id` doesn't already match (`{"error": "parent_mismatch"}`),
     so without this parameter the analyst had to PATCH the card after
     creation as a workaround.
+
+    `depends_on` is the list of sibling card ids that must reach a terminal
+    state before this card becomes dispatchable — see
+    `docs/cockpit/multi-agent-kanban.md` for the DAG semantics. Useful for
+    retroactive wiring: when a dependency is discovered after the cards are
+    already created (so `add_plan_attachment`'s `depends_on_graph` is no
+    longer an option), or when the sibling-only deps are needed outside the
+    analyst plan-attachment flow. The same field is honoured by the REST
+    `CardCreate` schema (`backend/app/kanban/schemas.py:147`) and flows
+    through `apply_operation` to the `KanbanCard.depends_on` column.
 
     `metadata` is a free-form key/value bag (JSON-serialized) for
     integration-specific data that doesn't deserve its own field — external
@@ -179,6 +190,7 @@ async def create_card(project: str, title: str, description: str = "",
                      "column": column, "work_type": work_type,
                      "agent": resolved_agent,
                      "parent_card_id": parent_card_id,
+                     "depends_on": depends_on,
                      "metadata": metadata})
         await s.commit()
         card = await service.get_card(s, cid)
@@ -257,13 +269,23 @@ async def move_card(card_id: str, column: str, summary: str | None = None) -> di
 @mcp.tool()
 async def update_card(card_id: str, title: str | None = None,
                       description: str | None = None,
+                      depends_on: list[str] | None = None,
                       metadata: dict | None = None) -> dict:
-    """Update a card's title, description, and/or metadata bag.
+    """Update a card's title, description, depends_on, and/or metadata bag.
 
     Same "skip-when-None" semantics as the existing title/description paths:
     None means "don't touch". To clear an existing value via MCP, leave the
     field at its current value or use the REST PATCH endpoint, which can
     distinguish "field absent" from "field set to null" via exclude_unset.
+
+    `depends_on` replaces the card's sibling-dep list — pass a `list[str]`
+    to set, leave `None` to keep the current value. The dispatcher uses
+    this list to gate dispatch on the named cards reaching a terminal
+    state. Mirrors the REST `PATCH /api/v1/kanban/cards/{cid}` path's
+    handling of `CardUpdate.depends_on` (see
+    `backend/app/api/v1/kanban/router.py:329-360` →
+    `apply_operation("update")` → `_materialize` setting
+    `card.depends_on = payload["depends_on"]`).
     """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
@@ -271,6 +293,7 @@ async def update_card(card_id: str, title: str | None = None,
             logger.debug("update_card: %s not found", card_id)
             return {"error": _NOT_FOUND, "card_id": card_id}
         payload = {k: v for k, v in {"title": title, "description": description,
+                                     "depends_on": depends_on,
                                      "metadata": metadata}.items()
                    if v is not None}
         await apply_operation(s, op_type="update", entity_type="card",

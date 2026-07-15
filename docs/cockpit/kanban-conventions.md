@@ -118,6 +118,48 @@ als je er een introduceert.
 > voel je je vrij om ze te posten via dezelfde `attach_deliverable` MCP-tool,
 > maar `DELIVERABLE_KINDS` zal ze niet "kennen".
 
+## 4a. MCP-affordances voor `depends_on` (sibling-deps zonder plan-flow)
+
+Sibling-deps worden in de **analyst-fase** vanzelf gewired door
+`add_plan_attachment(depends_on_graph=...)` — de planner post één keer een
+DAG en alle kinderen krijgen hun `depends_on` via de `link_plan_ref`-op.
+
+Buiten die flow is er ook directe MCP/REST-ondersteuning nodig — bijv.
+
+- **retroactieve tracking**: je hebt kaarten al aangemaakt via `create_card`,
+  en pas ná creatie ontdek je dat de ene kaart op de ander moet wachten;
+- **sibling-only deps**: je wilt twee losse kaarten aan elkaar knopen zonder
+  een parent + plan-attachment op te tuigen.
+
+In beide gevallen exposeert de MCP-server `depends_on` rechtstreeks, zodat je
+niet terug hoeft te vallen op `curl PATCH /api/v1/kanban/cards/{id}`:
+
+```python
+# Python-MCP voorbeeld
+sibling = await m.create_card("PROJ", "Sibling")
+gated   = await m.create_card(
+    "PROJ", "Gated", depends_on=[sibling["id"]],
+)
+# Of: achteraf wire je op een bestaande kaart
+await m.update_card(gated["id"], depends_on=[sibling["id"]])
+```
+
+**Semantiek — bewust 1:1 met de REST `CardUpdate.depends_on`:**
+
+- `depends_on=None` → veld niet aangeraakt (skip-when-None, identiek aan
+  `title`/`description`/`metadata`).
+- `depends_on=[...]` → vervangt de huidige lijst (volledige write,
+  geen append/merge).
+- Leeglijst `[]` → zet de kolom op `[]` (geen deps); om terug te gaan
+  naar SQL `NULL` moet je via de REST PATCH gaan (Pydantic
+  `exclude_unset` kan onderscheid maken tussen "afwezig" en "expliciet
+  null", de MCP-wrapper kan dat niet).
+
+De waarde landt via `apply_operation("update", ...)` in
+`_materialize` (`backend/app/kanban/operations.py:206`), dezelfde
+code-path als de REST PATCH — dus dispatcher-gating, op-log-replay en
+`rematerialize()` gedragen zich identiek voor MCP- en REST-clients.
+
 ## 4. Bron van waarheid — waar lees je wat?
 
 | Vraag | Eerst hier kijken |
@@ -126,6 +168,7 @@ als je er een introduceert.
 | Welke kolommen worden automatisch gedispatched? | `backend/app/kanban/dispatch.py:1655` — `_DISPATCH_COLUMNS`. **Server-side.** |
 | Welke comment-prefix wordt waar gelezen? | Tabel §2 hierboven + de prefix-constanten in `backend/app/kanban/service.py:100,134–136,216,226`. |
 | Welke `kind` mag ik op `attach_deliverable` zetten? | De MCP `attach_deliverable` docstring + `backend/app/kanban/mcp_server.py:339–361`. |
+| Hoe zet ik sibling-deps op een kaart via MCP? | `mcp.create_card(..., depends_on=[...])` / `mcp.update_card(card_id, depends_on=[...])` (`mcp_server.py:125–199, 268–305`). De dispatcher gebruikt deze lijst om de kaart pas op te pakken als de genoemde siblings op `Done` of `Impediment` staan. De REST `CardCreate` / `CardUpdate` schemas (`schemas.py:147, :169`) accepteren hetzelfde veld; de MCP wrappers waren historisch beperkter en exposeerden dit alleen via `add_plan_attachment(depends_on_graph=...)`. |
 | Is deze productbeslissing al genomen, en wat kwam eruit? | [`decisions.md`](./decisions.md) — het chronologische beslis-register (datum, vraag, uitkomst, doc-link, kaart-id). **Kijk hier vóór je een beslissing heropent.** |
 | Welke agent-kolommen kunnen bestaan? | Per-project afgeleid van `.claude/agents/*.md`-filenames — `service.sync_agent_columns` + `router.enable:707`. |
 | Welke agent-kolommen worden op dit moment gedispatched? | `dispatch._DISPATCH_COLUMNS` ∪ eventuele "orphan" agent-kolommen met ongeclaimde kaarten (`dispatch._next_card:1725–1737`). |
