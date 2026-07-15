@@ -45,6 +45,7 @@ from app.kanban.schemas import (
     ReopenRequest,
     ReorderRequest,
     ReviewRequest,
+    SetGateRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
     SubscriptionPoolRequest,
@@ -454,6 +455,47 @@ async def comment(cid: str, payload: CommentRequest):
     async with KanbanSessionLocal() as s:
         await apply_operation(s, op_type="comment", entity_type="comment",
             project_key="", entity_id=cid, payload=payload.model_dump())
+        await s.commit()
+        return await _reload(s, cid)
+
+
+@router.post("/cards/{cid}/set-gate", response_model=CardResponse)
+async def set_gate(cid: str, payload: SetGateRequest):
+    """REST mirror of the MCP ``set_card_gate`` tool.
+
+    Sets or clears the card's ``metadata.gated_on`` machine-readable business
+    gate. ``gated_on`` truthy (non-empty string) writes the value verbatim and
+    the dispatcher (``_is_gated``) holds the card out of auto-dispatch until
+    cleared. Empty string or None clears the gate. Either way a
+    ``**Gate:** set/cleared`` activity-feed comment is posted so the gate's
+    history is visible without inspecting metadata — mirrors the kanban-
+    conventions `**Gate:**` prefix pattern.
+
+    See ``docs/cockpit/kanban-conventions.md`` §4 for the rationale + the
+    choice of ``metadata.gated_on`` over alternatives (depends_on / scheduled_at
+    / dedicated column).
+    """
+    async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is None:
+            raise HTTPException(404, "card not found")
+
+        existing_meta = dict(card.meta or {})
+        new_value = (payload.gated_on or "").strip() or None
+        if new_value is None:
+            existing_meta.pop("gated_on", None)
+            action = "cleared"
+        else:
+            existing_meta["gated_on"] = new_value
+            action = "set"
+
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid,
+            payload={"metadata": existing_meta})
+        await apply_operation(s, op_type="comment", entity_type="comment",
+            project_key="", entity_id=cid,
+            payload={"text": f"**Gate:** {action} via set-gate"
+                              + (f" — {new_value}" if new_value else "")})
         await s.commit()
         return await _reload(s, cid)
 

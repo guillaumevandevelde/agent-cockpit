@@ -522,3 +522,113 @@ async def test_mcp_create_card_depends_on_survives_rematerialize():
 
     fetched = await m.get_card(gated["id"])
     assert fetched["depends_on"] == [sibling["id"]]
+
+
+# --- set_card_gate: machine-readable business gate (card f8ef71a0…) ----
+#
+# The gate is independent of `depends_on`: it lets an operator pin a card
+# against a *business* trigger (e.g. "activeert pas bij tweede-executor-
+# provider-onboarding") that has no kanban-card representation. The
+# dispatcher (`dispatch._is_gated`) reads `card.metadata["gated_on"]` on
+# every tick and holds the card out of auto-dispatch while it is non-empty.
+# See `docs/cockpit/kanban-conventions.md` §4 and
+# `tests/test_dispatch_gate.py` for the dispatch-side regressions.
+
+
+@pytest.mark.asyncio
+async def test_set_card_gate_sets_metadata_and_posts_audit_comment():
+    """set_card_gate writes ``metadata.gated_on`` verbatim AND posts a
+    `**Gate:** set — <trigger>` activity-feed comment so the gate's history
+    is visible without inspecting metadata. The comment prefix matches the
+    kanban-conventions pattern; ``enrich_done_info`` ignores it (no Done
+    marker collision)."""
+    created = await m.create_card("P", "Gated spike", "desc")
+    cid = created["id"]
+
+    res = await m.set_card_gate(cid, "second-executor-provider-onboarded")
+    assert res["metadata"]["gated_on"] == "second-executor-provider-onboarded"
+
+    # Fetch the card's op-log and confirm the audit comment landed. Use
+    # `card_activity` (the same helper used by Kanban UI for the activity
+    # feed) rather than reading the response — get_card returns the
+    # CardResponse shape with no `activity` field.
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.service import card_activity
+    async with KanbanSessionLocal() as s:
+        activity = await card_activity(s, cid)
+    gate_comments = [
+        op for op in activity
+        if op.op_type == "comment"
+        and op.payload.get("text", "").startswith("**Gate:**")
+    ]
+    assert len(gate_comments) == 1
+    assert "second-executor-provider-onboarded" in gate_comments[0].payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_set_card_gate_clear_with_none_removes_key():
+    """Passing gated_on=None lifts the gate: ``metadata.gated_on`` is removed
+    (not set to None — JSON null would be a different sentinel). The card
+    becomes dispatchable again on the next tick."""
+    created = await m.create_card("P", "Gated", "desc")
+    cid = created["id"]
+
+    await m.set_card_gate(cid, "trigger-x")
+    fetched = await m.get_card(cid)
+    assert fetched["metadata"]["gated_on"] == "trigger-x"
+
+    res = await m.set_card_gate(cid, None)
+    assert "gated_on" not in (res["metadata"] or {}), (
+        "gated_on must be deleted, not set to null — _is_gated's "
+        "falsy-check would treat both the same way, but storing None "
+        "as the literal value would muddle future intent. Use a "
+        "missing key to signal 'no gate'."
+    )
+
+
+@pytest.mark.asyncio
+async def test_set_card_gate_clear_with_empty_string_treated_as_clear():
+    """An empty string normalizes to None (lift the gate). Mirrors
+    ``_is_gated``'s fail-open behaviour on empty values — a typo at the
+    call site doesn't wedge the card forever."""
+    created = await m.create_card("P", "Gated", "desc")
+    cid = created["id"]
+
+    await m.set_card_gate(cid, "trigger-x")
+    res = await m.set_card_gate(cid, "")
+    assert "gated_on" not in (res["metadata"] or {})
+
+
+@pytest.mark.asyncio
+async def test_set_card_gate_preserves_other_metadata_keys():
+    """The gate tool only touches ``metadata.gated_on``; other keys
+    (external ids, owner, workflow tags) must survive the round-trip.
+    Operators compose gates with other integration metadata; nuking
+    them on every gate flip would be a footgun."""
+    created = await m.create_card("P", "With metadata", "desc")
+    cid = created["id"]
+
+    # Seed some unrelated metadata via update_card.
+    await m.update_card(cid, metadata={"external_ref": "JIRA-123", "owner": "team-x"})
+    # Now set a gate — pre-existing keys must survive.
+    await m.set_card_gate(cid, "trigger-y")
+    fetched = await m.get_card(cid)
+    md = fetched["metadata"] or {}
+    assert md.get("gated_on") == "trigger-y"
+    assert md.get("external_ref") == "JIRA-123"
+    assert md.get("owner") == "team-x"
+
+    # Lifting the gate must also leave the unrelated keys alone.
+    await m.set_card_gate(cid, None)
+    fetched = await m.get_card(cid)
+    md = fetched["metadata"] or {}
+    assert "gated_on" not in md
+    assert md.get("external_ref") == "JIRA-123"
+    assert md.get("owner") == "team-x"
+
+
+@pytest.mark.asyncio
+async def test_set_card_gate_returns_not_found_for_missing_card():
+    res = await m.set_card_gate("does-not-exist", "trigger-x")
+    assert res.get("error") == "not_found"
+    assert res.get("card_id") == "does-not-exist"

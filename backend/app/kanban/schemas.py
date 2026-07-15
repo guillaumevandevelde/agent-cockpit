@@ -189,6 +189,23 @@ class CommentRequest(BaseModel):
     text: str
 
 
+class SetGateRequest(BaseModel):
+    """REST mirror of the MCP ``set_card_gate`` tool.
+
+    Mirrors the schema's "MachineReadable gate" contract — ``gated_on=None``
+    (or an empty string) lifts the gate; any non-empty string is the opaque
+    trigger reason and is written verbatim to ``card.metadata["gated_on"]``
+    so future operators and ``flag-problem`` audits can grep for it.
+
+    Distinct from ``CommentRequest``: this writes through ``apply_operation``
+    so the change lands on the op-log (and is preserved across device
+    replays) rather than acting as a free-text note. The handler also posts
+    a ``**Gate:** set/cleared`` activity-feed comment so the gate's
+    history is visible without inspecting metadata.
+    """
+    gated_on: str | None = None
+
+
 class ReviewRequest(BaseModel):
     """Flag doubt on a completed card and route it to the analyst for triage."""
     note: str
