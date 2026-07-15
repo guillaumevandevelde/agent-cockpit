@@ -2230,6 +2230,36 @@ def _awaiting_plan_ref(card) -> bool:
     )
 
 
+def _is_gated(card) -> bool:
+    """True when the card carries a machine-readable business gate that the
+    operator has not yet lifted.
+
+    Reads ``card.meta["gated_on"]`` (the ORM attribute is ``meta`` because
+    SQLAlchemy's Declarative API reserves ``metadata`` on the base class; the
+    DB column is ``metadata`` — see models.py:94). The trigger string is
+    opaque to the dispatcher: any non-empty value means "do not auto-dispatch
+    this card; a human must clear it". An empty string is treated as no gate
+    (fail open, same contract as ``_is_due``'s unparseable timestamp) so a
+    user who sets ``gated_on: ""`` by mistake doesn't wedge their card
+    forever.
+
+    Why a metadata flag rather than reusing ``depends_on`` (card-DAG) or
+    ``scheduled_at`` (time-based): the gate is *neither* a kanban-card
+    dependency (it references external business state — e.g. 'second executor
+    provider onboarded') nor a clock trigger ('dispatch after YYYY-MM-DD').
+    The three filters are orthogonal: a card is dispatchable iff ``_is_due``
+    AND ``not _awaiting_plan_ref`` AND ``not _is_gated`` AND
+    ``meets_dep_prerequisites``. See kanban card "[problem] Gepoorte kaarten
+    ('bewust niet nu, pas bij trigger X') worden auto-gedispatcht zodra hun
+    depends_on klaar is" for the bug class that motivated this helper.
+    """
+    meta = getattr(card, "meta", None)
+    if not meta:
+        return False
+    gate = meta.get("gated_on")
+    return bool(gate)
+
+
 def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     cards = list(cards)
     for col in _DISPATCH_COLUMNS:
@@ -2237,6 +2267,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
             c for c in cards
             if c.column == col and not c.claimed_by and _is_due(c)
             and not _awaiting_plan_ref(c)
+            and not _is_gated(c)
         ]
         if col_cards:
             # list_cards is ordered by rank; stable-sort by priority on top of that
@@ -2255,6 +2286,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
         c for c in cards
         if c.column not in COLUMNS and not c.claimed_by and _is_due(c)
         and not _awaiting_plan_ref(c)
+        and not _is_gated(c)
     ]
     if orphans:
         orphans.sort(key=_priority_key, reverse=True)
@@ -3261,6 +3293,14 @@ async def dispatch_project(
             cards = [c for c in cards if c.id != card.id]
             continue
 
+        # Same defence-in-depth for the business-gate path: _next_card already
+        # filters gated cards out, but if a card races a `clear metadata` write
+        # mid-tick we still want a second line of defence here. The actual gate
+        # status is read fresh from the working-set copy in `cards_by_id` above.
+        if _is_gated(card):
+            cards = [c for c in cards if c.id != card.id]
+            continue
+
         if transport is None:
             transport = await get_transport_for_project(project_path)
 
@@ -3561,6 +3601,12 @@ async def dispatch_all_pending(
                 card.id, card.depends_on,
             )
             continue
+        if _is_gated(card):
+            logger.info(
+                "dispatch_all_pending: skipping gated card %s (gated_on=%r)",
+                card.id, (card.meta or {}).get("gated_on"),
+            )
+            continue
         # Respect per-column caps even in manual "Dispatch all" — the cap is a
         # structural limit, not a busy heuristic. Analyst phase always goes to
         # the "analyst" column; executor phase resolves via _resolve_target_column.
@@ -3617,6 +3663,12 @@ async def redispatch_all_orphans(
             logger.info(
                 "redispatch_all_orphans: skipping blocked orphan %s (depends_on %s not yet Done)",
                 card.id, card.depends_on,
+            )
+            continue
+        if _is_gated(card):
+            logger.info(
+                "redispatch_all_orphans: skipping gated orphan %s (gated_on=%r)",
+                card.id, (card.meta or {}).get("gated_on"),
             )
             continue
         try:

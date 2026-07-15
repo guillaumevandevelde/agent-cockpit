@@ -314,6 +314,61 @@ async def comment(card_id: str, text: str) -> dict:
 
 
 @mcp.tool()
+async def set_card_gate(card_id: str, gated_on: str | None) -> dict:
+    """Set or clear a card's business-trigger gate.
+
+    The gate is a free-form string written to ``card.metadata["gated_on"]``;
+    ``dispatch._is_gated`` reads it on every dispatch tick and holds the card
+    out of auto-dispatch while it is non-empty. Independent of
+    ``depends_on`` (the kanban-card DAG) and ``scheduled_at`` (clock-based
+    hold) — see ``docs/cockpit/kanban-conventions.md`` §4.
+
+    Pass ``gated_on=None`` (or an empty string) to lift the gate: the next
+    tick picks the card up normally. Passing a string sets the gate and the
+    operator's reason is recorded verbatim — keep it short and machine-
+    legible so future operators (and ``flag-problem`` audits) can grep for
+    the trigger, e.g. ``"second-executor-provider-onboarded"`` rather than
+    free-form prose.
+
+    Use this rather than a bare ``update_card(metadata={...})`` because the
+    tool posts an audit comment with ``**Gate:** set/cleared`` so the gate's
+    history is visible in the activity feed and the op-log replay doesn't
+    silently lose the intent. ``update_card`` will still work for raw
+    metadata edits; this tool is the canonical, opinionated path.
+    """
+    async with KanbanSessionLocal() as s:
+        card = await _require_card(s, card_id)
+        if card is None:
+            return {"error": _NOT_FOUND, "card_id": card_id}
+
+        # Normalize: empty string and None both mean "clear the gate", same
+        # contract as _is_gated's fail-open behaviour on empty values.
+        new_value = (gated_on or "").strip() or None
+        existing_meta = dict(card.meta or {})
+        if new_value is None:
+            existing_meta.pop("gated_on", None)
+            action = "cleared"
+        else:
+            existing_meta["gated_on"] = new_value
+            action = "set"
+
+        await apply_operation(
+            s, op_type="update", entity_type="card",
+            project_key="", entity_id=card_id,
+            payload={"metadata": existing_meta},
+        )
+        await apply_operation(
+            s, op_type="comment", entity_type="comment",
+            project_key="", entity_id=card_id,
+            payload={"text": f"**Gate:** {action} via set_card_gate"
+                              + (f" — {new_value}" if new_value else "")},
+        )
+        await s.commit()
+        logger.info("set_card_gate: %s on %s", action, card_id)
+        return await _card_dict(s, await service.get_card(s, card_id))
+
+
+@mcp.tool()
 async def request_review(card_id: str, note: str) -> dict:
     """Flag doubt on a *completed* (Done) card and route it to the analyst for triage.
 

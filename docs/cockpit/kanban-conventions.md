@@ -118,6 +118,79 @@ als je er een introduceert.
 > voel je je vrij om ze te posten via dezelfde `attach_deliverable` MCP-tool,
 > maar `DELIVERABLE_KINDS` zal ze niet "kennen".
 
+## 3a. Card-gate (`metadata.gated_on`) — business-triggers buiten de kaart-DAG
+
+> **Bron van waarheid:** [`backend/app/kanban/dispatch.py:_is_gated`](../backend/app/kanban/dispatch.py)
+> (de predicate die de dispatcher elke tick uitleest) +
+> [`backend/app/kanban/mcp_server.py:set_card_gate`](../backend/app/kanban/mcp_server.py)
+> (canonieke set/clear tool) +
+> [`backend/app/api/v1/kanban/router.py:set_gate`](../backend/app/api/v1/kanban/router.py)
+> (REST mirror op `POST /api/v1/kanban/cards/{cid}/set-gate`).
+
+Een kaart kan **bewust gepoort** zijn op een *business-trigger* die geen
+kanban-kaart is — bv. *"activeert pas bij tweede-executor-provider-onboarding"*
+(kaart `a4a091fa…`) of *"wacht op JIRA-ticket PROJ-1423"*. De dispatcher kent
+alleen `depends_on` (kaart-naar-kaart-DAG) en `scheduled_at` (kloktrigger);
+beide zijn verkeerde tools voor een trigger die **niet door een ander kanban-
+kaart of een specifiek tijdstip** wordt gemodelleerd.
+
+De oplossing is een **machine-leesbare metadata-vlag** —
+`card.metadata["gated_on"]` — een vrije tekst die de reden van de poort
+vastlegt. De dispatcher leest 'm elke tick via `_is_gated(card)` en houdt de
+kaart uit auto-dispatch zolang de sleutel een niet-lege string draagt. De
+kaart blijft zichtbaar op Backlog met de trigger als reden, net als bij
+`depends_on` of `scheduled_at`.
+
+### Drie orthogonale hold-mechanismen
+
+| Mechanisme | Veld | Predicate | Wanneer "los"? |
+|---|---|---|---|
+| Kaart-DAG | `depends_on` (lijst van card-ids) | `dep_resolver.meets_dep_prerequisites` | Alle genoemde parents staan op `Done` |
+| Kloktrigger | `scheduled_at` (ISO8601) | `dispatch._is_due` | De tijd is bereikt |
+| Business-trigger | `metadata.gated_on` (string) | `dispatch._is_gated` | Een mens past de metadata aan (of een tool-call) |
+
+De drie zijn onafhankelijk: een kaart is dispatchable iff `meets_dep_prerequisites` ∧
+`_is_due` ∧ `not _awaiting_plan_ref` ∧ `not _is_gated`. Geen van beide heeft
+de ander nodig om te werken.
+
+### Waarom `metadata.gated_on` (en niet de alternatieven)?
+
+De kaart noemde drie kandidaten; dit zijn de afwegingen:
+
+| Kandidaat | Voordeel | Nadeel | Gekozen? |
+|---|---|---|---|
+| **`metadata.gated_on`** | Geen schema-migratie (`metadata` bestaat al), triviaal op te heffen (verwijder sleutel), semantisch onafhankelijk van DAG/klok, UI kan de sleutel prominent renderen | Minder zichtbaar dan een dedicated kolom | **Ja** — minste complexiteit, max orthogonaal met bestaande mechanismen |
+| Expliciete `Gated`-kolom | Meest zichtbaar op het bord | Nieuwe vaste-kolom-set, schema-migratie op `KanbanColumn`, front-end snapshot drift, een 4e item in `_DISPATCH_COLUMNS` skip-list | Nee — disproportionele infra voor één bit informatie |
+| Hergebruik `scheduled_at` | Reeds bestaand veld, geen migratie | Semantisch verkeerd: `scheduled_at` zegt *"op tijdstip X"* en is een kloktrigger; een business-trigger heeft geen klok. Conflatie maakt de UX verwarrend ("dit zou toch mogen lopen? oh ja, er staat een datum in de toekomst") | Nee — semantische mismatch is de hele bug-klasse |
+
+### Hoe zet je een gate / hoe licht je 'm?
+
+De canonieke paden zijn `mcp.set_card_gate(card_id, gated_on=<string>)` (MCP)
+en `POST /api/v1/kanban/cards/{cid}/set-gate {"gated_on": "<string>"}` (REST).
+Beide:
+
+1. Schrijven `metadata.gated_on` via `apply_operation("update", ...)` (zelfde
+   op-log-pad als elke andere metadata-edit — replay-veilig).
+2. Posten een `**Gate:** set/cleared — <trigger>` activity-feed comment zodat
+   de gate-historie zichtbaar is zonder metadata te hoeven inspecteren
+   (comment-prefix volgt hetzelfde patroon als `**Summary:** ` / `**Impediment:** `
+   in §2).
+3. Normaliseren `""` en `None` naar "geen gate" (verwijderen sleutel, niet
+   schrijven als JSON null — `_is_gated` doet dezelfde normalisatie aan de
+   lees-kant zodat een type-fout de kaart niet eeuwig vasthoudt).
+
+Handmatig via `update_card(metadata={...})` kan ook, maar is *geen*
+canoniek pad: het post geen audit-comment en het is makkelijker om per ongeluk
+de hele metadata-bag te overschrijven. De dedicated tools doen een
+sleutel-specifieke merge en loggen de intentie.
+
+### Regressietest
+
+`backend/tests/test_dispatch_gate.py` bevat het end-to-end regressie-scenario
+uit de kaart-beschrijving: een kind-kaart met `depends_on` op een `Done`
+parent en `metadata.gated_on="second-executor-provider-onboarded"` mag niet
+gespawned worden door `dispatch_project` tot een mens de sleutel verwijdert.
+
 ## 4a. MCP-affordances voor `depends_on` (sibling-deps zonder plan-flow)
 
 Sibling-deps worden in de **analyst-fase** vanzelf gewired door
@@ -169,6 +242,7 @@ code-path als de REST PATCH — dus dispatcher-gating, op-log-replay en
 | Welke comment-prefix wordt waar gelezen? | Tabel §2 hierboven + de prefix-constanten in `backend/app/kanban/service.py:100,134–136,216,226`. |
 | Welke `kind` mag ik op `attach_deliverable` zetten? | De MCP `attach_deliverable` docstring + `backend/app/kanban/mcp_server.py:339–361`. |
 | Hoe zet ik sibling-deps op een kaart via MCP? | `mcp.create_card(..., depends_on=[...])` / `mcp.update_card(card_id, depends_on=[...])` (`mcp_server.py:125–199, 268–305`). De dispatcher gebruikt deze lijst om de kaart pas op te pakken als de genoemde siblings op `Done` of `Impediment` staan. De REST `CardCreate` / `CardUpdate` schemas (`schemas.py:147, :169`) accepteren hetzelfde veld; de MCP wrappers waren historisch beperkter en exposeerden dit alleen via `add_plan_attachment(depends_on_graph=...)`. |
+| Hoe zet/lift ik een business-trigger gate? | `mcp.set_card_gate(card_id, gated_on=<trigger>)` (MCP) of `POST /api/v1/kanban/cards/{cid}/set-gate {"gated_on": "<trigger>"}` (REST). `gated_on=None` of `""` licht de gate. Leest in `dispatch._is_gated` — zie §3a voor rationale en de keuze tegen `depends_on` / `scheduled_at` / dedicated kolom. |
 | Is deze productbeslissing al genomen, en wat kwam eruit? | [`decisions.md`](./decisions.md) — het chronologische beslis-register (datum, vraag, uitkomst, doc-link, kaart-id). **Kijk hier vóór je een beslissing heropent.** |
 | Welke agent-kolommen kunnen bestaan? | Per-project afgeleid van `.claude/agents/*.md`-filenames — `service.sync_agent_columns` + `router.enable:707`. |
 | Welke agent-kolommen worden op dit moment gedispatched? | `dispatch._DISPATCH_COLUMNS` ∪ eventuele "orphan" agent-kolommen met ongeclaimde kaarten (`dispatch._next_card:1725–1737`). |
