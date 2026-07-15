@@ -126,6 +126,7 @@ als je er een introduceert.
 | Welke kolommen worden automatisch gedispatched? | `backend/app/kanban/dispatch.py:1655` — `_DISPATCH_COLUMNS`. **Server-side.** |
 | Welke comment-prefix wordt waar gelezen? | Tabel §2 hierboven + de prefix-constanten in `backend/app/kanban/service.py:100,134–136,216,226`. |
 | Welke `kind` mag ik op `attach_deliverable` zetten? | De MCP `attach_deliverable` docstring + `backend/app/kanban/mcp_server.py:339–361`. |
+| Is deze productbeslissing al genomen, en wat kwam eruit? | [`decisions.md`](./decisions.md) — het chronologische beslis-register (datum, vraag, uitkomst, doc-link, kaart-id). **Kijk hier vóór je een beslissing heropent.** |
 | Welke agent-kolommen kunnen bestaan? | Per-project afgeleid van `.claude/agents/*.md`-filenames — `service.sync_agent_columns` + `router.enable:707`. |
 | Welke agent-kolommen worden op dit moment gedispatched? | `dispatch._DISPATCH_COLUMNS` ∪ eventuele "orphan" agent-kolommen met ongeclaimde kaarten (`dispatch._next_card:1725–1737`). |
 
@@ -137,3 +138,10 @@ rij heeft voor elke naam uit `COLUMNS`. Dit vangt de
 "project-enabled-vóór-`intake`-toegevoegd"-klasse van bugs voordat ze aan de
 oppervlakte komen in de UI. Draai het lokaal of in CI na elke wijziging aan
 `COLUMNS` of `ensure_*_column` helpers.
+
+[`scripts/check-decision-register.sh`](../../scripts/check-decision-register.sh)
+valideert dat elk `docs/cockpit/*-decision.md` gelinkt is vanuit het beslis-register
+([`decisions.md`](./decisions.md)). Advies-only (exit 0 met een warning); `--strict`
+geeft exit 1 voor CI-gebruik. Draai het als je een `[beslissing]`-kaart afrondt: een
+nieuw beslisdocument zonder register-regel is precies de drift die het register moest
+oplossen. Harness: `bash scripts/test_check_decision_register.sh`.

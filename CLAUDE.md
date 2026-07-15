@@ -23,6 +23,11 @@ Het zwaartepunt van de **actieve** ontwikkeling ligt nu bij de kanban-/multi-age
   repo-identiteit en inspectable mailbox (`docs/cockpit/agent-mail-spec.md`).
 
 - **Volledige oriëntatie + huidige taak:** `docs/cockpit/00-orientation.md`
+- **Is X al beslist?** `docs/cockpit/decisions.md` — chronologisch beslis-register (datum,
+  vraag, uitkomst, doc-link, kaart-id) over álle `*-decision.md`-docs en §-forks. **Kijk
+  hier vóór je een productbeslissing heropent of opnieuw uitzoekt.** Rond je een
+  `[beslissing]`-kaart af, voeg dan een regel toe; `scripts/check-decision-register.sh`
+  flag't een beslisdoc zonder register-regel.
 - **Scheduled-messages plan (vrijwel af):** `docs/cockpit/fase-2-plan.md`
 - **Huidige open pool:** `docs/cockpit/kanban-followups.md`
 - **Omgeving:** WSL Ubuntu, Docker (`docker compose up -d` → :8000), tmux, claude CLI.
@@ -113,6 +118,10 @@ cd frontend && npm run build     # Same as above
 # Test
 bash backend/test_commands_api.sh                         # Curl-based API tests
 bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
+bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
+
+# Docs / decision register
+./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
 
 # Lint
 cd frontend && npm run lint      # ESLint
