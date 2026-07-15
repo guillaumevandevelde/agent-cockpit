@@ -105,6 +105,18 @@ per abonnement.** Anthropic = schatting, MiniMax = API-afhankelijk, Codex/Copilo
 vandaag afwezig. Een router mag dus nooit doen alsof alle abonnementen een exact,
 vergelijkbaar quota-getal hebben (zie §6).
 
+> ⚠️ **Update 2026-07-15 — het signaal is niet alleen ongelijk, het is ook verkeerd
+> toegerekend.** MiniMax draait via dezelfde `claude`-CLI (alleen `ANTHROPIC_BASE_URL`
+> om) en schrijft dus naar **dezelfde** `~/.claude/projects/**/*.jsonl`-boom. Omdat
+> `UsageService.get_block_usage()` geen model-/provider-filter heeft, telt
+> `AnthropicUsageProvider` de MiniMax-tokens mee in zijn Anthropic-schatting — op deze
+> host **36,9% van alle tokens**. Wie de dode fase-1a fixt door de echte
+> `AnthropicUsageProvider` te registreren, activeert daarmee deze bug: "geen signaal"
+> wordt dan "fout signaal", wat erger is omdat het betrouwbaar oogt. De
+> `model → subscription`-attributiefix hoort dus vóór (of samen met) de registry-fix.
+> Volledige analyse + kwantificering:
+> [`subscription-verbruik-inzicht-analyse.md`](./subscription-verbruik-inzicht-analyse.md) §4.
+
 ## 3. Twee dimensies van "abonnement"
 
 De gebruiker zegt "**agents** wisselen op de kolommen". In deze codebase betekent
