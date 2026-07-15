@@ -14,6 +14,7 @@ from app.database import AsyncSessionLocal
 from app.models.sandcastle import SandcastleConfig, SandcastleRun
 from app.models.security_audit import SecurityAuditKind
 from app.services.security_audit_service import record as audit_record
+from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -780,9 +781,9 @@ class SandcastleService:
             # SQLite round-trips DateTime(timezone=True) as naive even though it's
             # always written as UTC (see usage_service.py's cached_at handling for
             # the same idiom) -- reattach tzinfo before subtracting.
-            started = run.started_at.replace(tzinfo=UTC)
+            started = ensure_aware(run.started_at)
             end = (
-                run.completed_at.replace(tzinfo=UTC)
+                ensure_aware(run.completed_at)
                 if run.completed_at else datetime.now(UTC)
             )
             duration = (end - started).total_seconds()

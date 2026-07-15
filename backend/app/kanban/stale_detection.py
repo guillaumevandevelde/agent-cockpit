@@ -20,6 +20,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.kanban.models import KanbanCard, KanbanMeta, KanbanOp
 from app.kanban.operations import apply_operation
+from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,6 @@ STALE_COMMENT_PREFIX = "[portfolio-stale]"
 
 def _stale_meta_key(project_key: str, card_id: str) -> str:
     return f"{STALE_META_PREFIX}{project_key}:{card_id}:last_posted_at"
-
-
-def _aware(dt: datetime) -> datetime:
-    """Coerce a naive DB timestamp to UTC so it compares with ``now(UTC)``.
-
-    SQLite drops tzinfo on write, so ``DateTime(timezone=True)`` rows read back
-    naive — mirror dispatch.py's ``replace(tzinfo=UTC)`` guard.
-    """
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 async def _last_done_move_at(session, card_ids: list[str]) -> datetime | None:
@@ -56,7 +48,7 @@ async def _last_done_move_at(session, card_ids: list[str]) -> datetime | None:
     for created_at, payload in rows:
         if (payload or {}).get("column") != "Done":
             continue
-        when = _aware(created_at)
+        when = ensure_aware(created_at)
         if latest is None or when > latest:
             latest = when
     return latest
@@ -77,18 +69,18 @@ async def _check_project(session, project_key: str) -> bool:
         # A project that has never completed anything: anchor to its oldest card
         # so a brand-new project isn't flagged the moment it gets a Backlog card,
         # while a long-idle never-finished project still trips the threshold.
-        last_progress = min(_aware(c.created_at) for c in cards)
+        last_progress = min(ensure_aware(c.created_at) for c in cards)
 
     threshold = timedelta(hours=settings.stale_threshold_hours)
     if now - last_progress < threshold:
         return False
 
-    oldest = min(backlog, key=lambda c: _aware(c.created_at))
+    oldest = min(backlog, key=lambda c: ensure_aware(c.created_at))
     meta_key = _stale_meta_key(project_key, oldest.id)
     existing = await session.get(KanbanMeta, meta_key)
     if existing is not None:
         try:
-            last_posted = _aware(datetime.fromisoformat(existing.value))
+            last_posted = ensure_aware(datetime.fromisoformat(existing.value))
         except ValueError:
             last_posted = None
         # One comment per card per stale window — don't re-post while the last
