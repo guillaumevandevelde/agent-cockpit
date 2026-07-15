@@ -6,8 +6,6 @@ REST CRUD and frontend UI sit on top of.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from app.services.blueprint import Blueprint, BlueprintAgent, BlueprintSettings, BlueprintSkill

@@ -234,9 +234,9 @@ async def test_rollback_when_project_already_registered(tmp_path: Path, monkeypa
     a duplicate, don't seed, don't move anything. (ProjectService.add_project
     would silently update the existing row's `name` field, which is *worse*
     than a hard error here, so the inception service pre-checks.)"""
-    from app.services.inception_service import InceptionService
     from app.database import AsyncSessionLocal
     from app.models.database import Project
+    from app.services.inception_service import InceptionService
 
     intake_id = await _create_intake_card("meta")
     target = tmp_path / "myapp"

@@ -25,7 +25,6 @@ from app.services.agentic_cli.structured_events import (
     parse_structured_event,
 )
 
-
 # --- capability matrix -------------------------------------------------------
 
 def test_headless_run_is_a_capability_key():

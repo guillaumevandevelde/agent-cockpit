@@ -67,7 +67,7 @@ async def test_list_cards_compact_returns_summary_shape_via_mcp():
 async def test_list_cards_compact_default_is_false_backwards_compatible_mcp():
     """Calling m.list_cards(project) without compact must still return the
     full CardResponse-shaped dict (description present, etc.)."""
-    created = await m.create_card("MCP-BC", "T", "description here")
+    await m.create_card("MCP-BC", "T", "description here")
     listed = await m.list_cards("MCP-BC")
     assert len(listed) == 1
     assert listed[0]["description"] == "description here"

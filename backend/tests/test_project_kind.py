@@ -14,10 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.api.v1 import projects as projects_api
 from app.database import Base, _migrate_project_columns
 from app.main import app
-from app.models.database import Project
 from app.models.schemas import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.services.project_service import ProjectService
-
 
 # ---------------------------------------------------------------- schema layer
 

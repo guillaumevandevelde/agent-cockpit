@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.kanban import mcp_server
-from app.kanban.models import KanbanCard, KanbanDeliverable
+from app.kanban.models import KanbanCard
 from app.kanban.operations import apply_operation
 from app.main import app
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables

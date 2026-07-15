@@ -10,7 +10,13 @@
 from datetime import UTC, datetime
 
 from sqlalchemy import (
-    JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint,
+    JSON,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

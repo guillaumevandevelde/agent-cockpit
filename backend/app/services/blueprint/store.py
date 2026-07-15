@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import Blueprint
@@ -136,7 +136,7 @@ class BlueprintStore:
         if path.exists() and not overwrite:
             raise BlueprintAlreadyExists(f"blueprint {name!r} already exists")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if blueprint.created_at is None:
             blueprint = blueprint.model_copy(update={"created_at": now})
         blueprint = blueprint.model_copy(update={"updated_at": now})

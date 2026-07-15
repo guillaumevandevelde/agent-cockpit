@@ -25,7 +25,6 @@ async def test_list_cards_compact_skips_deliverables_eager_load():
     unloaded, while the default (compact=False) call leaves it loaded so
     existing callers (REST + MCP _card_dict) can serialize it as before.
     """
-    from app.kanban.models import KanbanDeliverable
 
     async with KanbanSessionLocal() as s:
         cid = await apply_operation(s, op_type="create", entity_type="card",
