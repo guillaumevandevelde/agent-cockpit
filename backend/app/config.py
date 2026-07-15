@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     portfolio_cap_enabled: bool = False
     portfolio_cap_value: int = Field(default_factory=_default_portfolio_cap_value)
 
+    # Comma-separated project_keys the portfolio migration pass treats as `meta`
+    # in addition to the live cockpit key (`resolve_project_key(<checkout>)`).
+    # Purely additive override for multi-meta / fork-rename edge cases — the
+    # live-key heuristic covers the common single-cockpit case without config.
+    # See docs/cockpit/portfolio-migration-plan.md §4. Kept as a raw string
+    # (not `list[str]`) so a plain comma value parses without pydantic's
+    # JSON-list coercion; use `settings.meta_project_keys` for the split list.
+    cockpit_meta_project_keys: str = ""
+
     # Stale-project detection: a scheduler task (see main.py lifespan) that signals
     # — never blocks — when an autodispatch-enabled project's Backlog sits with no
     # Done-move for too long. `stale_threshold_hours` is the age past which the
@@ -116,6 +125,11 @@ class Settings(BaseSettings):
     # reads it server-side and injects it into the tmux session's env.
     minimax_api_key: str | None = None
     minimax_base_url: str | None = None
+
+    @property
+    def meta_project_keys(self) -> list[str]:
+        """`cockpit_meta_project_keys` split into a clean list of project_keys."""
+        return [k.strip() for k in self.cockpit_meta_project_keys.split(",") if k.strip()]
 
 
 # Global settings instance
