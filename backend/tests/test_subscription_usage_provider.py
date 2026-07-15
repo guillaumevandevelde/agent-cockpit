@@ -332,6 +332,84 @@ class TestMinimaxUsageProvider:
         assert usage.bron == "minimax_api:probe_unparseable"
 
 
+class TestRegistrySeeding:
+    """``register_default_providers`` (kaart ea7e038b… D2) — populates
+    the registry with honest no-signal stubs for the known
+    ``(cli, provider)`` pairs. The pool router's snapshot path needs
+    the registry non-empty; before D2, ``_PROVIDERS`` was ``{}`` at
+    startup and ``get_provider_for`` always returned ``None``."""
+
+    def setup_method(self):
+        # Snapshot module-level state so the test doesn't leak.
+        from app.services.subscriptions import registry as reg
+        self._saved = dict(reg._PROVIDERS)
+        reg._PROVIDERS.clear()
+
+    def teardown_method(self):
+        from app.services.subscriptions import registry as reg
+        reg._PROVIDERS.clear()
+        reg._PROVIDERS.update(self._saved)
+
+    def test_seeds_three_supported_providers(self):
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        # Every (cli, provider) the pool allow-list permits gets a stub.
+        for prov in ("anthropic", "bedrock", "minimax"):
+            assert reg.get_provider_for(
+                cli="claude-code", provider=prov,
+            ) is not None, f"missing default provider for {prov}"
+
+    async def test_seeded_providers_return_onbekend_snapshots(self):
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        # Each stub is an UnknownUsageProvider — honest no-signal, no
+        # fabrication (analyse §6.1 / §6.3). The router's _is_above_threshold
+        # treats drempel_gebruikt=None as "no signal → available", which
+        # is the pre-D2 behaviour — so the seed doesn't change routing
+        # decisions, it just stops the snapshot path from short-circuiting.
+        for prov in ("anthropic", "bedrock", "minimax"):
+            provider = reg.get_provider_for(cli="claude-code", provider=prov)
+            usage = await provider.get_usage()
+            assert usage.betrouwbaarheid == "onbekend"
+            assert usage.drempel_gebruikt is None
+            assert usage.beschikbaar is True
+
+    async def test_registered_provider_replaces_default(self):
+        """A real AnthropicUsageProvider (with plan_tier) registered
+        after the seed takes over by id — proves the seed doesn't lock
+        the registry in. This is the upgrade path once a user has
+        configured a real plan-tier: the call site does
+        ``register_provider(real)`` and the stub is silently gone."""
+        from app.services.subscriptions import registry as reg
+        from app.services.subscriptions.anthropic import AnthropicUsageProvider
+
+        reg.register_default_providers()
+        stub = reg.get_provider_for(cli="claude-code", provider="anthropic")
+        stub_usage = await stub.get_usage()
+        assert stub_usage.betrouwbaarheid == "onbekend"
+
+        real = AnthropicUsageProvider(
+            usage_service=MagicMock(),
+            plan_tier_limit_tokens=100_000,
+        )
+        reg.register_provider(real)
+        assert reg.get_provider_for(cli="claude-code", provider="anthropic") is real
+
+    def test_seeding_is_idempotent(self):
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        first_keys = set(reg._PROVIDERS.keys())
+        reg.register_default_providers()
+        # No duplicates, same key set — re-running ``register_default_providers``
+        # (e.g. lifespan re-entry, multiple workers, accidental double-call)
+        # is safe and doesn't grow the registry. The values are fresh
+        # ``UnknownUsageProvider`` instances — that doesn't matter, the
+        # router only reads ``subscription_id`` / ``drempel_gebruikt`` from
+        # the snapshot, both of which are derived from the registered id.
+        assert set(reg._PROVIDERS.keys()) == first_keys
+        assert len(reg._PROVIDERS) == len(first_keys)
+
+
 class TestNoCrossVendorNormalization:
     """Analyse §6.2: signals stay per-subscription, never normalised
     into a single comparable score."""
