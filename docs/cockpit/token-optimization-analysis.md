@@ -17,11 +17,13 @@ MCP-toolschemas en SessionStart-hooks. Er is geen plek waar wij zelf een `messag
 met te veel context versturen; de hefboom is *configuratie en promptsamenstelling*, niet
 API-payloads.
 
-De grootste, laaghangende hefboom is **modelkeuze**: beide persona's (`analyst.md`,
-`engineer.md`) declareren `model: 'opus'`, dus **elke** gedispatchte sessie draait op Opus
-tenzij een card/kolom-override dat overschrijft. Opus kost grofweg 5× de input- en een
-veelvoud van de outputprijs van Sonnet. Sonnet-default met selectieve Opus-escalatie is
-volgens externe benchmarks de grootste kostenbesparing (60–90% op reële workloads).
+De grootste, laaghangende hefboom is **modelkeuze**: voor de chore in R1 staat
+`engineer.md` op `model: 'sonnet'`; alleen `analyst.md` blijft op `opus`. Elke engineer-
+sessie draait daardoor standaard op Sonnet tenzij een card/kolom-override Opus
+terughaalt; analyst-sessies blijven Opus tot dezelfde heuristiek voor analyst toegepast
+wordt. Opus kost grofweg 5× de input- en een veelvoud van de outputprijs van Sonnet.
+Sonnet-default met selectieve Opus-escalatie is volgens externe benchmarks de grootste
+kostenbesparing (60–90% op reële workloads).
 
 Ranglijst (impact × moeite) staat in [§4](#4-aanbevelingen-geprioriteerd). Niets hiervan is
 in dit spike geïmplementeerd — dit doc is de beslisbasis; de concrete follow-up-kaarten
@@ -57,11 +59,14 @@ Een gedispatchte sessie betaalt tokens voor (grofweg, in volgorde van injectie):
 
 Belangrijkste observaties:
 
-1. **Modeldefault = Opus voor álles.** `head -8 .claude/agents/*.md` → beide persona's
-   hebben `model: 'opus'`. De precedentieketen (`card.model > column.default_model >
+1. **Modeldefault = Opus voor analyst, Sonnet voor engineer.** `head -8
+   .claude/agents/*.md` → `engineer.md` staat op `sonnet`, `analyst.md` op `opus`.
+   De precedentieketen (`card.column_overrides → card.model > column.default_model >
    persona-frontmatter > geen flag`, zie [`kanban-model-override.md`](./kanban-model-override.md))
-   valt dus standaard terug op Opus. Engineer-werk (implementatie, tests, chores) haalt
-   zelden Opus-only-baat; analyst-decompositie mogelijk wél.
+   valt dus standaard terug op Sonnet voor engineer-sessies en op Opus voor analyst-
+   sessies. Engineer-werk (implementatie, tests, chores) haalt zelden Opus-only-baat;
+   analyst-decompositie mogelijk wél — daarom is Sonnet voor engineer nu de default
+   en blijft analyst Opus totdat een vervolgkaart hetzelfde doet voor analyst.
 2. **CLAUDE.md is 221 regels** — boven Anthropic's richtlijn van <200 regels. Het bevat
    uitgebreide git-workflow-recepten (merge-via-detached-worktree, remote-branch-hygiene,
    pre-push-historie) die als *baseline* in élke sessie meegaan, ook sessies die nooit
