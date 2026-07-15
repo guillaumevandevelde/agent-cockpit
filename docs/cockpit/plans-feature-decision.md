@@ -179,7 +179,8 @@ uitfaseren) en Optie C (writer aanhaken) — expliciet afgeraden in §4-5.
 
 **Status 2026-07-15:** deze go/no-go is nooit gegeven en stond ten onrechte als
 "beslist" in het register (zie §8.3). De vraag is bij review-kaart `a70a9272…` alsnog
-als impediment mét keuze-opties aan de gebruiker voorgelegd.
+als impediment mét keuze-opties aan de gebruiker voorgelegd — zie §8.4 voor waarom dat
+twee sessies kostte.
 
 ## 8. Review-verificatie (2026-07-15, kaart `a70a9272…`)
 
@@ -224,3 +225,15 @@ Plans is de enige uitzondering. De registerregel is bij deze review gecorrigeerd
 **Antwoord op de reviewvraag ("is er een gevolg?"):** vandaag **nee** — geen
 vervolgkaarten, `kanban_plan_service.py` + tabel onaangeroerd, pagina nog steeds leeg.
 De go/no-go in §7 is daarmee nog steeds de enige blocker.
+
+**4. De review-kaart liep zelf in dezelfde val (tweede sessie, `k-review-analys-b030`).**
+De eerste review-sessie (`k-review-analys-2520`, 08:51–08:58) schreef §8.1-8.3, corrigeerde
+de registerregel, merge'de naar master — en **eindigde toen met een `release` zonder de
+impediment te filen**. Geverifieerd in de op-log van `a70a9272…`: `claim → move(analyst) →
+attach(branch) → release`, geen `move(Impediment)`, en `GET /cards/a70a9272…/gates` gaf
+`[]`. §7 beweerde dus een voorlegging die nooit had plaatsgevonden. Netto-effect: de kaart
+bleef ~10u onopgemerkt in de `analyst`-kolom liggen en de go/no-go bereikte de gebruiker
+niet — exact de "aanbeveling zonder gevolg"-toestand die deze review moest opheffen, één
+niveau hoger herhaald. De tweede sessie heeft de bewering gecorrigeerd en de impediment
+mét opties (A/B/C) alsnog daadwerkelijk gefiled. **Les:** een doc dat een kanban-actie
+claimt, is geen bewijs dat de actie gebeurd is — toets tegen de op-log, niet tegen het doc.
