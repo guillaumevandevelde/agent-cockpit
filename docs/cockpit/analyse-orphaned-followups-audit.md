@@ -93,10 +93,18 @@ aan `d4d7c087`:
 4. `[analysis]` Human-takeover-UX voor headless sessies (dep: #3)
 5. `[spike, GEPOORT]` ACP-adaptertransport als sibling — **niet nu**, activeert pas bij tweede-executor-provider-onboarding (dep: #2)
 
-Bewust op **Backlog** (niet Todo): de auto-dispatcher claimt alleen Todo-kaarten, dus dit
-is veilige staging — een mens/prioritering promoot ze wanneer de transport-investering
+Bewust op **Backlog** — een mens/prioritering promoot ze wanneer de transport-investering
 (P1/P3 in `build-prioriteiten-analyse.md`) aan de beurt is. Kaart 5 draagt in haar titel
 de "niet nu"-poort zodat ze niet per ongeluk wordt opgepakt.
+
+> **Correctie (2026-07-15, review `4ec799e8`).** Dit stond er oorspronkelijk als *"de
+> auto-dispatcher claimt alleen Todo-kaarten, dus dit is veilige staging"*. Dat klopt
+> niet: `_DISPATCH_COLUMNS = ("Backlog", "To Resume")` (`backend/app/kanban/dispatch.py`)
+> — Backlog is juist de *bron* van auto-dispatch, en een `Todo`-kolom bestaat niet eens
+> (`COLUMNS` in `schemas.py`). Backlog is alleen de facto veilig zolang auto-dispatch
+> per project uit staat (`is_autodispatch_enabled`). De titel-poort op kaart 5 is dus de
+> enige echte rem — zie Backlog-kaart `f8ef71a0` ("Gepoorte kaarten worden
+> auto-gedispatcht zodra hun depends_on klaar is").
 
 ### #3 — Portfolio-migratie: 1 kaart aangemaakt
 

@@ -102,17 +102,34 @@ Belangrijkste observaties:
 **Aanbevolen volgorde:** R1 eerst (grootste besparing, laagste moeite, direct terugdraaibaar
 via override), dan R2, dan R6 (meten), daarna R3/R4 op basis van de meetdata.
 
-## 5. Voorgestelde follow-up-kaarten
+## 5. Follow-up-kaarten — aangemaakt op 2026-07-15
 
-Dit spike levert alleen dit doc op (geen code). Kandidaat-kaarten voor menselijke triage:
+Dit spike levert alleen dit doc op (geen code). De vervolgkaarten hieronder zijn
+**aangemaakt op het bord** (Backlog) via review-kaart `4ec799e8`:
 
-1. **[chore] Sonnet-default voor engineer-persona, Opus selectief** — R1. Frontmatter +
-   evt. per-kolom `default_model`; documenteer de escalatie-route (card.model-override).
-2. **[chore] CLAUDE.md < 200 regels: git-ship-recepten naar apart doc/skill** — R2.
-3. **[analysis] Per-persona MCP-tool-allowlist voor gedispatchte sessies** — R3; vereist eigen
-   scope-fase (welke tools per rol, hoe filteren via CLI/MCP).
-4. **[feature] Per-dispatch tokentelemetrie in de usage-feature** — R6.
-5. **[chore] Verifieer/enforce project-scoped MCP-config bij spawn** — R5.
+| # | Kaart | Aanbeveling | Type |
+|---|---|---|---|
+| 1 | `d17b6e6a` Sonnet-default voor engineer-persona, Opus selectief | R1 | chore |
+| 2 | `a738497d` CLAUDE.md < 200 regels: git-ship-recepten naar apart doc/skill | R2 | chore |
+| 3 | `28e1558e` Per-persona MCP-tool-allowlist voor gedispatchte sessies | R3 | analysis |
+| 4 | `8a2ad986` Per-dispatch tokentelemetrie koppelen aan de usage-feature | R6 | feature |
+| 5 | `00fa8325` Verifieer/enforce project-scoped MCP-config bij spawn | R5 | chore |
+
+Geen onderlinge `depends_on`: de aanbevolen volgorde (R1 → R2 → R6 → R3) is prioritering,
+geen contract — geen van de vijf consumeert de output van een ander.
+
+**R4 (dispatch-boilerplate dedupliceren) is bewust géén kaart.** Het raakt het contract dat
+elke agent volgt en het doc merkt zelf op: *"Meten vóór snijden"*. Het blijft §4-prosa tot
+R6 (`8a2ad986`) meetdata levert die de ingreep rechtvaardigt.
+
+> **Nagekomen review (2026-07-15, kaart `4ec799e8`).** Deze §5 stond oorspronkelijk als
+> "kandidaat-kaarten voor menselijke triage" en die triage bleef uit — de kaarten zijn
+> nooit aangemaakt en de analyse verdampte op Done. De review heeft alle dragende claims
+> hierboven opnieuw tegen de code getoetst (beide persona's nog `opus`; CLAUDE.md
+> intussen **230** regels, dus §2 se punt 2 is eerder verslechterd dan opgelost; 19
+> MCP-tools; `.mcp.json` minimaal) — niets was geïmplementeerd, alles nog geldig.
+> De systemische oorzaak (leaf-spike maakt geen eigen kaarten) is inmiddels opgelost via
+> kaart `75b54887`; deze analyse dateert van vóór die fix.
 
 ## 6. Bronnen
 
