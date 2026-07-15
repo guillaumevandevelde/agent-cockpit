@@ -135,8 +135,9 @@ async def test_tick_spawns_analyst_when_set(monkeypatch):
 # ---- Task 7: plan-aware executor prompt -----------------------------------
 
 def test_plan_context_prepend_resolved_plan():
-    from app.kanban.dispatch import _plan_context_section
+    from app.kanban.dispatch import PLAN_OK, _plan_context_section
     section = _plan_context_section(
+        status=PLAN_OK,
         plan_markdown="# plan\n\nStep 1: do X\nStep 2: do Y",
         plan_deliverable_id="d1",
         parent_card_id="p1",
@@ -148,13 +149,17 @@ def test_plan_context_prepend_resolved_plan():
 
 
 def test_plan_context_unresolvable_returns_placeholder():
-    from app.kanban.dispatch import _plan_context_section
+    from app.kanban.dispatch import PLAN_DANGLING_PARENT, _plan_context_section
     section = _plan_context_section(
+        status=PLAN_DANGLING_PARENT,
         plan_markdown=None,
-        plan_deliverable_id=None,
-        parent_card_id=None,
+        plan_deliverable_id="plan-id",
+        parent_card_id="parent-1",
+        # Empty description → guidance steers to report_impediment.
+        card_description="",
     )
     assert "Plan niet beschikbaar" in section
+    assert "parent-1" in section
     assert "report_impediment" in section
 
 
@@ -185,13 +190,16 @@ async def test_run_card_skips_plan_context_for_legacy_cards(monkeypatch):
 
     async def fake_resolve(session, card):
         resolve_calls.append(card.id)
-        return (None, None, None)
+        return (dispatch.PLAN_NO_REF, None, None, None)
 
-    def fake_section(*, plan_markdown, plan_deliverable_id, parent_card_id):
-        section_calls.append((plan_markdown, plan_deliverable_id, parent_card_id))
-        return _plan_context_section(plan_markdown=plan_markdown,
+    def fake_section(*, status, plan_markdown, plan_deliverable_id, parent_card_id,
+                     card_description=None):
+        section_calls.append((status, plan_markdown, plan_deliverable_id, parent_card_id))
+        return _plan_context_section(status=status,
+                                     plan_markdown=plan_markdown,
                                      plan_deliverable_id=plan_deliverable_id,
-                                     parent_card_id=parent_card_id)
+                                     parent_card_id=parent_card_id,
+                                     card_description=card_description)
 
     monkeypatch.setattr(dispatch, "_resolve_plan_for_child", fake_resolve)
     monkeypatch.setattr(dispatch, "_plan_context_section", fake_section)
@@ -249,7 +257,7 @@ async def test_run_card_prepends_plan_context_for_child_with_parent(monkeypatch)
 
     async def fake_resolve(session, card):
         resolve_calls.append(card.id)
-        return ("# My Plan\n\n- Step 1\n- Step 2", "d1", "parent-1")
+        return (dispatch.PLAN_OK, "# My Plan\n\n- Step 1\n- Step 2", "d1", "parent-1")
 
     monkeypatch.setattr(dispatch, "_resolve_plan_for_child", fake_resolve)
 
@@ -303,7 +311,7 @@ async def test_run_card_prepends_placeholder_for_child_with_missing_plan(monkeyp
 
     async def fake_resolve(session, card):
         # Simulate parent deleted or plan never written.
-        return (None, None, "parent-1")
+        return (dispatch.PLAN_DANGLING_PARENT, None, "plan-id", "parent-1")
 
     monkeypatch.setattr(dispatch, "_resolve_plan_for_child", fake_resolve)
 

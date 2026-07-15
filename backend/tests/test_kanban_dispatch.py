@@ -4933,14 +4933,232 @@ async def test_next_card_gate_distinguishes_race_from_genuine_miss():
         missed_card = next(c for c in cards if c.id == raced)
         # No longer gated — it IS eligible now (plan_ref present).
         assert dispatch._awaiting_plan_ref(missed_card) is False
-        # ...and resolving its plan yields nothing, so the executor prompt would
-        # render the genuine-miss placeholder.
-        plan_md, _, _ = await dispatch._resolve_plan_for_child(s, missed_card)
+        # ...and resolving its plan yields a DANGLING_PARENT status
+        # (the parent_id in the ref was "deleted-parent" which never existed).
+        plan_status, plan_md, plan_id, parent_id = await dispatch._resolve_plan_for_child(
+            s, missed_card,
+        )
+    assert plan_status == dispatch.PLAN_DANGLING_PARENT
     assert plan_md is None
+    assert plan_id == "gone"
+    assert parent_id == "deleted-parent"
     section = dispatch._plan_context_section(
-        plan_markdown=None, plan_deliverable_id=None, parent_card_id=None,
+        status=plan_status,
+        plan_markdown=plan_md,
+        plan_deliverable_id=plan_id,
+        parent_card_id=parent_id,
+        # The child in this test was created without a description; the
+        # softened-guidance path requires a non-empty description.
+        card_description="",
     )
     assert "Plan niet beschikbaar" in section
+    assert "deleted-parent" in section
+
+
+# ---- card 4a03565d: status-aware plan resolution + softened guidance -------
+
+@pytest.mark.asyncio
+async def test_resolve_plan_for_child_returns_dangling_parent_status():
+    """A child with plan_ref whose parent_card_id points at a non-existent
+    card must return PLAN_DANGLING_PARENT (not the generic (None,None,None))."""
+    async with KanbanSessionLocal() as s:
+        # Note: no parent card created — parent_id "ghost-parent" is dangling.
+        child = await _make_child(s, parent_card_id="ghost-parent", title="child")
+        await _link_plan_ref(
+            s, child_id=child, parent_id="ghost-parent",
+            plan_deliverable_id="plan-xyz",
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        child_card = next(c for c in cards if c.id == child)
+        status, plan_md, plan_id, parent_id = await dispatch._resolve_plan_for_child(
+            s, child_card,
+        )
+    assert status == dispatch.PLAN_DANGLING_PARENT
+    assert plan_md is None
+    assert plan_id == "plan-xyz"
+    assert parent_id == "ghost-parent"
+
+
+@pytest.mark.asyncio
+async def test_resolve_plan_for_child_returns_plan_missing_on_parent_status():
+    """A child with plan_ref whose parent exists but lacks the referenced
+    plan deliverable must return PLAN_MISSING_ON_PARENT (not a generic
+    failure that gets mistaken for 'parent deleted')."""
+    async with KanbanSessionLocal() as s:
+        # Create a real parent but DO NOT add a plan deliverable to it.
+        parent = await _make_card(s, title="parent", column="Done")
+        child = await _make_child(s, parent_card_id=parent, title="child")
+        await _link_plan_ref(
+            s, child_id=child, parent_id=parent,
+            plan_deliverable_id="plan-id-not-on-parent",
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        child_card = next(c for c in cards if c.id == child)
+        status, plan_md, plan_id, parent_id = await dispatch._resolve_plan_for_child(
+            s, child_card,
+        )
+    assert status == dispatch.PLAN_MISSING_ON_PARENT
+    assert plan_md is None
+    assert plan_id == "plan-id-not-on-parent"
+    assert parent_id == parent
+
+
+@pytest.mark.asyncio
+async def test_resolve_plan_for_child_returns_no_plan_ref_status():
+    """A child card with no plan_ref deliverable at all must return
+    PLAN_NO_REF. Mirrors the race-window case where the analyst hasn't
+    attached the plan yet — but here we exercise the leaf helper directly
+    because _awaiting_plan_ref already gates dispatch on plan_ref presence."""
+    async with KanbanSessionLocal() as s:
+        # Create parent + child but skip _link_plan_ref entirely.
+        parent = await _make_card(s, title="parent", column="Done")
+        child = await _make_child(s, parent_card_id=parent, title="child")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        child_card = next(c for c in cards if c.id == child)
+        status, plan_md, plan_id, parent_id = await dispatch._resolve_plan_for_child(
+            s, child_card,
+        )
+    assert status == dispatch.PLAN_NO_REF
+    assert plan_md is None
+    assert plan_id is None
+    assert parent_id is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_plan_for_child_returns_malformed_status_for_bad_json():
+    """A child whose plan_ref ref is not parseable JSON must surface
+    PLAN_MALFORMED instead of being silently swallowed as (None,None,None)."""
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Done")
+        child = await _make_child(s, parent_card_id=parent, title="child")
+        await apply_operation(
+            s, op_type="link_plan_ref", entity_type="deliverable",
+            project_key=PK, entity_id=child,
+            payload={"ref_json": "not-json-{", "depends_on": []},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        child_card = next(c for c in cards if c.id == child)
+        status, plan_md, plan_id, parent_id = await dispatch._resolve_plan_for_child(
+            s, child_card,
+        )
+    assert status == dispatch.PLAN_MALFORMED
+    assert plan_md is None
+    assert plan_id is None
+    assert parent_id is None
+
+
+def test_plan_context_section_dangling_parent_distinguishes_from_no_ref():
+    """The PLAN_DANGLING_PARENT message must mention the specific parent
+    id, not collapse into 'mogelijk is de parent verwijderd of is het plan
+    nooit opgeslagen' — that's the bug card 4a03565d reported."""
+    section = dispatch._plan_context_section(
+        status=dispatch.PLAN_DANGLING_PARENT,
+        plan_markdown=None,
+        plan_deliverable_id="plan-cb29",
+        parent_card_id="parent-d4d7",
+        card_description="",
+    )
+    assert "parent-d4d7" in section
+    assert "plan-cb29" in section
+    # Old message bundled two cases into one; the new message must be
+    # specific about WHICH case it is.
+    assert "bestaat niet meer" in section or "nooit aangemaakt" in section
+    assert "nooit opgeslagen" not in section, (
+        "old fallback phrasing must not leak into the new message — "
+        "this is the exact symptom from card 4a03565d"
+    )
+
+
+def test_plan_context_section_missing_on_parent_message_is_specific():
+    section = dispatch._plan_context_section(
+        status=dispatch.PLAN_MISSING_ON_PARENT,
+        plan_markdown=None,
+        plan_deliverable_id="plan-missing",
+        parent_card_id="parent-alive",
+        card_description="",
+    )
+    assert "parent-alive" in section
+    assert "plan-missing" in section
+    assert "niet (meer) op te vinden" in section
+
+
+def test_plan_context_section_malformed_message_is_specific():
+    section = dispatch._plan_context_section(
+        status=dispatch.PLAN_MALFORMED,
+        plan_markdown=None,
+        plan_deliverable_id=None,
+        parent_card_id=None,
+        card_description="",
+    )
+    assert "misvormd" in section
+    assert "parseerbare JSON" in section
+
+
+def test_plan_context_section_self_sufficient_card_does_not_force_impediment():
+    """A card with a non-empty description is self-sufficient: the
+    placeholder must guide the executor to proceed using the description
+    and post a `**Self-improve:**` note, NOT unconditionally steer to
+    report_impediment. This is the softening requirement from the
+    acceptance criteria."""
+    section = dispatch._plan_context_section(
+        status=dispatch.PLAN_DANGLING_PARENT,
+        plan_markdown=None,
+        plan_deliverable_id="plan-1",
+        parent_card_id="parent-1",
+        card_description=(
+            "Wire ACP-isomorf structured events into agentic_cli. "
+            "Source: docs/cockpit/acp-transport-decision.md §6."
+        ),
+    )
+    # Self-sufficient path: steer via Self-improve comment, not impediment.
+    assert "Self-improve" in section
+    assert "kaartbeschrijving" in section
+    # The `report_impediment` reference must still appear as a *fallback*,
+    # not as the primary guidance — the executor should not see it as
+    # the first action to take. We check it appears only after "ALLEEN".
+    alleen_idx = section.find("ALLEEN")
+    imp_idx = section.find("report_impediment")
+    if imp_idx != -1:
+        assert alleen_idx != -1 and imp_idx > alleen_idx, (
+            "report_impediment must only appear as a fallback after ALLEEN, "
+            "not as the primary instruction"
+        )
+
+
+def test_plan_context_section_empty_description_steers_to_impediment():
+    """A card with no usable description has no source of truth besides
+    the plan — guidance must steer to report_impediment immediately."""
+    section = dispatch._plan_context_section(
+        status=dispatch.PLAN_DANGLING_PARENT,
+        plan_markdown=None,
+        plan_deliverable_id="plan-1",
+        parent_card_id="parent-1",
+        card_description="",
+    )
+    assert "report_impediment" in section
+    assert "Self-improve" not in section
+
+
+def test_plan_context_section_whitespace_only_description_steers_to_impediment():
+    """A whitespace-only description is treated as empty (we strip() in
+    the helper) — guidance must steer to report_impediment."""
+    section = dispatch._plan_context_section(
+        status=dispatch.PLAN_DANGLING_PARENT,
+        plan_markdown=None,
+        plan_deliverable_id="plan-1",
+        parent_card_id="parent-1",
+        card_description="   \n\t  ",
+    )
+    assert "report_impediment" in section
+    assert "Self-improve" not in section
 
 
 # ---- per-provider pause for limit hits (kanban-limit feature) --------------

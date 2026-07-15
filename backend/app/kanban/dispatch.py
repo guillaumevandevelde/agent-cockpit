@@ -1263,65 +1263,167 @@ async def _stamp_resume_target(session, *, card, project_key: str,
     )
 
 
-def _plan_context_section(*, plan_markdown: str | None, plan_deliverable_id: str | None,
-                          parent_card_id: str | None) -> str:
+# Statuses returned by `_resolve_plan_for_child`. Distinct values let
+# `_plan_context_section` render an accurate diagnosis (was the parent
+# deleted, or was the plan simply never written?) instead of one generic
+# "kon niet worden geladen" message. See kanban card 4a03565d ("Dispatch
+# PLAN CONTEXT reports 'plan-attachment kon niet worden geladen' while a
+# valid plan_ref deliverable exists") for the originating complaint.
+PLAN_OK = "ok"
+PLAN_NO_REF = "no_plan_ref"                  # child carries no plan_ref deliverable
+PLAN_DANGLING_PARENT = "dangling_parent"     # plan_ref present, parent card gone
+PLAN_MISSING_ON_PARENT = "plan_missing_on_parent"  # parent alive, plan deliverable absent
+PLAN_MALFORMED = "malformed_ref"             # plan_ref JSON doesn't parse or lacks required keys
+
+
+def _plan_context_section(*, status: str, plan_markdown: str | None,
+                          plan_deliverable_id: str | None,
+                          parent_card_id: str | None,
+                          card_description: str | None = None) -> str:
     """Build the PLAN CONTEXT preamble that the executor sees in its prompt.
 
-    Resolves the plan via the child's `plan_ref` deliverable. If the ref
-    is missing (parent deleted, plan never written), returns a placeholder
-    that nudges the executor to surface the issue via report_impediment.
+    On success, embeds the plan markdown verbatim so the executor can follow
+    the analyst's steps. On failure, renders a status-specific diagnosis and
+    picks the right nudge:
+
+    - When the card carries its own self-sufficient description (the analyst
+      wrote enough context in the title/description that the work can be
+      reconstructed from the source material), the placeholder tells the
+      executor to **proceed using the card description**, post a
+      `**Self-improve:**` note on the card, and only fall back to
+      `report_impediment` if the card is genuinely un-actionable without the
+      plan.
+    - When the card has no description (or an empty one), the placeholder
+      steers to `report_impediment` directly — without the analyst's plan
+      the executor has no source of truth and would otherwise burn context
+      guessing.
+
+    Previously this helper unconditionally pushed the executor to
+    `report_impediment` even for cards that were self-sufficient from their
+    own source doc, which forced every decomposed-family card with a
+    dangling parent into a needless blocker session.
     """
-    if not plan_markdown:
+    if status == PLAN_OK:
         return (
-            "PLAN CONTEXT — Plan niet beschikbaar: het plan-attachment "
-            "voor deze kaart kon niet worden geladen (mogelijk is de "
-            "parent-kaart verwijderd of is het plan nooit opgeslagen). "
-            "Gebruik mcp__cockpit-kanban__report_impediment om dit te "
-            "signaleren.\n"
+            f"PLAN CONTEXT — read this first\n"
+            f"Plan deliverable: {plan_deliverable_id}\n"
+            f"Parent card: {parent_card_id}\n\n"
+            f"{plan_markdown}\n\n"
+            f"---\n"
+            f"Bovenstaande is het plan van de analyst. Volg deze stappen, "
+            f"tenzij je tijdens het werk ontdekt dat het plan niet klopt — "
+            f"gebruik dan report_impediment.\n"
         )
-    return (
-        f"PLAN CONTEXT — read this first\n"
-        f"Plan deliverable: {plan_deliverable_id}\n"
-        f"Parent card: {parent_card_id}\n\n"
-        f"{plan_markdown}\n\n"
-        f"---\n"
-        f"Bovenstaande is het plan van de analyst. Volg deze stappen, "
-        f"tenzij je tijdens het werk ontdekt dat het plan niet klopt — "
-        f"gebruik dan report_impediment.\n"
-    )
+
+    # Failure modes — status-specific diagnosis, so the executor (and the
+    # operator reading the transcript) can tell whether the parent was
+    # deleted, the plan was never written, or the ref is corrupt.
+    if status == PLAN_DANGLING_PARENT:
+        diag = (
+            "PLAN CONTEXT — Plan niet beschikbaar: de parent-kaart "
+            f"`{parent_card_id}` van deze kaart bestaat niet meer "
+            "(verwijderd of nooit aangemaakt), waardoor het plan-attachment "
+            f"(`plan_deliverable_id={plan_deliverable_id}`) niet meer "
+            "bereikbaar is. Dit is meestal een gevolg van het verwijderen "
+            "van de analyst-parent nadat de kind-kaarten al waren aangemaakt."
+        )
+    elif status == PLAN_MISSING_ON_PARENT:
+        diag = (
+            "PLAN CONTEXT — Plan niet beschikbaar: de parent-kaart "
+            f"`{parent_card_id}` bestaat, maar het plan-attachment "
+            f"`{plan_deliverable_id}` is daar niet (meer) op te vinden. "
+            "De analyst heeft het plan dus niet (of niet meer) gekoppeld."
+        )
+    elif status == PLAN_MALFORMED:
+        diag = (
+            "PLAN CONTEXT — Plan niet beschikbaar: het `plan_ref`-deliverable "
+            "op deze kaart is misvormd (geen parseerbare JSON, of mist "
+            "`parent_card_id`/`plan_deliverable_id`). De kind-kaart verwijst "
+            "dus naar een onbruikbare referentie."
+        )
+    elif status == PLAN_NO_REF:
+        diag = (
+            "PLAN CONTEXT — Plan niet beschikbaar: deze kind-kaart heeft "
+            "geen `plan_ref`-deliverable (de analyst heeft het plan niet "
+            "gekoppeld via `add_plan_attachment`)."
+        )
+    else:
+        diag = (
+            "PLAN CONTEXT — Plan niet beschikbaar: onbekende fout tijdens "
+            f"het laden van het plan-attachment (status={status})."
+        )
+
+    # Soften the guidance: only steer to report_impediment when the card is
+    # genuinely un-actionable. A non-empty description means the analyst or
+    # the card author wrote enough context in the title/description to
+    # reconstruct the work from the source material — that path keeps the
+    # executor productive and surfaces a `**Self-improve:**` note so the
+    # dispatcher can clean up the dangling ref.
+    description = (card_description or "").strip()
+    if description:
+        guidance = (
+            "\n\nDe kaartbeschrijving hierboven bevat genoeg context om deze "
+            "kaart alsnog op te pakken. Ga door met de implementatie op "
+            "basis van die beschrijving en post onderaan een "
+            "`**Self-improve:**` comment op deze kaart zodat de dispatch-"
+            "loop de dangle opruimt. ALLEEN als de kaart zonder plan echt "
+            "niet uitvoerbaar is: gebruik dan "
+            "`mcp__cockpit-kanban__report_impediment`."
+        )
+    else:
+        guidance = (
+            "\n\nDe kaart heeft geen beschrijving die het werk draagt, dus "
+            "is het plan-attachment de enige bron van waarheid. Gebruik "
+            "`mcp__cockpit-kanban__report_impediment` om dit te signaleren."
+        )
+    return diag + guidance + "\n"
 
 
-async def _resolve_plan_for_child(session, card) -> tuple[str | None, str | None, str | None]:
-    """Return (plan_markdown, plan_deliverable_id, parent_card_id) for a child
-    card that holds a `plan_ref` deliverable, or (None, None, None).
+async def _resolve_plan_for_child(session, card) -> tuple[str, str | None, str | None, str | None]:
+    """Return ``(status, plan_markdown, plan_deliverable_id, parent_card_id)``
+    for a child card that holds a ``plan_ref`` deliverable.
 
-    Looks up the `plan_ref` deliverable on the child, parses it for the
+    Looks up the ``plan_ref`` deliverable on the child, parses it for the
     parent_card_id and plan_deliverable_id, fetches the parent, and pulls
-    the actual plan markdown from the parent's `plan` deliverable. Returns
-    (None, None, None) when the child has no plan_ref, the ref is malformed,
-    the parent/plan is missing, or the plan deliverable's kind isn't "plan".
+    the actual plan markdown from the parent's ``plan`` deliverable. The
+    status distinguishes why resolution failed so ``_plan_context_section``
+    can render an accurate diagnosis instead of one generic "could not be
+    loaded" message:
+
+    - ``PLAN_OK``                       — plan found and resolved
+    - ``PLAN_NO_REF``                   — child carries no ``plan_ref`` deliverable
+    - ``PLAN_DANGLING_PARENT``          — parent card no longer exists (deleted, never written)
+    - ``PLAN_MISSING_ON_PARENT``        — parent exists, but the referenced ``plan`` deliverable isn't on it
+    - ``PLAN_MALFORMED``                — ``plan_ref`` JSON doesn't parse or lacks required keys
 
     Async because resolving the plan needs a DB roundtrip (parent card
     lookup) — the brief's draft had this as a sync helper, which would
     have crashed the first time an executor session was dispatched.
     """
-    for d in getattr(card, "deliverables", []) or []:
-        if d.kind == "plan_ref":
-            try:
-                ref = json.loads(d.ref)
-            except (TypeError, ValueError):
-                return (None, None, None)
-            parent_id = ref.get("parent_card_id")
-            plan_id = ref.get("plan_deliverable_id")
-            if not parent_id or not plan_id:
-                return (None, None, None)
-            parent = await get_card(session, parent_id)
-            if parent is None:
-                return (None, None, None)
-            for pd in parent.deliverables:
-                if pd.id == plan_id and pd.kind == "plan":
-                    return (pd.ref, plan_id, parent_id)
-    return (None, None, None)
+    plan_refs = [d for d in getattr(card, "deliverables", []) or []
+                 if d.kind == "plan_ref"]
+    if not plan_refs:
+        return (PLAN_NO_REF, None, None, None)
+    # A child should have at most one plan_ref, but be defensive: pick the
+    # first and treat the rest as a soft sign of corruption (we still
+    # surface the resolution attempt under PLAN_OK or the appropriate
+    # failure status — never silently swallow an extra plan_ref).
+    d = plan_refs[0]
+    try:
+        ref = json.loads(d.ref)
+    except (TypeError, ValueError):
+        return (PLAN_MALFORMED, None, None, None)
+    parent_id = ref.get("parent_card_id")
+    plan_id = ref.get("plan_deliverable_id")
+    if not parent_id or not plan_id:
+        return (PLAN_MALFORMED, None, plan_id, parent_id)
+    parent = await get_card(session, parent_id)
+    if parent is None:
+        return (PLAN_DANGLING_PARENT, None, plan_id, parent_id)
+    for pd in parent.deliverables:
+        if pd.id == plan_id and pd.kind == "plan":
+            return (PLAN_OK, pd.ref, plan_id, parent_id)
+    return (PLAN_MISSING_ON_PARENT, None, plan_id, parent_id)
 
 
 def _build_ship_instructions(ship_mode: str) -> str:
@@ -2362,13 +2464,18 @@ async def _run_card(
         # "Plan niet beschikbaar" placeholder to those would silently
         # downgrade every existing kanban executor prompt. When a child
         # card has a parent but its plan_ref is missing/unresolvable,
-        # _resolve_plan_for_child returns (None, None, None) and the
-        # helper surfaces the placeholder — that's the desired signal
-        # to the executor that something is off.
-        plan_md, plan_id, parent_id = await _resolve_plan_for_child(session, card)
-        plan_section = _plan_context_section(plan_markdown=plan_md,
-                                             plan_deliverable_id=plan_id,
-                                             parent_card_id=parent_id)
+        # _resolve_plan_for_child returns a non-OK status and the helper
+        # surfaces a status-specific placeholder — that's the desired signal
+        # to the executor that something is off (parent deleted, plan never
+        # written, ref malformed, …).
+        plan_status, plan_md, plan_id, parent_id = await _resolve_plan_for_child(session, card)
+        plan_section = _plan_context_section(
+            status=plan_status,
+            plan_markdown=plan_md,
+            plan_deliverable_id=plan_id,
+            parent_card_id=parent_id,
+            card_description=getattr(card, "description", None),
+        )
         prompt = plan_section + prompt
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
