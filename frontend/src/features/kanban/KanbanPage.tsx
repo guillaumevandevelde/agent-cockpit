@@ -14,9 +14,8 @@ import { ShipModeToggle } from "./components/ShipModeToggle";
 import { SkipPermissionsToggle } from "./components/SkipPermissionsToggle";
 import { AutodispatchToggle } from "./components/AutodispatchToggle";
 import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
-import { ActiveSubscriptionOverride } from "./components/ActiveSubscriptionOverride";
+import { SubscriptionToolbarButton } from "./components/SubscriptionToolbarButton";
 import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
-import { SubscriptionPool } from "./components/SubscriptionPool";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
 import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
@@ -258,7 +257,6 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-full gap-4 overflow-hidden">
       <DispatchPauseBanner />
-      <SubscriptionPool projectKey={projectKey} />
       <div className="flex items-center justify-between flex-shrink-0">
         <div>
           <div className="flex items-center gap-3">
@@ -273,7 +271,7 @@ export default function KanbanPage() {
           <SkipPermissionsToggle projectKey={projectKey} />
           <AutodispatchToggle projectKey={projectKey} />
           <DefaultTransportSelect projectKey={projectKey} />
-          <ActiveSubscriptionOverride projectKey={projectKey} />
+          <SubscriptionToolbarButton projectKey={projectKey} />
           <Button size="sm" variant="outline" onClick={() => setEditingColumns(true)}>
             Columns
           </Button>
