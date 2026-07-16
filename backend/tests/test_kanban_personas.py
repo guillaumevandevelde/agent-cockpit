@@ -154,6 +154,31 @@ def test_analyst_prompt_module_docstring_covers_both_modes():
     )
 
 
+def test_engineer_persona_frontmatter_pins_sonnet_default():
+    """Regression guard for kanban card 7c120256: the engineer persona's
+    `model:` frontmatter must stay pinned to `sonnet` so the token-cost
+    optimisation from token-optimization-analysis.md §4 R1 (~5x input-price
+    difference vs opus) isn't silently reverted by a future persona edit."""
+    repo_root = Path(__file__).resolve().parents[2]
+    model = dispatch._read_persona_model(str(repo_root), "engineer.md")
+    assert model == "sonnet", (
+        f"engineer persona frontmatter is {model!r}, expected 'sonnet' — "
+        "see docs/cockpit/token-optimization-analysis.md §4 R1"
+    )
+
+
+def test_analyst_persona_frontmatter_pins_opus_default():
+    """Inverse guard: the analyst persona's `model:` frontmatter must stay
+    pinned to `opus` — see token-optimization-analysis.md §4 R1, which keeps
+    opus for analyst while sonnet-defaulting engineer."""
+    repo_root = Path(__file__).resolve().parents[2]
+    model = dispatch._read_persona_model(str(repo_root), "analyst.md")
+    assert model == "opus", (
+        f"analyst persona frontmatter is {model!r}, expected 'opus' — "
+        "see docs/cockpit/token-optimization-analysis.md §4 R1"
+    )
+
+
 def test_project_analyst_md_covers_both_modes(tmp_path):
     """The shipped .claude/agents/analyst.md must explicitly distinguish
     multi-agent decomposition (prohibitions apply) from leaf
