@@ -2,7 +2,7 @@ import json
 
 from app.services.scheduling import hook_installer
 
-ALL_EVENTS = {"UserPromptSubmit", "Stop", "Notification", "SessionStart"}
+ALL_EVENTS = {"UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"}
 
 
 def _patch_settings_file(monkeypatch, path):

@@ -9,11 +9,11 @@ import pytest
 from app.main import ensure_scheduling_hooks_installed
 from app.services.scheduling import hook_installer
 
-ALL_EVENTS = {"UserPromptSubmit", "Stop", "Notification", "SessionStart"}
+ALL_EVENTS = {"UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"}
 
 
 @pytest.mark.asyncio
-async def test_ensure_scheduling_hooks_installed_writes_all_four_hooks(tmp_path, monkeypatch):
+async def test_ensure_scheduling_hooks_installed_writes_all_hooks(tmp_path, monkeypatch):
     settings_file = tmp_path / "settings.json"
     monkeypatch.setattr(hook_installer, "get_claude_user_settings_file", lambda: settings_file)
 

@@ -12,7 +12,7 @@ def test_hook_command_posts_event():
 
 def test_settings_block_has_all_events():
     block = settings_hooks_block(port=8000)
-    assert set(block) == {"UserPromptSubmit", "Stop", "Notification", "SessionStart"}
+    assert set(block) == {"UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"}
 
 
 def test_render_includes_tmux_pane():
@@ -47,3 +47,15 @@ def test_hook_event_accepts_message():
         message="You've hit your session limit",
     )
     assert ev.message == "You've hit your session limit"
+
+
+def test_hook_event_accepts_session_end():
+    ev = HookEvent(event="SessionEnd", session_id="s1", cwd="/proj")
+    assert ev.event == "SessionEnd"
+
+
+def test_session_end_hook_command_posts_event():
+    cmd = render_hook_command(event="SessionEnd", port=8000)
+    assert "curl" in cmd
+    assert "SessionEnd" in cmd
+    assert "hook-event" in cmd
