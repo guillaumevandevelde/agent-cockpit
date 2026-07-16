@@ -217,3 +217,61 @@ def test_project_analyst_md_covers_both_modes(tmp_path):
         "multi-agent decomposition path. "
         f"Got header: {header_line!r}"
     )
+
+
+# ---- Modus-2 content that used to live only in the dispatch-injected -----
+# ---- override (removed in kanban card fbe7937e99484941b196bf2ebc0866f6) --
+# The persona is now the single source of truth for the leaf design-
+# deliverable contract: the follow-up cards clause (with its Backlog-spam
+# guards), the scoped impediment-escape, and the outcome enum. These tests
+# replace the dispatch-level assertions that used to pin this text inside
+# `_analyst_leaf_spike_override_note()`.
+
+
+def _analyst_md_body() -> str:
+    repo_root = Path(__file__).resolve().parents[2]
+    persona_path = repo_root / ".claude" / "agents" / "analyst.md"
+    return dispatch._strip_frontmatter(persona_path.read_text())
+
+
+def test_analyst_md_follow_up_cards_clause_relaxes_create_card():
+    body = _analyst_md_body()
+    assert "create_card" in body and "add_plan_attachment" in body
+    body_lower = body.lower()
+    assert any(
+        marker in body_lower
+        for marker in ("relaxed", "relax", "toegestaan", "permitted", "allowed")
+    ), "analyst.md must explicitly relax create_card/add_plan_attachment for modus 2"
+
+
+def test_analyst_md_follow_up_cards_clause_has_spam_guards():
+    body = _analyst_md_body()
+    body_lower = body.lower()
+    assert "acceptance criteria" in body_lower or "acceptance-criteria" in body_lower
+    assert "list_cards" in body
+    assert "depends_on" in body
+
+
+def test_analyst_md_has_scoped_impediment_escape():
+    body = _analyst_md_body()
+    body_lower = body.lower()
+    assert "report_impediment" in body
+    assert "best-effort" in body_lower or "best effort" in body_lower
+    assert "conditio" in body_lower  # matches "conditional" / "conditionele"
+
+
+def test_analyst_md_outcome_contract_names_enum_and_field():
+    body = _analyst_md_body()
+    for outcome in ("decomposed", "not_feasible", "no_action_needed"):
+        assert outcome in body, f"analyst.md must name outcome enum value {outcome!r}"
+    assert "outcome" in body.lower()
+    assert "move_card" in body
+    assert "Done" in body
+
+
+def test_analyst_md_no_longer_references_dispatch_override():
+    """The dispatch layer no longer injects an override note above the
+    persona (kanban card fbe7937e99484941b196bf2ebc0866f6) — the persona
+    must not point at a mechanism that no longer exists."""
+    body = _analyst_md_body()
+    assert "Analyst-leaf-spike override" not in body

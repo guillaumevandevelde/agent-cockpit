@@ -1155,51 +1155,57 @@ def _stub_default_work_type_mapping(monkeypatch):
     monkeypatch.setattr(service, "get_work_type_persona", fake_get_work_type_persona)
 
 
-# ---- Leaf analyst spike override -------------------------------------------
-# Regression for kanban card a9c27beeb63e427a9c14ad98fa8380fe
-# ("[self-improve] analyst-persona + executor-ship-workflow botsen in één
-# prompt bij work_type=analysis spike-kaarten"). A `work_type='analysis'`
-# leaf card (no `analyst_agent_id`) was getting both the analyst persona
-# (which says "Verboden: geen Write/Edit") AND the executor ship workflow
-# (which says "write doc, commit, ship, attach branch, move THIS kaart
-# naar Done") in the same prompt — the agent had to reason out the
-# contradiction by hand. The fix prepends an override note to the persona
-# preamble that explicitly relaxes the prohibition and reframes the task as
-# "produce a single deliverable, ship it, move THIS card to Done".
+
+# ---- Leaf analyst spike: persona self-scopes, dispatch injects no override -
+# Regression for kanban card a9c27beeb63e427a9c14ad98fa8380fe originally added
+# a dispatch-level override note reconciling the analyst persona's "Verboden:
+# geen Write/Edit" with the executor ship workflow. That override grew to
+# duplicate large chunks of analyst.md's own two-modi framing (follow-up
+# cards clause, outcome contract) while being a preamble every leaf
+# design-deliverable card paid for on every dispatch (kanban card
+# fbe7937e99484941b196bf2ebc0866f6). The persona itself now fully self-scopes
+# both modi (see .claude/agents/analyst.md and analyst_prompt.ANALYST_PROMPT,
+# and their content contracts in test_kanban_personas.py /
+# test_analyst_prompt.py), so `build_card_prompt` no longer injects anything
+# beyond the persona text — these tests assert exactly that.
 
 
 def test_is_analyst_leaf_spike_recognizes_work_type_analysis():
+    from app.kanban import service
     card = _FakeCard(work_type="analysis", agent=None)
-    assert dispatch.is_analyst_leaf_spike(card) is True
+    assert service.is_analyst_leaf_spike(card) is True
 
 
 def test_is_analyst_leaf_spike_recognizes_agent_analyst():
+    from app.kanban import service
     card = _FakeCard(work_type=None, agent="analyst")
-    assert dispatch.is_analyst_leaf_spike(card) is True
+    assert service.is_analyst_leaf_spike(card) is True
 
 
 def test_is_analyst_leaf_spike_recognizes_both():
+    from app.kanban import service
     card = _FakeCard(work_type="analysis", agent="analyst")
-    assert dispatch.is_analyst_leaf_spike(card) is True
+    assert service.is_analyst_leaf_spike(card) is True
 
 
 def test_is_analyst_leaf_spike_rejects_non_analyst_routing():
+    from app.kanban import service
     card = _FakeCard(work_type="feature", agent="engineer")
-    assert dispatch.is_analyst_leaf_spike(card) is False
+    assert service.is_analyst_leaf_spike(card) is False
 
 
 def test_is_analyst_leaf_spike_rejects_unset_card():
+    from app.kanban import service
     card = _FakeCard(work_type=None, agent=None)
-    assert dispatch.is_analyst_leaf_spike(card) is False
+    assert service.is_analyst_leaf_spike(card) is False
 
 
-def test_build_card_prompt_leaf_spike_prepends_override_note():
+def test_build_card_prompt_leaf_spike_no_dispatch_override():
     """A leaf analyst spike (work_type=analysis + no analyst_agent_id,
-    dispatched in executor phase) must get an override note that
-    reconciles the analyst persona's "Verboden: geen Write/Edit" with the
-    executor ship workflow's "write doc, commit, ship, attach". The
-    override must come BEFORE the prohibition in the rendered prompt so
-    the agent treats it as the operative instruction."""
+    dispatched in executor phase) must NOT get any dispatch-injected
+    override text — the persona passed in is rendered as-is. The persona
+    itself (not dispatch) is responsible for scoping its own "Verboden"
+    section to modus 1 and stating the modus-2 contract."""
     card = _FakeCard(
         title="Spike: db plafond",
         description="Investigate SQLite vs Postgres for multi-agent write load.",
@@ -1212,56 +1218,25 @@ def test_build_card_prompt_leaf_spike_prepends_override_note():
         "Je bent de analyst voor een kanban-kaart.\n"
         "### Modus 2 — Leaf design-deliverable\n"
         "Schrijf, commit, ship.\n"
-        "Verboden:\n"
+        "## Verboden (geldt alleen in modus 1)\n"
         "- Zelf code wijzigen in het werkveld."
     )
     prompt = dispatch.build_card_prompt(
         card, persona=persona, ship_mode="direct", phase="executor",
     )
 
-    override_marker = "Analyst-leaf-spike override"
-    assert override_marker in prompt, (
-        f"Leaf-spike override marker {override_marker!r} missing from prompt"
-    )
-    override_idx = prompt.index(override_marker)
-    verboden_idx = prompt.index("Verboden")
-    assert override_idx < verboden_idx, (
-        "Override must precede the 'Verboden' prohibition so the agent reads "
-        "it as the operative instruction. Got override_idx={override_idx}, "
-        "verboden_idx={verboden_idx}."
-    )
-    # The persona is still loaded (we keep the analyst voice); only the
-    # prohibition is relaxed.
-    assert "Verboden" in prompt
-    # The executor ship workflow is still present (no switch to analyst
-    # session-end for leaf spikes).
+    assert "Analyst-leaf-spike override" not in prompt
+    # The persona text is rendered verbatim, right at the top of the prompt.
+    assert prompt.startswith(persona.strip())
+    # The executor ship workflow is still present (leaf spikes ship code).
     assert "Ship (direct mode)" in prompt
     assert "merge --no-ff" in prompt
-    # The persona still mentions leaf-spike reframing (the "Leaf
-    # design-deliverable" section is where the actual modus-2 contract
-    # lives; the override is just a pointer).
-    assert "Leaf design-deliverable" in prompt
-    # The override must defer to the persona's leaf-design-deliverable
-    # section (kanban card c2b478ca: the persona itself is the primary
-    # source of truth, the override is a safety-net pointer). It must
-    # reference both "leaf" + "design" so the agent knows the persona
-    # section to look at.
-    override_block = prompt[override_idx:prompt.index("\n\n---\n\n", override_idx)]
-    assert (
-        "leaf" in override_block.lower() and "design" in override_block.lower()
-    ), (
-        "Leaf-spike override must point at the persona's leaf-design-deliverable "
-        "section (so the persona itself is the primary source of truth). "
-        f"Override block was:\n{override_block}"
-    )
 
 
 def test_build_card_prompt_analyst_classic_no_override():
     """A real analyst card (analyst_agent_id set, no analyst_run_id,
-    phase='analyst') must NOT get the leaf-spike override. It keeps the
-    analyst session-end workflow (move parent → Done) and the analyst
-    persona unchanged. The override would corrupt the multi-agent
-    decomposition flow."""
+    phase='analyst') keeps the analyst session-end workflow (move parent
+    → Done) and the analyst persona unchanged — no dispatch override."""
     card = _FakeCard(
         title="Multi-agent parent",
         description="Decompose this.",
@@ -1280,6 +1255,7 @@ def test_build_card_prompt_analyst_classic_no_override():
     )
 
     assert "Analyst-leaf-spike override" not in prompt
+    assert prompt.startswith(persona.strip())
     # Analyst session-end workflow: move parent → Done
     assert "Move the parent card to Done" in prompt
     # NOT the executor ship workflow — the analyst doesn't ship.
@@ -1287,9 +1263,9 @@ def test_build_card_prompt_analyst_classic_no_override():
     assert "merge --no-ff" not in prompt
 
 
-def test_build_card_prompt_non_analyst_card_no_override():
-    """A non-analyst card (work_type=feature, agent=engineer) must NOT
-    get the leaf-spike override — there's no analyst persona to relax."""
+def test_build_card_prompt_non_analyst_card_unaffected():
+    """A non-analyst card (work_type=feature, agent=engineer) renders its
+    persona unchanged, same as before this change."""
     card = _FakeCard(
         title="Feature: add button",
         description="",
@@ -1304,15 +1280,17 @@ def test_build_card_prompt_non_analyst_card_no_override():
     )
 
     assert "Analyst-leaf-spike override" not in prompt
+    assert prompt.startswith(persona.strip())
     assert "Ship (direct mode)" in prompt
     assert "Move the parent card to Done" not in prompt
 
 
-def test_build_card_prompt_post_analyst_executor_with_work_type_analysis_gets_override():
+def test_build_card_prompt_post_analyst_executor_with_work_type_analysis_no_override():
     """A card where the analyst already ran (analyst_agent_id +
     analyst_run_id both set) but its work_type is still 'analysis' is
-    now dispatched in executor phase with the analyst persona. Same
-    contradiction as the leaf-spike case — same override needed."""
+    dispatched in executor phase with the analyst persona. Same routing
+    as the leaf-spike case, same result: no dispatch override, persona
+    rendered as-is."""
     card = _FakeCard(
         title="post-analyst child",
         description="",
@@ -1330,41 +1308,14 @@ def test_build_card_prompt_post_analyst_executor_with_work_type_analysis_gets_ov
         card, persona=persona, ship_mode="direct", phase="executor",
     )
 
-    assert "Analyst-leaf-spike override" in prompt
-    override_idx = prompt.index("Analyst-leaf-spike override")
-    verboden_idx = prompt.index("Verboden")
-    assert override_idx < verboden_idx
+    assert "Analyst-leaf-spike override" not in prompt
+    assert prompt.startswith(persona.strip())
     assert "Ship (direct mode)" in prompt
 
 
-def test_build_card_prompt_leaf_spike_with_only_agent_no_work_type():
-    """A leaf card without work_type=analysis but with card.agent='analyst'
-    (legacy routing — analyst.md exists but the card was tagged for analyst
-    manually) also gets the leaf-spike override."""
-    card = _FakeCard(
-        title="leaf spike",
-        description="",
-        work_type=None,
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden: geen Write/Edit."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    assert "Analyst-leaf-spike override" in prompt
-
-
-def test_build_card_prompt_no_persona_no_override_section_breakage():
-    """Edge case: persona is None (no analyst.md on disk). The leaf-spike
-    detection still applies (work_type='analysis'), but no preamble is
-    rendered — so the override is silently skipped (nothing to relax).
-    The executor ship workflow renders normally."""
+def test_build_card_prompt_no_persona_no_crash():
+    """Edge case: persona is None (no analyst.md on disk). No preamble is
+    rendered; the executor ship workflow renders normally."""
     card = _FakeCard(
         title="leaf spike",
         description="",
@@ -1377,467 +1328,6 @@ def test_build_card_prompt_no_persona_no_override_section_breakage():
         card, persona=None, ship_mode="direct", phase="executor",
     )
 
-    # No override (no preamble to override)
     assert "Analyst-leaf-spike override" not in prompt
-    # The ship workflow is intact
     assert "Ship (direct mode)" in prompt
     assert "merge --no-ff" in prompt
-
-
-# ---- Leaf-spike follow-up cards clause -------------------------------------
-# Continuation of the kanban card a9c27bee override. The override relaxed
-# Write/Edit so the leaf-spike could write its doc, but it said nothing about
-# the create_card/add_plan_attachment prohibitions carried over from the
-# analyst persona. Result: a leaf-spike session that recommends concrete
-# acceptance-criteria-level follow-up cards would leave them as §-prose in
-# the doc and move THIS card to Done — forcing a manual review round-trip
-# for what is mechanically deterministic work (kanban card 75b54887).
-#
-# The fix extends `_analyst_leaf_spike_override_note` with an explicit
-# follow-up cards clause that:
-#   (a) relaxes the create_card/add_plan_attachment prohibition for the
-#       leaf case (analogous to Write/Edit);
-#   (b) instructs: if the deliverable recommends concrete acceptance-
-#       criteria-level follow-ups, create them in the SAME session via
-#       create_card (+ add_plan_attachment when they form a DAG) BEFORE
-#       moving THIS card to Done;
-#   (c) carries the spam guards (acceptance-criteria level only,
-#       dedup-pass via list_cards, depends_on only on real contracts);
-#   (d) carries the scoped impediment-escape (report_impediment only for
-#       real unresolved product forks; responsible forks decided
-#       best-effort with the alternative preserved as a conditional card).
-#
-# Marker: "Leaf-spike follow-up cards clause" — greppable, mirrors the
-# existing "Analyst-leaf-spike override" marker pattern from kanban card
-# a9c27bee so test-side scanning is consistent.
-
-LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER = "Leaf-spike follow-up cards clause"
-
-
-def _leaf_spike_clause_block(prompt: str) -> str:
-    """Return the text of the leaf-spike follow-up cards clause block from
-    a rendered prompt (from the clause marker through the override's
-    `\\n\\n---\\n\\n` terminator). Empty string when the clause isn't in
-    the prompt."""
-    if LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER not in prompt:
-        return ""
-    start = prompt.index(LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER)
-    end_marker = "\n\n---\n\n"
-    end = prompt.find(end_marker, start)
-    if end == -1:
-        # Clause rendered without the trailing separator (defensive — every
-        # current path includes it). Return the rest of the prompt so the
-        # assertion still inspects something meaningful.
-        return prompt[start:]
-    return prompt[start:end]
-
-
-def test_build_card_prompt_leaf_spike_contains_follow_up_cards_clause():
-    """A leaf analyst spike (work_type='analysis' + no analyst_agent_id,
-    dispatched in executor phase) MUST contain the follow-up cards clause.
-    The clause is what makes the leaf-spike session autonomous over its
-    own recommendations — without it, the recommendations stay as
-    §-prose and the autonomy contract is silently violated.
-    """
-    card = _FakeCard(
-        title="Spike: follow-up cards",
-        description="",
-        work_type="analysis",
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden:\n"
-        "- Zelf code wijzigen in het werkveld."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    assert LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER in prompt, (
-        f"Leaf-spike follow-up cards clause marker "
-        f"{LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER!r} missing from leaf-spike "
-        f"prompt. The clause is required so leaf-spike sessions create "
-        f"follow-up cards in the same session instead of leaving "
-        f"recommendations as §-prose (kanban card 75b54887)."
-    )
-
-
-def test_build_card_prompt_regular_executor_no_follow_up_cards_clause():
-    """A regular executor card (work_type=feature, agent=engineer) must
-    NOT receive the leaf-spike follow-up cards clause. The clause is
-    specifically the relaxation of the analyst persona's create_card
-    prohibition for the leaf case — applying it to a non-leaf engineer
-    card would mean engineers start creating their own follow-up cards
-    (changing the executor/analyst contract), which is out of scope for
-    this card.
-    """
-    card = _FakeCard(
-        title="Feature: add button",
-        description="",
-        work_type="feature",
-        agent="engineer",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = "You are an engineer. Write and ship."
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    assert LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER not in prompt
-
-
-def test_build_card_prompt_real_analyst_no_follow_up_cards_clause():
-    """A real analyst card (analyst_agent_id set, dispatched in
-    phase='analyst') must NOT receive the leaf-spike follow-up cards
-    clause. The classic analyst persona already has its own
-    create_card/add_plan_attachment contract (that's the analyst's
-    primary job). Duplicating that contract via the leaf-spike clause
-    would create contradictory instructions — the persona says
-    "create kind-cards via add_plan_attachment", the leaf-spike clause
-    says "create follow-up cards via create_card" — and the two are
-    subtly different operations.
-    """
-    card = _FakeCard(
-        title="Multi-agent parent",
-        description="",
-        work_type=None,
-        agent=None,
-        analyst_agent_id="claude-code",
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden:\n"
-        "- Zelf code wijzigen in het werkveld."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="analyst",
-    )
-
-    assert LEAF_SPIKE_FOLLOW_UP_CARDS_MARKER not in prompt
-
-
-def test_build_card_prompt_leaf_spike_follow_up_clause_has_spam_guards():
-    """The follow-up cards clause must contain the three spam guards:
-
-    1. Acceptance-criteria level only — speculation stays as §-prose.
-    2. Dedup-pass via list_cards (Backlog/Impediment), comment on match
-       instead of duplicating — same discipline as the flag-problem skill.
-    3. depends_on only on a real contract — pure sequence without a
-       contract is not a dependency.
-
-    Without these guards, the relaxed create_card permission would
-    spawn Backlog-spam (every leaf-spike dumps its brainstorm as N
-    cards) and reverse the autonomy principle into over-escalation.
-    """
-    card = _FakeCard(
-        title="Spike: with guards",
-        description="",
-        work_type="analysis",
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden: geen Write/Edit."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    clause_block = _leaf_spike_clause_block(prompt)
-    assert clause_block, (
-        "Leaf-spike follow-up cards clause marker missing from prompt — "
-        "test_build_card_prompt_leaf_spike_contains_follow_up_cards_clause "
-        "should have failed first; check test ordering or merge conflicts."
-    )
-
-    # Guard 1: acceptance-criteria level only.
-    assert (
-        "acceptance-criteria" in clause_block.lower()
-        or "acceptance criteria" in clause_block.lower()
-    ), (
-        "Follow-up cards clause must require acceptance-criteria-level "
-        "scope to prevent Backlog-spam (speculative ideas stay as prose)."
-    )
-
-    # Guard 2: dedup-pass first via list_cards.
-    assert "list_cards" in clause_block, (
-        "Follow-up cards clause must require a dedup-pass via list_cards "
-        "before creating, with `comment` on match instead of duplicating."
-    )
-    assert "comment" in clause_block.lower(), (
-        "Follow-up cards clause must instruct `comment` on a dedup match "
-        "(same discipline as the flag-problem skill)."
-    )
-
-    # Guard 3: depends_on only on a real contract.
-    assert "depends_on" in clause_block, (
-        "Follow-up cards clause must address depends_on — only on a real "
-        "contract, not pure sequence without a contract."
-    )
-
-
-def test_build_card_prompt_leaf_spike_follow_up_clause_relaxes_create_card():
-    """The follow-up cards clause must explicitly RELAX the
-    create_card/add_plan_attachment prohibition for the leaf case
-    (analogous to how the existing override relaxes Write/Edit). The
-    relaxation is the load-bearing part: without an explicit
-    permission, the agent reads the persona's "Verboden" and skips
-    card creation, defeating the entire clause.
-    """
-    card = _FakeCard(
-        title="Spike: relaxed create_card",
-        description="",
-        work_type="analysis",
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden: geen Write/Edit."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    clause_block = _leaf_spike_clause_block(prompt)
-    assert clause_block
-
-    # Both create_card and add_plan_attachment must be referenced — the
-    # decision doc prescribes create_card for standalone follow-ups and
-    # add_plan_attachment when the cards form a DAG.
-    assert "create_card" in clause_block
-    assert "add_plan_attachment" in clause_block
-    # The relaxation language must be explicit — paraphrase markers:
-    # "relaxed", "permitted", or "allowed" in conjunction with the verbs.
-    clause_lower = clause_block.lower()
-    assert any(
-        marker in clause_lower
-        for marker in ("relaxed", "relax", "permitted", "allowed", "toegestaan")
-    ), (
-        "Follow-up cards clause must explicitly state that create_card / "
-        "add_plan_attachment is RELAXED for the leaf case — a vague "
-        "mention leaves the agent reading the persona's Verboden and "
-        "skipping card creation."
-    )
-
-
-def test_build_card_prompt_leaf_spike_follow_up_clause_has_scoped_impediment_escape():
-    """The follow-up cards clause must contain the scoped impediment-
-    escape: report_impediment(options=[…]) is reserved for an
-    UNRESOLVED PRODUCT FORK that changes WHAT the cards should be
-    (the autonomy-eerst pattern from the decision doc — kanban card
-    75b54887 §5.3). Responsible forks are decided best-effort with
-    the alternative preserved as a conditional card. Without this
-    scope, the clause over-corrects: leaf-spike sessions escalate
-    every minor fork to a human, re-institutionalising the autonomy
-    violation in reverse.
-    """
-    card = _FakeCard(
-        title="Spike: scoped impediment",
-        description="",
-        work_type="analysis",
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden: geen Write/Edit."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    clause_block = _leaf_spike_clause_block(prompt)
-    assert clause_block
-
-    # The escape mechanism: report_impediment must be referenced.
-    assert "report_impediment" in clause_block, (
-        "Follow-up cards clause must reference report_impediment so the "
-        "leaf-spike session knows the scoped escape exists for real "
-        "unresolved product forks."
-    )
-
-    # The scope: best-effort + conditional must be present so the agent
-    # has a default other than escalating every fork.
-    clause_lower = clause_block.lower()
-    assert (
-        "best-effort" in clause_lower or "best effort" in clause_lower
-    ), (
-        "Follow-up cards clause must mention best-effort as the default "
-        "for responsible forks (escalate only the knot you cannot "
-        "responsibly cut)."
-    )
-    assert "conditional" in clause_lower, (
-        "Follow-up cards clause must mention preserving the alternative "
-        "as a conditional card (the autonomy-eerst pattern: escalate "
-        "the unresolved knot, not the routine fork)."
-    )
-
-
-# ---- Outcome-enum contract in leaf-spike override --------------------------
-# Continuation of the analysis-outcome-contract (docs/cockpit/analysis-
-# outcome-contract-decision.md §5). The MCP `move_card` tool refuses a
-# Done-move on a `work_type='analysis'` (or agent='analyst') card without
-# a `outcome` param from the closed enum
-# {`decomposed`, `not_feasible`, `no_action_needed`}. The override note
-# prepended in leaf-spike mode must (a) name the three values verbatim so
-# the session can quote them in the `move_card` call, (b) name `outcome`
-# so the agent knows which `move_card` field populates them, and (c) state
-# the preference order (concrete follow-up cards → real product fork via
-# `report_impediment` → the two written-justification outcomes as honest
-# terminal paths, not escape hatches). Without this the leaf-spike hits
-# the `outcome_required` gate at the very end of its budget — precisely
-# the worst time to discover an unnamed contract.
-
-
-def test_build_card_prompt_leaf_spike_override_names_outcome_enum():
-    """The leaf-spike override note must name the closed outcome enum
-    (`decomposed` / `not_feasible` / `no_action_needed`) verbatim so the
-    session can pass one of them to `move_card(..., column='Done',
-    outcome=<value>)` without guessing at the wire format. The values
-    are the contract of the analysis-outcome-poort; the persona and the
-    gate must read the same string set.
-    """
-    card = _FakeCard(
-        title="Spike: outcome enum",
-        description="",
-        work_type="analysis",
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden: geen Write/Edit."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    clause_block = _leaf_spike_clause_block(prompt)
-    assert clause_block
-
-    for outcome in ("decomposed", "not_feasible", "no_action_needed"):
-        assert outcome in clause_block, (
-            f"Leaf-spike override must name the outcome enum value "
-            f"{outcome!r} so the session can pass it to move_card. The "
-            f"analysis-outcome-poort rejects the Done-move without a "
-            f"value from {{decomposed, not_feasible, no_action_needed}} "
-            f"(docs/cockpit/analysis-outcome-contract-decision.md §5)."
-        )
-
-
-def test_build_card_prompt_leaf_spike_override_names_outcome_param():
-    """The override note must explicitly name the `outcome` parameter so
-    the session doesn't try to smuggle the value into `summary` or a free
-    label. The MCP gate reads `move_card`'s `outcome` kwarg; the prompt
-    and the gate must agree on the field name."""
-    card = _FakeCard(
-        title="Spike: outcome param",
-        description="",
-        work_type="analysis",
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden: geen Write/Edit."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    clause_block = _leaf_spike_clause_block(prompt)
-    assert clause_block
-    clause_lower = clause_block.lower()
-
-    assert "outcome" in clause_lower, (
-        "Leaf-spike override must mention the `outcome` parameter name so "
-        "the session knows which move_card field carries the enum value."
-    )
-    # Must reference move_card by name with Done as the target column —
-    # that's the call site the enum belongs to.
-    assert "move_card" in clause_block, (
-        "Leaf-spike override must reference move_card by name so the "
-        "`outcome=<value>` instruction is grounded at the call site, not "
-        "left as a floating concept."
-    )
-    assert "Done" in clause_block, (
-        "Leaf-spike override must name the Done column so the agent "
-        "knows move_card(..., column='Done') is the call that consumes "
-        "the outcome enum."
-    )
-
-
-def test_build_card_prompt_leaf_spike_override_states_preference_order():
-    """The override note must state the preference order explicitly:
-    vervolgkaarten is the voorkeur (continue with the existing
-    create_card/add_plan_attachment clause); an echte onopgeloste
-    product-fork goes to `report_impediment` (NOT a Done-move); and
-    `not_feasible` / `no_action_needed` are written-justification terminal
-    outcomes, not escape hatches. The order matters because a session
-    under context pressure must know which path is the honest one —
-    the doc's whole point is that 'vervolgkaarten overslaan via
-    no_action_needed' is acceptable only when written and audited."""
-    card = _FakeCard(
-        title="Spike: preference order",
-        description="",
-        work_type="analysis",
-        agent="analyst",
-        analyst_agent_id=None,
-        analyst_run_id=None,
-    )
-    persona = (
-        "Je bent de analyst voor een kanban-kaart.\n"
-        "Verboden: geen Write/Edit."
-    )
-    prompt = dispatch.build_card_prompt(
-        card, persona=persona, ship_mode="direct", phase="executor",
-    )
-
-    clause_block = _leaf_spike_clause_block(prompt)
-    assert clause_block
-    clause_lower = clause_block.lower()
-
-    # Voorkeur: vervolgkaarten / follow-up / kind-kaarten — the existing
-    # clause is the preferred outcome; the new enum section must say so.
-    assert (
-        "voorkeur" in clause_lower or "preferred" in clause_lower
-        or "voorkeur" in clause_block
-    ), (
-        "Leaf-spike override must mark the follow-up cards path as the "
-        "preferred outcome so the agent doesn't reach for "
-        "no_action_needed as an escape hatch."
-    )
-
-    # report_impediment for echte product-forks (and it is NOT a Done-move).
-    assert "report_impediment" in clause_block, (
-        "Leaf-spike override must keep report_impediment as the escape "
-        "for an echte onopgeloste product-fork; that path is NOT a "
-        "Done-move and is therefore not part of the outcome enum."
-    )
-
-    # The two written-justification outcomes must be framed as
-    # legitimate endings, not escape hatches — both must come with a
-    # rationale/justification/summary demand.
-    assert "not_feasible" in clause_block
-    assert "no_action_needed" in clause_block
-    assert any(
-        marker in clause_lower
-        for marker in ("rationale", "rechtvaardiging", "justification")
-    ), (
-        "Leaf-spike override must demand a written justification "
-        "(rationale / rechtvaardiging / justification) for "
-        "not_feasible / no_action_needed so the outcome is auditeerbaar "
-        "instead of silent."
-    )
