@@ -77,6 +77,7 @@ de prefix exact zoals hieronder of de consumer ziet je comment als ruis.
 | `**Review requested:** ` | (geen) | `mcp_server.request_review` | Prefix is *uniek tegenover* `**Summary:**` zodat `enrich_done_info` het nooit als Done-summary leest. |
 | `**Revisit:** ` | `dispatch.extract_revisit_question` | `mcp_server.reopen_card` | Het laatste comment met deze prefix wordt door de dispatch-prompt als `## REVISIT`-sectie ingevoegd. |
 | `[dispatch-failure]` | `impediment_status_for_card` | `dispatch._move_to_impediment_after_repeated_failures` | Nieuwste comment met deze prefix → `impediment_status = "dispatch_failed"`. De UI beveelt dan **redispatch**, geen menselijk antwoord. |
+| `**Outcome:** ` | `mcp_server.move_card` (analyst-Done gate) | `mcp_server.move_card` met `outcome=<value>` op een analyse-kaart (`work_type='analysis'` of `agent='analyst'`) die naar Done gaat | Verplichte tag op de Done-move van een analyse-kaart. Body is `<value> — <summary>`, met `<value>` uit de gesloten enum `decomposed` \| `not_feasible` \| `no_action_needed`. `not_feasible` en `no_action_needed` zetten óók het canonieke label (`not-feasible` / `no-action-needed`) op de kaart — `decomposed` zet geen label, de kind-kaarten zijn het bewijs. Zie `analysis-outcome-contract-decision.md` §5 voor het "waarom". |
 
 ### Veelgemaakte fouten
 
@@ -92,6 +93,33 @@ de prefix exact zoals hieronder of de consumer ziet je comment als ruis.
   `report_impediment` (met of zonder `options`) of een gewone `move_card` met
   `column="Impediment"` + `summary="<vraag>"` — beide produceren automatisch
   de juiste prefix intern.
+
+### 2a. Outcome-label vocabulary (analyse-fase afronding)
+
+Voor analyse-kaarten (`work_type='analysis'` of `agent='analyst'`) is de
+`Done`-move via `mcp_server.move_card` ge-poort op een gesloten
+`outcome`-enum. De canonieke label-waarden die bij `not_feasible` en
+`no_action_needed` automatisch op de kaart worden gezet, zijn:
+
+| `outcome`           | Label                | Betekenis |
+|---------------------|----------------------|-----------|
+| `decomposed`        | (geen — kind-kaarten zijn het bewijs) | De analyse leverde ≥1 vervolgkaart op (geverifieerd tegen `parent_card_id`). |
+| `not_feasible`      | `not-feasible`       | De analyse concludeert: niet bouwen. Rationale in `summary`. |
+| `no_action_needed`  | `no-action-needed`   | Sturings-/ontwerpdoc; geen vervolgkaarten. Rechtvaardiging in `summary`. |
+
+Andere waarden worden geweigerd met `{"error": "invalid_outcome",
+"allowed": [...]}`. Een analyse-Done zonder `outcome` wordt geweigerd met
+`{"error": "outcome_required"}`. Een `decomposed`-claim zonder kinderen
+wordt geweigerd met `{"error": "no_children"}` — dit is de anti-lie-check
+die liegen over `decomposed` onmogelijk maakt. De labels worden
+**append-only** op bestaande labels gezet (`not_feasible` naast bv. een
+ander vrij label), niet overschreven. Zie
+[`analysis-outcome-contract-decision.md`](./analysis-outcome-contract-decision.md)
+§5 voor het "waarom".
+
+> **Niet-ondersteunde vierde uitkomst: "input nodig".** Die hoort bij
+> `report_impediment` (Impediment-kolom), niet bij een Done-move. De
+> poort probeert 'm niet te modelleren.
 
 ## 3. Deliverable-kinds
 
@@ -240,6 +268,7 @@ code-path als de REST PATCH — dus dispatcher-gating, op-log-replay en
 | Welke namen zijn canoniek als "vaste kolom"? | `backend/app/kanban/schemas.py:13` — `COLUMNS`. **Server-side.** |
 | Welke kolommen worden automatisch gedispatched? | `backend/app/kanban/dispatch.py:1655` — `_DISPATCH_COLUMNS`. **Server-side.** |
 | Welke comment-prefix wordt waar gelezen? | Tabel §2 hierboven + de prefix-constanten in `backend/app/kanban/service.py:100,134–136,216,226`. |
+| Welke `outcome` mag ik op `move_card(..., outcome=…)` zetten voor een analyse-Done? | §2a hierboven + de gesloten enum in `backend/app/kanban/mcp_server.py:_OUTCOMES`. Onbekende waarden → `invalid_outcome`; zonder `outcome` → `outcome_required`; `decomposed` zonder kinderen → `no_children`. |
 | Welke `kind` mag ik op `attach_deliverable` zetten? | De MCP `attach_deliverable` docstring + `backend/app/kanban/mcp_server.py:339–361`. Voor de childless-kaart escape hatch voor `kind="plan"`: §3 hierboven + de docstring op `attach_deliverable`. |
 | Hoe zet ik sibling-deps op een kaart via MCP? | `mcp.create_card(..., depends_on=[...])` / `mcp.update_card(card_id, depends_on=[...])` (`mcp_server.py:125–199, 268–305`). De dispatcher gebruikt deze lijst om de kaart pas op te pakken als de genoemde siblings op `Done` of `Impediment` staan. De REST `CardCreate` / `CardUpdate` schemas (`schemas.py:147, :169`) accepteren hetzelfde veld; de MCP wrappers waren historisch beperkter en exposeerden dit alleen via `add_plan_attachment(depends_on_graph=...)`. |
 | Hoe zet/lift ik een business-trigger gate? | `mcp.set_card_gate(card_id, gated_on=<trigger>)` (MCP) of `POST /api/v1/kanban/cards/{cid}/set-gate {"gated_on": "<trigger>"}` (REST). `gated_on=None` of `""` licht de gate. Leest in `dispatch._is_gated` — zie §3a voor rationale en de keuze tegen `depends_on` / `scheduled_at` / dedicated kolom. |

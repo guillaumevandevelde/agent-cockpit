@@ -318,6 +318,184 @@ async def test_move_card_to_other_columns_does_not_require_summary():
     assert moved["column"] == "To Resume"
 
 
+# --- move_card outcome gate (analysis-outcome-contract-decision §5) -------
+#
+# Analysis cards (`work_type='analysis'` or `agent='analyst'`) moving to
+# Done must carry an explicit `outcome` from the closed enum
+# `{decomposed, not_feasible, no_action_needed}`. `decomposed` is verified
+# against real child cards; `not_feasible` / `no_action_needed` set a
+# label and post a `**Outcome:** …` activity-feed comment. Non-analysis
+# cards are unaffected (backwards compatible). See docs/cockpit/kanban-
+# conventions.md §2 for the comment-prefix contract.
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_without_outcome_is_rejected():
+    """An analysis card (work_type='analysis') without outcome is refused.
+
+    Mirrors the summary_required pattern: card stays put, an actionable
+    error listing the three allowed values comes back."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    result = await m.move_card(cid, "Done", summary="analysis done")
+    assert result.get("error") == "outcome_required"
+    # three allowed values should be mentioned in the message body
+    msg = result.get("message", "")
+    for value in ("decomposed", "not_feasible", "no_action_needed"):
+        assert value in msg, f"{value} missing from message: {msg!r}"
+    card = await m.get_card(cid)
+    assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_analyst_agent_card_to_done_without_outcome_is_rejected():
+    """Routing via agent='analyst' (legacy/manual override) is also gated.
+
+    `is_analyst_leaf_spike` checks both `work_type == 'analysis'` and
+    `agent == 'analyst'` — this confirms the agent-attribute path is also
+    subject to the gate."""
+    cid = (await m.create_card("P", "analyse", "", agent="analyst"))["id"]
+    result = await m.move_card(cid, "Done", summary="analysis done")
+    assert result.get("error") == "outcome_required"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_with_invalid_outcome_is_rejected():
+    """Unknown outcome values fail closed with the allowed-set echoed back."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    result = await m.move_card(cid, "Done",
+                                summary="analysis done",
+                                outcome="finished")
+    assert result.get("error") == "invalid_outcome"
+    assert set(result.get("allowed", [])) == {
+        "decomposed", "not_feasible", "no_action_needed",
+    }
+    card = await m.get_card(cid)
+    assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_decomposed_without_children_is_rejected():
+    """`decomposed` is verified, not trusted: without ≥1 child card the
+    move is refused — this is the anti-lie check."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    result = await m.move_card(cid, "Done",
+                                summary="split into subtasks",
+                                outcome="decomposed")
+    assert result.get("error") == "no_children"
+    card = await m.get_card(cid)
+    assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_decomposed_with_children_is_allowed():
+    """`decomposed` with ≥1 child is the happy path — the children are the
+    proof of work, no extra label is set (the children are the artefact)."""
+    parent = (await m.create_card("P", "analyse", "",
+                                   work_type="analysis"))["id"]
+    # Create a child card pointing back at the parent.
+    await m.create_card("P", "child", "",
+                         parent_card_id=parent)
+    result = await m.move_card(parent, "Done",
+                                summary="split into subtasks",
+                                outcome="decomposed")
+    assert result["column"] == "Done"
+    # No label is set for `decomposed`; children themselves are the proof.
+    assert "not-feasible" not in (result.get("labels") or [])
+    assert "no-action-needed" not in (result.get("labels") or [])
+    # An Outcome comment is posted with the summary verbatim.
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.service import card_activity
+
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, parent)
+    outcome_comments = [
+        o for o in ops
+        if o.op_type == "comment"
+        and "**Outcome:** decomposed — split into subtasks" in (o.payload.get("text") or "")
+    ]
+    assert len(outcome_comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_not_feasible_sets_label_and_comment():
+    """`not_feasible` appends the canonical `not-feasible` label (preserving
+    any pre-existing labels) and posts the **Outcome:** comment.
+
+    Verifies the append-not-overwrite invariant: we pre-set a label on the
+    card, call move_card with outcome=not_feasible, and assert both labels
+    are present after the move."""
+    cid = (await m.create_card("P", "analyse", "",
+                                work_type="analysis"))["id"]
+    # Seed a pre-existing label via the op-log (the MCP create_card wrapper
+    # doesn't surface `labels` — sibling chore on the kanban board fills
+    # that gap; for the gate itself we only need to prove append-not-
+    # overwrite, which is easier to express by seeding via the same op-
+    # log path the gate itself uses under the hood).
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import apply_operation
+
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid,
+            payload={"labels": ["pre-existing"]})
+        await s.commit()
+    result = await m.move_card(cid, "Done",
+                                summary="scope too broad — punt on this",
+                                outcome="not_feasible")
+    assert result["column"] == "Done"
+    assert "not-feasible" in (result.get("labels") or [])
+    # pre-existing label survives the merge
+    assert "pre-existing" in (result.get("labels") or [])
+
+    from app.kanban.service import card_activity
+
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, cid)
+    outcome_comments = [
+        o for o in ops
+        if o.op_type == "comment"
+        and "**Outcome:** not_feasible — scope too broad — punt on this" in (o.payload.get("text") or "")
+    ]
+    assert len(outcome_comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_no_action_needed_sets_label_and_comment():
+    """`no_action_needed` is the symmetric counterpart of `not_feasible`:
+    label `no-action-needed`, append-not-overwrite, **Outcome:** comment."""
+    cid = (await m.create_card("P", "analyse", "",
+                                work_type="analysis"))["id"]
+    result = await m.move_card(cid, "Done",
+                                summary="decision-doc only, no follow-up",
+                                outcome="no_action_needed")
+    assert result["column"] == "Done"
+    assert "no-action-needed" in (result.get("labels") or [])
+
+
+@pytest.mark.asyncio
+async def test_move_non_analysis_card_to_done_ignores_outcome():
+    """Backwards compatibility: feature/bug/chore cards (or untyped ones)
+    with work_type != 'analysis' and agent != 'analyst' keep accepting a
+    bare summary=... and outcome, if supplied, is recorded as a normal
+    op but never gates anything.
+
+    This proves the gate is limited to the predicate — engineers, plan
+    creators, and bystander cards all stay on the legacy path."""
+    cid = (await m.create_card("P", "feature", "", work_type="feature"))["id"]
+    # No outcome: legacy path.
+    moved = await m.move_card(cid, "Done", summary="shipped the feature")
+    assert moved["column"] == "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_card_to_other_columns_ignores_outcome():
+    """The outcome gate only fires on Done. A Backlog→Doing move with a
+    bogus outcome string is untouched — the column isn't Done, the gate
+    isn't triggered, and there's no spurious rejection."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    moved = await m.move_card(cid, "Doing", outcome="decomposed")
+    assert moved["column"] == "Doing"
+
+
 # --- resolve_project_key: MCP-only path to the real board key, so agents ---
 # --- without shell/HTTP access don't have to guess a project string. -------
 
