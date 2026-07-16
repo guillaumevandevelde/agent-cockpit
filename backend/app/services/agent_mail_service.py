@@ -676,6 +676,24 @@ class AgentMailService:
             last_seen_at=session.last_seen_at,
         )
 
+    async def _gc_stale_repo_members(self, db: AsyncSession) -> int:
+        """Delete MailTeamMember rows whose ``repo_path`` no longer exists on disk.
+
+        ``_get_or_create_repo_member`` hands out a permanent identity to any
+        cwd that ever registers, including ephemeral ones (pytest tmp_path,
+        scratchpad dirs, manual probes) -- nothing ever reclaims them once the
+        directory is gone, so they accumulate as roster/prompt noise (see
+        docs/cockpit/spawn-test-bridge-sessions-analyse.md bevinding 7). A real
+        repo's working directory always exists, so this never touches it.
+        """
+        members = (await db.execute(select(MailTeamMember))).scalars().all()
+        stale = [m for m in members if not os.path.isdir(m.repo_path)]
+        for member in stale:
+            await db.delete(member)
+        if stale:
+            await db.commit()
+        return len(stale)
+
     async def list_team(self, db: AsyncSession) -> list[MailMemberResponse]:
         now = datetime.utcnow()
         members = (await db.execute(select(MailTeamMember))).scalars().all()
@@ -718,6 +736,11 @@ class AgentMailService:
     async def build_session_start_context(
         self, db: AsyncSession, member_id: int, session_key: str | None = None,
     ) -> str:
+        # This builds the "Team: ..." roster injected into every dispatched
+        # session's first prompt -- the one place a stale identity is
+        # guaranteed to be re-read at a low, natural cadence (once per
+        # session start), so it's also where the GC runs.
+        await self._gc_stale_repo_members(db)
         member = await db.get(MailTeamMember, member_id)
         if member is None:
             return ""

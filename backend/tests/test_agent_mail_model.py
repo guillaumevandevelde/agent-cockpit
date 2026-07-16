@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.database import AsyncSessionLocal, Base, engine
+from app.database import Base
 from app.models.agent_mail import (
     MailAgentSession,
     MailExternalActor,
@@ -10,6 +10,7 @@ from app.models.agent_mail import (
     MailReceipt,
     MailTeamMember,
 )
+from tests.agent_mail_test_db import AsyncSessionLocal, engine
 
 
 @pytest.mark.asyncio

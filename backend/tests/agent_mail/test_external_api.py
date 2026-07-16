@@ -1,12 +1,16 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.database import Base, engine
+import app.database as database_module
+from app.database import Base
 from app.main import app
+from tests.agent_mail_test_db import AsyncSessionLocal as agent_mail_session_factory
+from tests.agent_mail_test_db import engine
 
 
 @pytest.fixture(autouse=True)
-async def _create_tables():
+async def _create_tables(monkeypatch):
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", agent_mail_session_factory)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

@@ -2,12 +2,20 @@ import json
 
 import pytest
 
-from app.database import Base, engine
+from app.database import Base
 from app.mcp_server.server import mcp
+from tests.agent_mail_test_db import AsyncSessionLocal, engine
 
 
 @pytest.fixture(autouse=True)
-async def _create_tables():
+async def _create_tables(monkeypatch):
+    # The MCP tools create their own DB sessions internally (see
+    # app/mcp_server/tools/agent_mail.py), binding AsyncSessionLocal into that
+    # module's namespace at import time -- patch it there, not on app.database,
+    # per the test-doubles convention (docs/cockpit/test-doubles-convention.md).
+    from app.mcp_server.tools import agent_mail as agent_mail_tools
+    monkeypatch.setattr(agent_mail_tools, "AsyncSessionLocal", AsyncSessionLocal)
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

@@ -1,6 +1,6 @@
 import pytest
 
-from app.database import AsyncSessionLocal, Base, engine
+from app.database import Base
 from app.models.agent_mail_schemas import (
     ExternalAgentMailContextRequest,
     MailAgentRegisterRequest,
@@ -12,6 +12,7 @@ from app.services.external_agent_mail_service import (
     ExternalAgentMailRateLimitError,
     external_agent_mail_service,
 )
+from tests.agent_mail_test_db import AsyncSessionLocal, engine
 
 
 @pytest.fixture(autouse=True)
