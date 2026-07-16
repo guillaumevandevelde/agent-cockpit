@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from app.kanban import service
+from app.kanban import dispatch, service
 from app.kanban.operations import apply_operation
 from app.main import app
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
@@ -143,6 +143,74 @@ async def test_request_review_includes_deliverable_refs_in_description():
         review = await service.request_review(s, original_id, "check it")
         await s.commit()
     assert "branch: k-some-branch" in review.description
+
+
+# --- Priority dispatch contract ---------------------------------------------
+#
+# Acceptance criterion from kanban card b4710c5a… (self-improve): a human in
+# the loop asked for a review on a Done card and waited >1h because the new
+# review card sat behind ~20 Backlog cards. Without `priority="high"` it sorts
+# behind everything (rank-based FIFO); with it the dispatcher's `_next_card`
+# picks it before lower-priority work. Three things must hold:
+#   (1) the review card carries `priority="high"` (service contract),
+#   (2) it sits in the priority-sorted dispatch order ahead of older
+#       Backlog cards with no priority (rank would otherwise beat it),
+#   (3) the dispatcher picks it up as the very first thing.
+
+
+@pytest.mark.asyncio
+async def test_request_review_sets_high_priority_on_new_card():
+    """Service contract: a review card created via request_review carries
+    priority='high' so it jumps the queue. Without this, a human in the loop
+    waits as long as the rank-FIFO backlog (1h+ in the worst observed case),
+    and falls back to reopening the source card as the costliest possible
+    corrective action (a full Opus re-analysis)."""
+    async with KanbanSessionLocal() as s:
+        original_id = await _make_done_card(s)
+
+    async with KanbanSessionLocal() as s:
+        review = await service.request_review(s, original_id, "doubt")
+        await s.commit()
+
+    assert review.priority == "high", (
+        "request_review must set priority='high' so the review card sorts "
+        "ahead of ordinary Backlog cards via dispatch._priority_key"
+    )
+
+
+@pytest.mark.asyncio
+async def test_request_review_card_dispatches_before_older_unprioritised_backlog():
+    """Integration: even when an unprioritised Backlog card was filed *first*
+    (older rank) and the review card only lands later, `_next_card` returns
+    the review card. This is the exact scenario that produced the 1h+ wait."""
+    PK = "P"
+    async with KanbanSessionLocal() as s:
+        # File an ordinary Backlog card first so it has an older rank than the
+        # review card will have when we create it next.
+        await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key=PK, entity_id=None,
+            payload={"title": "filed-an-hour-ago", "column": "Backlog"},
+        )
+        original_id = await _make_done_card(s, project_key=PK)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await service.request_review(s, original_id, "please check")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await service.list_cards(s, PK)
+    backlog = [c for c in cards if c.column == "Backlog"]
+    assert {c.title for c in backlog} == {"filed-an-hour-ago", "Review: Ship the thing"}
+
+    async with KanbanSessionLocal() as s:
+        cards = await service.list_cards(s, PK)
+        next_card = dispatch._next_card(cards)
+    assert next_card is not None
+    assert next_card.title == "Review: Ship the thing", (
+        "the review card must be picked first even though rank would pick the older card"
+    )
 
 
 # --- REST layer --------------------------------------------------------------

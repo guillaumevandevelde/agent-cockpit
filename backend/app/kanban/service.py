@@ -274,6 +274,14 @@ async def request_review(session, card_id: str, note: str):
        refs, and `metadata.reviewed_card_id` linking back to the original. A new
        card, not a reopen, so the original's done_summary/completed_at stay intact.
 
+    The new card is tagged `priority="high"` so `dispatch._next_card` picks it
+    up before ordinary rank-FIFO Backlog cards: a human in the loop is blocked
+    on an answer, and waiting behind 20+ unrelated cards (the worst observed
+    wait was 1u43m) pushes them to reopen the source card as the costliest
+    possible corrective action (a full Opus re-analysis). High priority uses
+    the existing `_PRIORITY_RANK = {"high": 3, ...}` machinery — no new sort
+    path needed.
+
     Returns the new review card, or None when `card_id` doesn't exist. Raises
     CardNotInDone when the card exists but isn't in Done (the check runs before
     any op, so a rejected call leaves the board untouched).
@@ -299,6 +307,7 @@ async def request_review(session, card_id: str, note: str):
         project_key=card.project_key, entity_id=None,
         payload={"title": f"Review: {card.title}", "description": description,
                  "column": "Backlog", "work_type": "analysis", "agent": agent,
+                 "priority": "high",
                  "metadata": {"reviewed_card_id": card_id}})
     return await get_card(session, new_id)
 
