@@ -13,3 +13,12 @@
 *.css       text eol=lf
 *.html      text eol=lf
 Dockerfile  text eol=lf
+
+# Decision register: append-friendly merge so concurrent sessions that each
+# insert a new row at the same position (directly under the header — see
+# `docs/cockpit/decisions.md` "Conventie — een beslissing landt hier") don't
+# silently lose a row. `merge=union` keeps both sides' added lines on conflict;
+# the order between two concurrent inserts is non-deterministic but the
+# `Datum` column makes the chronological order explicit regardless. See card
+# `16ce4d89…` for the conflict incident that motivated this.
+docs/cockpit/decisions.md merge=union
