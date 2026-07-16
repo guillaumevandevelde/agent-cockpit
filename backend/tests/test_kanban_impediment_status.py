@@ -235,7 +235,7 @@ async def test_get_card_includes_impediment_status_dispatch_failed(_client):
     that landed there via 3× dispatch failure."""
     from app.kanban import mcp_server as m
 
-    cid = (await m.create_card("IMP-HTTP-1", "t", ""))["id"]
+    cid = (await m.create_card("IMP-HTTP-1", "t", "", confirm_new_project=True))["id"]
     await m.move_card(cid, "Impediment")
     # Simulate the auto-move comment + a successor move (same effect as
     # _move_to_impediment_after_repeated_failures produces in production).
@@ -257,7 +257,7 @@ async def test_get_card_includes_impediment_status_needs_answer(_client):
     """A `**Impediment:**` comment + open gate → needs_answer."""
     from app.kanban import mcp_server as m
 
-    cid = (await m.create_card("IMP-HTTP-2", "t", ""))["id"]
+    cid = (await m.create_card("IMP-HTTP-2", "t", "", confirm_new_project=True))["id"]
     await m.move_card(cid, "Impediment")
     await apply_operation(
         TestSessionLocal()(), op_type="comment", entity_type="comment",
@@ -274,16 +274,16 @@ async def test_list_cards_includes_impediment_status_per_card(_client):
     """Every card on the board surfaces its status; non-Impediment cards get null."""
     from app.kanban import mcp_server as m
 
-    no_q_id = (await m.create_card("IMP-LIST", "bare", ""))["id"]
+    no_q_id = (await m.create_card("IMP-LIST", "bare", "", confirm_new_project=True))["id"]
     await m.move_card(no_q_id, "Impediment")
-    ask_id = (await m.create_card("IMP-LIST", "ask", ""))["id"]
+    ask_id = (await m.create_card("IMP-LIST", "ask", "", confirm_new_project=True))["id"]
     await m.move_card(ask_id, "Impediment")
     await apply_operation(
         TestSessionLocal()(), op_type="comment", entity_type="comment",
         project_key="IMP-LIST", entity_id=ask_id,
         payload={"text": "**Impediment:** pick A or B"},
     )
-    back_id = (await m.create_card("IMP-LIST", "back", ""))["id"]
+    back_id = (await m.create_card("IMP-LIST", "back", "", confirm_new_project=True))["id"]
     # Stays on Backlog.
 
     r = await _client.get("/api/v1/kanban/cards",
@@ -300,9 +300,9 @@ async def test_mcp_list_cards_includes_impediment_status_per_card():
     """MCP layer parity: agent-side tools see the same field as REST."""
     from app.kanban import mcp_server as m
 
-    no_q_id = (await m.create_card("MCP-IMP-LIST", "bare", ""))["id"]
+    no_q_id = (await m.create_card("MCP-IMP-LIST", "bare", "", confirm_new_project=True))["id"]
     await m.move_card(no_q_id, "Impediment")
-    fail_id = (await m.create_card("MCP-IMP-LIST", "fail", ""))["id"]
+    fail_id = (await m.create_card("MCP-IMP-LIST", "fail", "", confirm_new_project=True))["id"]
     await m.move_card(fail_id, "Impediment")
     await apply_operation(
         TestSessionLocal()(), op_type="comment", entity_type="comment",

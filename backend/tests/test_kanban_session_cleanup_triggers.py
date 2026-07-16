@@ -56,7 +56,7 @@ async def test_move_to_done_via_mcp_fires_cleanup(monkeypatch):
     called: list = []
     _patch_cleanup(monkeypatch, called)
 
-    card = await m.create_card("git:test/repo", "X", "")
+    card = await m.create_card("git:test/repo", "X", "", confirm_new_project=True)
     cid = card["id"]
     await m.claim_card(cid, "agent:k-test-1234")
 
@@ -74,7 +74,7 @@ async def test_move_to_impediment_via_mcp_fires_cleanup(monkeypatch):
     called: list = []
     _patch_cleanup(monkeypatch, called)
 
-    card = await m.create_card("git:test/repo", "X", "")
+    card = await m.create_card("git:test/repo", "X", "", confirm_new_project=True)
     cid = card["id"]
     await m.claim_card(cid, "agent:k-test-1234")
 
@@ -92,7 +92,7 @@ async def test_report_impediment_via_mcp_fires_cleanup(monkeypatch):
     called: list = []
     _patch_cleanup(monkeypatch, called)
 
-    card = await m.create_card("git:test/repo", "X", "")
+    card = await m.create_card("git:test/repo", "X", "", confirm_new_project=True)
     cid = card["id"]
     await m.claim_card(cid, "agent:k-test-1234")
 

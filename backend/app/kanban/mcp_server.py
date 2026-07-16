@@ -87,14 +87,40 @@ async def resolve_project_key(project_path: str) -> dict:
     return {"project_key": _resolve_project_key(project_path)}
 
 
+async def _unknown_project_key_error(s, project: str, *, for_create: bool) -> dict:
+    known = sorted(await service.known_project_keys(s))
+    sample = known[:10]
+    hint = (
+        "Call resolve_project_key(project_path) to get the exact key for an "
+        "existing project. If this is genuinely the first card for a "
+        "brand-new project, "
+        + ("pass confirm_new_project=True." if for_create
+           else "use create_card(..., confirm_new_project=True) to create "
+                "its first card, then list_cards will see it.")
+    )
+    return {
+        "error": "unknown_project_key",
+        "project": project,
+        "message": (
+            f"No existing cards or columns found for project key {project!r} "
+            f"— this is likely a typo or a guessed key. {hint}"
+        ),
+        "known_project_keys_sample": sample,
+    }
+
+
 @mcp.tool()
 async def list_cards(project: str, column: str | None = None,
-                     compact: bool = False) -> list[dict]:
+                     compact: bool = False) -> list[dict] | dict:
     """List cards for a project, optionally filtered by column.
 
     `project` must be the exact project key — use `resolve_project_key` first
-    if you're not certain of it. A mistyped or guessed key won't error; it
-    just returns an empty (or wrong) list from an unrelated bucket.
+    if you're not certain of it. An unrecognized key (no existing cards or
+    columns) returns `{"error": "unknown_project_key", ...}` instead of
+    silently returning an empty list from an unrelated (or mistyped) bucket
+    — see kanban card 91c85199 for the incident this prevents. If the
+    project is genuinely brand-new, create its first card via
+    `create_card(..., confirm_new_project=True)` first.
 
     `compact=True` returns the dedupe-friendly per-card shape
     (id, title, column, work_type, rank) and skips the per-card op-log
@@ -104,6 +130,9 @@ async def list_cards(project: str, column: str | None = None,
     agent expects. Backwards-compatible opt-in.
     """
     async with KanbanSessionLocal() as s:
+        known = await service.known_project_keys(s)
+        if project not in known:
+            return await _unknown_project_key_error(s, project, for_create=False)
         rows = await service.list_cards(s, project, column, compact=compact)
         if compact:
             return [CardSummaryResponse.model_validate(c).model_dump()
@@ -130,12 +159,19 @@ async def create_card(project: str, title: str, description: str = "",
                       parent_card_id: str | None = None,
                       depends_on: list[str] | None = None,
                       labels: list[str] | None = None,
-                      metadata: dict | None = None) -> dict:
+                      metadata: dict | None = None,
+                      confirm_new_project: bool = False) -> dict:
     """Create a new card (agents may decompose work into subtask cards).
 
     `project` must be the exact project key — use `resolve_project_key` first
-    if you're not certain of it. A mistyped or guessed key won't error; it
-    silently creates a new, orphaned bucket that auto-dispatch never sees.
+    if you're not certain of it. A `project` with no existing cards or
+    columns is refused with `{"error": "unknown_project_key", ...}` unless
+    `confirm_new_project=True` — this is what closes the "silent orphan
+    bucket" half of the incident in kanban card 91c85199 (the other half is
+    `list_cards` returning a false-empty list for the same reason). Pass
+    `confirm_new_project=True` only when you deliberately mean to create the
+    very first card of a brand-new project; for an existing project, a
+    mistyped key should error, not quietly succeed elsewhere.
 
     `work_type` (analysis | feature | bug | chore) and `agent` are optional
     routing hints. When `work_type` is set and `agent` is not, the
@@ -173,6 +209,10 @@ async def create_card(project: str, title: str, description: str = "",
     a JSON column on the card and round-tripped unchanged on read.
     """
     async with KanbanSessionLocal() as s:
+        if not confirm_new_project:
+            known = await service.known_project_keys(s)
+            if project not in known:
+                return await _unknown_project_key_error(s, project, for_create=True)
         # Auto-fill `agent` from the work_type mapping so MCP-created cards
         # don't recreate the regression from kanban card 9cf106e7 ("Card with
         # analysis work type got picked up by an engineer"): without this, a

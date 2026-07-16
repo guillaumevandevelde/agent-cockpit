@@ -51,7 +51,7 @@ async def test_resolve_impediment_forwards_gate_answer_as_impediment_answer(
     monkeypatch.setattr(dispatch_mod, "dispatch_impediment_card", fake_dispatch)
 
     # 1. Create card + report_impediment with options (mirrors the new MCP path).
-    card = await m.create_card("P", "blocked", "details", agent="engineer")
+    card = await m.create_card("P", "blocked", "details", agent="engineer", confirm_new_project=True)
     cid = card["id"]
     await m.claim_card(cid, "agent:sess")
     await m.report_impediment(cid, "Postgres or SQLite?",
@@ -94,7 +94,7 @@ async def test_resolve_impediment_legacy_free_text_question_path(
 
     monkeypatch.setattr(dispatch_mod, "dispatch_impediment_card", fake_dispatch)
 
-    card = await m.create_card("P", "blocked", "details", agent="engineer")
+    card = await m.create_card("P", "blocked", "details", agent="engineer", confirm_new_project=True)
     cid = card["id"]
     await m.claim_card(cid, "agent:sess")
     # Legacy call — no options. No KanbanGate is created.
@@ -130,7 +130,7 @@ async def test_resolve_impediment_gate_wins_over_resolution_comment(
     monkeypatch.setattr(dispatch_mod, "dispatch_impediment_card", fake_dispatch)
 
     # 1. Create card + report_impediment with options, then answer the gate.
-    card = await m.create_card("P", "blocked", "details", agent="engineer")
+    card = await m.create_card("P", "blocked", "details", agent="engineer", confirm_new_project=True)
     cid = card["id"]
     await m.claim_card(cid, "agent:sess")
     await m.report_impediment(cid, "Postgres or SQLite?",

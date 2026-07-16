@@ -31,7 +31,7 @@ async def test_open_gate_not_found():
 
 @pytest.mark.asyncio
 async def test_open_gate_returns_answer_once_a_human_answers():
-    cid = (await m.create_card("P", "Card", ""))["id"]
+    cid = (await m.create_card("P", "Card", "", confirm_new_project=True))["id"]
 
     async def answer_soon():
         # Let open_gate create the gate and start polling first.
@@ -51,7 +51,7 @@ async def test_open_gate_returns_answer_once_a_human_answers():
 
 @pytest.mark.asyncio
 async def test_open_gate_times_out_when_unanswered():
-    cid = (await m.create_card("P", "Card", ""))["id"]
+    cid = (await m.create_card("P", "Card", "", confirm_new_project=True))["id"]
     result = await m.open_gate(cid, "Ship now?", ["yes", "no"], timeout_seconds=0.05)
     assert result["error"] == "timeout"
     assert "gate_id" in result
@@ -64,7 +64,7 @@ async def test_open_gate_times_out_when_unanswered():
 
 @pytest.mark.asyncio
 async def test_open_gate_logs_a_comment_on_the_card():
-    cid = (await m.create_card("P", "Card", ""))["id"]
+    cid = (await m.create_card("P", "Card", "", confirm_new_project=True))["id"]
 
     async def answer_soon():
         await asyncio.sleep(0.05)
@@ -93,14 +93,14 @@ async def test_open_gate_logs_a_comment_on_the_card():
 
 @pytest.mark.asyncio
 async def test_latest_gate_answer_returns_none_when_no_gate_exists():
-    cid = (await m.create_card("P", "Card", ""))["id"]
+    cid = (await m.create_card("P", "Card", "", confirm_new_project=True))["id"]
     async with KanbanSessionLocal() as s:
         assert await service.latest_gate_answer(s, cid) is None
 
 
 @pytest.mark.asyncio
 async def test_latest_gate_answer_returns_none_when_gate_unanswered():
-    cid = (await m.create_card("P", "Card", ""))["id"]
+    cid = (await m.create_card("P", "Card", "", confirm_new_project=True))["id"]
     await m.open_gate(cid, "Pick one", ["a", "b"], timeout_seconds=0.01)
     async with KanbanSessionLocal() as s:
         # Gate exists but status="open" — pending human input. Don't surface
@@ -110,7 +110,7 @@ async def test_latest_gate_answer_returns_none_when_gate_unanswered():
 
 @pytest.mark.asyncio
 async def test_latest_gate_answer_returns_chosen_value_via_mcp():
-    cid = (await m.create_card("P", "Card", ""))["id"]
+    cid = (await m.create_card("P", "Card", "", confirm_new_project=True))["id"]
     async with KanbanSessionLocal() as s:
         gate = await service.create_gate(s, card_id=cid, project_key="P",
             question="Pick one", options=["a", "b"])
@@ -127,7 +127,7 @@ async def test_latest_gate_answer_returns_chosen_value_via_mcp():
 async def test_latest_gate_answer_picks_most_recent_answer():
     """Re-opened impediments may carry multiple gates. The latest *answered*
     one wins so a human who changes their mind overrides the first pick."""
-    cid = (await m.create_card("P", "Card", ""))["id"]
+    cid = (await m.create_card("P", "Card", "", confirm_new_project=True))["id"]
     async with KanbanSessionLocal() as s:
         first = await service.create_gate(s, card_id=cid, project_key="P",
             question="Round 1", options=["x", "y"])

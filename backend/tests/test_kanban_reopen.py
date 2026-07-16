@@ -463,7 +463,7 @@ async def test_rest_reopen_404_on_missing_card(_client):
 async def test_mcp_reopen_creates_revisit_and_moves_to_backlog():
     from app.kanban import mcp_server as m
 
-    original_id = (await m.create_card("MCP", "Done decision", ""))["id"]
+    original_id = (await m.create_card("MCP", "Done decision", "", confirm_new_project=True))["id"]
     await m.move_card(original_id, "Done", summary="Decided X.")
 
     card = await m.reopen_card(original_id, "X is wrong.")
@@ -474,7 +474,7 @@ async def test_mcp_reopen_creates_revisit_and_moves_to_backlog():
 async def test_mcp_reopen_error_on_in_flight_card():
     from app.kanban import mcp_server as m
 
-    cid = (await m.create_card("MCP", "wip", ""))["id"]
+    cid = (await m.create_card("MCP", "wip", "", confirm_new_project=True))["id"]
     # Move it into a column other than Done / Backlog so reopen refuses.
     await m.move_card(cid, "Doing")
     res = await m.reopen_card(cid, "too early")
