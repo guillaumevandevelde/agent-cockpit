@@ -1,8 +1,9 @@
 import json
 
 from app.services.scheduling import hook_installer
+from app.services.scheduling.hook_script import SCHEDULING_HOOK_EVENTS
 
-ALL_EVENTS = {"UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"}
+ALL_EVENTS = set(SCHEDULING_HOOK_EVENTS)
 
 
 def _patch_settings_file(monkeypatch, path):
@@ -18,7 +19,7 @@ def test_status_all_missing_when_no_settings_file(tmp_path, monkeypatch):
     assert status == {event: False for event in ALL_EVENTS}
 
 
-def test_install_writes_all_four_hooks(tmp_path, monkeypatch):
+def test_install_writes_all_scheduling_hooks(tmp_path, monkeypatch):
     settings_file = tmp_path / "settings.json"
     _patch_settings_file(monkeypatch, settings_file)
 

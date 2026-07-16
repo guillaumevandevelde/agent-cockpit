@@ -8,8 +8,9 @@ import pytest
 
 from app.main import ensure_scheduling_hooks_installed
 from app.services.scheduling import hook_installer
+from app.services.scheduling.hook_script import SCHEDULING_HOOK_EVENTS
 
-ALL_EVENTS = {"UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"}
+ALL_EVENTS = set(SCHEDULING_HOOK_EVENTS)
 
 
 @pytest.mark.asyncio
