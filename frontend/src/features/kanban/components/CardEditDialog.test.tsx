@@ -33,7 +33,13 @@ import { CardEditDialog } from "./CardEditDialog";
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  // clearAllMocks (not restoreAllMocks) — the vi.mock factory above installs
+  // vi.fn() defaults once at module load (e.g. getModelOptions). For a bare
+  // vi.fn() with no real implementation to restore to, mockRestore() strips
+  // the factory default (equivalent to mockReset()), and any subsequent test
+  // that relies on the shared default silently breaks when an earlier test's
+  // afterEach runs. See kanban card 3097ebadd3… for the full analysis.
+  vi.clearAllMocks();
 });
 
 describe("CardEditDialog", () => {

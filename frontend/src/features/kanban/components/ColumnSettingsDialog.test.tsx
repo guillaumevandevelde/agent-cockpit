@@ -32,7 +32,12 @@ const COLUMN = {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  // clearAllMocks (not restoreAllMocks) — the vi.mock factory above installs
+  // vi.fn() defaults once at module load. For a bare vi.fn() with no real
+  // implementation to restore to, mockRestore() strips the factory default
+  // (equivalent to mockReset()), and any subsequent test that relies on the
+  // shared default silently breaks when an earlier test's afterEach runs.
+  vi.clearAllMocks();
 });
 
 describe("ColumnSettingsDialog model field", () => {
