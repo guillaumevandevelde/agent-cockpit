@@ -1,5 +1,10 @@
 # Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart
 
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `f2fe8548…`
+**Uitkomst:** **`superpowers:brainstorming` + `writing-plans`** in een dunne `intake-authoring`-skill. Niet spec-kit (zware dep, dubbele orkestratie). `intake_kind` vervalt voor de MVP.
+
 > Kanban-kaart: **`[analysis][inceptie] Interview-/intake-authoring-flow: vrij
 > gesprek → ingevulde intake-kaart (spec + plan)`**
 > (`f2fe854803924e5cbb875bdddc2c4ef5`). Leaf-spike: deze doc *is* de deliverable.

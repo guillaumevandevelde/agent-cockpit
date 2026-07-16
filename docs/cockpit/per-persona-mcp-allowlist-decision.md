@@ -1,5 +1,10 @@
 # Per-persona MCP-tool-allowlist — analyse & beslissing
 
+**Datum:** 2026-07-15
+**Status:** besloten
+**Kaart:** `28e1558e…`
+**Uitkomst:** **NO-GO — geen vervolgkaart.** De premisse ("alle 19 schemas in élke system-prompt") is achterhaald: Claude Code 2.1.210 defert MCP-schemas achter `ToolSearch`, waardoor de 19 tools **388 tokens** kosten i.p.v. ~4.994 — 1,1% van een 36.660-token baseline; de CLI vangt al ~92%. Het voorgestelde mechanisme bestaat bovendien niet: `--allowedTools`/`--disallowedTools` zijn permissie-poorten, geen schema-filters (`--allowedTools` kost netto **+109** tokens). Alleen een rol-gescopete MCP-mount zou grip geven, voor max ~184 tokens (0,5%) — tegenover permanente plumbing en een faalmodus die de leaf-spike-analyst (die de unie van beide rolsets nodig heeft) op de ship-stap breekt. Ook de matrix zelf is minder scheidbaar dan aangenomen: de **verplichte** `session-retro` roept `create_card` aan. Misfire-preventie hoort server-side (bestaand `{"error": …}`-patroon), niet in een allowlist. **Heropenen** alleen als de meting in §7 van 388 → ~5.000 springt.
+
 > **Type:** analyse/beslisdoc (leaf spike). Bron-kaart: *"[analysis] Per-persona
 > MCP-tool-allowlist voor gedispatchte sessies"* (`28e1558e0edf457caee4629870deba3e`),
 > afkomstig van [`token-optimization-analysis.md`](./token-optimization-analysis.md) §4 **R3**.

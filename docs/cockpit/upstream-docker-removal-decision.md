@@ -1,5 +1,10 @@
 # Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing
 
+**Datum:** 2026-07-09
+**Status:** besloten
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Niet overnemen.** Cockpit blijft bij Docker als primaire/aanbevolen flow.
+
 > Kanban-kaart: "BESLISSING: upstream verwijderde Docker-support — meenemen in Cockpit?"
 > DoD van de kaart: blijft Cockpit bij Docker als primaire flow, of sluiten we aan bij
 > upstream en verwijderen we het — **voordat** dit als gewone implementatiekaart

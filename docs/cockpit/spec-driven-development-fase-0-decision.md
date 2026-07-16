@@ -1,5 +1,10 @@
 # Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)
 
+**Datum:** 2026-07-11
+**Status:** besloten
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Optie B (maximalistisch).** `docs/plans/` gearchiveerd → `docs/plans-legacy/`; `docs/cockpit/` expliciet én afdwingbaar canoniek; promotie-ledger + check-script.
+
 > Kanban-kaart: **`[spec-ssot]` Fase 0: consolideer naar één canonieke spec-boom**.
 > Context: [`spec-driven-development-analysis.md`](./spec-driven-development-analysis.md) §5-6.
 > Menselijke go/no-go: **Optie B** (maximalistische Fase 0), gegeven op 2026-07-10.

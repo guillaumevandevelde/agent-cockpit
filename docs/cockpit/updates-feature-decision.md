@@ -1,5 +1,10 @@
 # 'Updates' (self-update) feature — past die nog bij Cockpit's missie?
 
+**Datum:** 2026-07-09
+**Status:** besloten
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Houden, zoals het is.** Geen aanpassing aan `scripts/update.sh`, router of page.
+
 > Kanban-kaart: "Beslis of de 'updates' (self-update) feature nog past bij Cockpit's missie".
 > DoD van de kaart: eerst vaststellen wat `scripts/update.sh` vandaag doet en of de
 > feature in de fork-context nog zinvol is, **voordat** dit als gewone implementatiekaart

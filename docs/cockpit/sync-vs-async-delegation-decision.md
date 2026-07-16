@@ -2,6 +2,9 @@
 
 **Datum:** 2026-07-14
 **Status:** Analyse / beslisdocument (leaf-spike; geen implementatie in deze kaart)
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Complementair, niet concurrerend.** Grens op één as: durability + bordzichtbaarheid vs. gedeelde in-memory context. Async-decompositie blijft één laag diep aan de bordkant.
+
 **Trigger:** kanban-kaart "[analysis] Synchrone sub-agent-delegatie vs. async
 kanban-decompositie", voortkomend uit
 [`openhands-analyse.md`](./openhands-analyse.md) §4.4 + §7.4.

@@ -1,6 +1,10 @@
 # Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies
 
+**Datum:** 2026-07-11
 **Status:** besloten (mens-beslissing op de impediment).
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Niet bouwen.** In plaats daarvan de bestaande in-session retro uitbreiden naar álle gedispatchte sessies — concreet: het analyst-gat sluiten.
+
 **TL;DR:** de *headless* `SessionEnd`-retro voor willekeurige **interactieve**
 sessies wordt **niet gebouwd**. In plaats daarvan breiden we de bestaande
 **in-session** retro uit naar **álle gedispatchte** sessies — concreet: het

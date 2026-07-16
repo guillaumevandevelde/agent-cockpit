@@ -71,7 +71,33 @@ Herzie je een bestaande beslissing? Werk het bron-document bij, voeg een **nieuw
 regel bovenaan toe en markeer de oude regel met `↩︎ herzien door <link>` — zo blijft de
 chronologie leesbaar en verdwijnt er geen historie.
 
-**Validatie:** `bash scripts/check-decision-register.sh` flag't elk
-`docs/cockpit/*-decision.md` dat niet vanuit dit register gelinkt is (advies,
-niet-blokkerend; `--strict` geeft exit 1 voor CI-gebruik). Zo loopt het register niet
-opnieuw achter zodra er een nieuw beslisdocument landt.
+### Header-conventie — wat bovenaan elk `*-decision.md` hoort te staan
+
+Elk beslisdocument begint — direct onder de `# Titel`-regel, vóór de eerste
+`##`-sectie of `>`-blokquote — met dit vier-velden-header:
+
+```markdown
+**Datum:** YYYY-MM-DD
+**Status:** besloten | herzien | voorgesteld
+**Kaart:** `<card-id>`
+**Uitkomst:** <één zin — dezelfde zin als de register-regel>
+```
+
+| Veld | Bron | Verplicht? |
+|---|---|---|
+| **Datum** | `git log --reverse --format=%ad --date=short -- <doc>` wanneer niet in het doc | ja |
+| **Status** | Canonical waarden `besloten` / `herzien` / `voorgesteld`; vrije toevoeging tussen haakjes blijft toegestaan | ja |
+| **Kaart** | `<card-id>` in backticks wanneer beschikbaar; anders `_zie doc — geen hex-id in dit beslisdoc vastgelegd_` (placeholder, refactor-TODO) | ja |
+| **Uitkomst** | Eerste zin van de overeenkomstige register-rij, verbatim. Voor `plans-feature-decision.md` (`⏳ NOG NIET BESLIST`) blijft die tekst expliciet staan. | ja |
+
+**Backfill-volgorde** bij het aanmaken van een nieuw beslisdoc: trek `Datum` uit
+`git log --reverse`, kopieer `Uitkomst` van de register-rij die je zojuist
+hebt aangemaakt, zet `Status: besloten` (of `herzien` als de revisieteller
+hoger is), en vul `Kaart` met de hex-id als die bekend is.
+
+**Validatie:** `bash scripts/check-decision-register.sh --check-headers`
+controleert dat alle vier de velden bestaan én dat `**Uitkomst:**` (na
+whitespace-normalisatie) een prefix is van de register-rij. Advies-only;
+`--strict` geeft exit 1 voor CI-gebruik. De validatie staat los van de
+bestaande link-presence-check — beide klassen worden door dezelfde run
+geflagd.

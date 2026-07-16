@@ -1,5 +1,10 @@
 # Upstream verwijderde Presence — overnemen? Trade-off + beslissing
 
+**Datum:** 2026-07-08
+**Status:** besloten
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Niet overnemen.** Presence blijft in Cockpit staan zoals het is.
+
 > Kanban-kaart: "BESLISSING: upstream verwijderde legacy Presence-feature — meenemen in
 > Cockpit?" DoD van de kaart: eerst nagaan of Cockpit Presence nog actief gebruikt of
 > uitgebreid heeft, en of verwijderen breaking zou zijn, **voordat** dit als gewone

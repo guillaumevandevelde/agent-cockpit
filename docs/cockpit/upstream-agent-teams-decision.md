@@ -1,5 +1,10 @@
 # Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing
 
+**Datum:** 2026-07-08
+**Status:** besloten
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Niet adopteren** — concurrerend orchestratie-paradigma naast kanban-dispatch, geen complement. Alleen de universele provider-correctness-bugs zijn gecherrypickt.
+
 > Kanban-kaart: "Upstream sync: Agentic Agent Teams + Team Presets overnemen". DoD van de
 > kaart: **eerst een geschreven brainstorm/spec-sessie, geïnformeerd door upstream's eigen
 > ontwerpredenering** (`16155c7`/`8946ee7` in `upstream/master`), **daarna pas

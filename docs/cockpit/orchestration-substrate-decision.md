@@ -2,6 +2,9 @@
 
 **Datum:** 2026-07-11
 **Status:** besloten (read-only spike; geen implementatie in deze kaart)
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Incrementeel abstraheren** — niet migreren en niet bevriezen. Headless/gestructureerd transport náást tmux; tmux blijft default voor human-in-the-loop.
+
 **Trigger:** kanban-spike "orchestratie-substraat" — kind-kaart van de
 tech-stack-evaluatie t.o.v. het platformdoel (parent `fa76d74a`). Zusje-docs:
 `headless-session-retro-decision.md`, `spike-claude-code-model-switching.md`.

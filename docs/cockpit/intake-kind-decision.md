@@ -1,5 +1,10 @@
 # Beslissing: `intake_kind` nu toevoegen, of YAGNI?
 
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `646f5860…`
+**Uitkomst:** **Geen standalone veld nu** (geen enum zonder lezer), maar het echte gemis — de interview-/intake-authoring-flow — krijgt één `analysis`-vervolgkaart waarin `intake_kind` mét consument meekomt. ↩︎ afgesloten door `intake-authoring-flow-decision.md`.
+
 > Kanban-kaart: **`[beslissing] Intake-kaarten: nu een optioneel intake_kind-veld
 > toevoegen, of YAGNI?`** (`646f5860…`). Leaf-spike: deze doc *is* de deliverable.
 > Bouwt voort op [`intake-card-routing-analysis.md`](./intake-card-routing-analysis.md)

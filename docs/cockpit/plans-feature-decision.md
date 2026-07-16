@@ -1,5 +1,10 @@
 # Plans-feature — analyse & richting (leaf spike)
 
+**Datum:** 2026-07-14
+**Status:** voorgesteld
+**Kaart:** `45ac606e…` (review: `a70a9272…`)
+**Uitkomst:** ⏳ **NOG NIET BESLIST — aanbeveling, geen uitkomst.** De analyse *adviseert* herbestemmen (Optie B: read-only mensvenster op de spec-/plan-laag, `kanban_plans` uitfaseren), maar §7 van het doc parkeert dit expliciet op een menselijke go/no-go die nooit kwam. Deze regel stond hier tot 2026-07-15 als genomen beslissing (backfill-fout, commit `4101d56`) — dat onderdrukte heropening terwijl niets uitgevoerd werd. Alternatieven A (volledig uitfaseren) en C (writer aanhaken) staan nog open.
+
 > Kanban-kaart: **"Analyse - Plan functionaliteit"**.
 > Vraag (gebruiker): *"Vandaag is er onder operations een plan functionaliteit. Geen
 > idee waar deze vandaag voor dient, er verschijnt daar niets in? Is het de bedoeling
