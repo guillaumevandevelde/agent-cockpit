@@ -43,6 +43,28 @@ class KanbanOp(KanbanBase):
 
 
 class KanbanCard(KanbanBase):
+    """Materialized card state.
+
+    Timestamp columns split into two families depending on how they get
+    written, and the ``Mapped`` type MUST match the family:
+
+    - **Backend-set** (`created_at`, `updated_at`, `claimed_at`): written
+      only by trusted server code via direct ORM assignment or SQL
+      defaults, never via a PATCH payload. `DateTime(timezone=True)` is
+      fine here.
+    - **User-PATCHable** (`scheduled_at`, `dispatch_started_at`): reachable
+      through `PATCH /cards/{cid}` (`CardUpdate.model_dump(exclude_unset=True)`
+      in `api/v1/kanban/router.py`) or any other write that flows through
+      `kanban.operations.apply_operation`, which appends the payload dict
+      onto `KanbanOp.payload` — a `JSON` column. SQLite's JSON column
+      cannot serialize a `datetime` object, so these columns MUST be
+      `String(40)` holding an ISO-8601 string, never `DateTime`. Parse them
+      back with `app.utils.timeutils.parse_iso_datetime` (accepts both the
+      string form and a stray in-memory `datetime`). `scheduled_at` is the
+      original worked example; `dispatch_started_at` (kanban card 8a2ad986)
+      hit this the hard way — see kanban card 307873ae for the postmortem.
+    """
+
     __tablename__ = "kanban_cards"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -81,12 +103,8 @@ class KanbanCard(KanbanBase):
     # endpoint (services.dispatch_usage_service.get_card_usage) attribute
     # the spawned session's JSONL transcript to this card. Nullable so
     # existing rows (legacy cards dispatched before this feature) round-trip
-    # unchanged. See kanban card 8a2ad986.
-    #
-    # dispatch_started_at is stored as an ISO8601 *string* (mirrors
-    # `scheduled_at`) because the op-log payload goes through SQLite's
-    # JSON column — datetime objects don't round-trip. The service layer
-    # parses it with `_ensure_aware`.
+    # unchanged. See kanban card 8a2ad986. String(40) ISO-8601, not
+    # DateTime — see the class docstring's PATCHable-timestamp rule.
     dispatch_started_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
     dispatch_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     dispatch_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
