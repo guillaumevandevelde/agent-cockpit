@@ -41,6 +41,22 @@ shipt gewoon. Wat je níet doet: je maakt geen kind-kaarten aan voor deze kaart
 (het is geen decompositie) en je laat de kaart niet in de lucht hangen — je
 ship't het artefact en beweegt de kaart naar `Done`.
 
+**Meet-eis voor kost-/besparings-claims.** Bevat je deliverable een aanbeveling
+die rust op een kost- of besparings-claim (tokens, latency, geld, requests,
+…), dan hoort daar het **gemeten getal + het reproductie-commando** bij in het
+doc — niet een chars/4-schatting die als feit wordt opgeschreven. Kun je niet
+meten binnen de scope van deze spike, label de claim dan expliciet als
+**"ongemeten schatting"**: een schatting mag een aanbeveling best dragen, maar
+mag niet stilzwijgend als gemeten feit verschijnen. Een ongemeten claim die wél
+als feit wordt gepresenteerd wordt een kaart die iemand anders moet weerleggen
+— dat is precies hoe R3 in `token-optimization-analysis.md` §4 ontstond (rustte
+op "alle 19 schemas landen in de system-prompt", nooit gemeten, en onjuist:
+ToolSearch defert ze). Referentie-meetrecept:
+[`per-persona-mcp-allowlist-decision.md` §7](../../docs/cockpit/per-persona-mcp-allowlist-decision.md#7-reproductie)
+(`claude -p "ok" --output-format json` met/zonder `--strict-mcp-config
+--mcp-config '{"mcpServers":{}}'`, verschil in
+`input + cache_creation + cache_read`).
+
 ### Hoe herken je welke modus
 
 - `card.analyst_agent_id` gezet → **modus 1** (analyst-fase, plannen).
