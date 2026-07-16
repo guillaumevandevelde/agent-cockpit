@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -33,7 +34,9 @@ export default function KanbanPage() {
   const [projectKey, setProjectKey] = useState<string>("");
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
+  const [cardsLoaded, setCardsLoaded] = useState(false);
   const [open, setOpen] = useState<Card | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
   const [editingColumns, setEditingColumns] = useState(false);
   const [editingWorkTypeMappings, setEditingWorkTypeMappings] = useState(false);
@@ -53,9 +56,16 @@ export default function KanbanPage() {
       ]);
       setColumns(colRes.columns);
       setCards(cardRes.items);
-      setOpen((prev) =>
-        prev ? (cardRes.items.find((c) => c.id === prev.id) ?? null) : null
-      );
+      setCardsLoaded(true);
+      setOpen((prev) => {
+        if (!prev) return null;
+        // A card opened via `?card=` deep-link (card-references-analysis
+        // §2.4/§D2) can belong to a different project than the one this
+        // poll just reloaded — leave it alone rather than treating "not in
+        // this project's list" as "card was deleted".
+        if (prev.project_key && prev.project_key !== projectKey) return prev;
+        return cardRes.items.find((c) => c.id === prev.id) ?? null;
+      });
     } catch {
       toast.error("Failed to load board");
     }
@@ -65,6 +75,85 @@ export default function KanbanPage() {
     if (!projectPath) return;
     kanbanApi.projectKey(projectPath).then((r) => setProjectKey(r.project_key));
   }, [projectPath]);
+
+  // Deep-link (`?card=<id>`) — card-references-analysis §2.4/§D2. Opening a
+  // card always pushes a history entry so browser-back closes the drawer
+  // instead of leaving the kanban page; closing replaces the entry so it
+  // doesn't leave a forward-navigation ghost.
+  const openCard = useCallback(
+    (card: Card) => {
+      setOpen(card);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("card", card.id);
+          return next;
+        },
+        { replace: false }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const closeCard = useCallback(() => {
+    setOpen(null);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("card");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
+
+  // Reconciles the URL -> drawer state whenever it changes for a reason
+  // other than `openCard`/`closeCard` themselves: initial page load with a
+  // `?card=` param, browser back/forward, or a pasted/edited URL. The board
+  // only ever loads one project's cards at a time, so a card from another
+  // project falls back to the project-agnostic `getCard` lookup (AC3). An
+  // id that resolves to neither is reported and the param is cleared (AC4)
+  // rather than left as a silent no-op.
+  useEffect(() => {
+    const cardParam = searchParams.get("card");
+    if (cardParam === (open?.id ?? null)) return;
+
+    if (!cardParam) {
+      setOpen(null);
+      return;
+    }
+
+    const local = cards.find((c) => c.id === cardParam);
+    if (local) {
+      setOpen(local);
+      return;
+    }
+    // Wait for the current project's own list before falling back to the
+    // project-agnostic lookup, so a same-project card isn't fetched twice.
+    if (!cardsLoaded) return;
+
+    let cancelled = false;
+    kanbanApi
+      .getCard(cardParam)
+      .then((card) => {
+        if (!cancelled) setOpen(card);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        toast.error(`Card ${cardParam.slice(0, 8)}… not found`);
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("card");
+            return next;
+          },
+          { replace: true }
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, cards, cardsLoaded, open, setSearchParams]);
 
   useEffect(() => {
     void reload();
@@ -307,7 +396,7 @@ export default function KanbanPage() {
         columns={columns}
         cards={cards}
         cardMeta={cardMeta}
-        onOpen={setOpen}
+        onOpen={openCard}
         onDropCardAt={onDropCardAt}
         projectPath={projectPath}
         onPromote={setPromotingCard}
@@ -345,7 +434,7 @@ export default function KanbanPage() {
         <CardDrawer
           card={open}
           projectPath={projectPath}
-          onClose={() => setOpen(null)}
+          onClose={closeCard}
           onChanged={reload}
         />
       )}
