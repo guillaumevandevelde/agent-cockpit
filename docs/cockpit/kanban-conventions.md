@@ -292,6 +292,17 @@ geeft exit 1 voor CI-gebruik. Draai het als je een `[beslissing]`-kaart afrondt:
 nieuw beslisdocument zonder register-regel is precies de drift die het register moest
 oplossen. Harness: `bash scripts/test_check_decision_register.sh`.
 
+[`scripts/check-analysis-outcomes.sh`](../../scripts/check-analysis-outcomes.sh)
+valideert dat elke `Done`-analyse (`work_type='analysis'` of `agent='analyst'`)
+minstens één van de drie outcome-bewijzen draagt (zie
+[`analysis-outcome-contract-decision.md`](./analysis-outcome-contract-decision.md) §5):
+een `**Outcome:**` activity-comment, een `not-feasible`/`no-action-needed`-label,
+of ≥1 kind-kaart. Vangnet voor het REST-bypass-gat (de gate zit alleen op de
+MCP-tool) én voor de historische voorraad die de gate niet retroactief kan
+dekken. Advies-only; `--strict` voor CI; `--since YYYY-MM-DD` verschuift de
+historic-grens (default: 2026-07-16, commit `b2e7333` van de gate). Harness:
+`bash scripts/test_check_analysis_outcomes.sh`.
+
 ### `--check-headers` — de vier-velden-header per beslisdoc
 
 `scripts/check-decision-register.sh --check-headers` voegt een tweede
