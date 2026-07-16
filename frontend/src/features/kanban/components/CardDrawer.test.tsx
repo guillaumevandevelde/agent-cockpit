@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import type { Card } from "../types";
 
@@ -41,6 +43,26 @@ const { kanbanApi } = await import("../api");
 const { appsApi } = await import("../appsApi");
 const { CardDrawer } = await import("./CardDrawer");
 
+// CardDrawer (Parent plan / Depends on navigation) and MarkdownRenderer
+// (internal link navigation) both call `useNavigate`, which requires a
+// Router ancestor — every render() below goes through this wrapper instead
+// of mounting <CardDrawer> directly.
+function LocationDisplay() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname + location.search}</div>;
+}
+
+function CardDrawerWithRouter(props: ComponentProps<typeof CardDrawer>) {
+  return (
+    <MemoryRouter initialEntries={["/kanban"]}>
+      <LocationDisplay />
+      <Routes>
+        <Route path="/kanban" element={<CardDrawer {...props} />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
 const baseCard: Card = {
   id: "card-1",
   project_key: "proj-1",
@@ -71,7 +93,7 @@ describe("CardDrawer live activity", () => {
       ]);
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={baseCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -110,7 +132,7 @@ describe("CardDrawer Done summary banner", () => {
     };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doneCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -141,7 +163,7 @@ describe("CardDrawer Done summary banner", () => {
     };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doingCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -163,7 +185,7 @@ describe("CardDrawer Done summary banner", () => {
     };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doneCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -185,7 +207,7 @@ describe("CardDrawer request review control", () => {
     const doingCard: Card = { ...baseCard, column: "Doing" };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doingCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -206,7 +228,7 @@ describe("CardDrawer request review control", () => {
     const onChanged = vi.fn();
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doneCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -249,7 +271,7 @@ describe("CardDrawer request review control", () => {
     const doneCard: Card = { ...baseCard, column: "Done" };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doneCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -269,7 +291,7 @@ describe("CardDrawer reopen control", () => {
     const doingCard: Card = { ...baseCard, column: "Doing" };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doingCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -289,7 +311,7 @@ describe("CardDrawer reopen control", () => {
     const onChanged = vi.fn();
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doneCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -332,7 +354,7 @@ describe("CardDrawer reopen control", () => {
     const doneCard: Card = { ...baseCard, column: "Done" };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doneCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -367,7 +389,7 @@ describe("CardDrawer resolve impediment control", () => {
     const doingCard: Card = { ...baseCard, column: "Doing" };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doingCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -395,7 +417,7 @@ describe("CardDrawer resolve impediment control", () => {
     const onChanged = vi.fn();
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={impedimentCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -451,7 +473,7 @@ describe("CardDrawer deliverables tab per-kind rendering", () => {
     };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={card}
         projectPath="/proj"
         onClose={() => {}}
@@ -532,7 +554,7 @@ describe("CardDrawer Plan tab", () => {
 
     const onChanged = vi.fn();
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={cardWithPlan}
         projectPath="/proj"
         onClose={() => {}}
@@ -586,7 +608,7 @@ describe("CardDrawer Plan tab", () => {
     };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={cardWithRef}
         projectPath="/proj"
         onClose={() => {}}
@@ -615,7 +637,7 @@ describe("CardDrawer edit dialog round-trip", () => {
     };
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={splitCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -677,7 +699,7 @@ describe("CardDrawer Impediment column: structured-options gate", () => {
     (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={impCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -711,7 +733,7 @@ describe("CardDrawer Impediment column: structured-options gate", () => {
     (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={impCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -749,7 +771,7 @@ describe("CardDrawer Impediment column: structured-options gate", () => {
 
     const onChanged = vi.fn();
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={impCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -787,7 +809,7 @@ describe("CardDrawer Impediment column: structured-options gate", () => {
     ]);
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={impCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -829,7 +851,7 @@ describe("CardDrawer Impediment column: structured-options gate", () => {
     (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={impCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -867,7 +889,7 @@ describe("CardDrawer Impediment column: structured-options gate", () => {
 
     const doingCard: Card = { ...baseCard, column: "Doing" };
     render(
-      <CardDrawer
+      <CardDrawerWithRouter
         card={doingCard}
         projectPath="/proj"
         onClose={() => {}}
@@ -887,7 +909,7 @@ describe("CardDrawer spec link", () => {
       metadata: { spec_doc: "docs/cockpit/agent-mail-spec.md" },
     };
     render(
-      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
     const section = screen.getByTestId("spec-link-section");
     expect(section.textContent).toMatch(/docs\/cockpit\/agent-mail-spec\.md/);
@@ -899,7 +921,7 @@ describe("CardDrawer spec link", () => {
       metadata: { spec_doc: "https://example.com/spec.md" },
     };
     render(
-      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
     const link = screen.getByTestId("spec-link-value").querySelector("a");
     expect(link).not.toBeNull();
@@ -914,7 +936,7 @@ describe("CardDrawer spec link", () => {
       ],
     };
     render(
-      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
     expect(screen.getByTestId("spec-from-plan")).not.toBeNull();
   });
@@ -927,7 +949,7 @@ describe("CardDrawer spec link", () => {
       metadata: { reviewed_card_id: "abc" },
     };
     render(
-      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
 
     fireEvent.click(screen.getByTestId("spec-link-edit"));
@@ -981,7 +1003,7 @@ describe("CardDrawer preview control — rendering", () => {
   it("does not render the Run this branch control when the card is not Done", () => {
     const doingCard: Card = { ...baseCard, column: "Doing" };
     render(
-      <CardDrawer card={doingCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={doingCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
     expect(screen.queryByTestId("run-this-branch-control")).toBeNull();
     expect(screen.queryByRole("button", { name: /Run this branch/i })).toBeNull();
@@ -990,7 +1012,7 @@ describe("CardDrawer preview control — rendering", () => {
   it("renders the Run this branch control on a Done card", () => {
     const doneCard: Card = { ...baseCard, column: "Done" };
     render(
-      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
     const control = screen.getByTestId("run-this-branch-control");
     expect(control).not.toBeNull();
@@ -1015,7 +1037,7 @@ describe("CardDrawer preview control — start", () => {
 
     const doneCard: Card = { ...baseCard, column: "Done" };
     render(
-      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
 
     await act(async () => {
@@ -1056,7 +1078,7 @@ describe("CardDrawer preview control — start", () => {
 
     const doneCard: Card = { ...baseCard, column: "Done" };
     render(
-      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
 
     await act(async () => {
@@ -1091,7 +1113,7 @@ describe("CardDrawer preview control — stop", () => {
 
     const doneCard: Card = { ...baseCard, column: "Done" };
     render(
-      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
 
     await act(async () => {
@@ -1127,7 +1149,7 @@ describe("CardDrawer preview control — backend reports stopped", () => {
 
     const doneCard: Card = { ...baseCard, column: "Done" };
     render(
-      <CardDrawer card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={doneCard} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
 
     await act(async () => {
@@ -1155,7 +1177,7 @@ describe("CardDrawer id chip", () => {
 
     const card: Card = { ...baseCard, id: "9eaa600d1b58408aa3773df7d2d4edee" };
     render(
-      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+      <CardDrawerWithRouter card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
     );
 
     const chip = screen.getByTestId("card-id-chip");
@@ -1172,5 +1194,114 @@ describe("CardDrawer id chip", () => {
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/card id copied/i)),
     );
+  });
+});
+
+describe("CardDrawer copy reference action", () => {
+  it("copies a markdown link to this card, distinct from the Copy id action", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const card: Card = {
+      ...baseCard,
+      id: "9eaa600d1b58408aa3773df7d2d4edee",
+      title: "Some card",
+    };
+    render(
+      <CardDrawerWithRouter card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("card-copy-reference"));
+    });
+
+    expect(writeText).toHaveBeenCalledWith(`[Some card](/kanban?card=${card.id})`);
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/reference copied/i)),
+    );
+
+    // The pre-existing "Copy id" action is unchanged — it still copies the
+    // bare id, not the markdown link.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("card-id-chip"));
+    });
+    expect(writeText).toHaveBeenLastCalledWith(card.id);
+  });
+});
+
+describe("CardDrawer Plan tab dead-link navigation", () => {
+  it("Parent plan button navigates to the parent card via the ?card= deep-link", async () => {
+    const cardWithRef: Card = {
+      ...baseCard,
+      parent_card_id: "parent-abcdef0123",
+      depends_on: [],
+      deliverables: [
+        {
+          id: "ref-1",
+          kind: "plan_ref",
+          ref: JSON.stringify({ parent_card_id: "parent-abcdef0123" }),
+          created_at: "2026-07-10T10:00:00Z",
+        },
+      ],
+    };
+
+    render(
+      <CardDrawerWithRouter
+        card={cardWithRef}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "Plan" }));
+    });
+
+    const parentButton = await screen.findByRole("button", { name: "parent-a" });
+    await act(async () => {
+      fireEvent.click(parentButton);
+    });
+
+    expect(screen.getByTestId("location").textContent).toBe(
+      "/kanban?card=parent-abcdef0123",
+    );
+  });
+
+  it("Depends on badges navigate to the dependency card via the ?card= deep-link", async () => {
+    const cardWithDeps: Card = {
+      ...baseCard,
+      parent_card_id: "parent-abcdef0123",
+      depends_on: ["dep-11112222"],
+      deliverables: [
+        {
+          id: "ref-1",
+          kind: "plan_ref",
+          ref: JSON.stringify({ parent_card_id: "parent-abcdef0123" }),
+          created_at: "2026-07-10T10:00:00Z",
+        },
+      ],
+    };
+
+    render(
+      <CardDrawerWithRouter
+        card={cardWithDeps}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByRole("tab", { name: "Plan" }));
+    });
+
+    const depButton = await screen.findByRole("button", { name: "dep-1111" });
+    await act(async () => {
+      fireEvent.click(depButton);
+    });
+
+    expect(screen.getByTestId("location").textContent).toBe("/kanban?card=dep-11112222");
   });
 });

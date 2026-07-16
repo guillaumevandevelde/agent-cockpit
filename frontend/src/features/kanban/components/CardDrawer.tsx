@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { Copy, Loader2, Play } from "lucide-react";
+import { Copy, Link2, Loader2, Play } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -679,6 +680,8 @@ function EditablePlan({
 }
 
 function PlanTabContent({ card, onChanged }: { card: Card; onChanged: () => void }) {
+  const navigate = useNavigate();
+
   // Parent case: a "plan" deliverable carries the markdown directly in `ref`
   // and is editable. The child `plan_ref` case below stays read-only.
   const planDeliverable = card.deliverables.find((d) => d.kind === "plan");
@@ -698,6 +701,11 @@ function PlanTabContent({ card, onChanged }: { card: Card; onChanged: () => void
     }
     const parentId = parsed.parent_card_id ?? card.parent_card_id ?? null;
     const dependsOn = card.depends_on ?? [];
+    // Both references navigate via the `?card=<id>` deep-link (card-
+    // references-analysis §D2) — KanbanPage's own reconciliation effect
+    // opens the drawer (falling back to the cross-project `getCard` lookup
+    // or an error toast for an unknown id), so this only needs to update
+    // the query param.
     return (
       <div className="space-y-3 text-sm">
         <div className="flex flex-wrap items-center gap-2">
@@ -706,14 +714,7 @@ function PlanTabContent({ card, onChanged }: { card: Card; onChanged: () => void
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
-                void kanbanApi
-                  .getCard(parentId)
-                  .then((parent) => {
-                    toast.info(`Open parent "${parent.title}" in the board`);
-                  })
-                  .catch(() => toast.error("Failed to load parent card"));
-              }}
+              onClick={() => navigate(`?card=${parentId}`)}
             >
               {parentId.slice(0, 8)}
             </Button>
@@ -725,9 +726,16 @@ function PlanTabContent({ card, onChanged }: { card: Card; onChanged: () => void
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground">Depends on:</span>
             {dependsOn.map((depId) => (
-              <Badge key={depId} variant="secondary">
-                {depId.slice(0, 8)}
-              </Badge>
+              <button
+                key={depId}
+                type="button"
+                onClick={() => navigate(`?card=${depId}`)}
+                className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Badge variant="secondary" className="cursor-pointer hover:border-primary/50">
+                  {depId.slice(0, 8)}
+                </Badge>
+              </button>
             ))}
           </div>
         )}
@@ -1041,6 +1049,18 @@ export function CardDrawer({
             >
               {card.id.slice(0, 8)}…
               <Copy className="h-3 w-3" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              data-testid="card-copy-reference"
+              title="Copy reference — a markdown link to this card, clickable when pasted into another card's description"
+              onClick={() => {
+                navigator.clipboard.writeText(`[${card.title}](/kanban?card=${card.id})`);
+                toast.success("Reference copied");
+              }}
+              className="inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-muted-foreground hover:border-primary/50 hover:text-foreground"
+            >
+              <Link2 className="h-3 w-3" aria-hidden="true" />
             </button>
           </div>
         </DialogHeader>
