@@ -13,6 +13,7 @@ That gap is undetectable from `record()` alone, because no hook means no
 """
 import asyncio
 import logging
+import subprocess
 import time
 from pathlib import Path
 
@@ -22,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 _IDLE_EVENTS = {"Stop"}
 _BUSY_EVENTS = {"UserPromptSubmit", "SessionStart", "Notification"}
+
+# Minimum seconds between successive ``tmux list-panes`` reconciliations from
+# ``_maybe_reconcile``. The lazy reconcile runs on every ``can_add_session``
+# call, which itself fires per hook event — without a throttle a busy backend
+# would shell out to tmux dozens of times per second. The value is exposed at
+# module scope so tests can monkeypatch it down.
+_RECONCILE_INTERVAL_S = 5.0
 
 
 class SessionRegistry:
@@ -38,6 +46,12 @@ class SessionRegistry:
         # hook event. Once non-empty for a name, the session is no longer
         # considered "stuck" — its `claude` process is alive enough to call home.
         self._spawn_received_hooks: set[str] = set()
+        # Monotonic timestamp of the last ``_panes`` reconciliation. ``None``
+        # means we have never queried tmux yet — the next non-empty reconcile
+        # always shells out so stale entries left over from a previous
+        # backend run get cleared on the first ``can_add_session`` after
+        # restart.
+        self._last_reconcile_at: float | None = None
 
     @property
     def effective_max_sessions(self) -> int:
@@ -49,11 +63,25 @@ class SessionRegistry:
 
     @property
     def session_count(self) -> int:
-        """Number of tracked sessions, tmux panes plus external reservations."""
+        """Number of tracked sessions, tmux panes plus external reservations.
+
+        Pure read — does NOT call out to tmux. Stale ``_panes`` entries only
+        disappear once a reconciliation has run (lazily via ``can_add_session``
+        or explicitly via ``cleanup_stale_sessions``); this property is the
+        honest count of whatever is currently in the dicts.
+        """
         return len(self._panes) + len(self._external)
 
     def can_add_session(self) -> bool:
-        """Check if we can track another session without exceeding limits."""
+        """Check if we can track another session without exceeding limits.
+
+        Self-healing: reconciles ``_panes`` against tmux before the check, so
+        a crashed/killed/rebooted pane no longer blocks a new spawn. The
+        reconciliation is throttled (see ``_RECONCILE_INTERVAL_S``) so this
+        method — which is on the hook-event hot path — does not shell out to
+        tmux on every event.
+        """
+        self._maybe_reconcile()
         return self.session_count < self.effective_max_sessions
 
     def reserve_external(self, key: str) -> None:
@@ -164,15 +192,99 @@ class SessionRegistry:
         return worktree.name
 
     def cleanup_stale_sessions(self, max_idle_seconds: int = 3600) -> int:
-        """Remove sessions that have been idle for too long.
-        
-        Returns the number of sessions removed.
+        """Remove ``_panes`` (and ``_idle``) entries whose tmux pane is gone.
+
+        Implements what the old stub promised: a real reconciliation against
+        ``tmux list-panes`` so the session count follows reality even when no
+        caller explicitly tracked the teardown — a crash, ``kill -9``, a host
+        reboot, or a bridge-test spawn that never went through the
+        ``clear_spawn`` path. Forces a fresh tmux query (bypasses the
+        ``_maybe_reconcile`` throttle) because an explicit caller always wants
+        the latest state, not a cached "nothing to do" from a few seconds ago.
+
+        ``max_idle_seconds`` is retained for API backwards compatibility but
+        no longer drives the behaviour — the registry no longer trusts
+        hook-event timestamps for liveness, only the tmux pane actually
+        existing. Returns the number of session_ids removed (0 when nothing
+        was stale, or when tmux was unavailable and we conservatively kept
+        every entry).
         """
-        import time
-        time.monotonic()
-        # Sessions only get idle flag set on Stop events, so we track that
-        # For now, just report the count - actual cleanup needs timestamp tracking
-        return 0
+        return self._maybe_reconcile(force=True)
+
+    @staticmethod
+    def _live_pane_ids() -> set[str] | None:
+        """Set of currently-live tmux pane ids, or ``None`` when tmux can't be
+        queried.
+
+        Returning ``None`` (not an empty set) on a tmux hiccup lets the
+        caller distinguish "no panes alive" from "we don't know". An empty
+        set is the truthful answer for "tmux is fine and no panes match",
+        and clears every stale entry on the next reconciliation.
+
+        Bounded by a 5s subprocess timeout so a hung tmux never wedges the
+        hook path; covered by ``_RECONCILE_INTERVAL_S`` for callers that
+        shell out on every event.
+        """
+        try:
+            result = subprocess.run(
+                ["tmux", "list-panes", "-a", "-F", "#{pane_id}"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+    def _maybe_reconcile(self, *, force: bool = False) -> int:
+        """Drop ``_panes`` (and ``_idle``) entries whose tmux pane no longer
+        exists.
+
+        Self-healing reconciliation against ``tmux list-panes`` — covers
+        crashes, ``kill -9``, reboots, and bridge-test spawns that never went
+        through the ``clear_spawn`` path. The mapping remains intact for live
+        panes (so ``pane_for()`` keeps feeding the scheduled-messages inject
+        pipeline); only stale entries go.
+
+        Throttled: skips the tmux round-trip if less than
+        ``_RECONCILE_INTERVAL_S`` has passed since the last call. Pass
+        ``force=True`` to bypass the throttle (used by the explicit
+        ``cleanup_stale_sessions`` public method).
+
+        Returns the number of session_ids removed. ``0`` covers three
+        different cases — empty registry, throttled, tmux unavailable —
+        which is fine; the caller does not need to distinguish them.
+        """
+        # Nothing to reconcile, nothing to throttle against — bail without
+        # burning a tmux call on every hook event when no session has ever
+        # registered a pane.
+        if not self._panes:
+            return 0
+        now = time.monotonic()
+        if (
+            not force
+            and self._last_reconcile_at is not None
+            and now - self._last_reconcile_at < _RECONCILE_INTERVAL_S
+        ):
+            return 0
+        self._last_reconcile_at = now
+        live = self._live_pane_ids()
+        if live is None:
+            # tmux unavailable or errored; be conservative and keep every
+            # entry. The next reconciliation (after the throttle or the
+            # next spawn) will retry; if tmux is permanently gone, the
+            # ``effective_max_sessions`` ceiling will catch the limit too.
+            return 0
+        stale = [sid for sid, pane in self._panes.items() if pane not in live]
+        for sid in stale:
+            self._panes.pop(sid, None)
+            self._idle.pop(sid, None)
+        if stale:
+            logger.info(
+                "SessionRegistry reconciled against tmux: removed %d stale session(s)",
+                len(stale),
+            )
+        return len(stale)
 
     def pane_for(self, session_id: str) -> str | None:
         return self._panes.get(session_id)
