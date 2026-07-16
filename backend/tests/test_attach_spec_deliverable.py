@@ -145,3 +145,63 @@ async def test_attach_spec_via_rest_with_empty_ref_is_rejected():
     async with KanbanSessionLocal() as s:
         card = await _load_card(s, cid)
         assert not [d for d in card.deliverables if d.kind == "spec"]
+
+
+@pytest.mark.asyncio
+async def test_attach_plan_via_mcp_persists_on_childless_card():
+    """``kind="plan"`` on a childless (intake) card is the intake-correct
+    route — ``add_plan_attachment`` requires ``child_card_ids`` and rejects
+    a parent with no children, so a plan deliverable on an intake card must
+    come through ``attach_deliverable``. Locks that contract so a future
+    ``_materialize`` change can't silently break it.
+    """
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "intake plan", "column": "intake"},
+        )
+        await s.commit()
+
+    plan_body = (
+        "# Plan\n\n"
+        "## Goal\nLand a plan deliverable on a childless intake card.\n"
+        "## Approach\nUse attach_deliverable — add_plan_attachment needs kids.\n"
+    )
+    result = await mcp_server.attach_deliverable(cid, "plan", plan_body)
+    assert "error" not in result, result
+    assert result["id"] == cid
+
+    async with KanbanSessionLocal() as s:
+        card = await _load_card(s, cid)
+        plans = [d for d in card.deliverables if d.kind == "plan"]
+        assert len(plans) == 1
+        assert plans[0].ref == plan_body
+
+
+@pytest.mark.asyncio
+async def test_attach_plan_via_rest_endpoint_persists_on_childless_card():
+    """REST mirror of ``test_attach_plan_via_mcp_persists_on_childless_card``
+    — catches the ``AttachRequest`` schema drifting out of sync with the MCP
+    tool's accepted kinds."""
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "intake plan", "column": "intake"},
+        )
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as c:
+        resp = await c.post(
+            f"/api/v1/kanban/cards/{cid}/deliverables",
+            json={"kind": "plan", "ref": "# Plan\n\nbody"},
+        )
+    assert resp.status_code == 200, resp.text
+
+    async with KanbanSessionLocal() as s:
+        card = await _load_card(s, cid)
+        plans = [d for d in card.deliverables if d.kind == "plan"]
+        assert len(plans) == 1
+        assert plans[0].ref == "# Plan\n\nbody"
