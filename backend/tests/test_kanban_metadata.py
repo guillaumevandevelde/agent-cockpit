@@ -113,7 +113,7 @@ from app.kanban import mcp_server as m  # noqa: E402  (import after SAMPLE for g
 
 @pytest.mark.asyncio
 async def test_mcp_create_card_accepts_metadata_and_round_trips():
-    created = await m.create_card("PROJ", "Tagged via MCP", metadata=SAMPLE)
+    created = await m.create_card("PROJ", "Tagged via MCP", metadata=SAMPLE, confirm_new_project=True)
     assert created["metadata"] == SAMPLE
     fetched = await m.get_card(created["id"])
     assert fetched["metadata"] == SAMPLE
@@ -121,7 +121,7 @@ async def test_mcp_create_card_accepts_metadata_and_round_trips():
 
 @pytest.mark.asyncio
 async def test_mcp_update_card_accepts_metadata_and_round_trips():
-    cid = (await m.create_card("PROJ", "Plain via MCP"))["id"]
+    cid = (await m.create_card("PROJ", "Plain via MCP", confirm_new_project=True))["id"]
     assert (await m.get_card(cid))["metadata"] is None
 
     updated = await m.update_card(cid, metadata={"sha": "def456"})
@@ -135,5 +135,5 @@ async def test_mcp_update_card_accepts_metadata_and_round_trips():
 @pytest.mark.asyncio
 async def test_mcp_metadata_omitted_stays_none():
     """Omitting metadata on MCP create must leave the column None."""
-    card = await m.create_card("PROJ", "Standalone")
+    card = await m.create_card("PROJ", "Standalone", confirm_new_project=True)
     assert card["metadata"] is None

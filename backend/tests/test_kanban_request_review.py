@@ -263,7 +263,7 @@ async def test_rest_request_review_404_on_missing_card(_client):
 async def test_mcp_request_review_creates_linked_card():
     from app.kanban import mcp_server as m
 
-    original_id = (await m.create_card("MCP", "Ship Z", ""))["id"]
+    original_id = (await m.create_card("MCP", "Ship Z", "", confirm_new_project=True))["id"]
     await m.move_card(original_id, "Done", summary="Z shipped.")
 
     review = await m.request_review(original_id, "Z might leak a handle.")
@@ -275,7 +275,7 @@ async def test_mcp_request_review_creates_linked_card():
 async def test_mcp_request_review_error_on_non_done_card():
     from app.kanban import mcp_server as m
 
-    cid = (await m.create_card("MCP", "wip", ""))["id"]
+    cid = (await m.create_card("MCP", "wip", "", confirm_new_project=True))["id"]
     res = await m.request_review(cid, "too early")
     assert res["error"] == "not_in_done"
     assert res["column"] == "Backlog"

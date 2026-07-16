@@ -14,7 +14,7 @@ async def _tables():
 
 @pytest.mark.asyncio
 async def test_create_then_list_then_claim():
-    created = await m.create_card("P", "Do the thing", "details")
+    created = await m.create_card("P", "Do the thing", "details", confirm_new_project=True)
     cid = created["id"]
     listed = await m.list_cards("P")
     assert any(c["id"] == cid for c in listed)
@@ -35,7 +35,7 @@ async def test_list_cards_compact_returns_summary_shape_via_mcp():
 
     fat = "long description body " * 50
     cid = (await m.create_card("MCP-COMPACT", "Compact MCP card", fat,
-                                work_type="bug"))["id"]
+                                work_type="bug", confirm_new_project=True))["id"]
 
     default = await m.list_cards("MCP-COMPACT")
     assert len(default) == 1
@@ -67,7 +67,7 @@ async def test_list_cards_compact_returns_summary_shape_via_mcp():
 async def test_list_cards_compact_default_is_false_backwards_compatible_mcp():
     """Calling m.list_cards(project) without compact must still return the
     full CardResponse-shaped dict (description present, etc.)."""
-    await m.create_card("MCP-BC", "T", "description here")
+    await m.create_card("MCP-BC", "T", "description here", confirm_new_project=True)
     listed = await m.list_cards("MCP-BC")
     assert len(listed) == 1
     assert listed[0]["description"] == "description here"
@@ -76,7 +76,7 @@ async def test_list_cards_compact_default_is_false_backwards_compatible_mcp():
 
 @pytest.mark.asyncio
 async def test_claim_conflict_returns_error_dict():
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "first@d")
     result = await m.claim_card(cid, "second@d")
     assert result["error"] == "already_claimed"
@@ -147,7 +147,7 @@ async def test_report_impediment_with_options_creates_open_gate():
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.models import KanbanGate
 
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
     await m.report_impediment(
         cid,
@@ -174,7 +174,7 @@ async def test_report_impediment_with_options_releases_claim():
     """options= must NOT change the existing release-on-impediment semantics —
     the calling session ends immediately so the worktree can be GC'd. Verifies
     the 'sessie sluit, blokkeert niet' acceptance criterion."""
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
     result = await m.report_impediment(
         cid, "Pick A or B", options=["A", "B"],
@@ -192,7 +192,7 @@ async def test_report_impediment_without_options_still_works():
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.models import KanbanGate
 
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
     result = await m.report_impediment(cid, "Need a human, please answer in chat.")
 
@@ -217,7 +217,7 @@ async def test_report_impediment_with_options_posts_impediment_comment():
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.service import card_activity
 
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
     await m.report_impediment(
         cid, "Postgres or SQLite?", options=["Postgres", "SQLite"],
@@ -234,7 +234,7 @@ async def test_report_impediment_with_options_posts_impediment_comment():
 
 @pytest.mark.asyncio
 async def test_comment_returns_ok_dict():
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     result = await m.comment(cid, "progress update")
     assert result.get("ok") is True
 
@@ -252,7 +252,7 @@ async def test_ping_returns_ok():
 
 @pytest.mark.asyncio
 async def test_full_lifecycle():
-    card = await m.create_card("proj", "Build X", "desc")
+    card = await m.create_card("proj", "Build X", "desc", confirm_new_project=True)
     cid = card["id"]
 
     moved = await m.move_card(cid, "Done", summary="Built X and shipped it.")
@@ -269,7 +269,7 @@ async def test_full_lifecycle():
 
 @pytest.mark.asyncio
 async def test_move_card_to_done_without_summary_is_rejected():
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done")
     assert result.get("error") == "summary_required"
     # card must stay put — the rejected move must not have applied
@@ -279,7 +279,7 @@ async def test_move_card_to_done_without_summary_is_rejected():
 
 @pytest.mark.asyncio
 async def test_move_card_to_impediment_without_summary_is_rejected():
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Impediment")
     assert result.get("error") == "summary_required"
     card = await m.get_card(cid)
@@ -288,14 +288,14 @@ async def test_move_card_to_impediment_without_summary_is_rejected():
 
 @pytest.mark.asyncio
 async def test_move_card_to_done_with_blank_summary_is_rejected():
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done", summary="   ")
     assert result.get("error") == "summary_required"
 
 
 @pytest.mark.asyncio
 async def test_move_card_to_done_with_summary_posts_it_as_a_comment():
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     moved = await m.move_card(cid, "Done", summary="Implemented the thing and tested it.")
     assert moved["column"] == "Done"
 
@@ -311,7 +311,7 @@ async def test_move_card_to_done_with_summary_posts_it_as_a_comment():
 
 @pytest.mark.asyncio
 async def test_move_card_to_other_columns_does_not_require_summary():
-    cid = (await m.create_card("P", "t", ""))["id"]
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     moved = await m.move_card(cid, "Doing")
     assert moved["column"] == "Doing"
     moved = await m.move_card(cid, "To Resume")
@@ -334,7 +334,7 @@ async def test_move_analysis_card_to_done_without_outcome_is_rejected():
 
     Mirrors the summary_required pattern: card stays put, an actionable
     error listing the three allowed values comes back."""
-    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done", summary="analysis done")
     assert result.get("error") == "outcome_required"
     # three allowed values should be mentioned in the message body
@@ -352,7 +352,7 @@ async def test_move_analyst_agent_card_to_done_without_outcome_is_rejected():
     `is_analyst_leaf_spike` checks both `work_type == 'analysis'` and
     `agent == 'analyst'` — this confirms the agent-attribute path is also
     subject to the gate."""
-    cid = (await m.create_card("P", "analyse", "", agent="analyst"))["id"]
+    cid = (await m.create_card("P", "analyse", "", agent="analyst", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done", summary="analysis done")
     assert result.get("error") == "outcome_required"
 
@@ -360,7 +360,7 @@ async def test_move_analyst_agent_card_to_done_without_outcome_is_rejected():
 @pytest.mark.asyncio
 async def test_move_analysis_card_to_done_with_invalid_outcome_is_rejected():
     """Unknown outcome values fail closed with the allowed-set echoed back."""
-    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done",
                                 summary="analysis done",
                                 outcome="finished")
@@ -376,7 +376,7 @@ async def test_move_analysis_card_to_done_with_invalid_outcome_is_rejected():
 async def test_move_analysis_card_to_done_decomposed_without_children_is_rejected():
     """`decomposed` is verified, not trusted: without ≥1 child card the
     move is refused — this is the anti-lie check."""
-    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done",
                                 summary="split into subtasks",
                                 outcome="decomposed")
@@ -390,10 +390,10 @@ async def test_move_analysis_card_to_done_decomposed_with_children_is_allowed():
     """`decomposed` with ≥1 child is the happy path — the children are the
     proof of work, no extra label is set (the children are the artefact)."""
     parent = (await m.create_card("P", "analyse", "",
-                                   work_type="analysis"))["id"]
+                                   work_type="analysis", confirm_new_project=True))["id"]
     # Create a child card pointing back at the parent.
     await m.create_card("P", "child", "",
-                         parent_card_id=parent)
+                         parent_card_id=parent, confirm_new_project=True)
     result = await m.move_card(parent, "Done",
                                 summary="split into subtasks",
                                 outcome="decomposed")
@@ -424,7 +424,7 @@ async def test_move_analysis_card_to_done_not_feasible_sets_label_and_comment():
     card, call move_card with outcome=not_feasible, and assert both labels
     are present after the move."""
     cid = (await m.create_card("P", "analyse", "",
-                                work_type="analysis"))["id"]
+                                work_type="analysis", confirm_new_project=True))["id"]
     # Seed a pre-existing label via the op-log (the MCP create_card wrapper
     # doesn't surface `labels` — sibling chore on the kanban board fills
     # that gap; for the gate itself we only need to prove append-not-
@@ -463,7 +463,7 @@ async def test_move_analysis_card_to_done_no_action_needed_sets_label_and_commen
     """`no_action_needed` is the symmetric counterpart of `not_feasible`:
     label `no-action-needed`, append-not-overwrite, **Outcome:** comment."""
     cid = (await m.create_card("P", "analyse", "",
-                                work_type="analysis"))["id"]
+                                work_type="analysis", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done",
                                 summary="decision-doc only, no follow-up",
                                 outcome="no_action_needed")
@@ -480,7 +480,7 @@ async def test_move_non_analysis_card_to_done_ignores_outcome():
 
     This proves the gate is limited to the predicate — engineers, plan
     creators, and bystander cards all stay on the legacy path."""
-    cid = (await m.create_card("P", "feature", "", work_type="feature"))["id"]
+    cid = (await m.create_card("P", "feature", "", work_type="feature", confirm_new_project=True))["id"]
     # No outcome: legacy path.
     moved = await m.move_card(cid, "Done", summary="shipped the feature")
     assert moved["column"] == "Done"
@@ -491,7 +491,7 @@ async def test_move_card_to_other_columns_ignores_outcome():
     """The outcome gate only fires on Done. A Backlog→Doing move with a
     bogus outcome string is untouched — the column isn't Done, the gate
     isn't triggered, and there's no spurious rejection."""
-    cid = (await m.create_card("P", "analyse", "", work_type="analysis"))["id"]
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     moved = await m.move_card(cid, "Doing", outcome="decomposed")
     assert moved["column"] == "Doing"
 
@@ -520,7 +520,7 @@ async def test_resolve_project_key_matches_what_create_card_should_use(monkeypat
         lambda path: "git:github.com/u/repo",
     )
     resolved = await m.resolve_project_key("/some/path")
-    cid = (await m.create_card(resolved["project_key"], "t", ""))["id"]
+    cid = (await m.create_card(resolved["project_key"], "t", "", confirm_new_project=True))["id"]
     listed = await m.list_cards(resolved["project_key"])
     assert any(c["id"] == cid for c in listed)
 
@@ -538,7 +538,7 @@ async def test_resolve_project_key_matches_what_create_card_should_use(monkeypat
 @pytest.mark.asyncio
 async def test_mcp_create_card_accepts_work_type_and_auto_fills_agent():
     """work_type='analysis' + no explicit agent → card.agent == 'analyst'."""
-    card = await m.create_card("P", "Investigate X", "", "Backlog", "analysis")
+    card = await m.create_card("P", "Investigate X", "", "Backlog", "analysis", confirm_new_project=True)
     assert card["work_type"] == "analysis"
     assert card["agent"] == "analyst", (
         "MCP create_card must apply resolve_create_agent so work_type='analysis' "
@@ -552,7 +552,7 @@ async def test_mcp_create_card_explicit_agent_overrides_work_type():
     """Explicit agent still wins, same as the REST contract."""
     card = await m.create_card(
         "P", "Force engineer", "", "Backlog", "analysis", "engineer",
-    )
+    confirm_new_project=True)
     assert card["work_type"] == "analysis"
     assert card["agent"] == "engineer"
 
@@ -560,7 +560,7 @@ async def test_mcp_create_card_explicit_agent_overrides_work_type():
 @pytest.mark.asyncio
 async def test_mcp_create_card_no_work_type_leaves_agent_empty():
     """No work_type, no agent → card.agent stays None (no mapping to apply)."""
-    card = await m.create_card("P", "Plain card")
+    card = await m.create_card("P", "Plain card", confirm_new_project=True)
     assert card["agent"] is None
     assert card["work_type"] is None
 
@@ -582,15 +582,15 @@ async def test_mcp_create_card_accepts_parent_card_id():
     create op-log and be visible on the resulting card — so a subsequent
     add_plan_attachment call sees parent_card_id == expected_parent instead
     of returning {"error": "parent_mismatch"}."""
-    parent = await m.create_card("P", "Parent")
-    child = await m.create_card("P", "Child", parent_card_id=parent["id"])
+    parent = await m.create_card("P", "Parent", confirm_new_project=True)
+    child = await m.create_card("P", "Child", parent_card_id=parent["id"], confirm_new_project=True)
     assert child["parent_card_id"] == parent["id"]
 
 
 @pytest.mark.asyncio
 async def test_mcp_create_card_omitted_parent_card_id_stays_none():
     """Omitting parent_card_id must leave the column None (backwards compat)."""
-    card = await m.create_card("P", "Standalone")
+    card = await m.create_card("P", "Standalone", confirm_new_project=True)
     assert card["parent_card_id"] is None
 
 
@@ -599,9 +599,9 @@ async def test_mcp_create_card_then_add_plan_attachment_round_trip():
     """End-to-end: create parent + children via MCP, then bind them with
     add_plan_attachment. Pre-fix this returned {"error": "parent_mismatch"}
     because children were born without parent_card_id."""
-    parent = await m.create_card("P", "Parent", work_type="analysis")
-    child_a = await m.create_card("P", "Child A", parent_card_id=parent["id"])
-    child_b = await m.create_card("P", "Child B", parent_card_id=parent["id"])
+    parent = await m.create_card("P", "Parent", work_type="analysis", confirm_new_project=True)
+    child_a = await m.create_card("P", "Child A", parent_card_id=parent["id"], confirm_new_project=True)
+    child_b = await m.create_card("P", "Child B", parent_card_id=parent["id"], confirm_new_project=True)
 
     result = await m.add_plan_attachment(
         parent["id"], "# Plan\n\nDo the thing.", [child_a["id"], child_b["id"]],
@@ -628,10 +628,10 @@ async def test_mcp_create_card_accepts_depends_on_and_persists_it():
     create op-log and be visible on the resulting card — so the dispatcher
     gates this card on the named siblings reaching Done, without a follow-up
     REST PATCH."""
-    sibling = await m.create_card("P", "Sibling")
+    sibling = await m.create_card("P", "Sibling", confirm_new_project=True)
     card = await m.create_card(
         "P", "Gated", depends_on=[sibling["id"]],
-    )
+    confirm_new_project=True)
     assert card["depends_on"] == [sibling["id"]]
 
     # Reload via get_card to make sure the value landed in storage, not just
@@ -644,7 +644,7 @@ async def test_mcp_create_card_accepts_depends_on_and_persists_it():
 async def test_mcp_create_card_omitted_depends_on_stays_none():
     """Omitting depends_on on create must leave the column None (backwards
     compat — pre-existing MCP callers don't suddenly sprout a list field)."""
-    card = await m.create_card("P", "Standalone")
+    card = await m.create_card("P", "Standalone", confirm_new_project=True)
     assert card["depends_on"] is None
 
 
@@ -653,14 +653,14 @@ async def test_mcp_update_card_accepts_depends_on_and_round_trips():
     """update_card(card_id, depends_on=[...]) must write the new list through
     apply_operation("update") → _materialize, the same path the REST PATCH
     endpoint uses. Setting and replacing both work."""
-    card = await m.create_card("P", "Gated")
+    card = await m.create_card("P", "Gated", confirm_new_project=True)
     assert card["depends_on"] is None
 
-    a = await m.create_card("P", "A")
+    a = await m.create_card("P", "A", confirm_new_project=True)
     updated = await m.update_card(card["id"], depends_on=[a["id"]])
     assert updated["depends_on"] == [a["id"]]
 
-    b = await m.create_card("P", "B")
+    b = await m.create_card("P", "B", confirm_new_project=True)
     replaced = await m.update_card(card["id"], depends_on=[a["id"], b["id"]])
     assert replaced["depends_on"] == [a["id"], b["id"]]
 
@@ -670,8 +670,8 @@ async def test_mcp_update_card_omitted_depends_on_preserves_existing():
     """update_card(card_id, title=...) with no depends_on arg must not clobber
     a previously-set depends_on — same "skip-when-None" semantics as the
     other updatable fields (title/description/metadata)."""
-    card = await m.create_card("P", "Gated")
-    a = await m.create_card("P", "A")
+    card = await m.create_card("P", "Gated", confirm_new_project=True)
+    a = await m.create_card("P", "A", confirm_new_project=True)
     await m.update_card(card["id"], depends_on=[a["id"]])
 
     # Title-only update — must not touch depends_on.
@@ -689,10 +689,10 @@ async def test_mcp_create_card_depends_on_survives_rematerialize():
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.operations import rematerialize
 
-    sibling = await m.create_card("P", "Sibling")
+    sibling = await m.create_card("P", "Sibling", confirm_new_project=True)
     gated = await m.create_card(
         "P", "Gated", depends_on=[sibling["id"]],
-    )
+    confirm_new_project=True)
 
     async with KanbanSessionLocal() as s:
         await rematerialize(s)
@@ -720,7 +720,7 @@ async def test_set_card_gate_sets_metadata_and_posts_audit_comment():
     is visible without inspecting metadata. The comment prefix matches the
     kanban-conventions pattern; ``enrich_done_info`` ignores it (no Done
     marker collision)."""
-    created = await m.create_card("P", "Gated spike", "desc")
+    created = await m.create_card("P", "Gated spike", "desc", confirm_new_project=True)
     cid = created["id"]
 
     res = await m.set_card_gate(cid, "second-executor-provider-onboarded")
@@ -748,7 +748,7 @@ async def test_set_card_gate_clear_with_none_removes_key():
     """Passing gated_on=None lifts the gate: ``metadata.gated_on`` is removed
     (not set to None — JSON null would be a different sentinel). The card
     becomes dispatchable again on the next tick."""
-    created = await m.create_card("P", "Gated", "desc")
+    created = await m.create_card("P", "Gated", "desc", confirm_new_project=True)
     cid = created["id"]
 
     await m.set_card_gate(cid, "trigger-x")
@@ -769,7 +769,7 @@ async def test_set_card_gate_clear_with_empty_string_treated_as_clear():
     """An empty string normalizes to None (lift the gate). Mirrors
     ``_is_gated``'s fail-open behaviour on empty values — a typo at the
     call site doesn't wedge the card forever."""
-    created = await m.create_card("P", "Gated", "desc")
+    created = await m.create_card("P", "Gated", "desc", confirm_new_project=True)
     cid = created["id"]
 
     await m.set_card_gate(cid, "trigger-x")
@@ -783,7 +783,7 @@ async def test_set_card_gate_preserves_other_metadata_keys():
     (external ids, owner, workflow tags) must survive the round-trip.
     Operators compose gates with other integration metadata; nuking
     them on every gate flip would be a footgun."""
-    created = await m.create_card("P", "With metadata", "desc")
+    created = await m.create_card("P", "With metadata", "desc", confirm_new_project=True)
     cid = created["id"]
 
     # Seed some unrelated metadata via update_card.
@@ -828,7 +828,7 @@ async def test_mcp_create_card_accepts_labels_and_persists_them():
     """A `labels=[...]` passed at create time must round-trip through the
     create op-log and be visible on the resulting card — so a downstream
     agent can rely on labels being there without a follow-up PATCH."""
-    card = await m.create_card("P", "Tagged", labels=["urgent", "backend"])
+    card = await m.create_card("P", "Tagged", labels=["urgent", "backend"], confirm_new_project=True)
     assert card["labels"] == ["urgent", "backend"]
 
     # Reload via get_card to make sure the value landed in storage, not just
@@ -841,7 +841,7 @@ async def test_mcp_create_card_accepts_labels_and_persists_them():
 async def test_mcp_create_card_omitted_labels_stays_none():
     """Omitting labels on create must leave the column None (backwards
     compat — pre-existing MCP callers don't suddenly sprout a list field)."""
-    card = await m.create_card("P", "Standalone")
+    card = await m.create_card("P", "Standalone", confirm_new_project=True)
     assert card["labels"] is None
 
 
@@ -852,7 +852,7 @@ async def test_mcp_update_card_accepts_labels_and_replaces_existing():
     endpoint uses. Setting and replacing both work, and the operation is a
     full replace — passing a new list clobbers the previous one (matches
     the explicit "vervang-semantiek" the docstring spells out)."""
-    card = await m.create_card("P", "Will be tagged", labels=["alpha"])
+    card = await m.create_card("P", "Will be tagged", labels=["alpha"], confirm_new_project=True)
     assert card["labels"] == ["alpha"]
 
     replaced = await m.update_card(card["id"], labels=["beta", "gamma"])
@@ -869,7 +869,7 @@ async def test_mcp_update_card_labels_with_empty_list_clears_existing():
     """Passing `labels=[]` (an explicit empty list, not None) must clear any
     previously-set labels. This is the standard "clear the labels" path;
     None means "don't touch", empty list means "set to []"."""
-    card = await m.create_card("P", "Tagged", labels=["to-clear"])
+    card = await m.create_card("P", "Tagged", labels=["to-clear"], confirm_new_project=True)
     assert card["labels"] == ["to-clear"]
 
     cleared = await m.update_card(card["id"], labels=[])
@@ -882,7 +882,7 @@ async def test_mcp_update_card_omitted_labels_preserves_existing():
     a previously-set labels list — same "skip-when-None" semantics as
     title/description/depends_on/metadata. The replace semantics only
     trigger when the caller explicitly passes a value (including [])."""
-    card = await m.create_card("P", "Tagged", labels=["keep-me"])
+    card = await m.create_card("P", "Tagged", labels=["keep-me"], confirm_new_project=True)
 
     # Title-only update — must not touch labels.
     updated = await m.update_card(card["id"], title="Renamed")
@@ -896,7 +896,7 @@ async def test_mcp_update_card_explicit_none_for_labels_also_preserves_existing(
     "skip" branch — the MCP tool uses `None` as its "field absent" signal,
     so this matches the contract documented in the existing title/
     description paths."""
-    card = await m.create_card("P", "Tagged", labels=["keep"])
+    card = await m.create_card("P", "Tagged", labels=["keep"], confirm_new_project=True)
     updated = await m.update_card(card["id"], labels=None)
     assert updated["labels"] == ["keep"]
 
@@ -908,7 +908,7 @@ async def test_mcp_update_card_labels_round_trip_via_card_dict():
     the schema (CardResponse.labels) and the materializer agree on the
     field name so an agent that reads the response gets back the same list
     it sent in."""
-    card = await m.create_card("P", "Round-trip", labels=["x", "y"])
+    card = await m.create_card("P", "Round-trip", labels=["x", "y"], confirm_new_project=True)
     fetched = await m.get_card(card["id"])
     # list (not stringified JSON) — CardResponse.labels is typed as `list`.
     assert isinstance(fetched["labels"], list)
@@ -928,7 +928,7 @@ async def test_mcp_create_card_labels_survive_rematerialize():
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.operations import rematerialize
 
-    card = await m.create_card("P", "Tagged", labels=["survives"])
+    card = await m.create_card("P", "Tagged", labels=["survives"], confirm_new_project=True)
 
     async with KanbanSessionLocal() as s:
         await rematerialize(s)
@@ -945,7 +945,7 @@ async def test_mcp_update_card_labels_survive_rematerialize():
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.operations import rematerialize
 
-    card = await m.create_card("P", "Will be tagged")
+    card = await m.create_card("P", "Will be tagged", confirm_new_project=True)
     await m.update_card(card["id"], labels=["alpha", "beta"])
 
     async with KanbanSessionLocal() as s:
@@ -954,3 +954,61 @@ async def test_mcp_update_card_labels_survive_rematerialize():
 
     fetched = await m.get_card(card["id"])
     assert fetched["labels"] == ["alpha", "beta"]
+
+
+# --- unknown project_key validation (kanban card 91c85199) ------------------
+#
+# A mistyped or guessed `project` used to fail silently: list_cards returned
+# an empty list indistinguishable from "this project's Backlog is really
+# empty" (the incident: a dedup pass almost mass-duplicated 36 cards after
+# reading a typo'd project key as an empty board), and create_card would
+# quietly create an orphaned card in a bucket auto-dispatch never sees.
+# Both tools now validate `project` against known keys (existing cards or
+# columns) and refuse an unknown one — create_card offers an explicit
+# `confirm_new_project=True` opt-in for a project's genuine first card.
+
+@pytest.mark.asyncio
+async def test_list_cards_unknown_project_key_returns_error_not_empty_list():
+    result = await m.list_cards("git:github.com/typo-org/claude-cockpit")
+    assert result["error"] == "unknown_project_key"
+    assert result["project"] == "git:github.com/typo-org/claude-cockpit"
+
+
+@pytest.mark.asyncio
+async def test_list_cards_known_project_key_is_unaffected():
+    cid = (await m.create_card("KNOWN-PROJ", "t", "",
+                                confirm_new_project=True))["id"]
+    listed = await m.list_cards("KNOWN-PROJ")
+    assert any(c["id"] == cid for c in listed)
+
+
+@pytest.mark.asyncio
+async def test_create_card_unknown_project_key_is_refused_without_confirm():
+    result = await m.create_card("git:github.com/typo-org/claude-cockpit",
+                                  "Should not be created", "")
+    assert result["error"] == "unknown_project_key"
+    listed = await m.list_cards("git:github.com/typo-org/claude-cockpit")
+    assert listed["error"] == "unknown_project_key", (
+        "the refused create_card must not have silently created the "
+        "project's first card either"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_card_new_project_allowed_with_explicit_confirm():
+    card = await m.create_card("BRAND-NEW-PROJ", "First card", "",
+                                confirm_new_project=True)
+    assert "error" not in card
+    listed = await m.list_cards("BRAND-NEW-PROJ")
+    assert any(c["id"] == card["id"] for c in listed)
+
+
+@pytest.mark.asyncio
+async def test_create_card_second_card_for_known_project_needs_no_confirm():
+    """Once a project has ≥1 card, subsequent create_card calls for the same
+    key don't need confirm_new_project — only the very first card does."""
+    first = await m.create_card("ALREADY-KNOWN", "First", "",
+                                 confirm_new_project=True)
+    second = await m.create_card("ALREADY-KNOWN", "Second", "")
+    assert "error" not in second
+    assert second["id"] != first["id"]

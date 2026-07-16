@@ -223,7 +223,7 @@ async def test_list_cards_includes_done_summary_per_card(_client):
 async def test_mcp_get_card_includes_done_summary_when_done_comment_exists():
     from app.kanban import mcp_server as m
 
-    cid = (await m.create_card("MCP-DONE", "t", ""))["id"]
+    cid = (await m.create_card("MCP-DONE", "t", "", confirm_new_project=True))["id"]
     await m.move_card(cid, "Done", summary="Shipped from MCP.")
 
     card = await m.get_card(cid)
@@ -235,7 +235,7 @@ async def test_mcp_get_card_includes_done_summary_when_done_comment_exists():
 async def test_mcp_get_card_done_summary_null_when_no_done_comment():
     from app.kanban import mcp_server as m
 
-    cid = (await m.create_card("MCP-NONE", "t", ""))["id"]
+    cid = (await m.create_card("MCP-NONE", "t", "", confirm_new_project=True))["id"]
 
     card = await m.get_card(cid)
     assert card["done_summary"] is None
@@ -246,8 +246,8 @@ async def test_mcp_get_card_done_summary_null_when_no_done_comment():
 async def test_mcp_list_cards_includes_done_summary_per_card():
     from app.kanban import mcp_server as m
 
-    done_id = (await m.create_card("MCP-LIST", "done", ""))["id"]
-    open_id = (await m.create_card("MCP-LIST", "open", ""))["id"]
+    done_id = (await m.create_card("MCP-LIST", "done", "", confirm_new_project=True))["id"]
+    open_id = (await m.create_card("MCP-LIST", "open", "", confirm_new_project=True))["id"]
     await m.move_card(done_id, "Done", summary="Listed done.")
 
     cards = {c["id"]: c for c in await m.list_cards("MCP-LIST")}

@@ -53,6 +53,26 @@ def is_analyst_leaf_spike(card) -> bool:
     return work_type == "analysis" or agent == "analyst"
 
 
+async def known_project_keys(session) -> set[str]:
+    """Distinct project keys with existing state: a card, or a column (the
+    latter seeded by `POST /kanban/enable` before any card exists).
+
+    Used by the MCP `list_cards`/`create_card` tools to catch a mistyped or
+    guessed `project` argument before it silently returns an empty list from
+    an unrelated bucket, or creates an orphaned card in one auto-dispatch
+    never sees. See kanban card 91c85199 for the incident that prompted
+    this — a wrong `project` string looked exactly like a valid, empty
+    project instead of erroring.
+    """
+    card_keys = (await session.execute(
+        select(KanbanCard.project_key).distinct()
+    )).scalars().all()
+    column_keys = (await session.execute(
+        select(KanbanColumn.project_key).distinct()
+    )).scalars().all()
+    return set(card_keys) | set(column_keys)
+
+
 async def list_cards(
     session,
     project_key: str,
