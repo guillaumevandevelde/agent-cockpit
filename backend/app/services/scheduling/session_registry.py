@@ -31,6 +31,13 @@ _BUSY_EVENTS = {"UserPromptSubmit", "SessionStart", "Notification"}
 # module scope so tests can monkeypatch it down.
 _RECONCILE_INTERVAL_S = 5.0
 
+# Limit-cause labels surfaced by the spawn-gate message. Kept as module-level
+# constants (not an Enum) because the values appear verbatim in log lines and
+# exception strings — operators grep them when triaging "Session limit
+# reached" hits.
+LIMIT_CAUSE_COUNTER_CEILING = "counter_ceiling"
+LIMIT_CAUSE_MEMORY_CEILING = "memory_ceiling"
+
 
 class SessionRegistry:
     def __init__(self, max_sessions: int | None = None) -> None:
@@ -71,6 +78,154 @@ class SessionRegistry:
         honest count of whatever is currently in the dicts.
         """
         return len(self._panes) + len(self._external)
+
+    def limit_cause(self) -> str:
+        """Why the current ``effective_max_sessions`` is what it is.
+
+        Returns one of the ``LIMIT_CAUSE_*`` constants:
+
+        - ``"counter_ceiling"`` when an explicit ``_max_sessions_override`` is
+          set — the binding constraint is the in-process counter, not memory.
+        - ``"memory_ceiling"`` when the limit is derived from
+          ``memory_monitor.estimated_max_sessions`` — memory IS the binding
+          constraint.
+
+        Used by the spawn-gate error message so the diagnostic doesn't blame
+        memory when memory isn't actually the cause (see bevinding 5 in
+        ``docs/cockpit/spawn-test-bridge-sessions-analyse.md``: a counter
+        ceiling at 5/5 with 13.5GB free used to read as a memory problem).
+        """
+        if self._max_sessions_override is not None:
+            return LIMIT_CAUSE_COUNTER_CEILING
+        return LIMIT_CAUSE_MEMORY_CEILING
+
+    def slot_breakdown(self) -> dict:
+        """Bucket the current ``session_count`` by slot type for diagnostics.
+
+        Returns a dict with these keys (all ints, except ``tmux_live`` and
+        ``tmux_dead`` which are ``int | None`` — None when tmux was
+        unreachable and we can't tell apart live from dead):
+
+        - ``tmux_total``     — number of registered pane entries (session_id→pane_id)
+        - ``tmux_live``      — of those, how many panes still exist in tmux
+        - ``tmux_dead``      — of those, how many panes no longer exist (zombie)
+        - ``external_total`` — non-tmux reservations (sandcastle, headless)
+        - ``session_count``  — tmux_total + external_total (matches the property)
+        - ``effective_max``  — current effective_max_sessions
+
+        The split matters because the spawn-gate message must distinguish a
+        tmux-backed leak (slots held without a backing pane) from external
+        reservations — they're consumed differently and fixed differently.
+        """
+        tmux_total = len(self._panes)
+        external_total = len(self._external)
+
+        tmux_live: int | None
+        tmux_dead: int | None
+        if tmux_total == 0:
+            tmux_live, tmux_dead = 0, 0
+        else:
+            # Reuses the same tmux probe ``_maybe_reconcile`` uses for
+            # self-healing — see that method's docstring. By the time this
+            # runs (always after a ``can_add_session()`` rejection), a fresh
+            # reconcile has usually already dropped stale entries, so
+            # ``tmux_dead`` is normally 0; it only surfaces >0 when the
+            # reconcile was throttled or tmux was briefly unreachable.
+            live_pane_ids = self._live_pane_ids()
+            if live_pane_ids is None:
+                # tmux unreachable — degrade rather than crash the message.
+                tmux_live, tmux_dead = None, None
+            else:
+                tmux_live = sum(1 for p in self._panes.values() if p in live_pane_ids)
+                tmux_dead = tmux_total - tmux_live
+
+        return {
+            "tmux_total": tmux_total,
+            "tmux_live": tmux_live,
+            "tmux_dead": tmux_dead,
+            "external_total": external_total,
+            "session_count": tmux_total + external_total,
+            "effective_max": self.effective_max_sessions,
+        }
+
+    def build_limit_message(self) -> str:
+        """Spawn-gate diagnostic message for a hit ``can_add_session() == False``.
+
+        Explicitly distinguishes the two distinct causes in
+        ``can_add_session()``:
+
+        - **Counter ceiling** (``_max_sessions_override``) — the in-process
+          counter is the binding constraint. Memory numbers are NOT shown as
+          cause; only a single parenthetical "memory is comfortable" note
+          when applicable.
+        - **Memory ceiling** (derived from ``memory_monitor``) — memory IS
+          the cause; memory figures stay in the message.
+
+        Both branches surface the slot breakdown (live vs dead tmux panes,
+        external reservations) so a counter leak is visible from the log
+        line alone — operators don't have to cross-reference another tool to
+        spot a stuck slot.
+        """
+        cause = self.limit_cause()
+        bd = self.slot_breakdown()
+        max_n = bd["effective_max"]
+        count = bd["session_count"]
+
+        if cause == LIMIT_CAUSE_COUNTER_CEILING:
+            head = (
+                f"Session limit reached: counter ceiling ({count}/{max_n}). "
+                f"The in-process max-sessions counter is the binding constraint, "
+                f"not memory."
+            )
+        else:
+            status = get_memory_status_cached()
+            head = (
+                f"Session limit reached: memory ceiling ({count}/{max_n}). "
+                f"Memory: {status.usage_percent:.0%} used, "
+                f"{status.available_bytes / (1024*1024):.0f}MB available."
+            )
+
+        # Slot breakdown — the diagnostic value-add. A counter leak shows up
+        # as tmux_dead > 0 (or tmux_live < tmux_total). External reservations
+        # are reported separately because they're a different bucket
+        # (sandcastle/headless runs) and shouldn't be confused with a
+        # leaking in-process counter.
+        if bd["tmux_total"] > 0:
+            if bd["tmux_live"] is None:
+                pane_part = f"{bd['tmux_total']} tmux-backed (tmux unreachable — live/phantom breakdown unknown)"
+            elif bd["tmux_dead"] == 0:
+                pane_part = f"{bd['tmux_total']} tmux-backed ({bd['tmux_live']} live)"
+            else:
+                pane_part = (
+                    f"{bd['tmux_total']} tmux-backed "
+                    f"({bd['tmux_live']} live, {bd['tmux_dead']} phantom — possible counter leak)"
+                )
+        else:
+            pane_part = "0 tmux-backed"
+
+        ext_part = f", {bd['external_total']} external" if bd["external_total"] else ""
+        breakdown = f"Slot breakdown: {pane_part}{ext_part}."
+
+        # Counter-ceiling case: explicitly note memory is comfortable, so the
+        # operator doesn't waste time chasing RAM.
+        if cause == LIMIT_CAUSE_COUNTER_CEILING:
+            try:
+                status = get_memory_status_cached()
+                if not status.is_critical:
+                    memory_note = (
+                        f" Memory is comfortable ({status.usage_percent:.0%} used) — "
+                        f"memory is NOT the binding constraint."
+                    )
+                else:
+                    memory_note = (
+                        f" Memory is also under pressure ({status.usage_percent:.0%} used), "
+                        f"but the counter ceiling fired first."
+                    )
+            except Exception:
+                memory_note = ""
+            return f"{head} {breakdown}{memory_note}"
+
+        return f"{head} {breakdown}"
 
     def can_add_session(self) -> bool:
         """Check if we can track another session without exceeding limits.
@@ -127,12 +282,11 @@ class SessionRegistry:
 
         # Check limits for new sessions
         if session_id not in self._panes and not self.can_add_session():
-            status = get_memory_status_cached()
+            # ``build_limit_message`` already distinguishes counter ceiling
+            # from memory ceiling and surfaces the slot breakdown — same
+            # diagnostic the dispatch transports raise with.
             logger.warning(
-                f"Session limit reached ({self.session_count}/{self.effective_max_sessions}). "
-                f"Memory: {status.usage_percent:.0%} used, "
-                f"{status.available_bytes / (1024*1024):.0f}MB available. "
-                f"Rejecting session {session_id[:8]}..."
+                f"{self.build_limit_message()} Rejecting session {session_id[:8]}..."
             )
             return False
 

@@ -1,6 +1,22 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.services.scheduling.session_registry import SessionRegistry
+
+
+def _fake_memory_status(*, usage_percent: float, available_mb: float,
+                        is_critical: bool, estimated_max_sessions: int):
+    """Return a stub for ``get_memory_status_cached`` matching the real
+    MemoryStatus interface the message builder reads (usage_percent,
+    available_bytes, is_critical). Patches the consumer's namespace, NOT
+    the source module — see CLAUDE.md test-doubles convention."""
+    return lambda: SimpleNamespace(
+        usage_percent=usage_percent,
+        available_bytes=int(available_mb * 1024 * 1024),
+        is_critical=is_critical,
+        estimated_max_sessions=estimated_max_sessions,
+    )
 
 
 def test_pane_mapping_and_idle_transitions():
@@ -611,3 +627,245 @@ def test_reconcile_uses_subprocess_timeout(monkeypatch):
     _args, kwargs = fake.calls[0]
     assert kwargs.get("timeout") is not None
     assert kwargs["timeout"] <= 10  # sane bound, not None / 0
+
+
+def test_record_rejection_log_uses_cause_aware_message(monkeypatch, caplog):
+    """The legacy ``record()`` rejection log used the misleading
+    "Memory: X% used, YMB available" pattern regardless of cause. The new
+    format (via ``build_limit_message``) makes the counter-ceiling vs
+    memory-ceiling distinction visible from the log line alone."""
+    import logging
+
+    import app.services.scheduling.session_registry as mod
+
+    # All recorded panes stay "alive" throughout, so the self-healing
+    # reconciliation triggered by can_add_session() never removes anything —
+    # this test cares about the rejection message, not the leak-detection
+    # path (see test_limit_message_surfaces_zombie_pane_count for that).
+    fake = _FakeTmux(live_panes={"%1", "%2"})
+    monkeypatch.setattr(mod.subprocess, "run", fake)
+    monkeypatch.setattr(mod, "get_memory_status_cached", lambda: SimpleNamespace(
+        usage_percent=0.15, available_bytes=13562 * 1024 * 1024,
+        is_critical=False, estimated_max_sessions=107,
+    ))
+
+    reg = SessionRegistry(max_sessions=2)
+    reg.record("SessionStart", session_id="s1", cwd="/proj", tmux_pane="%1")
+    reg.record("SessionStart", session_id="s2", cwd="/proj", tmux_pane="%2")
+
+    with caplog.at_level(logging.WARNING, logger=mod.logger.name):
+        result = reg.record(
+            "SessionStart", session_id="s3",
+            cwd="/proj", tmux_pane="%3",
+        )
+
+    assert result is False
+    assert any(
+        "counter ceiling" in rec.message for rec in caplog.records
+    ), f"expected cause-aware message in log; got: {[r.message for r in caplog.records]}"
+    # The legacy misleading pattern MUST NOT appear as cause.
+    assert not any(
+        "Memory: 15% used, 13562MB available" in rec.message
+        for rec in caplog.records
+    )
+
+
+# --- limit diagnostics: distinguishing counter ceiling from memory pressure ---
+
+# These tests pin down the spawn-gate error message (see bevinding 5 in
+# docs/cockpit/spawn-test-bridge-sessions-analyse.md): the legacy message
+# blamed memory whenever a counter ceiling was actually the binding constraint,
+# steering every diagnosis toward "more RAM / less parallelism" instead of the
+# real cause. The new helpers and message must make the cause unambiguous and
+# surface a counter leak (slots held without a live tmux pane) from the log
+# line alone.
+
+
+def test_limit_cause_is_counter_ceiling_when_override_set():
+    """An explicit _max_sessions_override is a counter ceiling — NOT memory."""
+    reg = SessionRegistry(max_sessions=5)
+    assert reg.limit_cause() == "counter_ceiling"
+
+
+def test_limit_cause_is_memory_ceiling_without_override():
+    """Without an override, the limit is derived from memory_monitor."""
+    reg = SessionRegistry()
+    assert reg.limit_cause() == "memory_ceiling"
+
+
+def test_slot_breakdown_reports_tmux_and_external_split(monkeypatch):
+    """slot_breakdown separates tmux-backed sessions from external reservations
+    so a leak in either bucket is visible from the message alone."""
+    import app.services.scheduling.session_registry as mod
+
+    # Hermetic: avoid a real subprocess call to the host's tmux server.
+    fake = _FakeTmux(live_panes={"%1", "%2"})
+    monkeypatch.setattr(mod.subprocess, "run", fake)
+    reg = SessionRegistry(max_sessions=10)
+    reg.reserve_external("k-ex-001")
+    reg.record("SessionStart", session_id="s1", cwd="/p", tmux_pane="%1")
+    reg.record("SessionStart", session_id="s2", cwd="/p", tmux_pane="%2")
+    breakdown = reg.slot_breakdown()
+    assert breakdown["tmux_total"] == 2
+    assert breakdown["external_total"] == 1
+    assert breakdown["session_count"] == 3
+    assert breakdown["effective_max"] == 10
+
+
+def test_slot_breakdown_includes_live_tmux_count_when_tmux_reachable(monkeypatch):
+    """When tmux is reachable, the breakdown reports how many of the stored
+    pane IDs are still alive — a leak (zombie panes) shows up here.
+
+    Seeds ``_panes`` directly (bypassing ``record()``) so the result is
+    deterministic regardless of the self-healing reconcile's real-time
+    throttle window — see test_limit_message_surfaces_zombie_pane_count for
+    why that matters."""
+    import app.services.scheduling.session_registry as mod
+
+    fake = _FakeTmux(live_panes={"%1", "%3"})  # %1 alive, %2 dead, %3 alive
+    monkeypatch.setattr(mod.subprocess, "run", fake)
+    reg = SessionRegistry(max_sessions=10)
+    reg._panes["s1"] = "%1"
+    reg._panes["s2"] = "%2"
+    reg._panes["s3"] = "%3"
+    breakdown = reg.slot_breakdown()
+    assert breakdown["tmux_total"] == 3
+    assert breakdown["tmux_live"] == 2
+    assert breakdown["tmux_dead"] == 1
+
+
+def test_slot_breakdown_marks_live_count_unknown_when_tmux_unreachable(monkeypatch):
+    """When tmux is unreachable, the breakdown reports None for live/dead
+    counts (not -1, not a crash) so the message can degrade to 'unknown'."""
+    import app.services.scheduling.session_registry as mod
+
+    def raise_fnf(*args, **kwargs):
+        raise FileNotFoundError("tmux: command not found")
+
+    monkeypatch.setattr(mod.subprocess, "run", raise_fnf)
+    reg = SessionRegistry(max_sessions=10)
+    reg.record("SessionStart", session_id="s1", cwd="/p", tmux_pane="%1")
+    breakdown = reg.slot_breakdown()
+    assert breakdown["tmux_total"] == 1
+    assert breakdown["tmux_live"] is None
+    assert breakdown["tmux_dead"] is None
+
+
+def test_limit_message_counter_ceiling_does_not_blame_memory(monkeypatch):
+    """The spawn-gate message for a counter ceiling must NOT lead with memory
+    figures (the original symptom — operators chase RAM when the real cause is
+    the explicit counter). Memory figures are only present when memory is
+    actually the binding constraint."""
+    import app.services.scheduling.session_registry as mod
+
+    # Comfortable memory (the actual scenario from bevinding 5: 13.5GB free).
+    # All three panes stay "alive" so the self-healing reconcile triggered
+    # by can_add_session() never removes any of them.
+    fake = _FakeTmux(live_panes={"%1", "%2", "%3"})
+    monkeypatch.setattr(mod.subprocess, "run", fake)
+    # Patch where the consumer looks — `session_registry` did
+    # `from app.services.memory_monitor import get_memory_status_cached`, so
+    # the binding lives in `mod` namespace, not the source module.
+    # (See CLAUDE.md test-doubles convention.)
+    monkeypatch.setattr(mod, "get_memory_status_cached", _fake_memory_status(
+        usage_percent=0.15, available_mb=13562, is_critical=False,
+        estimated_max_sessions=107,
+    ))
+    reg = SessionRegistry(max_sessions=5)  # counter ceiling, not memory
+    reg.record("SessionStart", session_id="s1", cwd="/p", tmux_pane="%1")
+    reg.record("SessionStart", session_id="s2", cwd="/p", tmux_pane="%2")
+    reg.record("SessionStart", session_id="s3", cwd="/p", tmux_pane="%3")
+    reg.reserve_external("k-ex-001")
+    reg.reserve_external("k-ex-002")
+
+    msg = reg.build_limit_message()
+
+    # Cause is explicit and unambiguous.
+    assert "counter ceiling" in msg
+    assert "5/5" in msg  # count vs effective max
+    # The legacy misleading "Memory: X% used, YMB available" pattern MUST NOT
+    # appear as if memory were the cause. A note about memory being NOT the
+    # binding constraint is fine; the legacy cause-presentation is not.
+    assert "Memory: 15% used, 13562MB available" not in msg
+    assert "Memory:" not in msg or "not the binding constraint" in msg
+    # Slot breakdown shows the leak signal: live vs dead panes.
+    assert "3 live" in msg
+    assert "tmux-backed" in msg
+    # External reservations reported separately so they can't be confused
+    # with a leaking counter.
+    assert "2 external" in msg
+
+
+def test_limit_message_memory_ceiling_does_show_memory_pressure(monkeypatch):
+    """When memory IS the binding constraint, memory figures stay in the
+    message because they're the actual cause — the goal isn't to hide memory,
+    it's to not blame memory when it's not the cause."""
+    import app.services.scheduling.session_registry as mod
+
+    # No tmux fake needed: this scenario only uses reserve_external(), so
+    # _panes stays empty and slot_breakdown()'s tmux_total==0 branch never
+    # calls out to tmux at all.
+    monkeypatch.setattr(mod, "get_memory_status_cached", _fake_memory_status(
+        usage_percent=0.92, available_mb=1024, is_critical=True,
+        estimated_max_sessions=8,
+    ))
+    reg = SessionRegistry()  # no override → memory ceiling
+    reg.reserve_external("k-ex-001")
+    reg.reserve_external("k-ex-002")
+    reg.reserve_external("k-ex-003")
+    reg.reserve_external("k-ex-004")
+    reg.reserve_external("k-ex-005")
+    reg.reserve_external("k-ex-006")
+    reg.reserve_external("k-ex-007")
+    reg.reserve_external("k-ex-008")
+
+    msg = reg.build_limit_message()
+
+    assert "memory ceiling" in msg
+    assert "92%" in msg  # cause-relevant memory figure stays
+    assert "8/8" in msg
+    assert "8 external" in msg
+
+
+def test_limit_message_surfaces_zombie_pane_count(monkeypatch):
+    """A counter leak (slots held without a live tmux pane) MUST be visible
+    from the message alone — that's the whole point of bevinding 5.
+
+    Seeds ``_panes`` directly instead of going through ``record()``: the
+    self-healing reconcile added alongside this card (triggered by
+    ``can_add_session()``, throttled to once per ``_RECONCILE_INTERVAL_S``)
+    would otherwise non-deterministically clean up the very zombies this
+    test wants to observe, depending on real-time throttle timing. Direct
+    seeding keeps the "5 stored, 1 live" shape stable so the only tmux call
+    is ``build_limit_message()``'s own direct (unthrottled) probe."""
+    import app.services.scheduling.session_registry as mod
+
+    # Five stored panes, only one still alive — typical leak shape.
+    fake = _FakeTmux(live_panes={"%3"})
+    monkeypatch.setattr(mod.subprocess, "run", fake)
+    monkeypatch.setattr(mod, "get_memory_status_cached", _fake_memory_status(
+        usage_percent=0.10, available_mb=16000, is_critical=False,
+        estimated_max_sessions=120,
+    ))
+    reg = SessionRegistry(max_sessions=5)
+    reg._panes["s1"] = "%1"  # dead
+    reg._panes["s2"] = "%2"  # dead
+    reg._panes["s3"] = "%3"  # live
+    reg._panes["s4"] = "%4"  # dead
+    reg._panes["s5"] = "%5"  # dead
+
+    msg = reg.build_limit_message()
+
+    # Both halves of the breakdown surface — operators can see "1 live, 4
+    # phantom" and immediately suspect a leak.
+    assert "1 live" in msg
+    assert "4 phantom" in msg or "4 dead" in msg
+
+
+# Note: direct unit tests for the tmux-probe helper (parses pane-id output,
+# returns None on missing/error/timeout tmux) live with the reconciliation
+# tests above as SessionRegistry._live_pane_ids — see
+# test_reconcile_survives_tmux_not_installed / _timeout / _error and
+# test_reconcile_uses_subprocess_timeout. slot_breakdown() and
+# build_limit_message() reuse that same static method (no separate
+# module-level helper) so there is no additional surface to test here.
