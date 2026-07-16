@@ -20,6 +20,26 @@ _spawned_sessions: dict[str, dict] = {}
 _DEFAULT_RUNTIME = "worktree"
 
 
+def _project_mcp_config_args(directory: str) -> list[str]:
+    """Return ``--strict-mcp-config`` + ``--mcp-config`` flags for ``directory``.
+
+    Pinning MCP servers to the project's own ``.mcp.json`` keeps a host-user's
+    global ``~/.claude.json`` MCP entries — and any plugin-discovered MCPs —
+    from leaking into dispatched sessions. Without these flags every extra
+    tool schema lands in the system prompt of every spawned agent.
+
+    See kanban card ``00fa8325`` / ``docs/cockpit/token-optimization-analysis.md``
+    §4 R5. Single source of truth: both this legacy bridge and the newer
+    ``agentic_cli/claude_code.build_spawn_command`` import the same helper so a
+    security fix can't drift between paths.
+    """
+    return [
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(Path(directory) / ".mcp.json"),
+    ]
+
+
 def _resolve_project_directory(project_folder: str, session_id: str | None = None) -> str:
     """Resolve a Claude project folder name to the actual project directory.
 
@@ -144,6 +164,11 @@ def spawn_session(
         command += ["--resume", session_id]
     else:
         raise ValueError(f"Unknown mode: {mode}")
+
+    # Pin MCP servers to the project-`.mcp.json` only. Shared helper with
+    # the agent-bridge ``claude_code.py:build_spawn_command`` so both paths
+    # can't drift — see kanban card `00fa8325`.
+    command += _project_mcp_config_args(directory)
 
     if skip_permissions:
         command.append("--dangerously-skip-permissions")

@@ -10,10 +10,11 @@ from app.services.agentic_cli.base import (
     argv0_name,
     has_binary_descendant,
 )
-from app.services.runs.cc_spawn import _resolve_project_directory
+from app.services.runs.cc_spawn import _project_mcp_config_args, _resolve_project_directory
 from app.utils.path_utils import ClaudePathUtils
 
 logger = logging.getLogger(__name__)
+
 
 class ClaudeCodeCli(AgenticCli):
     id = "claude-code"
@@ -69,6 +70,10 @@ class ClaudeCodeCli(AgenticCli):
             command += ["--resume", options.session_id]
         else:
             raise ValueError(f"Unsupported Claude Code mode: {options.mode}")
+
+        # Pin MCP servers to the project-`.mcp.json` only — see
+        # `_project_mcp_config_args` for the rationale.
+        command += _project_mcp_config_args(options.directory)
 
         if options.skip_permissions:
             command.append("--dangerously-skip-permissions")
