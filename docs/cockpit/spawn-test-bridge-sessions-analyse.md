@@ -166,6 +166,29 @@ pad, en er is geen enkele GC. Wegwerp-paden krijgen permanente identiteiten.
 Dit **blokkeert geen dispatch** — het is contextvervuiling in elke prompt (en dus tokens), plus
 een misleidende Team-lijst. Aparte kaart, lagere prioriteit.
 
+**Correctie (kaart `8c5633b0`, opvolging van deze bevinding):** de aanname hierboven dat
+`test_agent_bridge_spawn_unknown_provider_smoke` zélf de rij registreert, klopt niet —
+die test roept de endpoint aan met `db=None` en raist (zou moeten raisen) vóór enige
+DB-toegang. Twee dingen bleken waar te zijn:
+
+1. De **geverifieerde, structurele bron** van bijna alle rommelrijen was iets anders:
+   8 testbestanden onder `backend/tests/agent_mail/` + `test_agent_mail_model.py`
+   importeerden `AsyncSessionLocal`/`engine` direct uit `app.database` (de echte,
+   device-lokale `claude_registry.db`) in plaats van een geïsoleerde test-DB zoals de
+   kanban-tests al hadden (`tests/kanban_test_db.py`) — elke test die
+   `cwd=str(tmp_path)` registreerde, schreef een permanente rij naar de productie-DB.
+   Fix: `tests/agent_mail_test_db.py` (zelfde patroon als kanban) + elk bestand omgezet.
+2. Voor déze specifieke rij is de waarschijnlijke oorzaak toch iets ergers: `SpawnRequest`
+   heeft na de provider/cli-terminologie-rename een `cli: str = "claude-code"`-veld
+   gescheiden van het (nu ongebruikte in deze test) `provider`-veld — de test zet nog
+   `provider="unknown-provider"`, dus `cli` blijft op de default `"claude-code"` staan,
+   `get_agentic_cli()` raist niet, en de endpoint valt door naar een **echte, ongemockte**
+   `spawn_session("claude-code", ...)` met `directory=str(tmp_path)`. Bevestigd
+   reproduceerbaar op `origin/master` (`DID NOT RAISE HTTPException`); nog niet
+   uitgezocht of dit ook echt een tmux-sessie/CLI-proces spawnt. Apart gemeld via
+   flag-problem — dit is potentieel een side-effect-in-tests probleem, niet louter
+   agent-mail-rommel.
+
 ## Wat dit betekent voor de fix
 
 De vraag is niet "hoe kuisen we test-sessies op" maar **"waarom is een in-memory dict de bron van
