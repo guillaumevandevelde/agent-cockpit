@@ -632,3 +632,147 @@ async def test_set_card_gate_returns_not_found_for_missing_card():
     res = await m.set_card_gate("does-not-exist", "trigger-x")
     assert res.get("error") == "not_found"
     assert res.get("card_id") == "does-not-exist"
+
+
+# --- labels on create_card / update_card ------------------------------------
+# Regression: `labels` exists end-to-end — KanbanCard.labels
+# (models.py:55), CardCreate/CardUpdate/CardResponse (schemas.py:179,200,119),
+# materialized by operations.py:137,201, rendered by CardItem.tsx:234,
+# editable by humans in the UI. The MCP update_card / create_card tools,
+# however, didn't surface labels, so a dispatched agent had no way to set
+# them — the write path existed only via REST PATCH or a human in the UI.
+# Surface the field on both tools with replace-semantics, consistent with
+# `depends_on` (the dispatcher reads it back via get_card → CardResponse).
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_accepts_labels_and_persists_them():
+    """A `labels=[...]` passed at create time must round-trip through the
+    create op-log and be visible on the resulting card — so a downstream
+    agent can rely on labels being there without a follow-up PATCH."""
+    card = await m.create_card("P", "Tagged", labels=["urgent", "backend"])
+    assert card["labels"] == ["urgent", "backend"]
+
+    # Reload via get_card to make sure the value landed in storage, not just
+    # the in-memory response — mirrors the depends_on regression above.
+    fetched = await m.get_card(card["id"])
+    assert fetched["labels"] == ["urgent", "backend"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_omitted_labels_stays_none():
+    """Omitting labels on create must leave the column None (backwards
+    compat — pre-existing MCP callers don't suddenly sprout a list field)."""
+    card = await m.create_card("P", "Standalone")
+    assert card["labels"] is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_accepts_labels_and_replaces_existing():
+    """update_card(card_id, labels=[...]) must write the new list through
+    apply_operation("update") → _materialize, the same path the REST PATCH
+    endpoint uses. Setting and replacing both work, and the operation is a
+    full replace — passing a new list clobbers the previous one (matches
+    the explicit "vervang-semantiek" the docstring spells out)."""
+    card = await m.create_card("P", "Will be tagged", labels=["alpha"])
+    assert card["labels"] == ["alpha"]
+
+    replaced = await m.update_card(card["id"], labels=["beta", "gamma"])
+    assert replaced["labels"] == ["beta", "gamma"]
+
+    # Setting again overwrites — agents must read the docstring to know
+    # the operation is replace, not append.
+    replaced_again = await m.update_card(card["id"], labels=["delta"])
+    assert replaced_again["labels"] == ["delta"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_labels_with_empty_list_clears_existing():
+    """Passing `labels=[]` (an explicit empty list, not None) must clear any
+    previously-set labels. This is the standard "clear the labels" path;
+    None means "don't touch", empty list means "set to []"."""
+    card = await m.create_card("P", "Tagged", labels=["to-clear"])
+    assert card["labels"] == ["to-clear"]
+
+    cleared = await m.update_card(card["id"], labels=[])
+    assert cleared["labels"] == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_omitted_labels_preserves_existing():
+    """update_card(card_id, title=...) with no labels arg must not clobber
+    a previously-set labels list — same "skip-when-None" semantics as
+    title/description/depends_on/metadata. The replace semantics only
+    trigger when the caller explicitly passes a value (including [])."""
+    card = await m.create_card("P", "Tagged", labels=["keep-me"])
+
+    # Title-only update — must not touch labels.
+    updated = await m.update_card(card["id"], title="Renamed")
+    assert updated["labels"] == ["keep-me"]
+    assert updated["title"] == "Renamed"
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_explicit_none_for_labels_also_preserves_existing():
+    """A caller who passes `labels=None` explicitly must hit the same
+    "skip" branch — the MCP tool uses `None` as its "field absent" signal,
+    so this matches the contract documented in the existing title/
+    description paths."""
+    card = await m.create_card("P", "Tagged", labels=["keep"])
+    updated = await m.update_card(card["id"], labels=None)
+    assert updated["labels"] == ["keep"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_labels_round_trip_via_card_dict():
+    """Labels must round-trip through the JSON-serialised _card_dict payload
+    that the MCP server returns — same as the op-log replay path. Verifies
+    the schema (CardResponse.labels) and the materializer agree on the
+    field name so an agent that reads the response gets back the same list
+    it sent in."""
+    card = await m.create_card("P", "Round-trip", labels=["x", "y"])
+    fetched = await m.get_card(card["id"])
+    # list (not stringified JSON) — CardResponse.labels is typed as `list`.
+    assert isinstance(fetched["labels"], list)
+    assert fetched["labels"] == ["x", "y"]
+
+    updated = await m.update_card(card["id"], labels=["z"])
+    assert isinstance(updated["labels"], list)
+    assert updated["labels"] == ["z"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_create_card_labels_survive_rematerialize():
+    """Labels must survive the op-log → materialized-row replay that
+    rematerialize() performs — same regression class as the depends_on
+    test above. Otherwise a DB rebuild would silently drop the labels
+    column and any UI / routing logic that reads them would break."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import rematerialize
+
+    card = await m.create_card("P", "Tagged", labels=["survives"])
+
+    async with KanbanSessionLocal() as s:
+        await rematerialize(s)
+        await s.commit()
+
+    fetched = await m.get_card(card["id"])
+    assert fetched["labels"] == ["survives"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_update_card_labels_survive_rematerialize():
+    """Same regression for the update path: labels set via update_card
+    must persist through rematerialize()."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import rematerialize
+
+    card = await m.create_card("P", "Will be tagged")
+    await m.update_card(card["id"], labels=["alpha", "beta"])
+
+    async with KanbanSessionLocal() as s:
+        await rematerialize(s)
+        await s.commit()
+
+    fetched = await m.get_card(card["id"])
+    assert fetched["labels"] == ["alpha", "beta"]
