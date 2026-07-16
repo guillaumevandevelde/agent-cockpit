@@ -74,6 +74,47 @@ def test_prompt_verboden_scoped_to_decomposition_mode():
 # card c2b478ca396a473287aa0c04a79890e2 for the original two-modi framing.
 
 
+# ---- Modus-2 content that used to live only in the dispatch-injected -----
+# ---- override (removed in kanban card fbe7937e99484941b196bf2ebc0866f6) --
+# Mirrors the same content contract asserted against the real
+# .claude/agents/analyst.md in test_kanban_personas.py, applied here to the
+# hardcoded fallback so the two personas don't drift apart.
+
+
+def test_prompt_follow_up_cards_clause_relaxes_create_card():
+    assert "create_card" in ANALYST_PROMPT and "add_plan_attachment" in ANALYST_PROMPT
+    prompt_lower = ANALYST_PROMPT.lower()
+    assert any(
+        marker in prompt_lower
+        for marker in ("relaxed", "relax", "toegestaan", "permitted", "allowed")
+    )
+
+
+def test_prompt_follow_up_cards_clause_has_spam_guards():
+    prompt_lower = ANALYST_PROMPT.lower()
+    assert "acceptance criteria" in prompt_lower or "acceptance-criteria" in prompt_lower
+    assert "list_cards" in ANALYST_PROMPT
+    assert "depends_on" in ANALYST_PROMPT
+
+
+def test_prompt_has_scoped_impediment_escape():
+    prompt_lower = ANALYST_PROMPT.lower()
+    assert "report_impediment" in ANALYST_PROMPT
+    assert "best-effort" in prompt_lower or "best effort" in prompt_lower
+    assert "conditional" in prompt_lower
+
+
+def test_prompt_outcome_contract_names_enum_and_field():
+    for outcome in ("decomposed", "not_feasible", "no_action_needed"):
+        assert outcome in ANALYST_PROMPT
+    assert "outcome" in ANALYST_PROMPT.lower()
+    assert "move_card" in ANALYST_PROMPT or "Done" in ANALYST_PROMPT
+
+
+def test_prompt_no_longer_references_dispatch_override():
+    assert "Analyst-leaf-spike override" not in ANALYST_PROMPT
+
+
 def test_analyst_prompt_module_docstring_covers_both_modes():
     doc = _analyst_prompt_module.__doc__ or ""
     assert doc.strip(), "analyst_prompt.py must have a module docstring"

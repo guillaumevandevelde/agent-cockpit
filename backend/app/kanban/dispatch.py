@@ -34,7 +34,6 @@ from app.kanban.service import (
     get_card,
     get_column_default_model,
     get_column_default_provider,
-    is_analyst_leaf_spike,
     list_cards,
 )
 from app.kanban.subscription_pool import (
@@ -729,9 +728,15 @@ def _resolve_analyst_persona(project_path: str) -> str:
       `card.agent='analyst'` without `analyst_agent_id`): the persona is
       the implementer; it writes a single design-doc / prototype,
       commits, ships to master, and moves THIS card to Done. No child
-      cards. The dispatch layer injects an `Analyst-leaf-spike override`
-      pointer that defers to the persona's own two-modi framing rather
-      than repeating the full modus-2 workflow here.
+      cards.
+
+    The persona body itself (both this fallback and the project-local
+    `.claude/agents/analyst.md`) self-scopes both modi — the "Verboden"
+    prohibitions are explicitly marked as modus-1-only and the "Leaf
+    design-deliverable" section states the full modus-2 contract. Dispatch
+    does not inject any additional override text on top of it (removed in
+    kanban card fbe7937e99484941b196bf2ebc0866f6 — the previous per-dispatch
+    override had grown mostly redundant with the persona's own framing).
     """
     from app.kanban.analyst_prompt import ANALYST_PROMPT
     project_body = _read_persona_file(project_path, "analyst.md")
@@ -932,139 +937,24 @@ def extract_revisit_question(activity) -> str | None:
     return None
 
 
-def _analyst_leaf_spike_override_note() -> str:
-    """Override note prepended to the persona preamble for leaf analyst
-    spikes. Points at the persona's own **Leaf design-deliverable** section
-    (which is the primary source of truth — kanban card c2b478ca) and
-    explicitly relaxes the ``Verboden: geen Write/Edit`` prohibition that
-    otherwise contradicts the executor ship workflow injected below the
-    persona. Kept short on purpose: the persona describes the contract, the
-    override is just a safety-net pointer so a fresh session doesn't miss
-    that modus 2 is in effect.
-
-    As of kanban card 75b54887 the override also carries a **Leaf-spike
-    follow-up cards clause** that relaxes the ``create_card`` /
-    ``add_plan_attachment`` prohibition (analogous to the Write/Edit
-    relaxation) and instructs the leaf-spike session to create concrete,
-    acceptance-criteria-level follow-up cards in the SAME session before
-    moving THIS card to Done. Without this clause, leaf-spike
-    recommendations stayed as §-prose and required a manual review
-    round-trip to materialise as cards — an autonomy violation (kanban
-    card 75b54887 §5).
-
-    As of kanban card fcbd0bf6 the override additionally carries a
-    **Leaf-spike outcome contract** mirroring the analysis-outcome-poort
-    (kanban card b2e7333 / docs/cockpit/analysis-outcome-contract-decision.md
-    §5): ``move_card(parent, column='Done')`` on a leaf-spike analysis
-    card requires an explicit ``outcome`` from the closed enum
-    {``decomposed``, ``not_feasible``, ``no_action_needed``}. The clause
-    names the values verbatim, pins the ``move_card`` call site, and
-    declares the preference order (follow-up cards → real product-fork
-    via ``report_impediment`` → written-justification outcomes as
-    legitimate terminal paths). Without this, a leaf-spike session hits
-    the ``outcome_required`` gate at the very end of its budget —
-    precisely when context pressure is highest.
-
-    Lives as a separate helper (not inlined into ``build_card_prompt``) so
-    the marker text is greppable in tests and the override contract is
-    reviewable on its own.
-    """
-    return (
-        "## ⚠ Analyst-leaf-spike override\n"
-        "This card was dispatched in the **executor** phase (no "
-        "`analyst_agent_id` configured), but the routing placed you in the "
-        "analyst column via `work_type='analysis'` or `card.agent='analyst'`. "
-        "**Read the *Leaf design-deliverable* section of the persona below "
-        "before doing anything** — that's your modus-2 contract: write the "
-        "artefact, commit, ship, attach the branch, move **THIS** card to "
-        "Done. The `Verboden` prohibition is scoped to modus 1 and does NOT "
-        "apply to this card.\n\n"
-        "### Leaf-spike follow-up cards clause\n"
-        "Unlike the classic analyst persona (modus 1), this leaf case "
-        "delegates execution back to **you** — which means the analyst's "
-        "`Verboden: zelf code wijzigen` extends only to *product code*. "
-        "**Kanban card creation is relaxed for this leaf case** "
-        "(analogous to the Write/Edit relaxation above): if your "
-        "deliverable recommends concrete, scoped vervolgtaken op "
-        "acceptance-criteria-niveau, create those in the **same session** "
-        "as Backlog cards via `create_card` (and `add_plan_attachment` "
-        "when they form a dependency DAG) **before** moving THIS card to "
-        "Done. The §-in-the-doc stays the human-readable justification; "
-        "the cards are the executable record.\n\n"
-        "**Guards against Backlog-spam** (apply unconditionally):\n"
-        "- **Acceptance-criteria level only** — a card requires a title "
-        "plus 2-5 zinnen acceptance criteria. Speculative/soft ideas stay "
-        "as §-prose in the doc, no card.\n"
-        "- **Dedup-pass first** — `list_cards` on Backlog/Impediment "
-        "before creating. On a match: `comment` on the existing card "
-        "instead of duplicating (same discipline as the `flag-problem` "
-        "skill).\n"
-        "- **`depends_on` only on a real contract** — child B waits on an "
-        "output of child A (e.g. A creates an abstraction B consumes). "
-        "Pure sequence without a contract is not a dependency.\n\n"
-        "**Scoped impediment-escape:** reserve "
-        "`report_impediment(options=[…])` for an **unresolved product "
-        "fork** that changes *what* the cards should be (e.g. multi-"
-        "vendor vs single-vendor subscription model). For responsible "
-        "forks you CAN decide best-effort: document the assumption and "
-        "preserve the alternative as a conditional spike-card. Escalate "
-        "only the knot you cannot responsibly cut.\n\n"
-        "### Leaf-spike outcome contract\n"
-        "`move_card(parent, column='Done')` on a leaf-spike analysis "
-        "card now requires an explicit `outcome` from a closed enum — "
-        "the `outcome_required` gate (see kanban card b2e7333 / "
-        "docs/cockpit/analysis-outcome-contract-decision.md §5) refuses "
-        "the move without one, exactly mirroring the existing "
-        "`summary_required` gate. The accepted values are:\n\n"
-        "- **`decomposed`** — the analysis produced concrete follow-up "
-        "cards (the preferred path; verified against real child cards).\n"
-        "- **`not_feasible`** — the analysis concluded *don't build this*; "
-        "the **rationale must appear in the `summary`** of the Done-move "
-        "(label + `**Outcome:**`-comment are added by the gate).\n"
-        "- **`no_action_needed`** — the deliverable is a governance / "
-        "design doc with no cards to action; the **justification must "
-        "appear in the `summary`** of the Done-move.\n\n"
-        "**Preference order:** the follow-up cards path above is the "
-        "**voorkeur** — it's the honest, most-verifiable outcome and "
-        "the one the gate checks against real children. An echte "
-        "onopgeloste product-fork stays on `report_impediment` "
-        "(that is NOT a Done-move and uses no `outcome`). The two "
-        "written-justification outcomes (`not_feasible` / "
-        "`no_action_needed`) are **legitimate terminal endings, not "
-        "escape hatches** — they're auditeerbaar on the board (label + "
-        "comment + rationale in summary) precisely so a clean "
-        "no-children Done-move cannot be mistaken for a forgotten one. "
-        "If you reach for them under context pressure to skip the "
-        "follow-up work, you're defeating the contract — write the "
-        "cards or write the rationale; don't slide through.\n\n"
-        "---\n\n"
-    )
-
-
 def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       phase: str = "executor",
                       impediment_question: str | None = None,
                       impediment_answer: str | None = None,
                       revisit_question: str | None = None,
                       revisit_prior_decision: dict | None = None) -> str:
-    # Leaf analyst spike override: a card dispatched in the executor phase
-    # (no `analyst_agent_id`) but routed to the analyst column via
-    # `work_type='analysis'` or `card.agent='analyst'` would otherwise get
-    # both the analyst.md persona (which forbids Write/Edit) AND the
-    # executor ship workflow (which requires writing a doc, committing,
-    # shipping, attaching a branch) — contradictory instructions in the
-    # same prompt. The override prepended here explicitly relaxes the
-    # "Verboden: geen Write/Edit" prohibition for this leaf case and
-    # reframes the task as "produce a single deliverable, ship it, move
-    # THIS card to Done", matching the executor session-end workflow that
-    # follows. See kanban card a9c27beeb63e427a9c14ad98fa8380fe for the
-    # original report (analyst + executor-session-end collide for
-    # work_type=analysis spike cards).
-    leaf_spike = phase == "executor" and persona and is_analyst_leaf_spike(card)
-    if leaf_spike:
-        preamble = _analyst_leaf_spike_override_note() + persona.strip() + "\n\n"
-    else:
-        preamble = (persona.strip() + "\n\n") if persona else ""
+    # A card dispatched in the executor phase (no `analyst_agent_id`) can
+    # still resolve to the analyst persona via `work_type='analysis'` or
+    # `card.agent='analyst'` (the "leaf analyst spike" case — see
+    # `is_analyst_leaf_spike`). analyst.md (and its ANALYST_PROMPT
+    # fallback) self-scopes for this: the "Verboden" prohibitions are
+    # explicitly marked as modus-1-only and the persona's own "Leaf
+    # design-deliverable" section states the modus-2 contract, so no
+    # dispatch-level override is needed to reconcile it with the executor
+    # ship workflow injected below. See kanban card c2b478ca396a473287aa0c04a79890e2
+    # for the two-modi framing and fbe7937e99484941b196bf2ebc0866f6 for the
+    # removal of the (now redundant) per-dispatch override preamble.
+    preamble = (persona.strip() + "\n\n") if persona else ""
     impediment_section = ""
     if impediment_question:
         impediment_section = (
