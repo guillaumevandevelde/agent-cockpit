@@ -76,6 +76,21 @@ class KanbanCard(KanbanBase):
     resume_session_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     resume_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
     scheduled_at: Mapped[str | None] = mapped_column(String(40), nullable=True)  # ISO8601; auto-dispatch ignores the card until this time
+    # Per-dispatch telemetry breadcrumbs written by dispatch._run_card after a
+    # successful spawn. Together they let the per-card token telemetry
+    # endpoint (services.dispatch_usage_service.get_card_usage) attribute
+    # the spawned session's JSONL transcript to this card. Nullable so
+    # existing rows (legacy cards dispatched before this feature) round-trip
+    # unchanged. See kanban card 8a2ad986.
+    #
+    # dispatch_started_at is stored as an ISO8601 *string* (mirrors
+    # `scheduled_at`) because the op-log payload goes through SQLite's
+    # JSON column — datetime objects don't round-trip. The service layer
+    # parses it with `_ensure_aware`.
+    dispatch_started_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    dispatch_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dispatch_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    dispatch_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     analyst_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     executor_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parent_card_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

@@ -38,6 +38,7 @@ import { kanbanApi } from "../api";
 import { appsApi } from "../appsApi";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
+import { CardTokensTab } from "./CardTokensTab";
 import { PreviewPane } from "./PreviewPane";
 import type { Card, ActivityEntry, Deliverable, Gate, RunInstance } from "../types";
 import { SPEC_DOC_META_KEY } from "../types";
@@ -1171,6 +1172,7 @@ export function CardDrawer({
             <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="plan">Plan</TabsTrigger>
+            <TabsTrigger value="tokens">Tokens</TabsTrigger>
             {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
           </TabsList>
 
@@ -1198,6 +1200,10 @@ export function CardDrawer({
 
           <TabsContent value="plan">
             <PlanTabContent card={card} onChanged={onChanged} />
+          </TabsContent>
+
+          <TabsContent value="tokens">
+            <CardTokensTab card={card} />
           </TabsContent>
 
           {runSession && (

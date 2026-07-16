@@ -87,6 +87,13 @@ export const kanbanApi = {
   getCard: (id: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}`),
 
+  // Per-dispatch token telemetry (kanban card 8a2ad986). Returns `{usage: null}`
+  // for cards without dispatch breadcrumbs (legacy cards, or cards that
+  // haven't been dispatched yet) — distinct from "card not found" which the
+  // existing `getCard` resolves as 404.
+  getCardUsage: (id: string): Promise<import("./cardUsage").CardUsageResponse> =>
+    apiClient<import("./cardUsage").CardUsageResponse>(`${BASE}/cards/${id}/usage`),
+
   activity: (id: string): Promise<ActivityEntry[]> =>
     apiClient<ActivityEntry[]>(`${BASE}/cards/${id}/activity`),
 

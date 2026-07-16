@@ -56,6 +56,41 @@ class DeliverableResponse(BaseModel):
     created_at: datetime
 
 
+class CardUsageModelBreakdown(BaseModel):
+    """Per-model token totals — mirrors the breakdown shape used by
+    `/api/v1/usage/sessions` so the frontend can reuse the existing
+    breakdown renderer on the card detail panel."""
+
+    model: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    total_tokens: int = 0
+
+
+class CardUsageResponse(BaseModel):
+    """Aggregate token usage for one dispatched card (kanban card 8a2ad986).
+
+    Derived lazily from Claude Code's per-session JSONL transcripts by
+    `app.services.dispatch_usage_service.get_card_usage` — the spawned
+    session never sees a new tool/turn, so its own token bill is
+    unaffected (acceptance criterion #4).
+    """
+
+    session_id: str | None = None  # resolved from JSONL stem; None until transcript appears
+    recorded_model: str | None = None  # the model the dispatcher recorded at spawn time
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    first_activity: datetime | None = None
+    last_activity: datetime | None = None
+    model_breakdowns: list[CardUsageModelBreakdown] = []
+
+
 class CardSummaryResponse(BaseModel):
     """Compact per-card projection used by `list_cards(compact=True)` so a
     50+ card board stops blowing the MCP token cap during dedupe passes
@@ -93,6 +128,15 @@ class CardResponse(BaseModel):
     resume_project_folder: str | None = None
     scheduled_at: str | None = None  # ISO8601; auto-dispatch ignores the card until this time
     dispatch_failures: int = 0
+    # Per-dispatch telemetry breadcrumbs (kanban card 8a2ad986). All four
+    # are written by dispatch._run_card immediately after a successful
+    # spawn and read by GET /kanban/cards/{cid}/usage. ISO8601 string to
+    # match `scheduled_at` (op-log payload goes through SQLite's JSON
+    # column — datetime objects don't round-trip).
+    dispatch_started_at: str | None = None
+    dispatch_session_id: str | None = None
+    dispatch_project_folder: str | None = None
+    dispatch_model: str | None = None
     claimed_by: str | None = None
     claimed_at: datetime | None = None
     created_at: datetime
@@ -168,6 +212,13 @@ class CardUpdate(BaseModel):
     analyst_run_id: str | None = None
     depends_on: list[str] | None = None
     metadata: dict | None = None
+    # Per-dispatch telemetry breadcrumbs (kanban card 8a2ad986). In
+    # practice these are set by dispatch.py, not via PATCH; exposing them
+    # so the schema matches the underlying row shape.
+    dispatch_started_at: str | None = None
+    dispatch_session_id: str | None = None
+    dispatch_project_folder: str | None = None
+    dispatch_model: str | None = None
 
 
 class MoveRequest(BaseModel):
