@@ -861,11 +861,19 @@ async def add_plan_attachment(
             describing the dependency DAG. Must be acyclic. Each child gets its
             own `depends_on` column set to that list.
 
+    Requires at least one child — for a childless card, use
+    `attach_deliverable(kind="plan")` instead.
+
     Returns the parent card on success, or an error dict:
-        {error: "not_found"} / {error: "parent_mismatch"} /
+        {error: "not_found"} / {error: "no_children"} / {error: "parent_mismatch"} /
         {error: "child_not_found"} / {error: "cycle_detected", cycle: [...]} /
         {error: "too_many_children", max: 50}.
     """
+    if not child_card_ids:
+        return {"error": "no_children", "card_id": card_id,
+                "message": "add_plan_attachment requires at least one child card; "
+                            "for childless cards use attach_deliverable(kind='plan')."}
+
     if len(child_card_ids) > MAX_CHILDREN_PER_PLAN:
         return {"error": "too_many_children", "max": MAX_CHILDREN_PER_PLAN}
 
