@@ -12,6 +12,7 @@
 #   4. stale checkout  — working copy is missing many files origin/master has
 #   5. worktree leaks  — merged+clean worktrees left lying around
 #   6. test-project rows — leftover "mcp-test-*" rows in claude_registry.db
+#   7. orphan bridge sessions — Cockpit-spawned tmux sessions with no live kanban claim
 #
 # Usage: scripts/cockpit-doctor.sh
 set -uo pipefail
@@ -88,6 +89,19 @@ if [ -x "$ROOT/scripts/cleanup-test-projects.sh" ]; then
         warn "$stale leftover test-project row(s) in claude_registry.db — run scripts/cleanup-test-projects.sh --apply."
     else
         pass "no leftover test-project rows."
+    fi
+fi
+
+# 7. orphan bridge sessions — Cockpit-spawned tmux sessions no card claims
+# (docs/cockpit/spawn-test-bridge-sessions-analyse.md bevinding 6). Report-only:
+# the script never kills anything, so this check can never surprise a live
+# manual debug session — see docs/cockpit/agent-bridge.md.
+if [ -x "$ROOT/scripts/list-orphan-bridge-sessions.sh" ]; then
+    orphans=$("$ROOT/scripts/list-orphan-bridge-sessions.sh" 2>/dev/null | grep -c '^WOULD-FLAG')
+    if [ "${orphans:-0}" -gt 0 ]; then
+        warn "$orphans orphan agent-bridge session(s) with no active kanban claim — run scripts/list-orphan-bridge-sessions.sh for details."
+    else
+        pass "no orphan agent-bridge sessions."
     fi
 fi
 

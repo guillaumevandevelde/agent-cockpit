@@ -111,8 +111,55 @@ beslissingen:
   server-gegenereerde bestandsnamen; nooit buiten de attachment-root schrijven.
 - **Retentie-cleanup** verwijdert verlopen rijen + bestanden (default 7 dagen, configureerbaar).
 
+## Sessie-lifecycle: wees-sessies (bewust beperkt)
+
+Dit document beschrijft bewust géén volledige sessie-lifecycle — spawn/relay/config
+zijn hierboven vastgelegd, maar "wanneer stopt een sessie" is elders opgelost, en
+maar gedeeltelijk. Twee bestaande opkuis-paden zijn **kaart-gescoped**:
+`session_cleanup.py` (kilt tmux + worktree wanneer een kanban-kaart naar
+Done/Impediment gaat) en `reap_stale_claims()` (release't `agent:`-claims op dode
+sessies, gevonden door over `cards` te itereren). Een sessie die buiten dispatch om
+gespawnd wordt — de "New Session"-dialoog, een handmatige test van de Agent Bridge
+zelf — heeft nooit een kaart en dus geen claim om te reapen. Zonder een apart
+mechanisme is zo'n sessie **volledig onzichtbaar**: ze blijft draaien, eet RAM, en
+bezet een registry-slot. Zie
+[`spawn-test-bridge-sessions-analyse.md`](./spawn-test-bridge-sessions-analyse.md)
+(bevinding 6) voor de volledige analyse; het slot-lek zelf is inmiddels
+zelfhelend via `SessionRegistry`'s reconciliatie tegen `tmux list-panes`
+(`backend/app/services/scheduling/session_registry.py`) — wat resteert is de
+tmux-sessie zelf.
+
+**Gekozen grens: zichtbaar maken, nooit automatisch killen.**
+
+- `scripts/list-orphan-bridge-sessions.sh` — read-only, geen `--apply`. Draait
+  bij elke `cockpit.sh start` (via `run_doctor`) en op aanvraag via
+  `cockpit.sh doctor` (check 7). Rapporteert Cockpit-gespawnde tmux-sessies
+  zonder levende kanban-claim; WARN, nooit een harde FAIL.
+- Detectie leunt volledig op tmux/DB als bron van waarheid, niet op een
+  in-memory dict die een backend-herstart overleeft: (1) *Cockpit-gespawnd* —
+  elke `spawn_session()`-aanroep zet `COCKPIT_RUNTIME` via `tmux new-session -e`
+  (`backend/app/services/agentic_cli/provider_env.py:build_spawn_env`), dus
+  `tmux show-environment -t <sessie> COCKPIT_RUNTIME` onderscheidt een
+  Cockpit-sessie van een willekeurige andere tmux-sessie op dezelfde host;
+  (2) *geclaimd* — hergebruikt `scripts/kanban_active_worktrees.py` (dezelfde
+  query die `worktree-gc.sh` vertrouwt): een `agent:`-claim buiten
+  Done/Impediment beschermt de sessie; (3) *oud genoeg* — tmux's eigen
+  `#{session_created}` moet minstens `ORPHAN_GRACE_S` (default 120s) geleden
+  zijn, zodat een sessie tussen spawn en het committen van haar kaart-claim
+  nooit vals-positief flagt.
+- **Waarom geen auto-kill.** Een handmatig gespawnde debug-sessie is voor dit
+  script niet te onderscheiden van een vergeten test-sessie — beide hebben
+  geen kaart. Automatisch killen zou de `worktree-gc`-postmortem ("actieve
+  claim weggekilld onder iemands handen") één laag dieper herhalen. Een mens
+  beoordeelt de WARN-regel en killt handmatig (`tmux kill-session -t <naam>`)
+  wanneer gewenst — vergelijkbaar met hoe `worktree-gc.sh` en
+  `cleanup-test-projects.sh` allebei dry-run-by-default zijn met een losse
+  `--apply`-vlag; dit script heeft zelfs geen `--apply` omdat "killen" hier
+  bewust buiten scope blijft.
+
 ## Zie ook
 
 - [`subscriptions.md`](./subscriptions.md) — waar de MiniMax-key + per-provider quota worden beheerd.
 - [`kanban-dispatch-spec.md`](./kanban-dispatch-spec.md) — de dispatcher spawnt via dezelfde transport.
 - [`terminology.md`](./terminology.md) — Agent / Provider / CLI / Model / Run naamgeving.
+- [`spawn-test-bridge-sessions-analyse.md`](./spawn-test-bridge-sessions-analyse.md) — analyse achter de wees-sessie-detectie hierboven.

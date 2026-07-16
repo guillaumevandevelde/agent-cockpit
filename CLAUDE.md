@@ -77,6 +77,7 @@ bash backend/test_commands_api.sh                         # Curl-based API tests
 bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
 bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
+bash scripts/test_list_orphan_bridge_sessions.sh           # Bash tests for list-orphan-bridge-sessions.sh (uses real tmux sessions)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
