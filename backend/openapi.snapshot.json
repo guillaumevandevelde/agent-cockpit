@@ -2848,6 +2848,11 @@
             "title": "Rank",
             "type": "string"
           },
+          "release_without_terminal_move": {
+            "default": 0,
+            "title": "Release Without Terminal Move",
+            "type": "integer"
+          },
           "resume_project_folder": {
             "anyOf": [
               {

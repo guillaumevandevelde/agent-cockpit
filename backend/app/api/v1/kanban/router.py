@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
-from app.kanban.operations import ClaimRejected, apply_operation
+from app.kanban.operations import ClaimRejected, apply_operation, release_card_claim
 from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
     WORK_TYPES,
@@ -505,8 +505,7 @@ async def claim_card(cid: str, payload: ClaimRequest):
 @router.post("/cards/{cid}/release", response_model=CardResponse)
 async def release_card(cid: str):
     async with KanbanSessionLocal() as s:
-        await apply_operation(s, op_type="release", entity_type="card",
-            project_key="", entity_id=cid, payload={})
+        await release_card_claim(s, card_id=cid, project_key="")
         await s.commit()
         return await _reload(s, cid)
 

@@ -16,7 +16,7 @@ from app.kanban import dep_resolver as mcp_kanban_deps
 from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
 from app.kanban.models import KanbanCard, KanbanDeliverable
-from app.kanban.operations import ClaimRejected, apply_operation
+from app.kanban.operations import ClaimRejected, apply_operation, release_card_claim
 from app.kanban.project_key import resolve_project_key as _resolve_project_key
 from app.kanban.schemas import CardResponse, CardSummaryResponse
 
@@ -643,14 +643,19 @@ async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
 
 @mcp.tool()
 async def release_card(card_id: str) -> dict:
-    """Release a claim on a card."""
+    """Release a claim on a card.
+
+    A bare release with no accompanying move to Done/Impediment is tracked as
+    claim->release churn (kanban card 49626139); repeating it without ever
+    finishing the card auto-flags it to Impediment for human triage instead of
+    letting auto-dispatch keep re-claiming it forever.
+    """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
         if card is None:
             logger.debug("release_card: %s not found", card_id)
             return {"error": _NOT_FOUND, "card_id": card_id}
-        await apply_operation(s, op_type="release", entity_type="card",
-            project_key="", entity_id=card_id, payload={})
+        await release_card_claim(s, card_id=card_id, project_key=card.project_key)
         await s.commit()
         logger.info("release_card: %s", card_id)
         return await _card_dict(s, await service.get_card(s, card_id))

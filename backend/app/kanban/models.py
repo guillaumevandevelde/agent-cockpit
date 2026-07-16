@@ -112,6 +112,12 @@ class KanbanCard(KanbanBase):
     # enough to prove the target works, or when the streak trips the Impediment
     # move. See dispatch.MAX_DISPATCH_FAILURES / dispatch._release_dead_claim.
     dispatch_failures: Mapped[int] = mapped_column(Integer, default=0)
+    # Consecutive claim->release cycles that did NOT end in a terminal move
+    # (Done/Impediment) — the "session spawned, did something, released
+    # cleanly, but never finished the card" churn pattern that dispatch_failures
+    # cannot see (that counter only tracks dead/crashed spawns). Reset to 0 by
+    # any move into Done/Impediment. See operations.MAX_RELEASE_WITHOUT_TERMINAL_MOVE.
+    release_without_terminal_move: Mapped[int] = mapped_column(Integer, default=0)
     claimed_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

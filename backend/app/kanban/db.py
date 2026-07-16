@@ -121,6 +121,11 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql(
             "ALTER TABLE kanban_cards ADD COLUMN dispatch_failures INTEGER NOT NULL DEFAULT 0"
         )
+    if "release_without_terminal_move" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN release_without_terminal_move "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
     if "analyst_agent_id" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN analyst_agent_id VARCHAR(64)")
     if "executor_agent_id" not in cols:
