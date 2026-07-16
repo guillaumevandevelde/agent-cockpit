@@ -1,15 +1,13 @@
 import pytest
 
-from app.database import Base
+from app.database import AsyncSessionLocal
 from app.models.agent_mail_schemas import MailAgentRegisterRequest
 from app.services.agent_mail_service import agent_mail_service
-from tests.agent_mail_test_db import AsyncSessionLocal, engine
-
-
-@pytest.fixture(autouse=True)
-async def _create_tables():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+# No autouse ``_create_tables`` fixture needed: ``tests/conftest.py``'s
+# ``_reset_app_database_tables`` drops + recreates the full ``Base.metadata``
+# schema (incl. ``mail_team_members``/``mail_agent_sessions``/...) before every
+# test, and ``_patch_app_database`` has already swapped
+# ``app.database.AsyncSessionLocal`` to the test factory.
 
 
 @pytest.mark.asyncio

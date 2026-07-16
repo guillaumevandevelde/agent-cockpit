@@ -154,8 +154,14 @@ async def test_mcp_tool_list_projects():
 
     from app.mcp_server.server import mcp
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Per-test ``_reset_app_database_tables`` (see conftest.py) gives us a
+    # fresh ``Base.metadata`` schema, and the ``_patch_app_database``
+    # identity-swap ensures ``app.mcp_server.tools.projects.AsyncSessionLocal``
+    # opens sessions on the same test engine we wrote into above. Kanban
+    # card 02e80e79 removed the legacy ``try/finally`` cleanup + the
+    # session-scoped safety net (``_cleanup_test_projects``) because the
+    # temp-file engine is unlinked at process exit and rows never reach
+    # ``claude_registry.db`` in the first place.
 
     uid = uuid.uuid4().hex[:8]
     test_path = f"/tmp/test-{uid}"
@@ -166,21 +172,10 @@ async def test_mcp_tool_list_projects():
         db.add(p)
         await db.commit()
 
-    try:
-        result = await mcp.call_tool("list_projects", {})
-        content_list, _ = result
-        text = content_list[0].text
-        data = json.loads(text)
-        assert "projects" in data
-        matching = [p for p in data["projects"] if p["name"] == f"mcp-test-{uid}"]
-        assert len(matching) == 1
-    finally:
-        # This test writes to the real app DB (claude_registry.db), not an
-        # isolated test DB — clean up so repeated runs don't accumulate
-        # "mcp-test-*" rows forever. See _cleanup_test_projects in conftest.py
-        # for a session-level safety net covering any that still leak.
-        async with AsyncSessionLocal() as db:
-            row = await db.get(Project, p.id)
-            if row:
-                await db.delete(row)
-                await db.commit()
+    result = await mcp.call_tool("list_projects", {})
+    content_list, _ = result
+    text = content_list[0].text
+    data = json.loads(text)
+    assert "projects" in data
+    matching = [p for p in data["projects"] if p["name"] == f"mcp-test-{uid}"]
+    assert len(matching) == 1

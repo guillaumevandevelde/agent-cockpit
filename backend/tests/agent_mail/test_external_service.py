@@ -1,6 +1,6 @@
 import pytest
 
-from app.database import Base
+from app.database import AsyncSessionLocal
 from app.models.agent_mail_schemas import (
     ExternalAgentMailContextRequest,
     MailAgentRegisterRequest,
@@ -12,13 +12,25 @@ from app.services.external_agent_mail_service import (
     ExternalAgentMailRateLimitError,
     external_agent_mail_service,
 )
-from tests.agent_mail_test_db import AsyncSessionLocal, engine
+# Schema is created by ``_reset_app_database_tables`` in conftest.
 
 
 @pytest.fixture(autouse=True)
-async def _create_tables():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+def _reset_external_service_rate_limit_window():
+    """Clear the in-memory ``_send_windows`` deque between tests.
+
+    The conftest's per-test ``drop_all`` resets the ``mail_external_actors``
+    table, so auto-incremented ``actor.id`` values restart at 1 each test.
+    ``external_agent_mail_service._send_windows`` is keyed by that id —
+    without this fixture, a previous test's entries collide with the new
+    test's actor and the rate-limit test fires spuriously (the
+    ``test_rate_limit_after_30_messages`` test asserts the 31st call
+    raises; if a previous test already pushed 30 entries for id=1, the
+    very first iteration raises instead).
+    """
+    external_agent_mail_service._send_windows.clear()
+    yield
+    external_agent_mail_service._send_windows.clear()
 
 
 @pytest.mark.asyncio

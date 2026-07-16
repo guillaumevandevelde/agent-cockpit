@@ -1,22 +1,12 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import app.database as database_module
-from app.database import Base
 from app.main import app
-from tests.agent_mail_test_db import AsyncSessionLocal as agent_mail_session_factory
-from tests.agent_mail_test_db import engine
-
-
-@pytest.fixture(autouse=True)
-async def _create_tables(monkeypatch):
-    # get_db() looks up AsyncSessionLocal from app.database's own module
-    # globals at call time, so patching the attribute here (rather than
-    # wherever a router imported get_db from) redirects every DB session
-    # opened through the real ASGI app for the duration of this test.
-    monkeypatch.setattr(database_module, "AsyncSessionLocal", agent_mail_session_factory)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+# Schema + per-test reset handled by conftest fixtures. The
+# ``_patch_app_database`` fixture now patches ``AsyncSessionLocal`` on
+# ``app.database`` itself (and every module that imported it) so even
+# ``get_db()`` — which reads the module attribute at request time — sees
+# the test factory through the real ASGI app.
 
 
 @pytest.mark.asyncio

@@ -4,16 +4,10 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from app.database import Base
+from app.database import AsyncSessionLocal
 from app.models.agent_mail import MailAgentSession
 from app.services.agent_mail_service import agent_mail_service
-from tests.agent_mail_test_db import AsyncSessionLocal, engine
-
-
-@pytest.fixture(autouse=True)
-async def _create_tables():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+# Schema is created by ``_reset_app_database_tables`` in conftest.
 
 
 @pytest.mark.asyncio
