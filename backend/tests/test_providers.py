@@ -337,7 +337,13 @@ def test_claude_code_spawn_command_includes_model_flag_when_set():
         SpawnCommandOptions(directory="/tmp/project", mode="plain", model="opus", prompt="do the thing")
     )
 
-    assert command == ["claude", "--model", "opus", "do the thing"]
+    assert command == [
+        "claude",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "/tmp/project/.mcp.json",
+        "--model", "opus", "do the thing",
+    ]
 
 
 def test_claude_code_spawn_command_omits_model_flag_when_unset():
@@ -350,7 +356,13 @@ def test_claude_code_spawn_command_omits_model_flag_when_unset():
     )
 
     assert "--model" not in command
-    assert command == ["claude", "do the thing"]
+    assert command == [
+        "claude",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "/tmp/project/.mcp.json",
+        "do the thing",
+    ]
 
 
 def test_claude_code_spawn_command_includes_model_flag_across_modes():
@@ -363,10 +375,24 @@ def test_claude_code_spawn_command_includes_model_flag_across_modes():
         SpawnCommandOptions(directory="/tmp/project", mode="worktree",
                             worktree_name="k-feature-a1b2", model="sonnet")
     )
-    assert worktree_command == ["claude", "--worktree", "k-feature-a1b2", "--model", "sonnet"]
+    assert worktree_command == [
+        "claude",
+        "--worktree", "k-feature-a1b2",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "/tmp/project/.mcp.json",
+        "--model", "sonnet",
+    ]
 
     resume_command = provider.build_spawn_command(
         SpawnCommandOptions(directory="/tmp/project", mode="resume",
                             session_id="sess-123", model="haiku")
     )
-    assert resume_command == ["claude", "--resume", "sess-123", "--model", "haiku"]
+    assert resume_command == [
+        "claude",
+        "--resume", "sess-123",
+        "--strict-mcp-config",
+        "--mcp-config",
+        "/tmp/project/.mcp.json",
+        "--model", "haiku",
+    ]
