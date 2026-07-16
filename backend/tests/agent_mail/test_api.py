@@ -1,18 +1,14 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-import app.database as database_module
-from app.database import Base
 from app.main import app
-from tests.agent_mail_test_db import AsyncSessionLocal as agent_mail_session_factory
-from tests.agent_mail_test_db import engine
-
-
-@pytest.fixture(autouse=True)
-async def _create_tables(monkeypatch):
-    monkeypatch.setattr(database_module, "AsyncSessionLocal", agent_mail_session_factory)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+# Schema + per-test reset handled by ``_reset_app_database_tables`` +
+# ``_patch_app_database`` in conftest.py. No per-file monkeypatch of
+# ``app.database.AsyncSessionLocal`` needed — every consumer (including
+# ``get_db()`` resolved at request time, routers that did
+# ``from app.database import AsyncSessionLocal`` at import time, and the
+# inner ``agent_mail`` API calls) is rebound to the test factory by the
+# session-scoped identity-swap.
 
 
 @pytest.mark.asyncio

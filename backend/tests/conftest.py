@@ -1,6 +1,7 @@
-"""Shared test fixtures for kanban tests.
+"""Shared test fixtures for kanban + app.database tests.
 
-Patches KanbanSessionLocal in all modules so tests never touch the production DB.
+Patches ``KanbanSessionLocal`` / ``kanban_engine`` and ``AsyncSessionLocal`` /
+``engine`` in every module so tests never touch the production DB.
 """
 import os
 import sys
@@ -8,6 +9,7 @@ import sys
 import pytest
 import pytest_asyncio
 
+import app.database as _app_database
 import app.kanban.db as _kanban_db
 
 # Eagerly import the kanban models so every table registered on
@@ -17,9 +19,31 @@ import app.kanban.db as _kanban_db
 # any model added after the conftest itself was last imported (e.g. the
 # ``kanban_plans`` table from kanban card 727470a8).
 import app.kanban.models  # noqa: F401
+
+# Same rationale for ``app.models``: the device-local ``claude_registry.db``
+# tables (project / mcp_token / sandcastle / scheduled / agent_mail /
+# security_audit / ...) only land on ``Base.metadata`` once each module in
+# ``app/models/*.py`` has been imported. Without this, a test that only
+# pulls in ``app.services.x`` would see a test DB missing any table
+# registered by a model file the test didn't import transitively. The
+# conftest's eager import guarantees every model is materialised before
+# the reset fixture runs.
+import app.models  # noqa: F401
+
+# ``app.models.database`` is intentionally *not* in ``app.models/__init__.py``
+# (it predates the eager-import convention and is treated as the core table
+# set: Project, Backup, AutoBackupSettings, Marketplace, ...). Import it
+# explicitly here so the per-test ``drop_all``/``create_all`` pass sees
+# every core table. Without this, a test that only pulls in e.g.
+# ``app.services.agent_mail_service`` would see ``projects``/``backups``
+# missing from the test DB and fail with ``no such table: projects``.
+import app.models.database  # noqa: F401
+
+from tests.app_database_test_db import TestSessionLocal as _AppDbSessionLocal, test_engine as _app_db_test_engine
 from tests.kanban_test_db import TestSessionLocal, test_engine
 
 _test_sf = TestSessionLocal()
+_app_db_test_sf = _AppDbSessionLocal()
 
 
 @pytest.fixture(autouse=True)
@@ -43,41 +67,94 @@ def _isolate_git_env():
 
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_test_db():
-    """Drop and recreate all tables before each test."""
+    """Drop and recreate all kanban tables before each test."""
     from tests.kanban_test_db import reset_test_tables
     await reset_test_tables()
     yield
 
 
-@pytest_asyncio.fixture(autouse=True, scope="session")
-async def _cleanup_test_projects():
-    """Safety net: purge leftover test rows from the real app DB.
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_app_database_tables():
+    """Drop and recreate all ``app.database.Base`` tables before each test.
 
-    Some tests (e.g. test_mcp_server.py::test_mcp_tool_list_projects) must
-    exercise the actual `projects` table in claude_registry.db rather than
-    an isolated test DB, because they go through the MCP tool layer. By
-    convention those tests name their row "mcp-test-*" / path it under
-    "/tmp/test-*". Individual tests clean up after themselves, but a crash
-    or an interrupted run can still leak rows — this fixture sweeps any
-    stragglers once the whole session finishes so claude_registry.db can't
-    accumulate junk projects across repeated test runs.
+    Mirrors ``_reset_test_db`` for the wider ``claude_registry.db`` schema:
+    every test starts with a fresh set of project / mcp_token / sandcastle /
+    scheduled / agent_mail / security_audit / ... rows so prior tests can't
+    leak into the current one. The drop_all + create_all pass is fast enough
+    that even tests that don't touch the DB pay only milliseconds.
     """
+    from tests.app_database_test_db import reset_test_tables
+    await reset_test_tables()
     yield
 
-    from sqlalchemy import delete, or_
 
-    from app.database import AsyncSessionLocal, Base, engine
-    from app.models.database import Project
+@pytest_asyncio.fixture(autouse=True, scope="session")
+async def _patch_app_database():
+    """Swap every ``AsyncSessionLocal`` / ``engine`` reference to the test
+    factory/engine for the whole session, regardless of which module
+    imported them.
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with AsyncSessionLocal() as db:
-        await db.execute(
-            delete(Project).where(
-                or_(Project.name.like("mcp-test-%"), Project.path.like("/tmp/test-%"))
-            )
-        )
-        await db.commit()
+    Self-improve kanban card 02e80e79: generalises
+    ``_patch_kanban_db``'s identity-swap technique to ``app.database``
+    itself. Mirrors the kanban fixture structurally:
+
+      * Capture the prod references from the canonical module BEFORE
+        patching it, so we can detect them on other modules by identity.
+      * Rebind the canonical module.
+      * Walk ``sys.modules`` and rebind every module whose ``engine`` /
+        ``AsyncSessionLocal`` attribute still points at the *same* object
+        as the prod references.
+
+    A new MCP tool / service / router that does
+    ``from app.database import AsyncSessionLocal`` is picked up
+    automatically — no allow-list to maintain. The ``mcp_server.tools.*``
+    modules and any ``app.services.*`` importer are now isolated with no
+    per-file ``monkeypatch.setattr`` needed.
+
+    Test that exercises this guarantee end-to-end:
+    ``tests/test_app_database_isolation.py::test_app_database_swap_reaches_indirect_consumer``.
+
+    Once every ``app.database`` consumer goes through the test DB, the
+    legacy ``_cleanup_test_projects`` safety net (which sweated
+    mcp-test-* rows that escaped the prod DB on a crash) is no longer
+    needed: any row a test writes lives in the temp-file engine, which
+    is unlinked at process exit by ``atexit``. Kanban card 02e80e79
+    removed that net in the same commit.
+    """
+    original_sf = _app_database.AsyncSessionLocal
+    original_engine = _app_database.engine
+
+    _app_database.engine = _app_db_test_engine
+    _app_database.AsyncSessionLocal = _app_db_test_sf
+
+    # Some modules import the helpers (``get_db``) or the ``Base`` class
+    # alongside the engine/session factory. ``get_db`` is a closure over
+    # the module-level ``AsyncSessionLocal`` and ``Base`` is a class (same
+    # object either way), so neither needs swapping — only the two named
+    # attributes do.
+    rebound = []
+    for mod in list(sys.modules.values()):
+        if mod is None:
+            continue
+        try:
+            current_sf = getattr(mod, "AsyncSessionLocal", None)
+        except Exception:
+            current_sf = None
+        if current_sf is original_sf:
+            mod.AsyncSessionLocal = _app_db_test_sf
+            rebound.append((mod, "AsyncSessionLocal", current_sf))
+        try:
+            current_engine = getattr(mod, "engine", None)
+        except Exception:
+            current_engine = None
+        if current_engine is original_engine:
+            mod.engine = _app_db_test_engine
+            rebound.append((mod, "engine", current_engine))
+
+    yield
+
+    for mod, attr, val in rebound:
+        setattr(mod, attr, val)
 
 
 @pytest_asyncio.fixture(autouse=True, scope="session")
