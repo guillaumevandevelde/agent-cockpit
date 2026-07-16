@@ -11,6 +11,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+SCHEDULING_HOOK_EVENTS: tuple[str, ...] = (
+    "UserPromptSubmit",
+    "Stop",
+    "Notification",
+    "SessionStart",
+    "SessionEnd",
+)
+
 def render_hook_command(event: str, port: int = 8000) -> str:
     url = f"http://localhost:{port}/api/v1/scheduled-messages/hook-event"
     if event == "Notification":
@@ -35,10 +43,4 @@ def settings_hooks_block(port: int = 8000) -> dict:
     """Return a dict to merge into ~/.claude/settings.json 'hooks'."""
     def entry(ev: str):
         return [{"hooks": [{"type": "command", "command": render_hook_command(ev, port)}]}]
-    return {
-        "UserPromptSubmit": entry("UserPromptSubmit"),
-        "Stop": entry("Stop"),
-        "Notification": entry("Notification"),
-        "SessionStart": entry("SessionStart"),
-        "SessionEnd": entry("SessionEnd"),
-    }
+    return {ev: entry(ev) for ev in SCHEDULING_HOOK_EVENTS}

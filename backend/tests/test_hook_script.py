@@ -1,5 +1,9 @@
 from app.models.scheduled_message_schemas import HookEvent
-from app.services.scheduling.hook_script import render_hook_command, settings_hooks_block
+from app.services.scheduling.hook_script import (
+    SCHEDULING_HOOK_EVENTS,
+    render_hook_command,
+    settings_hooks_block,
+)
 
 
 def test_hook_command_posts_event():
@@ -12,7 +16,7 @@ def test_hook_command_posts_event():
 
 def test_settings_block_has_all_events():
     block = settings_hooks_block(port=8000)
-    assert set(block) == {"UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"}
+    assert set(block) == set(SCHEDULING_HOOK_EVENTS)
 
 
 def test_render_includes_tmux_pane():
