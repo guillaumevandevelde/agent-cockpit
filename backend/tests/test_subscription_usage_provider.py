@@ -205,6 +205,59 @@ class TestAnthropicUsageProvider:
         assert usage.drempel_gebruikt is None
 
 
+class TestAnthropicUsageProviderModelAttribution:
+    """Regression test for kaart d160d13f...: MiniMax tokens counted as
+    Anthropic plan-tier usage.
+
+    Uses a real ``UsageService`` (not a mocked ``get_block_usage``) so the
+    ``subscription_id`` filter is actually exercised end-to-end rather than
+    bypassed by a mock that already returns a pre-summed block.
+    """
+
+    async def test_mixed_anthropic_and_minimax_traffic_excludes_minimax(self):
+        from app.services.usage_service import LoadedUsageEntry, UsageService
+
+        usage_service = UsageService(db=None)
+        now = datetime.now(UTC)
+
+        def entry(model: str, input_tokens: int) -> LoadedUsageEntry:
+            return LoadedUsageEntry(
+                timestamp=now,
+                input_tokens=input_tokens,
+                output_tokens=0,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=0.0,
+                model=model,
+                session_id="s1",
+                version="1.0.0",
+                project_path="p",
+            )
+
+        # 10k Anthropic tokens + 90k MiniMax tokens in the same active
+        # block. Pre-fix, get_block_usage summed both -> drempel_gebruikt
+        # would be 100_000 / 100_000 = 1.0 (not beschikbaar). Post-fix,
+        # only the 10k Anthropic tokens should count.
+        usage_service.get_all_usage_entries = AsyncMock(
+            return_value=[
+                entry("claude-sonnet-4-20250514", 10_000),
+                entry("MiniMax-M3", 90_000),
+            ]
+        )
+
+        provider = AnthropicUsageProvider(
+            usage_service=usage_service,
+            plan_tier_limit_tokens=100_000,
+            subscription_id="claude-code:anthropic",
+            subscription_label="Claude Code (Anthropic)",
+        )
+
+        usage = await provider.get_usage()
+
+        assert usage.drempel_gebruikt == pytest.approx(0.1)
+        assert usage.beschikbaar is True
+
+
 class TestMinimaxUsageProvider:
     """MiniMax remote API — exact wanneer de probe werkt, anders onbekend.
 

@@ -70,7 +70,9 @@ class AnthropicUsageProvider(SubscriptionUsageProvider):
             )
 
         try:
-            blocks = await self._usage_service.get_block_usage(active=True)
+            blocks = await self._usage_service.get_block_usage(
+                active=True, subscription_id=self.id
+            )
         except Exception:
             # Een crashende UsageService mag de provider niet stillekens
             # iets anders laten suggereren — label onbekend.

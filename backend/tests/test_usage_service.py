@@ -1,5 +1,6 @@
 """Tests for usage tracking services."""
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -498,3 +499,61 @@ class TestSessionBlocks:
         # Active block should be included
         assert len(filtered) == 1
         assert filtered[0].is_active
+
+
+class TestGetBlockUsageSubscriptionFilter:
+    """``get_block_usage(subscription_id=...)`` — kaart d160d13f...
+
+    Without a filter, MiniMax and Anthropic tokens land in the same block
+    (same ``claude`` CLI writes both to the JSONL tree). The filter routes
+    every entry through ``subscription_id_for_model`` before blocks are
+    built, so a caller can ask for just one subscription's tokens.
+    """
+
+    def setup_method(self):
+        self.service = UsageService(db=None)
+
+    def _entry(self, model: str, input_tokens: int, timestamp: datetime) -> LoadedUsageEntry:
+        return LoadedUsageEntry(
+            timestamp=timestamp,
+            input_tokens=input_tokens,
+            output_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            cost_usd=0.0,
+            model=model,
+            session_id="s1",
+            version="1.0.0",
+            project_path="p",
+        )
+
+    @pytest.mark.asyncio
+    async def test_subscription_filter_excludes_other_models(self):
+        now = datetime.now(UTC)
+        entries = [
+            self._entry("claude-sonnet-4-20250514", 1000, now),
+            self._entry("MiniMax-M3", 5000, now),
+        ]
+        self.service.get_all_usage_entries = AsyncMock(return_value=entries)
+
+        response = await self.service.get_block_usage(
+            active=True, subscription_id="claude-code:anthropic"
+        )
+
+        assert response.active_block is not None
+        assert response.active_block.input_tokens == 1000
+        assert response.totals.input_tokens == 1000
+
+    @pytest.mark.asyncio
+    async def test_no_subscription_filter_includes_all_models(self):
+        now = datetime.now(UTC)
+        entries = [
+            self._entry("claude-sonnet-4-20250514", 1000, now),
+            self._entry("MiniMax-M3", 5000, now),
+        ]
+        self.service.get_all_usage_entries = AsyncMock(return_value=entries)
+
+        response = await self.service.get_block_usage(active=True)
+
+        assert response.active_block is not None
+        assert response.active_block.input_tokens == 6000
