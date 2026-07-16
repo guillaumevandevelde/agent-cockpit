@@ -32,6 +32,7 @@ from app.models.schemas import (
     UsageSummaryResponse,
 )
 from app.services.pricing_service import PricingService
+from app.services.subscriptions.attribution import subscription_id_for_model
 from app.utils.path_utils import (
     convert_path_to_folder_name,
     get_claude_projects_dir,
@@ -850,10 +851,22 @@ class UsageService:
         project_path: str | None = None,
         recent: bool = True,
         active: bool = False,
+        subscription_id: str | None = None,
     ) -> BlockUsageListResponse:
-        """Get 5-hour billing block usage."""
+        """Get 5-hour billing block usage.
+
+        ``subscription_id``, when given, restricts the block computation to
+        entries whose ``model`` maps to that subscription (see
+        ``subscriptions.attribution.subscription_id_for_model``) — e.g. so
+        ``AnthropicUsageProvider`` doesn't sum MiniMax tokens into the
+        Anthropic plan-tier ratio (kaart d160d13f...).
+        """
         cache_key = await self.get_cache_key(
-            "block", project_path, recent=recent, active=active
+            "block",
+            project_path,
+            recent=recent,
+            active=active,
+            subscription_id=subscription_id,
         )
         cached = await self.get_from_cache(cache_key)
 
@@ -861,6 +874,11 @@ class UsageService:
             return BlockUsageListResponse(**cached)
 
         entries = await self.get_all_usage_entries(project_path)
+        if subscription_id is not None:
+            entries = [
+                e for e in entries
+                if subscription_id_for_model(e.model) == subscription_id
+            ]
         blocks = await self.identify_session_blocks(entries)
 
         # Filter
