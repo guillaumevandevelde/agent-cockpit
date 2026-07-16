@@ -1681,3 +1681,163 @@ def test_build_card_prompt_leaf_spike_follow_up_clause_has_scoped_impediment_esc
         "as a conditional card (the autonomy-eerst pattern: escalate "
         "the unresolved knot, not the routine fork)."
     )
+
+
+# ---- Outcome-enum contract in leaf-spike override --------------------------
+# Continuation of the analysis-outcome-contract (docs/cockpit/analysis-
+# outcome-contract-decision.md §5). The MCP `move_card` tool refuses a
+# Done-move on a `work_type='analysis'` (or agent='analyst') card without
+# a `outcome` param from the closed enum
+# {`decomposed`, `not_feasible`, `no_action_needed`}. The override note
+# prepended in leaf-spike mode must (a) name the three values verbatim so
+# the session can quote them in the `move_card` call, (b) name `outcome`
+# so the agent knows which `move_card` field populates them, and (c) state
+# the preference order (concrete follow-up cards → real product fork via
+# `report_impediment` → the two written-justification outcomes as honest
+# terminal paths, not escape hatches). Without this the leaf-spike hits
+# the `outcome_required` gate at the very end of its budget — precisely
+# the worst time to discover an unnamed contract.
+
+
+def test_build_card_prompt_leaf_spike_override_names_outcome_enum():
+    """The leaf-spike override note must name the closed outcome enum
+    (`decomposed` / `not_feasible` / `no_action_needed`) verbatim so the
+    session can pass one of them to `move_card(..., column='Done',
+    outcome=<value>)` without guessing at the wire format. The values
+    are the contract of the analysis-outcome-poort; the persona and the
+    gate must read the same string set.
+    """
+    card = _FakeCard(
+        title="Spike: outcome enum",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden: geen Write/Edit."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    clause_block = _leaf_spike_clause_block(prompt)
+    assert clause_block
+
+    for outcome in ("decomposed", "not_feasible", "no_action_needed"):
+        assert outcome in clause_block, (
+            f"Leaf-spike override must name the outcome enum value "
+            f"{outcome!r} so the session can pass it to move_card. The "
+            f"analysis-outcome-poort rejects the Done-move without a "
+            f"value from {{decomposed, not_feasible, no_action_needed}} "
+            f"(docs/cockpit/analysis-outcome-contract-decision.md §5)."
+        )
+
+
+def test_build_card_prompt_leaf_spike_override_names_outcome_param():
+    """The override note must explicitly name the `outcome` parameter so
+    the session doesn't try to smuggle the value into `summary` or a free
+    label. The MCP gate reads `move_card`'s `outcome` kwarg; the prompt
+    and the gate must agree on the field name."""
+    card = _FakeCard(
+        title="Spike: outcome param",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden: geen Write/Edit."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    clause_block = _leaf_spike_clause_block(prompt)
+    assert clause_block
+    clause_lower = clause_block.lower()
+
+    assert "outcome" in clause_lower, (
+        "Leaf-spike override must mention the `outcome` parameter name so "
+        "the session knows which move_card field carries the enum value."
+    )
+    # Must reference move_card by name with Done as the target column —
+    # that's the call site the enum belongs to.
+    assert "move_card" in clause_block, (
+        "Leaf-spike override must reference move_card by name so the "
+        "`outcome=<value>` instruction is grounded at the call site, not "
+        "left as a floating concept."
+    )
+    assert "Done" in clause_block, (
+        "Leaf-spike override must name the Done column so the agent "
+        "knows move_card(..., column='Done') is the call that consumes "
+        "the outcome enum."
+    )
+
+
+def test_build_card_prompt_leaf_spike_override_states_preference_order():
+    """The override note must state the preference order explicitly:
+    vervolgkaarten is the voorkeur (continue with the existing
+    create_card/add_plan_attachment clause); an echte onopgeloste
+    product-fork goes to `report_impediment` (NOT a Done-move); and
+    `not_feasible` / `no_action_needed` are written-justification terminal
+    outcomes, not escape hatches. The order matters because a session
+    under context pressure must know which path is the honest one —
+    the doc's whole point is that 'vervolgkaarten overslaan via
+    no_action_needed' is acceptable only when written and audited."""
+    card = _FakeCard(
+        title="Spike: preference order",
+        description="",
+        work_type="analysis",
+        agent="analyst",
+        analyst_agent_id=None,
+        analyst_run_id=None,
+    )
+    persona = (
+        "Je bent de analyst voor een kanban-kaart.\n"
+        "Verboden: geen Write/Edit."
+    )
+    prompt = dispatch.build_card_prompt(
+        card, persona=persona, ship_mode="direct", phase="executor",
+    )
+
+    clause_block = _leaf_spike_clause_block(prompt)
+    assert clause_block
+    clause_lower = clause_block.lower()
+
+    # Voorkeur: vervolgkaarten / follow-up / kind-kaarten — the existing
+    # clause is the preferred outcome; the new enum section must say so.
+    assert (
+        "voorkeur" in clause_lower or "preferred" in clause_lower
+        or "voorkeur" in clause_block
+    ), (
+        "Leaf-spike override must mark the follow-up cards path as the "
+        "preferred outcome so the agent doesn't reach for "
+        "no_action_needed as an escape hatch."
+    )
+
+    # report_impediment for echte product-forks (and it is NOT a Done-move).
+    assert "report_impediment" in clause_block, (
+        "Leaf-spike override must keep report_impediment as the escape "
+        "for an echte onopgeloste product-fork; that path is NOT a "
+        "Done-move and is therefore not part of the outcome enum."
+    )
+
+    # The two written-justification outcomes must be framed as
+    # legitimate endings, not escape hatches — both must come with a
+    # rationale/justification/summary demand.
+    assert "not_feasible" in clause_block
+    assert "no_action_needed" in clause_block
+    assert any(
+        marker in clause_lower
+        for marker in ("rationale", "rechtvaardiging", "justification")
+    ), (
+        "Leaf-spike override must demand a written justification "
+        "(rationale / rechtvaardiging / justification) for "
+        "not_feasible / no_action_needed so the outcome is auditeerbaar "
+        "instead of silent."
+    )
