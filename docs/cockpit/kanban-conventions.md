@@ -261,6 +261,45 @@ De waarde landt via `apply_operation("update", ...)` in
 code-path als de REST PATCH — dus dispatcher-gating, op-log-replay en
 `rematerialize()` gedragen zich identiek voor MCP- en REST-clients.
 
+## 4b. Same-file Vervolgkaarten uit één analyse-doc — `depends_on` chainen
+
+Wanneer één analyse-doc (typisch `docs/cockpit/*-analyse.md`) onderaan
+een **"Vervolgkaarten"-tabel** N follow-ups uitspuugt die hetzelfde
+"hot file" raken — bv. dezelfde module-level constanten of
+samenhangende methoden — levert parallel dispatch van die N
+**merge-conflicten** op zodra de eerste naar `master` pusht: de
+overige N-1 zitten nog in een branch die dezelfde regio wijzigt, en
+elke landing dwingt een verse `git worktree add --detach` +
+`merge --no-ff` + handmatige conflict-resolution af. Bijkomend
+probleem: wijzigingen van een concurrente sibling kunnen het
+runtime-gedrag verschuiven waar je tests op leunen. Geobserveerd in
+self-improve kaart `d8b137fc…` voor de 5 bevindingen van
+[`spawn-test-bridge-sessions-analyse.md`](./spawn-test-bridge-sessions-analyse.md)
+op `backend/app/services/scheduling/session_registry.py` (3 van de 5
+landden in één week op master en forceerden elk een re-merge).
+
+**Conventie:** als ≥2 Vervolgkaarten van één analyse-doc hetzelfde
+bestand raken (of overlappende module-level state), keten ze
+**lineair via `depends_on`** in plaats van parallel te dispatchen.
+Dat kan via `add_plan_attachment(depends_on_graph=...)` (analyst-flow,
+zie [`multi-agent-kanban.md`](./multi-agent-kanban.md) §2) of
+retroactief via `update_card(depends_on=[...])` (zie §4a) als de
+kaarten al aangemaakt zijn.
+
+De keten-volgorde kan de natuurlijke prioriteit uit de analyse-doc
+volgen, of gewoon de tabel-volgorde als er geen hiërarchie is — het
+doel is sequentieel mergen, niet maximaliseren van
+executor-parallelism. Een paar merge-cycli verliezen is goedkoper
+dan drie keer dezelfde regio hoeven conflict-resolven.
+
+**Wanneer NIET chainen:** als de Vervolgkaarten orthogonale
+bestanden of subsystemen raken, is parallel dispatch prima — de
+conflict-klasse geldt alleen bij overlap op een hot file. Dit is
+een **proces-conventie**, geen mechanisme-fix: de dispatcher remt
+parallelisme niet actief voor overlappende kaarten, de discipline
+zit aan de analyst-/curator-kant bij het opstellen van de
+`depends_on_graph`.
+
 ## 4. Bron van waarheid — waar lees je wat?
 
 | Vraag | Eerst hier kijken |
