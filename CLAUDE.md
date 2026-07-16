@@ -86,6 +86,9 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Docs / decision register
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
 
+# Analysis outcome sweeper (vangnet voor het REST-gat + historische voorraad)
+./scripts/check-analysis-outcomes.sh          # Flag Done-analyses zonder Outcome-comment/label/kinderen (advisory; --strict = exit 1; --since YYYY-MM-DD voor historic-grens)
+
 # Lint
 cd frontend && npm run lint      # ESLint
 
