@@ -104,6 +104,16 @@ async def lifespan(app: FastAPI):
     # on the Scheduled Messages page, which meant the whole pipeline stayed dead
     # code on any machine where nobody happened to visit that page first.
     await ensure_scheduling_hooks_installed()
+    # Force every project's autodispatch flag off before the tick is scheduled
+    # below. The flag is persisted (KanbanMeta, device-local) and survives
+    # restarts, so without this a project left toggled on would start having
+    # cards auto-claimed/spawned on the very next tick after any backend
+    # restart -- auto-dispatch must always start from an explicit opt-in.
+    from app.kanban import dispatch as kanban_dispatch
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        await kanban_dispatch.disable_all_autodispatch(ks)
+        await ks.commit()
     # Start kanban auto-dispatch polling
     scheduler_service.schedule_kanban_dispatch(
         interval_seconds=settings.kanban_dispatch_interval_seconds
