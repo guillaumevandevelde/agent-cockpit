@@ -9,7 +9,7 @@ guard.
 """
 from datetime import UTC, datetime, timedelta, timezone
 
-from app.utils.timeutils import ensure_aware
+from app.utils.timeutils import ensure_aware, parse_iso_datetime
 
 
 def test_naive_datetime_is_coerced_to_utc_aware():
@@ -42,3 +42,35 @@ def test_now_utc_round_trips_through_helper():
     ``now(UTC)`` back through ``ensure_aware`` must not raise or shift."""
     now = datetime.now(UTC)
     assert ensure_aware(now) is now
+
+
+def test_parse_iso_datetime_none_and_empty_string():
+    assert parse_iso_datetime(None) is None
+    assert parse_iso_datetime("") is None
+
+
+def test_parse_iso_datetime_accepts_iso_string_with_z_suffix():
+    result = parse_iso_datetime("2026-07-14T12:00:00Z")
+    assert result == datetime(2026, 7, 14, 12, 0, 0, tzinfo=UTC)
+
+
+def test_parse_iso_datetime_accepts_iso_string_with_offset():
+    result = parse_iso_datetime("2026-07-14T12:00:00+00:00")
+    assert result == datetime(2026, 7, 14, 12, 0, 0, tzinfo=UTC)
+
+
+def test_parse_iso_datetime_accepts_naive_datetime_and_makes_it_aware():
+    naive = datetime(2026, 7, 14, 12, 0, 0)
+    result = parse_iso_datetime(naive)
+    assert result == naive.replace(tzinfo=UTC)
+
+
+def test_parse_iso_datetime_accepts_aware_datetime_unchanged():
+    aware = datetime(2026, 7, 14, 12, 0, 0, tzinfo=UTC)
+    result = parse_iso_datetime(aware)
+    assert result is aware
+
+
+def test_parse_iso_datetime_returns_none_for_unparseable_value():
+    assert parse_iso_datetime("not-a-date") is None
+    assert parse_iso_datetime(12345) is None

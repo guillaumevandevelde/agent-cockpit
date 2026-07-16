@@ -34,11 +34,12 @@ import logging
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from app.services.usage_service import LoadedUsageEntry, UsageService
 from app.utils.path_utils import get_claude_projects_dir
+from app.utils.timeutils import parse_iso_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -73,33 +74,16 @@ class CardUsage:
     model_breakdowns: list[ModelBreakdown] = field(default_factory=list)
 
 
-def _ensure_aware(dt: datetime) -> datetime:
-    """Treat naive datetimes as UTC and normalize aware datetimes to UTC.
-
-    SQLite drops tzinfo on DateTime(timezone=True) columns (see the note
-    in app/kanban/db.py), so any dispatch_started_at we read back is naive.
-    `dispatch_started_at` is stored as an ISO8601 *string* (mirrors
-    `scheduled_at` — see models.KanbanCard), so callers that already have
-    a string should use `_parse_started_at` instead.
-    """
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
-
-
 def _parse_started_at(value) -> datetime | None:
     """Accept the ISO-string form (DB row) or a datetime (in-memory ORM
-    attribute) and return an aware datetime in UTC. Returns None for
-    None / empty / unparseable input."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        return _ensure_aware(value)
-    try:
-        return _ensure_aware(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
-    except (ValueError, TypeError):
+    attribute) and return an aware datetime. Returns None for
+    None / empty / unparseable input. Thin wrapper around the shared
+    `app.utils.timeutils.parse_iso_datetime` that adds this module's
+    warning log on unparseable input."""
+    result = parse_iso_datetime(value)
+    if result is None and value not in (None, ""):
         logger.warning("dispatch-usage: could not parse dispatch_started_at=%r", value)
-        return None
+    return result
 
 
 def aggregate_dispatch_entries(entries: Iterable[LoadedUsageEntry]) -> CardUsage:

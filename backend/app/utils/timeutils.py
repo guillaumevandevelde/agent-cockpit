@@ -22,3 +22,25 @@ def ensure_aware(dt: datetime) -> datetime:
     which is the opposite of what a "make aware" helper should do.
     """
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
+def parse_iso_datetime(value: str | datetime | None) -> datetime | None:
+    """Parse a PATCHable timestamp column's stored value into an aware datetime.
+
+    Columns that round-trip through the kanban op-log's JSON ``payload``
+    (e.g. ``KanbanCard.scheduled_at``, ``dispatch_started_at`` — see the
+    note on ``KanbanCard`` in ``app/kanban/models.py``) are stored as
+    ISO-8601 strings rather than ``DateTime`` columns, so every consumer
+    ends up parsing the same shape. Accepts either the string form (a
+    freshly-read DB row) or a ``datetime`` (an in-memory ORM attribute
+    that hasn't round-tripped yet) so callers don't need to branch.
+    Returns ``None`` for ``None``, empty string, or an unparseable value.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return ensure_aware(value)
+    try:
+        return ensure_aware(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+    except (ValueError, TypeError):
+        return None
