@@ -16,6 +16,43 @@ from app.kanban.models import (
 )
 
 
+def is_analyst_leaf_spike(card) -> bool:
+    """True when the card is routed to the analyst column but does NOT have
+    a multi-agent decomposition pipeline attached.
+
+    Routing detection: ``work_type='analysis'`` (the structured routing hint
+    maps analysis → analyst by default — see ``WORK_TYPE_PERSONA_DEFAULTS``)
+    OR ``card.agent='analyst'`` (legacy/manual override that picks the
+    analyst column regardless of work_type). Either signals that the card's
+    target_agent resolved to "analyst" and its persona body is analyst.md
+    (or the hardcoded ``ANALYST_PROMPT`` fallback).
+
+    Without this distinction, ``build_card_prompt`` emitted both the
+    analyst persona ("Verboden: geen Write/Edit") AND the executor ship
+    workflow ("write doc + commit + ship + attach branch + move THIS kaart
+    naar Done") for the same card. The leaf analyst spike is a single
+    deliverable, not a multi-agent decomposition — there's no parent to
+    split, no child-cards to plan — so the standard analyst prohibitions
+    are inapplicable. See kanban card a9c27beeb63e427a9c14ad98fa8380fe.
+
+    Lives here (and not in ``dispatch.py``) so non-dispatch consumers
+    (e.g. ``mcp_server.move_card`` enforcing the analysis-outcome gate
+    from ``docs/cockpit/analysis-outcome-contract-decision.md`` §5) can
+    share the exact same predicate without an import cycle: dispatch.py
+    imports service.py, but service.py never imports dispatch.py.
+
+    Note: this helper only checks routing; the phase check (executor vs.
+    analyst) is applied in ``build_card_prompt``. A real analyst card
+    (``analyst_agent_id`` set, ``analyst_run_id`` not set, ``phase ==
+    'analyst'``) is consistent — persona + analyst session-end workflow
+    are both planning-only, no contradiction — so it does not need the
+    override.
+    """
+    work_type = getattr(card, "work_type", None)
+    agent = getattr(card, "agent", None)
+    return work_type == "analysis" or agent == "analyst"
+
+
 async def list_cards(
     session,
     project_key: str,

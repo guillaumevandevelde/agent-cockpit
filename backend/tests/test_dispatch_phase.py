@@ -1170,27 +1170,27 @@ def _stub_default_work_type_mapping(monkeypatch):
 
 def test_is_analyst_leaf_spike_recognizes_work_type_analysis():
     card = _FakeCard(work_type="analysis", agent=None)
-    assert dispatch._is_analyst_leaf_spike(card) is True
+    assert dispatch.is_analyst_leaf_spike(card) is True
 
 
 def test_is_analyst_leaf_spike_recognizes_agent_analyst():
     card = _FakeCard(work_type=None, agent="analyst")
-    assert dispatch._is_analyst_leaf_spike(card) is True
+    assert dispatch.is_analyst_leaf_spike(card) is True
 
 
 def test_is_analyst_leaf_spike_recognizes_both():
     card = _FakeCard(work_type="analysis", agent="analyst")
-    assert dispatch._is_analyst_leaf_spike(card) is True
+    assert dispatch.is_analyst_leaf_spike(card) is True
 
 
 def test_is_analyst_leaf_spike_rejects_non_analyst_routing():
     card = _FakeCard(work_type="feature", agent="engineer")
-    assert dispatch._is_analyst_leaf_spike(card) is False
+    assert dispatch.is_analyst_leaf_spike(card) is False
 
 
 def test_is_analyst_leaf_spike_rejects_unset_card():
     card = _FakeCard(work_type=None, agent=None)
-    assert dispatch._is_analyst_leaf_spike(card) is False
+    assert dispatch.is_analyst_leaf_spike(card) is False
 
 
 def test_build_card_prompt_leaf_spike_prepends_override_note():

@@ -10,12 +10,12 @@ import logging
 import time
 
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from app.kanban import dep_resolver as mcp_kanban_deps
 from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
-from app.kanban.models import KanbanDeliverable
+from app.kanban.models import KanbanCard, KanbanDeliverable
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import resolve_project_key as _resolve_project_key
 from app.kanban.schemas import CardResponse, CardSummaryResponse
@@ -227,9 +227,41 @@ async def claim_card(card_id: str, claimed_by: str) -> dict:
 # for the Done path and for a raw move_card("Impediment", ...) bypassing that tool.
 _SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary", "Impediment": "Impediment"}
 
+# Analysis cards (`work_type == "analysis"` or `agent == "analyst"`) are the
+# highest-discipline consumer of the Done state: their value is downstream
+# work (subtask cards, a NO-GO, or a judgement that no follow-up is needed),
+# not "did the analyst session end". A summary alone is the wrong witness
+# surface for that — three previous rounds of prompt-level instructions were
+# ignored because no machine path verified them (decision doc §1). This
+# gate closes that gap. The closed enum maps exactly the three legitimate
+# exits of the user's request (`analysis-outcome-contract-decision.md` §2):
+#
+#   decomposed      — child cards were created; verified against the DB
+#                     (≥1 row with parent_card_id == card.id). The children
+#                     ARE the artefact; no extra label is set.
+#   not_feasible    — "we should not build this"; rationale lives in summary.
+#                     Sets the canonical label `not-feasible`.
+#   no_action_needed — "this is a decision/steering artefact; no cards".
+#                     Sets the canonical label `no-action-needed`.
+#
+# The fourth exit — "input needed" — is `report_impediment`, not a Done
+# move; the gate intentionally doesn't try to model it (decision §5
+# "waarom no_action_needed geen achterdeur is").
+_OUTCOMES = frozenset({"decomposed", "not_feasible", "no_action_needed"})
+
+# Label keys for the two path-labelling outcomes. Keep them lowercase kebab,
+# matching the project's existing free-form label vocabulary. See
+# `docs/cockpit/kanban-conventions.md` §2 for the comment-prefix contract.
+_OUTCOME_LABELS = {
+    "not_feasible": "not-feasible",
+    "no_action_needed": "no-action-needed",
+}
+
 
 @mcp.tool()
-async def move_card(card_id: str, column: str, summary: str | None = None) -> dict:
+async def move_card(card_id: str, column: str,
+                    summary: str | None = None,
+                    outcome: str | None = None) -> dict:
     """Move a card to a different column.
 
     Moving into "Done" or "Impediment" requires `summary` — a short account of the
@@ -237,6 +269,19 @@ async def move_card(card_id: str, column: str, summary: str | None = None) -> di
     activity feed as a comment so the outcome is visible without opening a
     transcript. Returns {"error": "summary_required"} without moving the card if
     summary is missing/blank for those two columns.
+
+    For analysis cards (`work_type='analysis'` or `agent='analyst'`) moving to
+    `Done`, `outcome` is also required and must be one of:
+    ``decomposed`` (verified against ≥1 child card), ``not_feasible``
+    (canonical label `not-feasible` is appended), or ``no_action_needed`
+    (canonical label `no-action-needed` is appended). A `**Outcome:** <value> — <summary>`
+    comment is posted in every case. Failure modes are refused without moving
+    the card and return one of `{"error": "outcome_required"}`,
+    `{"error": "invalid_outcome", "allowed": [...]}` or
+    `{"error": "no_children"}`. Backwards-compatible for non-analysis
+    cards — `outcome` is ignored unless both the column is `Done` and
+    `service.is_analyst_leaf_spike(card)` is true. See
+    `docs/cockpit/analysis-outcome-contract-decision.md` for the rationale.
     """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
@@ -255,12 +300,90 @@ async def move_card(card_id: str, column: str, summary: str | None = None) -> di
                 ),
             }
 
+        # Analysis-outcome gate: only fires on Done + analyst routing. Both
+        # checks are explicit so a future "move analysis card to Doing"
+        # path can stay free. Non-analysis cards and non-Done moves fall
+        # through unchanged — full backwards compatibility for every
+        # existing caller (decision doc §5).
+        is_analysis_done = (
+            column == "Done" and service.is_analyst_leaf_spike(card)
+        )
+        outcome_clean = (outcome or "").strip() or None
+        if is_analysis_done:
+            if outcome_clean is None:
+                return {
+                    "error": "outcome_required",
+                    "message": (
+                        "An analysis card (work_type='analysis' or agent='analyst') "
+                        "moving to Done must declare an explicit outcome. Pick one of "
+                        "the three values from the closed enum: `decomposed` (the "
+                        "analysis produced ≥1 child follow-up cards), `not_feasible` "
+                        "(the analysis concludes: do not build this), or "
+                        "`no_action_needed` (decision/steering artefact only, no "
+                        "subtasks). The chosen value lands as a `**Outcome:** …` "
+                        "comment in the activity feed; `not_feasible` and "
+                        "`no_action_needed` also append a canonical label. For an "
+                        "unresolved product fork instead, use `report_impediment`."
+                    ),
+                }
+            if outcome_clean not in _OUTCOMES:
+                return {
+                    "error": "invalid_outcome",
+                    "allowed": sorted(_OUTCOMES),
+                    "message": (
+                        f"`outcome` must be one of {sorted(_OUTCOMES)}; "
+                        f"got {outcome_clean!r}."
+                    ),
+                }
+            # `decomposed` is verified, not trusted. A claim without any
+            # child cards is refused — this is the anti-lie check that
+            # makes the honest path also the easy one (decision §5).
+            if outcome_clean == "decomposed":
+                child_count = (await s.execute(
+                    select(func.count())
+                    .select_from(KanbanCard)
+                    .where(KanbanCard.parent_card_id == card_id)
+                )).scalar_one()
+                if not child_count:
+                    return {
+                        "error": "no_children",
+                        "message": (
+                            "`outcome='decomposed'` requires the analysis card "
+                            "to have ≥1 child follow-up card "
+                            "(`parent_card_id == card.id`); found 0. Create the "
+                            "subtask cards via `create_card(parent_card_id=…)` "
+                            "first, then retry the move. If the analysis truly "
+                            "produced no follow-up work, pick "
+                            "`no_action_needed` instead (and justify in "
+                            "`summary`)."
+                        ),
+                    }
+
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=card_id, payload={"column": column})
         if label:
             await apply_operation(s, op_type="comment", entity_type="comment",
                 project_key="", entity_id=card_id,
                 payload={"text": f"**{label}:** {summary}"})
+        # Outcome side-effects only apply on the analyst-Done path. We
+        # materialise labels + comment BEFORE commit so a partial state
+        # (label set, card not moved, or vice versa) can never land on
+        # disk.
+        if is_analysis_done and outcome_clean is not None:
+            outcome_label = _OUTCOME_LABELS.get(outcome_clean)
+            if outcome_label:
+                # Append-not-overwrite: existing labels survive. The op-log
+                # path's `_materialize` is a full-write on `labels`, so the
+                # merge happens here, not inside `apply_operation`.
+                existing = list(card.labels or [])
+                if outcome_label not in existing:
+                    existing.append(outcome_label)
+                await apply_operation(s, op_type="update", entity_type="card",
+                    project_key="", entity_id=card_id,
+                    payload={"labels": existing})
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=card_id,
+                payload={"text": f"**Outcome:** {outcome_clean} — {summary}"})
         await s.commit()
         logger.info("move_card: %s → %s", card_id, column)
         return await _card_dict(s, await service.get_card(s, card_id))
