@@ -94,14 +94,14 @@ async def test_agent_bridge_spawn_unknown_provider_smoke(tmp_path):
     with pytest.raises(agent_bridge_api.HTTPException) as exc_info:
         await agent_bridge_api.spawn_session_endpoint(
             agent_bridge_api.SpawnRequest(
-                provider="unknown-provider",
+                cli="unknown-provider",
                 directory=str(tmp_path),
             ),
             db=None,
         )
 
     assert exc_info.value.status_code == 400
-    assert "Unknown provider" in exc_info.value.detail
+    assert "Unknown CLI" in exc_info.value.detail
 
 
 async def test_provider_specific_inventory_smoke_rejects_wrong_provider():
