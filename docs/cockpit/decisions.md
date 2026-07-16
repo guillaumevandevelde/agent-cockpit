@@ -71,6 +71,50 @@ Herzie je een bestaande beslissing? Werk het bron-document bij, voeg een **nieuw
 regel bovenaan toe en markeer de oude regel met `↩︎ herzien door <link>` — zo blijft de
 chronologie leesbaar en verdwijnt er geen historie.
 
+### Hoe nieuwe regels worden ingevoegd — append-friendly via `merge=union`
+
+Omdat **elke** nieuwe beslissings-regel op exact dezelfde positie wordt ingevoegd
+(direct onder de `|---|---|---|---|` header van de tabel — er is maar één "nieuwste
+eerst"-plek), zou een conventionele three-way merge bij twee gelijktijdige inserts
+op een `CONFLICT (content)` in dit bestand uitkomen. Een haastige `git checkout
+--ours` zou dan een regel uit de index laten verdwijnen — precies wat dit register
+probeert te voorkomen.
+
+Daarom draagt `docs/cockpit/decisions.md` in `.gitattributes` de
+[`merge=union`](https://git-scm.com/docs/gitattributes#_defining_merge_attributes)
+strategie:
+
+```gitattributes
+docs/cockpit/decisions.md merge=union
+```
+
+`merge=union` is een file-level merge: bij een conflict houdt git de **unie van
+beide kanten' toegevoegde regels**, in plaats van een regel-tegen-regel-resolutie.
+Een insert van sessie A en een insert van sessie B op dezelfde positie resulteren
+daardoor in **beide rijen in het merge-resultaat**; de volgorde tussen twee
+gelijktijdige inserts is niet-deterministisch, maar de `Datum`-kolom maakt de
+chronologie expliciet — daar wijkt niets van af.
+
+**Wat dit betekent voor jou als auteur van een nieuwe regel:**
+
+- Schrijf je rij zoals je altijd zou doen: op de "nieuwste eerst"-plek, direct onder
+  de header.
+- **Forceer geen rebase / re-sort** van bestaande rijen om de tabel "mooi" te
+  houden — dat is precies wat de volgende sessie weer ongedaan maakt, en het
+  introduceert geen waarde die de `Datum`-kolom niet al biedt.
+- Draai de `.gitattributes`-regel niet terug. Als je denkt dat 'ie weg mag:
+  lees eerst kanban-kaart `16ce4d89…` (de merge-conflict-incident die 'm
+  rechtvaardigt) en de acceptatiecriteria daarvan.
+
+**Wat dit NIET doet:**
+
+- Het verandert de **leesconventie** niet — het register blijft "nieuwste eerst"
+  in de geest (de `Datum`-kolom is canonical, niet de regelvolgorde).
+- Het beschermt niet tegen edits aan *dezelfde* regel door twee sessies
+  (union houdt beide varianten, geen semantische merge) — een regel is append-only,
+  bestaande rijen worden niet herzien in dit register (zie de "↩︎ herzien door"-regel
+  hierboven voor revisies).
+
 ### Header-conventie — wat bovenaan elk `*-decision.md` hoort te staan
 
 Elk beslisdocument begint — direct onder de `# Titel`-regel, vóór de eerste
