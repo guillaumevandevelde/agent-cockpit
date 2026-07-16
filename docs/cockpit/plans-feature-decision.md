@@ -264,3 +264,42 @@ gelukt is, bewijst dit doc niet — dat is het hele punt. Lees het bord:
 ```bash
 curl -s "http://localhost:8000/api/v1/kanban/cards/a70a9272c7fe4134b6a8236b4c532f81/gates"
 ```
+
+## 9. Werkelijke oorzaak van de churn (2026-07-16) — een bug, geen discipline
+
+§8.4 hierboven is **weerlegd bewaard**: de diagnose ("de agents vergeten de terminale
+actie", "een gat in de ship-workflow") was fout, en de aanbevolen remedie —
+*"roep `report_impediment` aan i.p.v. `move_card(Done)`"* — zou net zo goed gefaald
+hebben. Beide eindigen namelijk in dezelfde kapotte code. Bewaard omdat de fout zelf
+leerzaam is: vijf sessies schreven een gedrags-verklaring voor wat een race condition was.
+
+**Bewijs (op-log + backend-log, niet proza):**
+
+| Waarneming | Bron |
+|---|---|
+| `move card a70a9272 (payload_keys=['column'])` gelogd 07:24:55.516 | backend-log |
+| Diezelfde move-op staat **niet** in `kanban_ops` | `sqlite3 kanban.db` |
+| `Killed tmux session: k-review-analys-590c` 07:24:55.**523** (7 ms later, zelfde `correlation_id`) | backend-log |
+| `Exception terminating connection <aiosqlite…>` 07:24:55.526 | backend-log |
+| `failed to release claim on card a70a9272` | backend-log |
+| ~26 claim→spawn→dood-na-90s cycli, 99 activity-entries | `GET /cards/{id}/activity` |
+
+**Mechanisme.** `operations._materialize` vuurde `on_card_moved_to_done` **vóór** de
+commit van de aanroeper. Die cleanup killt de tmux-sessie waarin de MCP-client draait die
+de move *op dat moment aan het uitvoeren is*. De client sterft → zijn in-flight request-task
+wordt gecancelled → `await s.commit()` wordt nooit bereikt → **de move rollt terug, de kill
+niet**. Resultaat: sessie weg, kaart nog in `analyst` én nog geclaimd → reaper → dispatcher
+→ sessie #n+1. `apply_operation` logt vóór de commit, dus het log toont een move die de DB
+nooit zag — precies de val waar §8.4 in trapte.
+
+Dit trof elke kaart die naar `Done`/`Impediment` bewoog (beide zijn
+`_TERMINAL_CLEANUP_COLUMNS`); dat de meeste kaarten tóch afsloten, maakte het een
+flaky race i.p.v. een zichtbare storing — en dus jarenlang onopgemerkt.
+
+**Fix:** cleanup verhuisd naar een `after_commit`-hook (`operations._cleanup_after_commit`),
+zodat alleen een move die écht geland is de sessie beëindigt. Regressietest:
+`backend/tests/test_kanban_terminal_cleanup_ordering.py` (faalt aantoonbaar op de oude code).
+
+**Gevolg voor de reviewvraag.** "Is er een gevolg?" had twee blockers, niet één. De
+tweede is nu weg. De eerste — de go/no-go uit §7 — is nog steeds open en is een echte
+productvraag; die hoort bij een mens, niet bij nog een analyse.

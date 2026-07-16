@@ -114,6 +114,35 @@ async def apply_operation(
     return entity_id
 
 
+def _cleanup_after_commit(session, card_id: str, project_key: str) -> None:
+    """Fire terminal-column session cleanup only once the move is committed.
+
+    The cleanup kills the tmux session hosting the MCP client that issued this
+    very move. Firing it here-and-now (pre-commit) let that kill race the
+    caller's own `await ... commit()`: the client died, its in-flight request
+    task was cancelled, and the transaction rolled back — so the tmux session
+    was gone but the card never left its agent column. The dispatcher re-claimed
+    the still-claimed card and respawned it, forever (card a70a9272 burned 26
+    cycles this way; the move op appears in the log but never in the DB).
+
+    Deferring to `after_commit` keeps the ordering that made the old code look
+    correct — cleanup still happens, and only for a move that actually landed.
+    """
+    from sqlalchemy import event
+
+    from app.kanban.session_cleanup import on_card_moved_to_done
+
+    loop = asyncio.get_running_loop()
+    sync_session = getattr(session, "sync_session", session)
+
+    @event.listens_for(sync_session, "after_commit", once=True)
+    def _fire(_sess) -> None:  # pragma: no cover - thin scheduling shim
+        # `after_commit` runs in SQLAlchemy's greenlet; hop back onto the loop
+        # before touching asyncio so cleanup scheduling never depends on
+        # whether a running loop is visible from that context.
+        loop.call_soon(on_card_moved_to_done, card_id, project_key)
+
+
 def _lww_set(card, field: str, value, hlc: str) -> None:
     """Apply value to card.<field> only if hlc beats the field's current hlc."""
     hlc_attr = f"{field}_hlc"
@@ -177,8 +206,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             new_column = payload.get("column")
             if (new_column in _TERMINAL_CLEANUP_COLUMNS
                     and old_column not in _TERMINAL_CLEANUP_COLUMNS):
-                from app.kanban.session_cleanup import on_card_moved_to_done
-                on_card_moved_to_done(entity_id, project_key)
+                _cleanup_after_commit(session, entity_id, project_key)
             # A card leaving an agent column back into a fixed one (e.g. a UI
             # drag-drop to Backlog) without an explicit release would otherwise
             # keep its `agent:` claim forever: _next_card requires unclaimed,
