@@ -107,7 +107,7 @@ als je er een introduceert.
 | `commit` | idem | Volledige `<sha>` (40 hex). |
 | `link` | idem | Een willekeurige URL (docs, dashboards, externe systemen). |
 | `note` | idem | Vrije tekst — geen URL/SHA-vereisten. |
-| `plan` | `add_plan_attachment` (MCP/REST); `PATCH /cards/{cid}/plan-attachment` (update) | Het markdown-plan van de analyst-fase. `ref` is **de body zelf**, geen URL. Precies één per parent-kaart; `_materialize` koppelt hem aan kind-kaart `plan_ref`s. |
+| `plan` | `add_plan_attachment` (MCP/REST); `PATCH /cards/{cid}/plan-attachment` (update) | Het markdown-plan van de analyst-fase. `ref` is **de body zelf**, geen URL. Precies één per parent-kaart; `_materialize` koppelt hem aan kind-kaart `plan_ref`s. **Childless escape hatch:** voor een intake-kaart (of andere kaart zonder kinderen) is `attach_deliverable(kind="plan", ref=<md body>)` het intake-correcte pad — `add_plan_attachment` weigert kind-loze parents (`mcp_server.add_plan_attachment:690-696`). |
 | `plan_ref` | `add_plan_attachment` (idem) | Pointer op een kind-kaart terug naar het `plan`-deliverable van de parent. `ref` is de `plan_deliverable_id`. |
 | `spec` | `attach_deliverable(card_id, kind="spec", ref=<md body>)` | Companion van `plan` — output van de `brainstorming`-skill. `ref` is wederom de body (lege body wordt geweigerd: `mcp_server.attach_deliverable:349`). |
 
@@ -240,7 +240,7 @@ code-path als de REST PATCH — dus dispatcher-gating, op-log-replay en
 | Welke namen zijn canoniek als "vaste kolom"? | `backend/app/kanban/schemas.py:13` — `COLUMNS`. **Server-side.** |
 | Welke kolommen worden automatisch gedispatched? | `backend/app/kanban/dispatch.py:1655` — `_DISPATCH_COLUMNS`. **Server-side.** |
 | Welke comment-prefix wordt waar gelezen? | Tabel §2 hierboven + de prefix-constanten in `backend/app/kanban/service.py:100,134–136,216,226`. |
-| Welke `kind` mag ik op `attach_deliverable` zetten? | De MCP `attach_deliverable` docstring + `backend/app/kanban/mcp_server.py:339–361`. |
+| Welke `kind` mag ik op `attach_deliverable` zetten? | De MCP `attach_deliverable` docstring + `backend/app/kanban/mcp_server.py:339–361`. Voor de childless-kaart escape hatch voor `kind="plan"`: §3 hierboven + de docstring op `attach_deliverable`. |
 | Hoe zet ik sibling-deps op een kaart via MCP? | `mcp.create_card(..., depends_on=[...])` / `mcp.update_card(card_id, depends_on=[...])` (`mcp_server.py:125–199, 268–305`). De dispatcher gebruikt deze lijst om de kaart pas op te pakken als de genoemde siblings op `Done` of `Impediment` staan. De REST `CardCreate` / `CardUpdate` schemas (`schemas.py:147, :169`) accepteren hetzelfde veld; de MCP wrappers waren historisch beperkter en exposeerden dit alleen via `add_plan_attachment(depends_on_graph=...)`. |
 | Hoe zet/lift ik een business-trigger gate? | `mcp.set_card_gate(card_id, gated_on=<trigger>)` (MCP) of `POST /api/v1/kanban/cards/{cid}/set-gate {"gated_on": "<trigger>"}` (REST). `gated_on=None` of `""` licht de gate. Leest in `dispatch._is_gated` — zie §3a voor rationale en de keuze tegen `depends_on` / `scheduled_at` / dedicated kolom. |
 | Is deze productbeslissing al genomen, en wat kwam eruit? | [`decisions.md`](./decisions.md) — het chronologische beslis-register (datum, vraag, uitkomst, doc-link, kaart-id). **Kijk hier vóór je een beslissing heropent.** |

@@ -426,7 +426,7 @@ async def reopen_card(card_id: str, note: str) -> dict:
 
 @mcp.tool()
 async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
-    """Bind a deliverable (pr|branch|commit|link|note|spec) as a portable reference.
+    """Bind a deliverable (pr|branch|commit|link|note|spec|plan|plan_ref) as a portable reference.
 
     `spec` is the brainstorming/design-doc companion to `plan`: the
     `brainstorming` skill writes a design-doc, and `attach_deliverable` lets
@@ -434,6 +434,13 @@ async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
     analyst plan-attachment. `ref` is the markdown body. Empty `ref` is
     rejected — spec is a markdown body, an empty body would render as a
     blank spec card.
+
+    `plan`/`plan_ref` are wired by their own tools (`add_plan_attachment`),
+    but may also be posted through this same endpoint. The
+    **intake-correct route** for `plan` on a *childless* card is this tool —
+    `add_plan_attachment` requires `child_card_ids` and rejects a card with
+    no children, so an intake card that wants to carry a plan deliverable
+    must use `attach_deliverable(kind="plan", ref=<markdown body>)` here.
     """
     if not ref:
         return {"error": "invalid_ref", "card_id": card_id,
