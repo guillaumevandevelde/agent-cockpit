@@ -1707,11 +1707,12 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         from app.services.scheduling.session_registry import session_registry
 
         if not session_registry.can_add_session():
-            status = get_memory_status_cached()
-            raise MemoryLimitExceeded(
-                f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
-                f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
-            )
+            # ``build_limit_message`` distinguishes the two distinct causes of
+            # ``can_add_session() == False`` (counter ceiling vs. memory
+            # ceiling) and surfaces a counter leak (slots held without a live
+            # tmux pane) from the message alone — see bevinding 5 in
+            # docs/cockpit/spawn-test-bridge-sessions-analyse.md.
+            raise MemoryLimitExceeded(session_registry.build_limit_message())
 
         repo = directory
         worktree_path = str(Path(repo) / ".claude" / "worktrees" / session_name)
@@ -1791,11 +1792,10 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
 
     # Check memory limits before spawning
     if not session_registry.can_add_session():
-        status = get_memory_status_cached()
-        raise MemoryLimitExceeded(
-            f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
-            f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
-        )
+        # Mirrors the worktree transport above — same cause-aware message,
+        # so a counter leak doesn't get mis-diagnosed as a memory problem
+        # (bevinding 5 in docs/cockpit/spawn-test-bridge-sessions-analyse.md).
+        raise MemoryLimitExceeded(session_registry.build_limit_message())
 
     from app.services.sandcastle_service import sandcastle_service
 
@@ -3860,7 +3860,12 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
                         ks, project_key=project_key, project_path=project_path,
                     )
             except MemoryLimitExceeded as e:
-                logger.warning(f"Memory limit reached for {project_key}: {e}")
+                # ``e`` is the cause-aware message built by
+                # ``SessionRegistry.build_limit_message`` (counter ceiling vs.
+                # memory ceiling). It already explains which one fired — no
+                # need to prepend a redundant "Memory limit reached" label
+                # that would mislead on a counter-ceiling hit (bevinding 5).
+                logger.warning(f"Session spawn rejected for {project_key}: {e}")
                 await _queue_card_on_memory_limit(
                     ks, project_key=project_key, project_path=project_path,
                 )
@@ -3949,11 +3954,11 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
         from app.services.scheduling.session_registry import session_registry
 
         if not session_registry.can_add_session():
-            status = get_memory_status_cached()
-            raise MemoryLimitExceeded(
-                f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
-                f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
-            )
+            # Cause-aware message — same builder as the worktree and sandcastle
+            # transports, so a counter leak doesn't get mis-diagnosed as a
+            # memory problem (bevinding 5 in
+            # docs/cockpit/spawn-test-bridge-sessions-analyse.md).
+            raise MemoryLimitExceeded(session_registry.build_limit_message())
 
         options = SpawnCommandOptions(
             directory=directory,

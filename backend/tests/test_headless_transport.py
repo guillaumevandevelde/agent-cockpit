@@ -50,6 +50,48 @@ def test_transports_tuple_includes_headless():
     assert TRANSPORTS.index("headless") >= 0  # present, not just truthy
 
 
+# ---- spawn-gate message (bevinding 5) --------------------------------------
+#
+# Headless transport's MemoryLimit path must use the same cause-aware message
+# as the other transports (worktree / sandcastle / resume). See
+# docs/cockpit/spawn-test-bridge-sessions-analyse.md bevinding 5.
+
+
+def test_headless_transport_raises_with_counter_ceiling_message(monkeypatch):
+    """When the in-process counter is the binding constraint, the headless
+    transport must not lead the error message with memory figures."""
+    from types import SimpleNamespace
+
+    import app.services.scheduling.session_registry as sreg
+    from app.kanban.dispatch import MemoryLimitExceeded
+
+    reg = sreg.SessionRegistry(max_sessions=5)
+    for i in range(5):
+        reg.record(
+            "SessionStart", session_id=f"sess-{i}",
+            cwd="/proj", tmux_pane=f"%{200 + i}",
+        )
+    monkeypatch.setattr(sreg, "session_registry", reg)
+    monkeypatch.setattr(sreg, "_list_live_tmux_pane_ids", lambda: set())
+    monkeypatch.setattr(sreg, "get_memory_status_cached", lambda: SimpleNamespace(
+        usage_percent=0.15, available_bytes=13562 * 1024 * 1024,
+        is_critical=False, estimated_max_sessions=107,
+    ))
+
+    with pytest.raises(MemoryLimitExceeded) as ei:
+        hr.headless_transport(
+            directory="/tmp/proj", prompt="hi", session_name="k-hl-0001",
+        )
+
+    msg = str(ei.value)
+    assert "counter ceiling" in msg
+    assert "5/5" in msg
+    # Counter leak visible from the message alone.
+    assert "5 phantom" in msg or "5 dead" in msg
+    # Memory is comfortable — must NOT be presented as cause.
+    assert "Memory: 15% used, 13562MB available" not in msg
+
+
 # ---- liveness source -------------------------------------------------------
 
 

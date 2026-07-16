@@ -1,8 +1,11 @@
 # backend/tests/test_kanban_dispatch.py
+from types import SimpleNamespace
+
 import pytest
 import pytest_asyncio
 
 from app.kanban import dispatch, service
+from app.kanban.dispatch import MemoryLimitExceeded
 from app.kanban.models import KanbanCard
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card, list_cards
@@ -2354,6 +2357,159 @@ def test_make_resume_transport_records_call():
     assert opts.project_folder == "-home-user-repo"
     assert opts.prompt == "continue"
     assert result == {"session_name": "k-test-0001"}
+
+
+# ---- cause-aware spawn-gate message (bevinding 5) --------------------------
+#
+# All three transports in dispatch.py (worktree, sandcastle, resume) and the
+# headless transport must raise ``MemoryLimitExceeded`` with the same
+# cause-aware message produced by ``SessionRegistry.build_limit_message``.
+# Legacy message blamed memory whenever a counter ceiling was the binding
+# constraint — see docs/cockpit/spawn-test-bridge-sessions-analyse.md.
+
+
+def _patch_can_add_false(monkeypatch, *, live_pane_ids=None):
+    """Make ``can_add_session()`` return False and stub out the tmux probe so
+    the message builder doesn't shell out in unit tests."""
+    import app.services.scheduling.session_registry as sreg
+    monkeypatch.setattr(
+        "app.services.scheduling.session_registry.session_registry.can_add_session",
+        lambda: False,
+    )
+    if live_pane_ids is not None:
+        monkeypatch.setattr(sreg, "_list_live_tmux_pane_ids", lambda: live_pane_ids)
+
+
+def _patch_registry_to_full_counter_ceiling(monkeypatch, *, max_sessions=5,
+                                            live_pane_ids=None,
+                                            pane_count=5):
+    """Make the registry look like a counter ceiling at max_sessions/5 with
+    ``pane_count`` zombie/live tmux panes — the bevinding-5 scenario."""
+    import app.services.scheduling.session_registry as sreg
+    reg = sreg.SessionRegistry(max_sessions=max_sessions)
+    # Fake a counter leak by storing pane IDs without any real tmux backing.
+    for i in range(pane_count):
+        reg.record(
+            "SessionStart", session_id=f"sess-{i}",
+            cwd="/proj", tmux_pane=f"%{100 + i}",
+        )
+    monkeypatch.setattr(sreg, "session_registry", reg)
+    if live_pane_ids is not None:
+        monkeypatch.setattr(sreg, "_list_live_tmux_pane_ids", lambda: live_pane_ids)
+    return reg
+
+
+def test_worktree_transport_raises_with_counter_ceiling_message(monkeypatch):
+    """Bevinding 5 — the classic case: 5/5 with comfortable memory must NOT
+    blame memory. The message must say counter ceiling + slot breakdown."""
+    import app.services.scheduling.session_registry as sreg
+
+    _patch_registry_to_full_counter_ceiling(
+        monkeypatch, max_sessions=5, pane_count=5, live_pane_ids=set(),
+    )
+    # Patch the consumer's binding for the memory-status call.
+    monkeypatch.setattr(sreg, "get_memory_status_cached", lambda: SimpleNamespace(
+        usage_percent=0.15, available_bytes=13562 * 1024 * 1024,
+        is_critical=False, estimated_max_sessions=107,
+    ))
+
+    with pytest.raises(MemoryLimitExceeded) as ei:
+        dispatch.worktree_transport(
+            directory="/tmp/proj", prompt="hi", session_name="k-proj-abcd",
+        )
+
+    msg = str(ei.value)
+    assert "counter ceiling" in msg
+    assert "5/5" in msg
+    # Legacy misleading pattern: must NOT appear as cause.
+    assert "Memory: 15% used, 13562MB available" not in msg
+    # Memory note must explicitly state it's not the binding constraint.
+    assert "not the binding constraint" in msg.lower() or "not the binding" in msg.lower()
+    # Slot breakdown must surface the leak — 5 stored, 0 live.
+    assert "5 tmux-backed" in msg
+    assert "0 live" in msg
+    assert "5 phantom" in msg or "5 dead" in msg
+
+
+def test_sandcastle_transport_raises_with_counter_ceiling_message(monkeypatch):
+    """Same shape as the worktree transport — same message."""
+    import app.services.scheduling.session_registry as sreg
+
+    reg = sreg.SessionRegistry(max_sessions=3)
+    for i in range(3):
+        reg.reserve_external(f"k-external-{i}")
+    monkeypatch.setattr(sreg, "session_registry", reg)
+    monkeypatch.setattr(sreg, "_list_live_tmux_pane_ids", lambda: set())
+    monkeypatch.setattr(sreg, "get_memory_status_cached", lambda: SimpleNamespace(
+        usage_percent=0.20, available_bytes=13000 * 1024 * 1024,
+        is_critical=False, estimated_max_sessions=120,
+    ))
+
+    with pytest.raises(MemoryLimitExceeded) as ei:
+        dispatch.sandcastle_transport(
+            directory="/tmp/proj", prompt="hi", session_name="k-proj-abcd",
+        )
+
+    msg = str(ei.value)
+    assert "counter ceiling" in msg
+    assert "3/3" in msg
+    assert "3 external" in msg
+    assert "not the binding constraint" in msg.lower() or "not the binding" in msg.lower()
+
+
+def test_make_resume_transport_raises_with_counter_ceiling_message(monkeypatch):
+    """Resume transport uses the same cause-aware message builder."""
+    import app.services.scheduling.session_registry as sreg
+
+    _patch_registry_to_full_counter_ceiling(
+        monkeypatch, max_sessions=5, pane_count=5, live_pane_ids=set(),
+    )
+    monkeypatch.setattr(sreg, "get_memory_status_cached", lambda: SimpleNamespace(
+        usage_percent=0.15, available_bytes=13562 * 1024 * 1024,
+        is_critical=False, estimated_max_sessions=107,
+    ))
+
+    transport = dispatch.make_resume_transport(
+        session_id="abc-123", project_folder="-home-user-repo",
+    )
+
+    with pytest.raises(MemoryLimitExceeded) as ei:
+        transport(directory="/p", prompt="continue", session_name="k-proj-abcd")
+
+    msg = str(ei.value)
+    assert "counter ceiling" in msg
+    assert "5/5" in msg
+    assert "5 phantom" in msg or "5 dead" in msg
+
+
+def test_worktree_transport_raises_with_memory_ceiling_message(monkeypatch):
+    """When memory IS the binding constraint, memory figures stay in the
+    message — they're the cause. Counter-ceiling case is the one that
+    forbids memory figures as cause."""
+    import app.services.scheduling.session_registry as sreg
+
+    # No override → memory ceiling.
+    reg = sreg.SessionRegistry()
+    # Fill it with external reservations so the limit trips.
+    for i in range(50):
+        reg.reserve_external(f"k-ex-{i}")
+    monkeypatch.setattr(sreg, "session_registry", reg)
+    monkeypatch.setattr(sreg, "_list_live_tmux_pane_ids", lambda: set())
+    monkeypatch.setattr(sreg, "get_memory_status_cached", lambda: SimpleNamespace(
+        usage_percent=0.92, available_bytes=1024 * 1024 * 1024,
+        is_critical=True, estimated_max_sessions=50,
+    ))
+
+    with pytest.raises(MemoryLimitExceeded) as ei:
+        dispatch.worktree_transport(
+            directory="/tmp/proj", prompt="hi", session_name="k-proj-abcd",
+        )
+
+    msg = str(ei.value)
+    assert "memory ceiling" in msg
+    # Memory pressure figures DO belong here — they're the cause.
+    assert "92%" in msg
+    assert "1024MB" in msg
 
 
 @pytest.mark.asyncio

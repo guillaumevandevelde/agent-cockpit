@@ -110,12 +110,12 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
     from app.services.scheduling.session_registry import session_registry
 
     if not session_registry.can_add_session():
-        from app.kanban.dispatch import MemoryLimitExceeded, get_memory_status_cached
-        status = get_memory_status_cached()
-        raise MemoryLimitExceeded(
-            f"Session limit reached ({session_registry.session_count}/{session_registry.effective_max_sessions}). "
-            f"Memory: {status.usage_percent:.0%} used, {status.available_bytes / (1024*1024):.0f}MB available."
-        )
+        from app.kanban.dispatch import MemoryLimitExceeded
+        # Cause-aware message — same builder as the worktree / sandcastle /
+        # resume transports, so a counter leak doesn't get mis-diagnosed as
+        # a memory problem (bevinding 5 in
+        # docs/cockpit/spawn-test-bridge-sessions-analyse.md).
+        raise MemoryLimitExceeded(session_registry.build_limit_message())
 
     # Reserve the slot synchronously so the count is correct for the rest of
     # this dispatch tick. ``run_headless`` releases it in its finally block.
