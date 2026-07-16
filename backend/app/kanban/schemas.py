@@ -128,6 +128,7 @@ class CardResponse(BaseModel):
     resume_project_folder: str | None = None
     scheduled_at: str | None = None  # ISO8601; auto-dispatch ignores the card until this time
     dispatch_failures: int = 0
+    release_without_terminal_move: int = 0
     # Per-dispatch telemetry breadcrumbs (kanban card 8a2ad986). All four
     # are written by dispatch._run_card immediately after a successful
     # spawn and read by GET /kanban/cards/{cid}/usage. ISO8601 string to

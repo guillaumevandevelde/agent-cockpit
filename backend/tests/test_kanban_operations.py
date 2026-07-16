@@ -32,7 +32,7 @@ async def test_can_persist_an_op_row():
 
 
 from app.kanban.models import KanbanCard
-from app.kanban.operations import apply_operation, get_device_id
+from app.kanban.operations import apply_operation, get_device_id, release_card_claim
 
 
 @pytest.mark.asyncio
@@ -236,6 +236,98 @@ async def test_release_clears_owner():
         await s.commit()
         card = await s.get(KanbanCard, cid)
         assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_release_without_terminal_move_increments_counter():
+    # Reproduces kanban card a70a9272's churn pattern: a claim gets released
+    # (via the bare release_card entry point) while the card is still sitting
+    # in an agent column, never having reached Done/Impediment.
+    # dispatch_failures stays 0 for this (the session didn't crash) — this
+    # counter is the one that must see it.
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t", "column": "Backlog"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "engineer"})
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "agent:k-test-1"})
+        await release_card_claim(s, card_id=cid, project_key="p")
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.release_without_terminal_move == 1
+        assert card.column == "engineer"  # below threshold: not auto-flagged yet
+
+
+@pytest.mark.asyncio
+async def test_release_without_terminal_move_resets_on_terminal_move():
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t", "column": "Backlog"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "engineer"})
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "agent:k-test-1"})
+        await release_card_claim(s, card_id=cid, project_key="p")
+        # Second claim on the same card actually finishes it this time.
+        await apply_operation(s, op_type="claim", entity_type="card",
+            project_key="p", entity_id=cid, payload={"claimed_by": "agent:k-test-2"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "Done"})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.release_without_terminal_move == 0
+        assert card.column == "Done"
+
+
+@pytest.mark.asyncio
+async def test_second_release_without_terminal_move_auto_flags_to_impediment():
+    # 2 claim->release cycles with no terminal move must trip the circuit
+    # breaker: the card is auto-moved to Impediment (out of _DISPATCH_COLUMNS)
+    # so a third dispatch cannot claim it again, and a visible comment
+    # explains why. The counter itself resets as part of that terminal move.
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t", "column": "Backlog"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "engineer"})
+        for i in range(2):
+            await apply_operation(s, op_type="claim", entity_type="card",
+                project_key="p", entity_id=cid, payload={"claimed_by": f"agent:k-test-{i}"})
+            await release_card_claim(s, card_id=cid, project_key="p")
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "Impediment"
+        assert card.claimed_by is None
+        assert card.release_without_terminal_move == 0  # reset by the auto-move
+        comments = (await s.execute(
+            _select(KanbanOp).where(
+                KanbanOp.entity_id == cid, KanbanOp.op_type == "comment",
+            ))).scalars().all()
+        assert any("Auto-flagged" in c.payload.get("text", "") for c in comments)
+
+
+@pytest.mark.asyncio
+async def test_dead_claim_reap_style_release_does_not_count_as_churn():
+    # dispatch.py's reap/pause release call sites (dead-claim reaper,
+    # stuck-session reaper, resume-later) go through plain apply_operation,
+    # NOT release_card_claim — they already have their own circuit breaker
+    # (dispatch_failures) or represent a legitimate continuation. Repeating
+    # that pattern must not trip *this* breaker too.
+    async with KanbanSessionLocal() as s:
+        cid = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="p", entity_id=None, payload={"title": "t", "column": "Backlog"})
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="p", entity_id=cid, payload={"column": "engineer"})
+        for i in range(5):
+            await apply_operation(s, op_type="claim", entity_type="card",
+                project_key="p", entity_id=cid, payload={"claimed_by": f"agent:k-test-{i}"})
+            await apply_operation(s, op_type="release", entity_type="card",
+                project_key="p", entity_id=cid, payload={})
+        await s.commit()
+        card = await s.get(KanbanCard, cid)
+        assert card.column == "engineer"
+        assert card.release_without_terminal_move == 0
 
 
 from sqlalchemy import select as _select

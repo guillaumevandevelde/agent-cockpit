@@ -32,6 +32,16 @@ logger = logging.getLogger(__name__)
 # UI.
 _TERMINAL_CLEANUP_COLUMNS = frozenset({"Done", "Impediment"})
 
+# Circuit breaker for claim->release churn: a card that gets claimed and
+# released this many times in a row *without* ever landing on Done/Impediment
+# is auto-flagged (moved to Impediment) instead of being handed back to
+# auto-dispatch forever. Distinct from dispatch.MAX_DISPATCH_FAILURES, which
+# only catches dead/crashed spawns — this catches sessions that ran, did
+# something, and released cleanly without finishing the card (kanban card
+# a70a9272: six claim/release cycles, zero terminal moves, dispatch_failures
+# stayed 0 throughout).
+MAX_RELEASE_WITHOUT_TERMINAL_MOVE = 2
+
 
 class ClaimRejected(Exception):
     """Raised when a claim loses to an existing earlier claim."""
@@ -112,6 +122,56 @@ async def apply_operation(
         op_type, entity_type, entity_id, project_key, sorted(payload.keys()),
     )
     return entity_id
+
+
+async def release_card_claim(session, *, card_id: str, project_key: str) -> None:
+    """Release a claim and track claim->release churn (kanban card 49626139).
+
+    Only for the *bare* release entry points — the `release_card` MCP tool
+    and the REST release endpoint — where a session or a human released the
+    claim with no accompanying column change. Those are exactly the calls a
+    correctly-behaving agent should never make (personas call `move_card` to
+    Done/Impediment, or `report_impediment`, both of which change the column
+    before/without a separate bare release); a repeat of this bare pattern is
+    the a70a9272 churn signature: claimed, released, no progress, no crash.
+
+    Deliberately NOT wired into every `apply_operation(op_type="release")`
+    call site: dispatch.py's own release calls (dead-claim reaper, stuck-session
+    reaper, redispatch, pause-to-"To Resume") already have their own circuit
+    breaker (`dispatch_failures` / MAX_DISPATCH_FAILURES) or represent a
+    legitimate multi-session continuation — counting them here too would trip
+    this breaker earlier than (and in conflict with) the existing one.
+    """
+    await apply_operation(session, op_type="release", entity_type="card",
+        project_key=project_key, entity_id=card_id, payload={})
+
+    card = await session.get(KanbanCard, card_id)
+    if card is None or card.column in _TERMINAL_CLEANUP_COLUMNS:
+        return
+    card.release_without_terminal_move = (card.release_without_terminal_move or 0) + 1
+    await session.flush()
+    churn = card.release_without_terminal_move
+    if churn < MAX_RELEASE_WITHOUT_TERMINAL_MOVE:
+        return
+
+    await apply_operation(
+        session, op_type="move", entity_type="card",
+        project_key=project_key, entity_id=card_id, payload={"column": "Impediment"},
+    )
+    await apply_operation(
+        session, op_type="comment", entity_type="comment",
+        project_key=project_key, entity_id=card_id,
+        payload={"text": (
+            f"**Impediment:** Auto-flagged after {churn} consecutive "
+            "claim->release cycles with no terminal move (Done/Impediment) — "
+            "looks like a churn loop, not real progress. Needs human triage "
+            "before this is dispatched again."
+        )},
+    )
+    logger.warning(
+        "card %s auto-flagged to Impediment after %d claim/release cycles "
+        "without a terminal move", card_id, churn,
+    )
 
 
 def _cleanup_after_commit(session, card_id: str, project_key: str) -> None:
@@ -207,6 +267,11 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             if (new_column in _TERMINAL_CLEANUP_COLUMNS
                     and old_column not in _TERMINAL_CLEANUP_COLUMNS):
                 _cleanup_after_commit(session, entity_id, project_key)
+            # A terminal move means the card actually finished this round —
+            # forgive whatever claim/release churn preceded it so a later
+            # reopen starts the circuit breaker fresh.
+            if new_column in _TERMINAL_CLEANUP_COLUMNS and card.release_without_terminal_move:
+                card.release_without_terminal_move = 0
             # A card leaving an agent column back into a fixed one (e.g. a UI
             # drag-drop to Backlog) without an explicit release would otherwise
             # keep its `agent:` claim forever: _next_card requires unclaimed,
