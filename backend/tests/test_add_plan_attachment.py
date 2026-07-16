@@ -163,6 +163,28 @@ async def test_add_plan_rejects_cycle():
 
 
 @pytest.mark.asyncio
+async def test_add_plan_attachment_rejects_empty_children():
+    async with KanbanSessionLocal() as s:
+        parent_id = await apply_operation(
+            s, op_type="create", entity_type="card",
+            project_key="git:example", entity_id=None,
+            payload={"title": "p", "column": "Backlog"},
+        )
+        await s.commit()
+
+    result = await mcp_server.add_plan_attachment(
+        card_id=parent_id, plan_markdown="# x",
+        child_card_ids=[], depends_on_graph={},
+    )
+    assert result["error"] == "no_children"
+    assert "attach_deliverable(kind='plan')" in result["message"]
+
+    async with KanbanSessionLocal() as s:
+        parent = await _load_card(s, parent_id)
+        assert [d for d in parent.deliverables if d.kind == "plan"] == []
+
+
+@pytest.mark.asyncio
 async def test_add_plan_rejects_too_many_children():
     async with KanbanSessionLocal() as s:
         parent_id = await apply_operation(
