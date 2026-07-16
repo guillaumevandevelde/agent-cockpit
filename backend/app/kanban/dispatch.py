@@ -952,6 +952,19 @@ def _analyst_leaf_spike_override_note() -> str:
     round-trip to materialise as cards — an autonomy violation (kanban
     card 75b54887 §5).
 
+    As of kanban card fcbd0bf6 the override additionally carries a
+    **Leaf-spike outcome contract** mirroring the analysis-outcome-poort
+    (kanban card b2e7333 / docs/cockpit/analysis-outcome-contract-decision.md
+    §5): ``move_card(parent, column='Done')`` on a leaf-spike analysis
+    card requires an explicit ``outcome`` from the closed enum
+    {``decomposed``, ``not_feasible``, ``no_action_needed``}. The clause
+    names the values verbatim, pins the ``move_card`` call site, and
+    declares the preference order (follow-up cards → real product-fork
+    via ``report_impediment`` → written-justification outcomes as
+    legitimate terminal paths). Without this, a leaf-spike session hits
+    the ``outcome_required`` gate at the very end of its budget —
+    precisely when context pressure is highest.
+
     Lives as a separate helper (not inlined into ``build_card_prompt``) so
     the marker text is greppable in tests and the override contract is
     reviewable on its own.
@@ -996,6 +1009,34 @@ def _analyst_leaf_spike_override_note() -> str:
         "forks you CAN decide best-effort: document the assumption and "
         "preserve the alternative as a conditional spike-card. Escalate "
         "only the knot you cannot responsibly cut.\n\n"
+        "### Leaf-spike outcome contract\n"
+        "`move_card(parent, column='Done')` on a leaf-spike analysis "
+        "card now requires an explicit `outcome` from a closed enum — "
+        "the `outcome_required` gate (see kanban card b2e7333 / "
+        "docs/cockpit/analysis-outcome-contract-decision.md §5) refuses "
+        "the move without one, exactly mirroring the existing "
+        "`summary_required` gate. The accepted values are:\n\n"
+        "- **`decomposed`** — the analysis produced concrete follow-up "
+        "cards (the preferred path; verified against real child cards).\n"
+        "- **`not_feasible`** — the analysis concluded *don't build this*; "
+        "the **rationale must appear in the `summary`** of the Done-move "
+        "(label + `**Outcome:**`-comment are added by the gate).\n"
+        "- **`no_action_needed`** — the deliverable is a governance / "
+        "design doc with no cards to action; the **justification must "
+        "appear in the `summary`** of the Done-move.\n\n"
+        "**Preference order:** the follow-up cards path above is the "
+        "**voorkeur** — it's the honest, most-verifiable outcome and "
+        "the one the gate checks against real children. An echte "
+        "onopgeloste product-fork stays on `report_impediment` "
+        "(that is NOT a Done-move and uses no `outcome`). The two "
+        "written-justification outcomes (`not_feasible` / "
+        "`no_action_needed`) are **legitimate terminal endings, not "
+        "escape hatches** — they're auditeerbaar on the board (label + "
+        "comment + rationale in summary) precisely so a clean "
+        "no-children Done-move cannot be mistaken for a forgotten one. "
+        "If you reach for them under context pressure to skip the "
+        "follow-up work, you're defeating the contract — write the "
+        "cards or write the rationale; don't slide through.\n\n"
         "---\n\n"
     )
 

@@ -91,8 +91,47 @@ ship't het artefact en beweegt de kaart naar `Done`.
      niet, herschrijf de samenvatting totdat ze overeenkomen — schrijf ze niet
      allebei en laat de executor uitzoeken welke klopt.
 5. **Parent verplaatsen naar Done** met `move_card(parent, "Done", summary="Plan
-   opgesplitst in N taken: <korte lijst>")`. Dat is je exit-signaal — de sessie
-   eindigt hier.
+   opgesplitst in N taken: <korte lijst>", outcome="decomposed")`. Dat is je
+   exit-signaal — de sessie eindigt hier. Het `outcome`-veld is verplicht (zie
+   de "Outcome-contract" hieronder); zonder accepteert de MCP-poort de Done-move
+   niet.
+
+## Outcome-contract (geldt voor modus 1 én modus 2)
+
+`move_card` naar `Done` op een analyse-kaart (`work_type='analysis'` of
+`card.agent='analyst'`) vereist een **expliciete `outcome`** uit een gesloten
+enum — de MCP-poort weigert de move zonder, met dezelfde vorm als
+`summary_required`. De drie waarden — exact deze strings, geen varianten:
+
+- **`decomposed`** — de analyse leverde concrete vervolgkaarten op (modus 1:
+  kind-kaarten via `add_plan_attachment`; modus 2: follow-up cards via
+  `create_card`). **Voorkeurpad.** De poort verifieert 'decomposed' tegen echte
+  kind-kaarten — een claim zonder kinderen wordt geweigerd.
+- **`not_feasible`** — de analyse concludeert: niet doen. De **rationale hoort
+  thuis in de `summary`** van de Done-move; de poort zet zelf het label
+  `not-feasible` + een `**Outcome:**`-comment op de kaart.
+- **`no_action_needed`** — het deliverable is een sturings-/ontwerpdoc zonder
+  kaarten van toepassing. De **rechtvaardiging hoort thuis in de `summary`**;
+  de poort zet zelf het label `no-action-needed` + `**Outcome:**`-comment.
+
+**Voorkeur-volgorde — wees eerlijk over welke je kiest:**
+
+1. **Vervolgkaarten** = `outcome="decomposed"`. Het voorkeurpad; de poort
+   verifieert 't tegen echte kinderen, dus liegen kan niet.
+2. **Echte onopgeloste product-fork** = `report_impediment(options=[…])`. Géén
+   Done-move, géén outcome — dit is de vierde uitgang, niet in de enum omdat
+   het geen Done is.
+3. **`not_feasible` of `no_action_needed`** = **legitieme eindpunten, geen
+   escape hatches**. Beide vragen een geschreven rechtvaardiging in de
+   `summary`; de bedoeling is dat ze auditeerbaar op het bord staan (label +
+   comment + rationale), zodat een verdampte analyse niet stil kan
+   verdwijnen als een geslaagde.
+
+Bron: `docs/cockpit/analysis-outcome-contract-decision.md` §5. De vorige twee
+rondes analyse-probleem probeerden het via prompt-instructie alleen — twee
+rondes zonder verificatie betekende dat context-druk aan het einde van het
+budget de instructie simpelweg overschreef. Een gesloten enum op de poort is
+het verschil tussen een verzoek en een contract.
 
 ## Kaart bijwerken (VERPLICHT)
 
@@ -102,15 +141,20 @@ apart workflow-systeem dat je output parseert:
 - `create_card` — kind-kaarten aanmaken (basic fields: `project`, `title`, `description`;
   zet `work_type="analysis"` als de kind-kaart zelf nog een analyse-fase nodig heeft — zie stap 3).
 - `add_plan_attachment` — kind-kaarten aan de parent koppelen + dep-graph + plan-markdown.
-- `move_card` — parent naar `Done` als exit-signaal.
+- `move_card` — parent naar `Done` als exit-signaal. **Vergeet het `outcome`-veld niet**
+  (zie Outcome-contract hierboven) — anders weigert de poort de move met
+  `outcome_required`. Het kan ook zijn dat je via een REST-fallback werkt; volg dan
+  dezelfde enum-waarde via `metadata["outcome"]` of re-trigger via de MCP-tool.
 - `report_impediment` — als je écht vastloopt tijdens analyse (bijv. de kaart is
   onduidelijk of de scope is te groot), **óf** als je een menselijke beslissing nodig
   hebt: verplaats de parent naar `Impediment` met een concrete, actionable
   `question` en (bij voorkeur) `options: list[str]` met kandidaat-antwoorden. De
   claim wordt vrijgegeven en de sessie eindigt direct — geen blokkerende poll, geen
-  open sessie. Dit is de standaard vraagflow. Een hervattende sessie leest het gekozen
-  antwoord via dezelfde `impediment_question`-pipeline die `dispatch.build_card_prompt`
-  in de `## IMPEDIMENT`-sectie van de prompt zet.
+  open sessie. Dit is de standaard vraagflow, **en** dit is de vierde uitgang voor
+  een echte onopgeloste product-fork die geen Done-move zou moeten zijn. Een
+  hervattende sessie leest het gekozen antwoord via dezelfde `impediment_question`-
+  pipeline die `dispatch.build_card_prompt` in de `## IMPEDIMENT`-sectie van de
+  prompt zet.
 
 NIET doen: `attach_deliverable`, `comment` op kind-kaarten, sessie verlengen
 na de `Done`-move. Die zijn voor de executor.

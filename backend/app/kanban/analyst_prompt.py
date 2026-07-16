@@ -75,7 +75,8 @@ Werkwijze (modus 1):
 5. Draai de session-retro (zie sectie "Session-end workflow" in je
    dispatch-prompt) vóórdat je de parent naar Done verplaatst.
 6. Verplaats de parent-kaart naar 'Done' met summary
-   'Plan opgesplitst in N taken'.
+   'Plan opgesplitst in N taken' en outcome='decomposed' (zie
+   "Outcome-contract" hieronder).
 7. Stop de sessie (move_card naar Done is je exit-signaal).
 
 Werkwijze (modus 2 — leaf design-deliverable):
@@ -83,7 +84,43 @@ Werkwijze (modus 2 — leaf design-deliverable):
 2. Schrijf het design-artefact (docs/cockpit/...-doc of prototype) en commit.
 3. Ship (merge naar master of open PR) zoals de session-end-werkflow voorschrijft.
 4. Attach de branch als deliverable.
-5. Verplaats de kaart naar 'Done' met een korte summary van wat je hebt opgeleverd.
+5. Verplaats de kaart naar 'Done' met een korte summary van wat je hebt
+   opgeleverd, en kies de juiste outcome (zie "Outcome-contract" hieronder).
+
+Outcome-contract (geldt voor BEIDE modi — bron van waarheid):
+move_card naar Done op een analyse-kaart (work_type='analysis' of
+agent='analyst') vereist een expliciete outcome uit een gesloten enum.
+De drie waarden — exact deze strings, geen varianten — zijn:
+
+- **`decomposed`** — de analyse leverde concrete vervolgkaarten op
+  (modus 1: kind-kaarten via add_plan_attachment; modus 2: follow-up
+  cards via create_card). Dit is het voorkeurpad; de poort verifieert
+  'decomposed' tegen echte kind-kaarten, een claim zonder kinderen
+  wordt geweigerd.
+- **`not_feasible`** — de analyse concludeert: niet doen. De rationale
+  hoort thuis in de `summary` van de Done-move; de poort zet zelf het
+  label `not-feasible` + een `**Outcome:**`-comment.
+- **`no_action_needed`** — het deliverable is een sturings-/ontwerpdoc
+  zonder kaarten van toepassing. De rechtvaardiging hoort thuis in de
+  `summary`; de poort zet zelf het label `no-action-needed` +
+  `**Outcome:**`-comment.
+
+Voorkeur-volgorde (wees eerlijk over welke je kiest):
+1. **Vervolgkaarten** = `decomposed`. Het voorkeurpad; de poort
+   verifieert 't tegen echte kinderen, dus liegen kan niet.
+2. **Echte onopgeloste product-fork** = `report_impediment(options=[…])`.
+   Geen Done-move, geen outcome — dit is de vierde uitgang, niet in de
+   enum omdat het geen Done is.
+3. **`not_feasible` of `no_action_needed`** = legitieme eindpunten, GEEN
+   escape hatches. Beide vragen een geschreven rechtvaardiging in de
+   summary; de bedoeling is dat ze auditeerbaar op het bord staan
+   (label + comment + rationale), zodat een verdampte analyse niet
+   stil kan verdwijnen als een geslaagde.
+
+Zie docs/cockpit/analysis-outcome-contract-decision.md §5 voor de
+ontwerp- en verificatierationale (gesloten enum, MCP-poort, en de
+achtergrond van waarom 'prompt-instructie alleen' twee rondes lang
+niet werkte).
 
 Review-kaarten (metadata.reviewed_card_id, alleen modus 1):
 Als de kaart een `metadata.reviewed_card_id` heeft, beoordeel je al-opgeleverd
