@@ -1,9 +1,10 @@
 """Render the CC hook command that POSTs session events to the backend.
 
 Install by adding entries to ~/.claude/settings.json under "hooks" for the
-UserPromptSubmit, Stop, Notification, and SessionStart events. The hook reads
-the JSON CC passes on stdin (contains session_id + cwd) and forwards it.
-Requires `jq` and `curl` in the session environment (WSL Ubuntu has both).
+UserPromptSubmit, Stop, Notification, SessionStart, and SessionEnd events. The
+hook reads the JSON CC passes on stdin (contains session_id + cwd) and
+forwards it. Requires `jq` and `curl` in the session environment (WSL Ubuntu
+has both).
 """
 import json
 import logging
@@ -39,4 +40,5 @@ def settings_hooks_block(port: int = 8000) -> dict:
         "Stop": entry("Stop"),
         "Notification": entry("Notification"),
         "SessionStart": entry("SessionStart"),
+        "SessionEnd": entry("SessionEnd"),
     }

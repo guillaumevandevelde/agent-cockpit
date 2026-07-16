@@ -96,12 +96,35 @@ class SessionRegistry:
         """Release a previously reserved external slot. No-op for unknown keys."""
         self._external.discard(key)
 
+    def _remove_pane(self, session_id: str) -> None:
+        """Drop a single session's pane + idle tracking. No-op for unknown ids.
+
+        The one removal primitive for ``_panes``/``_idle``, shared by tmux
+        reconciliation (``_maybe_reconcile``) and an explicit ``SessionEnd``
+        hook event (``record``) -- there must be exactly one way a session's
+        slot goes away, not two paths that can drift out of sync.
+        """
+        self._panes.pop(session_id, None)
+        self._idle.pop(session_id, None)
+
     def record(self, event: str, session_id: str, cwd: str,
                tmux_pane: str | None = None) -> bool:
         """Record a session event.
 
         Returns True if the event was recorded, False if rejected due to limits.
+
+        ``SessionEnd`` is a release, not an acquisition: it frees the slot via
+        the same removal primitive tmux-reconciliation uses (``_remove_pane``)
+        and always succeeds, even against a full registry -- a session ending
+        must never be blocked by the very fullness it's trying to relieve.
+        This is the fast path on top of ``_maybe_reconcile``: a crashed
+        session or `kill -9` never sends SessionEnd, so reconciliation
+        remains the self-healing backstop, not something this replaces.
         """
+        if event == "SessionEnd":
+            self._remove_pane(session_id)
+            return True
+
         # Check limits for new sessions
         if session_id not in self._panes and not self.can_add_session():
             status = get_memory_status_cached()
@@ -277,8 +300,7 @@ class SessionRegistry:
             return 0
         stale = [sid for sid, pane in self._panes.items() if pane not in live]
         for sid in stale:
-            self._panes.pop(sid, None)
-            self._idle.pop(sid, None)
+            self._remove_pane(sid)
         if stale:
             logger.info(
                 "SessionRegistry reconciled against tmux: removed %d stale session(s)",

@@ -188,6 +188,28 @@ async def test_hook_event_populates_session_registry():
 
 
 @pytest.mark.asyncio
+async def test_hook_event_session_end_frees_session_registry_slot():
+    """The endpoint that feeds session_registry.record() must accept
+    SessionEnd (it's rejected by the HookEvent schema until this card) and
+    release the slot immediately, rather than waiting for the next tmux
+    reconciliation sweep."""
+    from app.services.scheduling.session_registry import session_registry
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/scheduled-messages/hook-event",
+                          json={"event": "SessionStart", "session_id": "sEnd",
+                                "cwd": "/proj", "tmux_pane": "%8"})
+        assert r.status_code == 200
+        assert session_registry.pane_for("sEnd") == "%8"
+
+        r = await ac.post("/api/v1/scheduled-messages/hook-event",
+                          json={"event": "SessionEnd", "session_id": "sEnd",
+                                "cwd": "/proj", "tmux_pane": "%8"})
+        assert r.status_code == 200
+    assert session_registry.pane_for("sEnd") is None
+
+
+@pytest.mark.asyncio
 async def test_hook_event_limit_notification_moves_kanban_card_to_resume():
     """A "hit your session limit" Notification triggers the kanban To-Resume move,
     independent of whether the scheduled-messages auto-resume toggle is on. The

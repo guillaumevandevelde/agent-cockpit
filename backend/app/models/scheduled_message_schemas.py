@@ -117,7 +117,7 @@ class ScheduledMessageResponse(BaseModel):
 
 class HookEvent(BaseModel):
     """Posted by the CC hook script."""
-    event: Literal["UserPromptSubmit", "Stop", "Notification", "SessionStart"]
+    event: Literal["UserPromptSubmit", "Stop", "Notification", "SessionStart", "SessionEnd"]
     session_id: str
     cwd: str
     tmux_pane: str | None = None

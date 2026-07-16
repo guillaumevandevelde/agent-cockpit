@@ -27,6 +27,45 @@ def test_unknown_session_is_not_idle():
     assert reg.pane_for("nope") is None
 
 
+def test_session_end_frees_slot():
+    """The acceptance scenario from the card: SessionStart occupies a slot,
+    SessionEnd releases it immediately -- no waiting for the next
+    reconciliation sweep."""
+    reg = SessionRegistry(max_sessions=1)
+    reg.record("SessionStart", session_id="s1", cwd="/proj", tmux_pane="%3")
+    assert reg.session_count == 1
+    assert reg.pane_for("s1") == "%3"
+    assert reg.can_add_session() is False
+
+    reg.record("SessionEnd", session_id="s1", cwd="/proj", tmux_pane="%3")
+
+    assert reg.session_count == 0
+    assert reg.pane_for("s1") is None
+    assert reg.is_idle("s1") is False
+    assert reg.can_add_session() is True
+
+
+def test_session_end_bypasses_session_limit():
+    """Releasing a slot must never itself be rejected by the limit check --
+    a full registry (session_count == effective_max_sessions) would otherwise
+    reject the very SessionEnd that's supposed to free it."""
+    reg = SessionRegistry(max_sessions=1)
+    reg.record("SessionStart", session_id="s1", cwd="/proj", tmux_pane="%3")
+    assert reg.can_add_session() is False
+
+    result = reg.record("SessionEnd", session_id="s1", cwd="/proj", tmux_pane="%3")
+
+    assert result is True
+    assert reg.session_count == 0
+
+
+def test_session_end_for_unknown_session_is_a_noop():
+    reg = SessionRegistry()
+    result = reg.record("SessionEnd", session_id="never-started", cwd="/proj")
+    assert result is True
+    assert reg.pane_for("never-started") is None
+
+
 def test_external_reservations_count_toward_session_total(monkeypatch):
     # Sandcastle runs have no tmux pane but still consume memory, so they must
     # count against the shared session budget.
