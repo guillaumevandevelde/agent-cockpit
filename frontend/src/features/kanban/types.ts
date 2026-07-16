@@ -155,6 +155,15 @@ export interface Card {
   resume_session_id?: string | null;
   resume_project_folder?: string | null;
   scheduled_at?: string | null;
+  // Per-dispatch telemetry breadcrumbs written by dispatch._run_card after a
+  // successful spawn. Combined they let the per-card usage endpoint attribute
+  // the spawned session's JSONL transcript back to this card. Legacy cards
+  // dispatched before this feature landed (or cards still on Backlog) have
+  // all-null here. See kanban card 8a2ad986.
+  dispatch_started_at?: string | null;
+  dispatch_session_id?: string | null;
+  dispatch_project_folder?: string | null;
+  dispatch_model?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
   analyst_agent_id?: string | null;

@@ -48,6 +48,7 @@ from app.services.agentic_cli.provider_env import (
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.scheduling.session_registry import session_registry
 from app.services.subscriptions.base import SubscriptionUsage
+from app.utils.path_utils import convert_path_to_folder_name
 from app.utils.timeutils import ensure_aware
 
 logger = logging.getLogger(__name__)
@@ -2585,6 +2586,38 @@ async def _run_card(
                 card.id, source_column, name,
                 "sandcastle" if card_transport == sandcastle_transport else "worktree",
                 cli_id)
+
+    # Per-dispatch telemetry breadcrumbs (kanban card 8a2ad986): write the
+    # fields that the per-card usage endpoint reads. The worktree path is
+    # what the spawned session's transcript folder is keyed on (Claude
+    # Code encodes it via convert_path_to_folder_name). Sandcastle runs
+    # have no local worktree, so dispatch_project_folder stays None and
+    # the endpoint will refuse the lookup — by design, not a bug.
+    try:
+        telemetry: dict = {
+            "dispatch_started_at": datetime.now(UTC).isoformat(),
+            "dispatch_model": effective_model,
+        }
+        if card_transport != sandcastle_transport:
+            worktree_path = str(Path(project_path) / ".claude" / "worktrees" / name)
+            telemetry["dispatch_project_folder"] = convert_path_to_folder_name(worktree_path)
+        await apply_operation(
+            session, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload=telemetry,
+        )
+    except Exception:
+        # Telemetry is best-effort. A failure here must not break the
+        # dispatch: the session is already running in tmux. Log and move on;
+        # the per-card usage endpoint will return None for this dispatch and
+        # the card will still ship. See kanban card 8a2ad986 acceptance
+        # criteria #4: no extra token cost — derived telemetry must not
+        # poison the dispatch.
+        logger.exception(
+            "dispatch telemetry write failed for card %s (session %s); "
+            "continuing — per-card usage will return no data for this dispatch",
+            card.id, name,
+        )
+
     return {"card_id": card.id, "session_name": name, "claimant": claimant,
             "source_column": source_column, "spawned": spawned}
 

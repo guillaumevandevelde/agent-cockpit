@@ -53,6 +53,12 @@ from app.kanban.schemas import (
     WorkTypeMappingBulk,
     WorkTypeMappingResponse,
 )
+from app.kanban.schemas import (
+    CardUsageModelBreakdown as _ModelBreakdownResponse,
+)
+from app.kanban.schemas import (
+    CardUsageResponse as _CardUsageResponse,
+)
 from app.utils.url_utils import resolve_base_url
 
 logger = logging.getLogger(__name__)
@@ -342,6 +348,61 @@ async def get_card(cid: str):
 async def activity(cid: str):
     async with KanbanSessionLocal() as s:
         return await service.card_activity(s, cid)
+
+
+@router.get("/cards/{cid}/usage")
+async def card_usage(cid: str):
+    """Per-dispatch token telemetry for a single card (kanban card 8a2ad986).
+
+    Returns the aggregated input/output/cache tokens + model breakdowns for
+    the spawned session that worked this card, derived from Claude Code's
+    per-session JSONL transcript (no extra token cost in the session itself
+    — the data already exists, we just read it).
+
+    Response shape — matches `CardUsage` from
+    `app.services.dispatch_usage_service` so the frontend can render the
+    same breakdown widget it already uses on `/usage`.
+
+    Returns 404 only when the card itself doesn't exist; a card with no
+    dispatch breadcrumbs (legacy cards dispatched before this feature
+    landed) returns `null` instead, so the UI can distinguish "unknown
+    card" from "card without telemetry yet" without a 404 round-trip per
+    row.
+    """
+    from app.services.dispatch_usage_service import (
+        get_card_usage as _get_card_usage,
+    )
+
+    async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        if card is None:
+            raise HTTPException(404, "card not found")
+        usage = await _get_card_usage(card)
+        if usage is None:
+            return {"usage": None}
+        return {"usage": _CardUsageResponse(
+            session_id=usage.session_id,
+            recorded_model=usage.recorded_model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_creation_tokens=usage.cache_creation_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            total_tokens=usage.total_tokens,
+            total_cost_usd=usage.total_cost_usd,
+            first_activity=usage.first_activity,
+            last_activity=usage.last_activity,
+            model_breakdowns=[
+                _ModelBreakdownResponse(
+                    model=b.model,
+                    input_tokens=b.input_tokens,
+                    output_tokens=b.output_tokens,
+                    cache_creation_tokens=b.cache_creation_tokens,
+                    cache_read_tokens=b.cache_read_tokens,
+                    total_tokens=b.total_tokens,
+                )
+                for b in usage.model_breakdowns
+            ],
+        ).model_dump(mode="json")}
 
 
 @router.patch("/cards/{cid}", response_model=CardResponse)

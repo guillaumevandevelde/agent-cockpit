@@ -142,6 +142,28 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN model VARCHAR(64)")
     if "column_overrides" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN column_overrides JSON")
+    # Kanban card 8a2ad986 — per-dispatch telemetry breadcrumbs. All four
+    # are nullable so legacy rows survive. Added together so the migration
+    # is atomic from the application's perspective: an existing DB either
+    # has all four or none, never a partial state where dispatch_started_at
+    # exists without dispatch_project_folder (which would break the
+    # per-card usage endpoint's gating).
+    if "dispatch_started_at" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN dispatch_started_at VARCHAR(40)"
+        )
+    if "dispatch_session_id" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN dispatch_session_id VARCHAR(64)"
+        )
+    if "dispatch_project_folder" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN dispatch_project_folder VARCHAR(512)"
+        )
+    if "dispatch_model" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN dispatch_model VARCHAR(64)"
+        )
 
 
 async def _ensure_column_table(conn) -> None:
