@@ -129,6 +129,7 @@ async def create_card(project: str, title: str, description: str = "",
                       agent: str | None = None,
                       parent_card_id: str | None = None,
                       depends_on: list[str] | None = None,
+                      labels: list[str] | None = None,
                       metadata: dict | None = None) -> dict:
     """Create a new card (agents may decompose work into subtask cards).
 
@@ -157,6 +158,14 @@ async def create_card(project: str, title: str, description: str = "",
     analyst plan-attachment flow. The same field is honoured by the REST
     `CardCreate` schema (`backend/app/kanban/schemas.py:147`) and flows
     through `apply_operation` to the `KanbanCard.depends_on` column.
+
+    `labels` is the free-form label list rendered on the card (see
+    `CardItem.tsx:234`). At create time the value is stored verbatim on the
+    new card — there is no previous list to merge with. Omit (or pass
+    `None`) to leave the column NULL; pass `[]` to start the card with an
+    explicit empty label list. Mirrors `CardCreate.labels`
+    (`schemas.py:179`) and round-trips through the create op-log the same
+    way `depends_on` does.
 
     `metadata` is a free-form key/value bag (JSON-serialized) for
     integration-specific data that doesn't deserve its own field — external
@@ -191,6 +200,7 @@ async def create_card(project: str, title: str, description: str = "",
                      "agent": resolved_agent,
                      "parent_card_id": parent_card_id,
                      "depends_on": depends_on,
+                     "labels": labels,
                      "metadata": metadata})
         await s.commit()
         card = await service.get_card(s, cid)
@@ -270,13 +280,16 @@ async def move_card(card_id: str, column: str, summary: str | None = None) -> di
 async def update_card(card_id: str, title: str | None = None,
                       description: str | None = None,
                       depends_on: list[str] | None = None,
+                      labels: list[str] | None = None,
                       metadata: dict | None = None) -> dict:
-    """Update a card's title, description, depends_on, and/or metadata bag.
+    """Update a card's title, description, depends_on, labels, and/or metadata bag.
 
     Same "skip-when-None" semantics as the existing title/description paths:
-    None means "don't touch". To clear an existing value via MCP, leave the
-    field at its current value or use the REST PATCH endpoint, which can
-    distinguish "field absent" from "field set to null" via exclude_unset.
+    None means "don't touch". To clear an existing value via MCP, pass the
+    empty list `[]` for list-typed fields (labels / depends_on) — `None`
+    is the "field absent" sentinel and leaves the stored value alone. For
+    the REST PATCH endpoint, `exclude_unset` distinguishes "absent" from
+    "set to null" on the wire.
 
     `depends_on` replaces the card's sibling-dep list — pass a `list[str]`
     to set, leave `None` to keep the current value. The dispatcher uses
@@ -286,6 +299,13 @@ async def update_card(card_id: str, title: str | None = None,
     `backend/app/api/v1/kanban/router.py:329-360` →
     `apply_operation("update")` → `_materialize` setting
     `card.depends_on = payload["depends_on"]`).
+
+    `labels` replaces the card's label list — **not** append. Pass
+    `labels=["urgent", "backend"]` to set those two labels and drop any
+    others; pass `labels=[]` to clear the labels column; leave `None` to
+    keep the existing list. This matches `CardUpdate.labels`
+    (`schemas.py:200`) and the existing `depends_on` replace semantics
+    so an agent can use the same mental model for both list-typed fields.
     """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
@@ -294,6 +314,7 @@ async def update_card(card_id: str, title: str | None = None,
             return {"error": _NOT_FOUND, "card_id": card_id}
         payload = {k: v for k, v in {"title": title, "description": description,
                                      "depends_on": depends_on,
+                                     "labels": labels,
                                      "metadata": metadata}.items()
                    if v is not None}
         await apply_operation(s, op_type="update", entity_type="card",
