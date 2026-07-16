@@ -65,8 +65,14 @@ const setHidden = (hidden: boolean) => {
 
 afterEach(() => {
   cleanup();
+  // clearAllMocks (not restoreAllMocks) — the vi.mock("./api", …) factory above
+  // installs vi.fn() defaults once at module load. For a bare vi.fn() with no
+  // real implementation, mockRestore() strips the factory default (equivalent
+  // to mockReset()), silently breaking any subsequent test that relies on the
+  // shared default. clearAllMocks() clears call history / results but
+  // preserves the factory-installed implementation, so file order is no longer
+  // load-bearing. See kanban card 3097ebadd3… for the full analysis.
   vi.clearAllMocks();
-  vi.restoreAllMocks();
   setHidden(false);
 });
 

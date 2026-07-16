@@ -77,7 +77,16 @@ const baseCard: Card = {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
+  // clearAllMocks (not restoreAllMocks) — the file's `vi.mock("../api", …)`
+  // factory installs `vi.fn(async () => …)` defaults once at module load.
+  // For a bare vi.fn() with no real implementation, mockRestore() strips that
+  // factory-installed default (equivalent to mockReset()), and any subsequent
+  // test that relies on the shared default — even one that sets its own
+  // mockResolvedValue before render — silently breaks when an earlier test
+  // runs and hits this afterEach. clearAllMocks() clears call history /
+  // results but preserves the factory-installed implementation, so file order
+  // is no longer load-bearing.
+  vi.clearAllMocks();
 });
 
 describe("CardDrawer live activity", () => {
