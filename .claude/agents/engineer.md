@@ -98,7 +98,11 @@ altijd door.
    zelf nog eens goed" onder tijdsdruk. Voor een diepere
    kwaliteitssweep kan preset `simplify` (code-review effort=low) of
    preset `investigate` (read-only sweep) gebruikt worden. Verander
-   nooit een test om een bug te maskeren.
+   nooit een test om een bug te maskeren. Komt er tijdens de targeted
+   run een failure uit die niet van jou lijkt? Draai de `iteration-loop`
+   skill met preset `pytest-attr` — die vergelijkt je branch-failures
+   met de master-baseline en classificeert ze als `pre-existing` / `NEW`
+   / `FIXED`, zodat je niet zelf hoeft te stash-en-vergelijken.
 
 ## Werkomgeving in worktree: venv & cwd-veiligheid
 
