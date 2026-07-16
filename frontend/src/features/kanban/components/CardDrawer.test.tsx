@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import type { Card } from "../types";
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 vi.mock("@/contexts/ProviderContext", () => ({
   useProviderContext: () => ({
@@ -1139,5 +1144,33 @@ describe("CardDrawer preview control — backend reports stopped", () => {
     );
     expect(screen.queryByTestId("preview-pane-iframe")).toBeNull();
     expect(screen.getByTestId("preview-stopped-message")).not.toBeNull();
+  });
+});
+
+describe("CardDrawer id chip", () => {
+  it("shows an abbreviated id chip and copies the full id to the clipboard on click", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const card: Card = { ...baseCard, id: "9eaa600d1b58408aa3773df7d2d4edee" };
+    render(
+      <CardDrawer card={card} projectPath="/proj" onClose={() => {}} onChanged={() => {}} />,
+    );
+
+    const chip = screen.getByTestId("card-id-chip");
+    // Abbreviated form is shown, not the full id.
+    expect(chip.textContent).toMatch(/9eaa600d/);
+    expect(chip.textContent).not.toContain(card.id);
+
+    await act(async () => {
+      fireEvent.click(chip);
+    });
+
+    // The FULL id is copied — never the abbreviated form.
+    expect(writeText).toHaveBeenCalledWith(card.id);
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/card id copied/i)),
+    );
   });
 });

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { Loader2, Play } from "lucide-react";
+import { Copy, Loader2, Play } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -1027,7 +1027,22 @@ export function CardDrawer({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className={MODAL_SIZES.LG}>
         <DialogHeader>
-          <DialogTitle>{card.title}</DialogTitle>
+          <div className="flex items-center gap-2 pr-6">
+            <DialogTitle className="min-w-0 flex-1 truncate">{card.title}</DialogTitle>
+            <button
+              type="button"
+              data-testid="card-id-chip"
+              title={`Copy full card id (${card.id})`}
+              onClick={() => {
+                navigator.clipboard.writeText(card.id);
+                toast.success("Card id copied");
+              }}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-xs font-normal text-muted-foreground hover:border-primary/50 hover:text-foreground"
+            >
+              {card.id.slice(0, 8)}…
+              <Copy className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </div>
         </DialogHeader>
 
         {openGates.map((gate) => (
