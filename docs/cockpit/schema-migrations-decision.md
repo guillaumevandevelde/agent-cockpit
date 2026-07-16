@@ -2,6 +2,9 @@
 
 **Datum:** 2026-07-11
 **Status:** besloten (read-only spike; geen implementatie/migratie in deze kaart)
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Alembic invoeren**, forward-only en SQLite-first.
+
 **Trigger:** kanban-spike "schema-migratiesysteem" — kind-kaart van de
 tech-stack-evaluatie t.o.v. het platformdoel (parent `fa76d74a`). Zusje-docs:
 `orchestration-substrate-decision.md` (Spike 1),

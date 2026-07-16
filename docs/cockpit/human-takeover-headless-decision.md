@@ -2,6 +2,9 @@
 
 **Datum:** 2026-07-15
 **Status:** besloten — **tmux blijft de interactieve transport; takeover = promotie, geen
+**Kaart:** `80c812af…`
+**Uitkomst:** **tmux blijft de interactieve transport; takeover = promotie.** Geen input-streaming-UX en geen categorie "human-takeover-kaarten": een headless run wordt op afroep via `claude --resume <session_id>` gepromoveerd tot een echte, attachbare pane mét historie (gemeten). De transport-keuze verschuift van dispatch-tijd naar takeover-tijd.
+
 input-streaming.**
 **Trigger:** kanban-kaart "[analysis][transport] Human-takeover-UX voor headless sessies"
 (`80c812af`) — [`acp-transport-decision.md`](./acp-transport-decision.md) §6 kaart 4

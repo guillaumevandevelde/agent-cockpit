@@ -2,7 +2,8 @@
 
 **Datum:** 2026-07-15
 **Status:** Beslissing / ontwerp — implementatie belegd op de vervolgkaarten in §7
-**Kaart:** "Analyse - Analyse fase" (`e95729bb…`) · **Type:** analyse-leaf-spike
+**Kaart:** "Analyse - Analyse fase" (`e95729bb…`)
+**Uitkomst:** **Uitkomst-poort op de Done-move.** Een analyse-kaart mag Done alleen binnen met een expliciete `outcome` uit een gesloten enum (`decomposed` — geverifieerd tegen echte kind-kaarten / `not_feasible` → label / `no_action_needed`); "input nodig" blijft `report_impediment`. Prompt-instructie alleen is afgewezen — dat was de vorige twee rondes en niets verifieerde het.
 
 **Trigger (de gebruiker):**
 

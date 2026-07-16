@@ -1,5 +1,10 @@
 # Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED)
 
+**Datum:** 2026-07-10
+**Status:** herzien
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Wél bouwen, in lichtere vorm** (REVISED): feature-compliance-review als subagent-call binnen dezelfde engineer-sessie vóór `move_card Done`. Geen aparte persona, geen Review-kolom.
+
 > Kanban-kaart: "Onderzoek: reviewer-agent + review-kolom — is dit wenselijk?"
 > Eerste iteratie van dit document concludeerde "niet bouwen". Deze revisie
 > corrigeert die conclusie op drie punten (zie §"Wat er fout was aan de eerste

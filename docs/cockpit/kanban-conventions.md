@@ -262,3 +262,27 @@ valideert dat elk `docs/cockpit/*-decision.md` gelinkt is vanuit het beslis-regi
 geeft exit 1 voor CI-gebruik. Draai het als je een `[beslissing]`-kaart afrondt: een
 nieuw beslisdocument zonder register-regel is precies de drift die het register moest
 oplossen. Harness: `bash scripts/test_check_decision_register.sh`.
+
+### `--check-headers` — de vier-velden-header per beslisdoc
+
+`scripts/check-decision-register.sh --check-headers` voegt een tweede
+drift-klasse toe: elk `*-decision.md` moet een uniform header-blok dragen
+bovenaan (direct onder de `# Titel`-regel), en de `**Uitkomst:**`-regel in
+het doc moet (whitespace-normalized, prefix-match) overeenkomen met de
+overeenkomstige `Uitkomst`-cel van het register.
+
+Het header-formaat staat in [`decisions.md` §Conventie](./decisions.md).
+Kort:
+
+```markdown
+**Datum:** YYYY-MM-DD
+**Status:** besloten | herzien | voorgesteld
+**Kaart:** `<card-id>`
+**Uitkomst:** <één zin — dezelfde zin als de register-regel>
+```
+
+Zonder een dergelijke header kan het register de uitkomst niet meer
+machine-leesbaar verifiëren — dan moeten datum en uitkomst weer uit de
+prosa worden gepeuterd (kaart `78cb8ce3…`, het "grep-archeologie"-
+probleem dat de header-conventie sloot). Advies-only by design; voor
+CI-gebruik: `bash scripts/check-decision-register.sh --check-headers --strict`.

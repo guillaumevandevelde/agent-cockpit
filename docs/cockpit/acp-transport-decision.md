@@ -2,6 +2,9 @@
 
 **Datum:** 2026-07-14
 **Status:** besloten (read-only spike; geen implementatie in deze kaart)
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **Conditionele GO op gestructureerd transport, NO-GO op ACP als eerste.** Eerste slice met `claude -p --output-format stream-json`; event-model ACP-isomorf; ACP-adapter gepoort op tweede-provider-onboarding.
+
 **Trigger:** kanban-spike "[spike] ACP als gestructureerd transport achter `SpawnTransport`" —
 kind-kaart uit [`openhands-analyse.md`](./openhands-analyse.md) §4.1 + §7.1 (hoogste-leverage
 overname). Behandelt bewust **één** beslissing samen met de headless-transport-vervolgkaart uit

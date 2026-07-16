@@ -2,7 +2,8 @@
 
 **Datum:** 2026-07-15
 **Status:** Beslissing / ontwerp — implementatie belegd op de vervolgkaarten in §7
-**Kaart:** "Analyse - koppel vervolgkaarten aan analyse" (`d0089809…`) · **Type:** analyse-leaf-spike
+**Kaart:** "Analyse - koppel vervolgkaarten aan analyse" (`d0089809…`)
+**Uitkomst:** **Parkeerkolom `Awaiting Subtasks` + subtaak-rollup + vijf-statussenvocabulaire.** Een parent met ≥1 kind-kaart (parent-generiek, niet analyse-specifiek) gaat op de Done-move naar `Awaiting Subtasks` i.p.v. `Done`, en sluit automatisch zodra het laatste kind `Done` haalt. De bestaande `parent_card_id`-relatie wordt zichtbaar gemaakt op de parent, met een statusbadge per kind. `ReadyState` gaat van 3 → 5: `blocked`→`dependent` (wacht op andere kaarten — DAG of kinderen), `dispatching`→`in_progress`, plus nieuw `impeded` + `completed`. `completed` is **afgeleid** (`column == "Done"`), géén opgeslagen label — anders dan `not-feasible`/`no-action-needed`, die informatie dragen die de kolom niet heeft. Complementair aan de uitkomst-poort hieronder: die beslist *of* een analyse mag afsluiten, dit beslist *waarheen*.
 
 **Trigger (de gebruiker):**
 
