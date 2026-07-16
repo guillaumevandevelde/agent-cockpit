@@ -74,6 +74,31 @@ async def test_set_and_list_autodispatch():
         assert PK not in await dispatch.list_autodispatch_projects(s)
 
 
+@pytest.mark.asyncio
+async def test_disable_all_autodispatch_clears_every_enabled_project():
+    other_pk = "git:example.com/me/other-repo"
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_autodispatch(s, PK, True)
+        await dispatch.set_autodispatch(s, other_pk, True)
+        await s.commit()
+        assert set(await dispatch.list_autodispatch_projects(s)) == {PK, other_pk}
+
+        await dispatch.disable_all_autodispatch(s)
+        await s.commit()
+
+        assert await dispatch.list_autodispatch_projects(s) == []
+        assert await dispatch.is_autodispatch_enabled(s, PK) is False
+        assert await dispatch.is_autodispatch_enabled(s, other_pk) is False
+
+
+@pytest.mark.asyncio
+async def test_disable_all_autodispatch_is_noop_when_nothing_enabled():
+    async with KanbanSessionLocal() as s:
+        await dispatch.disable_all_autodispatch(s)
+        await s.commit()
+        assert await dispatch.list_autodispatch_projects(s) == []
+
+
 # ---- prompt ----------------------------------------------------------------
 
 @pytest.mark.asyncio

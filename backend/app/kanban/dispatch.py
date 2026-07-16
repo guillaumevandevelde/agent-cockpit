@@ -271,6 +271,26 @@ async def list_autodispatch_projects(session) -> list[str]:
     ]
 
 
+async def disable_all_autodispatch(session) -> None:
+    """Force every project's autodispatch flag off.
+
+    Called once at backend startup (``app.main.lifespan``), before the dispatch
+    tick is scheduled: the enablement flag is persisted per-project in
+    ``KanbanMeta`` (see module docstring in ``dispatch_pause.py`` for why —
+    device-local, survives restarts), so without this an operator who left a
+    project's toggle on would have the dispatcher immediately start
+    claiming/spawning Todo cards on the very next tick after any backend
+    restart or crash-recovery, with nobody necessarily watching. Auto-dispatch
+    must always start from an explicit opt-in each time the backend comes up.
+    """
+    from sqlalchemy import select
+    rows = (await session.execute(select(KanbanMeta))).scalars().all()
+    for row in rows:
+        if row.key.startswith(META_PREFIX) and row.value == "1":
+            row.value = "0"
+    await session.flush()
+
+
 async def get_skip_permissions(session, project_key: str) -> bool:
     row = await session.get(KanbanMeta, SKIP_PERMISSIONS_PREFIX + project_key)
     if row is None:
