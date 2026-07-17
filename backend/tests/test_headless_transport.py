@@ -133,6 +133,46 @@ def test_live_headless_sessions_empty_when_registry_empty():
     assert hr.live_headless_sessions() == set()
 
 
+# ---- kill_headless_session (human-takeover promotion) ----------------------
+#
+# `docs/cockpit/human-takeover-headless-decision.md` §7 point 2: promotion
+# first ends the headless process if still alive. `run_headless`'s own
+# `finally` block drains `_headless_processes` once the process actually
+# exits, so this function only has to signal it — it must not mutate the
+# registry itself.
+
+
+def test_kill_headless_session_terminates_live_process(monkeypatch):
+    class FakeProc:
+        def __init__(self):
+            self.returncode = None
+            self.terminated = False
+
+        def terminate(self):
+            self.terminated = True
+
+    proc = FakeProc()
+    monkeypatch.setattr(hr, "_headless_processes", {"k-hl-1": proc})
+    assert hr.kill_headless_session("k-hl-1") is True
+    assert proc.terminated is True
+
+
+def test_kill_headless_session_false_when_unknown_session():
+    assert hr.kill_headless_session("k-hl-does-not-exist") is False
+
+
+def test_kill_headless_session_false_when_already_exited(monkeypatch):
+    class FakeProc:
+        def __init__(self):
+            self.returncode = 0
+
+        def terminate(self):
+            raise AssertionError("must not terminate an already-exited process")
+
+    monkeypatch.setattr(hr, "_headless_processes", {"k-hl-2": FakeProc()})
+    assert hr.kill_headless_session("k-hl-2") is False
+
+
 # ---- stream-json → ACP-isomorphic mapping ----------------------------------
 #
 # Spike §4 is the source of truth. Each test below exercises one row of the

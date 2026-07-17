@@ -49,6 +49,7 @@ from app.kanban.schemas import (
     ShipModeRequest,
     SkipPermissionsRequest,
     SubscriptionPoolRequest,
+    TakeOverRequest,
     UpdatePlanAttachmentRequest,
     WorkTypeMappingBulk,
     WorkTypeMappingResponse,
@@ -1359,6 +1360,29 @@ async def redispatch_now(cid: str, payload: RedispatchRequest):
     if res is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "card not found")
     return res
+
+
+@router.post("/cards/{cid}/take-over")
+async def take_over(cid: str, payload: TakeOverRequest):
+    """Promote a headless-dispatched card's session to an attachable tmux pane.
+
+    Implements `docs/cockpit/human-takeover-headless-decision.md` §7: ends the
+    headless subprocess (if still alive), spawns `claude --resume <session_id>`
+    in tmux under the same session_name, and leaves the `agent:` claim,
+    branch, and worktree untouched. The existing `CardRunTab` "Live" view
+    picks up the new tmux session automatically — no separate attach step.
+    """
+    from app.kanban import takeover
+    key = resolve_project_key(payload.project_path)
+    async with KanbanSessionLocal() as s:
+        try:
+            result = await takeover.promote_to_tmux(
+                s, card_id=cid, project_key=key, project_path=payload.project_path,
+            )
+        except takeover.TakeoverError as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+        await s.commit()
+    return result
 
 
 @router.post("/redispatch-all")

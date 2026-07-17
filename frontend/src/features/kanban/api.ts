@@ -166,6 +166,15 @@ export const kanbanApi = {
       body: JSON.stringify({ project_path: projectPath, agent }),
     }),
 
+  // Promote a headless-dispatched card's session to an attachable tmux pane
+  // (docs/cockpit/human-takeover-headless-decision.md §7). The claim, branch
+  // and worktree stay the same — only the transport promotes.
+  takeOver: (id: string, projectPath: string): Promise<{ session_name: string; tmux_target: string }> =>
+    apiClient<{ session_name: string; tmux_target: string }>(`${BASE}/cards/${id}/take-over`, {
+      method: "POST",
+      body: JSON.stringify({ project_path: projectPath }),
+    }),
+
   redispatchAll: (projectPath: string): Promise<{ redispatched: number; results: { session_name: string }[] }> =>
     apiClient<{ redispatched: number; results: { session_name: string }[] }>(`${BASE}/redispatch-all`, {
       method: "POST",
