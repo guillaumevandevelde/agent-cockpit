@@ -834,7 +834,7 @@ def _effective_model(override_model: str | None, card_model: str | None,
     Anthropic-subscription alias (e.g. `opus`), written before per-column provider
     selection existed. When the column routes to a non-Anthropic provider
     (minimax/bedrock), that alias is meaningless and — passed as `--model` — would
-    override the provider env's native model (`ANTHROPIC_MODEL=MiniMax-M3[1m]`),
+    override the provider env's native model (`ANTHROPIC_MODEL=MiniMax-M3`),
     silently running the wrong model against the wrong vendor. So the persona
     fallback only applies for Anthropic (or when provider is unknown). The explicit
     override/card/column-default models always win: those are deliberate choices

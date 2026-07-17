@@ -30,7 +30,12 @@ CLAUDE_CODE_CLI_ID = "claude-code"
 
 MINIMAX_BASE_URL_INTERNATIONAL = "https://api.minimax.io/anthropic"
 MINIMAX_BASE_URL_CHINA = "https://api.minimaxi.com/anthropic"
-MINIMAX_DEFAULT_MODEL = "MiniMax-M3[1m]"
+# MiniMax's Anthropic-compatible API only accepts bare model identifiers
+# (MiniMax-M3, MiniMax-M2.7, …). The old "MiniMax-M3[1m]" form with a
+# bracketed context-window suffix is rejected as an unknown model. The 1M
+# context window is requested separately via CLAUDE_CODE_AUTO_COMPACT_WINDOW
+# below, so the suffix is both redundant and breaking — keep this bare.
+MINIMAX_DEFAULT_MODEL = "MiniMax-M3"
 MINIMAX_AUTO_COMPACT_WINDOW = "1000000"
 
 

@@ -8,11 +8,11 @@ function all usage attribution routes through (analyse §6, acceptance
 criterion 1 of kaart d160d13f...) — do not duplicate the mapping at
 call sites.
 
-Matching is **prefix-based, not exact-match**: ``provider_env.py``
-declares ``MINIMAX_DEFAULT_MODEL = "MiniMax-M3[1m]"`` (with a
-context-window suffix) while the JSONL logs record the bare
-``"MiniMax-M3"`` — an exact-match mapping would silently miss every
-MiniMax entry.
+Matching is **prefix-based, not exact-match**: the JSONL logs may record
+any MiniMax variant (``MiniMax-M3``, ``MiniMax-M2.7``, a per-card model
+override, or a historical ``MiniMax-M3[1m]`` suffix from older sessions) —
+an exact-match mapping would silently miss every entry that isn't the
+current default.
 
 An unrecognized model is **not guessed**: it maps to
 ``UNKNOWN_SUBSCRIPTION_ID``, mirroring the ``betrouwbaarheid`` honesty
