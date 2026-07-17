@@ -13,24 +13,9 @@ from app.services.external_agent_mail_service import (
     external_agent_mail_service,
 )
 # Schema is created by ``_reset_app_database_tables`` in conftest.
-
-
-@pytest.fixture(autouse=True)
-def _reset_external_service_rate_limit_window():
-    """Clear the in-memory ``_send_windows`` deque between tests.
-
-    The conftest's per-test ``drop_all`` resets the ``mail_external_actors``
-    table, so auto-incremented ``actor.id`` values restart at 1 each test.
-    ``external_agent_mail_service._send_windows`` is keyed by that id —
-    without this fixture, a previous test's entries collide with the new
-    test's actor and the rate-limit test fires spuriously (the
-    ``test_rate_limit_after_30_messages`` test asserts the 31st call
-    raises; if a previous test already pushed 30 entries for id=1, the
-    very first iteration raises instead).
-    """
-    external_agent_mail_service._send_windows.clear()
-    yield
-    external_agent_mail_service._send_windows.clear()
+# Per-test reset of ``external_agent_mail_service._send_windows`` lives in
+# ``conftest.py:_reset_singleton_state`` so the next service that gains
+# per-id state can be wired in one place.
 
 
 @pytest.mark.asyncio
