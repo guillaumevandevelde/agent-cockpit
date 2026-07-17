@@ -24,6 +24,9 @@ Public surface (everything else is module-private):
 - :func:`live_headless_sessions` — third liveness source consumed by
   ``dispatch.reap_stale_claims``. Defensive: any failure yields ``set()`` so
   a registry hiccup makes the reaper *eager*, never blind.
+- :func:`kill_headless_session` — best-effort SIGTERM for the human-takeover
+  promotion (``app.kanban.takeover``); signals only, never mutates the
+  registry (``run_headless``'s own ``finally`` block does that).
 - :func:`map_stream_event` — pure mapping from a raw stream-json payload to
   the dict shape :func:`parse_structured_event` accepts. Tested in isolation
   so the parser doesn't have to know about Claude's wire format.
@@ -77,6 +80,29 @@ def live_headless_sessions() -> set[str]:
     except Exception:
         logger.exception("could not query live headless sessions")
         return set()
+
+
+def kill_headless_session(session_name: str) -> bool:
+    """Best-effort SIGTERM of a still-running headless subprocess.
+
+    First step of the human-takeover promotion
+    (`docs/cockpit/human-takeover-headless-decision.md` §7 point 2): end the
+    headless process before spawning the tmux `--resume` replacement. Only
+    signals — :func:`run_headless`'s own ``finally`` block drains
+    ``_headless_processes`` once the process actually exits, so mutating the
+    registry here would race it.
+
+    Returns True when a live process was signaled, False when there was
+    nothing to kill (unknown session name, or already exited).
+    """
+    proc = _headless_processes.get(session_name)
+    if proc is None or proc.returncode is not None:
+        return False
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def resolve_cli_executable(cli_id: str) -> str:

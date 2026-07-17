@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ArrowUpCircle } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { TerminalView } from "@/features/cc-bridge/TerminalView";
 import { useCCSessions } from "@/features/cc-bridge/useCCSessions";
@@ -7,6 +8,7 @@ import { fetchResumableSessions } from "@/features/cc-bridge/api";
 import { ConversationList } from "@/features/sessions/ConversationList";
 import { useSessionsApi } from "@/hooks/useSessionsApi";
 import type { ResumableSession, SessionDetail } from "@/types/sessions";
+import { kanbanApi } from "../api";
 
 type View = "live" | "transcript";
 
@@ -17,13 +19,15 @@ type View = "live" | "transcript";
  * `sessionName` is that claim with the prefix stripped.
  */
 export function CardRunTab({
+  cardId,
   sessionName,
   projectPath,
 }: {
+  cardId: string;
   sessionName: string;
   projectPath: string;
 }) {
-  const { sessions } = useCCSessions();
+  const { sessions, refresh } = useCCSessions();
   const isLive = useMemo(
     () => sessions.some((s) => s.session_name === sessionName),
     [sessions, sessionName],
@@ -32,6 +36,7 @@ export function CardRunTab({
     () => sessions.find((s) => s.session_name === sessionName)?.tmux_target ?? sessionName,
     [sessions, sessionName],
   );
+  const [takingOver, setTakingOver] = useState(false);
 
   // Default to the live terminal while the tmux session is alive, otherwise the
   // transcript. Once the user picks a view explicitly we stop auto-switching.
@@ -44,6 +49,24 @@ export function CardRunTab({
   const pick = (v: View) => {
     userPicked.current = true;
     setView(v);
+  };
+
+  // Promote a headless (or otherwise dead) session to an attachable tmux pane
+  // (docs/cockpit/human-takeover-headless-decision.md §7). Only offered while
+  // there's no live pane already — once one exists, "Live" is the takeover.
+  const takeOver = async () => {
+    setTakingOver(true);
+    try {
+      await kanbanApi.takeOver(cardId, projectPath);
+      await refresh();
+      pick("live");
+      toast.success("Session promoted — attaching to the tmux pane");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Take over failed";
+      toast.error(msg);
+    } finally {
+      setTakingOver(false);
+    }
   };
 
   const effectiveView = view ?? (isLive ? "live" : "transcript");
@@ -68,6 +91,18 @@ export function CardRunTab({
         >
           Transcript
         </Button>
+        {!isLive && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={takeOver}
+            disabled={takingOver}
+            data-testid="take-over-button"
+          >
+            <ArrowUpCircle className="mr-1 h-3 w-3" aria-hidden="true" />
+            {takingOver ? "Taking over…" : "Take over"}
+          </Button>
+        )}
         <span className="text-xs text-muted-foreground">session {sessionName}</span>
       </div>
 

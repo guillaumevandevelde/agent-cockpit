@@ -1243,7 +1243,7 @@ export function CardDrawer({
 
           {runSession && (
             <TabsContent value="run">
-              <CardRunTab sessionName={runSession} projectPath={projectPath} />
+              <CardRunTab cardId={card.id} sessionName={runSession} projectPath={projectPath} />
             </TabsContent>
           )}
         </Tabs>

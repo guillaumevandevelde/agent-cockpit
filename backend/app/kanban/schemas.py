@@ -445,6 +445,10 @@ class RedispatchRequest(BaseModel):
     agent: str | None = None  # override: use this agent instead of card's current agent
 
 
+class TakeOverRequest(BaseModel):
+    project_path: str
+
+
 # Column management schemas
 
 
