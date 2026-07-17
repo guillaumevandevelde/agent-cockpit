@@ -1043,6 +1043,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         ship_instructions = _build_ship_instructions(ship_mode)
     problem_flag_instructions = _build_problem_flag_instructions()
     mcp_fallback_instructions = _build_mcp_fallback_instructions()
+    worktree_safety_callout = _build_worktree_safety_callout()
 
     return (
         f"{preamble}"
@@ -1060,6 +1061,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         "blocked, use `report_impediment` with a clear question explaining what you need."
         f"\n\n{mcp_fallback_instructions}"
         f"\n\n{problem_flag_instructions}"
+        f"\n\n{worktree_safety_callout}"
         f"\n## Session-end workflow\n"
         "When your work on this card is complete, follow these steps in order:\n\n"
         f"{ship_instructions}"
@@ -1117,6 +1119,61 @@ def _build_problem_flag_instructions() -> str:
         "`[problem] <summary>`) if none exists. See the `flag-problem` skill "
         "for the full procedure. Keep this quick — don't let it derail the "
         "card you were actually dispatched for.\n"
+    )
+
+
+def _build_worktree_safety_callout() -> str:
+    """Top-of-prompt callout forbidding writes to the canonical checkout path.
+
+    Background — kanban card 513e37a1a86e41db8b6af8423292f6b6: a dispatched
+    analyst session edited two docs via the absolute path
+    ``/home/vdvgu/claude-cockpit/docs/cockpit/...`` instead of its worktree
+    path. ``Edit`` succeeded because the committed content matched in both
+    checkouts, so ``old_string`` resolved; the change landed on top of a
+    concurrent session's uncommitted work in the main checkout. The persona
+    doc already warns against ``cd /home/vdvgu/claude-cockpit/...`` for
+    shell commands but says nothing about Write/Edit — an agent reading the
+    card description (which references ``/home/vdvgu/claude-cockpit/...`` for
+    canonical filenames) easily constructs an absolute *write* path that
+    bypasses the worktree.
+
+    This callout is the in-prompt mirror of the persona-doc guidance: it
+    names the safe pattern, names the forbidden one, and names the tools that
+    can clobber (``Write`` / ``Edit`` / ``MultiEdit``). It is rendered above
+    the ``## Session-end workflow`` heading so it lands in the agent's
+    early context, not buried under later steps — same parity principle as
+    the ship-instructions inline.
+
+    The exact path string (``/home/vdvgu/claude-cockpit``) is hard-coded
+    because that is the canonical checkout location on this host; the
+    guidance is that the worktree is
+    ``<that-root>/.claude/worktrees/<branch>/`` and absolute writes outside
+    it are forbidden.
+    """
+    return (
+        "## Worktree scope — write only inside your worktree\n"
+        "You were spawned in a git worktree at "
+        "``/home/vdvgu/claude-cockpit/.claude/worktrees/<branch>/`` "
+        "(see your shell's cwd). Your **only** writable surface is that "
+        "worktree root. **Never** call ``Write``, ``Edit``, ``MultiEdit``, "
+        "or ``NotebookEdit`` with an absolute path that resolves to "
+        "``/home/vdvgu/claude-cockpit/...`` *outside* your worktree — that "
+        "is the shared canonical checkout where ``master`` is checked out, "
+        "and concurrent dispatched sessions may have uncommitted work there. "
+        "A write to that path silently lands on top of someone else's "
+        "changes (kanban card 513e37a1a86e41db8b6af8423292f6b6 was a "
+        "near-clobber from exactly this).\n\n"
+        "Concretely:\n"
+        "- **Right:** ``docs/cockpit/foo.md``, ``backend/app/x.py``, or "
+        "absolute "
+        "``/home/vdvgu/claude-cockpit/.claude/worktrees/<branch>/docs/cockpit/foo.md``.\n"
+        "- **Wrong:** ``/home/vdvgu/claude-cockpit/docs/cockpit/foo.md`` — "
+        "this resolves to the *main* checkout, not your worktree, even "
+        "though the file content is identical.\n\n"
+        "Same rule for shell: don't ``cd /home/vdvgu/claude-cockpit/...`` "
+        "and run a write from there — see the persona's *Werkomgeving in "
+        "worktree* section for the broader cwd-safety rules. Read paths to "
+        "the canonical checkout are fine; only writes are forbidden.\n"
     )
 
 
