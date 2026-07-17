@@ -19,4 +19,4 @@ def test_message_create_defaults_to_message_kind():
 
 def test_register_request_requires_cwd_and_session_key():
     req = MailAgentRegisterRequest(source="hook", cwd="/repo", session_key="cc:1")
-    assert req.provider == "unknown"
+    assert req.cli == "unknown"
