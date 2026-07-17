@@ -1,4 +1,10 @@
-"""Spawn and kill Claude Code sessions in tmux."""
+"""Spawn and kill Claude Code sessions in tmux.
+
+Legacy CC-Bridge-only spawn path. Kanban dispatch (including resume/take-over
+transports) calls ``app.services.runs.spawn.spawn_session`` via
+``app.kanban.dispatch.make_resume_transport`` instead — that module is the
+canonical spawn path for anything dispatched through the board.
+"""
 import json
 import logging
 import shlex
