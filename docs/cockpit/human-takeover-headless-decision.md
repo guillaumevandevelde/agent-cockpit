@@ -193,7 +193,7 @@ trigger (een mens die klikt i.p.v. een reaper die een dode sessie vindt):
 | Bouwsteen | Bestaat als | Werkt headless? |
 |---|---|---|
 | worktree → `session_id` resolven | `_resolve_resume_target` (`session_recovery.py:52`) — globt de transcript-dir op mtime | ✅ **transport-agnostisch**: het kijkt naar de transcript, niet naar tmux |
-| tmux spawnen met `--resume` | `spawn_session(mode="resume", …)` (`cc_spawn.py:141-144`) | ✅ ongewijzigd |
+| tmux spawnen met `--resume` | `spawn_session(mode="resume", …)` (`runs/spawn.py`, aangeroepen via `dispatch.make_resume_transport`, `dispatch.py:4013`) | ✅ ongewijzigd |
 | resume-target op de kaart parkeren | `card.resume_session_id` / `resume_project_folder` | ✅ ongewijzigd |
 | kaart terug in de dispatch-flow | `"To Resume"`-kolom (`schemas.py:21`, `_DISPATCH_COLUMNS`) | ✅ ongewijzigd |
 | pane bekijken/overnemen | `PtyRelay` + `mode=readonly\|interactive` | ✅ zodra de pane er is |
