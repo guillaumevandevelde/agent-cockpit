@@ -30,10 +30,9 @@ class TestSubscriptionIdForModel:
         assert subscription_id_for_model("MiniMax-M3") == "claude-code:minimax"
 
     def test_configured_minimax_model_with_context_window_suffix_also_matches(self):
-        # provider_env.MINIMAX_DEFAULT_MODEL declares "MiniMax-M3[1m]" — an
-        # exact-match mapping would fail on this value ever appearing in a
-        # JSONL row (e.g. echoed back verbatim by some future code path).
-        # Prefix matching must catch both forms.
+        # Older sessions used a "MiniMax-M3[1m]" context-window suffix (since
+        # dropped — MiniMax's API rejects it). Historical JSONL rows may still
+        # carry it, so prefix matching must keep catching the suffixed form.
         assert subscription_id_for_model("MiniMax-M3[1m]") == "claude-code:minimax"
 
     def test_matching_is_case_insensitive(self):
