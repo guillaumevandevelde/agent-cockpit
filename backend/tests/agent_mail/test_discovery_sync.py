@@ -24,7 +24,7 @@ async def test_sync_observed_sessions_creates_member_and_session(tmp_path):
                 select(MailAgentSession).where(MailAgentSession.session_key == "tmux:%1")
             )).scalar_one()
             assert row.source == "observed"
-            assert row.provider == "claude-code"
+            assert row.cli == "claude-code"
             assert row.tmux_target == "sess:0.0"
             assert row.mailbox_status == "observed"
 
@@ -46,28 +46,28 @@ async def test_sync_removes_stale_observed_sessions(tmp_path):
             assert remaining == []
 
 
-def test_session_can_nudge_requires_observed_wake_provider_and_tmux_target():
+def test_session_can_nudge_requires_observed_wake_cli_and_tmux_target():
     now = datetime.utcnow()
     good = MailAgentSession(
-        source="observed", provider="claude-code", tmux_target="s:0.0",
+        source="observed", cli="claude-code", tmux_target="s:0.0",
         mailbox_status="observed", last_seen_at=now, session_key="tmux:%1", member_id=1,
     )
     assert agent_mail_service._session_can_nudge(good, now) is True
 
-    wrong_provider = MailAgentSession(
-        source="observed", provider="unknown", tmux_target="s:0.0",
+    wrong_cli = MailAgentSession(
+        source="observed", cli="unknown", tmux_target="s:0.0",
         mailbox_status="observed", last_seen_at=now, session_key="tmux:%2", member_id=1,
     )
-    assert agent_mail_service._session_can_nudge(wrong_provider, now) is False
+    assert agent_mail_service._session_can_nudge(wrong_cli, now) is False
 
     not_observed = MailAgentSession(
-        source="hook", provider="claude-code", tmux_target="s:0.0",
+        source="hook", cli="claude-code", tmux_target="s:0.0",
         mailbox_status="connected", last_seen_at=now, session_key="cc:1", member_id=1,
     )
     assert agent_mail_service._session_can_nudge(not_observed, now) is False
 
     stale = MailAgentSession(
-        source="observed", provider="codex-cli", tmux_target="s:0.0",
+        source="observed", cli="codex-cli", tmux_target="s:0.0",
         mailbox_status="observed", last_seen_at=now - timedelta(seconds=999), session_key="tmux:%3", member_id=1,
     )
     assert agent_mail_service._session_can_nudge(stale, now) is False
