@@ -43,10 +43,19 @@ def test_unknown_session_is_not_idle():
     assert reg.pane_for("nope") is None
 
 
-def test_session_end_frees_slot():
+def test_session_end_frees_slot(monkeypatch):
     """The acceptance scenario from the card: SessionStart occupies a slot,
     SessionEnd releases it immediately -- no waiting for the next
     reconciliation sweep."""
+    from app.services.scheduling import session_registry as mod
+
+    # Hermetic: ``can_add_session`` now lazily reconciles ``_panes`` against
+    # ``tmux list-panes -a``. Without this patch the host's live tmux server
+    # would be consulted, the fake ``%3`` pane would be reported as stale, and
+    # the freshly-recorded session would be removed before the assertion runs.
+    fake = _FakeTmux(live_panes={"%3"})
+    monkeypatch.setattr(mod.subprocess, "run", fake)
+
     reg = SessionRegistry(max_sessions=1)
     reg.record("SessionStart", session_id="s1", cwd="/proj", tmux_pane="%3")
     assert reg.session_count == 1
@@ -61,10 +70,20 @@ def test_session_end_frees_slot():
     assert reg.can_add_session() is True
 
 
-def test_session_end_bypasses_session_limit():
+def test_session_end_bypasses_session_limit(monkeypatch):
     """Releasing a slot must never itself be rejected by the limit check --
     a full registry (session_count == effective_max_sessions) would otherwise
     reject the very SessionEnd that's supposed to free it."""
+    from app.services.scheduling import session_registry as mod
+
+    # Hermetic: same ``can_add_session`` lazy-reconciliation reason as in
+    # ``test_session_end_frees_slot`` -- see that test's docstring for the
+    # full trace. Without this fake the host tmux server would drop the
+    # fake ``%3`` pane as stale, leaving ``session_count == 0`` and making
+    # the "registry is full" assertion read True where it must read False.
+    fake = _FakeTmux(live_panes={"%3"})
+    monkeypatch.setattr(mod.subprocess, "run", fake)
+
     reg = SessionRegistry(max_sessions=1)
     reg.record("SessionStart", session_id="s1", cwd="/proj", tmux_pane="%3")
     assert reg.can_add_session() is False
