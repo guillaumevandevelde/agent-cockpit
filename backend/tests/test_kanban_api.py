@@ -20,7 +20,7 @@ async def test_create_list_move_card():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "Build X"})
+            json={"project_key": "P", "title": "Build X", "confirm_new_project": True})
         assert r.status_code == 201, r.text
         cid = r.json()["id"]
 
@@ -39,7 +39,8 @@ async def test_reorder_cards_sets_rank_order():
         ids = []
         for title in ("A", "B", "C"):
             r = await ac.post("/api/v1/kanban/cards",
-                json={"project_key": "P", "title": title, "column": "Backlog"})
+                json={"project_key": "P", "title": title, "column": "Backlog",
+                      "confirm_new_project": True})
             ids.append(r.json()["id"])
 
         # Reverse the order: C, B, A
@@ -61,7 +62,8 @@ async def test_reorder_ignores_unknown_ids_and_keeps_column():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         a = (await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "A", "column": "Backlog"})).json()["id"]
+            json={"project_key": "P", "title": "A", "column": "Backlog",
+                  "confirm_new_project": True})).json()["id"]
         b = (await ac.post("/api/v1/kanban/cards",
             json={"project_key": "P", "title": "B", "column": "Backlog"})).json()["id"]
 
@@ -82,7 +84,7 @@ async def test_claim_conflict_returns_409():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "t"})).json()["id"]
+            json={"project_key": "P", "title": "t", "confirm_new_project": True})).json()["id"]
         r1 = await ac.post(f"/api/v1/kanban/cards/{cid}/claim",
             json={"claimed_by": "first@d"})
         assert r1.status_code == 200
@@ -154,14 +156,21 @@ async def test_transport_rejects_unknown():
 async def test_delete_card_without_worktree_succeeds():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "no worktree"})
+            json={"project_key": "P", "title": "no worktree", "confirm_new_project": True})
         cid = r.json()["id"]
 
         r = await ac.delete(f"/api/v1/kanban/cards/{cid}")
         assert r.status_code == 204
 
-        r = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
-        assert not any(c["id"] == cid for c in r.json()["items"])
+        # The single-card GET is keyed by card_id (not project_key), so it
+        # stays valid even after the project's only card was deleted — and
+        # the project itself is now unknown to `list_cards` (no cards or
+        # columns remain, see test_kanban_unknown_project_key_rest.py). The
+        # new REST guard introduced by kanban card adffb537 turns that into
+        # a structured 404; we use the single-card endpoint to assert the
+        # card is gone without depending on the project-list semantics.
+        r = await ac.get(f"/api/v1/kanban/cards/{cid}")
+        assert r.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -177,7 +186,7 @@ async def test_delete_card_warns_on_unmerged_worktree_then_force_deletes(monkeyp
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "has worktree"})
+            json={"project_key": "P", "title": "has worktree", "confirm_new_project": True})
         cid = r.json()["id"]
 
         r = await ac.delete(f"/api/v1/kanban/cards/{cid}")
@@ -192,8 +201,11 @@ async def test_delete_card_warns_on_unmerged_worktree_then_force_deletes(monkeyp
         r = await ac.delete(f"/api/v1/kanban/cards/{cid}", params={"force": "true"})
         assert r.status_code == 204
 
-        r = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
-        assert not any(c["id"] == cid for c in r.json()["items"])
+        # See test_delete_card_without_worktree_succeeds for why we use the
+        # single-card GET here instead of the project-scoped list — the
+        # project has no cards left after force-delete.
+        r = await ac.get(f"/api/v1/kanban/cards/{cid}")
+        assert r.status_code == 404
 
 
 # ---- Fix B: auto-create analyst column on PATCH ------------------------------
@@ -209,7 +221,7 @@ async def test_patch_card_with_analyst_agent_id_creates_analyst_column():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         # Create a plain card first (no analyst config).
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "FIX-B-PROJ", "title": "Plain"})
+            json={"project_key": "FIX-B-PROJ", "title": "Plain", "confirm_new_project": True})
         cid = r.json()["id"]
 
         # Confirm no "analyst" column exists yet.
@@ -236,7 +248,7 @@ async def test_patch_card_without_analyst_agent_id_does_not_create_column():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "FIX-B-NONE", "title": "Plain"})
+            json={"project_key": "FIX-B-NONE", "title": "Plain", "confirm_new_project": True})
         cid = r.json()["id"]
 
         # PATCH without analyst_agent_id → no analyst column.
@@ -256,7 +268,7 @@ async def test_patch_card_idempotent_when_analyst_column_already_exists():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "FIX-B-IDEMP", "title": "Plain"})
+            json={"project_key": "FIX-B-IDEMP", "title": "Plain", "confirm_new_project": True})
         cid = r.json()["id"]
 
         # First PATCH creates the column.
@@ -293,7 +305,7 @@ async def test_create_card_with_analyst_agent_id_creates_analyst_column():
         # TODO and verify the PATCH path works (covered above).
         r = await ac.post("/api/v1/kanban/cards",
             json={"project_key": "FIX-B-CREATE", "title": "With analyst",
-                  "analyst_agent_id": "claude-code"})
+                  "analyst_agent_id": "claude-code", "confirm_new_project": True})
         # Either 201 with column created, or 422 (schema doesn't allow it yet).
         if r.status_code == 201:
             r = await ac.get("/api/v1/kanban/columns",
@@ -318,7 +330,8 @@ async def test_list_cards_compact_returns_summary_shape_via_http():
         fat = "lorem ipsum " * 200
         cid = (await ac.post("/api/v1/kanban/cards",
             json={"project_key": "COMPACT", "title": "fat card",
-                  "description": fat, "work_type": "bug"})).json()["id"]
+                  "description": fat, "work_type": "bug",
+                  "confirm_new_project": True})).json()["id"]
 
         # Default (full-detail) response: must still include description +
         # deliverables so existing UI callers don't break.
@@ -367,7 +380,8 @@ async def test_list_cards_ready_query_param_filters_via_http():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         parent = (await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "READY-P", "title": "parent"})).json()
+            json={"project_key": "READY-P", "title": "parent",
+                  "confirm_new_project": True})).json()
         parent_id = parent["id"]
         child = (await ac.post("/api/v1/kanban/cards",
             json={"project_key": "READY-P", "title": "child",
@@ -394,7 +408,8 @@ async def test_list_cards_blocking_query_param_filters_via_http():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         parent = (await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "BLOCK-P", "title": "parent"})).json()
+            json={"project_key": "BLOCK-P", "title": "parent",
+                  "confirm_new_project": True})).json()
         parent_id = parent["id"]
         child = (await ac.post("/api/v1/kanban/cards",
             json={"project_key": "BLOCK-P", "title": "child",

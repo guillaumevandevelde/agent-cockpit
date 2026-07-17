@@ -191,6 +191,17 @@ class CardCreate(BaseModel):
     parent_card_id: str | None = None
     depends_on: list[str] | None = None
     metadata: dict | None = None
+    # Explicit opt-in for the first card of a brand-new project. The REST
+    # `POST /kanban/cards` handler refuses an unknown `project_key` (the same
+    # guard the MCP `create_card` tool applies via `known_project_keys`) — a
+    # typo or guessed key used to silently create an orphaned card in a
+    # bucket auto-dispatch never sees. Pass `confirm_new_project=True` ONLY
+    # when you genuinely mean to create the very first card of a brand-new
+    # project; for an existing project, a mistyped key should error, not
+    # quietly succeed elsewhere. The normal onboarding path is
+    # `POST /kanban/enable` (which seeds columns and makes the key known), so
+    # this opt-in is rarely needed. Mirrors MCP `confirm_new_project`.
+    confirm_new_project: bool = False
 
 
 class CardUpdate(BaseModel):

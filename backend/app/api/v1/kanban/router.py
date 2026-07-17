@@ -83,6 +83,71 @@ def _write_json_atomic(target: Path, data: dict) -> None:
     os.replace(tmp, target)
 
 
+def _unknown_project_key_http_error(
+    project_key: str, known: set[str], *, for_create: bool
+) -> HTTPException:
+    """Build a 404 for an unknown `project_key` on `GET /cards` / `POST /cards`.
+
+    Mirrors the MCP-side ``_unknown_project_key_error`` payload shape
+    (``backend/app/kanban/mcp_server.py:90``) so any REST fallback recipe
+    written off the documented ``-32602`` MCP-failure instructions can branch
+    on the same ``error`` key. Field name is ``project_key`` here (matching
+    the REST query/body field) instead of MCP's ``project`` — keeps each
+    layer's wire format consistent with its own schemas.
+
+    The hint tells callers about the two legitimate paths: (1) call
+    ``POST /kanban/enable`` first to onboard (the normal flow — the resulting
+    columns put the key into ``known_project_keys``), or (2) re-post with
+    ``confirm_new_project=True`` for the rare case where a script knows it's
+    creating the very first card of a brand-new project. 404 is consistent
+    with how this router already reports ``"card not found"`` /
+    ``"column not found"``.
+    """
+    sample = sorted(known)[:10]
+    if for_create:
+        hint = (
+            "Call POST /api/v1/kanban/enable first to onboard this project "
+            "(which seeds the columns and makes the key known), or pass "
+            "confirm_new_project=true to deliberately create its first card."
+        )
+    else:
+        hint = (
+            "Call POST /api/v1/kanban/enable first to onboard this project, "
+            "or use the resolved key from GET /api/v1/kanban/project-key."
+        )
+    return HTTPException(
+        status_code=404,
+        detail={
+            "error": "unknown_project_key",
+            "project_key": project_key,
+            "message": (
+                f"No existing cards or columns found for project key "
+                f"{project_key!r} — this is likely a typo or a guessed key. "
+                f"{hint}"
+            ),
+            "known_project_keys_sample": sample,
+        },
+    )
+
+
+async def _assert_project_key_known(s, project_key: str, *, for_create: bool) -> None:
+    """Raise 404 ``unknown_project_key`` if ``project_key`` has no cards or columns.
+
+    Reuses ``service.known_project_keys`` (the single source of truth shared
+    with the MCP tools) — see kanban card 91c85199 for the incident this
+    guards against and `docs/cockpit/kanban-conventions.md` for the broader
+    contract. The check sits at the top of every REST handler that takes a
+    ``project_key`` so a typo / guessed key from a dispatched agent (e.g.
+    via the documented MCP-``-32602`` REST fallback) can't silently return
+    an empty list or create an orphaned card.
+    """
+    known = await service.known_project_keys(s)
+    if project_key not in known:
+        raise _unknown_project_key_http_error(
+            project_key, known, for_create=for_create
+        )
+
+
 router = APIRouter(prefix="/kanban", tags=["Kanban"])
 
 
@@ -259,6 +324,14 @@ async def list_cards(
     ),
 ):
     async with KanbanSessionLocal() as s:
+        # Refuse a typo'd/guessed project key instead of silently returning
+        # [] (the false-empty-board failure mode MCP list_cards closed in
+        # kanban card 91c85199). The same guard covers the REST MCP-`-32602`
+        # fallback path documented in the dispatch prompt — a hand-typed
+        # `project_key` from a dispatched agent used to look exactly like a
+        # valid, empty project and downstream tools would happily write into
+        # it. See _assert_project_key_known for the rationale.
+        await _assert_project_key_known(s, project_key, for_create=False)
         rows = await service.list_cards(
             s, project_key, column,
             ready=ready, blocking=blocking, compact=compact,
@@ -296,11 +369,28 @@ async def _reload(s, cid: str) -> CardResponse:
 @router.post("/cards", response_model=CardResponse, status_code=status.HTTP_201_CREATED)
 async def create_card(payload: CardCreate):
     async with KanbanSessionLocal() as s:
+        # Refuse an unknown `project_key` unless the caller explicitly opts
+        # into creating the very first card of a brand-new project
+        # (`confirm_new_project=True`). The normal onboarding path is
+        # `POST /kanban/enable`, which seeds the columns and makes the key
+        # known — so an unknown key here is overwhelmingly a typo. This
+        # mirrors MCP `create_card`'s gate from kanban card 91c85199; see
+        # _assert_project_key_known for the rationale and
+        # `CardCreate.confirm_new_project` for the opt-in semantics.
+        if not payload.confirm_new_project:
+            await _assert_project_key_known(
+                s, payload.project_key, for_create=True
+            )
         # Auto-fill `agent` from the work_type mapping when the caller did
         # not set it explicitly. See service.resolve_create_agent and
         # docs/cockpit/work-type-routing-analysis.md §2B. The resolved value
         # is written to the op-log so a rematerialize() rebuild reproduces it.
-        payload_dict = payload.model_dump(exclude={"project_key"})
+        # `confirm_new_project` is a guard signal, not card state — exclude
+        # it from the persisted payload so it never round-trips into the
+        # materialized row or survives a rematerialize() replay.
+        payload_dict = payload.model_dump(
+            exclude={"project_key", "confirm_new_project"}
+        )
         payload_dict["agent"] = await service.resolve_create_agent(
             s, payload.project_key,
             work_type=payload.work_type,

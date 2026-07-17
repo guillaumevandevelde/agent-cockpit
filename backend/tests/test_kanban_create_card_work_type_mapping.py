@@ -130,6 +130,7 @@ async def test_create_card_auto_fills_agent_from_default_mapping():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Investigate X", "work_type": "analysis",
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         assert r.json()["agent"] == "analyst"
@@ -156,6 +157,7 @@ async def test_create_card_auto_fills_agent_from_per_project_override():
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Investigate root cause",
             "work_type": "bug",
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         assert r.json()["agent"] == "analyst"
@@ -174,6 +176,7 @@ async def test_create_card_keeps_explicit_agent_when_set():
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Force to engineer",
             "work_type": "bug", "agent": "engineer",
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         assert r.json()["agent"] == "engineer"
@@ -186,6 +189,7 @@ async def test_create_card_skips_mapping_when_no_work_type():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Plain card",
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         assert r.json()["agent"] is None
@@ -199,6 +203,7 @@ async def test_create_card_explicit_empty_string_falls_through_to_mapping():
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Investigate",
             "work_type": "analysis", "agent": "",
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         assert r.json()["agent"] == "analyst"
@@ -212,6 +217,7 @@ async def test_create_card_explicit_whitespace_is_normalized():
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Force to engineer",
             "agent": " engineer ",
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         assert r.json()["agent"] == "engineer"
@@ -225,6 +231,7 @@ async def test_create_card_resolved_agent_survives_rematerialize():
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Replay me",
             "work_type": "analysis",
+            "confirm_new_project": True,
         })).json()["id"]
         assert (await ac.get(f"/api/v1/kanban/cards/{cid}")).json()["agent"] == "analyst"
 
@@ -249,6 +256,7 @@ async def test_create_card_known_limitation_work_type_after_create_does_not_chan
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Initially analysis",
             "work_type": "analysis",
+            "confirm_new_project": True,
         })).json()["id"]
         assert (await ac.get(f"/api/v1/kanban/cards/{cid}")).json()["agent"] == "analyst"
 

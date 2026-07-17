@@ -24,6 +24,7 @@ async def test_create_card_with_metadata_round_trips():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Tagged card", "metadata": SAMPLE,
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         body = r.json()
@@ -41,6 +42,7 @@ async def test_update_card_can_set_and_clear_metadata():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Plain card",
+            "confirm_new_project": True,
         })).json()["id"]
         assert (await ac.get(f"/api/v1/kanban/cards/{cid}")).json()["metadata"] is None
 
@@ -71,7 +73,8 @@ async def test_metadata_defaults_to_null_when_omitted():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-                          json={"project_key": "PROJ", "title": "No metadata"})
+                          json={"project_key": "PROJ", "title": "No metadata",
+                                "confirm_new_project": True})
         assert r.status_code == 201, r.text
         assert r.json()["metadata"] is None
 
@@ -91,6 +94,7 @@ async def test_metadata_survives_rematerialize():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Replay me", "metadata": SAMPLE,
+            "confirm_new_project": True,
         })).json()["id"]
         assert (await ac.get(f"/api/v1/kanban/cards/{cid}")).json()["metadata"] == SAMPLE
 

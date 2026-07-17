@@ -219,7 +219,7 @@ async def test_request_review_card_dispatches_before_older_unprioritised_backlog
 @pytest.mark.asyncio
 async def test_rest_request_review_creates_linked_card(_client):
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "REST", "title": "Feature Y"})
+        json={"project_key": "REST", "title": "Feature Y", 'confirm_new_project': True})
     original_id = r.json()["id"]
     from app.kanban import mcp_server as m
     await m.move_card(original_id, "Done", summary="Y is done.")
@@ -241,7 +241,7 @@ async def test_rest_request_review_creates_linked_card(_client):
 @pytest.mark.asyncio
 async def test_rest_request_review_409_on_non_done_card(_client):
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "REST", "title": "Not done yet"})
+        json={"project_key": "REST", "title": "Not done yet", 'confirm_new_project': True})
     cid = r.json()["id"]
 
     r = await _client.post(f"/api/v1/kanban/cards/{cid}/request-review",
