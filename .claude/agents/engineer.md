@@ -86,7 +86,12 @@ altijd door.
 2. **Codebase verkennen**: Welke bestanden en patronen zijn relevant? Welke dependencies?
 3. **Tests eerst** (TDD): schrijf de failing test die het gedrag vastlegt.
 4. **Implementeren**: minimale code die de test groen maakt, conform projectconventies.
-5. **Verifiëren**: draai de volledige test-suite én lint; fix tot alles groen is.
+5. **Verifiëren**: draai de geraakte test-files gericht
+   (`scripts/run-single-test.sh tests/test_x.py[::test_y]` of een targeted
+   `pytest` op de gewijzigde bestanden) plus lint; fix tot alles groen is.
+   De volledige test-suite draait niet lokaal — die loopt in CI
+   (`quality.yml`). Zie CLAUDE.md "Geen lokale pre-push gate" en de
+   `git-ship`-rationale.
 6. **Zelf-review via `iteration-loop` met preset `verify` (standaard)**:
    draai de nieuwe `iteration-loop`-skill met preset `verify` (frontend
    `npm run lint && npm run build`; backend `pytest` wordt niet lokaal
