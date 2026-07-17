@@ -88,6 +88,27 @@ async def _reset_app_database_tables():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_singleton_state():
+    """Clear per-id in-memory state on every module-level singleton.
+
+    Sibling to ``_reset_app_database_tables``: the DB reset makes
+    auto-increment ids restart at 1 every test, which collides with
+    singletons that key per-id state on the instance (e.g.
+    ``external_agent_mail_service._send_windows`` keyed by ``actor.id``,
+    ``agent_mail_service._last_auto_nudge_at`` keyed by ``member_id``).
+
+    Self-improve kanban card 42f44a05: keeps the list in one place
+    (``app.services._testing.reset_all_singleton_test_state``) so the next
+    service that gains per-id state can be wired in alongside instead of
+    needing a per-file autouse fixture.
+    """
+    from app.services._testing import reset_all_singleton_test_state
+    reset_all_singleton_test_state()
+    yield
+    reset_all_singleton_test_state()
+
+
 @pytest_asyncio.fixture(autouse=True, scope="session")
 async def _patch_app_database():
     """Swap every ``AsyncSessionLocal`` / ``engine`` reference to the test
