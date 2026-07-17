@@ -37,6 +37,7 @@ from app.kanban.models import KanbanCard, KanbanDeliverable
 from app.kanban.project_key import resolve_project_key
 from app.models.schemas import (
     CardPlanItem,
+    DocContentResponse,
     DocSpecItem,
     PlanCreate,
     PlanDetailResponse,
@@ -232,6 +233,100 @@ async def get_plans_overview(
     return PlansOverviewResponse(
         project_key=project_key, cards=cards, docs=docs,
     )
+
+
+# ---------------------------------------------------------------------------
+# Single doc fetch — supports the C-section detail view (kanban card
+# 9e33a359, Optie B, stap 2).
+# ---------------------------------------------------------------------------
+#
+# The ``/plans/overview`` list endpoint deliberately omits doc bodies to
+# keep the aggregate response small (a 50 KB ``plans-feature-decision.md``
+# would otherwise dominate the payload). The detail page opens this
+# endpoint when a user expands a doc row.
+#
+# Path-traversal guard: the path MUST live directly under ``_COCKPIT_DOCS_DIR``.
+# We both check the string prefix (rejects ``..``-style and other obvious
+# bypasses) and resolve the candidate against ``PROJECT_ROOT`` with
+# ``Path.resolve()`` + an ``is_relative_to`` check so a request like
+# ``/plans/overview/docs/docs%2Fcockpit%2F..%2F..%2Fetc%2Fpasswd`` cannot
+# escape the sandbox even if a future code change moves the docs tree.
+
+
+from pathlib import Path
+
+
+async def _read_cockpit_doc(rel_path: str) -> DocContentResponse:
+    """Read a single docs/cockpit/*.md file and return its body.
+
+    Trailing-whitespace newlines are stripped so multi-MB files don't
+    inflate the JSON with a deterministic suffix. The H1 title is
+    computed the same way as in ``_list_cockpit_docs`` so detail rows
+    match the list view (avoids the "title changed when I expanded it"
+    surprise).
+    """
+    candidate = (PROJECT_ROOT / rel_path).resolve()
+    # Reject anything that, after resolve, escapes the docs root. We
+    # compare against the resolved root (PROJECT_ROOT may itself be a
+    # symlink in some deploys) and require "docs/cockpit" as the next
+    # segment — so ``docs/cockpit/../something`` is denied even if it
+    # resolves back under PROJECT_ROOT.
+    docs_root = _COCKPIT_DOCS_DIR.resolve()
+    try:
+        candidate.relative_to(docs_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Doc path must live under docs/cockpit/",
+        )
+    if not candidate.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Doc not found: {rel_path}",
+        )
+    try:
+        content = candidate.read_text(encoding="utf-8").strip("\n")
+    except (OSError, UnicodeDecodeError) as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read doc: {e}",
+        )
+    first_line = content.splitlines()[:1]
+    title = first_line[0] if first_line else f"# {candidate.name}"
+    if len(title) > _DOC_TITLE_MAX_CHARS:
+        title = title[: _DOC_TITLE_MAX_CHARS - 1] + "…"
+    stat = candidate.stat()
+    return DocContentResponse(
+        path=f"docs/cockpit/{candidate.name}",
+        title=title,
+        content=content,
+        modified_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+        size_bytes=stat.st_size,
+    )
+
+
+@router.get(
+    "/plans/overview/docs/{rel_path:path}",
+    response_model=DocContentResponse,
+)
+async def get_plan_overview_doc(rel_path: str):
+    """Return the full body of one ``docs/cockpit/*.md`` doc.
+
+    Paired with ``/plans/overview`` (which ships only metadata) so the
+    detail page can lazily read just the file the user opened. Lives
+    under the same router for the same reason — there is no separate
+    "specs" / "decisions" feature; the SSOT docs tree is the source of
+    truth for spec-shaped content.
+    """
+    # Defensive normalize: callers may URL-encode the path; we already
+    # got the decoded form from FastAPI's ``{rel_path:path}``, but a
+    # leading slash can sneak in via ``/api/v1/plans/overview/docs//
+    # docs/...``. Strip it so ``PROJECT_ROOT / rel_path`` resolves to
+    # the right place without 404-ing on a stray separator.
+    normalized = rel_path.lstrip("/")
+    return await _read_cockpit_doc(normalized)
 
 
 @router.get("/plans", response_model=PlanListResponse)

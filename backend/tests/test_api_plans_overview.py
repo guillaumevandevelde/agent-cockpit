@@ -381,3 +381,98 @@ async def test_overview_does_not_read_kanban_plans(patched_project_key):
         assert "legacy-plan" not in row.get("ref", "")
     for d in body["docs"]:
         assert not d["path"].endswith("legacy-plan")
+
+
+# ---------------------------------------------------------------------------
+# Section C — single-doc fetch (kanban card 9e33a359, Optie B, stap 2)
+# ---------------------------------------------------------------------------
+#
+# The list endpoint deliberately ships only metadata (path / title / mtime
+# / size); the detail page opens this endpoint when a user expands a row.
+# Tests cover the happy path, the shape contract, missing-file 404s, and
+# the path-traversal guard — the four failure modes that need to be
+# pinned down before the SPA starts calling this route.
+
+
+@pytest.mark.asyncio
+async def test_overview_doc_returns_full_body(patched_project_key):
+    """Happy path: an existing ``docs/cockpit/*.md`` is returned with
+    its full content, the same H1 title the list endpoint uses, and the
+    same ``modified_at`` / ``size_bytes`` so the detail page can render
+    without a follow-up call to the list endpoint.
+    """
+    patched_project_key("/tmp/x", "slug:any")
+    list_r = (await _client().get(
+        "/api/v1/plans/overview", params={"project_path": "/tmp/x"},
+    ))
+    list_body = list_r.json()
+    target = next(d for d in list_body["docs"] if d["path"].endswith("kanban-conventions.md"))
+
+    async with _client() as ac:
+        r = await ac.get(
+            f"/api/v1/plans/overview/docs/{target['path']}",
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["path"] == target["path"]
+    # Title matches the list endpoint so the detail page never shows a
+    # different H1 than the row that was clicked.
+    assert body["title"] == target["title"]
+    assert body["modified_at"] == target["modified_at"]
+    assert body["size_bytes"] == target["size_bytes"]
+    # Body is the real markdown (not the truncated excerpt).
+    assert "# " in body["content"]
+    assert "kanban-conventies" in body["content"].lower() or "kanban" in body["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_overview_doc_404_for_missing_file(patched_project_key, monkeypatch):
+    """A path that resolves under docs/cockpit/ but doesn't exist on
+    disk returns 404 (not 500, not 200 with empty content) — so the SPA
+    can distinguish "doc deleted from the tree" from "boom".
+    """
+    patched_project_key("/tmp/x", "slug:any")
+
+    from app.api.v1 import plans as plans_module
+    real_root = plans_module._COCKPIT_DOCS_DIR
+
+    class _Root:
+        def resolve(self_inner):
+            return real_root.resolve()
+        def is_dir(self_inner):
+            return True
+        def glob(self_inner, _pat):
+            return []
+    monkeypatch.setattr(plans_module, "_COCKPIT_DOCS_DIR", _Root())
+
+    async with _client() as ac:
+        r = await ac.get(
+            "/api/v1/plans/overview/docs/docs/cockpit/no-such-file.md",
+        )
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.asyncio
+async def test_overview_doc_rejects_path_traversal(patched_project_key):
+    """A request whose resolved path escapes ``docs/cockpit/`` returns
+    400 — never the leaked file. The guard uses ``Path.resolve() +
+    relative_to()`` so an attacker can't bypass with ``..`` segments
+    or URL-encoded slashes that decode to ``/``.
+    """
+    patched_project_key("/tmp/x", "slug:any")
+    async with _client() as ac:
+        # ``..`` traversal — resolves outside docs/cockpit, must 400.
+        r1 = await ac.get(
+            "/api/v1/plans/overview/docs/docs/cockpit/../README.md",
+        )
+        assert r1.status_code == 400, r1.text
+        # Absolute path attempt — also resolves outside, also 400.
+        r2 = await ac.get(
+            "/api/v1/plans/overview/docs//etc/passwd",
+        )
+        assert r2.status_code == 400, r2.text
+        # Wrong tree entirely — also 400.
+        r3 = await ac.get(
+            "/api/v1/plans/overview/docs/backend/requirements.txt",
+        )
+        assert r3.status_code == 400, r3.text

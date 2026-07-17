@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ClipboardList, Search, Calendar, HardDrive, FileText } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ClipboardList, Search, FileText, KanbanSquare, BookText, ExternalLink } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { RefreshButton } from '@/components/shared/RefreshButton'
@@ -9,7 +9,322 @@ import { usePlansApi } from '@/hooks/usePlansApi'
 import { useFetchData } from '@/hooks/useFetchData'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { formatBytes } from '@/types/backup'
-import type { PlanSummary } from '@/types/plans'
+import type { CardPlanItem, DocSpecItem, PlansOverviewResponse } from '@/types/plans'
+
+// Module-level empty arrays so the ``useMemo`` deps below don't churn
+// on every render. ``data?.cards ?? EMPTY_CARDS`` keeps a stable
+// reference when the overview hasn't loaded yet.
+const EMPTY_CARDS: CardPlanItem[] = []
+const EMPTY_DOCS: DocSpecItem[] = []
+
+/**
+ * Read-only "Plans & Specs" overview (Optie B, kanban card 9e33a359).
+ *
+ * Two sections:
+ *   * **B — from cards.** ``plan``/``plan_ref`` deliverables attached to
+ *     kanban cards scoped to the active project. Click a row to jump to
+ *     the source card (``/kanban?card=<card_id>``).
+ *   * **C — from docs.** ``docs/cockpit/*.md`` files in the repo's SSOT
+ *     tree. Click a row to open the doc detail page
+ *     (``/plans/<encoded-path>``).
+ *
+ * Each section has its own empty/loading/error state — independent
+ * failures aren't possible today (one fetch, two sections) but the
+ * shape is left ready for the day when they are.
+ */
+export function PlansPage() {
+  const navigate = useNavigate()
+  const { getOverview } = usePlansApi()
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const { data, loading, error, refresh } = useFetchData<PlansOverviewResponse>(
+    getOverview,
+    [getOverview]
+  )
+
+  const cards = data?.cards ?? EMPTY_CARDS
+  const docs = data?.docs ?? EMPTY_DOCS
+  const projectKey = data?.project_key ?? ''
+
+  const filteredCards = useMemo(
+    () => filterCards(cards, searchQuery),
+    [cards, searchQuery]
+  )
+  const filteredDocs = useMemo(
+    () => filterDocs(docs, searchQuery),
+    [docs, searchQuery]
+  )
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-2">
+            <ClipboardList className="h-8 w-8" />
+            Plans &amp; Specs
+          </h1>
+          <p className="text-muted-foreground">
+            Read-only window on the active project's plan attachments and
+            the repo's cockpit docs.
+          </p>
+          {projectKey && (
+            <p className="text-xs text-muted-foreground mt-1 font-mono">
+              Project: {projectKey}
+            </p>
+          )}
+        </div>
+        <RefreshButton onClick={refresh} loading={loading} />
+      </div>
+
+      {error && (
+        <Card className="border-destructive">
+          <CardContent className="py-4 text-sm text-destructive">{error}</CardContent>
+        </Card>
+      )}
+
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Filter by title or path…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-10"
+        />
+      </div>
+
+      <CardPlanSection
+        items={filteredCards}
+        loading={loading && cards.length === 0}
+        searchQuery={searchQuery}
+        onCardClick={(cardId) => navigate(`/kanban?card=${cardId}`)}
+      />
+
+      <DocSection
+        items={filteredDocs}
+        loading={loading && docs.length === 0}
+        searchQuery={searchQuery}
+        onDocClick={(path) => navigate(`/plans/${encodeURIComponent(path)}`)}
+      />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Section B — kanban card plan attachments
+// ---------------------------------------------------------------------------
+
+function CardPlanSection({
+  items,
+  loading,
+  searchQuery,
+  onCardClick,
+}: {
+  items: CardPlanItem[]
+  loading: boolean
+  searchQuery: string
+  onCardClick: (cardId: string) => void
+}) {
+  return (
+    <section aria-labelledby="card-plans-heading" className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2
+          id="card-plans-heading"
+          className="text-lg font-semibold flex items-center gap-2"
+        >
+          <KanbanSquare className="h-5 w-5" />
+          From Kanban Cards
+        </h2>
+        <Badge variant="secondary" className="text-xs">
+          {items.length}
+        </Badge>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Plan &amp; plan_ref deliverables attached to kanban cards in this project.
+        Click a row to jump to the source card.
+      </p>
+      {loading ? (
+        <SectionEmpty>Loading card plans…</SectionEmpty>
+      ) : items.length === 0 ? (
+        <SectionEmpty>
+          {searchQuery ? 'No card plans match your filter' : 'No card plans in this project yet'}
+        </SectionEmpty>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li key={item.deliverable_id}>
+              <Card
+                className={CLICKABLE_CARD}
+                onClick={() => onCardClick(item.card_id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onCardClick(item.card_id)
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={`Open kanban card ${item.card_title}`}
+              >
+                <CardContent className="py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <KanbanSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <h3 className="font-medium truncate">{item.card_title}</h3>
+                        <Badge variant="outline" className="text-xs">
+                          {item.kind}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {item.excerpt || '(no excerpt)'}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span
+                        className="text-xs text-muted-foreground"
+                        title={new Date(item.created_at).toLocaleString()}
+                      >
+                        {formatRelativeDate(item.created_at)}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        <ExternalLink className="h-3 w-3" />
+                        <span className="font-mono">{item.card_id.slice(0, 8)}</span>
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Section C — docs/cockpit/*.md index
+// ---------------------------------------------------------------------------
+
+function DocSection({
+  items,
+  loading,
+  searchQuery,
+  onDocClick,
+}: {
+  items: DocSpecItem[]
+  loading: boolean
+  searchQuery: string
+  onDocClick: (path: string) => void
+}) {
+  return (
+    <section aria-labelledby="doc-section-heading" className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2
+          id="doc-section-heading"
+          className="text-lg font-semibold flex items-center gap-2"
+        >
+          <BookText className="h-5 w-5" />
+          From Cockpit Docs
+        </h2>
+        <Badge variant="secondary" className="text-xs">
+          {items.length}
+        </Badge>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Decision &amp; spec docs from the platform's{' '}
+        <code className="text-xs">docs/cockpit/</code> tree. Click a row
+        to read the full doc.
+      </p>
+      {loading ? (
+        <SectionEmpty>Loading docs…</SectionEmpty>
+      ) : items.length === 0 ? (
+        <SectionEmpty>
+          {searchQuery ? 'No docs match your filter' : 'No docs in docs/cockpit/'}
+        </SectionEmpty>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((doc) => (
+            <li key={doc.path}>
+              <Card
+                className={CLICKABLE_CARD}
+                onClick={() => onDocClick(doc.path)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onDocClick(doc.path)
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={`Open doc ${doc.title}`}
+              >
+                <CardContent className="py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <h3 className="font-medium truncate">{doc.title}</h3>
+                      </div>
+                      <p className="text-xs text-muted-foreground font-mono truncate">
+                        {doc.path}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span
+                        className="text-xs text-muted-foreground"
+                        title={new Date(doc.modified_at).toLocaleString()}
+                      >
+                        {formatRelativeDate(doc.modified_at)}
+                      </span>
+                      <Badge variant="outline" className="text-xs">
+                        {formatBytes(doc.size_bytes)}
+                      </Badge>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function SectionEmpty({ children }: { children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardContent className="py-6 text-center text-sm text-muted-foreground">
+        {children}
+      </CardContent>
+    </Card>
+  )
+}
+
+function filterCards(items: CardPlanItem[], query: string): CardPlanItem[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return items
+  return items.filter(
+    (item) =>
+      item.card_title.toLowerCase().includes(q) ||
+      item.excerpt.toLowerCase().includes(q)
+  )
+}
+
+function filterDocs(items: DocSpecItem[], query: string): DocSpecItem[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return items
+  return items.filter(
+    (doc) =>
+      doc.title.toLowerCase().includes(q) ||
+      doc.path.toLowerCase().includes(q)
+  )
+}
 
 function formatRelativeDate(isoDate: string): string {
   const date = new Date(isoDate)
@@ -25,207 +340,4 @@ function formatRelativeDate(isoDate: string): string {
   if (diffDays < 7) return `${diffDays}d ago`
   if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`
   return date.toLocaleDateString()
-}
-
-function groupByDate(plans: PlanSummary[]): { label: string; plans: PlanSummary[] }[] {
-  const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const weekStart = new Date(todayStart.getTime() - 7 * 86400000)
-  const monthStart = new Date(todayStart.getTime() - 30 * 86400000)
-
-  const groups: Record<string, PlanSummary[]> = {
-    'Today': [],
-    'This Week': [],
-    'This Month': [],
-    'Older': [],
-  }
-
-  for (const plan of plans) {
-    const date = new Date(plan.modified_at)
-    if (date >= todayStart) groups['Today'].push(plan)
-    else if (date >= weekStart) groups['This Week'].push(plan)
-    else if (date >= monthStart) groups['This Month'].push(plan)
-    else groups['Older'].push(plan)
-  }
-
-  return Object.entries(groups)
-    .filter(([, plans]) => plans.length > 0)
-    .map(([label, plans]) => ({ label, plans }))
-}
-
-export function PlansPage() {
-  const navigate = useNavigate()
-  const { listPlans, getStats } = usePlansApi()
-  const [searchQuery, setSearchQuery] = useState('')
-
-  const { data, loading, error, refresh: fetchData } = useFetchData(
-    () => Promise.all([listPlans(), getStats()]),
-    [listPlans, getStats]
-  )
-  const plans = data?.[0].plans ?? []
-  const stats = data?.[1] ?? null
-
-  // Client-side filtering by search query
-  const filteredPlans = useMemo(() => {
-    if (!searchQuery.trim()) return plans
-    const q = searchQuery.toLowerCase()
-    return plans.filter(
-      p => p.title.toLowerCase().includes(q) ||
-           p.excerpt.toLowerCase().includes(q) ||
-           p.slug.toLowerCase().includes(q)
-    )
-  }, [plans, searchQuery])
-
-  const grouped = useMemo(() => groupByDate(filteredPlans), [filteredPlans])
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <ClipboardList className="h-8 w-8" />
-            Plans
-          </h1>
-          <p className="text-muted-foreground">
-            Browse and search your Claude Code execution plans
-          </p>
-        </div>
-        <RefreshButton onClick={fetchData} loading={loading} />
-      </div>
-
-      {error && (
-        <Card className="border-destructive">
-          <CardHeader>
-            <CardTitle className="text-destructive">Error</CardTitle>
-            <CardDescription>{error}</CardDescription>
-          </CardHeader>
-        </Card>
-      )}
-
-      {/* Stats Row */}
-      {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Total Plans</CardDescription>
-              <CardTitle className="text-3xl">{stats.total_plans}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">
-                Execution plan files
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Date Range</CardDescription>
-              <CardTitle className="text-lg">
-                {stats.oldest_date
-                  ? `${new Date(stats.oldest_date).toLocaleDateString()} — ${new Date(stats.newest_date!).toLocaleDateString()}`
-                  : 'No plans'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Calendar className="h-3 w-3" />
-                <span>First to latest plan</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardDescription>Total Size</CardDescription>
-              <CardTitle className="text-3xl">{formatBytes(stats.total_size_bytes)}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <HardDrive className="h-3 w-3" />
-                <span>Combined plan files</span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search plans by title, content, or slug..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
-        />
-      </div>
-
-      {/* Plan List */}
-      {loading && plans.length === 0 ? (
-        <Card>
-          <CardContent className="py-8">
-            <p className="text-center text-muted-foreground">Loading plans...</p>
-          </CardContent>
-        </Card>
-      ) : filteredPlans.length === 0 ? (
-        <Card>
-          <CardContent className="py-8">
-            <p className="text-center text-muted-foreground">
-              {searchQuery ? 'No plans match your search' : 'No plans found'}
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {grouped.map(group => (
-            <div key={group.label}>
-              <h2 className="text-sm font-semibold text-muted-foreground mb-3">{group.label}</h2>
-              <div className="space-y-2">
-                {group.plans.map(plan => (
-                  <Card
-                    key={plan.filename}
-                    className={CLICKABLE_CARD}
-                    onClick={() => navigate(`/plans/${encodeURIComponent(plan.filename)}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        navigate(`/plans/${encodeURIComponent(plan.filename)}`)
-                      }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                  >
-                    <CardContent className="py-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            <h3 className="font-medium truncate">{plan.title}</h3>
-                          </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2">
-                            {plan.excerpt}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                          <span
-                            className="text-xs text-muted-foreground"
-                            title={new Date(plan.modified_at).toLocaleString()}
-                          >
-                            {formatRelativeDate(plan.modified_at)}
-                          </span>
-                          <Badge variant="outline" className="text-xs">
-                            {formatBytes(plan.size_bytes)}
-                          </Badge>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
