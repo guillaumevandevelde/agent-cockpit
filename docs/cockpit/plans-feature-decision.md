@@ -3,7 +3,9 @@
 **Datum:** 2026-07-14
 **Status:** voorgesteld
 **Kaart:** `45ac606e…` (review: `a70a9272…`)
-**Uitkomst:** ⏳ **NOG NIET BESLIST — aanbeveling, geen uitkomst.** De analyse *adviseert* herbestemmen (Optie B: read-only mensvenster op de spec-/plan-laag, `kanban_plans` uitfaseren), maar §7 van het doc parkeert dit expliciet op een menselijke go/no-go die nooit kwam. Deze regel stond hier tot 2026-07-15 als genomen beslissing (backfill-fout, commit `4101d56`) — dat onderdrukte heropening terwijl niets uitgevoerd werd. Alternatieven A (volledig uitfaseren) en C (writer aanhaken) staan nog open.
+**Uitkomst:** ✅ **BESLIST 2026-07-17 — Optie B (herbestemmen).** De gebruiker gaf go op Optie B: herbestem Plans tot read-only mensvenster op de spec-/plan-laag (B = kaart-plan-attachments + C = `docs/cockpit/`-docs), faseer `kanban_plans` uit. **Randvoorwaarde van de gebruiker:** de B↔C-join via `spec_doc` is GEEN gratis stap (0× gepopuleerd, zie §8.2) — **lever B en C eerst náást elkaar**; de join is uitgesteld werk. Gedecomponeerd in 4 vervolgkaarten (zie §10). Alternatieven A (volledig uitfaseren) en C (writer aanhaken) zijn hiermee afgewezen.
+
+_Historische noot: tot 2026-07-15 stond deze regel ten onrechte als genomen beslissing (backfill-fout, commit `4101d56`); de review 2026-07-15 corrigeerde 'm naar "nog niet beslist". De go hierboven is de eerste échte menselijke beslissing._
 
 > Kanban-kaart: **"Analyse - Plan functionaliteit"**.
 > Vraag (gebruiker): *"Vandaag is er onder operations een plan functionaliteit. Geen
@@ -182,8 +184,13 @@ gebruiker op **Optie B** (herbestemmen als spec-/plan-venster, `kanban_plans`
 uitfaseren) vóórdat uitvoering start. Alternatieven blijven Optie A (volledig
 uitfaseren) en Optie C (writer aanhaken) — expliciet afgeraden in §4-5.
 
-**Status 2026-07-15:** deze go/no-go is nooit gegeven en stond ten onrechte als
-"beslist" in het register (zie §8.3).
+**Status 2026-07-17:** ✅ **go gegeven — Optie B.** De gebruiker koos Optie B op
+kaart `a70a9272…`, met de expliciete randvoorwaarde dat B en C éérst náást elkaar
+geleverd worden (de `spec_doc`-join is uitgesteld — zie §8.2 + §10). Gedecomponeerd
+in 4 vervolgkaarten; zie §10.
+
+_(2026-07-15: deze go/no-go was toen nog nooit gegeven en stond ten onrechte als
+"beslist" in het register — zie §8.3.)_
 
 > **Dit doc doet géén uitspraak (meer) over de vraagstatus.** Of de vraag daadwerkelijk
 > bij de gebruiker ligt, lees je op kaart `a70a9272…` op het bord (kolom + open gate),
@@ -303,3 +310,31 @@ zodat alleen een move die écht geland is de sessie beëindigt. Regressietest:
 **Gevolg voor de reviewvraag.** "Is er een gevolg?" had twee blockers, niet één. De
 tweede is nu weg. De eerste — de go/no-go uit §7 — is nog steeds open en is een echte
 productvraag; die hoort bij een mens, niet bij nog een analyse.
+
+## 10. Resolutie (2026-07-17, kaart `a70a9272…`) — go op Optie B + decompositie
+
+De laatste blocker (§7-go/no-go) is beantwoord. **De gebruiker koos Optie B** met
+één expliciete randvoorwaarde:
+
+> Optie B (aanbevolen) — herbestem Plans tot read-only mensvenster op de spec-/plan-laag
+> (kaart-plan-attachments + `docs/cockpit/`), faseer `kanban_plans` uit. **NB:** de
+> B↔C-join via `spec_doc` is GEEN gratis stap (0× gepopuleerd) — lever B en C eerst
+> náást elkaar.
+
+Die randvoorwaarde is exact de zwakke poot die de review in §8.2 blootlegde: de
+`spec_doc`-join heeft geen producent. Ze stuurt de decompositie: de kern (B en C
+náást elkaar) mag niet wachten op het oplossen van de join.
+
+**Vervolgkaarten** (kinderen van `a70a9272…`, aangemaakt in deze sessie; DAG via
+plan-attachment):
+
+| # | Kaart | Type | Dep | Kern |
+|---|---|---|---|---|
+| 1 | `885d0b61…` [plans-window] Aggregator-backend | feature | — | endpoint dat B (`plan`/`plan_ref`-deliverables) en C (`docs/cockpit/`-index) als twee **gescheiden** secties retourneert; geen join, geen nieuw datamodel |
+| 2 | `9e33a359…` [plans-window] Frontend herbestemming | feature | 1 | Plans-pagina toont het aggregaat i.p.v. `kanban_plans`; detail linkt naar kaart (B) of rendert doc (C) |
+| 3 | `528c5ca2…` [plans-window] `kanban_plans` uitfaseren | chore | 2 | tabel/CRUD/migratie demoteren ná bevestiging geen externe `POST /plans`-caller; `docs/features/plans.md` bijwerken |
+| 4 | `bb1f61aa…` [plans-window] B↔C-join (uitgesteld) | analysis | 1 | éérst een producent voor `spec_doc` ontwerpen, dán de correlatie — of gemotiveerd `not_feasible` |
+
+Kaart 4 is bewust `work_type=analysis` en losgekoppeld: de join wacht op een
+`spec_doc`-producent en blokkeert de kern-levering (1-3) niet. Daarmee is de
+"gedefinieerd, geen producent"-val uit §8.2 vermeden i.p.v. herhaald.
