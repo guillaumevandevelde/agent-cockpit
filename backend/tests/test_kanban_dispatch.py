@@ -3818,12 +3818,51 @@ class TestBuildShipInstructionsSessionRetro:
     def test_session_retro_step_runs_after_attach_deliverable_and_before_move_card(self):
         """Acceptance: the retro must be the *last* step before move_card→Done
         (after ship + attach_deliverable, never before them). A retro wired
-        earlier would burn time on lessons that ship-discipline should catch."""
-        for mode in ("direct", "pull-request"):
+        earlier would burn time on lessons that ship-discipline should catch.
+
+        Anchor on numbered step headings (``N. **...**``) rather than bare
+        tool names. The bare ``move_card`` token legitimately appears
+        elsewhere in the prompt (pre-ship blocks, post-mortems, any block
+        that mentions the tool in passing), so an ``index("move_card")``
+        match on a pre-ship mention would shadow the canonical step and
+        either false-positive or false-negative the ordering check (incident
+        reproduced during the FCR step wiring of `_build_ship_instructions`
+        — see [self-improve] card fff81b84…).
+        """
+        # Anchors per mode — the step numbers differ between direct (5/6/7)
+        # and pull-request (6/7/8) per the shared numbering contract verified
+        # by ``test_session_retro_step_uses_consistent_step_numbering``.
+        step_anchors = {
+            "direct": (
+                "5. **Attach the deliverable**",
+                "6. **Run the session-end retro**",
+                "7. **Move the card to Done**",
+            ),
+            "pull-request": (
+                "6. **Attach the deliverable**",
+                "7. **Run the session-end retro**",
+                "8. **Move the card**",
+            ),
+        }
+        for mode, (attach_h, retro_h, move_h) in step_anchors.items():
             instructions = dispatch._build_ship_instructions(mode)
-            attach_idx = instructions.index("attach_deliverable")
-            retro_idx = instructions.index("session-retro")
-            move_idx = instructions.index('move_card')
+            # Each anchor must occur exactly once — a bare ``index()`` against
+            # a non-unique anchor would silently mask ordering bugs.
+            assert instructions.count(attach_h) == 1, (
+                f"attach anchor not unique in {mode}: "
+                f"{instructions.count(attach_h)} matches of {attach_h!r}"
+            )
+            assert instructions.count(retro_h) == 1, (
+                f"retro anchor not unique in {mode}: "
+                f"{instructions.count(retro_h)} matches of {retro_h!r}"
+            )
+            assert instructions.count(move_h) == 1, (
+                f"move anchor not unique in {mode}: "
+                f"{instructions.count(move_h)} matches of {move_h!r}"
+            )
+            attach_idx = instructions.index(attach_h)
+            retro_idx = instructions.index(retro_h)
+            move_idx = instructions.index(move_h)
             assert attach_idx < retro_idx < move_idx, (
                 f"order broken in {mode}: "
                 f"attach@{attach_idx} retro@{retro_idx} move@{move_idx}"
