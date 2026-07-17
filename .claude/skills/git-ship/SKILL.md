@@ -127,7 +127,11 @@ TMP=$(mktemp -d)
 # fresh slot per invocation — do NOT simplify back to a fixed name.
 # (kanban card c23dfe46…)
 git worktree add --detach "$TMP/merge-$$" origin/master
-git -C "$TMP/merge-$$" merge --no-ff "$BRANCH" -m "Merge $BRANCH"
+if ! git -C "$TMP/merge-$$" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
+  echo "ERROR: merge conflict merging $BRANCH into master — not pushing." >&2
+  echo "Conflicted worktree left at $TMP/merge-$$ for inspection (not removed)." >&2
+  exit 1
+fi
 git -C "$TMP/merge-$$" push origin HEAD:master
 git worktree remove --force "$TMP/merge-$$"
 ```
@@ -139,6 +143,14 @@ retro** (invoke the `session-retro` skill — read
 `Done` with a `summary` of the work you did (required — the move is rejected without it).
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
+
+If the merge itself reports `CONFLICT` (the block above exits 1 before pushing):
+do not resolve conflict markers by guessing. This means a concurrent session
+touched the same files after you branched. Re-`git fetch origin` and retry the
+merge once — the conflict may already be gone if master moved on unrelated
+files since your `TMP` snapshot. If a real conflict remains, `report_impediment`
+naming the conflicting files so a human can resolve it; never force-push or
+discard either side of the conflict.
 
 ## 4b. Ship mode `pull-request` — open a PR and wait for it to merge
 
@@ -222,6 +234,9 @@ when leftovers exist.
 
 - Push **only** to `origin`. Never to any other remote. Never `--force`.
 - Never merge or open a PR when tests are red.
+- Never push after `git merge` reports a conflict — check its exit code before
+  the push/worktree-remove; a misleading "Everything up-to-date" on push means
+  nothing new was pushed, not that the merge succeeded.
 - A new worktree always branches from `origin/master`.
 - `attach_deliverable` before `move_card` so the deliverable is on the card.
 - Run the **session-end retro** (`session-retro` skill) between `attach_deliverable`
