@@ -168,11 +168,13 @@ describe("CardItem ReadyStateBadge", () => {
       <CardItem card={baseCard} readyState="ready" onOpen={() => {}} />,
     );
     expect(screen.getByText("Ready")).not.toBeNull();
-    expect(screen.queryByText("Blocked")).toBeNull();
-    expect(screen.queryByText("Dispatching")).toBeNull();
+    expect(screen.queryByText("Dependent")).toBeNull();
+    expect(screen.queryByText("In Progress")).toBeNull();
+    expect(screen.queryByText("Impeded")).toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
   });
 
-  it("renders a 'Blocked' badge with blocker titles in the tooltip", () => {
+  it("renders a 'Dependent' badge with blocker titles in the tooltip", () => {
     // Tooltip text is exposed via the standard `title` HTML attribute, which
     // jsdom turns into the `title` property on the element. Reading it back
     // here pins the contract — the CardDrawer / KanbanPage must list the
@@ -181,29 +183,55 @@ describe("CardItem ReadyStateBadge", () => {
     render(
       <CardItem
         card={baseCard}
-        readyState="blocked"
+        readyState="dependent"
         blockerTitles={["Parent A", "Parent B"]}
         onOpen={() => {}}
       />,
     );
-    const blocked = screen.getByText("Blocked");
-    expect(blocked).not.toBeNull();
-    expect(blocked.getAttribute("title")).toBe("Blocked by: Parent A, Parent B");
+    const dependent = screen.getByText("Dependent");
+    expect(dependent).not.toBeNull();
+    expect(dependent.getAttribute("title")).toBe("Waiting on: Parent A, Parent B");
     expect(screen.queryByText("Ready")).toBeNull();
-    expect(screen.queryByText("Dispatching")).toBeNull();
+    expect(screen.queryByText("In Progress")).toBeNull();
   });
 
-  it("renders a 'Dispatching' badge when readyState='dispatching' is supplied", () => {
+  it("renders an 'In Progress' badge when readyState='in_progress' is supplied", () => {
     render(
       <CardItem
         card={{ ...baseCard, claimed_by: "agent:tmux-x" }}
-        readyState="dispatching"
+        readyState="in_progress"
         onOpen={() => {}}
       />,
     );
-    expect(screen.getByText("Dispatching")).not.toBeNull();
+    expect(screen.getByText("In Progress")).not.toBeNull();
     expect(screen.queryByText("Ready")).toBeNull();
-    expect(screen.queryByText("Blocked")).toBeNull();
+    expect(screen.queryByText("Dependent")).toBeNull();
+  });
+
+  it("renders an 'Impeded' badge when readyState='impeded' is supplied", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "Impediment" }}
+        readyState="impeded"
+        onOpen={() => {}}
+      />,
+    );
+    const impeded = screen.getByText("Impeded");
+    expect(impeded).not.toBeNull();
+    expect(impeded.getAttribute("title")).toBe("Waiting on a human decision");
+  });
+
+  it("renders a 'Completed' badge when readyState='completed' is supplied", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "Done" }}
+        readyState="completed"
+        onOpen={() => {}}
+      />,
+    );
+    const completed = screen.getByText("Completed");
+    expect(completed).not.toBeNull();
+    expect(completed.getAttribute("title")).toBe("Work is done");
   });
 
   it("omits the ready-state badge entirely when no readyState prop is passed", () => {
@@ -213,8 +241,10 @@ describe("CardItem ReadyStateBadge", () => {
     // untouched callers identical.
     render(<CardItem card={baseCard} onOpen={() => {}} />);
     expect(screen.queryByText("Ready")).toBeNull();
-    expect(screen.queryByText("Blocked")).toBeNull();
-    expect(screen.queryByText("Dispatching")).toBeNull();
+    expect(screen.queryByText("Dependent")).toBeNull();
+    expect(screen.queryByText("In Progress")).toBeNull();
+    expect(screen.queryByText("Impeded")).toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
   });
 });
 
