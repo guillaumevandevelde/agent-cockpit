@@ -237,3 +237,48 @@ describe("KanbanPage ?card= deep link", () => {
     expect(getByTestId("location").textContent).toBe("/kanban");
   });
 });
+
+describe("KanbanPage ready-state precedence", () => {
+  const DONE_COLUMN: import("./types").KanbanColumn = {
+    ...BACKLOG_COLUMN,
+    id: "col-done",
+    name: "Done",
+  };
+  const IMPEDIMENT_COLUMN: import("./types").KanbanColumn = {
+    ...BACKLOG_COLUMN,
+    id: "col-impediment",
+    name: "Impediment",
+  };
+
+  it("applies completed > impeded > in_progress > dependent > ready precedence", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN, DONE_COLUMN, IMPEDIMENT_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        // A stale agent claim in Done must still read "completed", not
+        // "in_progress" — column-based terminal states win over the claim.
+        makeCard({ id: "card-done", column: "Done", claimed_by: "agent:tmux-x" }),
+        makeCard({ id: "card-impeded", column: "Impediment", claimed_by: "agent:tmux-y" }),
+        makeCard({ id: "card-in-progress", claimed_by: "agent:tmux-z" }),
+        makeCard({ id: "card-dependent", depends_on: ["missing-parent"] }),
+        makeCard({ id: "card-ready" }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() => expect(stateOf("card-done")).toBe("completed"));
+    expect(stateOf("card-impeded")).toBe("impeded");
+    expect(stateOf("card-in-progress")).toBe("in_progress");
+    expect(stateOf("card-dependent")).toBe("dependent");
+    expect(stateOf("card-ready")).toBe("ready");
+  });
+});

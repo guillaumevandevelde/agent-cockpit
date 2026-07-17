@@ -212,14 +212,25 @@ export default function KanbanPage() {
   // Per-card operational state for the ReadyStateBadge. Mirrors the backend
   // `meets_dep_prerequisites` semantic so the UI badge and the dispatcher's
   // own dep check agree: a card is "ready" iff every entry in `depends_on`
-  // is present and Done. "Dispatching" wins over Ready/Blocked because a card
-  // already being worked on is the more pressing signal for the operator.
+  // is present and Done. Precedence, highest first: completed (column ===
+  // "Done") → impeded (column === "Impediment") → in_progress (claimed_by
+  // starts with "agent:") → dependent (open depends_on) → ready. The
+  // column-based terminal states win over the claim so a card with a stale
+  // claim sitting in Done/Impediment doesn't show as in_progress.
   const cardMeta = useMemo(() => {
     const cardsById = new Map(cards.map((c) => [c.id, c]));
     const meta = new Map<string, CardMeta>();
     for (const card of cards) {
+      if (card.column === "Done") {
+        meta.set(card.id, { readyState: "completed", blockerTitles: [] });
+        continue;
+      }
+      if (card.column === "Impediment") {
+        meta.set(card.id, { readyState: "impeded", blockerTitles: [] });
+        continue;
+      }
       if (card.claimed_by?.startsWith(AGENT_CLAIM_PREFIX)) {
-        meta.set(card.id, { readyState: "dispatching", blockerTitles: [] });
+        meta.set(card.id, { readyState: "in_progress", blockerTitles: [] });
         continue;
       }
       const deps = card.depends_on ?? [];
@@ -231,7 +242,7 @@ export default function KanbanPage() {
         }
       }
       meta.set(card.id, {
-        readyState: blockerTitles.length === 0 ? "ready" : "blocked",
+        readyState: blockerTitles.length === 0 ? "ready" : "dependent",
         blockerTitles,
       });
     }
