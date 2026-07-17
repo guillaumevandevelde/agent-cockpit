@@ -152,6 +152,43 @@ def test_card_prompt_executor_phase_has_retro_and_ship_steps():
     assert "npm run lint && npm run build" in prompt
 
 
+def test_card_prompt_warns_against_writes_to_canonical_checkout():
+    """Every dispatched session must be told — in the prompt itself, not only
+    in the persona doc — that Write/Edit are worktree-relative and that the
+    absolute canonical path `/home/vdvgu/claude-cockpit/...` is the *main*
+    checkout, where a write silently lands on top of concurrent sessions'
+    uncommitted work.
+
+    Background (kanban card 513e37a1a86e41db8b6af8423292f6b6): an analyst
+    session edited two docs at `/home/vdvgu/claude-cockpit/docs/cockpit/...`
+    instead of its worktree path. Edit succeeded because the committed
+    content matched, but the write went to the main checkout and landed on
+    top of a concurrent session's uncommitted changes."""
+    class _C:
+        title = "T"
+        description = ""
+    # Both phases (executor / analyst) need this — the original incident was
+    # an analyst session, and an engineer writing a doc-fix outside its
+    # worktree would hit the same blast radius.
+    executor_prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct", phase="executor")
+    analyst_prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct", phase="analyst")
+    for prompt in (executor_prompt, analyst_prompt):
+        # Must name both the safe pattern and the forbidden one explicitly —
+        # vague "stay in your worktree" guidance is exactly what the original
+        # card author already had, and it didn't stick.
+        assert "worktree" in prompt.lower()
+        assert "/home/vdvgu/claude-cockpit" in prompt
+        # Must name the file-mutation tools that can clobber the main checkout.
+        assert "Write" in prompt and "Edit" in prompt
+        # The callout must precede the ship recipe so it lands in the agent's
+        # early context, not buried under later steps.
+        assert prompt.index("/home/vdvgu/claude-cockpit") < prompt.index(
+            "## Session-end workflow"
+        )
+
+
 def test_direct_ship_recipe_has_uncommitted_changes_preflight():
     """Direct-mode ship recipe must guard against the silent no-op where the
     detached worktree only sees COMMITTED state: uncommitted/untracked changes

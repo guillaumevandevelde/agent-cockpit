@@ -159,6 +159,44 @@ voor de merge-stap — de slot-naam `merge-$$` (per-proces uniek) voorkomt dat
 concurrent sessies dezelfde `.git/worktrees/`-gitdir hergebruiken; dit is de
 algemene variant voor élke git-mutatie binnen een worktree-sessie.)
 
+### Write/Edit = worktree-relatief (geen absolute paden naar de hoofd-checkout)
+
+De cwd-trap hierboven gaat over shell-commando's; hetzelfde gevaar geldt
+voor `Write`/`Edit`/`MultiEdit`/`NotebookEdit` met een **absoluut pad dat
+buiten je worktree valt**. Die tools respecteren geen cwd-relativiteit —
+je typt een pad, de tool schrijft daarheen, punt. De dispatch-prompt noemt
+overal het canonieke pad `/home/vdvgu/claude-cockpit/...` (voor voorbeelden,
+docs, commit-sha's), en een agent construeert daaruit makkelijk een
+*write*-pad dat naar de hoofd-checkout wijst in plaats van de worktree.
+
+**Concrete bug** (kanban card `513e37a1a86e41db8b6af8423292f6b6`): een
+gedispatchte analyst-sessie deed `Edit` op
+`/home/vdvgu/claude-cockpit/docs/cockpit/foo.md`. De gecommitte inhoud was
+in beide checkouts identiek, dus `old_string` matchte en `Edit` slaagde —
+zonder waarschuwing. De wijziging landde in de **main checkout** (waar
+`master` uitgecheckt staat), bovenop 4 ongecommitte bestanden van een
+concurrente sessie. Bijna-clobber; de recovery was
+`cp <main> <worktree>` + `git restore <main>` van precies de eigen 2
+bestanden.
+
+**Regel:**
+
+- **Schrijf-OK (worktree-pad):** `docs/cockpit/foo.md` (relatief, resolved
+  door Bash/Read/Write-cwd), `backend/app/x.py`,
+  of een absoluut pad dat begint met
+  `/home/vdvgu/claude-cockpit/.claude/worktrees/<jouw-branch>/...`.
+- **Schrijf-FOUT (hoofd-checkout):** een absoluut pad dat begint met
+  `/home/vdvgu/claude-cockpit/<iets>` waarbij `<iets>` *niet* het
+  `.claude/worktrees/<branch>/`-voorvoegsel heeft — dat is de gedeelde
+  checkout waar `master` staat en waar andere sessies live aan werken.
+
+Een write daarheen "slaagt" zonder foutmelding (de file bestaat, je hebt
+schrijfrechten), maar landt op andermans werk. **Lees** vanuit de
+hoofd-checkout is prima — alleen schrijven is verboden. Als je per ongeluk
+ tóch een pad naar de hoofd-checkout moet aanraken (bv. om een doc te
+lezen die nog niet in je worktree staat), doe dat uitsluitend met `Read`,
+nooit met `Write`/`Edit`/`MultiEdit`.
+
 ## Kaart bijwerken (VERPLICHT)
 
 Gebruik de `cockpit-kanban` MCP-tools om de kaart te sturen — er is **geen** apart

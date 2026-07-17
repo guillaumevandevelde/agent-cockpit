@@ -289,3 +289,30 @@ niet via zelf-gespawnde kind-kaarten. De async-decompositie blijft één laag di
 - Minimalistisch: drie vergelijkbare regels > premature abstractie.
 - Bij twijfel in je plan: documenteer de aanname, laat de executor 'm bevestigen
   of weerleggen.
+
+## Werkomgeving in worktree: scope van schrijven
+
+Ook al schrijf je in modus 1 normaal gesproken geen productcode, je schrijft
+**wel** docs (`docs/cockpit/...`), deliverable-bodies, en in modus 2 ook
+design-docs en prototypes. Die writes moeten in je worktree landen, niet in
+de hoofd-checkout waar `master` staat en andere sessies live aan werken.
+
+**Concrete bug** (kanban card `513e37a1a86e41db8b6af8423292f6b6`): een
+analyst deed `Edit` op `/home/vdvgu/claude-cockpit/docs/cockpit/foo.md`
+i.p.v. `docs/cockpit/foo.md`. De commit-inhoud was in beide checkouts
+identiek, dus `Edit` slaagde zonder waarschuwing; de wijziging landde op
+de hoofd-checkout bovenop ongecommitte wijzigingen van een concurrente
+sessie.
+
+**Regel (zelfde als engineer.md, kort):**
+
+- **Schrijf-OK:** relatieve paden (resolved door je cwd = worktree), of
+  absolute paden met prefix
+  `/home/vdvgu/claude-cockpit/.claude/worktrees/<jouw-branch>/`.
+- **Schrijf-FOUT:** absolute paden naar `/home/vdvgu/claude-cockpit/...`
+  *buiten* `.claude/worktrees/<jouw-branch>/` — dat is de hoofd-checkout.
+  Een write daar landt op iemand anders z'n werk zonder foutmelding.
+- **Lees** vanuit de hoofd-checkout is prima — alleen `Write` / `Edit` /
+  `MultiEdit` / `NotebookEdit` zijn gevaarlijk.
+- Idem voor shell: geen `cd /home/vdvgu/claude-cockpit/...` in een
+  werkboom-sessie; houd cwd in je worktree.
