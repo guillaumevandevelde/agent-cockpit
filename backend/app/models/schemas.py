@@ -1814,6 +1814,62 @@ class PlanStatsResponse(BaseModel):
     total_size_bytes: int
 
 
+# Plans Overview — B + C aggregator (kanban card 885d0b61, Optie B, stap 1).
+#
+# Two read-only sections returned as siblings:
+#   * ``cards``  (B) — ``plan``/``plan_ref`` deliverables on cards scoped to
+#     the resolved ``project_key``. Per-row shape carries enough context
+#     for the SPA to render a row without a follow-up fetch.
+#   * ``docs``   (C) — repo-relative ``docs/cockpit/*.md`` filesystem index.
+#     Not project-scoped: ``docs/cockpit/`` is the platform-wide SSOT,
+#     shared across every project the SPA might ask about.
+#
+# No ``spec_doc`` join: that would require a producer for the anchor
+# (currently 0× populated, kanban card bb1f61aa is the deferred follow-up).
+# The shape is intentionally flat so the SPA can show both columns without
+# deciding up-front which store each row belongs to.
+class CardPlanItem(BaseModel):
+    """One row in the B section — a single ``plan``/``plan_ref`` deliverable
+    on a card, joined with the card's title so the SPA can render the row.
+    """
+
+    deliverable_id: str
+    kind: str  # "plan" | "plan_ref"
+    card_id: str
+    card_title: str
+    # Short preview of the deliverable's ``ref`` (the markdown body for
+    # ``plan``, the JSON envelope for ``plan_ref``). Truncated so a single
+    # long plan can't blow the response; the SPA can fetch the full body
+    # via the existing ``/cards/{cid}`` route when a row is expanded.
+    excerpt: str
+    created_at: datetime
+
+
+class DocSpecItem(BaseModel):
+    """One row in the C section — a single ``docs/cockpit/*.md`` file with
+    the H1 parsed as the title. Modified-at is the filesystem mtime so the
+    SPA can render a "recently updated" sort without a separate API.
+    """
+
+    path: str  # repo-relative ("docs/cockpit/...md")
+    title: str  # H1 line (with "# " prefix preserved)
+    modified_at: str  # ISO8601 UTC
+    size_bytes: int
+
+
+class PlansOverviewResponse(BaseModel):
+    """Aggregated read-only view of the two real plan/spec stores.
+
+    B and C are returned as independent sections. No correlation field
+    is added at the top level — the ``spec_doc`` join is a separate
+    follow-up (kanban card bb1f61aa).
+    """
+
+    project_key: str
+    cards: list[CardPlanItem] = []
+    docs: list[DocSpecItem] = []
+
+
 # MCP Registry Schemas
 
 
