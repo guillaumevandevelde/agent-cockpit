@@ -92,7 +92,8 @@ async def test_create_card_with_work_type_round_trips():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "Investigate X", "work_type": "analysis"})
+            json={"project_key": "P", "title": "Investigate X", "work_type": "analysis",
+                  "confirm_new_project": True})
         assert r.status_code == 201, r.text
         cid = r.json()["id"]
         assert r.json()["work_type"] == "analysis"
@@ -119,7 +120,8 @@ async def test_update_card_can_set_and_clear_work_type():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "t", "work_type": "feature"})).json()["id"]
+            json={"project_key": "P", "title": "t", "work_type": "feature",
+                  "confirm_new_project": True})).json()["id"]
         assert (await ac.get(f"/api/v1/kanban/cards/{cid}")).json()["work_type"] == "feature"
 
         # Change to a different value
@@ -144,7 +146,8 @@ async def test_work_type_survives_rematerialize():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards",
             json={"project_key": "P", "title": "t",
-                  "labels": ["x"], "work_type": "bug"})).json()["id"]
+                  "labels": ["x"], "work_type": "bug",
+                  "confirm_new_project": True})).json()["id"]
 
         async with KanbanSessionLocal() as s:
             await rematerialize(s)

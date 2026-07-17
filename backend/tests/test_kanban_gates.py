@@ -121,7 +121,7 @@ async def test_open_gate_via_api_creates_gate_and_activity_comment():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "Card"})
+            json={"project_key": "P", "title": "Card", "confirm_new_project": True})
         cid = r.json()["id"]
 
         r = await ac.post(f"/api/v1/kanban/cards/{cid}/gates",
@@ -150,7 +150,7 @@ async def test_list_gates_via_api():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "Card"})
+            json={"project_key": "P", "title": "Card", "confirm_new_project": True})
         cid = r.json()["id"]
         await ac.post(f"/api/v1/kanban/cards/{cid}/gates",
             json={"question": "Q1?", "options": ["A"]})
@@ -167,7 +167,7 @@ async def test_answer_gate_via_api():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "Card"})
+            json={"project_key": "P", "title": "Card", "confirm_new_project": True})
         cid = r.json()["id"]
         r = await ac.post(f"/api/v1/kanban/cards/{cid}/gates",
             json={"question": "Ship?", "options": ["yes", "no"]})
@@ -185,7 +185,7 @@ async def test_answer_gate_invalid_option_422():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-            json={"project_key": "P", "title": "Card"})
+            json={"project_key": "P", "title": "Card", "confirm_new_project": True})
         cid = r.json()["id"]
         r = await ac.post(f"/api/v1/kanban/cards/{cid}/gates",
             json={"question": "Ship?", "options": ["yes", "no"]})

@@ -33,7 +33,8 @@ async def _tables():
 
 async def _create_card(ac: AsyncClient, **payload) -> str:
     """POST /cards with sensible defaults; return the new card id."""
-    body = {"project_key": "git:example", "title": "card"}
+    body = {"project_key": "git:example", "title": "card",
+            "confirm_new_project": True}
     body.update(payload)
     r = await ac.post("/api/v1/kanban/cards", json=body)
     assert r.status_code == 201, r.text

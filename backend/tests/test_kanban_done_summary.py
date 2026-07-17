@@ -140,7 +140,7 @@ async def test_get_card_includes_done_summary_when_done_comment_exists(_client):
     """GET /cards/{cid} surfaces done_summary and completed_at for a card with
     a `**Summary:**` comment op."""
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "DONE-SUM", "title": "t"})
+        json={"project_key": "DONE-SUM", "title": "t", "confirm_new_project": True})
     cid = r.json()["id"]
     # Post the summary via the MCP tool — same code path the engineer's
     # `move_card("Done", summary=...)` runs in production.
@@ -159,7 +159,7 @@ async def test_get_card_includes_done_summary_when_done_comment_exists(_client):
 async def test_get_card_done_summary_null_when_no_done_comment(_client):
     """No `**Summary:**` comment op → done_summary and completed_at both null."""
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "NO-SUM", "title": "t"})
+        json={"project_key": "NO-SUM", "title": "t", "confirm_new_project": True})
     cid = r.json()["id"]
 
     r = await _client.get(f"/api/v1/kanban/cards/{cid}")
@@ -176,7 +176,7 @@ async def test_get_card_done_summary_works_when_card_moved_back_from_done(_clien
     got moved back to Backlog still surfaces its summary."""
     from app.kanban import mcp_server as m
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "BACK-AGAIN", "title": "t"})
+        json={"project_key": "BACK-AGAIN", "title": "t", "confirm_new_project": True})
     cid = r.json()["id"]
     await m.move_card(cid, "Done", summary="Done once.")
     await m.move_card(cid, "Backlog")  # summary comment op stays in the log
@@ -196,7 +196,7 @@ async def test_list_cards_includes_done_summary_per_card(_client):
     each card individually to render the green badge."""
     from app.kanban import mcp_server as m
     r1 = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "LIST-SUM", "title": "done"})
+        json={"project_key": "LIST-SUM", "title": "done", "confirm_new_project": True})
     done_id = r1.json()["id"]
     r2 = await _client.post("/api/v1/kanban/cards",
         json={"project_key": "LIST-SUM", "title": "open"})

@@ -418,7 +418,7 @@ async def test_stamp_resume_target_noop_without_agent_claim(monkeypatch, tmp_pat
 @pytest.mark.asyncio
 async def test_rest_reopen_creates_revisit_and_moves_to_backlog(_client):
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "REST", "title": "Done decision"})
+        json={"project_key": "REST", "title": "Done decision", 'confirm_new_project': True})
     cid = r.json()["id"]
     from app.kanban import mcp_server as m
     await m.move_card(cid, "Done", summary="Decided X.")
@@ -439,7 +439,7 @@ async def test_rest_reopen_creates_revisit_and_moves_to_backlog(_client):
 @pytest.mark.asyncio
 async def test_rest_reopen_409_on_in_flight_card(_client):
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "REST", "title": "wip"})
+        json={"project_key": "REST", "title": "wip", 'confirm_new_project': True})
     cid = r.json()["id"]
     # Move it to Doing so it's in flight.
     await _client.post(f"/api/v1/kanban/cards/{cid}/move",

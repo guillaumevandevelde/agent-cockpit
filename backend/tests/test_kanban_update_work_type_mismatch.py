@@ -109,6 +109,7 @@ async def test_patch_work_type_posts_mismatch_comment():
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Onderzoek: reviewer-agent",
             "agent": "engineer",
+            "confirm_new_project": True,
         })).json()["id"]
 
         r = await ac.patch(f"/api/v1/kanban/cards/{cid}", json={"work_type": "analysis"})
@@ -129,6 +130,7 @@ async def test_patch_work_type_no_comment_when_agent_matches():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Feature card", "agent": "engineer",
+            "confirm_new_project": True,
         })).json()["id"]
 
         # engineer + work_type=bug → bug maps to engineer → no mismatch.
@@ -144,6 +146,7 @@ async def test_patch_work_type_no_comment_when_agent_set_in_same_call():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Card", "agent": "engineer",
+            "confirm_new_project": True,
         })).json()["id"]
 
         r = await ac.patch(f"/api/v1/kanban/cards/{cid}",
@@ -159,6 +162,7 @@ async def test_patch_work_type_no_comment_when_no_agent_pinned():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Unpinned card",
+            "confirm_new_project": True,
         })).json()["id"]
 
         r = await ac.patch(f"/api/v1/kanban/cards/{cid}", json={"work_type": "analysis"})

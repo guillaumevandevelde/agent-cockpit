@@ -26,6 +26,7 @@ async def test_create_card_with_column_overrides_round_trips():
         r = await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Override card",
             "column_overrides": SAMPLE,
+            "confirm_new_project": True,
         })
         assert r.status_code == 201, r.text
         assert r.json()["column_overrides"] == SAMPLE
@@ -42,6 +43,7 @@ async def test_update_card_can_set_replace_and_clear_column_overrides():
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Plain card",
+            "confirm_new_project": True,
         })).json()["id"]
         assert (await ac.get(f"/api/v1/kanban/cards/{cid}")).json()["column_overrides"] is None
 
@@ -67,7 +69,8 @@ async def test_column_overrides_defaults_to_null_when_omitted():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-                          json={"project_key": "PROJ", "title": "No overrides"})
+                          json={"project_key": "PROJ", "title": "No overrides",
+                                "confirm_new_project": True})
         assert r.status_code == 201, r.text
         assert r.json()["column_overrides"] is None
 
@@ -88,6 +91,7 @@ async def test_column_overrides_survive_rematerialize():
         cid = (await ac.post("/api/v1/kanban/cards", json={
             "project_key": "PROJ", "title": "Replay me",
             "column_overrides": SAMPLE,
+            "confirm_new_project": True,
         })).json()["id"]
         assert (await ac.get(f"/api/v1/kanban/cards/{cid}")).json()["column_overrides"] == SAMPLE
 

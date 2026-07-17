@@ -204,7 +204,7 @@ async def test_rest_resolve_impediment_without_answer_threads_none(
 @pytest.mark.asyncio
 async def test_rest_resolve_impediment_422_when_not_in_impediment(_client):
     r = await _client.post("/api/v1/kanban/cards",
-        json={"project_key": "REST", "title": "not blocked"})
+        json={"project_key": "REST", "title": "not blocked", 'confirm_new_project': True})
     cid = r.json()["id"]
     r = await _client.post(
         f"/api/v1/kanban/cards/{cid}/resolve-impediment",

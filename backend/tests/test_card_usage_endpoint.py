@@ -54,7 +54,7 @@ async def test_card_usage_returns_null_for_card_without_dispatch_breadcrumbs():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-                          json={"project_key": "P", "title": "legacy"})
+                          json={"project_key": "P", "title": "legacy", 'confirm_new_project': True})
         cid = r.json()["id"]
 
         r = await ac.get(f"/api/v1/kanban/cards/{cid}/usage")
@@ -70,7 +70,7 @@ async def test_card_usage_aggregates_from_dispatch_project_folder(tmp_path, monk
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         # 1) Create a card
         r = await ac.post("/api/v1/kanban/cards",
-                          json={"project_key": "P", "title": "telemetry-test"})
+                          json={"project_key": "P", "title": "telemetry-test", 'confirm_new_project': True})
         cid = r.json()["id"]
 
         # 2) Write dispatch breadcrumbs via PATCH (the same path
@@ -145,7 +145,7 @@ async def test_card_usage_returns_empty_when_transcript_not_yet_written(tmp_path
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/cards",
-                          json={"project_key": "P", "title": "no-transcript"})
+                          json={"project_key": "P", "title": "no-transcript", 'confirm_new_project': True})
         cid = r.json()["id"]
         dispatch_started = datetime(2026, 7, 15, 9, 0, 0, tzinfo=UTC).isoformat()
         r = await ac.patch(f"/api/v1/kanban/cards/{cid}",
