@@ -255,6 +255,115 @@ check "--pre-existing-only does NOT print NEW section" \
     '! echo "$out" | grep -qE "NEW.*needs fix"'
 
 # ----------------------------------------------------------------------------
+echo
+echo "Task 9: resolve_pytest_cmd — shared venv-resolution fallback (card 4f86598f)"
+# Both pytest-baseline.sh and pytest-compare.sh source this lib instead of
+# hardcoding `$BACKEND_DIR/venv/bin/pytest` as their only default — that
+# hardcoding is exactly what broke worktree sessions (no local venv, script
+# died instead of falling back to the shared main-checkout venv like
+# run-single-test.sh already does).
+LIB="$SCRIPT_DIR/lib/resolve-pytest-cmd.sh"
+check "resolve-pytest-cmd.sh lib exists" '[ -f "$LIB" ]'
+check "pytest-baseline.sh sources the shared lib" \
+    'grep -qE "source.*lib/resolve-pytest-cmd\.sh" "$SCRIPT_DIR/pytest-baseline.sh"'
+check "pytest-compare.sh sources the shared lib" \
+    'grep -qE "source.*lib/resolve-pytest-cmd\.sh" "$SCRIPT_DIR/pytest-compare.sh"'
+
+# run_resolve: call resolve_pytest_cmd(backend_dir, [shared_venv_override]) in
+# an isolated subshell (env -i) so PATH/PYTEST_CMD from the test harness's own
+# environment never leak in. Prints "RC=<n>" and "RESULT=<PYTEST_CMD>" lines
+# the caller greps for.
+BASH_BIN="$(command -v bash)"
+run_resolve() {
+    local pcmd="$1" bdir="$2" pathval="$3" shared="${4:-}"
+    # Use an absolute path to invoke bash itself — `env -i PATH=...` uses the
+    # NEW PATH to resolve the command that follows it, so a deliberately
+    # empty/minimal $pathval (simulating "no pytest on PATH") would otherwise
+    # also make `env` fail to find `bash` itself.
+    env -i PATH="$pathval" PYTEST_CMD="$pcmd" "$BASH_BIN" -c '
+        set -u
+        source "'"$LIB"'"
+        resolve_pytest_cmd "'"$bdir"'" "'"$shared"'"
+        rc=$?
+        echo "RC=$rc"
+        echo "RESULT=${PYTEST_CMD:-}"
+    ' 2>&1
+}
+
+fake_backend_no_venv="$TMPDIR/fake_backend_no_venv"
+mkdir -p "$fake_backend_no_venv"
+
+fake_backend_with_venv="$TMPDIR/fake_backend_with_venv"
+mkdir -p "$fake_backend_with_venv/venv/bin"
+cat > "$fake_backend_with_venv/venv/bin/pytest" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$fake_backend_with_venv/venv/bin/pytest"
+
+nonexistent_shared="$TMPDIR/nonexistent_shared_venv/pytest"
+
+# Tier 1: explicit PYTEST_CMD wins over everything, even an unrelated value.
+out=$(run_resolve "/explicit/override/pytest" "$fake_backend_no_venv" "/usr/bin:/bin")
+check "tier 1: explicit PYTEST_CMD short-circuits (RC=0)" \
+    'echo "$out" | grep -qE "^RC=0$"'
+check "tier 1: explicit PYTEST_CMD value preserved verbatim" \
+    'echo "$out" | grep -qE "^RESULT=/explicit/override/pytest$"'
+
+# Tier 2: worktree-local venv wins when PYTEST_CMD is unset.
+out=$(run_resolve "" "$fake_backend_with_venv" "/usr/bin:/bin")
+check "tier 2: worktree-local venv resolves (RC=0)" \
+    'echo "$out" | grep -qE "^RC=0$"'
+check "tier 2: resolves to \$backend_dir/venv/bin/pytest" \
+    'echo "$out" | grep -qE "^RESULT=$fake_backend_with_venv/venv/bin/pytest$"'
+
+# Tier 3: no worktree-local venv, real default shared main-checkout venv on
+# this box — this is the literal card scenario ("fresh worktree, no local
+# venv, no env override"). Skipped gracefully if this box has no shared venv.
+if [ -x /home/vdvgu/claude-cockpit/backend/venv/bin/pytest ]; then
+    out=$(run_resolve "" "$fake_backend_no_venv" "/usr/bin:/bin")
+    check "tier 3: falls back to shared main-checkout venv (RC=0)" \
+        'echo "$out" | grep -qE "^RC=0$"'
+    check "tier 3: resolves to the shared main-checkout venv path" \
+        'echo "$out" | grep -qE "^RESULT=/home/vdvgu/claude-cockpit/backend/venv/bin/pytest$"'
+else
+    echo "  (skipped tier 3 — no shared venv on this box)"
+fi
+
+# Tier 4: no worktree-local venv, injected-nonexistent shared venv, bare
+# `pytest` present on PATH.
+path_with_pytest="$TMPDIR/path_with_pytest"
+mkdir -p "$path_with_pytest"
+cat > "$path_with_pytest/pytest" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$path_with_pytest/pytest"
+out=$(run_resolve "" "$fake_backend_no_venv" "$path_with_pytest:/usr/bin:/bin" "$nonexistent_shared")
+check "tier 4: falls back to PATH (RC=0)" \
+    'echo "$out" | grep -qE "^RC=0$"'
+check "tier 4: resolves to the PATH pytest" \
+    'echo "$out" | grep -qE "^RESULT=$path_with_pytest/pytest$"'
+
+# Tier 5 (none found): no worktree-local venv, injected-nonexistent shared
+# venv, empty PATH — resolution fails with a descriptive "tried" hint.
+empty_path="$TMPDIR/empty_path_for_resolve"
+mkdir -p "$empty_path"
+out=$(run_resolve "" "$fake_backend_no_venv" "$empty_path" "$nonexistent_shared")
+check "none found: exits non-zero" \
+    '! echo "$out" | grep -qE "^RC=0$"'
+check "none found: prints 'pytest not found' hint" \
+    'echo "$out" | grep -qE "pytest not found"'
+check "none found: hint names \$PYTEST_CMD" \
+    'echo "$out" | grep -qE "PYTEST_CMD .unset"'
+check "none found: hint names the worktree-local venv path" \
+    'echo "$out" | grep -qE "$fake_backend_no_venv/venv/bin/pytest"'
+check "none found: hint names the injected shared venv path" \
+    'echo "$out" | grep -qE "nonexistent_shared_venv/pytest"'
+check "none found: hint names PATH fallback" \
+    'echo "$out" | grep -qE "on PATH"'
+
+# ----------------------------------------------------------------------------
 mv "$TMPDIR" /tmp/_pytest_baseline_test_artifacts >/dev/null 2>&1 || true
 echo
 echo "Total: $PASS passed, $FAIL failed"

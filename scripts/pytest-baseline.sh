@@ -84,9 +84,14 @@ if [ ! -d "$BACKEND_DIR" ]; then
 fi
 
 # PYTEST_CMD (with optional PYTEST_CWD) lets the test harness fake pytest for
-# isolation tests without touching the real venv. Default points at the
-# production venv.
-PYTEST_CMD="${PYTEST_CMD:-$BACKEND_DIR/venv/bin/pytest}"
+# isolation tests without touching the real venv. Absent an override, falls
+# back through worktree-local venv → shared main-checkout venv → PATH (same
+# chain as scripts/run-single-test.sh) so this works in worktree sessions
+# that have no local venv.
+source "$SCRIPT_DIR/lib/resolve-pytest-cmd.sh"
+if ! resolve_pytest_cmd "$BACKEND_DIR"; then
+    exit 1
+fi
 PYTEST_CWD="${PYTEST_CWD:-$BACKEND_DIR}"
 if [ ! -x "$PYTEST_CMD" ]; then
     echo "error: $PYTEST_CMD not executable — run scripts/install.sh first" >&2
