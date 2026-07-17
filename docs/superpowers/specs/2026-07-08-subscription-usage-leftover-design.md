@@ -1,7 +1,9 @@
+> **⚠️ SUPERSEDED — 2026-07-15 (kanban-card `64343a81…`).** This design was **not** implemented as specified. The `PeriodUsage` / `SubscriptionUsageSnapshot` dataclasses, `SubscriptionUsageProvider.get_snapshot()` method, the `(provider_id, key) -> value` `subscription_prefs` table, and `/api/v1/agent-bridge/subscriptions/{provider_id}/usage` endpoints it describes **do not exist in the codebase**. The shipped shape is the simpler `SubscriptionUsage` dataclass + `SubscriptionUsageProvider.get_usage()` in [`backend/app/services/subscriptions/base.py`](../../backend/app/services/subscriptions/base.py), motivated by the analyse [`docs/cockpit/subscription-verbruik-inzicht-analyse.md`](../../cockpit/subscription-verbruik-inzicht-analyse.md) (see also [`docs/cockpit/subscriptions.md`](../../cockpit/subscriptions.md)). Kept here as historical context only — do **not** implement against this doc.
+
 # Subscription usage leftover — show each provider's quota at a glance
 
 **Date:** 2026-07-08
-**Status:** Design — pending implementation
+**Status:** Design — pending implementation (later superseded — see banner above)
 **Scope:** Add per-provider usage/quota display to the **Subscriptions** page (`/subscriptions`) for the two agent providers that are on subscription plans: **Anthropic** (Claude Code, via Anthropic OAuth) and **MiniMax** (via `MINIMAX_API_KEY`). One PR, two providers — MiniMax implemented first, then Anthropic.
 
 ## Problem

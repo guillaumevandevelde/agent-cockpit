@@ -1,3 +1,5 @@
+> **⚠️ SUPERSEDED — 2026-07-15 (kanban-card `64343a81…`).** The implementation this plan describes was **never executed**. The `PeriodUsage` / `SubscriptionUsageSnapshot` dataclasses, `SubscriptionUsageProvider.get_snapshot()` method, the `(provider_id, key) -> value` `subscription_prefs` table, `/api/v1/agent-bridge/subscriptions/*` routes, and `ANTHROPIC_PLAN_LIMITS` plan-tier constants it assumes **do not exist in the codebase**. The shipped shape is the simpler `SubscriptionUsage` dataclass + `SubscriptionUsageProvider.get_usage()` in [`backend/app/services/subscriptions/base.py`](../../backend/app/services/subscriptions/base.py), motivated by the analyse [`docs/cockpit/subscription-verbruik-inzicht-analyse.md`](../../cockpit/subscription-verbruik-inzicht-analyse.md). Kept here as historical context only — do **not** execute tasks against this plan.
+
 # Subscription Usage Leftover Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
