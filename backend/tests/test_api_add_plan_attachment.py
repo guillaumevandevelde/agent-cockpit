@@ -20,7 +20,9 @@ from sqlalchemy.orm import selectinload
 
 from app.kanban.models import KanbanCard
 from app.main import app
-from tests.kanban_test_db import reset_test_tables
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
+
+KanbanSessionLocal = TestSessionLocal()
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -44,8 +46,7 @@ async def _load_card_deliverables(card_id: str) -> list:
     Lazy-loading a relationship on an async session can't be triggered
     implicitly (no greenlet), so we always selectinload deliverables up front.
     """
-    from tests.kanban_test_db import TestSessionLocal
-    async with TestSessionLocal() as s:
+    async with KanbanSessionLocal() as s:
         return (await s.execute(
             select(KanbanCard)
             .where(KanbanCard.id == card_id)
