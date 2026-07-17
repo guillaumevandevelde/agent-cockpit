@@ -13,6 +13,7 @@ active block, no plan-tier limit, or a non-positive limit.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.services.subscriptions.base import (
@@ -24,6 +25,29 @@ if TYPE_CHECKING:
     from app.services.usage_service import UsageService
 
 logger = logging.getLogger(__name__)
+
+WINDOW_LABEL = "5h rate"
+
+# Best-effort community estimates for each plan tier's 5h-window token
+# budget — Anthropic does not publish these numbers for Pro/Max (analyse
+# §7.2). Never presented as "exact"; the UI must show a "verify before
+# trusting" note alongside whichever tier the user picks (subscriptions.md).
+# A user who knows their real number can use the "custom" tier instead of
+# trusting these.
+ANTHROPIC_PLAN_TIERS: dict[str, dict[str, object]] = {
+    "pro": {"label": "Pro", "tokens_5h": 44_000},
+    "max_5x": {"label": "Max 5x", "tokens_5h": 220_000},
+    "max_20x": {"label": "Max 20x", "tokens_5h": 880_000},
+}
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 class AnthropicUsageProvider(SubscriptionUsageProvider):
@@ -113,4 +137,9 @@ class AnthropicUsageProvider(SubscriptionUsageProvider):
             drempel_gebruikt=drempel_gebruikt,
             bron="usage_service:active_block",
             betrouwbaarheid="schatting",
+            verbruikt=total_tokens,
+            limiet=self._plan_tier_limit_tokens,
+            eenheid="tokens",
+            venster_label=WINDOW_LABEL,
+            reset_op=_parse_iso(getattr(active_block, "end_time", None)),
         )

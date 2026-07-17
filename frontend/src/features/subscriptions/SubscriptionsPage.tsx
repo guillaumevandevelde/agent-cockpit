@@ -1,4 +1,5 @@
 import { MinimaxCredentialsCard } from './MinimaxCredentialsCard'
+import { SubscriptionUsageSection } from './SubscriptionUsageSection'
 
 export function SubscriptionsPage() {
   return (
@@ -10,6 +11,7 @@ export function SubscriptionsPage() {
         </p>
       </div>
 
+      <SubscriptionUsageSection />
       <MinimaxCredentialsCard />
     </div>
   )

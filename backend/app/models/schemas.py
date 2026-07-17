@@ -2181,3 +2181,54 @@ class CITemplateApplyResponse(BaseModel):
     written_file: str | None = None
     skipped_existing: bool = False
     force: bool = False
+
+
+class SubscriptionUsageRow(BaseModel):
+    """One row on the Subscriptions-pagina — a single subscription's
+    ``SubscriptionUsage`` snapshot (``app.services.subscriptions.base``),
+    wired to the wire format. Per-subscription; never normalised into a
+    cross-vendor score (analyse §6.2)."""
+
+    subscription_id: str
+    subscription_label: str
+    beschikbaar: bool
+    drempel_gebruikt: float | None
+    bron: str
+    betrouwbaarheid: Literal["exact", "schatting", "onbekend"]
+    verbruikt: float | None = None
+    limiet: float | None = None
+    eenheid: str = "tokens"
+    venster_label: str | None = None
+    reset_op: datetime | None = None
+
+
+class SubscriptionUsageListResponse(BaseModel):
+    """`GET /api/v1/subscriptions/usage` response."""
+
+    subscriptions: list[SubscriptionUsageRow]
+
+
+class AnthropicPlanTierOption(BaseModel):
+    key: str
+    label: str
+    tokens_5h: int
+
+
+class AnthropicPlanTierOptionsResponse(BaseModel):
+    """`GET /api/v1/subscriptions/anthropic/plan-tiers` response."""
+
+    tiers: list[AnthropicPlanTierOption]
+
+
+class AnthropicPlanTierResponse(BaseModel):
+    """`GET`/`PUT /api/v1/subscriptions/anthropic/plan-tier` response."""
+
+    tier: str | None
+    custom_limit_tokens: int | None = None
+
+
+class AnthropicPlanTierUpdateRequest(BaseModel):
+    """`PUT /api/v1/subscriptions/anthropic/plan-tier` request body."""
+
+    tier: str | None = None
+    custom_limit_tokens: int | None = Field(default=None, gt=0)
