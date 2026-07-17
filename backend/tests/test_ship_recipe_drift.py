@@ -1,32 +1,39 @@
 """Drift-test for the direct-mode ship recipe.
 
 The ship recipe (``git worktree add --detach ... && merge --no-ff && push``)
-is intentionally duplicated across three mirrors:
+is intentionally duplicated across two content mirrors:
 
   1. ``backend/app/kanban/dispatch.py::_build_ship_instructions``
      — the prompt the dispatcher injects into a fresh agent session.
-  2. ``CLAUDE.md`` §Git Workflow "Finishing a branch" recipe
-     — the operator-facing doc the running agent reads.
-  3. ``.claude/skills/git-ship/SKILL.md`` §4a
-     — the provider-agnostic skill (read when the agent has filesystem access).
+  2. ``.claude/skills/git-ship/SKILL.md`` §4a
+     — the provider-agnostic skill (read when the agent has filesystem access),
+     bron van waarheid.
 
 The duplication is by design (a freshly spawned agent may not be able to read
-``.claude/skills/``), but each recipe-edit otherwise has to be applied in all
-three places by hand. Without a drift guard, a future edit that forgets one
-mirror gives silent inconsistency between what the prompt says and what the
-docs/skill say.
+``.claude/skills/``), but each recipe-edit otherwise has to be applied in both
+places by hand. Without a drift guard, a future edit that forgets one mirror
+gives silent inconsistency between what the prompt says and what the skill
+says.
 
-This test asserts the *core* recipe invariants appear in all three mirrors.
-Adding or removing a command in one mirror without the others will fail the
-parametrised test below on the next CI run, with a failure message that names
-exactly which mirror lost which command.
+``CLAUDE.md`` §Git Workflow used to be a third content mirror, but was
+deliberately trimmed to a pointer (commit 4c697d0, "CLAUDE.md <200 regels —
+ship-recipes als pointer") that redirects to the skill and to
+``_build_ship_instructions`` instead of carrying its own copy of the recipe.
+It is still guarded here, just differently: ``test_claude_md_points_at_the_two_mirrors``
+asserts the pointer paragraph still names both mirrors, so a rename of the
+skill path or the dispatch function would still be caught.
 
-The test reads ``CLAUDE.md`` and ``SKILL.md`` as plain text (they're checked
+This test asserts the *core* recipe invariants appear in both content
+mirrors. Adding or removing a command in one mirror without the other will
+fail the parametrised test below on the next CI run, with a failure message
+that names exactly which mirror lost which command.
+
+The test reads ``SKILL.md`` and ``CLAUDE.md`` as plain text (they're checked
 into the repo) and renders the dispatch prompt by calling
 ``dispatch._build_ship_instructions("direct")`` directly. The
 ``CORE_RECIPE_INVARIANTS`` list lives at module scope — edit it when the
-recipe itself changes, so all three mirrors can be updated in lockstep with
-the test as the safety net.
+recipe itself changes, so both content mirrors can be updated in lockstep
+with the test as the safety net.
 """
 from __future__ import annotations
 
@@ -51,10 +58,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # point is that an inconsistency here is loud, not silent.
 CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # The throwaway detached worktree that sidesteps the "master already
-    # checked out in the main worktree" error from git-worktree-add.
+    # checked out in the main worktree" error from git-worktree-add. Slot
+    # name is `merge-$$` (PID-unique), not a fixed name — a fixed slot
+    # collides across concurrent dispatched sessions (kanban card c23dfe46).
     (
         "detached-worktree merge target",
-        'git worktree add --detach "$TMP/m" origin/master',
+        'git worktree add --detach "$TMP/merge-$$" origin/master',
     ),
     # Required so master history shows a real merge commit, not a fast-forward.
     (
@@ -82,7 +91,7 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # Throwaway detached worktree cleanup (otherwise /tmp leaks).
     (
         "worktree cleanup",
-        'git worktree remove "$TMP/m" --force',
+        'git worktree remove --force "$TMP/merge-$$"',
     ),
 ]
 
@@ -98,37 +107,27 @@ def _dispatch_direct_prompt() -> str:
     return dispatch._build_ship_instructions("direct")
 
 
-def _claude_md_ship_recipe() -> str:
-    """Extract the ship-recipe ```bash``` block from CLAUDE.md.
+def _claude_md_git_workflow_section() -> str:
+    """Extract the ``## Git Workflow`` section of CLAUDE.md (up to the next
+    ``## `` heading).
 
-    We deliberately restrict to the fenced recipe block rather than matching
-    against the whole file — CLAUDE.md is much larger and unrelated prose
-    (notably the ``## Commands`` ``Install`` block) would otherwise dilute the
-    assertion. The recipe block lives immediately after the unique
-    "Finishing a branch" header bullet under ``## Git Workflow``; anchor on
-    that header so a future Commands-section edit cannot accidentally land
-    inside this extractor.
+    CLAUDE.md no longer carries its own copy of the recipe — it points at the
+    two content mirrors instead (see module docstring). Restrict to this
+    section rather than the whole file so unrelated prose elsewhere in
+    CLAUDE.md can't accidentally satisfy the pointer assertions below.
     """
     full = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    header_marker = "**Finishing a branch**"
+    header_marker = "## Git Workflow"
     header_idx = full.find(header_marker)
     if header_idx == -1:
         raise AssertionError(
-            "CLAUDE.md: expected the 'Finishing a branch' header bullet "
-            "to anchor the ship-recipe extractor"
+            "CLAUDE.md: expected a '## Git Workflow' section to anchor the "
+            "ship-recipe pointer check"
         )
-    fence_start = full.find("```bash", header_idx)
-    if fence_start == -1:
-        raise AssertionError(
-            "CLAUDE.md: 'Finishing a branch' header found but no ```bash "
-            "fence follows it"
-        )
-    fence_end = full.find("```", fence_start + len("```bash"))
-    if fence_end == -1:
-        raise AssertionError(
-            "CLAUDE.md: ship-recipe ```bash block is not closed"
-        )
-    return full[fence_start:fence_end]
+    next_heading_idx = full.find("\n## ", header_idx + len(header_marker))
+    if next_heading_idx == -1:
+        return full[header_idx:]
+    return full[header_idx:next_heading_idx]
 
 
 def _skill_md_direct_recipe() -> str:
@@ -145,9 +144,13 @@ def _skill_md_direct_recipe() -> str:
 # so the parametrised test can iterate sources symmetrically and the failure
 # message reads "SOURCE_NAME missing LABEL: 'command'", which is exactly what
 # the next editor needs to know.
+#
+# CLAUDE.md is deliberately NOT in this registry: it no longer carries its
+# own copy of the recipe (see module docstring), so it structurally cannot
+# contain these bash-command invariants. It is still guarded, just by
+# test_claude_md_points_at_the_two_mirrors below.
 SOURCES: dict[str, callable[[], str]] = {
     "dispatch._build_ship_instructions('direct')": _dispatch_direct_prompt,
-    "CLAUDE.md 'Finishing a branch' recipe block": _claude_md_ship_recipe,
     ".claude/skills/git-ship/SKILL.md": _skill_md_direct_recipe,
 }
 
@@ -161,24 +164,24 @@ SOURCES: dict[str, callable[[], str]] = {
 def test_core_recipe_command_present_in_every_mirror(
     source_name: str, invariant_label: str, command: str
 ) -> None:
-    """A core direct-mode ship-recipe command must appear in every mirror.
+    """A core direct-mode ship-recipe command must appear in every content mirror.
 
     Parametrised across (source × invariant) so a single regression points at
     exactly which mirror lost which command — the failure message reads e.g.
     ``dispatch._build_ship_instructions('direct') missing pre-flight
     uncommitted-changes guard: 'git diff --quiet HEAD'``.
 
-    If this test fails: either the recipe legitimately changed (update all
-    three mirrors AND ``CORE_RECIPE_INVARIANTS``), or a mirror silently
-    drifted (revert the offending mirror to match the other two). Do NOT
+    If this test fails: either the recipe legitimately changed (update both
+    content mirrors AND ``CORE_RECIPE_INVARIANTS``), or a mirror silently
+    drifted (revert the offending mirror to match the other one). Do NOT
     delete an invariant to make the test pass — that's the regression we're
     guarding against.
     """
     source_text = SOURCES[source_name]()
     assert command in source_text, (
         f"{source_name} missing {invariant_label}: {command!r}. "
-        f"Either the recipe changed (update all three mirrors) or the test "
-        f"is stale (update CORE_RECIPE_INVARIANTS)."
+        f"Either the recipe changed (update both content mirrors) or the "
+        f"test is stale (update CORE_RECIPE_INVARIANTS)."
     )
 
 
@@ -201,6 +204,28 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     )
     assert "git diff --quiet HEAD" in commands, (
         "invariants list lost the pre-flight 'git diff --quiet HEAD' guard"
+    )
+
+
+def test_claude_md_points_at_the_two_mirrors() -> None:
+    """CLAUDE.md carries no recipe of its own; it must still name both mirrors.
+
+    CLAUDE.md §Git Workflow was deliberately trimmed to a pointer (commit
+    4c697d0) instead of holding its own copy of the recipe, so it can't be
+    checked against ``CORE_RECIPE_INVARIANTS`` like the two content mirrors
+    (see module docstring). What it *can* still drift on is the pointer
+    itself: if the skill moves or the dispatch function is renamed without
+    updating this paragraph, an agent following CLAUDE.md would be sent to a
+    dead reference. Assert both names are still present.
+    """
+    section = _claude_md_git_workflow_section()
+    assert ".claude/skills/git-ship/SKILL.md" in section, (
+        "CLAUDE.md 'Git Workflow' section no longer points at "
+        "'.claude/skills/git-ship/SKILL.md'"
+    )
+    assert "_build_ship_instructions" in section, (
+        "CLAUDE.md 'Git Workflow' section no longer points at "
+        "'_build_ship_instructions' (the dispatch.py mirror)"
     )
 
 
