@@ -92,6 +92,15 @@ altijd door.
    De volledige test-suite draait niet lokaal — die loopt in CI
    (`quality.yml`). Zie CLAUDE.md "Geen lokale pre-push gate" en de
    `git-ship`-rationale.
+
+   **Schema/column-rename sweept:** als je diff een `ALTER TABLE ...
+   RENAME COLUMN` (of een andere model/Pydantic-schema-rename) introduceert,
+   draai dan `bash scripts/check-schema-rename-coverage.sh --strict` en
+   werk elke hit bij vóór de commit. Een gemiste referentie levert een
+   silent-red test op CI — net zoals kanban-kaart `ad15e08271c242238db239a90dc559d4`
+   documenteerde voor commit 558ca55 (de `provider` → `cli` rename shipte
+   met 2 latent-red tests). Het script grept `backend/app/` én
+   `backend/tests/` op resterende verwijzingen.
 6. **Zelf-review via `iteration-loop` met preset `verify` (standaard)**:
    draai de nieuwe `iteration-loop`-skill met preset `verify` (frontend
    `npm run lint && npm run build`; backend `pytest` wordt niet lokaal

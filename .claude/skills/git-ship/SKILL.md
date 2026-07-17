@@ -93,6 +93,15 @@ Make sure every change is committed to the current branch:
 git add -A && git commit -m "<descriptive summary>"
 ```
 
+**Schema/column-rename sweept:** als je diff een `ALTER TABLE ...
+RENAME COLUMN` (of een andere model/Pydantic-schema-rename) introduceert,
+draai dan `bash scripts/check-schema-rename-coverage.sh --strict` en
+werk elke hit bij vóór de commit. Een gemiste referentie levert een
+silent-red test op CI — net zoals kanban-kaart `ad15e08271c242238db239a90dc559d4`
+documenteerde voor commit 558ca55 (de `provider` → `cli` rename shipte
+met 2 latent-red tests). Het script grept `backend/app/` én
+`backend/tests/` op resterende verwijzingen.
+
 ## 4a. Ship mode `direct` — merge to master
 
 Only when every test passed. You are in a linked worktree while `master` is
