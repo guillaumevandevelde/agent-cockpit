@@ -82,11 +82,19 @@ new_count=$(printf '%s\n' "$new_list" | grep -c . || true)
 # --pre-existing-only: cheapest output path. Triage-tool mode.
 if [ "$PRE_ONLY" = 1 ]; then
     echo "pre-existing failures (not your fault): $pre_count"
+    echo "  ^ these tests are still FAILING — \"pre-existing\" means the failure"
+    echo "    is already on origin/master too, NOT that the test passes. Read"
+    echo "    the traceback before writing it off as environmental."
     exit 0
 fi
 
 echo "=== pytest failure attribution ==="
 echo "pre-existing (not your fault): $pre_count"
+if [ "$pre_count" -gt 0 ]; then
+    echo "  ^ these tests are still FAILING — \"pre-existing\" means the failure"
+    echo "    is already on origin/master too, NOT that the test passes. Read"
+    echo "    the traceback before writing it off as environmental."
+fi
 if [ -n "$new_list" ] && [ "$new_count" -gt 0 ]; then
     echo "NEW (your fault — needs fix):"
     printf '  %s\n' $new_list
