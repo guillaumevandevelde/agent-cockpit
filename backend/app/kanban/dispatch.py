@@ -2284,6 +2284,31 @@ async def _run_card(
     force-dispatch via the UI. When set AND the card had `scheduled_at`,
     post an `Auto-resuming (scheduled_at was <iso>)` activity comment so the
     activity feed shows the tick didn't force-dispatch early."""
+    # Re-read the card from the DB before claiming. The auto-tick's cached
+    # `cards` list reflects state from `list_cards` at the top of the tick;
+    # a `set_resume` MCP call (or any other concurrent update) that commits
+    # *between* that read and this function would otherwise be masked by
+    # the stale card object. The most consequential masked update is
+    # `set_resume`'s `resume_session_id` — without this re-read, the
+    # operator's "continue from where you left off" intent gets silently
+    # ignored and the card is dispatched with the worktree transport,
+    # spawning a brand-new session. See kanban card
+    # `[self-improve] set_resume races a fresh auto-dispatch`.
+    fresh = await get_card(session, card.id)
+    if fresh is None:
+        return None
+    card = fresh
+    # Also honor a fresh `scheduled_at` that landed since the cached list
+    # read. `_is_due` already gates `_next_card`, but the cached card may
+    # predate the defer — the re-read closes that gap so a deferred card
+    # isn't claimed + spawned in the same tick that just deferred it.
+    if not _is_due(card):
+        logger.info(
+            "_run_card: card %s has a fresh scheduled_at (%s); deferring to next tick",
+            card.id, card.scheduled_at,
+        )
+        return None
+
     source_column = card.column
     name = _mint_session_name(project_path, card.title, live_sessions=live_sessions)
     claimant = CLAIMANT_PREFIX + name
@@ -3191,13 +3216,38 @@ async def _release_dead_claim(session, *, card, project_key: str, session_name: 
     _move_to_impediment_after_repeated_failures) and has its resume pointer
     cleared (see _clear_stale_resume_fields) so a stale one can't be retried
     forever.
+
+    The not-dead-on-arrival branch preserves an operator-stamped
+    `resume_session_id` (the one `mcp_server.set_resume` writes): a long-
+    running session that died cleanly is exactly the case the operator is
+    most likely trying to resume, and stripping the pointer here means the
+    next dispatch uses the worktree transport — the very bug this method
+    used to enable. See kanban card `[self-improve] set_resume races a
+    fresh auto-dispatch`. The dead-on-arrival branch keeps clearing (that
+    pointer is from this dispatch's own resolution and is the loop-prone
+    case `_clear_stale_resume_fields` was designed for).
     """
+    # Re-read the card from the DB before deciding whether to clear the
+    # resume pointer. The `card` argument was loaded from the dispatch
+    # tick's cached `cards` list; a `set_resume` MCP call that commits
+    # after that read would be invisible to the stale snapshot, leading us
+    # to strip an operator-stamped resume_session_id and defeat the very
+    # fix that landed with this guard. The re-read is a single SELECT keyed
+    # by primary key; only happens once per dead-claim release, not per
+    # dispatch tick.
+    fresh = await get_card(session, card.id)
+    if fresh is not None:
+        card = fresh
+
     age = _claim_age_seconds(card)
     dead_on_arrival = age is None or age < DEAD_ON_ARRIVAL_SECONDS
 
     if not dead_on_arrival:
         await _reset_dispatch_failures(session, card=card, project_key=project_key)
-        await _clear_stale_resume_fields(session, card=card, project_key=project_key)
+        # Preserve an operator-stamped resume_session_id; only clear when
+        # the dead-on-arrival path below decides it's stale.
+        if not card.resume_session_id:
+            await _clear_stale_resume_fields(session, card=card, project_key=project_key)
         logger.info(
             "reaped stale claim on card %s (dead session %s, ran ~%.0fs — not dead-on-arrival)",
             card.id, session_name, age,

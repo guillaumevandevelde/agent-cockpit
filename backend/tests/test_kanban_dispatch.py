@@ -5775,3 +5775,371 @@ async def test_cleanup_stuck_session_pauses_provider_from_column_override(monkey
         assert await dispatch_pause.is_dispatch_paused(s, provider="minimax") is False
         assert await dispatch_pause.is_dispatch_paused(s) is False
 
+
+# ---- set_resume race guard ([self-improve] set_resume races a fresh auto-dispatch) ----
+#
+# Symptom: an operator calls `mcp_server.set_resume(card_id, session_id, ...)`
+# to mark a card for resume mode (claude --resume) on the next dispatch.
+# Within milliseconds, the auto-dispatch tick fires and dispatches the card
+# with the **worktree** transport, spawning a brand-new worktree + session
+# — exactly defeating the operator's intent. Root cause: the tick's cached
+# `cards` list reflects state *before* `set_resume` committed, AND the
+# reaper's `_release_dead_claim` then strips `resume_session_id` so even
+# a re-read on the next iteration sees no resume pointer.
+#
+# The fix has three parts, all observable from this block:
+#   1. `mcp_server.set_resume` stamps `scheduled_at = now + RESUME_RACE_GUARD_S`
+#      so the same dispatch-sweep pass defers the card via the existing
+#      `_is_due` gate.
+#   2. `dispatch._run_card` re-reads the card from the DB before claiming,
+#      catching both the fresh `resume_session_id` (concurrent set_resume)
+#      and the fresh `scheduled_at` (concurrent defer).
+#   3. `dispatch._release_dead_claim` no longer calls `_clear_stale_resume_fields`
+#      for the not-dead-on-arrival branch — a long-running session that died
+#      cleanly must keep the operator's just-stamped `resume_session_id`.
+
+from datetime import UTC as _UTC  # noqa: F401
+from datetime import datetime as _datetime
+from datetime import timedelta as _timedelta
+
+
+@pytest.mark.asyncio
+async def test_set_resume_mcp_stamps_scheduled_at_to_hold_off_dispatch():
+    """Setting resume_session_id via the MCP tool also stamps a near-future
+    scheduled_at so the card is held out of the *same* dispatch-sweep pass
+    that races the write. Without this guard, an in-flight dispatch tick
+    whose cards-list read predates set_resume will pick the card up and
+    dispatch it with the worktree transport — see kanban card
+    `[self-improve] set_resume races a fresh auto-dispatch`."""
+    from app.kanban import mcp_server as m
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="resume-race-guard", column="Backlog")
+        await s.commit()
+
+    before = _datetime.now(_UTC)
+    await m.set_resume(cid, "sess-explicit", project_folder="proj-folder")
+    after = _datetime.now(_UTC)
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert card.resume_session_id == "sess-explicit"
+    assert card.resume_project_folder == "proj-folder"
+    assert card.scheduled_at is not None
+    fire_at = _datetime.fromisoformat(card.scheduled_at)
+    # Guard window must be near-future (small, not "next hour" — that's the
+    # reaper's fallback path, which is a different code path). Pick something
+    # conservative so the test fails loud if the constant explodes.
+    assert fire_at > before
+    assert fire_at <= after + _timedelta(seconds=10)
+
+
+@pytest.mark.asyncio
+async def test_set_resume_does_not_overwrite_existing_future_scheduled_at():
+    """If the card already carries a future scheduled_at (e.g. a reaper
+    fallback set it to "next hour" because no resumable worktree was found),
+    set_resume must not clobber it — that schedule is intentional and the
+    operator's resume stamp should layer on top without re-scheduling."""
+    from app.kanban import mcp_server as m
+
+    far_future = (_datetime.now(_UTC) + _timedelta(hours=2)).isoformat()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="preserve-existing", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"scheduled_at": far_future},
+        )
+        await s.commit()
+
+    await m.set_resume(cid, "sess-late", project_folder="proj-folder")
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert card.resume_session_id == "sess-late"
+    assert card.scheduled_at == far_future  # preserved, not overwritten
+
+
+@pytest.mark.asyncio
+async def test_run_card_re_reads_to_pick_up_concurrent_set_resume():
+    """Regression test for the cached-card race: dispatch_project reads its
+    `cards` list at the top of the tick. A `set_resume` MCP call that
+    commits *between* that read and `_run_card`'s claim would otherwise be
+    masked by the stale card object in `dispatch_project`'s working set,
+    and the dispatch would pick the worktree transport — defeating the
+    operator's intent.
+
+    With the fix, `_run_card` re-reads the card from the DB right before
+    claiming, so a just-set `resume_session_id` wins and the resume
+    transport is selected."""
+    import unittest.mock as mock
+
+    # Card created on Backlog, no claim — the cached stale_card has no
+    # resume_session_id. The DB has the resume_session_id set (simulating
+    # a set_resume that landed between the dispatch tick's cards-list read
+    # and _run_card).
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="race-card", column="Backlog")
+        await s.commit()
+        stale_card = await get_card(s, cid)
+
+    async with KanbanSessionLocal() as s:
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid,
+            payload={"resume_session_id": "sess-fresh",
+                     "resume_project_folder": "proj-folder"},
+        )
+        await s.commit()
+
+    resume_calls: list[str] = []
+    worktree_calls: list[str] = []
+
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                         provider="anthropic", model=None):
+        resume_calls.append(session_name)
+        return {"session_name": session_name}
+
+    def worktree_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                            provider="anthropic", model=None):
+        worktree_calls.append(session_name)
+        return {"session_name": session_name}
+
+    with mock.patch.object(dispatch, "make_resume_transport", return_value=resume_transport):
+        async with KanbanSessionLocal() as s:
+            await dispatch._run_card(
+                s, card=stale_card, project_key=PK, project_path="/p",
+                transport=worktree_transport, live_sessions=set(),
+            )
+            await s.commit()
+
+    # Without the re-read fix: worktree_transport was used (1 call), the
+    # operator's set_resume is silently ignored. With the fix: the re-read
+    # sees resume_session_id, make_resume_transport is consulted, and the
+    # resume transport is the one called.
+    assert len(resume_calls) == 1, (
+        f"expected 1 resume transport call, got {len(resume_calls)} "
+        f"(worktree_calls={len(worktree_calls)})"
+    )
+    assert len(worktree_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_run_card_defers_to_next_tick_when_fresh_scheduled_at_is_future():
+    """If the re-read card has a future `scheduled_at` (e.g. set_resume's
+    race-guard deferred it to the next tick), `_run_card` must bail rather
+    than claim + spawn — the operator-set hold-out is honored even when the
+    dispatch tick is already mid-flight."""
+    import unittest.mock as mock
+
+    # Step 1: create the card and read it BEFORE stamping the guard, so the
+    # cached card really is stale (no scheduled_at, no resume_session_id).
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="defer-this-card", column="Backlog")
+        await s.commit()
+        stale_card = await get_card(s, cid)
+
+    # Step 2: now write the resume fields + the race-guard scheduled_at in
+    # the DB. The cached `stale_card` still has neither.
+    future = (_datetime.now(_UTC) + _timedelta(seconds=30)).isoformat()
+    async with KanbanSessionLocal() as s:
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid,
+            payload={"resume_session_id": "sess-fresh",
+                     "resume_project_folder": "proj-folder",
+                     "scheduled_at": future},
+        )
+        await s.commit()
+
+    # Sanity check: the cached card really doesn't carry the guard.
+    assert stale_card.scheduled_at is None
+    assert stale_card.resume_session_id is None
+
+    transport = RecordingTransport()
+    with mock.patch.object(dispatch, "make_resume_transport",
+                            return_value=lambda **_: {"session_name": "noop"}):
+        async with KanbanSessionLocal() as s:
+            result = await dispatch._run_card(
+                s, card=stale_card, project_key=PK, project_path="/p",
+                transport=transport, live_sessions=set(),
+            )
+            await s.commit()
+            card = await get_card(s, cid)
+
+    # _run_card must bail — no claim, no transport call, no telemetry write.
+    assert result is None
+    assert card.claimed_by is None, (
+        f"expected no claim while scheduled_at is future, got claimed_by={card.claimed_by!r}"
+    )
+    assert len(transport.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_reaper_release_dead_claim_preserves_operator_set_resume():
+    """A long-running session (claim age >> DEAD_ON_ARRIVAL_SECONDS) that
+    died cleanly must NOT have its operator-stamped `resume_session_id`
+    cleared by the reaper. Without this, `set_resume` followed by an
+    immediate reaper pass leaves the card without the resume pointer, so
+    the next dispatch uses the worktree transport — the very bug the
+    `[self-improve] set_resume races a fresh auto-dispatch` card names."""
+    import unittest.mock as mock
+
+    from app.kanban import session_recovery
+
+    # Card on engineer with a dead agent: claim — simulate the long-running
+    # session that finished its work, merged, then died.
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="dead-but-resumable", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-old"},
+        )
+        # Operator stamped a fresh resume_session_id via set_resume AFTER
+        # the session died. Worktree is gone (merge + GC), so _move_to_resume
+        # returns False and the reaper falls through to plain release.
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid,
+            payload={"resume_session_id": "sess-operator-stamped",
+                     "resume_project_folder": "proj-folder"},
+        )
+        await s.commit()
+
+    # Forge the claim as "old" so dead_on_arrival is False. Direct ORM
+    # assignment — apply_operation's `update` payload doesn't carry
+    # `claimed_at`, so the LWW plumbing would silently drop it.
+    async with KanbanSessionLocal() as s:
+        await _backdate_claim(s, cid, seconds_ago=2 * 3600)
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=None,
+    ):
+        async with KanbanSessionLocal() as s:
+            reaped = await dispatch.reap_stale_claims(
+                s, project_key=PK, cards=await list_cards(s, PK),
+                live_sessions=set(),
+                # project_path=None forces the plain-release fallback path.
+            )
+            await s.commit()
+            card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert card.claimed_by is None  # claim released
+    # Operator's resume_session_id must survive — this is the whole point.
+    assert card.resume_session_id == "sess-operator-stamped", (
+        "reaper stripped the operator's resume_session_id; the next dispatch "
+        "will use the worktree transport, exactly the bug this card fixes"
+    )
+
+
+@pytest.mark.asyncio
+async def test_set_resume_then_immediate_dispatch_defers_to_next_tick():
+    """End-to-end race acceptance: calling set_resume on a card with a dead
+    `agent:` claim, then calling `dispatch_project` in the same pass, must
+    NOT spawn a new worktree + session. The next pass (after the race guard
+    expires) is the one that picks it up — and it must use the resume
+    transport.
+
+    This is the integration test for `[self-improve] set_resume races a
+    fresh auto-dispatch`. Without the fix, the same dispatch_project call
+    claims the card with a fresh `agent:` session name and uses the worktree
+    transport (the bug). With the fix, the same call only reaps the dead
+    claim; the card stays unclaimed until the guard expires."""
+    import unittest.mock as mock
+
+    from app.kanban import mcp_server as m
+    from app.kanban import session_recovery
+
+    # Card on engineer, claimed by a long-dead session whose worktree is
+    # gone (worktree path returns None from _resolve_resume_target).
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="race-card", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-zzzz"},
+        )
+        await s.commit()
+
+    # Forge the claim as "old" so dead_on_arrival is False (the branch that
+    # preserves resume_session_id). Direct ORM — apply_operation's update
+    # payload doesn't carry claimed_at, so the LWW plumbing would silently
+    # drop a payload-based claim_at write.
+    async with KanbanSessionLocal() as s:
+        await _backdate_claim(s, cid, seconds_ago=2 * 3600)
+        await s.commit()
+
+    # Operator calls set_resume — this is the MCP entry point that the user
+    # clicks "Continue from where you left off" on.
+    await m.set_resume(cid, "sess-explicit", project_folder="proj-folder")
+
+    # In the same pass, the auto-dispatch tick fires. We simulate it.
+    resume_calls: list[str] = []
+    worktree_calls: list[str] = []
+
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                         provider="anthropic", model=None):
+        resume_calls.append(session_name)
+        return {"session_name": session_name}
+
+    def worktree_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                            provider="anthropic", model=None):
+        worktree_calls.append(session_name)
+        return {"session_name": session_name}
+
+    with mock.patch.object(session_recovery, "_resolve_resume_target",
+                            return_value=None), \
+         mock.patch.object(dispatch, "make_resume_transport",
+                            return_value=resume_transport):
+        async with KanbanSessionLocal() as s:
+            await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p",
+                transport=worktree_transport, live_sessions=set(),
+            )
+            await s.commit()
+            card_after_same_pass = await get_card(s, cid)
+
+    # Same pass: no fresh worktree (the bug would create one) and no claim
+    # by a different agent id. The reaper released the dead claim, but the
+    # operator's `scheduled_at` guard defers any re-claim to the next tick.
+    assert len(worktree_calls) == 0, (
+        "same-pass dispatch created a worktree — the resume-race fix is broken"
+    )
+    assert card_after_same_pass.claimed_by is None, (
+        f"expected no fresh claim in same pass, got {card_after_same_pass.claimed_by!r}"
+    )
+    assert card_after_same_pass.resume_session_id == "sess-explicit"
+
+    # Now simulate the guard expiring (next tick). Manually clear scheduled_at
+    # so _is_due returns True and the dispatch picks the card up.
+    async with KanbanSessionLocal() as s:
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"scheduled_at": None},
+        )
+        await s.commit()
+
+    resume_calls.clear()
+    worktree_calls.clear()
+    with mock.patch.object(session_recovery, "_resolve_resume_target",
+                            return_value=None), \
+         mock.patch.object(dispatch, "make_resume_transport",
+                            return_value=resume_transport):
+        async with KanbanSessionLocal() as s:
+            next_pass = await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p",
+                transport=worktree_transport, live_sessions=set(),
+            )
+            await s.commit()
+            card_after_next_pass = await get_card(s, cid)
+
+    # Next pass: the resume transport is selected (the operator's intent is
+    # honored). The worktree transport is NOT used.
+    assert next_pass is not None
+    assert len(resume_calls) == 1
+    assert len(worktree_calls) == 0
+    assert card_after_next_pass.claimed_by is not None
+    assert card_after_next_pass.claimed_by.startswith("agent:")
+
