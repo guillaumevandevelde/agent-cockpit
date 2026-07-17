@@ -273,6 +273,7 @@ code-path als de REST PATCH — dus dispatcher-gating, op-log-replay en
 | Hoe zet ik sibling-deps op een kaart via MCP? | `mcp.create_card(..., depends_on=[...])` / `mcp.update_card(card_id, depends_on=[...])` (`mcp_server.py:125–199, 268–305`). De dispatcher gebruikt deze lijst om de kaart pas op te pakken als de genoemde siblings op `Done` of `Impediment` staan. De REST `CardCreate` / `CardUpdate` schemas (`schemas.py:147, :169`) accepteren hetzelfde veld; de MCP wrappers waren historisch beperkter en exposeerden dit alleen via `add_plan_attachment(depends_on_graph=...)`. |
 | Hoe zet/lift ik een business-trigger gate? | `mcp.set_card_gate(card_id, gated_on=<trigger>)` (MCP) of `POST /api/v1/kanban/cards/{cid}/set-gate {"gated_on": "<trigger>"}` (REST). `gated_on=None` of `""` licht de gate. Leest in `dispatch._is_gated` — zie §3a voor rationale en de keuze tegen `depends_on` / `scheduled_at` / dedicated kolom. |
 | Is deze productbeslissing al genomen, en wat kwam eruit? | [`decisions.md`](./decisions.md) — het chronologische beslis-register (datum, vraag, uitkomst, doc-link, kaart-id). **Kijk hier vóór je een beslissing heropent.** |
+| Is deze Backlog `[problem]`-kaart eigenlijk al opgelost door recenter werk? | [`scripts/check-problem-card-staleness.sh`](../../scripts/check-problem-card-staleness.sh) — kruist `[problem]`-kaart-keywords tegen `decisions.md`-rijen + `git log`-subjects nieuwer dan `created_at`. |
 | Welke agent-kolommen kunnen bestaan? | Per-project afgeleid van `.claude/agents/*.md`-filenames — `service.sync_agent_columns` + `router.enable:707`. |
 | Welke agent-kolommen worden op dit moment gedispatched? | `dispatch._DISPATCH_COLUMNS` ∪ eventuele "orphan" agent-kolommen met ongeclaimde kaarten (`dispatch._next_card:1725–1737`). |
 
@@ -302,6 +303,21 @@ MCP-tool) én voor de historische voorraad die de gate niet retroactief kan
 dekken. Advies-only; `--strict` voor CI; `--since YYYY-MM-DD` verschuift de
 historic-grens (default: 2026-07-16, commit `b2e7333` van de gate). Harness:
 `bash scripts/test_check_analysis_outcomes.sh`.
+
+[`scripts/check-problem-card-staleness.sh`](../../scripts/check-problem-card-staleness.sh)
+flagt elke open `[problem]`-kaart op `Backlog` / `Doing` / `Impediment` (zonder
+`[self-improve]`) waarvan de keywords overlappen met een **nieuwere** rij in
+[`decisions.md`](./decisions.md) (Datum strikt na `created_at`) of een
+**nieuwer** commit-subject (`git log --since`). Doel: de
+"al-gefixed-door-onverwant-werk"-klasse vangen vóór de dispatcher een sessie +
+worktree claimt. De persona-instructie "reproduce first, skip impl if it
+doesn't reproduce" sluit deze klasse af *binnen* de sessie, maar die heeft dan
+al een dispatch-cyclus betaald — deze sweeper maakt van die cyclus een `grep`.
+Advies-only (`OK:` / `WARNING:`); `--strict` geeft exit 1 voor CI. Same-day
+sources worden conservatief uitgesloten (`created_at` heeft tijd, `Datum`
+alleen datum — onbekende volgorde). MIN_OVERLAP=2 keywords (lowercase,
+stopword-filter, ≥3 chars). Harness:
+`bash scripts/test_check_problem_card_staleness.sh`.
 
 ### `--check-headers` — de vier-velden-header per beslisdoc
 
