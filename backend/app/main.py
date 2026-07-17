@@ -73,6 +73,18 @@ async def lifespan(app: FastAPI):
         _subscription_registry.register_default_providers()
     except Exception:
         logger.exception("failed to seed default subscription providers")
+    # Upgrade the anthropic stub to a real AnthropicUsageProvider when a
+    # plan-tier has already been configured (kaart d404a11f...) — otherwise
+    # the pool router's drempel branch stays dead until the user next
+    # touches the plan-tier UI, which is what re-syncs it live.
+    from app.services.subscription_prefs_service import (
+        sync_anthropic_provider_registration,
+    )
+    try:
+        async with AsyncSessionLocal() as _db:
+            await sync_anthropic_provider_registration(_db)
+    except Exception:
+        logger.exception("failed to sync Anthropic provider registration from prefs")
     from app.database import engine
     from app.services.scheduling.schema_guard import (
         ensure_backup_columns,

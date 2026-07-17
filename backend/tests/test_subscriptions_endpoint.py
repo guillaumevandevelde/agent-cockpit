@@ -187,6 +187,42 @@ async def test_plan_tier_put_custom_round_trips():
 
 
 @pytest.mark.asyncio
+async def test_plan_tier_put_syncs_real_provider_into_pool_registry():
+    """The PUT endpoint doesn't just persist the pref — it also syncs the
+    pool-router's registry live (kaart d404a11f...), so a user picking a
+    plan tier doesn't need a backend restart before ``pick_subscription``
+    sees a real signal."""
+    from app.services.subscriptions import registry as reg
+    from app.services.subscriptions.anthropic import AnthropicUsageProvider
+
+    async with _client() as ac:
+        put = await ac.put(
+            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "max_20x"}
+        )
+        assert put.status_code == 200, put.text
+
+    provider = reg.get_provider_for(cli="claude-code", provider="anthropic")
+    assert isinstance(provider, AnthropicUsageProvider)
+    assert provider._plan_tier_limit_tokens == 880_000
+
+
+@pytest.mark.asyncio
+async def test_plan_tier_clear_reverts_pool_registry_to_stub():
+    from app.services.subscriptions import registry as reg
+    from app.services.subscriptions.unknown import UnknownUsageProvider
+
+    async with _client() as ac:
+        await ac.put("/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "pro"})
+        put = await ac.put(
+            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": None}
+        )
+        assert put.status_code == 200, put.text
+
+    provider = reg.get_provider_for(cli="claude-code", provider="anthropic")
+    assert isinstance(provider, UnknownUsageProvider)
+
+
+@pytest.mark.asyncio
 async def test_plan_tiers_options_endpoint_exposes_constants():
     async with _client() as ac:
         r = await ac.get("/api/v1/subscriptions/anthropic/plan-tiers")

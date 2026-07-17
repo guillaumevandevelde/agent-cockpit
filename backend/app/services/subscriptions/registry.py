@@ -25,13 +25,20 @@ from app.services.subscriptions.unknown import UnknownUsageProvider
 # source. Pairs that don't appear here fall back to ``get_provider_for``
 # returning ``None``, which the router treats as "no signal".
 #
-# ``claude-code:anthropic`` + ``claude-code:minimax`` are wired as
-# concrete providers in the kanban DB hooks elsewhere (see
-# ``subscriptions_meta`` / ``subscription_prefs`` for the per-project
-# Anthropic plan-tier + MiniMax credentials). The dispatcher here does
-# not own that wiring — it just asks the registry. If no concrete
-# provider is registered for a (cli, provider) pair, the entry is
-# skipped from the snapshot map (analyse §6.3).
+# ``claude-code:anthropic`` is upgraded from the stub to a real
+# ``AnthropicUsageProvider`` by
+# ``subscription_prefs_service.sync_anthropic_provider_registration``
+# (kaart d404a11f...) once the user has configured a plan tier — called
+# at app startup and again on every ``PUT /subscriptions/anthropic/plan
+# -tier``. ``claude-code:minimax`` stays on the ``UnknownUsageProvider``
+# stub: ``MinimaxUsageProvider`` is fully implemented but has no
+# confirmed usage/balance endpoint to probe yet (``probe_url`` is always
+# ``None`` at its only call site, ``api/v1/subscriptions.py``) — wiring
+# it into the registry today would just be a stub with extra steps, not
+# a real signal. The dispatcher here does not own that wiring — it just
+# asks the registry. If no concrete provider is registered for a
+# (cli, provider) pair, the entry is skipped from the snapshot map
+# (analyse §6.3).
 #
 # Populated at app startup via ``register_default_providers`` (kanban
 # card ea7e038b… D2): a previously-empty registry meant

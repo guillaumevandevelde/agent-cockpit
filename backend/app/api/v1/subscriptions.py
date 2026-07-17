@@ -10,6 +10,8 @@ each row keeps its own ``betrouwbaarheid`` and raw ``verbruikt``/``limiet``
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,12 +29,15 @@ from app.services.subscription_prefs_service import (
     get_or_create_prefs,
     resolve_anthropic_plan_tier_limit,
     set_anthropic_plan_tier,
+    sync_anthropic_provider_registration,
 )
 from app.services.subscriptions.anthropic import ANTHROPIC_PLAN_TIERS, AnthropicUsageProvider
 from app.services.subscriptions.base import SubscriptionUsage
 from app.services.subscriptions.minimax import MinimaxUsageProvider
 from app.services.subscriptions.registry import get_unknown_provider
 from app.services.usage_service import UsageService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 
@@ -119,6 +124,16 @@ async def put_anthropic_plan_tier(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        await sync_anthropic_provider_registration(db)
+    except Exception:
+        # The pref itself already persisted — a registry-sync failure must
+        # not turn into a 500 on a saved preference. Worst case the pool
+        # router keeps routing on the previous registration until the next
+        # app restart or successful sync.
+        logger.exception(
+            "failed to sync Anthropic provider registration after plan-tier update"
+        )
     return AnthropicPlanTierResponse(
         tier=prefs.anthropic_plan_tier,
         custom_limit_tokens=prefs.anthropic_custom_limit_tokens,
