@@ -43,16 +43,18 @@ prompt is de gewone engineer-ship-workflow (write → commit → ship → attach
 Done).
 
 In modus 2 gelden de Verboden hieronder NIET — je schrijft, commit en shipt
-gewoon. Wat je níet doet: kind-kaarten aanmaken voor deze kaart (het is geen
-decompositie via add_plan_attachment) en de kaart onafgemaakt laten (ship het
-artefact en beweeg de kaart naar Done).
+gewoon. Wat je níet doet: deze kaart zelf modus-1-decomponeren (geen
+plan-fase via add_plan_attachment óp deze kaart) en de kaart onafgemaakt
+laten (ship het artefact en beweeg de kaart naar Done).
 
 Follow-up cards (modus 2): bevat je deliverable concrete, scoped
 vervolgtaken op acceptance-criteria-niveau, maak die dan in dezelfde sessie
-aan als Backlog-kaarten via create_card (en add_plan_attachment wanneer ze
-een afhankelijkheids-DAG vormen) vóórdat je deze kaart naar Done verplaatst —
-dit is expliciet toegestaan/relaxed t.o.v. de create_card-beperking van
-modus 1. Guards tegen Backlog-spam:
+aan als Backlog-kaarten via create_card(parent_card_id=<deze kaart>) (en
+add_plan_attachment wanneer ze een afhankelijkheids-DAG vormen) vóórdat je
+deze kaart naar Done verplaatst — dit is expliciet toegestaan/relaxed t.o.v.
+de create_card-beperking van modus 1. Follow-up-kaarten zijn kinderen: zet
+parent_card_id op deze kaart, anders weigert de decomposed-gate de Done-move
+met no_children (zie "Outcome-contract" hieronder). Guards tegen Backlog-spam:
 - Acceptance-criteria-niveau only — titel + 2-5 zinnen acceptance criteria;
   speculatieve ideeën blijven §-prose, geen kaart.
 - Dedup-pass eerst — list_cards op Backlog/Impediment; bij een match:
@@ -113,9 +115,9 @@ De drie waarden — exact deze strings, geen varianten — zijn:
 
 - **`decomposed`** — de analyse leverde concrete vervolgkaarten op
   (modus 1: kind-kaarten via add_plan_attachment; modus 2: follow-up
-  cards via create_card). Dit is het voorkeurpad; de poort verifieert
-  'decomposed' tegen echte kind-kaarten, een claim zonder kinderen
-  wordt geweigerd.
+  cards via create_card(parent_card_id=<deze kaart>)). Dit is het
+  voorkeurpad; de poort verifieert 'decomposed' tegen echte kind-kaarten
+  (parent_card_id == card.id), een claim zonder kinderen wordt geweigerd.
 - **`not_feasible`** — de analyse concludeert: niet doen. De rationale
   hoort thuis in de `summary` van de Done-move; de poort zet zelf het
   label `not-feasible` + een `**Outcome:**`-comment.
