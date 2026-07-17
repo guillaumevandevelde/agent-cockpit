@@ -1464,7 +1464,7 @@ def test_worktree_transport_creates_from_origin_master(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_spawn(cli_id, options, session_name=None):
+    def fake_spawn(cli_id, options, session_name=None, **kwargs):
         captured["cli"] = cli_id
         captured["options"] = options
         captured["session_name"] = session_name
@@ -1500,7 +1500,7 @@ def test_worktree_transport_removes_worktree_when_spawn_fails(monkeypatch, tmp_p
             stderr = ""
         return R()
 
-    def fake_spawn(cli_id, options, session_name=None):
+    def fake_spawn(cli_id, options, session_name=None, **kwargs):
         raise RuntimeError("tmux exploded")
 
     import app.kanban.dispatch as d
@@ -2399,7 +2399,7 @@ def test_make_resume_transport_records_call():
     """make_resume_transport produces a callable that passes session_id through."""
     calls = []
 
-    def fake_spawn(cli_id, options, *, session_name):
+    def fake_spawn(cli_id, options, *, session_name, **kwargs):
         calls.append({"options": options, "session_name": session_name})
         return {"session_name": session_name}
 
