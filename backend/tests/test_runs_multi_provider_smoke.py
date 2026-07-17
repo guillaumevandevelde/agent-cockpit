@@ -26,11 +26,11 @@ def test_agent_bridge_session_filter_smoke(monkeypatch):
 
     calls = []
 
-    def fake_discover(provider=None):
-        calls.append(provider)
+    def fake_discover(cli=None):
+        calls.append(cli)
         return [
             {
-                "provider": provider or "claude-code",
+                "provider": cli or "claude-code",
                 "session_name": "session-1",
                 "tmux_target": "session-1:0.0",
             }
@@ -38,8 +38,8 @@ def test_agent_bridge_session_filter_smoke(monkeypatch):
 
     monkeypatch.setattr(agent_bridge_api, "discover_agent_sessions", fake_discover)
 
-    all_response = agent_bridge_api.list_sessions(provider=None)
-    codex_response = agent_bridge_api.list_sessions(provider="codex-cli")
+    all_response = agent_bridge_api.list_sessions(cli=None)
+    codex_response = agent_bridge_api.list_sessions(cli="codex-cli")
 
     assert calls == [None, "codex-cli"]
     assert all_response["count"] == 1
@@ -66,7 +66,7 @@ async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_pa
 
     response = await agent_bridge_api.spawn_session_endpoint(
         agent_bridge_api.SpawnRequest(
-            provider="codex-cli",
+            cli="codex-cli",
             directory=str(tmp_path),
             mode="plain",
             profile="default",
@@ -78,7 +78,7 @@ async def test_agent_bridge_spawn_smoke_passes_codex_options(monkeypatch, tmp_pa
         db=None,
     )
 
-    assert response["provider"] == "codex-cli"
+    assert response["cli"] == "codex-cli"
     assert captured["cli_id"] == "codex-cli"
     assert captured["options"].profile == "default"
     assert captured["options"].sandbox == "workspace-write"
