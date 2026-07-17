@@ -109,6 +109,44 @@ def _reset_singleton_state():
     reset_all_singleton_test_state()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_usage_service_projects_dir(tmp_path, monkeypatch):
+    """Pin ``UsageService.projects_dir`` to a per-test empty dir.
+
+    Without this, ``UsageService(db=...)`` reads ``get_claude_projects_dir``
+    from ``app.utils.path_utils`` at ``__init__`` time, which on this host
+    is the real ``~/.claude/projects/**`` tree — 956 JSONL files / 523 MB
+    as of kaart 103718db. A test that forgets to mock
+    ``get_all_usage_entries`` / ``get_block_usage`` (the common pattern in
+    ``test_subscription_usage_provider.py::TestAnthropicUsageProviderModelAttribution``
+    and ``test_subscriptions_endpoint.py``, both of which mock at the
+    method level) blocks the asyncio event loop on ``Path.iterdir()``
+    inside the ``async`` coroutine for several minutes — long enough to
+    hang ``scripts/run-single-test.sh`` past its 10s safety net even with
+    ``--timeout-method=thread``, and to drop the dispatch's interactive
+    prompt into an SSH idle-disconnect on the shared box.
+
+    We patch on the consumer side (``app.services.usage_service``) per
+    ``docs/cockpit/test-doubles-convention.md`` rule 1 — patching the
+    source module (``app.utils.path_utils``) is a silent no-op because
+    ``from app.utils.path_utils import get_claude_projects_dir`` binds
+    the original into ``usage_service``'s namespace at import time.
+
+    Tests that need a *real* ``projects_dir`` (with synthetic JSONL files
+    under ``tmp_path``) override this with their own ``monkeypatch.setattr``
+    on the same consumer attribute — ``monkeypatch`` is
+    function-scoped, so the test's override is applied after this
+    autouse fixture's setup and wins.
+    """
+    empty_projects_dir = tmp_path / "usage_service_projects"
+    empty_projects_dir.mkdir()
+    monkeypatch.setattr(
+        "app.services.usage_service.get_claude_projects_dir",
+        lambda: empty_projects_dir,
+    )
+    yield
+
+
 @pytest_asyncio.fixture(autouse=True, scope="session")
 async def _patch_app_database():
     """Swap every ``AsyncSessionLocal`` / ``engine`` reference to the test
