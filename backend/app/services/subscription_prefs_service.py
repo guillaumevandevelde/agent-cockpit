@@ -70,3 +70,39 @@ def resolve_anthropic_plan_tier_limit(
     if tier_config is None:
         return None
     return tier_config["tokens_5h"]  # type: ignore[return-value]
+
+
+async def sync_anthropic_provider_registration(db: AsyncSession) -> None:
+    """Register the pool-router's ``claude-code:anthropic`` entry to match
+    the stored plan-tier preference (kaart d404a11f...).
+
+    A configured tier (or custom limit) registers a real
+    ``AnthropicUsageProvider`` — replacing the honest ``UnknownUsageProvider``
+    stub by id, so ``pick_subscription``'s drempel branch gets a live
+    signal instead of "always available". No tier configured re-registers
+    the stub explicitly — not a fallback accident, matches
+    ``subscriptions.md`` §6.1/§6.3 "no fabrication".
+
+    Local imports avoid a module-load cycle with ``app.services.subscriptions
+    .registry`` (which several call sites, e.g. ``app.kanban.dispatch``,
+    already import lazily for the same reason).
+    """
+    from app.services.subscriptions import registry
+    from app.services.subscriptions.anthropic import AnthropicUsageProvider
+    from app.services.subscriptions.unknown import UnknownUsageProvider
+    from app.services.usage_service import UsageService
+
+    prefs = await get_or_create_prefs(db)
+    limit = resolve_anthropic_plan_tier_limit(
+        prefs.anthropic_plan_tier, prefs.anthropic_custom_limit_tokens
+    )
+    if limit is None:
+        registry.register_provider(UnknownUsageProvider(
+            subscription_id=AnthropicUsageProvider.DEFAULT_ID,
+            subscription_label="Claude Code (anthropic — geen signaal-bron)",
+        ))
+        return
+    registry.register_provider(AnthropicUsageProvider(
+        usage_service=UsageService(),
+        plan_tier_limit_tokens=limit,
+    ))
