@@ -1870,6 +1870,25 @@ class PlansOverviewResponse(BaseModel):
     docs: list[DocSpecItem] = []
 
 
+class DocContentResponse(BaseModel):
+    """Body of a single ``docs/cockpit/*.md`` file.
+
+    The frontend's detail view (kanban card 9e33a359, Optie B, stap 2)
+    fetches this when a user opens a row from the C section of
+    ``/plans/overview``. The list endpoint deliberately ships only
+    metadata (path/title/mtime/size) to keep the aggregate response
+    small — expanding a row is the cheap read path. Matches
+    ``DocSpecItem`` so the row the user clicked already has the title
+    it shows on the detail page.
+    """
+
+    path: str  # repo-relative ("docs/cockpit/...md")
+    title: str  # H1 line (with "# " prefix preserved)
+    content: str
+    modified_at: str  # ISO8601 UTC
+    size_bytes: int
+
+
 # MCP Registry Schemas
 
 

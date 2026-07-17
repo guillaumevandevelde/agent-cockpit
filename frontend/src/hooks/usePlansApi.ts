@@ -1,85 +1,69 @@
 /**
- * Hook for plan history browser API operations
+ * Hook for the read-only "Plans & Specs" overview.
+ *
+ * Optie B (kanban card 9e33a359, stap 2). Three endpoints:
+ *
+ *   ``getOverview()``         — the B+C aggregator (kanban card 885d0b61)
+ *   ``getDocContent(path)``   — single ``docs/cockpit/*.md`` body
+ *   ``getStats()``            — kept for the Dashboard tile; still reads
+ *                               ``kanban_plans`` until chore card 528c5ca2
+ *                               phases that store out.
+ *
+ * The legacy CRUD surface (``listPlans`` / ``getPlan`` / ``createPlan`` /
+ * ``updatePlan`` / ``deletePlan`` / ``searchPlans``) was deleted with
+ * this card: every write method was dead — no component called it. The
+ * ``/plans`` ``GET`` is now sourced from ``/plans/overview`` (no
+ * separation between B and C at the call site needed), and the ``/plans``
+ * detail route is now the ``/plans/overview/docs/{path}`` route.
  */
 import { useCallback } from 'react'
 import { apiClient, buildEndpoint } from '@/lib/api'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import type {
-  PlanListResponse,
-  PlanDetailResponse,
-  PlanSearchResponse,
-  PlanStatsResponse,
+  DocContentResponse,
+  PlansOverviewResponse,
 } from '@/types/plans'
-
-interface PlanMutationInput {
-  filename: string
-  content: string
-}
 
 export function usePlansApi() {
   const { activeProject } = useProjectContext()
 
-  const listPlans = useCallback(async () => {
-    return apiClient<PlanListResponse>(
-      buildEndpoint('plans', { project_path: activeProject?.path })
+  const getOverview = useCallback(async (): Promise<PlansOverviewResponse> => {
+    return apiClient<PlansOverviewResponse>(
+      buildEndpoint('plans/overview', { project_path: activeProject?.path })
     )
   }, [activeProject?.path])
 
-  const getPlan = useCallback(async (filename: string) => {
-    return apiClient<PlanDetailResponse>(
-      buildEndpoint(`plans/${encodeURIComponent(filename)}`, {
-        project_path: activeProject?.path,
-      })
+  const getDocContent = useCallback(async (relPath: string): Promise<DocContentResponse> => {
+    return apiClient<DocContentResponse>(
+      `plans/overview/docs/${relPath}`
     )
-  }, [activeProject?.path])
+  }, [])
 
-  const searchPlans = useCallback(async (query: string) => {
-    return apiClient<PlanSearchResponse>(
-      buildEndpoint('plans/search', {
-        q: query,
-        project_path: activeProject?.path,
-      })
-    )
-  }, [activeProject?.path])
-
+  /**
+   * Dashboard tile. Still hits ``/plans/stats`` — that endpoint is
+   * ``kanban_plans``-backed and is intentionally left alone here so the
+   * chore card 528c5ca2 (phase-out) can land as a separate, focused
+   * change. Once that card ships, this signature can drop.
+   *
+   * Typed locally with an inline shape because ``types/plans.ts`` is now
+   * focused exclusively on the read-only overview contract; the legacy
+   * kanban_plans schema is on its way out and didn't earn a permanent
+   * spot in the shared types file.
+   */
   const getStats = useCallback(async () => {
-    return apiClient<PlanStatsResponse>(
+    return apiClient<{
+      total_plans: number
+      oldest_date: string | null
+      newest_date: string | null
+      total_size_bytes: number
+    }>(
       buildEndpoint('plans/stats', { project_path: activeProject?.path })
     )
   }, [activeProject?.path])
 
-  const createPlan = useCallback(async ({ filename, content }: PlanMutationInput) => {
-    return apiClient<PlanDetailResponse>(
-      buildEndpoint('plans', { project_path: activeProject?.path }),
-      { method: 'POST', body: JSON.stringify({ filename, content }) }
-    )
-  }, [activeProject?.path])
-
-  const updatePlan = useCallback(async ({ filename, content }: PlanMutationInput) => {
-    return apiClient<PlanDetailResponse>(
-      buildEndpoint(`plans/${encodeURIComponent(filename)}`, {
-        project_path: activeProject?.path,
-      }),
-      { method: 'PUT', body: JSON.stringify({ content }) }
-    )
-  }, [activeProject?.path])
-
-  const deletePlan = useCallback(async (filename: string) => {
-    return apiClient<Record<string, never>>(
-      buildEndpoint(`plans/${encodeURIComponent(filename)}`, {
-        project_path: activeProject?.path,
-      }),
-      { method: 'DELETE' }
-    )
-  }, [activeProject?.path])
-
   return {
-    listPlans,
-    getPlan,
-    searchPlans,
+    getOverview,
+    getDocContent,
     getStats,
-    createPlan,
-    updatePlan,
-    deletePlan,
   }
 }
