@@ -785,6 +785,26 @@ async def set_resume(card_id: str, session_id: str,
         project_folder: Encoded folder name (e.g. "-home-user-repo") that maps to
             ~/.claude/projects/<folder>/.  Inferred from the session file when omitted.
     """
+    from datetime import UTC, datetime, timedelta
+
+    from app.utils.timeutils import ensure_aware
+
+    # Resume-race guard window: stamps a near-future `scheduled_at` so the
+    # same dispatch-sweep pass that races the write defers the card via the
+    # existing `_is_due` gate. Without this guard, an in-flight dispatch tick
+    # whose `list_cards` read predates this commit dispatches the card with
+    # the worktree transport (brand-new worktree + session) — exactly
+    # defeating the operator's intent. See kanban card
+    # `[self-improve] set_resume races a fresh auto-dispatch`.
+    #
+    # Small (2s) on purpose: just enough to outlive the dispatch tick that
+    # raced the write, not so long that a same-tick operator action gets
+    # delayed perceptibly. The companion re-read in `dispatch._run_card`
+    # catches the converse race (`set_resume` landing between the reaper's
+    # list refresh and `_run_card`), so this guard is defense-in-depth, not
+    # a replacement.
+    RESUME_RACE_GUARD_S = 2
+
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
         if card is None:
@@ -793,6 +813,26 @@ async def set_resume(card_id: str, session_id: str,
         payload: dict = {"resume_session_id": session_id}
         if project_folder is not None:
             payload["resume_project_folder"] = project_folder
+
+        # Don't overwrite an existing future `scheduled_at` — that schedule
+        # is intentional (e.g. a reaper fallback set it to "next hour"
+        # because no resumable worktree was found) and the operator's resume
+        # stamp should layer on top without re-scheduling.
+        existing = card.scheduled_at
+        needs_guard = True
+        if existing:
+            try:
+                if ensure_aware(datetime.fromisoformat(existing)) > datetime.now(UTC):
+                    needs_guard = False
+            except ValueError:
+                # Unparseable scheduled_at — let _is_due's fail-open handle it
+                # and stamp the guard as usual.
+                pass
+        if needs_guard:
+            payload["scheduled_at"] = (
+                datetime.now(UTC) + timedelta(seconds=RESUME_RACE_GUARD_S)
+            ).isoformat()
+
         await apply_operation(s, op_type="update", entity_type="card",
             project_key="", entity_id=card_id, payload=payload)
         await s.commit()
