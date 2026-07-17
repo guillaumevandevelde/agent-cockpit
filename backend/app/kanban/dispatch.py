@@ -1423,7 +1423,53 @@ def _build_ship_instructions(ship_mode: str) -> str:
     OpenCode, Codex CLI, or any other coding agent that spawns in a git worktree.
     A skill at ``.claude/skills/git-ship/SKILL.md`` mirrors this logic when the
     agent has filesystem access.
+
+    The first block in the returned string is a pre-ship
+    ``Feature-Compliance-Review (FCR)`` step — a subagent-call with cleared
+    context that validates the implementation against the card spec BEFORE the
+    numbered ship workflow runs. This mirrors engineer.md §6 (and the kanban
+    decision doc ``reviewer-agent-decision.md``); the drift guard
+    ``backend/tests/test_fcr_prompt_drift.py`` enforces that the prompt
+    text stays identical across both mirrors (drift-val: kaart ``d9447e49``).
     """
+    # Pre-ship: Feature-Compliance-Review (FCR) — reviewed by a fresh-context
+    # subagent before the numbered ship workflow begins. The prompt text must
+    # stay byte-identical to the engineer.md mirror; update both in lockstep.
+    #
+    # Note on wording: avoid the literal ``move_card`` token here — the ship
+    # workflow's last step is the canonical "move card to Done" call, and
+    # ``_build_ship_instructions`` ordering tests use ``index('move_card')``
+    # to find that step. A mention of ``move_card`` in this pre-ship block
+    # would mask the real step behind an earlier match.
+    feature_compliance_review = (
+        "**Pre-ship: Feature-Compliance-Review (FCR) als pre-Done subagent-call** "
+        "— `/code-review` / `iteration-loop verify` lezen de oorspronkelijke "
+        "kaart-spec niet; deze stap vult dat gat. **Vóór je de kaart naar Done "
+        "verplaatst**, draai je een subagent-call met **cleared context** die de "
+        "implementatie toetst aan de oorspronkelijke kaart-spec: kaart-titel, "
+        "kaart-beschrijving, en de committed diff tegen `origin/master`. Voer "
+        "letterlijk deze prompt uit:\n\n"
+        "   > Je reviewt een feature-implementatie tegen zijn oorspronkelijke\n"
+        "   > specificatie. Inputs: de oorspronkelijke kaart-titel, -beschrijving, en\n"
+        "   > de diff tegen `origin/master`. Vraag: doet de implementatie wat er\n"
+        "   > gevraagd werd?\n"
+        "   >\n"
+        "   > Specifiek:\n"
+        "   > - Elke requirement/bullet uit de beschrijving is geïmplementeerd.\n"
+        "   > - De API/UI matcht de specificatie (naamgeving, gedrag, edge cases).\n"
+        "   > - De implementatie integreert zonder siblings te breken.\n"
+        "   > - Het deliverable dat in de samenvatting geclaimd wordt, is\n"
+        "   >   daadwerkelijk aanwezig.\n"
+        "   >\n"
+        "   > Output: OK om te shippen, OF een lijst met blokkerende issues met\n"
+        "   > `file:line`-refs. Dit is een **feature-compliance-check**, geen\n"
+        "   > code-quality-check — die is al apart gelopen via `/code-review`.\n\n"
+        "   **Resultaat interpreteren:** OK → ga door naar stap 1 hieronder. "
+        "Blokkerende issues → fix die eerst in dezelfde sessie (geen nieuwe "
+        "kaart — FCR-blokkades zijn van jou, niet van het bord), herhaal de "
+        "FCR tot `OK`, en ga dan pas naar de ship-stappen.\n\n"
+    )
+
     sync = (
         "1. **Sync** — `git fetch origin` so you are up to date with the remote.\n"
     )
@@ -1587,7 +1633,7 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "move to Done.\n"
         )
 
-    return sync + tests + commit + shipping
+    return feature_compliance_review + sync + tests + commit + shipping
 
 
 def _build_session_retro_step(step_number: int = 6) -> str:

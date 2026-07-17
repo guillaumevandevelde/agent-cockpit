@@ -109,6 +109,41 @@ altijd door.
    met de master-baseline en classificeert ze als `pre-existing` / `NEW`
    / `FIXED`, zodat je niet zelf hoeft te stash-en-vergelijken.
 
+7. **Feature-Compliance-Review (FCR) als pre-Done subagent-call** — `/code-review` /
+   `iteration-loop verify` hierboven lezen de oorspronkelijke kaart-spec niet; deze
+   stap vult dat gat. **Vóór je de kaart naar Done verplaatst**, draai je een
+   subagent-call met **cleared context** die de implementatie toetst aan de
+   oorspronkelijke kaart-spec: kaart-titel, kaart-beschrijving, en de committed
+   diff tegen `origin/master`. Voer letterlijk deze prompt uit:
+
+   > Je reviewt een feature-implementatie tegen zijn oorspronkelijke
+   > specificatie. Inputs: de oorspronkelijke kaart-titel, -beschrijving, en
+   > de diff tegen `origin/master`. Vraag: doet de implementatie wat er
+   > gevraagd werd?
+   >
+   > Specifiek:
+   > - Elke requirement/bullet uit de beschrijving is geïmplementeerd.
+   > - De API/UI matcht de specificatie (naamgeving, gedrag, edge cases).
+   > - De implementatie integreert zonder siblings te breken.
+   > - Het deliverable dat in de samenvatting geclaimd wordt, is
+   >   daadwerkelijk aanwezig.
+   >
+   > Output: OK om te shippen, OF een lijst met blokkerende issues met
+   > `file:line`-refs. Dit is een **feature-compliance-check**, geen
+   > code-quality-check — die is al apart gelopen via `/code-review`.
+
+   **Resultaat interpreteren:**
+   - **OK** → ga door naar stap 8 (`Kaart bijwerken → Done`).
+   - **Blokkerende issues** → fix die eerst in dezelfde sessie (geen nieuwe kaart
+     — FCR-blokkades zijn van jou, niet van het bord), herhaal de FCR tot `OK`,
+     en ga dan pas naar `Done`.
+
+   **Bron van waarheid + drift-val:** dezelfde prompt is inlined in
+   `_build_ship_instructions` in `backend/app/kanban/dispatch.py` zodat
+   auto-gedispatchte sessies de FCR ook krijgen. Wijzig deze prompt **in dezelfde
+   commit** op beide plekken, anders raken engineer-sessies en gedispatchte
+   sessies uit sync (drift-val: kaart `d9447e49`).
+
 ## Werkomgeving in worktree: venv & cwd-veiligheid
 
 Worktree-sessies (`.claude/worktrees/<branch>/`) hebben **geen lokale Python
