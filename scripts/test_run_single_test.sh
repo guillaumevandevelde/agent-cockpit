@@ -236,6 +236,8 @@ check "passthrough → -v arg reaches pytest" \
     'echo "$out" | grep -qE "ARGV:.* -v"'
 check "passthrough → script still injects --timeout" \
     'echo "$out" | grep -qE "ARGV:.*--timeout"'
+check "passthrough → script still injects --timeout-method=thread (kaart 103718db)" \
+    'echo "$out" | grep -qE "ARGV:.*--timeout-method=thread"'
 check "passthrough → script still injects -q" \
     'echo "$out" | grep -qE "ARGV:.* -q( |$)"'
 

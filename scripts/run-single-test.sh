@@ -21,6 +21,9 @@
 #   The cap exists to keep this from turning into a "run the whole suite"
 #   if a missing-glob expands too wide. Single-file/-test runs are <1s on
 #   this box; <5s gate is the acceptance criterion in the card.
+# - Uses pytest-timeout's ``--timeout-method=thread`` (NOT ``signal``) so
+#   the 10s cap actually fires on asyncio-blocking I/O patterns — see the
+#   Run section below for why ``signal`` is unreliable here (kaart 103718db).
 # - Default verbosity is -q with --tb=short — a glance is enough to see
 #   what passed / what broke.
 # - Exit code is pytest's exit code (0 = green, 1 = tests-failed,
@@ -111,12 +114,23 @@ fi
 # `set +e` is intentional — pytest exits non-zero when tests fail (1),
 # when no tests are collected (5), or when a timeout fires. Caller cares
 # about the exact code, not "the script crashed".
+#
+# `--timeout-method=thread` is the deliberate choice over `signal`:
+# pytest-timeout's `signal` method sends SIGALRM to the main thread, but
+# the asyncio event loop only delivers that signal at the next yield
+# point — and a tight blocking sync I/O call inside an `async def`
+# (e.g. `Path.iterdir()` over a 956-file / 523 MB tree in
+# `UsageService.discover_jsonl_files`) starves the loop indefinitely, so
+# the documented 10s safety net silently never fires (kaart 103718db...).
+# The `thread` method uses a watchdog thread that hard-kills the
+# process, which interrupts *any* blocking pattern — the timeout
+# guarantee the script promises actually holds.
 set +e
 (
     cd "$BACKEND_DIR"
     "$PYTEST_CMD" \
         --timeout="$TIMEOUT_SECONDS" \
-        --timeout-method=signal \
+        --timeout-method=thread \
         -q \
         --tb=short \
         "$TEST_TARGET" \
