@@ -154,6 +154,10 @@ particular `investigate` → `flag-cycle` is a common two-pass.
   2. Run `scripts/pytest-compare.sh` to capture the current failure set
      and classify each test as `pre-existing`, `NEW (your fault)`, or
      `FIXED by your changes`.
+- **Worktree sessions (no local venv):** both scripts resolve pytest via
+  the same worktree-local → shared main-checkout venv → PATH fallback
+  chain as `scripts/run-single-test.sh` (`scripts/lib/resolve-pytest-cmd.sh`),
+  so no `PYTEST_CMD=` override is needed even in a fresh worktree.
 - **Clean when:** `pytest-compare.sh` exits 0 — every current failure
   is also in the baseline (no new failures). Pre-existing + FIXED-only
   diffs are fine; the loop's job is "did this card add any new reds?",
