@@ -162,6 +162,13 @@ particular `investigate` → `flag-cycle` is a common two-pass.
   is also in the baseline (no new failures). Pre-existing + FIXED-only
   diffs are fine; the loop's job is "did this card add any new reds?",
   not "is master 100% green?".
+- **"Pre-existing" ≠ "passing".** `pytest-compare.sh` classifying a
+  failure as "pre-existing (not your fault)" means the same test is
+  already red on `origin/master` — it does **not** mean the test
+  passes. An exit-0/clean loop summary can still be sitting on top of
+  deterministically-failing tests; read the actual failure/traceback
+  before concluding a targeted-file failure is order-dependent or
+  environmental (see kanban card `1419c9ef`).
 - **Blocked when:** `pytest-compare.sh` exits 1 — at least one `NEW`
   failure. The attribution output is what the engineer triages; the
   loop emits `<loop-blocked>` and the engineer fixes the named tests.
