@@ -283,6 +283,28 @@ class PresenceSession(Base):
     )
 
 
+class SubscriptionPrefs(Base):
+    """Singleton settings row for the Subscriptions-pagina.
+
+    Only the row with id=1 is used; the service creates it on first
+    access (mirrors ``AutoBackupSettings``). Today the only preference is
+    the Anthropic plan tier — Anthropic publishes no usage API for
+    Pro/Max, so the 5h-window limit has to come from the user (kaart
+    9bce091a..., ``docs/cockpit/subscriptions.md``).
+    """
+
+    __tablename__ = "subscription_prefs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    anthropic_plan_tier: Mapped[str | None] = mapped_column(String, nullable=True)
+    anthropic_custom_limit_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class RunGroup(Base):
     """A group of related CLI runs (lead + members).
 

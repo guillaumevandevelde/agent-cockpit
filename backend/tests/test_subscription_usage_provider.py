@@ -16,7 +16,7 @@ Each test class corresponds to one concrete provider. Tests pin:
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -35,9 +35,11 @@ def _make_block(
     start_time: datetime | None = None,
 ) -> SimpleNamespace:
     """Mimic a SessionBlock enough for the providers' tests."""
+    start = start_time or datetime.now(UTC)
     return SimpleNamespace(
         is_active=is_active,
-        start_time=(start_time or datetime.now(UTC)).isoformat(),
+        start_time=start.isoformat(),
+        end_time=(start + timedelta(hours=5)).isoformat(),
         input_tokens=total_tokens // 4,
         output_tokens=total_tokens // 4,
         cache_creation_tokens=total_tokens // 4,
@@ -105,6 +107,30 @@ class TestUnknownUsageProvider:
         usage = await self.provider.get_usage()
         assert usage.bron == "geen_signaal"
 
+    async def test_display_fields_default_to_none(self):
+        # No fabrication: a provider without a raw count must not
+        # synthesize verbruikt/limiet/venster_label.
+        usage = await self.provider.get_usage()
+        assert usage.verbruikt is None
+        assert usage.limiet is None
+        assert usage.venster_label is None
+        assert usage.reset_op is None
+        assert usage.eenheid == "tokens"
+
+
+class TestAnthropicPlanTiers:
+    """The tier constants consumed by the Subscriptions-pagina plan-tier
+    picker (kaart 9bce091a...). Never labelled ``exact`` — these are
+    best-effort estimates, not published by Anthropic (analyse §7.2)."""
+
+    def test_known_tiers_have_label_and_token_budget(self):
+        from app.services.subscriptions.anthropic import ANTHROPIC_PLAN_TIERS
+
+        assert set(ANTHROPIC_PLAN_TIERS) == {"pro", "max_5x", "max_20x"}
+        for tier in ANTHROPIC_PLAN_TIERS.values():
+            assert isinstance(tier["label"], str) and tier["label"]
+            assert isinstance(tier["tokens_5h"], int) and tier["tokens_5h"] > 0
+
 
 class TestAnthropicUsageProvider:
     """5h-venster-schatting uit UsageService + plan-tier limiet.
@@ -134,6 +160,31 @@ class TestAnthropicUsageProvider:
         assert usage.beschikbaar is True
         assert usage.bron == "usage_service:active_block"
         assert usage.subscription_id == "claude-code:anthropic"
+
+    async def test_active_block_populates_display_fields(self):
+        # kaart 9bce091a...: the Subscriptions-pagina needs raw
+        # verbruikt/limiet/venster/reset_op, not just the fraction.
+        block = _make_block(total_tokens=40_000)
+        self.usage_service.get_block_usage = AsyncMock(
+            return_value=SimpleNamespace(active_block=block)
+        )
+        usage = await self.provider.get_usage()
+        assert usage.verbruikt == 40_000
+        assert usage.limiet == self.plan_limit
+        assert usage.eenheid == "tokens"
+        assert usage.venster_label == "5h rate"
+        assert usage.reset_op is not None
+        assert usage.reset_op.isoformat() == block.end_time
+
+    async def test_no_active_block_leaves_display_fields_none(self):
+        self.usage_service.get_block_usage = AsyncMock(
+            return_value=SimpleNamespace(active_block=None)
+        )
+        usage = await self.provider.get_usage()
+        assert usage.verbruikt is None
+        assert usage.limiet is None
+        assert usage.venster_label is None
+        assert usage.reset_op is None
 
     async def test_active_block_at_or_above_limit_is_not_beschikbaar(self):
         block = _make_block(total_tokens=110_000)

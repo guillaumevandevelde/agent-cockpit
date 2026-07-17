@@ -40,6 +40,7 @@ from .security import router as security_router
 from .sessions import router as sessions_router
 from .status import router as status_router
 from .statusline import router as statusline_router
+from .subscriptions import router as subscriptions_router
 from .update.router import router as update_router
 from .usage import router as usage_router
 from .webhooks.router import router as webhooks_router
@@ -85,6 +86,7 @@ router.include_router(portfolio_router)
 router.include_router(cc_bridge_router, prefix="/cc-bridge", tags=["CC Bridge"])
 router.include_router(runs_router, prefix="/agent-bridge", tags=["Agent Bridge"])
 router.include_router(providers_router, tags=["Providers"])
+router.include_router(subscriptions_router)
 router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)

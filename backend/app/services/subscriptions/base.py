@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 Betrouwbaarheid = Literal["exact", "schatting", "onbekend"]
@@ -41,6 +42,20 @@ class SubscriptionUsage:
             not bake a threshold into the snapshot.
         bron: where the signal came from, for traceability.
         betrouwbaarheid: ``"exact"`` | ``"schatting"`` | ``"onbekend"``.
+        verbruikt: raw consumed amount in ``eenheid``, or None when the
+            provider has no usable count (no fabrication — mirrors
+            ``drempel_gebruikt``). Display-only; the router keeps using
+            ``drempel_gebruikt``.
+        limiet: raw limit in ``eenheid``, or None when the limit is not
+            published / not configured (e.g. subscriptions.md: "limit not
+            published" rather than a guessed number).
+        eenheid: unit label for ``verbruikt``/``limiet`` (default
+            ``"tokens"``) — providers with a different unit (e.g. a
+            request count) override this.
+        venster_label: the provider's own name for its rate window (e.g.
+            "5h rate"), shown verbatim per subscriptions.md's "no faked
+            cross-vendor equivalence" rule. None when unknown.
+        reset_op: when the current window resets, or None when unknown.
     """
 
     subscription_id: str
@@ -49,6 +64,11 @@ class SubscriptionUsage:
     drempel_gebruikt: float | None
     bron: str
     betrouwbaarheid: Betrouwbaarheid
+    verbruikt: float | None = None
+    limiet: float | None = None
+    eenheid: str = "tokens"
+    venster_label: str | None = None
+    reset_op: datetime | None = None
 
 
 class SubscriptionUsageProvider(ABC):
