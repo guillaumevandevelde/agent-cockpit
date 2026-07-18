@@ -1381,6 +1381,11 @@ async def delete_card(cid: str, force: bool = Query(False)):
                     "force-deleting card %s %r despite unmerged worktree %s",
                     cid, card.title, warning["worktree_path"],
                 )
+        # Dep-aware guard: strip this card out of any non-Done dependent's
+        # depends_on (+ audit comment) before the hard delete, so a satisfied
+        # dependency never silently becomes a permanent fail-closed block. See
+        # docs/cockpit/dangling-depends-on-analyse.md §1.2/§4.
+        await service.strip_dangling_deps_on_delete(s, cid)
         await apply_operation(s, op_type="delete", entity_type="card",
             project_key="", entity_id=cid, payload={})
         await s.commit()
@@ -1509,6 +1514,11 @@ async def clear_column(payload: ColumnClearRequest):
         cards = await service.list_cards(s, payload.project_key, column=payload.column)
         count = 0
         for card in cards:
+            # Same dep-aware guard as the single-card delete: strip each cleared
+            # card out of any non-Done dependent's depends_on (+ audit comment)
+            # so "Clear Done" never orphans a satisfied dependency into a
+            # permanent fail-closed block. dangling-depends-on-analyse.md §1.2/§4.
+            await service.strip_dangling_deps_on_delete(s, card.id)
             await apply_operation(s, op_type="delete", entity_type="card",
                 project_key="", entity_id=card.id, payload={})
             count += 1
