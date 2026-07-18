@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import type { Card } from "../types";
+import type { RunLedger } from "../runLedger";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -27,6 +28,14 @@ vi.mock("../api", async (importOriginal) => {
   stub.activity = vi.fn(async () => []);
   return { kanbanApi: stub };
 });
+
+// CardRunTab mounts the CC-Bridge PTY relay + Sessions transcript hooks, which
+// poll live endpoints. None of that is under test here — stub it so an
+// agent-claimed card (which defaults the drawer to the Run tab) doesn't fire
+// real network polls during these unit tests.
+vi.mock("./CardRunTab", () => ({
+  CardRunTab: () => null,
+}));
 
 vi.mock("../appsApi", () => {
   return {
@@ -1419,5 +1428,225 @@ describe("CardDrawer Subtasks section", () => {
     );
 
     expect(screen.queryByTestId("subtasks-section")).toBeNull();
+  });
+});
+
+// --- Run-ledger tab (docs/cockpit/run-ledger-decision.md §3-5) ------------
+// The Ledger tab renders the task → context → files → tests → outcome+model
+// spine from GET /kanban/cards/{cid}/run-ledger as a vertical timeline. Each
+// step is best-effort: an `available: false` step renders an empty/note state
+// instead of crashing, and the outcome step LINKS to the Run/Tokens tabs
+// rather than re-rendering them.
+
+function makeLedger(overrides: Partial<RunLedger> = {}): RunLedger {
+  return {
+    card_id: "card-1",
+    task: { title: "Test card", description: "Do the thing" },
+    context: {
+      available: true,
+      prompt: "You are an engineer. Ship the thing.",
+      phase: "execute",
+      ship_mode: "direct",
+      impediment_question: null,
+      impediment_answer: null,
+      revisit_question: null,
+    },
+    files: {
+      available: true,
+      branch: "k-my-branch",
+      files: [{ path: "frontend/src/foo.tsx", insertions: 12, deletions: 3 }],
+      files_changed: 1,
+      insertions_total: 12,
+      deletions_total: 3,
+      note: null,
+    },
+    tests: {
+      available: true,
+      status: "clean",
+      iteration_count: 2,
+      last_line: "iter 2 | clean",
+      ci_url: "https://github.com/org/repo/pull/7",
+      note: null,
+    },
+    outcome: {
+      column: "Done",
+      outcome_text: "Shipped the Ledger tab.",
+      outcome_source: "summary",
+      model: "sonnet",
+      completed_at: "2026-07-18T12:00:00Z",
+    },
+    usage_url: "/api/v1/kanban/cards/card-1/usage",
+    ...overrides,
+  };
+}
+
+async function openLedgerTab() {
+  await act(async () => {
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Ledger" }));
+  });
+}
+
+describe("CardDrawer Ledger tab", () => {
+  it("renders the five-step spine from the run-ledger endpoint", async () => {
+    (kanbanApi.getRunLedger as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeLedger(),
+    );
+
+    render(
+      <CardDrawerWithRouter
+        card={baseCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await openLedgerTab();
+
+    const timeline = await screen.findByTestId("ledger-timeline");
+    expect(timeline).not.toBeNull();
+    // Step headers.
+    expect(timeline.textContent).toMatch(/Task/);
+    expect(timeline.textContent).toMatch(/Context/);
+    expect(timeline.textContent).toMatch(/Files/);
+    expect(timeline.textContent).toMatch(/Tests/);
+    expect(timeline.textContent).toMatch(/Outcome & model/);
+    // Concrete data from the stitched sources.
+    expect(screen.getByTestId("ledger-context-phase").textContent).toMatch(/execute/);
+    expect(screen.getByTestId("ledger-files").textContent).toMatch(/frontend\/src\/foo\.tsx/);
+    expect(screen.getByTestId("ledger-tests-status").textContent).toMatch(/clean/);
+    expect(screen.getByTestId("ledger-outcome-column").textContent).toMatch(/Done/);
+    expect(timeline.textContent).toMatch(/model:/);
+    expect(timeline.textContent).toMatch(/sonnet/);
+  });
+
+  it("renders per-step empty/note states without crashing when sources are missing", async () => {
+    (kanbanApi.getRunLedger as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeLedger({
+        context: {
+          available: false,
+          prompt: null,
+          phase: null,
+          ship_mode: null,
+          impediment_question: null,
+          impediment_answer: null,
+          revisit_question: null,
+        },
+        files: {
+          available: false,
+          branch: null,
+          files: [],
+          files_changed: 0,
+          insertions_total: 0,
+          deletions_total: 0,
+          note: "no branch deliverable yet",
+        },
+        tests: {
+          available: false,
+          status: null,
+          iteration_count: null,
+          last_line: null,
+          ci_url: null,
+          note: "no iteration-loop progress file found",
+        },
+        outcome: {
+          column: "Backlog",
+          outcome_text: null,
+          outcome_source: null,
+          model: null,
+          completed_at: null,
+        },
+      }),
+    );
+
+    render(
+      <CardDrawerWithRouter
+        card={baseCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await openLedgerTab();
+
+    const timeline = await screen.findByTestId("ledger-timeline");
+    // The note strings surface as the per-step empty states; nothing throws.
+    expect(timeline.textContent).toMatch(/no branch deliverable yet/);
+    expect(timeline.textContent).toMatch(/no iteration-loop progress file found/);
+    expect(timeline.textContent).toMatch(/No dispatch context yet/);
+    expect(timeline.textContent).toMatch(/No outcome recorded yet/);
+    // The unavailable steps must not render their data tables.
+    expect(screen.queryByTestId("ledger-files")).toBeNull();
+  });
+
+  it("links to the Tokens tab from the outcome step instead of re-rendering tokens", async () => {
+    (kanbanApi.getRunLedger as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeLedger(),
+    );
+
+    render(
+      <CardDrawerWithRouter
+        card={baseCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await openLedgerTab();
+
+    const tokensLink = await screen.findByTestId("ledger-link-tokens");
+    await act(async () => {
+      fireEvent.click(tokensLink);
+    });
+
+    // The drawer switches the active tab to Tokens (controlled Tabs).
+    await waitFor(() =>
+      expect(
+        screen.getByRole("tab", { name: "Tokens" }).getAttribute("aria-selected"),
+      ).toBe("true"),
+    );
+  });
+
+  it("only offers the transcript link when the card has an agent run session", async () => {
+    (kanbanApi.getRunLedger as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeLedger(),
+    );
+
+    // No claimed_by → no runSession → no Run tab, and no transcript link.
+    render(
+      <CardDrawerWithRouter
+        card={baseCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await openLedgerTab();
+    await screen.findByTestId("ledger-timeline");
+    expect(screen.queryByTestId("ledger-link-run")).toBeNull();
+  });
+
+  it("offers the transcript link for a card with an active agent session", async () => {
+    (kanbanApi.getRunLedger as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeLedger(),
+    );
+
+    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
+    render(
+      <CardDrawerWithRouter
+        card={agentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // A run session defaults the drawer to the Run tab — switch to Ledger.
+    await openLedgerTab();
+    const runLink = await screen.findByTestId("ledger-link-run");
+    expect(runLink).not.toBeNull();
   });
 });
