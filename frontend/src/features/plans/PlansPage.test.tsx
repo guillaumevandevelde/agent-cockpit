@@ -62,12 +62,6 @@ vi.mock('@/hooks/usePlansApi', () => ({
       modified_at: '2026-07-17T00:00:00Z',
       size_bytes: 100,
     })),
-    getStats: vi.fn(async () => ({
-      total_plans: 0,
-      oldest_date: null,
-      newest_date: null,
-      total_size_bytes: 0,
-    })),
   }),
 }))
 
@@ -188,7 +182,6 @@ describe('PlansPage aggregator rendering', () => {
           docs: [],
         })),
         getDocContent: vi.fn(),
-        getStats: vi.fn(),
       }),
     }))
     const { PlansPage: EmptyPlansPage } = await import('./PlansPage')

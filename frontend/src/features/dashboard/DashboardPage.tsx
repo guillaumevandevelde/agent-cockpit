@@ -291,7 +291,7 @@ export function DashboardPage() {
             </CardHeader>
             <CardContent>
               <p className="text-xs text-muted-foreground">
-                {isCodex ? 'Codex update_plan snapshots' : 'Execution plans'}
+                {isCodex ? 'Codex update_plan snapshots' : 'Plan deliverables & spec docs'}
               </p>
               <Button
                 variant="link"

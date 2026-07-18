@@ -33,6 +33,9 @@ import type {
   CodexMcpInventoryResponse,
   CodexPluginInventoryResponse,
 } from '@/types/providers';
+import type { PlansOverviewResponse } from '@/types/plans';
+
+const EMPTY_PLANS_OVERVIEW: PlansOverviewResponse = { project_key: '', cards: [], docs: [] };
 
 export interface DashboardStats {
   providerId: AgenticCliId;
@@ -113,7 +116,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const { selectedProviderId, selectedProvider } = useProviderContext();
   const { getDashboardStats } = useSessionsApi();
   const { getActiveSessions } = useContextApi();
-  const { getStats: getPlanStats } = usePlansApi();
+  const { getOverview: getPlansOverview } = usePlansApi();
 
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -142,7 +145,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           pluginsData,
           featuresData,
           bridgeSessionsData,
-          planStatsData,
+          plansOverviewData,
         ] = await Promise.all([
           safeFetch(
             apiClient<CodexConfigResponse>('codex-config'),
@@ -215,7 +218,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             'Codex live sessions unavailable',
             warnings,
           ),
-          getPlanStats().catch(() => ({ total_plans: 0 })),
+          getPlansOverview().catch(() => EMPTY_PLANS_OVERVIEW),
         ]);
 
         if (currentFetchId !== fetchId.current) return;
@@ -243,7 +246,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
           contextHighestPct: null,
           contextHighestProject: undefined,
           contextActiveCount: null,
-          planCount: planStatsData.total_plans,
+          planCount: plansOverviewData.cards.length + plansOverviewData.docs.length,
           featureFlagCount: featuresData.features.length,
           enabledFeatureFlagCount: featuresData.features.filter((feature) => feature.enabled).length,
           unsupportedFeatures: [
@@ -273,7 +276,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         outputStylesData,
         sessionStatsData,
         contextData,
-        planStatsData,
+        plansOverviewData,
       ] = await Promise.all([
         apiClient<MergedConfig>(buildEndpoint('config', params)),
         apiClient<MCPServerListResponse>(buildEndpoint('mcp/servers', params)),
@@ -286,7 +289,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         apiClient<OutputStyleListResponse>(buildEndpoint('output-styles', params)),
         getDashboardStats(),
         getActiveSessions().catch((): ActiveSessionsResponse => ({ sessions: [] })),
-        getPlanStats().catch(() => ({ total_plans: 0 })),
+        getPlansOverview().catch(() => EMPTY_PLANS_OVERVIEW),
       ]);
 
       // Guard against stale responses from rapid project switches
@@ -324,7 +327,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         contextHighestPct: highestCtx?.context_percentage ?? 0,
         contextHighestProject: highestCtx?.project_name,
         contextActiveCount: activeSessions.length,
-        planCount: planStatsData.total_plans,
+        planCount: plansOverviewData.cards.length + plansOverviewData.docs.length,
         featureFlagCount: null,
         enabledFeatureFlagCount: null,
         unsupportedFeatures: [],
@@ -340,7 +343,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
     }
   // getDashboardStats and getActiveSessions have stable refs (empty deps).
-  // getPlanStats changes with activeProject?.path and selectedProviderId; those are handled below.
+  // getPlansOverview changes with activeProject?.path and selectedProviderId; those are handled below.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProject?.path, selectedProvider?.display_name, selectedProviderId]);
 

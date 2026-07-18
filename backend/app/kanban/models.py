@@ -2,10 +2,6 @@
 - KanbanOp: append-only operation log (source of truth + activity feed).
 - KanbanCard / KanbanDeliverable: materialized, derived state for fast reads.
 - KanbanMeta: small key/value store (device_id, per-project flags).
-- KanbanPlan: first-class plans scoped to a project_key. Replaces the legacy
-  file-backed PlanService (see docs/cockpit/00-orientation.md §3-bomen-regel).
-  Pure CRUD table — no KanbanOp log because the JSONL-based plan/session
-  linking (get_plan_sessions) keeps working independently.
 """
 from datetime import UTC, datetime
 
@@ -16,7 +12,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -236,40 +231,3 @@ class KanbanWorkTypeMapping(KanbanBase):
     persona: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-
-
-class KanbanPlan(KanbanBase):
-    """First-class plan scoped to a project_key.
-
-    Replaces the legacy file-backed ``PlanService`` (see kanban card
-    727470a8 / docs/cockpit/00-orientation.md §3 *drie-bomen-regel*).
-    One row per (project_key, slug); uniqueness on the pair keeps the
-    migration script idempotent and the API's ``{filename}`` URL
-    unambiguous.
-
-    Distinct from ``KanbanDeliverable(kind='plan')`` — those are analyst
-    plan-attachments *on a card* (parent + child-card dependency wiring).
-    ``KanbanPlan`` is the project-level plan library: a project-scoped
-    replacement for ``~/.claude/plans/*.md``.
-    """
-    __tablename__ = "kanban_plans"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_key", "slug", name="uq_kanban_plans_project_slug",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    project_key: Mapped[str] = mapped_column(String(512), index=True)
-    slug: Mapped[str] = mapped_column(String(256), index=True)
-    title: Mapped[str] = mapped_column(String(512), default="")
-    content: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
-    )
-    # Mirrors KanbanCard.meta — reserved for integration data (spec-doc
-    # links, workflow provenance, …). Nullable so existing rows round-trip
-    # as null. Defaults to None so the API contract never returns the
-    # key back as an explicit null.
-    meta: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)

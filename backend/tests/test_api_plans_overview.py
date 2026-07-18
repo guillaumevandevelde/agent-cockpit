@@ -4,8 +4,8 @@ Kanban card 885d0b61 (Optie B, stap 1). The endpoint returns TWO
 independent sections: B = ``plan``/``plan_ref`` deliverables on cards
 scoped to ``project_key``, C = ``docs/cockpit/*.md`` filesystem index.
 No ``spec_doc`` join (that requires a producer for the anchor — separate
-analysis card bb1f61aa). The endpoint never touches ``kanban_plans``
-(table phase-out is a separate chore, kanban card 528c5ca2).
+analysis card bb1f61aa). The legacy ``kanban_plans`` table/CRUD it
+replaced was removed entirely (kanban card 528c5ca2).
 """
 import pytest
 import pytest_asyncio
@@ -346,41 +346,6 @@ async def test_overview_sections_are_independent(patched_project_key):
     assert calls["n"] == 1, "monkey-patch never reached the handler"
     assert body["docs"] == []
     assert any(row["card_id"] == card_id for row in body["cards"])
-
-
-# ---------------------------------------------------------------------------
-# `kanban_plans` is NOT touched by this endpoint
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_overview_does_not_read_kanban_plans(patched_project_key):
-    """Even with a populated ``kanban_plans`` row, the overview must not
-    surface it — the legacy A store is being phased out and the new
-    endpoint deliberately uses B+C only. Asserting this keeps the
-    staged phase-out honest (kanban card 528c5ca2).
-    """
-    from app.kanban.models import KanbanPlan
-
-    patched_project_key("/tmp/legacy", "git:overview-legacy")
-    async with KanbanSessionLocal() as s:
-        s.add(KanbanPlan(
-            id="plan-legacy", project_key="git:overview-legacy",
-            slug="legacy-plan",
-            title="Legacy", content="Body",
-        ))
-        await s.commit()
-
-    async with _client() as ac:
-        r = await ac.get("/api/v1/plans/overview", params={
-            "project_path": "/tmp/legacy",
-        })
-    body = r.json()
-    # The legacy row is invisible — neither as a card nor as a doc.
-    for row in body["cards"]:
-        assert "legacy-plan" not in row.get("ref", "")
-    for d in body["docs"]:
-        assert not d["path"].endswith("legacy-plan")
 
 
 # ---------------------------------------------------------------------------
