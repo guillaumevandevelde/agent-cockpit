@@ -198,9 +198,18 @@ Geen aparte communicatie-agent; geen prosa-kwaliteit-gate.
 
 | # | Kaart | id | work_type | depends_on |
 |---|---|---|---|---|
-| 1 | Render Done-summary (banner) als markdown i.p.v. platte `whitespace-pre-wrap` | `56ddf5a6…` | feature | — |
-| 2 | `writing-summaries`-skill (outcome-first template) + wire in ship-pad & personas | `9b5c43db…` | chore | kaart 1 |
-| 3 | Kaart-modal weergave: lees-first, minder schuifbalken (ontwerp-fork A vs B) | `624f7718…` | analysis | — |
+| 1 | Render Done-summary (banner) als markdown i.p.v. platte `whitespace-pre-wrap` | `56ddf5a6…` (nieuw) | feature | — |
+| 2 | Schrijfstijl-conventie / `writing-summaries`-skill (outcome-first) + wire in ship-pad & personas | `4358fe0a…` (bestaand, verrijkt) | chore | kaart 1 |
+| 3 | Kaart-modal weergave: lees-first, minder schuifbalken (ontwerp-fork A vs B) | `624f7718…` (nieuw) | analysis | — |
+
+**Dedup op kaart 2.** Een parallelle analyse
+(`docs/cockpit/product-owner-volgbaarheid-analyse.md`) had al een bijna
+identieke kaart `4358fe0a…` ("Product-taal-conventie voor Done-summaries &
+impediment-options") op Backlog gezet. In plaats van een duplicaat te laten
+staan (die bovendien dezelfde persona-prompts + `move_card`-guidance zou
+raken → merge-conflict) is de skill-mechaniek, de outcome-first-template, de
+"skill-geen-agent"- en "geen-prosa-gate"-beslissingen en het rendering-contract
+**in die bestaande kaart gevouwen** (comment + `depends_on`).
 
 **Waarom kaart 2 → kaart 1 wacht:** kaart 2 leert auteurs hun samenvatting in
 markdown te structureren; die output wordt pas leesbaar geconsumeerd zodra
