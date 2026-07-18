@@ -1,4 +1,4 @@
-import { apiClient } from "@/lib/api";
+import { apiAssetUrl, apiClient, apiUpload } from "@/lib/api";
 import type {
   Card,
   ActivityEntry,
@@ -251,6 +251,20 @@ export const kanbanApi = {
       method: "POST",
       body: JSON.stringify({ kind, ref }),
     }),
+
+  uploadAttachment: (id: string, file: File): Promise<Card> => {
+    const form = new FormData();
+    form.append("file", file);
+    return apiUpload<Card>(`${BASE}/cards/${id}/attachments`, form);
+  },
+
+  deleteAttachment: (id: string, attachmentId: string): Promise<Card> =>
+    apiClient<Card>(`${BASE}/cards/${id}/attachments/${attachmentId}`, {
+      method: "DELETE",
+    }),
+
+  attachmentUrl: (id: string, attachmentId: string): string =>
+    apiAssetUrl(`${BASE}/cards/${id}/attachments/${attachmentId}`),
 
   projectKey: (projectPath: string): Promise<{ project_key: string }> =>
     apiClient<{ project_key: string }>(

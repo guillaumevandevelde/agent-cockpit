@@ -127,6 +127,34 @@ export class ApiClient {
 
 export const api = new ApiClient()
 
+/**
+ * POST a multipart/form-data body (e.g. a file upload). Unlike apiClient this
+ * never sets Content-Type — the browser adds it with the multipart boundary —
+ * while still carrying the API token when one is set.
+ */
+export async function apiUpload<T>(endpoint: string, formData: FormData): Promise<T> {
+  const url = `${API_BASE_URL}${endpoint}`
+  const headers = new Headers()
+  const token = getApiToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const response = await fetch(url, { method: 'POST', body: formData, headers })
+  if (!response.ok) {
+    const error: ApiError = await response.json().catch(() => ({
+      message: `HTTP ${response.status}: ${response.statusText}`,
+    }))
+    throw new Error(apiErrorMessage(error))
+  }
+  return response.json()
+}
+
+/** Absolute URL for a GET endpoint, with the API token appended when set —
+ * usable directly as an `<img src>` where the fetch-based auth retry can't run. */
+export function apiAssetUrl(endpoint: string): string {
+  const query = apiTokenQuery()
+  return `${API_BASE_URL}${endpoint}${query ? `?${query}` : ''}`
+}
+
 // Helper function for simpler API calls
 export async function apiClient<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`

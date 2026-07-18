@@ -108,7 +108,10 @@ async def list_cards(
         .order_by(KanbanCard.rank.asc())
     )
     if not compact:
-        stmt = stmt.options(selectinload(KanbanCard.deliverables))
+        stmt = stmt.options(
+            selectinload(KanbanCard.deliverables),
+            selectinload(KanbanCard.attachments),
+        )
     if column is not None:
         stmt = stmt.where(KanbanCard.column == column)
     rows = list((await session.execute(stmt)).scalars().all())
@@ -144,7 +147,10 @@ async def get_card(session, card_id: str):
     stmt = (
         select(KanbanCard)
         .where(KanbanCard.id == card_id)
-        .options(selectinload(KanbanCard.deliverables))
+        .options(
+            selectinload(KanbanCard.deliverables),
+            selectinload(KanbanCard.attachments),
+        )
     )
     return (await session.execute(stmt)).scalar_one_or_none()
 

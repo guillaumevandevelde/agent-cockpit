@@ -18,7 +18,14 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, select, update
 
 from app.kanban.hlc import HLC, hlc_max
-from app.kanban.models import KanbanCard, KanbanDeliverable, KanbanGate, KanbanMeta, KanbanOp
+from app.kanban.models import (
+    KanbanAttachment,
+    KanbanCard,
+    KanbanDeliverable,
+    KanbanGate,
+    KanbanMeta,
+    KanbanOp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +383,9 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 delete(KanbanDeliverable).where(KanbanDeliverable.card_id == entity_id)
             )
             await session.execute(
+                delete(KanbanAttachment).where(KanbanAttachment.card_id == entity_id)
+            )
+            await session.execute(
                 delete(KanbanGate).where(KanbanGate.card_id == entity_id)
             )
             await session.delete(card)
@@ -448,6 +458,23 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             card.depends_on = payload["depends_on"]
             await session.flush()
         return
+    if entity_type == "attachment" and op_type == "attach":
+        session.add(KanbanAttachment(
+            id=payload["id"], card_id=entity_id,
+            filename=payload.get("filename") or "",
+            mime_type=payload.get("mime_type") or "",
+            size_bytes=payload.get("size_bytes") or 0,
+            storage_path=payload["storage_path"],
+        ))
+        await session.flush()
+        return
+    if entity_type == "attachment" and op_type == "detach":
+        await session.execute(
+            delete(KanbanAttachment)
+            .where(KanbanAttachment.card_id == entity_id)
+            .where(KanbanAttachment.id == payload["id"])
+        )
+        return
     # comment ops are pure log entries; nothing to materialize.
 
 
@@ -457,6 +484,7 @@ async def rematerialize(session) -> None:
     swallowed here so an already-owned card keeps its first claimant.
     """
     from sqlalchemy import delete
+    await session.execute(delete(KanbanAttachment))
     await session.execute(delete(KanbanDeliverable))
     await session.execute(delete(KanbanCard))
     await session.flush()

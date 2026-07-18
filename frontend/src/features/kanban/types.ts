@@ -133,6 +133,14 @@ export interface Deliverable {
   created_at: string;
 }
 
+export interface Attachment {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+}
+
 export interface PlanAttachmentPayload {
   parent_card_id: string;
   plan_deliverable_id: string;
@@ -196,6 +204,10 @@ export interface Card {
   // spec-driven-development Fase 1 card→spec link lives at `metadata[SPEC_DOC_META_KEY]`.
   metadata?: Record<string, unknown> | null;
   deliverables: Deliverable[];
+  // Screenshots/images attached to the card. Injected (by absolute path) into
+  // the dispatch prompt so the spawned session can Read them. Optional so
+  // responses from older clients / summary endpoints round-trip.
+  attachments?: Attachment[];
 }
 
 // Machine-readable card → spec-doc link key inside `Card.metadata`. Mirrors the

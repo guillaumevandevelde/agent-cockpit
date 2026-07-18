@@ -56,6 +56,15 @@ class DeliverableResponse(BaseModel):
     created_at: datetime
 
 
+class AttachmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    created_at: datetime
+
+
 class CardUsageModelBreakdown(BaseModel):
     """Per-model token totals — mirrors the breakdown shape used by
     `/api/v1/usage/sessions` so the frontend can reuse the existing
@@ -242,6 +251,10 @@ class CardResponse(BaseModel):
         default=None, validation_alias=AliasChoices("meta", "metadata"),
     )
     deliverables: list[DeliverableResponse] = []
+    # Screenshots/images attached to the card and injected (by absolute path)
+    # into the dispatch prompt so the spawned session can Read them. Populated
+    # from the eager-loaded KanbanCard.attachments relationship.
+    attachments: list[AttachmentResponse] = []
     # Enrichment derived from the op-log at request time: the summary text
     # + timestamp of the most recent "**Summary:** ..." comment op on this
     # card (the comment that mcp_server.move_card posts when a card lands

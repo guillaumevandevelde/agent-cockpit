@@ -957,6 +957,32 @@ def extract_revisit_question(activity) -> str | None:
     return None
 
 
+def _build_attachments_section(card) -> str:
+    """Render the ``## Screenshots`` section listing each attachment's absolute
+    on-disk path, so the spawned session can open them with its ``Read`` tool
+    (Claude Code's Read renders images). Empty string when the card carries no
+    attachments — every legacy card round-trips unchanged.
+
+    Reads ``card.attachments`` defensively (``getattr``) so unit tests can pass
+    a lightweight card stub without the ORM relationship.
+    """
+    attachments = getattr(card, "attachments", None) or []
+    if not attachments:
+        return ""
+    lines = ["\n## Screenshots\n",
+             "The human attached the following image(s) to this card. Use your "
+             "`Read` tool on each absolute path to view them — they carry "
+             "context for the task:\n"]
+    for att in attachments:
+        path = getattr(att, "storage_path", "") or ""
+        if not path:
+            continue
+        filename = getattr(att, "filename", "") or "attachment"
+        lines.append(f"- `{path}` ({filename})")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       phase: str = "executor",
                       impediment_question: str | None = None,
@@ -1044,6 +1070,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
     problem_flag_instructions = _build_problem_flag_instructions()
     mcp_fallback_instructions = _build_mcp_fallback_instructions()
     worktree_safety_callout = _build_worktree_safety_callout()
+    attachments_section = _build_attachments_section(card)
 
     return (
         f"{preamble}"
@@ -1052,6 +1079,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         f"Host card id: {getattr(card, 'id', '') or ''}\n"
         f"# {card.title}\n"
         f"{getattr(card, 'description', '') or ''}\n"
+        f"{attachments_section}"
         f"{impediment_section}\n"
         f"{revisit_section}\n"
         f"Ship mode: {ship_mode}\n\n"
