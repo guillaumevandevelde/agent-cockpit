@@ -388,7 +388,11 @@ async def test_move_analysis_card_to_done_decomposed_without_children_is_rejecte
 @pytest.mark.asyncio
 async def test_move_analysis_card_to_done_decomposed_with_children_is_allowed():
     """`decomposed` with ≥1 child is the happy path — the children are the
-    proof of work, no extra label is set (the children are the artefact)."""
+    proof of work, no extra label is set (the children are the artefact).
+
+    The parent lands in `Awaiting Subtasks`, not `Done` — it parks until
+    every child reaches Done (decision doc §3/§6: `decomposed` is by
+    definition "has children", which is exactly the parking condition)."""
     parent = (await m.create_card("P", "analyse", "",
                                    work_type="analysis", confirm_new_project=True))["id"]
     # Create a child card pointing back at the parent.
@@ -397,7 +401,7 @@ async def test_move_analysis_card_to_done_decomposed_with_children_is_allowed():
     result = await m.move_card(parent, "Done",
                                 summary="split into subtasks",
                                 outcome="decomposed")
-    assert result["column"] == "Done"
+    assert result["column"] == "Awaiting Subtasks"
     # No label is set for `decomposed`; children themselves are the proof.
     assert "not-feasible" not in (result.get("labels") or [])
     assert "no-action-needed" not in (result.get("labels") or [])
@@ -494,6 +498,89 @@ async def test_move_card_to_other_columns_ignores_outcome():
     cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     moved = await m.move_card(cid, "Doing", outcome="decomposed")
     assert moved["column"] == "Doing"
+
+
+# --- Awaiting Subtasks parent-parking (analyse-levenscyclus-decision §3) --
+#
+# Parent-generic: the condition is "has ≥1 child card", not work_type ==
+# 'analysis'. Shares the interception point with the outcome gate above.
+
+@pytest.mark.asyncio
+async def test_move_card_with_children_parks_in_awaiting_subtasks():
+    """Any card (not just analysis) with ≥1 child parks instead of
+    reaching Done — the parent-generic rule from §3.1."""
+    parent = (await m.create_card("P", "feature", "",
+                                   work_type="feature", confirm_new_project=True))["id"]
+    await m.create_card("P", "child", "", parent_card_id=parent, confirm_new_project=True)
+    result = await m.move_card(parent, "Done", summary="shipped the parent piece")
+    assert result["column"] == "Awaiting Subtasks"
+
+
+@pytest.mark.asyncio
+async def test_move_card_without_children_goes_directly_to_done():
+    """Zero children is the majority case — nothing to park for, so the
+    move lands in Done as before."""
+    cid = (await m.create_card("P", "feature", "",
+                                work_type="feature", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Done", summary="shipped it")
+    assert result["column"] == "Done"
+
+
+@pytest.mark.asyncio
+async def test_parent_auto_closes_when_last_child_reaches_done():
+    """Once every sibling is Done, the parent moves itself from Awaiting
+    Subtasks to Done with a **Summary:** comment (§3.2) — no separate
+    move_card call on the parent is needed."""
+    parent = (await m.create_card("P", "analyse", "",
+                                   work_type="analysis", confirm_new_project=True))["id"]
+    child1 = (await m.create_card("P", "child1", "",
+                                   parent_card_id=parent, confirm_new_project=True))["id"]
+    child2 = (await m.create_card("P", "child2", "",
+                                   parent_card_id=parent, confirm_new_project=True))["id"]
+    await m.move_card(parent, "Done", summary="split into subtasks", outcome="decomposed")
+    assert (await m.get_card(parent))["column"] == "Awaiting Subtasks"
+
+    await m.move_card(child1, "Done", summary="child1 done")
+    assert (await m.get_card(parent))["column"] == "Awaiting Subtasks", (
+        "one sibling still pending — parent must stay parked"
+    )
+
+    await m.move_card(child2, "Done", summary="child2 done")
+    assert (await m.get_card(parent))["column"] == "Done"
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.service import card_activity
+
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, parent)
+    # The parent's own move_card(Done) already posted a plain "**Summary:**
+    # split into subtasks" comment (label keyed on the *requested* column,
+    # unaffected by the park redirect) — the auto-close posts a second,
+    # distinctly-worded one, so match on its specific text.
+    auto_close_comments = [
+        o for o in ops
+        if o.op_type == "comment"
+        and "auto-closed from Awaiting Subtasks" in (o.payload.get("text") or "")
+    ]
+    assert len(auto_close_comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_parent_stays_parked_while_one_child_impeded():
+    """A sibling that lands in Impediment (not Done) keeps the parent
+    parked forever, by design (§3.2) — a human has to intervene."""
+    parent = (await m.create_card("P", "analyse", "",
+                                   work_type="analysis", confirm_new_project=True))["id"]
+    child1 = (await m.create_card("P", "child1", "",
+                                   parent_card_id=parent, confirm_new_project=True))["id"]
+    child2 = (await m.create_card("P", "child2", "",
+                                   parent_card_id=parent, confirm_new_project=True))["id"]
+    await m.move_card(parent, "Done", summary="split into subtasks", outcome="decomposed")
+
+    await m.move_card(child1, "Done", summary="child1 done")
+    await m.move_card(child2, "Impediment", summary="stuck, needs a human")
+
+    assert (await m.get_card(parent))["column"] == "Awaiting Subtasks"
 
 
 # --- resolve_project_key: MCP-only path to the real board key, so agents ---

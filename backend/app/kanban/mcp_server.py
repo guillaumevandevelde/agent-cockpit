@@ -332,6 +332,13 @@ async def move_card(card_id: str, column: str,
     cards — `outcome` is ignored unless both the column is `Done` and
     `service.is_analyst_leaf_spike(card)` is true. See
     `docs/cockpit/analysis-outcome-contract-decision.md` for the rationale.
+
+    Parent-parking: any card (not just analysis cards) moving to `Done`
+    while it has ≥1 child card (`parent_card_id == card.id`) lands in
+    `Awaiting Subtasks` instead — the returned `column` reflects that. It
+    auto-closes to `Done` once every child card reaches `Done`, which also
+    walks up a chain of nested parents. See
+    `docs/cockpit/analyse-levenscyclus-decision.md` §3.
     """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
@@ -409,8 +416,21 @@ async def move_card(card_id: str, column: str,
                         ),
                     }
 
+        # Parent-parking (docs/cockpit/analyse-levenscyclus-decision.md §3):
+        # a Done move for a card with ≥1 child doesn't actually leave the
+        # board — it parks in `Awaiting Subtasks` until every child reaches
+        # Done. Parent-generic (§3.1: "heeft kinderen", not
+        # work_type=='analysis') and shares this interception point with
+        # the outcome gate above (§6) — outcome='decomposed' already
+        # verified ≥1 child exists, so that path always redirects here too.
+        final_column = column
+        if column == "Done" and await service.card_has_children(s, card_id):
+            final_column = "Awaiting Subtasks"
+            if card.project_key:
+                await service.ensure_awaiting_subtasks_column(s, card.project_key)
+
         await apply_operation(s, op_type="move", entity_type="card",
-            project_key="", entity_id=card_id, payload={"column": column})
+            project_key="", entity_id=card_id, payload={"column": final_column})
         if label:
             await apply_operation(s, op_type="comment", entity_type="comment",
                 project_key="", entity_id=card_id,
@@ -434,8 +454,21 @@ async def move_card(card_id: str, column: str,
             await apply_operation(s, op_type="comment", entity_type="comment",
                 project_key="", entity_id=card_id,
                 payload={"text": f"**Outcome:** {outcome_clean} — {summary}"})
+
+        # Auto-close (§3.2): this card actually reached Done (not parked) —
+        # if it's someone's child, check whether that parent can now close
+        # too, and walk up the chain for nested decomposition.
+        if final_column == "Done" and card.parent_card_id:
+            pid = card.parent_card_id
+            while pid:
+                closed = await service.close_parent_if_all_children_done(s, pid)
+                if not closed:
+                    break
+                grandparent = await s.get(KanbanCard, pid)
+                pid = grandparent.parent_card_id if grandparent else None
+
         await s.commit()
-        logger.info("move_card: %s → %s", card_id, column)
+        logger.info("move_card: %s → %s", card_id, final_column)
         return await _card_dict(s, await service.get_card(s, card_id))
 
 

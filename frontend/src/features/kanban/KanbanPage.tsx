@@ -22,7 +22,7 @@ import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
-const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Done", "To Resume"]);
+const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]);
 const DISPATCH_COLUMNS = new Set(["Backlog", "To Resume"]);
 const POLL_INTERVAL_MS = 5000;
 const AGENT_CLAIM_PREFIX = "agent:";

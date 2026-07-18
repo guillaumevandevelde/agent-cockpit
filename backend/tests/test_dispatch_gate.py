@@ -126,6 +126,23 @@ def test_next_card_independent_of_depends_on():
     assert _next_card([gated]) is None
 
 
+# ---- _next_card: fixed columns (incl. Awaiting Subtasks) are never --------
+# ---- auto-dispatched (analyse-levenscyclus-decision.md §3, AC4) ----------
+
+
+def test_next_card_skips_card_parked_in_awaiting_subtasks():
+    """A parent parked in `Awaiting Subtasks` must never be re-dispatched —
+    it's a fixed column (`COLUMNS`), not in `_DISPATCH_COLUMNS`, and it's
+    also excluded from the orphan fallback (`column not in COLUMNS`)."""
+    from app.kanban.schemas import COLUMNS
+
+    assert "Awaiting Subtasks" in COLUMNS
+    assert "Awaiting Subtasks" not in dispatch._DISPATCH_COLUMNS
+
+    card = _FakeCard(column="Awaiting Subtasks")
+    assert _next_card([card]) is None
+
+
 # ---- dispatch_project: end-to-end with stub _run_card -------------------
 
 @pytest.mark.asyncio

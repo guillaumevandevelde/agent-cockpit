@@ -631,6 +631,74 @@ async def ensure_analyst_column(session, project_key: str) -> bool:
     return True
 
 
+async def ensure_awaiting_subtasks_column(session, project_key: str) -> bool:
+    """Idempotent: create the 'Awaiting Subtasks' kanban_columns row for
+    this project if one doesn't already exist. Returns True iff a new
+    column was created.
+
+    Called lazily from the move_card parking path (mcp_server.move_card)
+    the first time a card actually parks there, so projects that enabled
+    kanban before this column existed still render it — mirrors
+    `ensure_analyst_column`/`ensure_intake_column`. Rank net vóór `Done`
+    (docs/cockpit/analyse-levenscyclus-decision.md §3).
+    """
+    existing = await list_columns(session, project_key)
+    if any(c.name == "Awaiting Subtasks" for c in existing):
+        return False
+    from app.kanban.schemas import COLUMNS
+    done_rank = "9999"
+    for col in existing:
+        if col.name == "Done":
+            done_rank = col.rank
+            break
+    rank = f"{int(done_rank) - 1:04d}" if done_rank != "9999" else f"0{len(COLUMNS):03d}"
+    await create_column(session, project_key, name="Awaiting Subtasks", rank=rank)
+    await session.flush()
+    return True
+
+
+async def card_has_children(session, card_id: str) -> bool:
+    """True if ≥1 card has `parent_card_id == card_id`, regardless of the
+    children's own column. Parent-generic — not gated on `work_type`
+    (decision doc §3.1)."""
+    count = (await session.execute(
+        select(func.count()).select_from(KanbanCard)
+        .where(KanbanCard.parent_card_id == card_id)
+    )).scalar_one()
+    return count > 0
+
+
+async def close_parent_if_all_children_done(session, parent_id: str) -> bool:
+    """If `parent_id` is currently parked in `Awaiting Subtasks` and every
+    card with `parent_card_id == parent_id` is now in `Done`, move the
+    parent to `Done` with a `**Summary:**` comment. Returns True iff the
+    parent was closed.
+
+    Only closes a parent that is actually parked — a parent still in an
+    agent column (analysis in progress) or in `Impediment` is left alone.
+    Callers walk the `parent_card_id` chain to handle nested decomposition
+    (a closed parent may itself be someone's child).
+    """
+    parent = await session.get(KanbanCard, parent_id)
+    if parent is None or parent.column != "Awaiting Subtasks":
+        return False
+    sibling_columns = (await session.execute(
+        select(KanbanCard.column).where(KanbanCard.parent_card_id == parent_id)
+    )).scalars().all()
+    if not sibling_columns or any(c != "Done" for c in sibling_columns):
+        return False
+    from app.kanban.operations import apply_operation
+    await apply_operation(session, op_type="move", entity_type="card",
+        project_key="", entity_id=parent_id, payload={"column": "Done"})
+    await apply_operation(session, op_type="comment", entity_type="comment",
+        project_key="", entity_id=parent_id,
+        payload={"text": (
+            "**Summary:** All subtasks reached Done — auto-closed from "
+            "Awaiting Subtasks."
+        )})
+    return True
+
+
 async def ensure_intake_column(session, project_key: str) -> bool:
     """Idempotent: create the 'intake' kanban_columns row for this project
     if one doesn't already exist. Returns True iff a new column was created.

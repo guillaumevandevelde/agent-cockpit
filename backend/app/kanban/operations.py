@@ -30,7 +30,18 @@ logger = logging.getLogger(__name__)
 # `release` op without a column change is intentionally NOT here — that
 # would silently kill in-flight work on every user-typed release from the
 # UI.
-_TERMINAL_CLEANUP_COLUMNS = frozenset({"Done", "Impediment"})
+#
+# `Awaiting Subtasks` is also here even though it's not a card-lifecycle
+# terminal state: a parent with children is redirected there ON its Done
+# move (mcp_server.move_card, docs/cockpit/analyse-levenscyclus-decision.md
+# §3) — the analyst/executor session that called move_card(Done) is still
+# exiting at that moment and needs its tmux session killed + worktree
+# removed + claim released exactly like a real Done, or every decomposed
+# parent leaks a live session. The later Awaiting Subtasks → Done auto-close
+# (service.close_parent_if_all_children_done) has old_column already in
+# this set, so cleanup correctly does NOT fire a second time — there's no
+# live session left on a parked card.
+_TERMINAL_CLEANUP_COLUMNS = frozenset({"Done", "Impediment", "Awaiting Subtasks"})
 
 # Circuit breaker for claim->release churn: a card that gets claimed and
 # released this many times in a row *without* ever landing on Done/Impediment
