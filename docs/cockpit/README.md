@@ -30,7 +30,7 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | **Kanban model-override** | [`kanban-model-override.md`](./kanban-model-override.md) | `specs/2026-07-10-kanban-model-override-design.md`, `plans/2026-07-10-kanban-model-override.md` |
 | **Multi-agent kanban** | [`multi-agent-kanban.md`](./multi-agent-kanban.md) | `specs/2026-07-08-multi-agent-kanban-design.md`, `plans/2026-07-08-multi-agent-kanban.md` |
 | **Agent Bridge (Runs)** | [`agent-bridge.md`](./agent-bridge.md) | `specs/2026-05-29-agent-bridge-bedrock-platform-design.md`, `specs/2026-06-12-agent-bridge-session-rename-design.md`, `specs/2026-06-12-resume-worktree-sessions-design.md`, `specs/2026-06-29-agent-bridge-image-paste-design.md` |
-| **Subscriptions-pagina** | [`subscriptions.md`](./subscriptions.md) | `specs/2026-07-04-minimax-providers-page-design.md`, `specs/2026-07-08-subscription-usage-leftover-design.md` |
+| **Subscriptions-pagina** | [`subscriptions.md`](./subscriptions.md) | `specs/2026-07-04-minimax-providers-page-design.md` ¹ |
 | **Abonnement-flexibiliteit (usage-aware routing)** | [`subscription-flexibiliteit-analyse.md`](./subscription-flexibiliteit-analyse.md) | — |
 | **Subscription-pool × dispatch × kolommen (bevindingen)** | [`subscription-pool-dispatch-analyse.md`](./subscription-pool-dispatch-analyse.md) | — |
 | **Skill stats** | [`skill-stats.md`](./skill-stats.md) | `specs/2026-06-27-skill-stats-design.md` |
@@ -44,6 +44,13 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | **Spec-driven development (SSOT)** | [`spec-driven-development-analysis.md`](./spec-driven-development-analysis.md) + [`spec-driven-development-fase-0-decision.md`](./spec-driven-development-fase-0-decision.md) | `specs/2026-07-05-code-drift-detection-design.md`, `plans/2026-07-05-code-drift-detection.md` |
 | **Work-type → routing** | [`work-type-routing-analysis.md`](./work-type-routing-analysis.md) | — |
 | **Sync / HLC-laag** | [`sync-hlc-freeze-vs-prune.md`](./sync-hlc-freeze-vs-prune.md) | — |
+
+> ¹ `specs/2026-07-08-subscription-usage-leftover-design.md` is **SUPERSEDED**
+> (kanban-card `64343a81…`, 2026-07-15) en staat niet meer als actieve
+> superpowers-tegenhanger in deze tabel — de cockpit-kant
+> ([`subscriptions.md`](./subscriptions.md), sectie *Per-provider usage / quota*)
+> is de geleverde, canonieke vorm. De spec is bewaard voor historische context;
+> raadpleeg het SUPERSEDED-banner bovenaan vóór je er tegen implementeert.
 
 ### Beslisdocumenten (ADR-achtig, geen feature-spec)
 

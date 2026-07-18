@@ -38,7 +38,12 @@ De MiniMax API-key Save/Change/Clear-form verhuisde uit de New-Session-dialog na
 
 ## Per-provider usage / quota
 
-**Superpowers-tegenhanger:** [`../superpowers/specs/2026-07-08-subscription-usage-leftover-design.md`](../superpowers/specs/2026-07-08-subscription-usage-leftover-design.md).
+> **Voorganger (SUPERSEDED 2026-07-15, kanban-card `64343a81…`):**
+> [`../superpowers/specs/2026-07-08-subscription-usage-leftover-design.md`](../superpowers/specs/2026-07-08-subscription-usage-leftover-design.md)
+> — het oorspronkelijke ontwerp is **niet** geïmplementeerd zoals gespecificeerd
+> (de `PeriodUsage` / `SubscriptionUsageSnapshot`-dataclasses en de
+> `subscription_prefs`-tabel die het beschrijft bestaan niet). Deze sectie is de
+> canonieke, geleverde vorm; raadpleeg de spec alleen voor historische context.
 
 Doel: één scherm dat toont "hoeveel heb ik op elk abonnement over", zodat de gebruiker die
 twee abonnementen parallel draait (Anthropic + MiniMax) kan beslissen waar werk naartoe te
