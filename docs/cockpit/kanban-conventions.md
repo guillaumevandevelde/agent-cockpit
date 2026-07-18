@@ -300,6 +300,65 @@ parallelisme niet actief voor overlappende kaarten, de discipline
 zit aan de analyst-/curator-kant bij het opstellen van de
 `depends_on_graph`.
 
+## 4c. Doc SUPERSEDED = banner + cross-ref audit (before you ship)
+
+Een **SUPERSEDED-banner** bovenaan een `docs/cockpit/*.md` of
+`docs/superpowers/{plans,specs}/*.md`-doc markeert dat de gearchiveerde tekst
+**niet meer de canonieke waarheid** is — maar de banner zelf bereikt alleen
+mensen die het bestand openen. Een toekomstige sessie die het bestand **niet**
+opent, maar het wel via een cross-ref (inhoudsopgave, "Superpowers-tegenhanger",
+promotie-ledger) als canoniek behandelt, krijgt de banner nooit te zien.
+
+**De volledige supersession is dus banner ∪ cross-ref-audit.** Een engineer-kaart
+die een doc SUPERSEDED markeert, doet vóór het shippen minimaal:
+
+1. **Vind alle cross-refs** op de **basenaam** van het stale doc (niet op de
+   hele pad-string — de basenaam is stabieler):
+
+   ```bash
+   basename=$(basename <stale-doc-path>)      # bv. 2026-07-08-subscription-usage-leftover-design.md
+   grep -rn "$basename" docs/ backend/ frontend/ \
+     --include='*.md' --include='*.sh' --include='*.py' --include='*.ts' --include='*.tsx'
+   ```
+
+2. **Voor elke hit** kies één van drie acties en leg 'm vast:
+
+   | Cross-ref-categorie | Actie |
+   |---|---|
+   | Live feature-sectie die de stale doc als "Superpowers-tegenhanger" / ontwerp-referentie linkt | **Vervang** de framing — geen "tegenhanger" meer, maar "Voorganger (SUPERSEDED <datum>, kanban-card `<id>`)" met uitleg welke canonieke sectie de rol heeft overgenomen. |
+   | Index-bestand (`docs/cockpit/README.md`, `docs/superpowers/README.md`) dat de stale doc als actieve tegenhanger of "✅ gepromoot" rij vermeldt | **Verwijder** uit de actieve lijst en zet 'm als footnote / `⚠️ superseded`-rij terug met link naar het canonieke doeldoc. `docs/superpowers/README.md` heeft hiervoor zelfs een aparte `⚠️ superseded`-status in de promotie-ledger-legend (toegevoegd 2026-07-17 in dezelfde PR). |
+   | Andere doc die de stale doc historisch noemt | Laat staan, of pas aan als de context misleidend wordt — discretionair. |
+
+3. **Verifieer** met dezelfde grep dat er geen resterende "counterpart"/"tegenhanger"-framing meer op de stale doc staat. Een cross-ref-overzicht zoals hieronder is het eindresultaat — *precies drie hits, alle drie expliciet "SUPERSEDED"*: `docs/cockpit/subscriptions.md` (sectie-opening als Voorganger), `docs/cockpit/README.md` (footnote), `docs/superpowers/README.md` (ledger-rij met `⚠️ superseded`).
+
+**Voorbeeld uit de praktijk** (kanban-card `a495f2ce…`, 2026-07-17): de
+supersession van `2026-07-08-subscription-usage-leftover-design.md` +
+`-plan.md` door de simpeler `SubscriptionUsage` + `get_usage()`-vorm in
+`backend/app/services/subscriptions/base.py` verving drie downstream-refs die
+de stale doc nog als canonieke superpowers-tegenhanger / actieve ledger-rij
+voorstelden — alle drie moesten op de hierboven beschreven manier worden
+bijgewerkt. Zonder deze stap had een toekomstige sessie via
+`docs/cockpit/README.md` of `docs/cockpit/subscriptions.md` nog steeds naar
+het stale doc kunnen klikken, de banner zien, en zich afvragen waarom de
+cockpit-kant het nog als "tegenhanger" behandelt.
+
+**Wanneer NIET van toepassing:**
+
+- De doc was **helemaal nooit** gelinkt (alleen in eigen prompts /
+  git-history). Banner alleen is voldoende; geen cross-refs om te updaten.
+- De cross-ref-update is **niet in deze PR** te rijgen — zet dan een
+  vervolgkaart op Backlog (prefix `[self-improve]`) met de drie
+  `file:line`-coördinaten, zodat de supersession niet half-shipt. Half-ships
+  zijn erger dan een banner-only: ze misleiden actief over de canonieke
+  waarheid.
+
+**Geen geautomatiseerde check** (bewust, vooralsnog): de cross-ref-categorieën
+hierboven zijn tekstueel en vragen om een lees-beslissing per hit — een
+`check-doc-supersession-crossrefs.sh` zou of vals-positieve hits genereren
+(commentaar, banner-citaten, git-history) of een te smal patroon hebben. De
+handmatige grep + drie-categorieën-tabel is sneller dan het schrijven van de
+checker en blijft auditeerbaar in de PR-diff.
+
 ## 4. Bron van waarheid — waar lees je wat?
 
 | Vraag | Eerst hier kijken |

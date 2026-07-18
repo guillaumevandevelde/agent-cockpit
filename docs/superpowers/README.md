@@ -43,8 +43,11 @@ afgedwongen. Nu:
 ## Promotie-ledger
 
 Status: **✅ gepromoot** (canoniek doc bestaat / is opgenomen) · **⏳ pending** (werk kan
-geland zijn, maar nog geen canoniek `docs/cockpit/`-doc — nog te promoten). Sinds Fase 0b
-(2026-07-11) staat alles op ✅; nieuwe rijen beginnen ⏳ tot ze gepromoot zijn.
+geland zijn, maar nog geen canoniek `docs/cockpit/`-doc — nog te promoten) ·
+**⚠️ superseded** (het plan/spec is **niet** uitgevoerd zoals beschreven — de
+implementatie week af of het ontwerp werd nooit gevolgd; rij blijft staan voor
+historische context met een link naar de canonieke vervanging). Sinds Fase 0b
+(2026-07-11) staat alles op ✅ of ⚠️; nieuwe rijen beginnen ⏳ tot ze gepromoot zijn.
 
 | Taak | Plan-file (`plans/`) | Spec-file (`specs/`) | Status | Canoniek doeldoc |
 |---|---|---|---|---|
@@ -65,7 +68,7 @@ geland zijn, maar nog geen canoniek `docs/cockpit/`-doc — nog te promoten). Si
 | Code drift detection | `2026-07-05-code-drift-detection.md` | `2026-07-05-code-drift-detection-design.md` | ✅ gepromoot | `cockpit/spec-driven-development-analysis.md` (CI/drift-signaal, Fase 2) |
 | Agent Mail | `2026-07-08-agent-mail-implementation.md` | — | ✅ gepromoot | `cockpit/agent-mail-spec.md` |
 | Multi-agent kanban | `2026-07-08-multi-agent-kanban.md` | `2026-07-08-multi-agent-kanban-design.md` | ✅ gepromoot | `cockpit/multi-agent-kanban.md` |
-| Subscription usage leftover | `2026-07-08-subscription-usage-leftover-plan.md` | `2026-07-08-subscription-usage-leftover-design.md` | ✅ gepromoot | `cockpit/subscriptions.md` (Per-provider usage/quota) |
+| Subscription usage leftover | `2026-07-08-subscription-usage-leftover-plan.md` | `2026-07-08-subscription-usage-leftover-design.md` | ⚠️ superseded | `cockpit/subscriptions.md` (Per-provider usage/quota) — implementatie week af; zie de SUPERSEDED-banner bovenaan `plans/.../subscription-usage-leftover-plan.md` |
 | Kanban model override | `2026-07-10-kanban-model-override.md` | `2026-07-10-kanban-model-override-design.md` | ✅ gepromoot | `cockpit/kanban-model-override.md` |
 | Settings-gap update | — | `2026-04-10-settings-gap-update-design.md` | ✅ gepromoot | opgenomen in `CLAUDE.md` (Config-feature)¹ |
 
