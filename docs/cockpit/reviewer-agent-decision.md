@@ -296,6 +296,25 @@ voor álle kaarten**, met de doorvoer-kost geaccepteerd.
    niet de reviewer opnieuw tegen ongewijzigde code. Daarna komt de kaart bij
    de volgende Done opnieuw langs de reviewer. Gesloten lus.
 
+### Waar "bord-afgedwongen" precies op slaat
+
+De gate zit op het **agent-pad**: `mcp_server.move_card`, de tool die elke
+gedispatchte engineer (en de git-ship-flow) gebruikt om een kaart naar Done te
+bewegen. Een engineer kan de reviewer daardoor **niet via zijn normale
+gereedschap overslaan** — precies de eis uit het impediment-antwoord ("engineer
+kan 'm niet zelf overslaan"). Dit is consistent met élke andere
+workflow-gate in dit project: de analyse-outcome-poort, de parent-parking en
+de summary-verplichting zitten óók uitsluitend op `mcp_server.move_card`, niet
+op de dunne REST-move (`POST /cards/{cid}/move`, `router.py`). Die REST-move is
+bewust een **rauw menselijk override-oppervlak** — een mens die een kaart in de
+UI naar Done sleept, omzeilt (net als bij alle bovengenoemde poorten) de
+agent-workflow-gates. Wil je die override óók dichttimmeren, dan hoort de
+redirect-beslissing in een gedeelde `service`-helper die beide move-ingangen
+aanroepen — dat is een groter, apart stuk (het raakt dan ook outcome-gate +
+parent-parking, die vandaag dezelfde MCP-only-conventie volgen). Buiten scope
+van deze kaart; de gebruiker vroeg om engineer-onafhankelijkheid, niet om het
+blokkeren van zijn eigen handmatige bord-acties.
+
 ### Uitsluitingen (bewust)
 
 - **De reviewer zelf** (`agent == "reviewer"`) — anders een oneindige loop.
