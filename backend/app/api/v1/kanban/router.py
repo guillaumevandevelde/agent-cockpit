@@ -45,6 +45,7 @@ from app.kanban.schemas import (
     ReopenRequest,
     ReorderRequest,
     ReviewRequest,
+    RunLedger,
     SetGateRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
@@ -494,6 +495,28 @@ async def card_usage(cid: str):
                 for b in usage.model_breakdowns
             ],
         ).model_dump(mode="json")}
+
+
+@router.get("/cards/{cid}/run-ledger", response_model=RunLedger)
+async def card_run_ledger(cid: str):
+    """Per-card run ledger — the task → context → files → tests →
+    outcome+model spine stitched from existing durable sources, no new
+    data flow (docs/cockpit/run-ledger-decision.md, kanban card aa8158e3).
+
+    Every step is best-effort: a missing source (no branch deliverable
+    yet, a gc'd worktree, no iteration-loop run) yields an
+    `available=False` step with a `note`, never a 500 — same contract as
+    GET .../usage. 404 only when the card itself doesn't exist. Token
+    totals are NOT re-derived here — see the response's `usage_url`,
+    which points at the existing `/usage` endpoint.
+    """
+    from app.kanban import run_ledger_service
+
+    async with KanbanSessionLocal() as s:
+        ledger = await run_ledger_service.build_run_ledger(s, cid)
+        if ledger is None:
+            raise HTTPException(404, "card not found")
+        return ledger
 
 
 @router.patch("/cards/{cid}", response_model=CardResponse)
