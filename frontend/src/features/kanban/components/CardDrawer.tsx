@@ -41,6 +41,8 @@ import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
 import { CardTokensTab } from "./CardTokensTab";
 import { PreviewPane } from "./PreviewPane";
+import { ReadyStateBadge } from "./ReadyStateBadge";
+import type { CardMeta } from "./Column";
 import type { Card, ActivityEntry, Deliverable, Gate, RunInstance } from "../types";
 import { SPEC_DOC_META_KEY } from "../types";
 
@@ -866,17 +868,72 @@ function SpecLinkSection({ card, onChanged }: { card: Card; onChanged: () => voi
   );
 }
 
+// "Subtasks" section shown on a parent card with ≥1 child (`parent_card_id
+// === card.id`) — kanban card 81797046. Each row shows the child's title +
+// its `ReadyStateBadge`, reusing the precedence-derived `cardMeta` map
+// KanbanPage already computes for the board (not reimplemented here), and
+// is clickable to navigate the operator from parent to child via the
+// existing `?card=<id>` deep-link (same pattern as the "Parent plan" /
+// "Depends on" links in PlanTabContent below).
+function SubtasksSection({
+  childCards,
+  cardMeta,
+  onNavigate,
+}: {
+  childCards: Card[];
+  cardMeta?: Map<string, CardMeta>;
+  onNavigate: (cardId: string) => void;
+}) {
+  if (childCards.length === 0) return null;
+  return (
+    <div className="rounded-md border p-3 text-sm space-y-2" data-testid="subtasks-section">
+      <div className="text-xs font-semibold uppercase text-muted-foreground">
+        Subtasks
+      </div>
+      <div className="space-y-1">
+        {childCards.map((child) => {
+          const meta = cardMeta?.get(child.id);
+          return (
+            <button
+              key={child.id}
+              type="button"
+              onClick={() => onNavigate(child.id)}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="subtask-row"
+            >
+              <span className="truncate">{child.title}</span>
+              {meta?.readyState && (
+                <ReadyStateBadge state={meta.readyState} blockerTitles={meta.blockerTitles} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function CardDrawer({
   card,
   projectPath,
+  cards = [],
+  cardMeta,
   onClose,
   onChanged,
 }: {
   card: Card;
   projectPath: string;
+  // All cards for the current project (KanbanPage already loads them) —
+  // used to derive this card's children (`parent_card_id === card.id`) for
+  // the Subtasks section. No dedicated child-fetch/API-filter (AC4).
+  cards?: Card[];
+  // Precomputed ready-state map (KanbanPage's precedence derivation) reused
+  // for the Subtasks section's per-child ReadyStateBadge.
+  cardMeta?: Map<string, CardMeta>;
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const navigate = useNavigate();
   const { selectedProviderId, providers } = useProviderContext();
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [editing, setEditing] = useState(false);
@@ -1015,6 +1072,8 @@ export function CardDrawer({
   const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
   const isClaimedByHuman = card.claimed_by && !isClaimedByAgent;
 
+  const childCards = cards.filter((c) => c.parent_card_id === card.id);
+
   const remove = async (force = false) => {
     try {
       await kanbanApi.deleteCard(card.id, force);
@@ -1140,6 +1199,12 @@ export function CardDrawer({
         </div>
 
         <SpecLinkSection card={card} onChanged={onChanged} />
+
+        <SubtasksSection
+          childCards={childCards}
+          cardMeta={cardMeta}
+          onNavigate={(childId) => navigate(`?card=${childId}`)}
+        />
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Select value={card.agent ?? AUTO} onValueChange={setAgent}>

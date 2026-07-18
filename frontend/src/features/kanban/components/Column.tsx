@@ -8,6 +8,14 @@ export interface CardMeta {
   blockerTitles: string[];
 }
 
+// Per-parent subtask rollup (done/total counts among cards whose
+// `parent_card_id` matches the parent). Threaded down to CardItem for the
+// compact "N/M subtasks" counter — kanban card 81797046.
+export interface SubtaskSummary {
+  done: number;
+  total: number;
+}
+
 export function Column({
   column,
   kanbanColumn,
@@ -17,6 +25,7 @@ export function Column({
   onDragStartColumn,
   onDropColumn,
   cardMeta,
+  subtaskCounts,
   projectPath,
   onPromote,
 }: {
@@ -28,6 +37,7 @@ export function Column({
   onDragStartColumn?: (columnId: string) => void;
   onDropColumn?: (targetColumnId: string) => void;
   cardMeta?: Map<string, CardMeta>;
+  subtaskCounts?: Map<string, SubtaskSummary>;
   // Threaded down to CardItem so the dispatch_failed → Redispatch
   // quick-action can call kanbanApi.redispatch without bouncing through
   // the drawer. Optional for backwards compat with tests that don't care.
@@ -104,6 +114,7 @@ export function Column({
                 onOpen={onOpen}
                 readyState={meta?.readyState}
                 blockerTitles={meta?.blockerTitles}
+                subtasks={subtaskCounts?.get(c.id)}
                 projectPath={projectPath}
                 onPromote={onPromote}
               />

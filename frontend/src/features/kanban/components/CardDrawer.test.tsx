@@ -1314,3 +1314,110 @@ describe("CardDrawer Plan tab dead-link navigation", () => {
     expect(screen.getByTestId("location").textContent).toBe("/kanban?card=dep-11112222");
   });
 });
+
+// kanban card 81797046: the parent_card_id relation only rendered one
+// direction (child → parent) before this. These tests pin the new
+// child-listing view on the parent.
+describe("CardDrawer Subtasks section", () => {
+  it("renders nothing when the card has no children", () => {
+    render(
+      <CardDrawerWithRouter
+        card={baseCard}
+        projectPath="/proj"
+        cards={[baseCard]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("subtasks-section")).toBeNull();
+  });
+
+  it("lists each child's title with its ReadyStateBadge, reusing the supplied cardMeta", () => {
+    const parent: Card = { ...baseCard, id: "parent-1" };
+    const childReady: Card = {
+      ...baseCard,
+      id: "child-ready",
+      title: "Child A",
+      parent_card_id: "parent-1",
+      column: "Backlog",
+    };
+    const childDone: Card = {
+      ...baseCard,
+      id: "child-done",
+      title: "Child B",
+      parent_card_id: "parent-1",
+      column: "Done",
+    };
+
+    const cardMeta = new Map([
+      ["child-ready", { readyState: "ready" as const, blockerTitles: [] }],
+      ["child-done", { readyState: "completed" as const, blockerTitles: [] }],
+    ]);
+
+    render(
+      <CardDrawerWithRouter
+        card={parent}
+        projectPath="/proj"
+        cards={[parent, childReady, childDone]}
+        cardMeta={cardMeta}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const section = screen.getByTestId("subtasks-section");
+    expect(section.textContent).toMatch(/Child A/);
+    expect(section.textContent).toMatch(/Child B/);
+    expect(section.textContent).toMatch(/Ready/);
+    expect(section.textContent).toMatch(/Completed/);
+  });
+
+  it("navigates to the clicked child card via the ?card= deep-link", async () => {
+    const parent: Card = { ...baseCard, id: "parent-1" };
+    const child: Card = {
+      ...baseCard,
+      id: "child-1",
+      title: "Child card",
+      parent_card_id: "parent-1",
+    };
+
+    render(
+      <CardDrawerWithRouter
+        card={parent}
+        projectPath="/proj"
+        cards={[parent, child]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const childRow = screen.getByTestId("subtask-row");
+    await act(async () => {
+      fireEvent.click(childRow);
+    });
+
+    expect(screen.getByTestId("location").textContent).toBe("/kanban?card=child-1");
+  });
+
+  it("does not include cards belonging to a different parent", () => {
+    const parent: Card = { ...baseCard, id: "parent-1" };
+    const unrelated: Card = {
+      ...baseCard,
+      id: "other-child",
+      title: "Someone else's subtask",
+      parent_card_id: "parent-2",
+    };
+
+    render(
+      <CardDrawerWithRouter
+        card={parent}
+        projectPath="/proj"
+        cards={[parent, unrelated]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("subtasks-section")).toBeNull();
+  });
+});
