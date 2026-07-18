@@ -19,6 +19,18 @@ These came out of the final code review (2026-06-14). The merge-blockers were fi
 
 ## UX / polish
 
+- **R1 — reviewer gate reviewt in direct-ship-modus ná de merge.** De
+  onafhankelijke reviewer-kolom-gate (gebouwd 2026-07-18, kaart `b493d3eb…`,
+  `reviewer-agent-decision.md` § Iteratie 3) stuurt een afgeronde kaart naar de
+  `reviewer`-kolom vóór Done — maar in direct-ship-modus heeft de engineer al
+  naar `master` gemerged. De kaart bereikt Done pas na akkoord, maar de code
+  staat al op master; een afkeuring un-merget niet. Voor een échte pre-merge
+  gate: forceer pull-request-modus voor gegatede kaarten (PR blijft open tot de
+  reviewer akkoord geeft), óf laat de engineer in direct-modus committen op de
+  branch zonder te mergen en laat de reviewer bij akkoord de merge doen. Beide
+  raken de ship-flow (`_build_ship_instructions` + `git-ship` SKILL) en vielen
+  bewust buiten de bouw-kaart.
+
 - **M4 — rank reordering in the UI.** Backend supports `rank` (LWW) and `MoveRequest.rank`,
   but the board only sends `{column}` on drop, so within-column reordering is inert and
   cards always sort by create-time HLC. Wire drag-drop to compute and send a `rank`.

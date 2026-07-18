@@ -1,9 +1,11 @@
-# Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED)
+# Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)
 
-**Datum:** 2026-07-10
-**Status:** herzien
-**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
-**Uitkomst:** **Wél bouwen, in lichtere vorm** (REVISED): feature-compliance-review als subagent-call binnen dezelfde engineer-sessie vóór `move_card Done`. Geen aparte persona, geen Review-kolom.
+**Datum:** 2026-07-10 (iteratie 1 + 2), **2026-07-18 (iteratie 3 — gebouwd)**
+**Status:** herzien² — **beide lagen bestaan nu naast elkaar**
+**Kaart:** `b493d3eb172945cf99a3dd4468103e6b` (iteratie 3); 2026-07-10 zonder hex-id vastgelegd
+**Uitkomst (2026-07-18, autoritatief):** **Wél bouwen — de zwaardere vorm, bovenóp de FCR.** Een onafhankelijke `reviewer`-persona + een bord-afgedwongen review-kolom-gate waar **álle** kaarten (m.u.v. analyse en de reviewer zelf) langs moeten vóór Done. De 2026-07-10-uitkomst hieronder (lichte in-sessie FCR) blijft staan en actief; deze iteratie voegt de onafhankelijke gate eróver toe. Zie **§ Iteratie 3** onderaan.
+
+**Uitkomst (2026-07-10):** **Wél bouwen, in lichtere vorm**: feature-compliance-review als subagent-call binnen dezelfde engineer-sessie vóór `move_card Done`. Geen aparte persona, geen Review-kolom.
 
 > Kanban-kaart: "Onderzoek: reviewer-agent + review-kolom — is dit wenselijk?"
 > Eerste iteratie van dit document concludeerde "niet bouwen". Deze revisie
@@ -244,3 +246,102 @@ implementatie is een aparte Backlog-kaart (zie vorige sectie).
 |---|---|
 | 2026-07-10 (eerste iteratie) | Conclusie: "niet bouwen". Onderbouwd door `/code-review` + CI + `iteration-loop preset verify` als afdoende poorten. |
 | 2026-07-10 (revisie) | Correctie op drie punten (§"Wat er fout was aan de eerste iteratie"): FCR ≠ `/code-review`; cleared context ≠ author-context; gate = autonomy-enabling. Conclusie nu: "wél bouwen, in lichtere vorm — subagent-call binnen engineer-sessie vóór `move_card Done`". Geen aparte persona, geen kolom, geen concurrency-impact. |
+| 2026-07-18 (iteratie 3 — gebouwd) | Gebruiker heropent de vraag en kiest expliciet **optie A**: de zwaardere, onafhankelijke gate — bovenóp de FCR, niet in plaats van. Doorvoer-kost (extra sessie per kaart) geaccepteerd. Gebouwd: `reviewer.md`-persona + `move_card`-redirect + agent-flip + return-routing. Zie § Iteratie 3. |
+
+---
+
+## Iteratie 3 (2026-07-18) — de onafhankelijke gate, gebouwd
+
+**Wat veranderde er t.o.v. 2026-07-10.** De FCR (iteratie 2) is een goede
+laag, maar niet wat de gebruiker met deze kaart bedoelde. Het verschil dat
+iteratie 2 wegnam maar de gebruiker juist wíl:
+
+- **Onafhankelijkheid.** De FCR is een subagent-call *binnen* de
+  engineer-sessie. Dezelfde sessie die het werk bouwde, orkestreert zijn eigen
+  review. Een aparte reviewer-sessie met cleared context is strikt
+  onafhankelijker.
+- **Bord-afdwinging.** De FCR is een prompt-instructie; een engineer die 'm
+  overslaat, wordt door niets tegengehouden. De gebruiker wil een gate die de
+  engineer **niet kan overslaan**.
+
+De gebruiker koos, na expliciete afweging (impediment-antwoord op kaart
+`b493d3eb…`), **optie A: bouw de onafhankelijke reviewer-agent + review-kolom-gate
+voor álle kaarten**, met de doorvoer-kost geaccepteerd.
+
+### Mechanisme
+
+1. **`.claude/agents/reviewer.md`** — een onafhankelijke reviewer-persona
+   *zonder* edit-tools (hij reviewt, hij fixt niet). Zijn bestaan laat
+   `sync_agent_columns` een `reviewer`-kolom aanmaken. Dat kolom-bestaan is de
+   **activatie-schakelaar**: geen kolom → de gate vuurt niet → elk ander bord
+   gedraagt zich exact als voorheen (backwards-compat).
+2. **Redirect in `mcp_server.move_card`** — een niet-reviewer-kaart die naar
+   `Done` beweegt en (a) geen analyse-leaf-spike is en (b) een `reviewer`-kolom
+   heeft, wordt doorgestuurd naar de `reviewer`-kolom in plaats van Done. Daarbij:
+   - `card.agent` wordt geflipt naar `reviewer`. **Dit is essentieel**: een
+     kolom alleen volstaat niet, want `dispatch._phase_target_agent` leest
+     `card.agent` eerst en zou anders `engineer` blijven dispatchen (de exacte
+     val die het impediment-antwoord noemde).
+   - De persona die het werk deed wordt bewaard in
+     `metadata.review_return_agent` voor return-routing.
+   - De engineer-sessie wordt opgeruimd (tmux + worktree + claim-release) net
+     als bij een echte Done, waarna de dispatcher de kaart als verse
+     reviewer-sessie oppikt.
+3. **Reviewer-beslissing** (`_build_reviewer_session_end_instructions` +
+   `reviewer.md`): akkoord → `move_card Done` (komt door de gate omdat
+   `agent == "reviewer"`); niet-akkoord → `report_impediment` met de reden.
+4. **Return-routing bij afkeuring** — `report_impediment` zet, voor een
+   reviewer-kaart, `card.agent` terug naar `review_return_agent` (de engineer),
+   zodat het menselijke impediment-antwoord de engineer hervat om te fixen —
+   niet de reviewer opnieuw tegen ongewijzigde code. Daarna komt de kaart bij
+   de volgende Done opnieuw langs de reviewer. Gesloten lus.
+
+### Waar "bord-afgedwongen" precies op slaat
+
+De gate zit op het **agent-pad**: `mcp_server.move_card`, de tool die elke
+gedispatchte engineer (en de git-ship-flow) gebruikt om een kaart naar Done te
+bewegen. Een engineer kan de reviewer daardoor **niet via zijn normale
+gereedschap overslaan** — precies de eis uit het impediment-antwoord ("engineer
+kan 'm niet zelf overslaan"). Dit is consistent met élke andere
+workflow-gate in dit project: de analyse-outcome-poort, de parent-parking en
+de summary-verplichting zitten óók uitsluitend op `mcp_server.move_card`, niet
+op de dunne REST-move (`POST /cards/{cid}/move`, `router.py`). Die REST-move is
+bewust een **rauw menselijk override-oppervlak** — een mens die een kaart in de
+UI naar Done sleept, omzeilt (net als bij alle bovengenoemde poorten) de
+agent-workflow-gates. Wil je die override óók dichttimmeren, dan hoort de
+redirect-beslissing in een gedeelde `service`-helper die beide move-ingangen
+aanroepen — dat is een groter, apart stuk (het raakt dan ook outcome-gate +
+parent-parking, die vandaag dezelfde MCP-only-conventie volgen). Buiten scope
+van deze kaart; de gebruiker vroeg om engineer-onafhankelijkheid, niet om het
+blokkeren van zijn eigen handmatige bord-acties.
+
+### Uitsluitingen (bewust)
+
+- **De reviewer zelf** (`agent == "reviewer"`) — anders een oneindige loop.
+- **Analyse-kaarten** (`is_analyst_leaf_spike`) — die hebben hun eigen
+  outcome-contract (`analysis-outcome-contract-decision.md`) en hun
+  deliverable is kind-kaarten, die elk zelf langs de reviewer gaan.
+- **Parent-kaarten met open kinderen** — die parkeren al in `Awaiting
+  Subtasks` en bereiken `final_column == "Done"` niet.
+
+### Bekende beperking
+
+In **direct-ship-modus** merget de engineer al naar `master` vóór de
+`move_card Done`, dus de reviewer reviewt *na* de merge. De kaart bereikt Done
+pas na akkoord (dat deel van de wens klopt), maar de code staat op dat moment al
+op master; een afkeuring un-merget niet automatisch. Voor een échte
+pre-merge-gate is **pull-request-modus** de juiste ship-mode (PR blijft open tot
+de reviewer akkoord geeft). Dit is een bewuste scope-grens: de ship-flow
+herarchitecteren viel buiten deze kaart. Vervolg-optie in
+[`kanban-followups.md`](./kanban-followups.md).
+
+### Waar het leeft (bron van waarheid + drift-vallen)
+
+- Persona: `.claude/agents/reviewer.md`.
+- Gate + return-routing: `backend/app/kanban/mcp_server.py`
+  (`move_card`, `report_impediment`).
+- Activatie-helper: `backend/app/kanban/service.py`
+  (`REVIEWER_COLUMN`, `reviewer_column_exists`, `REVIEW_RETURN_AGENT_KEY`).
+- Reviewer-prompt: `backend/app/kanban/dispatch.py`
+  (`_build_reviewer_session_end_instructions`) — houd in sync met `reviewer.md`.
+- Tests: `backend/tests/test_kanban_reviewer_gate.py`.

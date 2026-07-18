@@ -512,6 +512,37 @@ async def delete_column(session, column_id: str) -> bool:
     return True
 
 
+# Name of the independent-reviewer agent column. Its mere existence for a
+# project is the activation switch for the pre-Done review gate (see
+# `reviewer_column_exists` + `mcp_server.move_card`): a project without this
+# column behaves exactly as before — full backwards-compat for every other
+# board. The column is created the ordinary way (`sync_agent_columns` picks up
+# `.claude/agents/reviewer.md`), so "assign the reviewer to a column" =
+# "sync the agent columns once reviewer.md exists". See
+# `docs/cockpit/reviewer-agent-decision.md`.
+REVIEWER_COLUMN = "reviewer"
+
+# Card-metadata key holding the persona that produced the work, stashed when a
+# card is redirected into the reviewer column so a rejection routes the resume
+# back to that persona (the engineer) instead of re-running the reviewer.
+REVIEW_RETURN_AGENT_KEY = "review_return_agent"
+
+
+async def reviewer_column_exists(session, project_key: str) -> bool:
+    """True when this project has a `reviewer` agent column — the activation
+    switch for the independent, board-enforced pre-Done review gate. No column
+    → feature off (a card moving to Done behaves exactly as it did before this
+    feature existed)."""
+    if not project_key:
+        return False
+    stmt = (
+        select(KanbanColumn.id)
+        .where(KanbanColumn.project_key == project_key)
+        .where(KanbanColumn.name == REVIEWER_COLUMN)
+    )
+    return (await session.execute(stmt)).first() is not None
+
+
 async def get_column_default_agent(session, project_key: str, column_name: str) -> str | None:
     """Look up the default agent for a column name within a project."""
     stmt = (

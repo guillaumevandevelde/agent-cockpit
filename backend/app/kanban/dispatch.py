@@ -1065,6 +1065,8 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
     # workflow instead of the full engineer ship instructions.
     if phase == "analyst":
         ship_instructions = _build_analyst_session_end_instructions()
+    elif getattr(card, "agent", None) == "reviewer":
+        ship_instructions = _build_reviewer_session_end_instructions()
     else:
         ship_instructions = _build_ship_instructions(ship_mode)
     problem_flag_instructions = _build_problem_flag_instructions()
@@ -1732,6 +1734,58 @@ def _build_analyst_session_end_instructions() -> str:
         "the worktree.\n"
     )
     return retro + move
+
+
+def _build_reviewer_session_end_instructions() -> str:
+    """Session-end workflow for reviewer-phase cards (independent pre-Done gate).
+
+    The reviewer is an *independent* gate: it reads the original card spec plus
+    the work the engineer produced and decides whether the card may reach Done.
+    It never writes code, merges, or ships — those already happened in the
+    engineer session; re-doing them here would defeat the point of an
+    independent reviewer. So this is deliberately NOT
+    ``_build_ship_instructions``: no sync/test/commit/merge steps, just
+    review → approve (Done) or reject (Impediment).
+
+    Kept in sync with ``.claude/agents/reviewer.md`` — the persona body carries
+    the same contract; update both together. See
+    ``docs/cockpit/reviewer-agent-decision.md`` (REVISED 2026-07-18).
+    """
+    return (
+        "You are the **independent reviewer**. This card was completed by "
+        "another agent and routed to you *before* it may reach Done. Your job "
+        "is a feature-compliance + consistency gate — **not** to write, fix, "
+        "merge, or ship code. Follow these steps:\n\n"
+        "1. **Read the original request** — the card title + description above "
+        "are the wish (`de gestelde wens`). Note every requirement/bullet.\n"
+        "2. **Find what was built** — call ``get_card`` (MCP) to read the "
+        "deliverables and the engineer's ``**Summary:**`` comment. The branch "
+        "deliverable names the work; in direct-ship mode the work is already on "
+        "``master`` as a ``Merge <branch>`` commit. ``git fetch origin`` first, "
+        "then inspect the diff — e.g. find the merge commit "
+        "(``git log origin/master --merges --grep=<branch> -1 --format=%H``) "
+        "and read ``git show <merge>`` / ``git diff <merge>^1 <merge>``, or "
+        "review the open PR when one is attached.\n"
+        "3. **Judge two things.** (a) *Compliance*: does the implementation do "
+        "what the card asked — every requirement met, naming/behaviour/edge "
+        "cases matching the spec, the claimed deliverable actually present? "
+        "(b) *Consistency*: does it fit the rest of the application — existing "
+        "patterns, conventions, no sibling features broken? Read the "
+        "surrounding code to confirm, don't assume.\n"
+        "4. **Decide.**\n"
+        "   - **In order** → ``move_card`` with ``column=\"Done\"`` and a "
+        "``summary`` recording what you verified (``summary`` is required; the "
+        "call is rejected without it). This is the only approval path — the "
+        "card reaches Done because you, the reviewer, cleared it.\n"
+        "   - **Not in order** → ``report_impediment`` with a ``question`` that "
+        "states clearly **why it is not in order** (concrete, with "
+        "``file:line`` refs where possible) and what must change. Prefer a "
+        "short ``options`` list when there's a decision for the human. The card "
+        "moves to Impediment and, when the human resolves it, resumes with the "
+        "original engineer to fix — then it comes back to you.\n"
+        "   Never move a non-compliant card to Done, and never edit the code "
+        "yourself to make it pass.\n"
+    )
 
 
 
