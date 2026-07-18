@@ -16,7 +16,12 @@ from app.kanban import dep_resolver as mcp_kanban_deps
 from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
 from app.kanban.models import KanbanCard, KanbanDeliverable
-from app.kanban.operations import ClaimRejected, apply_operation, release_card_claim
+from app.kanban.operations import (
+    ClaimRejected,
+    _cleanup_after_commit,
+    apply_operation,
+    release_card_claim,
+)
 from app.kanban.project_key import resolve_project_key as _resolve_project_key
 from app.kanban.schemas import CardResponse, CardSummaryResponse
 
@@ -429,6 +434,37 @@ async def move_card(card_id: str, column: str,
             if card.project_key:
                 await service.ensure_awaiting_subtasks_column(s, card.project_key)
 
+        # Independent reviewer gate (docs/cockpit/reviewer-agent-decision.md,
+        # REVISED 2026-07-18): when the project has a `reviewer` column, a card
+        # reaching *genuine* Done is first routed through the reviewer for an
+        # independent, board-enforced feature-compliance + consistency check —
+        # the engineer cannot skip it because the redirect happens here, not in
+        # the persona prompt. The card's agent is flipped to `reviewer` so the
+        # dispatcher spawns the reviewer persona (a `reviewer` column alone
+        # isn't enough — `_phase_target_agent` reads `card.agent` first), and
+        # the persona that did the work is stashed so a rejection resumes *it*.
+        # Excluded: the reviewer's own Done move (else it loops forever) and
+        # analysis cards (their outcome contract + child cards are the review
+        # surface). Parent cards already parked in Awaiting Subtasks above never
+        # reach `final_column == "Done"`, so they're excluded too.
+        gated_to_review = False
+        if (final_column == "Done"
+                and card.agent != service.REVIEWER_COLUMN
+                and not service.is_analyst_leaf_spike(card)
+                and await service.reviewer_column_exists(s, card.project_key)):
+            gated_to_review = True
+            final_column = service.REVIEWER_COLUMN
+            from app.kanban.schemas import COLUMNS
+            return_agent = (
+                card.column if card.column not in COLUMNS
+                else (card.agent or "engineer")
+            )
+            new_meta = dict(card.meta or {})
+            new_meta[service.REVIEW_RETURN_AGENT_KEY] = return_agent
+            await apply_operation(s, op_type="update", entity_type="card",
+                project_key="", entity_id=card_id,
+                payload={"agent": service.REVIEWER_COLUMN, "metadata": new_meta})
+
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=card_id, payload={"column": final_column})
         if label:
@@ -454,6 +490,22 @@ async def move_card(card_id: str, column: str,
             await apply_operation(s, op_type="comment", entity_type="comment",
                 project_key="", entity_id=card_id,
                 payload={"text": f"**Outcome:** {outcome_clean} — {summary}"})
+
+        if gated_to_review:
+            await apply_operation(s, op_type="comment", entity_type="comment",
+                project_key="", entity_id=card_id,
+                payload={"text": (
+                    "**Review:** Routed to the reviewer for an independent "
+                    "feature-compliance + consistency check before Done. The "
+                    "reviewer either approves (→ Done) or reports an impediment "
+                    "explaining why it's not in order."
+                )})
+            # The engineer's session finished its work by issuing this move, so
+            # tear it down (tmux + worktree + claim release) exactly as a real
+            # Done would. Releasing the claim also turns the card into an
+            # unclaimed orphan in the reviewer column, which the dispatcher then
+            # re-picks up as a fresh, cleared-context reviewer session.
+            _cleanup_after_commit(s, card_id, card.project_key)
 
         # Auto-close (§3.2): this card actually reached Done (not parked) —
         # if it's someone's child, check whether that parent can now close
@@ -725,6 +777,23 @@ async def report_impediment(card_id: str, question: str,
         if card is None:
             logger.debug("report_impediment: %s not found", card_id)
             return {"error": _NOT_FOUND, "card_id": card_id}
+
+        # Reviewer-gate return routing: when a reviewer rejects a card it
+        # stashed a `review_return_agent` (the persona that produced the work)
+        # on redirect into the reviewer column. Restore that agent before the
+        # move so the human's impediment answer resumes *that* persona (the
+        # engineer, to fix the work) instead of re-running the reviewer against
+        # unchanged code. Only fires for reviewer-agent cards; every other
+        # caller is untouched. See docs/cockpit/reviewer-agent-decision.md.
+        return_agent = (card.meta or {}).get(service.REVIEW_RETURN_AGENT_KEY)
+        if card.agent == service.REVIEWER_COLUMN and return_agent:
+            new_meta = {
+                k: v for k, v in (card.meta or {}).items()
+                if k != service.REVIEW_RETURN_AGENT_KEY
+            }
+            await apply_operation(s, op_type="update", entity_type="card",
+                project_key="", entity_id=card_id,
+                payload={"agent": return_agent, "metadata": new_meta})
 
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=card_id, payload={"column": "Impediment"})
