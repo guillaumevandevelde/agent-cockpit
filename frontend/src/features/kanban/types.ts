@@ -172,6 +172,10 @@ export interface Card {
   dispatch_session_id?: string | null;
   dispatch_project_folder?: string | null;
   dispatch_model?: string | null;
+  // Provider (vendor subscription) the dispatcher resolved for the last spawn.
+  // Drives the provider badge on the card so an operator can see at a glance
+  // which provider picked up the card. Null for never-dispatched/legacy cards.
+  dispatch_provider?: string | null;
   claimed_by?: string | null;
   claimed_at?: string | null;
   analyst_agent_id?: string | null;

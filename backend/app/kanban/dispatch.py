@@ -2747,6 +2747,7 @@ async def _run_card(
         telemetry: dict = {
             "dispatch_started_at": datetime.now(UTC).isoformat(),
             "dispatch_model": effective_model,
+            "dispatch_provider": provider,
         }
         if card_transport != sandcastle_transport:
             worktree_path = str(Path(project_path) / ".claude" / "worktrees" / name)

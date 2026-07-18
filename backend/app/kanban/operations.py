@@ -315,6 +315,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                       "dispatch_failures",
                       "dispatch_started_at", "dispatch_session_id",
                       "dispatch_project_folder", "dispatch_model",
+                      "dispatch_provider",
                       "analyst_agent_id", "executor_agent_id", "parent_card_id",
                       "analyst_run_id", "depends_on"):
                 if f in payload:

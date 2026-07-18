@@ -168,6 +168,10 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql(
             "ALTER TABLE kanban_cards ADD COLUMN dispatch_model VARCHAR(64)"
         )
+    if "dispatch_provider" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN dispatch_provider VARCHAR(32)"
+        )
 
 
 async def _ensure_column_table(conn) -> None:
