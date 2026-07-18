@@ -104,6 +104,10 @@ class KanbanCard(KanbanBase):
     dispatch_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     dispatch_project_folder: Mapped[str | None] = mapped_column(String(512), nullable=True)
     dispatch_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Provider (vendor subscription) the dispatcher resolved for the last spawn.
+    # Written alongside dispatch_model so the board can show which provider
+    # picked up the card. Nullable so legacy/never-dispatched rows round-trip.
+    dispatch_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     analyst_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     executor_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parent_card_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

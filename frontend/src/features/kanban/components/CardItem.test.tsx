@@ -67,6 +67,34 @@ describe("CardItem work_type badge", () => {
   });
 });
 
+describe("CardItem provider badge", () => {
+  it("renders the human-readable provider label when dispatch_provider is set", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, dispatch_provider: "minimax" }}
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByTestId("provider-badge");
+    expect(badge.textContent).toContain("MiniMax");
+  });
+
+  it("falls back to the raw provider id when no label is mapped", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, dispatch_provider: "someprovider" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("provider-badge").textContent).toContain("someprovider");
+  });
+
+  it("renders no provider badge when dispatch_provider is unset", () => {
+    render(<CardItem card={baseCard} onOpen={() => {}} />);
+    expect(screen.queryByTestId("provider-badge")).toBeNull();
+  });
+});
+
 describe("CardItem labels", () => {
   it("renders the 'error' label as a red (destructive) badge", () => {
     render(

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { CLICKABLE_CARD } from "@/lib/constants";
 import { kanbanApi } from "../api";
 import type { Card } from "../types";
-import { WORK_TYPES, WORK_TYPE_ICONS, type WorkType } from "../types";
+import { WORK_TYPES, WORK_TYPE_ICONS, PROVIDER_LABELS, type WorkType } from "../types";
 import { ReadyStateBadge, type ReadyState } from "./ReadyStateBadge";
 import type { SubtaskSummary } from "./Column";
 
@@ -264,6 +264,16 @@ export function CardItem({
         {card.agent && (
           <Badge variant="secondary" className="text-[10px] font-normal">
             &#129302; {card.agent}
+          </Badge>
+        )}
+        {card.dispatch_provider && (
+          <Badge
+            variant="outline"
+            className="text-[10px] font-normal"
+            data-testid="provider-badge"
+            title={`Picked up by ${PROVIDER_LABELS[card.dispatch_provider] ?? card.dispatch_provider}`}
+          >
+            &#127760; {PROVIDER_LABELS[card.dispatch_provider] ?? card.dispatch_provider}
           </Badge>
         )}
         {isPendingSchedule && !isToResume && (

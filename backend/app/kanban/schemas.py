@@ -234,6 +234,7 @@ class CardResponse(BaseModel):
     dispatch_session_id: str | None = None
     dispatch_project_folder: str | None = None
     dispatch_model: str | None = None
+    dispatch_provider: str | None = None
     claimed_by: str | None = None
     claimed_at: datetime | None = None
     created_at: datetime
@@ -331,6 +332,7 @@ class CardUpdate(BaseModel):
     dispatch_session_id: str | None = None
     dispatch_project_folder: str | None = None
     dispatch_model: str | None = None
+    dispatch_provider: str | None = None
 
 
 class MoveRequest(BaseModel):

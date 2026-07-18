@@ -157,6 +157,38 @@ async def test_pool_first_entry_chosen_routes_to_its_provider():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_persists_provider_telemetry_on_card():
+    """The provider the dispatcher picked is written to card.dispatch_provider
+    so the board can show which provider picked up the card."""
+    transport = RecordingTransport()
+    pool = [_entry(provider="minimax")]
+    snapshots = {_entry(provider="minimax"): _usage(drempel_gebruikt=0.1)}
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer", default_provider="anthropic",
+        )
+        cid = await _make_card(s)
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    # The pool entry (minimax) beats the column default (anthropic) at spawn,
+    # and that same resolved provider lands on the card as telemetry.
+    assert transport.calls[0]["provider"] == "minimax"
+    async with KanbanSessionLocal() as s:
+        card = await service.get_card(s, cid)
+        assert card.dispatch_provider == "minimax"
+
+
+@pytest.mark.asyncio
 async def test_pool_entry_model_pins_dispatch_model():
     """When the pool entry sets a model, it overrides column.default_model."""
     transport = RecordingTransport()
