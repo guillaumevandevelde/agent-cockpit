@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Card, KanbanColumn } from "../types";
-import { Column, type CardMeta } from "./Column";
+import { Column, type CardMeta, type SubtaskSummary } from "./Column";
 
 export function Board({
   columns,
@@ -9,6 +9,7 @@ export function Board({
   onDropCardAt,
   onReorderColumns,
   cardMeta,
+  subtaskCounts,
   projectPath,
   onPromote,
 }: {
@@ -18,6 +19,7 @@ export function Board({
   onDropCardAt: (cardId: string, column: string, index: number) => void;
   onReorderColumns?: (sourceId: string, targetId: string) => void;
   cardMeta?: Map<string, CardMeta>;
+  subtaskCounts?: Map<string, SubtaskSummary>;
   // Threaded down to Column → CardItem so the Impediment `dispatch_failed`
   // badge can render a Redispatch quick-action.
   projectPath?: string;
@@ -45,6 +47,7 @@ export function Board({
             setDraggedColumn(null);
           }}
           cardMeta={cardMeta}
+          subtaskCounts={subtaskCounts}
           projectPath={projectPath}
           onPromote={onPromote}
         />

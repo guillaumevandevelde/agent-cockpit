@@ -16,6 +16,7 @@ import { kanbanApi } from "../api";
 import type { Card } from "../types";
 import { WORK_TYPES, WORK_TYPE_ICONS, type WorkType } from "../types";
 import { ReadyStateBadge, type ReadyState } from "./ReadyStateBadge";
+import type { SubtaskSummary } from "./Column";
 
 const PRIORITY_VARIANT: Record<string, BadgeProps["variant"]> = {
   low: "secondary",
@@ -109,6 +110,7 @@ export function CardItem({
   onOpen,
   readyState,
   blockerTitles,
+  subtasks,
   projectPath,
   onPromote,
 }: {
@@ -116,6 +118,10 @@ export function CardItem({
   onOpen: (c: Card) => void;
   readyState?: ReadyState;
   blockerTitles?: string[];
+  // Subtask rollup counts (done/total among cards whose parent_card_id
+  // points at this card) — drives the compact "N/M subtasks" counter so
+  // the operator can scan progress without opening the drawer.
+  subtasks?: SubtaskSummary;
   // Needed for the dispatch_failed → Redispatch quick-action so the card can
   // call `kanbanApi.redispatch` directly without bouncing through the drawer.
   projectPath?: string;
@@ -217,6 +223,16 @@ export function CardItem({
       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {readyState && (
           <ReadyStateBadge state={readyState} blockerTitles={blockerTitles} />
+        )}
+        {subtasks && subtasks.total > 0 && (
+          <Badge
+            variant="outline"
+            className="text-[10px] font-normal"
+            data-testid="subtask-count-badge"
+            title="Subtasks completed / total"
+          >
+            {subtasks.done}/{subtasks.total} subtasks
+          </Badge>
         )}
         {workType && (
           <Badge variant="secondary" className="text-[10px] font-normal">

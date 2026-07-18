@@ -249,6 +249,22 @@ export default function KanbanPage() {
     return meta;
   }, [cards]);
 
+  // Per-parent subtask rollup for the compact "N/M subtasks" counter
+  // (CardItem) and the "Subtasks" section (CardDrawer) — kanban card
+  // 81797046. Counts children by `parent_card_id`, "done" = child's column
+  // is "Done". Cards without children are simply absent from the map.
+  const subtaskCounts = useMemo(() => {
+    const counts = new Map<string, { done: number; total: number }>();
+    for (const c of cards) {
+      if (!c.parent_card_id) continue;
+      const entry = counts.get(c.parent_card_id) ?? { done: 0, total: 0 };
+      entry.total += 1;
+      if (c.column === "Done") entry.done += 1;
+      counts.set(c.parent_card_id, entry);
+    }
+    return counts;
+  }, [cards]);
+
   const clearDoneColumn = async () => {
     try {
       const r = await kanbanApi.clearColumn(projectKey, "Done");
@@ -407,6 +423,7 @@ export default function KanbanPage() {
         columns={columns}
         cards={cards}
         cardMeta={cardMeta}
+        subtaskCounts={subtaskCounts}
         onOpen={openCard}
         onDropCardAt={onDropCardAt}
         projectPath={projectPath}
@@ -445,6 +462,8 @@ export default function KanbanPage() {
         <CardDrawer
           card={open}
           projectPath={projectPath}
+          cards={cards}
+          cardMeta={cardMeta}
           onClose={closeCard}
           onChanged={reload}
         />

@@ -248,6 +248,39 @@ describe("CardItem ReadyStateBadge", () => {
   });
 });
 
+// kanban card 81797046: a parent card with ≥1 child (`parent_card_id`) shows
+// a compact "N/M subtasks" counter so progress is scannable without opening
+// the drawer; a card without children shows nothing extra.
+describe("CardItem subtask rollup counter", () => {
+  it("renders 'N/M subtasks' when a subtasks summary is supplied", () => {
+    render(
+      <CardItem
+        card={baseCard}
+        subtasks={{ done: 2, total: 5 }}
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByTestId("subtask-count-badge");
+    expect(badge.textContent).toBe("2/5 subtasks");
+  });
+
+  it("renders nothing extra when the card has no subtasks", () => {
+    render(
+      <CardItem
+        card={baseCard}
+        subtasks={{ done: 0, total: 0 }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("subtask-count-badge")).toBeNull();
+  });
+
+  it("renders nothing extra when no subtasks prop is passed at all", () => {
+    render(<CardItem card={baseCard} onOpen={() => {}} />);
+    expect(screen.queryByTestId("subtask-count-badge")).toBeNull();
+  });
+});
+
 // Per kanban card `c5eb6f89`: the Impediment column can hold cards for three
 // different reasons (open question / dispatch failure / bare move), and the
 // board UI must show a different affordance per cause so the operator can
