@@ -92,6 +92,18 @@ Werkwijze (modus 1):
    naar de analyst-persona (i.p.v. de executor) en doorloopt eerst een eigen
    plan-fase. Direct uitvoerbare kinderen krijgen een passend work_type
    (feature/bug/chore) of laten het veld leeg.
+   **Spec-link (metadata["spec_doc"]):** implementeert/bijwerkt een kind-kaart
+   een specifiek canoniek `docs/cockpit/*.md`-doc, zet dan op het create_card-
+   moment metadata={"spec_doc": "<repo-relatief docpad>"} op die kind-kaart
+   (bv. metadata={"spec_doc": "docs/cockpit/agent-mail-spec.md"}). Dit is de
+   voorwaartse "implements"-link: het doc dat de kaart aanstuurt, ook als de
+   kaart dat doc niet zelf edit. Je hebt de doc-context nu in de hand (je hebt
+   net de bron-analyse gelezen), dus dit is het enige moment waarop de link
+   goedkoop en betrouwbaar is. Géén link zetten wanneer: (a) de spec van het
+   kind de plan-attachment zélf is (bestaande Fase-1-uitzondering — een plan/
+   plan_ref-kaart is per definitie zijn eigen spec), of (b) er geen los
+   canoniek C-doc is dat het kind aanstuurt. Geen nieuw datamodel — hergebruik
+   de bestaande metadata-param van create_card/update_card.
 4. Schrijf een plan-attachment op de parent via add_plan_attachment.
 5. Draai de session-retro (zie sectie "Session-end workflow" in je
    dispatch-prompt) vóórdat je de parent naar Done verplaatst.

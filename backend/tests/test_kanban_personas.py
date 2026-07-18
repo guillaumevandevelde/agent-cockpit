@@ -275,3 +275,25 @@ def test_analyst_md_no_longer_references_dispatch_override():
     must not point at a mechanism that no longer exists."""
     body = _analyst_md_body()
     assert "Analyst-leaf-spike override" not in body
+
+
+# ---- spec_doc producer instruction (kanban card c0cccd74) ----
+# The shipped analyst.md is the *effective* producer in this repo (it wins
+# over the ANALYST_PROMPT fallback), so the spec_doc instruction must hold
+# here too — otherwise the producer never reaches dispatched sessions.
+# See docs/cockpit/spec-doc-producer-design.md §4.
+
+
+def test_analyst_md_instructs_spec_doc_producer():
+    body = _analyst_md_body()
+    assert "spec_doc" in body
+    assert "docs/cockpit" in body
+    body_lower = body.lower()
+    assert "implementeert" in body_lower or "implements" in body_lower
+
+
+def test_analyst_md_spec_doc_respects_plan_attachment_exception():
+    # The child whose spec IS the plan-attachment gets no explicit link —
+    # the existing Fase-1 exception must survive.
+    body_lower = _analyst_md_body().lower()
+    assert "plan-attachment" in body_lower or "plan_ref" in body_lower
