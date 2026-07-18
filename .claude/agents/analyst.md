@@ -121,6 +121,22 @@ ToolSearch defert ze). Referentie-meetrecept:
      een eigen plan-fase doorloopt. Kind-kaarten die al direct uitvoerbaar zijn
      krijgen een passend `work_type` (`feature`/`bug`/`chore`) of laten het veld
      leeg.
+   - **Zet `metadata={"spec_doc": "<repo-relatief docpad>"}`** op een kind-kaart
+     die een specifiek canoniek `docs/cockpit/*.md`-doc **implementeert of
+     bijwerkt** — op het `create_card`-moment (bv.
+     `metadata={"spec_doc": "docs/cockpit/agent-mail-spec.md"}`). Dit is de
+     voorwaartse *implements*-link: het doc dat de kaart aanstuurt, óók als de
+     kaart dat doc niet zelf edit. Jij hebt de doc-context nu in de hand — je
+     hebt net de bron-analyse gelezen — dus dit is het goedkoopste, meest
+     betrouwbare moment om die link te leggen; elk later moment moet 'm opnieuw
+     afleiden. Dit anker voedt twee consumenten: de Plans-venster B↔C-join en de
+     Fase-2 spec-drift-detectie (`find_spec_drift_for_card`). **Géén link zetten**
+     wanneer (a) de spec van het kind de **plan-attachment zélf** is (bestaande
+     Fase-1-uitzondering: een `plan`/`plan_ref`-kaart is per definitie zijn eigen
+     spec), of (b) geen los canoniek C-doc het kind aanstuurt. Geen nieuw
+     datamodel — hergebruik de bestaande `metadata`-param van
+     `create_card`/`update_card`. Zie
+     `docs/cockpit/spec-doc-producer-design.md` §4.
    - Houd het aantal kind-kaarten ≤ 50 (hard cap van `add_plan_attachment`).
 4. **Plan-attachment schrijven** via `add_plan_attachment(card_id=<parent>,
    plan_markdown=<markdown>, child_card_ids=[...], depends_on_graph={...})`. Het
@@ -188,7 +204,8 @@ Gebruik de `cockpit-kanban` MCP-tools. Jij beweegt de kaart zelf — er is **gee
 apart workflow-systeem dat je output parseert:
 
 - `create_card` — kind-kaarten aanmaken (basic fields: `project`, `title`, `description`;
-  zet `work_type="analysis"` als de kind-kaart zelf nog een analyse-fase nodig heeft — zie stap 3).
+  zet `work_type="analysis"` als de kind-kaart zelf nog een analyse-fase nodig heeft — zie stap 3;
+  zet `metadata={"spec_doc": "<docpad>"}` als het kind een `docs/cockpit/*.md`-doc implementeert — zie stap 3).
 - `add_plan_attachment` — kind-kaarten aan de parent koppelen + dep-graph + plan-markdown.
 - `move_card` — parent naar `Done` als exit-signaal. **Vergeet het `outcome`-veld niet**
   (zie Outcome-contract hierboven) — anders weigert de poort de move met

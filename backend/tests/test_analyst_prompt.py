@@ -115,6 +115,29 @@ def test_prompt_no_longer_references_dispatch_override():
     assert "Analyst-leaf-spike override" not in ANALYST_PROMPT
 
 
+# ---- spec_doc producer instruction (kanban card c0cccd74) ----
+# The analyst-decomposition phase is the one moment where the card→doc
+# mapping is known and intentional, so the persona must instruct writing
+# `metadata["spec_doc"]` on a child card that implements a specific
+# docs/cockpit doc — the missing producer both the Plans B↔C join and
+# Fase-2 drift-detection wait on. See docs/cockpit/spec-doc-producer-design.md.
+
+
+def test_prompt_instructs_spec_doc_producer():
+    assert "spec_doc" in ANALYST_PROMPT
+    # The instruction must anchor to create_card-time and to docs/cockpit docs.
+    assert "docs/cockpit" in ANALYST_PROMPT
+    prompt_lower = ANALYST_PROMPT.lower()
+    assert "implementeert" in prompt_lower or "implements" in prompt_lower
+
+
+def test_prompt_spec_doc_respects_plan_attachment_exception():
+    # A child whose spec IS the plan-attachment gets no explicit link — the
+    # existing Fase-1 exception must survive so we don't over-populate.
+    prompt_lower = ANALYST_PROMPT.lower()
+    assert "plan-attachment" in prompt_lower or "plan_ref" in prompt_lower
+
+
 def test_analyst_prompt_module_docstring_covers_both_modes():
     doc = _analyst_prompt_module.__doc__ or ""
     assert doc.strip(), "analyst_prompt.py must have a module docstring"

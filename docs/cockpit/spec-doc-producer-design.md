@@ -166,3 +166,43 @@ onafhankelijk en blokkeert nergens op — deze twee kaarten zijn puur additief.
 - **Ship-diff-verleiding.** Een executor kan geneigd zijn de mechanische ship-diff-backfill
   als "de" producent te bouwen; §4.1 legt uit waarom dat de verkeerde semantiek vangt —
   expliciet buiten scope van kaart 1.
+
+## 10. Meet-commando (adoptie-teller)
+
+De adoptie-gate van kaart-2 (`725fbdd3…`, §6.1) moet een **echt getal** lezen — hoeveel
+kaarten dragen vandaag een niet-leeg `spec_doc`? — i.p.v. een schatting. De kanban-DB leeft op
+`~/.claude-registry/kanban.db` (zie `backend/app/config.py`), `metadata` is een JSON-kolom op
+`kanban_cards` (`backend/app/kanban/models.py:122`). Eén SQL-regel telt de populatie:
+
+```bash
+sqlite3 ~/.claude-registry/kanban.db \
+  "SELECT COUNT(*) FROM kanban_cards
+   WHERE COALESCE(TRIM(json_extract(metadata, '\$.spec_doc')), '') != '';"
+```
+
+`json_extract(metadata, '$.spec_doc')` haalt het anker uit de bag; `COALESCE(TRIM(...), '') != ''`
+sluit zowel `NULL` (geen key / geen metadata) als lege/whitespace-strings uit, zodat alleen
+kaarten met een echt gevuld pad tellen. Uitsplitsing per doc (welke docs geïmplementeerd worden)
+voor een rijkere gate:
+
+```bash
+sqlite3 ~/.claude-registry/kanban.db \
+  "SELECT json_extract(metadata, '\$.spec_doc') AS spec_doc, COUNT(*) AS n
+   FROM kanban_cards
+   WHERE COALESCE(TRIM(json_extract(metadata, '\$.spec_doc')), '') != ''
+   GROUP BY spec_doc ORDER BY n DESC;"
+```
+
+Staat de `sqlite3`-CLI niet op de box (zoals op de huidige WSL-dev-omgeving), gebruik dan de
+venv-python — zelfde query, zelfde getal:
+
+```bash
+/home/vdvgu/claude-cockpit/backend/venv/bin/python -c "
+import sqlite3, os
+c = sqlite3.connect(os.path.expanduser('~/.claude-registry/kanban.db'))
+print(c.execute(\"SELECT COUNT(*) FROM kanban_cards WHERE COALESCE(TRIM(json_extract(metadata,'\$.spec_doc')),'') != ''\").fetchone()[0])
+"
+```
+
+Kaart-2 draait deze telling als **eerste acceptatie-stap**: telling ~0 → gemotiveerde stop
+(comment/impediment), i.p.v. een lege correlatie te shippen; niet-triviale telling → bouw de UI.
