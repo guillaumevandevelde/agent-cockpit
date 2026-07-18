@@ -94,6 +94,13 @@ export const kanbanApi = {
   getCardUsage: (id: string): Promise<import("./cardUsage").CardUsageResponse> =>
     apiClient<import("./cardUsage").CardUsageResponse>(`${BASE}/cards/${id}/usage`),
 
+  // Per-card run ledger (docs/cockpit/run-ledger-decision.md). Stitches the
+  // task → context → files → tests → outcome+model spine from existing
+  // durable sources. Every step is best-effort (`available: false` + a note
+  // for a missing source); 404 only when the card itself doesn't exist.
+  getRunLedger: (id: string): Promise<import("./runLedger").RunLedger> =>
+    apiClient<import("./runLedger").RunLedger>(`${BASE}/cards/${id}/run-ledger`),
+
   activity: (id: string): Promise<ActivityEntry[]> =>
     apiClient<ActivityEntry[]>(`${BASE}/cards/${id}/activity`),
 

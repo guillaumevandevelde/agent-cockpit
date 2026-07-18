@@ -40,6 +40,7 @@ import { appsApi } from "../appsApi";
 import { CardEditDialog } from "./CardEditDialog";
 import { CardRunTab } from "./CardRunTab";
 import { CardTokensTab } from "./CardTokensTab";
+import { CardLedgerTab } from "./CardLedgerTab";
 import { PreviewPane } from "./PreviewPane";
 import { ReadyStateBadge } from "./ReadyStateBadge";
 import type { CardMeta } from "./Column";
@@ -950,6 +951,10 @@ export function CardDrawer({
     ? card.claimed_by.slice("agent:".length)
     : null;
 
+  // Controlled active tab so the Ledger tab's outcome step can jump the drawer
+  // to the Run (transcript) / Tokens tabs instead of re-rendering them itself.
+  const [activeTab, setActiveTab] = useState<string>(runSession ? "run" : "deliverables");
+
   // A running session posts activity (comments, moves) and may open a gate via
   // the open_gate MCP tool at any time, independent of anything the UI does —
   // poll both so they show up without the drawer needing to be closed and
@@ -1267,11 +1272,12 @@ export function CardDrawer({
           </AlertDialog>
         </div>
 
-        <Tabs defaultValue={runSession ? "run" : "deliverables"}>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="plan">Plan</TabsTrigger>
+            <TabsTrigger value="ledger">Ledger</TabsTrigger>
             <TabsTrigger value="tokens">Tokens</TabsTrigger>
             {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
           </TabsList>
@@ -1300,6 +1306,14 @@ export function CardDrawer({
 
           <TabsContent value="plan">
             <PlanTabContent card={card} onChanged={onChanged} />
+          </TabsContent>
+
+          <TabsContent value="ledger">
+            <CardLedgerTab
+              card={card}
+              onNavigateTab={setActiveTab}
+              runAvailable={Boolean(runSession)}
+            />
           </TabsContent>
 
           <TabsContent value="tokens">
