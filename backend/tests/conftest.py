@@ -16,8 +16,8 @@ import app.kanban.db as _kanban_db
 # ``KanbanBase.metadata`` is materialized by the test-DB reset fixture
 # below. Without this, tests that only import e.g. ``app.services.x`` and
 # never touch ``app.kanban.models`` directly would see a test DB missing
-# any model added after the conftest itself was last imported (e.g. the
-# ``kanban_plans`` table from kanban card 727470a8).
+# any table added to ``app/kanban/models.py`` after the conftest itself
+# was last imported.
 import app.kanban.models  # noqa: F401
 
 # Same rationale for ``app.models``: the device-local ``claude_registry.db``

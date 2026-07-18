@@ -99,7 +99,6 @@ async def init_kanban_db() -> None:
             await _ensure_card_columns(conn)
             await _ensure_column_table(conn)
             await _ensure_work_type_mapping_table(conn)
-            await _ensure_plan_table(conn)
 
 
 async def _ensure_card_columns(conn) -> None:
@@ -239,39 +238,3 @@ async def _ensure_work_type_mapping_table(conn) -> None:
             "ON kanban_work_type_mappings (project_key)"
         )
 
-
-async def _ensure_plan_table(conn) -> None:
-    """Create kanban_plans if it doesn't exist.
-
-    First-class project-scoped plan storage replacing the legacy file
-    backend in ``PlanService``. ``create_all`` registers the model on a
-    fresh install, but on a database created before kanban card 727470a8
-    this function back-fills the table + indexes idempotently.
-
-    Unique (project_key, slug) — the migration script relies on this to be
-    idempotent (``INSERT ... ON CONFLICT DO NOTHING``), and the API uses
-    slug-within-project as its natural URL key.
-    """
-    tables = (await conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
-    table_names = {r[0] for r in tables}
-    if "kanban_plans" not in table_names:
-        await conn.exec_driver_sql("""
-            CREATE TABLE kanban_plans (
-                id VARCHAR(64) PRIMARY KEY,
-                project_key VARCHAR(512) NOT NULL,
-                slug VARCHAR(256) NOT NULL,
-                title VARCHAR(512) NOT NULL DEFAULT '',
-                content TEXT NOT NULL DEFAULT '',
-                created_at DATETIME NOT NULL,
-                updated_at DATETIME NOT NULL,
-                metadata JSON,
-                CONSTRAINT uq_kanban_plans_project_slug
-                    UNIQUE (project_key, slug)
-            )
-        """)
-        await conn.exec_driver_sql(
-            "CREATE INDEX ix_kanban_plans_project_key ON kanban_plans (project_key)"
-        )
-        await conn.exec_driver_sql(
-            "CREATE INDEX ix_kanban_plans_slug ON kanban_plans (slug)"
-        )

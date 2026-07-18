@@ -1,59 +1,61 @@
-# Plans
+# Plans & Specs
 
-Browse, search, and read execution-plan documents produced by Claude Code sessions.
+Read-only aggregator over the platform's two real plan/spec stores: kanban card
+plan-attachments and the `docs/cockpit/` decision-doc tree.
 
 ## Overview
 
-The Plans page lists every execution plan written under `~/.claude/plans/` (and per-project plan directories) — markdown documents that Claude Code generates when running a long, multi-step task. Each plan is a self-contained spec: title, structured headings, code blocks, tables, and a list of linked sessions that were active while the plan was authored.
+The Plans & Specs page shows two independent, side-by-side sections for the
+active project:
 
-The page has two views:
+- **From Kanban Cards** — `plan` / `plan_ref` deliverables attached to kanban
+  cards (the analyst phase's `add_plan_attachment`), scoped to the active
+  project's `project_key`. Clicking a row jumps to the source card
+  (`/kanban?card=<card_id>`).
+- **From Cockpit Docs** — the repo-wide `docs/cockpit/*.md` index (the
+  platform's canonical decision/spec-doc tree, shared across every project).
+  Clicking a row opens a detail page rendering the full markdown body.
 
-- **List** — all plans grouped by date (Today / This Week / This Month / Older), with title, excerpt, size, and modified-at
-- **Detail** — full plan content rendered as markdown, plus a list of sessions that were live while the plan was being written
+There is **no join** between the two sections. A correlation via
+`card.metadata["spec_doc"]` was considered but deferred — see
+[`plans-feature-decision.md`](../cockpit/plans-feature-decision.md) §5 and
+§8.2 for why: the anchor has zero producers today, so joining on it would
+repeat the "defined, no producer" failure this page itself replaced.
 
-## How to Use
+This is the read-only "human window" onto spec-driven development that
+`docs/cockpit/spec-driven-development-analysis.md` identified as missing:
+sessions are ephemeral, but plans and specs aren't, and there was no UI that
+showed the durable ones.
 
-### Browsing Plans
+## History — why this page used to be empty
 
-The list view shows three stat cards at the top:
+Before kanban card `885d0b61…` (2026-07), this page browsed a dedicated
+`kanban_plans` database table via a full CRUD API (`GET/POST/PUT/DELETE
+/plans`). That table had **zero live writers** in the normal workflow — the
+only writers were a manual `POST /plans` call no UI ever made, and a
+one-time `migrate_plans_to_kanban.py` import script for legacy
+`~/.claude/plans/*.md` files that Cockpit sessions don't write to on this
+box. The page was therefore always empty, while the platform's actual
+plans/specs lived in two other stores this page didn't read.
 
-- **Total Plans** — count of plan files
-- **Date Range** — first to most recent plan
-- **Total Size** — combined disk usage
+[`plans-feature-decision.md`](../cockpit/plans-feature-decision.md) has the
+full diagnosis. The resolution ("Optie B") was to repurpose the page as a
+read-only aggregator over the stores that *are* populated (above), and phase
+out `kanban_plans` entirely — table, `KanbanPlanService`, the CRUD routes,
+and the migration script were removed (kanban card `528c5ca2…`).
 
-Use the **search box** to filter plans by title, excerpt, or slug. Results are grouped by date with the same Today/Week/Month/Older buckets.
+## API
 
-### Reading a Plan
-
-Click any plan card to open the detail view:
-
-- **Title** and last-modified date at the top
-- **Markdown body** — full plan content with rendered headings, tables, and code blocks
-- **Linked sessions** — sessions that were active while the plan was authored, with project folder and git branch
-
-The detail page is read-only — plans are Claude-authored documents and Cockpit doesn't edit them.
-
-### Searching Plans
-
-Client-side search matches against title, excerpt, and slug. For full-text content search across all plans, use the backend's `plans/search` endpoint directly.
-
-## Plan Sources
-
-| Location | Scope |
-|----------|-------|
-| `~/.claude/plans/*.md` | User-scoped plans |
-| `.claude/plans/*.md` | Project-scoped plans |
-| Per-project plan dirs | As configured |
-
-The list endpoint aggregates across all known plan directories for the active project.
-
-## Tips
-
-- **Plans are markdown** — copy any plan into your editor to adapt it for reuse.
-- **Linked sessions** help reconstruct the context: if a plan is stale, click into the linked sessions to see the conversation that produced it.
-- **Large plans** are still rendered fully — there's no pagination in the detail view; the markdown component handles the scroll.
+- `GET /api/v1/plans/overview?project_path=<path>` — returns
+  `{ project_key, cards: CardPlanItem[], docs: DocSpecItem[] }`. `cards` is
+  project-scoped; `docs` is repo-wide.
+- `GET /api/v1/plans/overview/docs/{rel_path}` — full body of one
+  `docs/cockpit/*.md` file, for the detail view. Path-traversal-guarded to
+  stay under `docs/cockpit/`.
 
 ## See also
 
-- [Sessions](./sessions.md) — browse the conversations that produced these plans
-- [Kanban](./kanban.md) — analysts attach plans to cards as deliverables
+- [Kanban](./kanban.md) — analysts attach plan deliverables to cards; that's
+  the source of the "From Kanban Cards" section.
+- [`docs/cockpit/plans-feature-decision.md`](../cockpit/plans-feature-decision.md)
+  — the analysis, options considered, and decomposition into follow-up cards.
