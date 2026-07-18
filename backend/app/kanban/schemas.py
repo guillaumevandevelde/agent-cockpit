@@ -91,6 +91,93 @@ class CardUsageResponse(BaseModel):
     model_breakdowns: list[CardUsageModelBreakdown] = []
 
 
+class RunLedgerTaskStep(BaseModel):
+    """Spine step 1 — what the card asked for. Always available: both
+    fields already live on the card row (docs/cockpit/run-ledger-decision.md §5)."""
+    title: str
+    description: str
+
+
+class RunLedgerContextStep(BaseModel):
+    """Spine step 2 — the dispatch prompt the model received.
+
+    `prompt` is reconstructed at request time via `dispatch.build_card_prompt`
+    (deterministic, no persistence needed) rather than persisted at dispatch
+    time — see decision doc §5 step 2 ("implementatie-keuze voor de
+    executor"). The persona preamble is intentionally omitted (it's a large
+    static file, not per-run context); `phase`/`ship_mode` and any
+    impediment/revisit sections are the parts that vary per run.
+    """
+    available: bool
+    prompt: str | None = None
+    phase: str | None = None
+    ship_mode: str | None = None
+    impediment_question: str | None = None
+    impediment_answer: str | None = None
+    revisit_question: str | None = None
+
+
+class RunLedgerFileChange(BaseModel):
+    path: str
+    insertions: int = 0
+    deletions: int = 0
+
+
+class RunLedgerFilesStep(BaseModel):
+    """Spine step 3 — diffstat of the card's `branch` deliverable against
+    `origin/master`. Best-effort: no branch deliverable, an unregistered
+    project path, or a pruned/merged-away branch ref all yield
+    `available=False` + a `note`, never a 500 (decision doc §5 step 3)."""
+    available: bool
+    branch: str | None = None
+    files: list[RunLedgerFileChange] = []
+    files_changed: int = 0
+    insertions_total: int = 0
+    deletions_total: int = 0
+    note: str | None = None
+
+
+class RunLedgerTestsStep(BaseModel):
+    """Spine step 4 — verify/CI outcome. `status`/`last_line` come from the
+    `iteration-loop` skill's local, gitignored progress file, which is
+    routinely gone by the time a card is Done (worktree-gc removes it on
+    merge) — that's expected, not an error; `ci_url` (the `pr` deliverable
+    ref, if any) is the durable surface. Best-effort (decision doc §5 step 4)."""
+    available: bool
+    status: str | None = None
+    iteration_count: int | None = None
+    last_line: str | None = None
+    ci_url: str | None = None
+    note: str | None = None
+
+
+class RunLedgerOutcomeStep(BaseModel):
+    """Spine step 5 — what was accepted + which model did it. `outcome_text`
+    is the newest matching `**Outcome:**`/`**Summary:**`/`**Resolution:**`/
+    `**Impediment:**` comment on the activity feed (decision doc §5 step 5);
+    `outcome_source` names which prefix matched. Tokens are NOT re-derived
+    here — see `RunLedger.usage_url`."""
+    column: str
+    outcome_text: str | None = None
+    outcome_source: str | None = None
+    model: str | None = None
+    completed_at: datetime | None = None
+
+
+class RunLedger(BaseModel):
+    """`GET /kanban/cards/{cid}/run-ledger` response — the
+    task → context → files → tests → outcome+model spine stitched from
+    existing durable sources, no new data flow
+    (docs/cockpit/run-ledger-decision.md)."""
+    card_id: str
+    task: RunLedgerTaskStep
+    context: RunLedgerContextStep
+    files: RunLedgerFilesStep
+    tests: RunLedgerTestsStep
+    outcome: RunLedgerOutcomeStep
+    usage_url: str
+
+
 class CardSummaryResponse(BaseModel):
     """Compact per-card projection used by `list_cards(compact=True)` so a
     50+ card board stops blowing the MCP token cap during dedupe passes
