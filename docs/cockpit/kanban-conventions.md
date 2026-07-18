@@ -22,7 +22,7 @@ synoniem en het is belangrijk ze uit elkaar te houden.
 
 | Set | Bron van waarheid | Wat zit erin | Wat wordt er wel/niet mee gedaan |
 |---|---|---|---|
-| **`COLUMNS`** | `backend/app/kanban/schemas.py:13` | `["intake", "Backlog", "Impediment", "Done", "To Resume"]` | **Bron van waarheid voor wat een "vaste" kolom is op de server.** De frontend `KanbanPage.tsx FIXED_COLUMNS` is een snapshot (kans op drift). |
+| **`COLUMNS`** | `backend/app/kanban/schemas.py:13` | `["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]` | **Bron van waarheid voor wat een "vaste" kolom is op de server.** De frontend `KanbanPage.tsx FIXED_COLUMNS` is een snapshot (kans op drift). |
 | **`_DISPATCH_COLUMNS`** | `backend/app/kanban/dispatch.py:1655` | `("Backlog", "To Resume")` | **Auto-dispatch scan alleen deze twee** — nieuwe kaarten worden van `Backlog` opgepakt, heropende kaarten van `To Resume`. Alles wat hier niet in zit, wordt nooit automatisch naar een sessie gestuurd. |
 | **`FIXED_COLUMNS`** | `frontend/src/features/kanban/KanbanPage.tsx:23` | `new Set([...])` met dezelfde namen als `COLUMNS` | Alleen voor bord-rendering (welke kolommen verdwijnen in de agent-sectie). |
 
@@ -44,13 +44,14 @@ synoniem en het is belangrijk ze uit elkaar te houden.
 ### `ensure_*_column` helpers per vaste kolom
 
 Vaste-kolommen krijgen hun `kanban_columns`-rij meestal via `POST /enable`
-(itereert `COLUMNS`). Maar er zijn twee uitzonderingen die **buiten** die
+(itereert `COLUMNS`). Maar er zijn drie uitzonderingen die **buiten** die
 bulk-sync vallen:
 
 | Helper | Wanneer aangeroepen | Wat het doet |
 |---|---|---|
 | `ensure_intake_column` (`service.py:558`) | Iedere keer een intake-kaart wordt aangemaakt op een project dat nog geen `intake`-rij had | Voegt `intake` aan `kanban_columns` toe met `rank="0000"` (linksboven) en verschuift bestaande rijen +1 — idempotent, dus dubbel-aanroep is veilig. |
 | `ensure_analyst_column` (`service.py:531`) | Iedere keer een kaart een `analyst_agent_id` krijgt op een project dat nog geen `analyst`-rij had | Idempotent, rank net vóór `Done` zodat de analyst-kolom op de natuurlijke plek tussen agent-kolommen en Done landt. |
+| `ensure_awaiting_subtasks_column` (`service.py:635`) | Vanuit de `move_card`-parkeerlogica, de eerste keer een kaart écht in `Awaiting Subtasks` parkeert op een project dat nog geen rij had | Idempotent, rank net vóór `Done` — zelfde beleid als `ensure_analyst_column`. |
 
 > **De "ensure_intake_column"-bugklasse** — een project dat `enable` draaide
 > **vóór** `intake` aan `COLUMNS` werd toegevoegd, heeft geen `intake`-rij in
@@ -60,6 +61,15 @@ bulk-sync vallen:
 > [`scripts/check-kanban-conventions.sh`](../../scripts/check-kanban-conventions.sh)
 > detecteert deze klasse voor elk project dat wel een `kanban_columns`-rij heeft
 > maar niet alle namen uit `COLUMNS`.
+
+> **`Awaiting Subtasks` is een parkeerkolom, geen agent-kolom.** Een `move_card`
+> naar `Done` op een kaart met ≥1 kind-kaart (`parent_card_id == card.id`) landt
+> hier in plaats van `Done`, en sluit automatisch zodra álle kinderen `Done`
+> bereiken (`service.close_parent_if_all_children_done`, aangeroepen vanuit
+> `mcp_server.move_card`). De regel is parent-generiek, niet
+> `work_type == "analysis"`-specifiek. Zie
+> [`analyse-levenscyclus-decision.md`](./analyse-levenscyclus-decision.md) §3
+> voor het volledige ontwerp.
 
 ## 2. Comment-label contract
 

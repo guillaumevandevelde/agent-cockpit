@@ -22,7 +22,7 @@ import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
-const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Done", "To Resume"]);
+const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]);
 const DISPATCH_COLUMNS = new Set(["Backlog", "To Resume"]);
 const POLL_INTERVAL_MS = 5000;
 const AGENT_CLAIM_PREFIX = "agent:";
@@ -213,10 +213,12 @@ export default function KanbanPage() {
   // `meets_dep_prerequisites` semantic so the UI badge and the dispatcher's
   // own dep check agree: a card is "ready" iff every entry in `depends_on`
   // is present and Done. Precedence, highest first: completed (column ===
-  // "Done") → impeded (column === "Impediment") → in_progress (claimed_by
-  // starts with "agent:") → dependent (open depends_on) → ready. The
-  // column-based terminal states win over the claim so a card with a stale
-  // claim sitting in Done/Impediment doesn't show as in_progress.
+  // "Done") → impeded (column === "Impediment") → dependent (parked in
+  // "Awaiting Subtasks", waiting on its own children) → in_progress
+  // (claimed_by starts with "agent:") → dependent (open depends_on) →
+  // ready. The column-based terminal/parked states win over the claim so a
+  // card with a stale claim sitting in Done/Impediment/Awaiting Subtasks
+  // doesn't show as in_progress (analyse-levenscyclus-decision.md §3/§5).
   const cardMeta = useMemo(() => {
     const cardsById = new Map(cards.map((c) => [c.id, c]));
     const meta = new Map<string, CardMeta>();
@@ -227,6 +229,19 @@ export default function KanbanPage() {
       }
       if (card.column === "Impediment") {
         meta.set(card.id, { readyState: "impeded", blockerTitles: [] });
+        continue;
+      }
+      if (card.column === "Awaiting Subtasks") {
+        // Parked parent (analyse-levenscyclus-decision.md §3/§5): waiting
+        // on its own children, not on `depends_on` — same "dependent"
+        // state, different blocker source.
+        const pendingChildren = cards.filter(
+          (c) => c.parent_card_id === card.id && c.column !== "Done",
+        );
+        meta.set(card.id, {
+          readyState: "dependent",
+          blockerTitles: pendingChildren.map((c) => c.title),
+        });
         continue;
       }
       if (card.claimed_by?.startsWith(AGENT_CLAIM_PREFIX)) {

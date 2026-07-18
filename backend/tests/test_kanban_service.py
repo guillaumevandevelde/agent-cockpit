@@ -301,3 +301,113 @@ async def test_update_column_can_set_default_model():
 # were removed when sync.py was pruned. See docs/cockpit/sync-hlc-freeze-vs-prune.md.
 # Idempotent HLC-ordered replay of the *local* op-log stays covered by
 # test_kanban_rematerialize.py.
+
+
+# --- Awaiting Subtasks parking (analyse-levenscyclus-decision §3) ---------
+
+
+@pytest.mark.asyncio
+async def test_ensure_awaiting_subtasks_column_creates_row_ranked_before_done():
+    """Idempotent helper, mirrors ensure_analyst_column/ensure_intake_column:
+    creates the row once, ranks it just before `Done`, and a second call is
+    a no-op (returns False, no duplicate row)."""
+    async with KanbanSessionLocal() as s:
+        done_col = await service.create_column(s, project_key="A", name="Done", rank="0100")
+        await s.commit()
+
+        created = await service.ensure_awaiting_subtasks_column(s, "A")
+        await s.commit()
+        assert created is True
+
+        cols = await service.list_columns(s, "A")
+        awaiting = next(c for c in cols if c.name == "Awaiting Subtasks")
+        assert int(awaiting.rank) < int(done_col.rank)
+
+        created_again = await service.ensure_awaiting_subtasks_column(s, "A")
+        await s.commit()
+        assert created_again is False
+        cols = await service.list_columns(s, "A")
+        assert sum(1 for c in cols if c.name == "Awaiting Subtasks") == 1
+
+
+@pytest.mark.asyncio
+async def test_card_has_children_true_and_false():
+    async with KanbanSessionLocal() as s:
+        parent = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None, payload={"title": "parent"})
+        childless = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None, payload={"title": "childless"})
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child", "parent_card_id": parent})
+        await s.commit()
+
+        assert await service.card_has_children(s, parent) is True
+        assert await service.card_has_children(s, childless) is False
+
+
+@pytest.mark.asyncio
+async def test_close_parent_if_all_children_done_requires_parent_parked():
+    """A parent still sitting in an agent column (analysis in progress, not
+    yet parked) must not be auto-closed even if all children are Done —
+    only a genuinely parked parent (`Awaiting Subtasks`) is a candidate."""
+    async with KanbanSessionLocal() as s:
+        parent = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parent", "column": "analyst"})
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child", "column": "Done", "parent_card_id": parent})
+        await s.commit()
+
+        closed = await service.close_parent_if_all_children_done(s, parent)
+        await s.commit()
+        assert closed is False
+        assert (await service.get_card(s, parent)).column == "analyst"
+
+
+@pytest.mark.asyncio
+async def test_close_parent_if_all_children_done_false_while_one_pending():
+    async with KanbanSessionLocal() as s:
+        parent = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parent", "column": "Awaiting Subtasks"})
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "done-child", "column": "Done", "parent_card_id": parent})
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "pending-child", "column": "Backlog", "parent_card_id": parent})
+        await s.commit()
+
+        closed = await service.close_parent_if_all_children_done(s, parent)
+        await s.commit()
+        assert closed is False
+        assert (await service.get_card(s, parent)).column == "Awaiting Subtasks"
+
+
+@pytest.mark.asyncio
+async def test_close_parent_if_all_children_done_true_posts_summary_comment():
+    async with KanbanSessionLocal() as s:
+        parent = await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "parent", "column": "Awaiting Subtasks"})
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child1", "column": "Done", "parent_card_id": parent})
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="A", entity_id=None,
+            payload={"title": "child2", "column": "Done", "parent_card_id": parent})
+        await s.commit()
+
+        closed = await service.close_parent_if_all_children_done(s, parent)
+        await s.commit()
+        assert closed is True
+        assert (await service.get_card(s, parent)).column == "Done"
+
+        ops = await service.card_activity(s, parent)
+        summary_comments = [
+            o for o in ops
+            if o.op_type == "comment" and (o.payload.get("text") or "").startswith("**Summary:**")
+        ]
+        assert len(summary_comments) == 1

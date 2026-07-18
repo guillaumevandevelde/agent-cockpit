@@ -89,9 +89,13 @@ async def test_rolled_back_move_never_cleans_up(fired):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("column", ["Done", "Impediment"])
+@pytest.mark.parametrize("column", ["Done", "Impediment", "Awaiting Subtasks"])
 async def test_committed_move_fires_cleanup_once(fired, column):
-    """Both terminal columns still trigger cleanup — once — after commit."""
+    """All three terminal-for-the-session columns still trigger cleanup —
+    once — after commit. `Awaiting Subtasks` joined the set so a parent
+    parked there (analyse-levenscyclus-decision.md §3) still gets its
+    exiting agent session's tmux/worktree cleaned up exactly like a real
+    Done — the card's lifecycle isn't over, but the session is."""
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s)
         await s.commit()
@@ -139,4 +143,4 @@ async def test_non_terminal_move_does_not_clean_up(fired):
 
     await asyncio.sleep(0)
     assert fired == []
-    assert operations._TERMINAL_CLEANUP_COLUMNS == {"Done", "Impediment"}
+    assert {"Done", "Impediment", "Awaiting Subtasks"} == operations._TERMINAL_CLEANUP_COLUMNS

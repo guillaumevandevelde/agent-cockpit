@@ -18,7 +18,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 # in service.py runs. See docs/cockpit/kanban-conventions.md §1 for the
 # full convention map and scripts/check-kanban-conventions.sh for the
 # validator that catches the "stale column" bug class.
-COLUMNS = ["intake", "Backlog", "Impediment", "Done", "To Resume"]
+COLUMNS = ["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]  # the short enum clients validate against; `plan`, `plan_ref`, `spec` are wired by their own tools — see docs/cockpit/kanban-conventions.md §3
 
 # Machine-readable card → spec-doc link (spec-driven-development Fase 1). A
