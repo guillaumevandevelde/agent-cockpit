@@ -148,6 +148,9 @@ class KanbanCard(KanbanBase):
     deliverables: Mapped[list["KanbanDeliverable"]] = relationship(
         back_populates="card", cascade="all, delete-orphan",
     )
+    attachments: Mapped[list["KanbanAttachment"]] = relationship(
+        back_populates="card", cascade="all, delete-orphan",
+    )
 
 
 class KanbanDeliverable(KanbanBase):
@@ -160,6 +163,28 @@ class KanbanDeliverable(KanbanBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     card: Mapped["KanbanCard"] = relationship(back_populates="deliverables")
+
+
+class KanbanAttachment(KanbanBase):
+    """An image (screenshot) attached to a card and handed to its session.
+
+    The binary lives on disk (``storage_path``, an absolute local path under
+    ``settings.kanban_attachment_dir``); this row holds only metadata. Fed by
+    the op-log (``entity_type="attachment"``, ``op_type="attach"`` /
+    ``"detach"``) so a ``rematerialize()`` rebuild reproduces the row set — the
+    file itself is unlinked by the REST/service layer, never during replay.
+    """
+    __tablename__ = "kanban_attachments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    card_id: Mapped[str] = mapped_column(ForeignKey("kanban_cards.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(512), default="")
+    mime_type: Mapped[str] = mapped_column(String(64), default="")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    storage_path: Mapped[str] = mapped_column(Text)  # absolute local path
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    card: Mapped["KanbanCard"] = relationship(back_populates="attachments")
 
 
 class KanbanColumn(KanbanBase):

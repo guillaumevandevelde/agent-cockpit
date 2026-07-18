@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     bridge_attachment_retention_days: int = 7
     bridge_attachment_max_per_session_per_day: int = 100
 
+    # Kanban card attachment settings (screenshots handed to a dispatched
+    # session). Files live beside the ~/.claude-registry backups so the
+    # absolute storage path is readable by every worktree-spawned session on
+    # this box; the dispatch prompt injects those paths for the agent to Read.
+    kanban_attachment_dir: str = "~/.claude-registry/kanban-attachments"
+    kanban_attachment_max_bytes: int = 10 * 1024 * 1024
+
     # Server settings
     host: str = "127.0.0.1"
     port: int = 8000

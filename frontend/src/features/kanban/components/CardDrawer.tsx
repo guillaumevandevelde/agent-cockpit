@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { Copy, Link2, Loader2, Play } from "lucide-react";
+import { Copy, ImagePlus, Link2, Loader2, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -44,7 +44,7 @@ import { CardLedgerTab } from "./CardLedgerTab";
 import { PreviewPane } from "./PreviewPane";
 import { ReadyStateBadge } from "./ReadyStateBadge";
 import type { CardMeta } from "./Column";
-import type { Card, ActivityEntry, Deliverable, Gate, RunInstance } from "../types";
+import type { Card, ActivityEntry, Attachment, Deliverable, Gate, RunInstance } from "../types";
 import { SPEC_DOC_META_KEY } from "../types";
 
 const LIVE_POLL_INTERVAL_MS = 3000;
@@ -102,6 +102,114 @@ function formatRelativeTime(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return formatDistanceToNow(d, { addSuffix: true });
+}
+
+// Screenshots attached to a card. On dispatch the backend injects each
+// image's absolute path into the session prompt so the agent can Read it.
+function AttachmentsTab({
+  card,
+  onChanged,
+}: {
+  card: Card;
+  onChanged: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const attachments: Attachment[] = card.attachments ?? [];
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        await kanbanApi.uploadAttachment(card.id, file);
+      }
+      onChanged();
+      toast.success("Screenshot toegevoegd");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload mislukt");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDelete = async (attachmentId: string) => {
+    try {
+      await kanbanApi.deleteAttachment(card.id, attachmentId);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Verwijderen mislukt");
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {uploading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <ImagePlus className="h-4 w-4" />
+          )}
+          Screenshot uploaden
+        </Button>
+      </div>
+      {attachments.length === 0 ? (
+        <div className="text-xs text-muted-foreground">
+          Nog geen screenshots. Uploads worden aan de sessie meegegeven zodra
+          de kaart gedispatcht wordt.
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {attachments.map((a) => (
+            <div
+              key={a.id}
+              className="group relative overflow-hidden rounded border bg-muted/30"
+            >
+              <a
+                href={kanbanApi.attachmentUrl(card.id, a.id)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <img
+                  src={kanbanApi.attachmentUrl(card.id, a.id)}
+                  alt={a.filename}
+                  className="h-28 w-full object-cover"
+                  loading="lazy"
+                />
+              </a>
+              <Button
+                size="icon"
+                variant="destructive"
+                className="absolute right-1 top-1 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(a.id);
+                }}
+                aria-label="Screenshot verwijderen"
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Render a single deliverable with kind-specific icon + ref formatting.
@@ -1275,6 +1383,12 @@ export function CardDrawer({
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
+            <TabsTrigger value="screenshots">
+              Screenshots
+              {(card.attachments?.length ?? 0) > 0
+                ? ` (${card.attachments?.length})`
+                : ""}
+            </TabsTrigger>
             <TabsTrigger value="activity">Activity</TabsTrigger>
             <TabsTrigger value="plan">Plan</TabsTrigger>
             <TabsTrigger value="ledger">Ledger</TabsTrigger>
@@ -1291,6 +1405,10 @@ export function CardDrawer({
                 <DeliverableRow key={d.id} d={d} />
               ))}
             </div>
+          </TabsContent>
+
+          <TabsContent value="screenshots">
+            <AttachmentsTab card={card} onChanged={onChanged} />
           </TabsContent>
 
           <TabsContent value="activity">

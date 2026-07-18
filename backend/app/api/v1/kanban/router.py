@@ -4,12 +4,15 @@ import logging
 import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 
 from app.config import settings
+from app.kanban import attachments as attachment_store
 from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
+from app.kanban.models import KanbanAttachment, KanbanCard
 from app.kanban.operations import ClaimRejected, apply_operation, release_card_claim
 from app.kanban.project_key import resolve_project_key
 from app.kanban.schemas import (
@@ -737,6 +740,69 @@ async def attach(cid: str, payload: AttachRequest):
         await apply_operation(s, op_type="attach", entity_type="deliverable",
             project_key="", entity_id=cid, payload=payload.model_dump())
         await s.commit()
+        return await _reload(s, cid)
+
+
+@router.post("/cards/{cid}/attachments", response_model=CardResponse,
+             status_code=status.HTTP_201_CREATED)
+async def upload_attachment(cid: str, file: UploadFile = File(...)):
+    """Attach a screenshot to a card. The image is stored on disk and its
+    absolute path is injected into the dispatch prompt so the spawned session
+    can Read it (see dispatch.build_card_prompt)."""
+    content = await file.read(settings.kanban_attachment_max_bytes + 1)
+    async with KanbanSessionLocal() as s:
+        # Existence check via s.get (not service.get_card) so the card's
+        # attachments relationship stays unloaded — otherwise the post-commit
+        # _reload would return the stale (pre-upload) collection from the
+        # identity map.
+        if await s.get(KanbanCard, cid) is None:
+            raise HTTPException(404, "card not found")
+        try:
+            meta = attachment_store.save_attachment(cid, content)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        await apply_operation(s, op_type="attach", entity_type="attachment",
+            project_key="", entity_id=cid, payload=meta)
+        await s.commit()
+        return await _reload(s, cid)
+
+
+@router.get("/cards/{cid}/attachments/{attachment_id}")
+async def get_attachment_file(cid: str, attachment_id: str):
+    """Serve the raw image bytes for a card attachment (used by the board UI
+    to render thumbnails)."""
+    async with KanbanSessionLocal() as s:
+        row = (await s.execute(
+            select(KanbanAttachment)
+            .where(KanbanAttachment.card_id == cid)
+            .where(KanbanAttachment.id == attachment_id)
+        )).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(404, "attachment not found")
+        if not Path(row.storage_path).is_file():
+            raise HTTPException(404, "attachment file missing")
+        return FileResponse(
+            row.storage_path,
+            media_type=row.mime_type or "application/octet-stream",
+            filename=row.filename or None,
+        )
+
+
+@router.delete("/cards/{cid}/attachments/{attachment_id}", response_model=CardResponse)
+async def delete_attachment(cid: str, attachment_id: str):
+    async with KanbanSessionLocal() as s:
+        row = (await s.execute(
+            select(KanbanAttachment)
+            .where(KanbanAttachment.card_id == cid)
+            .where(KanbanAttachment.id == attachment_id)
+        )).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(404, "attachment not found")
+        storage_path = row.storage_path
+        await apply_operation(s, op_type="detach", entity_type="attachment",
+            project_key="", entity_id=cid, payload={"id": attachment_id})
+        await s.commit()
+        attachment_store.unlink_attachment(storage_path)
         return await _reload(s, cid)
 
 
