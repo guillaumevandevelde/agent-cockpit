@@ -126,6 +126,21 @@ async def list_cards(
     ]
 
 
+def _dependents_by_parent(cards: list[KanbanCard]) -> dict[str, list[KanbanCard]]:
+    """Map each parent card id → the non-Done cards that list it in
+    `depends_on`. Single detection seam shared by `_blocking_card_ids`
+    (needs only the key set) and the delete-guard `strip_dangling_deps_on_delete`
+    (needs the dependent cards themselves, to strip + comment on them)."""
+    dependents: dict[str, list[KanbanCard]] = {}
+    for card in cards:
+        if card.column == "Done":
+            # A finished card no longer blocks anything; skip.
+            continue
+        for parent_id in card.depends_on or ():
+            dependents.setdefault(parent_id, []).append(card)
+    return dependents
+
+
 def _blocking_card_ids(cards: list[KanbanCard]) -> set[str]:
     """Card ids that have at least one non-Done dependent in `cards`.
 
@@ -133,14 +148,60 @@ def _blocking_card_ids(cards: list[KanbanCard]) -> set[str]:
     the caller's `ready`/`blocking` filters both see the same snapshot — a
     freshly-Done parent has no in-flight children, so re-reading the DB would
     see an out-of-date view for the rest of this tick."""
-    blocking: set[str] = set()
-    for card in cards:
-        if card.column == "Done":
-            # A finished card no longer blocks anything; skip.
-            continue
-        for parent_id in card.depends_on or ():
-            blocking.add(parent_id)
-    return blocking
+    return set(_dependents_by_parent(cards).keys())
+
+
+# Prefix for the audit comment posted on a dependent when its dependency source
+# card is deleted. Deliberately distinct from every consumer-read prefix in
+# docs/cockpit/kanban-conventions.md §2 (`**Summary:** `, `**Impediment:** `,
+# `**Resolution:** `, …) so no reader mistakes it for one of those — it is
+# purely documentary for the activity feed, like `**Promoted to project:** `.
+_DEP_REMOVED_PREFIX = "**Dependency removed:** "
+
+
+async def strip_dangling_deps_on_delete(session, card_id: str) -> list[str]:
+    """Guard run before a card is deleted (single delete *or* `clear_column` /
+    "Clear Done"): strip the doomed card out of the `depends_on` of every
+    non-Done card that lists it, and post an audit comment on each such
+    dependent.
+
+    Without this, the fail-closed dep-resolver (`meets_dep_prerequisites`)
+    turns a *satisfied* dependency (parent in Done) into a permanent, invisible
+    fail-closed block the moment its source card is deleted — exactly the trap
+    that stranded 4 Backlog cards when "Clear Done" removed their finished
+    parent. See docs/cockpit/dangling-depends-on-analyse.md §1.2/§4.
+
+    Reuses the `_dependents_by_parent` detection seam (of which
+    `_blocking_card_ids` is the key-set view). Returns the ids of the
+    dependents that were updated, for logging/tests."""
+    from app.kanban.operations import apply_operation
+
+    card = await session.get(KanbanCard, card_id)
+    if card is None:
+        return []
+    cards = await list_cards(session, card.project_key, compact=True)
+    dependents = _dependents_by_parent(cards).get(card_id, [])
+    updated: list[str] = []
+    for dep in dependents:
+        new_deps = [d for d in (dep.depends_on or ()) if d != card_id]
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key="", entity_id=dep.id,
+            payload={"depends_on": new_deps},
+        )
+        await apply_operation(
+            session, op_type="comment", entity_type="comment",
+            project_key="", entity_id=dep.id,
+            payload={"text": (
+                f"{_DEP_REMOVED_PREFIX}dependency `{card_id}` "
+                f"({card.title!r}) was deleted from the board, so it has been "
+                f"stripped from this card's depends_on. The dependency source no "
+                f"longer exists; leaving the id in place would fail-closed the "
+                f"dep-resolver and block this card permanently."
+            )},
+        )
+        updated.append(dep.id)
+    return updated
 
 
 async def get_card(session, card_id: str):
