@@ -86,7 +86,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 89 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 90 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -177,7 +177,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
 | [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
 
-### Analysis (25)
+### Analysis (26)
 
 | Document | Status |
 |---|---|
@@ -185,6 +185,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten](./build-prioriteiten-analyse.md) | 🟢 active |
 | [Kaarten refereerbaar maken — analyse](./card-references-analysis.md) | 🟢 active |
 | [Communicatie & weergave — analyse](./communicatie-en-weergave-analyse.md) | 🟢 active |
+| [Controlled auto-dispatch — selectief dispatchen per soort werk](./controlled-auto-dispatch-analysis.md) | 🟢 active |
 | [Analyse — verweesde `depends_on` blokkeren kaarten permanent en onzichtbaar](./dangling-depends-on-analyse.md) | 🟢 active |
 | [Spike: headless `stream-json`-transport (Claude) achter `SpawnTransport`](./headless-stream-json-transport-spike.md) | 🔵 decided |
 | [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md) | 🟢 active |
