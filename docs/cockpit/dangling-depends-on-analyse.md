@@ -1,3 +1,9 @@
+---
+title: "Analyse — verweesde `depends_on` blokkeren kaarten permanent en onzichtbaar"
+type: analysis
+status: active
+---
+
 # Analyse — verweesde `depends_on` blokkeren kaarten permanent en onzichtbaar
 
 **Kaart:** `ea7a8e5a` "Analysis - Blocked cards" · **Datum:** 2026-07-17 · **Type:** leaf design-deliverable (analyst modus 2)

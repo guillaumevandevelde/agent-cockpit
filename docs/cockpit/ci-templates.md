@@ -1,3 +1,9 @@
+---
+title: "CITemplateService — drie GitHub-Actions-templates voor pasgeboren projecten"
+type: reference
+status: active
+---
+
 # CITemplateService — drie GitHub-Actions-templates voor pasgeboren projecten
 
 > Kanban-kaart: **`[feature][D] CITemplateService + drie GitHub-Actions-templates`**

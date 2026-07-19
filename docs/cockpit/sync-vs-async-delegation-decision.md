@@ -1,3 +1,9 @@
+---
+title: "Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument"
+type: decision
+status: decided
+---
+
 # Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument
 
 **Datum:** 2026-07-14

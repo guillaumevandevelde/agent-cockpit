@@ -1,3 +1,9 @@
+---
+title: "Audit: voltooide analyses zonder aangemaakte vervolgkaarten"
+type: analysis
+status: active
+---
+
 # Audit: voltooide analyses zonder aangemaakte vervolgkaarten
 
 **Kaart:** "Analyse - voltooide analyses" (`e00fc1f5`) · **Datum:** 2026-07-14 · **Type:** analyse-leaf-spike

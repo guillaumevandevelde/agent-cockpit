@@ -1,3 +1,9 @@
+---
+title: "Beslissing — Leaf-spike maakt zijn eigen vervolgkaarten aan (autonomie i.p.v. review-round-trip)"
+type: decision
+status: decided
+---
+
 # Beslissing — Leaf-spike maakt zijn eigen vervolgkaarten aan (autonomie i.p.v. review-round-trip)
 
 **Datum:** 2026-07-14

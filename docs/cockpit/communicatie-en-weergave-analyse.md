@@ -1,3 +1,9 @@
+---
+title: "Communicatie & weergave — analyse"
+type: analysis
+status: active
+---
+
 # Communicatie & weergave — analyse
 
 > **Type:** analyse (leaf design-deliverable). **Kaart:** `b0d2124e…`.

@@ -1,3 +1,9 @@
+---
+title: "Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)"
+type: decision
+status: decided
+---
+
 # Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)
 
 **Datum:** 2026-07-11

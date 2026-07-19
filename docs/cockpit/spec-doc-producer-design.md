@@ -1,3 +1,9 @@
+---
+title: "`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)"
+type: spec
+status: active
+---
+
 # `spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)
 
 **Datum:** 2026-07-17

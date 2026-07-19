@@ -1,3 +1,9 @@
+---
+title: "Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie"
+type: decision
+status: decided
+---
+
 # Beslissing — Code-kennisgraaf (Understand-Anything) voor code-navigatie
 
 **Datum:** 2026-07-18

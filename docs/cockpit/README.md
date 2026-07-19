@@ -1,3 +1,9 @@
+---
+title: "`docs/cockpit/` — de canonieke spec-boom (index)"
+type: index
+status: active
+---
+
 # `docs/cockpit/` — de canonieke spec-boom (index)
 
 > **Dit is de single source of truth voor "hoe werkt de fork Claude Cockpit vandaag".**

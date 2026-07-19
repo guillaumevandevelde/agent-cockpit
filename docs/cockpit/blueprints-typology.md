@@ -1,3 +1,9 @@
+---
+title: "Blueprints — taxonomie van `project_blueprint`-archetypes"
+type: reference
+status: active
+---
+
 # Blueprints — taxonomie van `project_blueprint`-archetypes
 
 > Kanban-kaart: **`[design][inceptie] Schrijf docs/cockpit/blueprints-typology.md`**.

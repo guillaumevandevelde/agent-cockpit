@@ -1,3 +1,9 @@
+---
+title: "Beslis-register — alle genomen productbeslissingen (index)"
+type: index
+status: active
+---
+
 # Beslis-register — alle genomen productbeslissingen (index)
 
 > **Dit is de canonieke, browsbare index van "welke richtingsbeslissingen zijn genomen

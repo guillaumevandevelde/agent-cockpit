@@ -1,3 +1,9 @@
+---
+title: "Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres"
+type: decision
+status: decided
+---
+
 # Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres
 
 **Datum:** 2026-07-11

@@ -1,3 +1,9 @@
+---
+title: "Beslissing — De analyse-fase krijgt een afdwingbaar uitkomst-contract"
+type: decision
+status: decided
+---
+
 # Beslissing — De analyse-fase krijgt een afdwingbaar uitkomst-contract
 
 **Datum:** 2026-07-15

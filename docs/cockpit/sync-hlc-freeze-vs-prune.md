@@ -1,3 +1,9 @@
+---
+title: "Sync + HLC-laag: bevriezen vs. snoeien — trade-off + beslissing"
+type: decision
+status: decided
+---
+
 # Sync + HLC-laag: bevriezen vs. snoeien — trade-off + beslissing
 
 > Uit de maturiteitsanalyse (§3, punt 3). DoD van de kaart: **eerst een geschreven

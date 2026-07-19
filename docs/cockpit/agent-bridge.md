@@ -1,3 +1,9 @@
+---
+title: "Agent Bridge — spawn, terminal-relay & per-sessie configuratie"
+type: reference
+status: active
+---
+
 # Agent Bridge — spawn, terminal-relay & per-sessie configuratie
 
 > **Canoniek** voor "hoe Claude Cockpit lokale agent-sessies start en bedient". Verzamelt

@@ -1,3 +1,9 @@
+---
+title: "Portfolio-orchestratie: meerdere product-apps beheren naast het meta-platform"
+type: analysis
+status: active
+---
+
 # Portfolio-orchestratie: meerdere product-apps beheren naast het meta-platform
 
 > Kanban-kaart: **`[analyse] Portfolio-orchestratie: meerdere product-apps

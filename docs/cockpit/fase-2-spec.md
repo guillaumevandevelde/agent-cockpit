@@ -1,3 +1,9 @@
+---
+title: "Fase 2 — Spec: Scheduled messages"
+type: spec
+status: active
+---
+
 # Fase 2 — Spec: Scheduled messages
 
 > Bouw dit pas nadat **fase 1** groen is (zie `fase-1-validation.md`). Fase 1 is **code-level

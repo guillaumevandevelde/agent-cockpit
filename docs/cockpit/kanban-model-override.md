@@ -1,3 +1,9 @@
+---
+title: "Kanban model-override — card/column/persona model-precedentie"
+type: reference
+status: active
+---
+
 # Kanban model-override — card/column/persona model-precedentie
 
 > **Canoniek** voor "welk model draait een kanban-gedispatchte sessie". Bouwt voort op

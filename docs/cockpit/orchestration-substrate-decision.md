@@ -1,3 +1,9 @@
+---
+title: "Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless"
+type: decision
+status: decided
+---
+
 # Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless
 
 **Datum:** 2026-07-11

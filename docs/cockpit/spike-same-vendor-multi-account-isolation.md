@@ -1,3 +1,9 @@
+---
+title: "Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor"
+type: analysis
+status: decided
+---
+
 # Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor
 
 **Datum:** 2026-07-13

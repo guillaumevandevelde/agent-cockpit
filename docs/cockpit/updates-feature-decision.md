@@ -1,3 +1,9 @@
+---
+title: "'Updates' (self-update) feature — past die nog bij Cockpit's missie?"
+type: decision
+status: decided
+---
+
 # 'Updates' (self-update) feature — past die nog bij Cockpit's missie?
 
 **Datum:** 2026-07-09

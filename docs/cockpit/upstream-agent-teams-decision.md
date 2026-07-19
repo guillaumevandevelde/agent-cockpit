@@ -1,3 +1,9 @@
+---
+title: "Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing"
+type: decision
+status: decided
+---
+
 # Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing
 
 **Datum:** 2026-07-08

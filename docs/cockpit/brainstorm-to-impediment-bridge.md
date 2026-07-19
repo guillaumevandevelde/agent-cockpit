@@ -1,3 +1,9 @@
+---
+title: "Brainstorm-to-impediment-bridge — van real-time dialogue naar `report_impediment`-flows"
+type: reference
+status: active
+---
+
 # Brainstorm-to-impediment-bridge — van real-time dialogue naar `report_impediment`-flows
 
 > Kanban-kaart: **`[design][inceptie] Schrijf brainstorm-to-impediment-bridge.md`**

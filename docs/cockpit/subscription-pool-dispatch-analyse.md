@@ -1,3 +1,9 @@
+---
+title: "Analyse — subscription-pool × auto-dispatcher × kolom-toewijzing"
+type: analysis
+status: active
+---
+
 # Analyse — subscription-pool × auto-dispatcher × kolom-toewijzing
 
 **Datum:** 2026-07-15

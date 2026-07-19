@@ -1,3 +1,9 @@
+---
+title: "Spike: headless `stream-json`-transport (Claude) achter `SpawnTransport`"
+type: analysis
+status: decided
+---
+
 # Spike: headless `stream-json`-transport (Claude) achter `SpawnTransport`
 
 **Datum:** 2026-07-15

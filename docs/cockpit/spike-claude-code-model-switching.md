@@ -1,3 +1,9 @@
+---
+title: "Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR"
+type: decision
+status: decided
+---
+
 # Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR
 
 **Date:** 2026-07-04

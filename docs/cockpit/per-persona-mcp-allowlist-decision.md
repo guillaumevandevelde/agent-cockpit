@@ -1,3 +1,9 @@
+---
+title: "Per-persona MCP-tool-allowlist — analyse & beslissing"
+type: decision
+status: decided
+---
+
 # Per-persona MCP-tool-allowlist — analyse & beslissing
 
 **Datum:** 2026-07-15

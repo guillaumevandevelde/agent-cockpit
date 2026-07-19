@@ -1,3 +1,9 @@
+---
+title: "Nieuw project spec-driven starten — is dit al ondersteund?"
+type: analysis
+status: active
+---
+
 # Nieuw project spec-driven starten — is dit al ondersteund?
 
 > Kanban-kaart: **"Analysis - New project startup flow"**

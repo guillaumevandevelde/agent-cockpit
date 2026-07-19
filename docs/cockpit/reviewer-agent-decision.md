@@ -1,3 +1,9 @@
+---
+title: "Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)"
+type: decision
+status: decided
+---
+
 # Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)
 
 **Datum:** 2026-07-10 (iteratie 1 + 2), **2026-07-18 (iteratie 3 — gebouwd)**

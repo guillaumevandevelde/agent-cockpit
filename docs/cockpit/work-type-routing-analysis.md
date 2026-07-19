@@ -1,3 +1,9 @@
+---
+title: "Card work-type → agent-routing — analyse & aanbevelingen"
+type: analysis
+status: active
+---
+
 # Card work-type → agent-routing — analyse & aanbevelingen
 
 > Status: **analyse, geen besluit.** Input voor kanban-kaart "Analyse - Auto dispatch

@@ -1,3 +1,9 @@
+---
+title: "Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse"
+type: analysis
+status: active
+---
+
 # Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse
 
 > **Status:** analyse afgerond 2026-07-15 · leaf-spike op kaart `32f2c383` ("Analyse - Spawn agent test bridges").

@@ -1,3 +1,9 @@
+---
+title: "Agent Mail — upstream sync (adapted port)"
+type: spec
+status: active
+---
+
 # Agent Mail — upstream sync (adapted port)
 
 > Cross-session berichten tussen willekeurige, losstaande Claude Code/Codex CLI-sessies

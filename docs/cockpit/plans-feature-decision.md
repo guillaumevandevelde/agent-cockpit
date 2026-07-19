@@ -1,3 +1,9 @@
+---
+title: "Plans-feature — analyse & richting (leaf spike)"
+type: decision
+status: proposed
+---
+
 # Plans-feature — analyse & richting (leaf spike)
 
 **Datum:** 2026-07-14

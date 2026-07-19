@@ -1,3 +1,9 @@
+---
+title: "Wat kunnen we leren van JIRA? — kritische analyse"
+type: analysis
+status: active
+---
+
 # Wat kunnen we leren van JIRA? — kritische analyse
 
 > Status: **analyse, geen besluit.** Leaf-spike voor de kanban-kaart

@@ -1,3 +1,9 @@
+---
+title: "Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten"
+type: analysis
+status: active
+---
+
 # Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten
 
 > Kanban-kaart: **`Analyse - Prioriteiten om te bouwen`**

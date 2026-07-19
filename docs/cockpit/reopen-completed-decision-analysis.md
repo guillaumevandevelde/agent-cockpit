@@ -1,3 +1,9 @@
+---
+title: "Completed beslissing weerleggen + heropenen met context — beslisdocument"
+type: decision
+status: decided
+---
+
 # Completed beslissing weerleggen + heropenen met context — beslisdocument
 
 > Kanban-kaart: **"Analyse - comment op completed beslissing"**

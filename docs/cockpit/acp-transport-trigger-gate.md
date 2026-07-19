@@ -1,3 +1,9 @@
+---
+title: "Trigger-poort: ACP-adaptertransport (§6 kaart 5) — status bij premature dispatch"
+type: reference
+status: proposed
+---
+
 # Trigger-poort: ACP-adaptertransport (§6 kaart 5) — status bij premature dispatch
 
 **Datum:** 2026-07-15

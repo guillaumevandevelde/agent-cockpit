@@ -1,3 +1,9 @@
+---
+title: "Beslissing: ACP (Agent-Client Protocol) als gestructureerd transport achter `SpawnTransport`"
+type: decision
+status: decided
+---
+
 # Beslissing: ACP (Agent-Client Protocol) als gestructureerd transport achter `SpawnTransport`
 
 **Datum:** 2026-07-14

@@ -1,3 +1,9 @@
+---
+title: "Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing"
+type: decision
+status: decided
+---
+
 # Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing
 
 **Datum:** 2026-07-09

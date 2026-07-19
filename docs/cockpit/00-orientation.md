@@ -1,3 +1,9 @@
+---
+title: "Claude Cockpit — oriëntatie (lees dit eerst)"
+type: reference
+status: active
+---
+
 # Claude Cockpit — oriëntatie (lees dit eerst)
 
 Dit is een **fork van [adrirubio/claude-deck](https://github.com/adrirubio/claude-deck)**

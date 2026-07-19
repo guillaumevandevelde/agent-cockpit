@@ -1,3 +1,9 @@
+---
+title: "Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling"
+type: spec
+status: active
+---
+
 # Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling
 
 **Datum:** 2026-06-11

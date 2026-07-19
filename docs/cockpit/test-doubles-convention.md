@@ -1,3 +1,9 @@
+---
+title: "Test-doubles convention — patch where the consumer looks"
+type: reference
+status: active
+---
+
 # Test-doubles convention — patch where the consumer looks
 
 `from app.module import name` binds the function object into the consumer's namespace

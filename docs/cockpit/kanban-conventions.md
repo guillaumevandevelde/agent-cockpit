@@ -1,3 +1,9 @@
+---
+title: "Kanban-DB conventions"
+type: reference
+status: active
+---
+
 # Kanban-DB conventions
 
 > **Bron van waarheid:** dit document is leidend voor de **string-conventies** in de
