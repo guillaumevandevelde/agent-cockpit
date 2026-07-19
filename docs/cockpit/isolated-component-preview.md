@@ -1,3 +1,9 @@
+---
+title: "Isolated component preview (light + dark screenshot)"
+type: reference
+status: active
+---
+
 # Isolated component preview (light + dark screenshot)
 
 Use this when you need to browser-verify a frontend change but

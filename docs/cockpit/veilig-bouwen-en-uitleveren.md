@@ -1,3 +1,9 @@
+---
+title: "Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy"
+type: reference
+status: active
+---
+
 # Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy
 
 > Kanban-kaart: **`[analyse] Veilig bouwen & uitleveren van willekeurige apps: isolatie, secrets, CI en run/deploy`** (facet D van de parent-kaart *"Deze applicatie als platform om andere applicaties te bouwen"*, `8db831a0df6d42689c5b26325b6cbecc`).

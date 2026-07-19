@@ -1,3 +1,9 @@
+---
+title: "Analyse — OpenHands: wat kunnen we overnemen of leren?"
+type: analysis
+status: active
+---
+
 # Analyse — OpenHands: wat kunnen we overnemen of leren?
 
 **Datum:** 2026-07-13

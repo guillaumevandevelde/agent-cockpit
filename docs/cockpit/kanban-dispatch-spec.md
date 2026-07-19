@@ -1,3 +1,9 @@
+---
+title: "Kanban auto-dispatch — spec"
+type: spec
+status: active
+---
+
 # Kanban auto-dispatch — spec
 
 > **Bron van waarheid:** dit document is leidend voor de auto-dispatch-laag.

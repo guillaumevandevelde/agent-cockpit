@@ -1,3 +1,9 @@
+---
+title: "Analyse — Flexibel & maximaal gebruik van abonnementen (usage-aware dispatch-routing)"
+type: analysis
+status: active
+---
+
 # Analyse — Flexibel & maximaal gebruik van abonnementen (usage-aware dispatch-routing)
 
 **Datum:** 2026-07-13

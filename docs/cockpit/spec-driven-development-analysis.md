@@ -1,3 +1,9 @@
+---
+title: "Spec-driven development als single source of truth — analyse"
+type: analysis
+status: active
+---
+
 # Spec-driven development als single source of truth — analyse
 
 > Kanban-kaart: **"Analyse - spec driven development as single source of truth"**

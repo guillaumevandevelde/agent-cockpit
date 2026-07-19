@@ -1,3 +1,9 @@
+---
+title: "Beslissing: human-takeover-UX voor headless sessies"
+type: decision
+status: decided
+---
+
 # Beslissing: human-takeover-UX voor headless sessies
 
 **Datum:** 2026-07-15

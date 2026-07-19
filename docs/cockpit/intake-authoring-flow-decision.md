@@ -1,3 +1,9 @@
+---
+title: "Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart"
+type: decision
+status: decided
+---
+
 # Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart
 
 **Datum:** 2026-07-14

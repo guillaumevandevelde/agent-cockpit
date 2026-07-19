@@ -167,6 +167,10 @@ Bouw geen parallel systeem; formaliseer wat er al is. Fundament → franje:
    advisory `scripts/check-doc-frontmatter.sh` toe (zelfde filosofie als de bestaande
    check-scripts).
 
+   ✅ Geïmplementeerd (kaart `25bfe803d3824d9297c66c490179b33e`): alle 88
+   `docs/cockpit/*.md` dragen nu `title`+`type`+`status`-frontmatter, en
+   `scripts/check-doc-frontmatter.sh` (advisory, `--strict`) bewaakt de dekking.
+
 2. **Gegenereerde index + `llms.txt`.** Eén generator die de frontmatter leest en
    (a) de README-indextabel **regenereert** (gegroepeerd op `type`, met `status`-badges,
    100% dekking i.p.v. 43/84), en (b) een `docs/cockpit/llms.txt` (of root) emit als

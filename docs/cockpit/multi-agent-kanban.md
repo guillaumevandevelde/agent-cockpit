@@ -1,3 +1,9 @@
+---
+title: "Multi-agent kanban — smoke-test cookbook"
+type: reference
+status: active
+---
+
 # Multi-agent kanban — smoke-test cookbook
 
 > Status: handleiding voor de twee-fase workflow (analyst → executors).

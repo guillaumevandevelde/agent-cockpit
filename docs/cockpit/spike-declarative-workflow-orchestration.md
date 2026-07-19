@@ -1,3 +1,9 @@
+---
+title: "Spike: declaratieve multi-agent workflow-orchestratie — ADR"
+type: decision
+status: decided
+---
+
 # Spike: declaratieve multi-agent workflow-orchestratie — ADR
 
 **Date:** 2026-07-03

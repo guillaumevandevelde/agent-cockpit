@@ -1,3 +1,9 @@
+---
+title: "Portfolio-migratie: bestaande projecten bij de kind-introductie"
+type: plan
+status: active
+---
+
 # Portfolio-migratie: bestaande projecten bij de kind-introductie
 
 > **Design-only.** Deze doc beschrijft **hoe** we bepalen welk bestaand

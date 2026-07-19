@@ -1,3 +1,9 @@
+---
+title: "Per-kaart run-ledger — scope & ontwerp — beslissing"
+type: decision
+status: decided
+---
+
 # Per-kaart run-ledger — scope & ontwerp — beslissing
 
 > Kanban-kaart: **`[observability] Per-kaart run-ledger: stitch prompt → files →

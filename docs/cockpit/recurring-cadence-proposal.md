@@ -1,3 +1,9 @@
+---
+title: "Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel"
+type: analysis
+status: proposed
+---
+
 # Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel
 
 > Companion van kanban-kaart

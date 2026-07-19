@@ -1,3 +1,9 @@
+---
+title: "Beslissing: `intake_kind` nu toevoegen, of YAGNI?"
+type: decision
+status: decided
+---
+
 # Beslissing: `intake_kind` nu toevoegen, of YAGNI?
 
 **Datum:** 2026-07-14

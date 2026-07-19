@@ -1,3 +1,9 @@
+---
+title: "Portfolio-cap policy: waarde, scope, failure-mode"
+type: reference
+status: active
+---
+
 # Portfolio-cap policy: waarde, scope, failure-mode
 
 > **Design-only.** Deze doc legt de drie open beleids-keuzes voor de

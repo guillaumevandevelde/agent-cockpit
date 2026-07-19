@@ -1,3 +1,9 @@
+---
+title: "Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)"
+type: analysis
+status: active
+---
+
 # Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)
 
 **Datum:** 2026-07-15

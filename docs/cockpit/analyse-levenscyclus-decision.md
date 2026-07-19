@@ -1,3 +1,9 @@
+---
+title: "Beslissing — De analyse-levenscyclus op het bord: parkeerkolom, subtaak-rollup, statusvocabulaire"
+type: decision
+status: decided
+---
+
 # Beslissing — De analyse-levenscyclus op het bord: parkeerkolom, subtaak-rollup, statusvocabulaire
 
 **Datum:** 2026-07-15

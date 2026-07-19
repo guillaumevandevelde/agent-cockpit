@@ -1,3 +1,9 @@
+---
+title: "Fase 1 — Validatiechecklist (werkt claude-deck onder WSL?)"
+type: reference
+status: active
+---
+
 # Fase 1 — Validatiechecklist (werkt claude-deck onder WSL?)
 
 Doel: bevestigen dat de dragende claude-deck-capaciteiten werken onder WSL vóór we fase 2

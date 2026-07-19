@@ -1,3 +1,9 @@
+---
+title: "Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo"
+type: reference
+status: active
+---
+
 # Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo
 
 > Kanban-kaart: **`[analyse] Repo-provisioning & project-bootstrap: nieuwe

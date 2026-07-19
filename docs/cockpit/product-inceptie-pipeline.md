@@ -1,3 +1,9 @@
+---
+title: "Product-inceptie: van gesprek naar spec + plan die een project seedt"
+type: reference
+status: active
+---
+
 # Product-inceptie: van gesprek naar spec + plan die een project seedt
 
 > Kanban-kaart: **`[analyse] Product-inceptie: van gesprek naar spec +

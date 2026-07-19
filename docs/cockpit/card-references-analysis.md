@@ -1,3 +1,9 @@
+---
+title: "Kaarten refereerbaar maken — analyse"
+type: analysis
+status: active
+---
+
 # Kaarten refereerbaar maken — analyse
 
 > **Status:** ontwerp-aanbeveling (leaf-spike). Kaart-id `9eaa600d222a4ec78e11f195fcf86bdd`.

@@ -1,3 +1,9 @@
+---
+title: "Orchestration-flow — is onze flow robuust genoeg? — analyse"
+type: analysis
+status: active
+---
+
 # Orchestration-flow — is onze flow robuust genoeg? — analyse
 
 > Kanban-kaart: **"Analyse - orchestration flow"**

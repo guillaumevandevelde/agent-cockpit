@@ -1,3 +1,9 @@
+---
+title: "Cockpit als app-fabriek: consolidatie van vier facet-analyses"
+type: analysis
+status: active
+---
+
 # Cockpit als app-fabriek: consolidatie van vier facet-analyses
 
 > Synthese-kaart (facet E, `c980a926119649d2af1b2f66274fff36`) van de

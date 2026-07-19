@@ -1,3 +1,9 @@
+---
+title: "Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies"
+type: decision
+status: decided
+---
+
 # Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies
 
 **Datum:** 2026-07-11

@@ -1,3 +1,9 @@
+---
+title: "Structured events / `headless_run` — ACP-isomorf event-schema"
+type: reference
+status: active
+---
+
 # Structured events / `headless_run` — ACP-isomorf event-schema
 
 **Status:** geïmplementeerd (schema-fundament). Bron: [`acp-transport-decision.md`](./acp-transport-decision.md) §6 kaart 2.

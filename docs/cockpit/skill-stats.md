@@ -1,3 +1,9 @@
+---
+title: "Skill Stats — per-project skill-gebruik"
+type: reference
+status: active
+---
+
 # Skill Stats — per-project skill-gebruik
 
 > **Canoniek** voor de Stats-tab op de Skills-pagina. Beknopt; voor bestandsdetails zie de

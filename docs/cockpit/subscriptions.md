@@ -1,3 +1,9 @@
+---
+title: "Subscriptions-pagina — credential-beheer & per-provider quota"
+type: reference
+status: active
+---
+
 # Subscriptions-pagina — credential-beheer & per-provider quota
 
 > **Canoniek** voor de `/subscriptions`-pagina (voorheen `/providers`): waar per-abonnement

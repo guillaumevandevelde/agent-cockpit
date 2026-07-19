@@ -1,3 +1,9 @@
+---
+title: "Token-optimalisatie — analyse & aanbevelingen"
+type: analysis
+status: active
+---
+
 # Token-optimalisatie — analyse & aanbevelingen
 
 > **Type:** analyse/beslisdoc (leaf spike). Bron-kaart: *"Analyse - Tokenoptimalisatie"*

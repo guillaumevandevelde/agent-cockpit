@@ -1,3 +1,9 @@
+---
+title: "Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic"
+type: decision
+status: decided
+---
+
 # Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic
 
 **Datum:** 2026-07-11

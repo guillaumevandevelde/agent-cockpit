@@ -1,3 +1,9 @@
+---
+title: "Sandcastle Integration Plan — Claude Cockpit"
+type: plan
+status: active
+---
+
 # Sandcastle Integration Plan — Claude Cockpit
 
 ## 1. Critical Analysis: Sandcastle vs Existing CC Bridge / Agent Bridge

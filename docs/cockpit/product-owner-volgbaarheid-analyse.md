@@ -1,3 +1,9 @@
+---
+title: "Analyse — Volgbaarheid van het project voor de product owner"
+type: analysis
+status: active
+---
+
 # Analyse — Volgbaarheid van het project voor de product owner
 
 **Datum:** 2026-07-18

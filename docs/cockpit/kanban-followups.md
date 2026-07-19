@@ -1,3 +1,9 @@
+---
+title: "Kanban — known follow-ups (post-v1)"
+type: reference
+status: active
+---
+
 # Kanban — known follow-ups (post-v1)
 
 These came out of the final code review (2026-06-14). The merge-blockers were fixed

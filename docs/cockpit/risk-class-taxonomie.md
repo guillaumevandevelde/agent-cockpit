@@ -1,3 +1,9 @@
+---
+title: "`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`"
+type: reference
+status: active
+---
+
 # `risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`
 
 > **Design-only.** Deze doc werkt de risico-taxonomie en de classifier uit die

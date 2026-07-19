@@ -1,3 +1,9 @@
+---
+title: "ProjectBootstrapPolicy — de \"cockpit-defaults\" van repo-bootstrap"
+type: reference
+status: active
+---
+
 # ProjectBootstrapPolicy — de "cockpit-defaults" van repo-bootstrap
 
 > Kanban-kaart: **`[design][bootstrap] ProjectBootstrapPolicy — cockpit-defaults

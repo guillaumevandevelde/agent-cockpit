@@ -1,3 +1,9 @@
+---
+title: "Routing van intake-kaarten — analyse & ontwerpbesluit"
+type: analysis
+status: active
+---
+
 # Routing van intake-kaarten — analyse & ontwerpbesluit
 
 > Kanban-kaart: **`[work-type][inceptie] Routing van intake-kaarten — niet door

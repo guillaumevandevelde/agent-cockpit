@@ -1,3 +1,9 @@
+---
+title: "Portfolio ↔ security overdracht — drie open vragen voor facet D"
+type: analysis
+status: proposed
+---
+
 # Portfolio ↔ security overdracht — drie open vragen voor facet D
 
 > **Design-only.** Dit document stelt **drie security-vragen** die facet D

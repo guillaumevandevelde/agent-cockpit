@@ -1,3 +1,9 @@
+---
+title: "Terminology — canonieke woordenlijst"
+type: reference
+status: active
+---
+
 # Terminology — canonieke woordenlijst
 
 > **Bron van waarheid** voor de vijf kernbegrippen in Claude Cockpit. Elke term

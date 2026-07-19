@@ -1,3 +1,9 @@
+---
+title: "Kanban — Spec: per-project bord met agent-zelfbediening"
+type: spec
+status: active
+---
+
 # Kanban — Spec: per-project bord met agent-zelfbediening
 
 > Status: ontwerp goedgekeurd (2026-06-13), geïmplementeerd in v1. Datamodel- en
