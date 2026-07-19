@@ -53,6 +53,7 @@
 
 ## Decision
 
+- [9Router-integratie — analyse & beslissing](./9router-integratie-analyse.md): type=decision status=decided
 - [Beslissing: ACP (Agent-Client Protocol) als gestructureerd transport achter `SpawnTransport`](./acp-transport-decision.md): type=decision status=decided
 - [Beslissing — De analyse-levenscyclus op het bord: parkeerkolom, subtaak-rollup, statusvocabulaire](./analyse-levenscyclus-decision.md): type=decision status=decided
 - [Beslissing — De analyse-fase krijgt een afdwingbaar uitkomst-contract](./analysis-outcome-contract-decision.md): type=decision status=decided
