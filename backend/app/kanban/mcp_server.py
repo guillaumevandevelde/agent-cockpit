@@ -505,7 +505,7 @@ async def move_card(card_id: str, column: str,
             # Done would. Releasing the claim also turns the card into an
             # unclaimed orphan in the reviewer column, which the dispatcher then
             # re-picks up as a fresh, cleared-context reviewer session.
-            _cleanup_after_commit(s, card_id, card.project_key)
+            _cleanup_after_commit(s, card_id, card.project_key, card.claimed_by)
 
         # Auto-close (§3.2): this card actually reached Done (not parked) —
         # if it's someone's child, check whether that parent can now close

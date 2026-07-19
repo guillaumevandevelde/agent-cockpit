@@ -192,7 +192,8 @@ async def release_card_claim(session, *, card_id: str, project_key: str) -> None
     )
 
 
-def _cleanup_after_commit(session, card_id: str, project_key: str) -> None:
+def _cleanup_after_commit(session, card_id: str, project_key: str,
+                          claimed_by: str | None = None) -> None:
     """Fire terminal-column session cleanup only once the move is committed.
 
     The cleanup kills the tmux session hosting the MCP client that issued this
@@ -205,6 +206,12 @@ def _cleanup_after_commit(session, card_id: str, project_key: str) -> None:
 
     Deferring to `after_commit` keeps the ordering that made the old code look
     correct — cleanup still happens, and only for a move that actually landed.
+
+    `claimed_by` is captured here (at schedule time, before the synchronous
+    claim-clear below wipes it) and threaded through to the cleanup, so a
+    Done→non-Done terminal move (`Impediment`/`Awaiting Subtasks`) no longer
+    reads `claimed_by=None` at fire time and silently skips the tmux-kill /
+    worktree-remove (kanban card 7b63463e).
     """
     from sqlalchemy import event
 
@@ -218,7 +225,7 @@ def _cleanup_after_commit(session, card_id: str, project_key: str) -> None:
         # `after_commit` runs in SQLAlchemy's greenlet; hop back onto the loop
         # before touching asyncio so cleanup scheduling never depends on
         # whether a running loop is visible from that context.
-        loop.call_soon(on_card_moved_to_done, card_id, project_key)
+        loop.call_soon(on_card_moved_to_done, card_id, project_key, claimed_by)
 
 
 def _lww_set(card, field: str, value, hlc: str) -> None:
@@ -284,7 +291,11 @@ async def _materialize(session, *, op_type, entity_type, project_key,
             new_column = payload.get("column")
             if (new_column in _TERMINAL_CLEANUP_COLUMNS
                     and old_column not in _TERMINAL_CLEANUP_COLUMNS):
-                _cleanup_after_commit(session, entity_id, project_key)
+                # Capture claimed_by now — the synchronous claim-clear below
+                # wipes it in this same transaction, so a fresh read at fire
+                # time would lose the session name (kanban card 7b63463e).
+                _cleanup_after_commit(session, entity_id, project_key,
+                                      card.claimed_by)
             # A terminal move means the card actually finished this round —
             # forgive whatever claim/release churn preceded it so a later
             # reopen starts the circuit breaker fresh.

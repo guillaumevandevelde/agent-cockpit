@@ -40,7 +40,7 @@ async def _wait_for_cleanup(called: list, *, timeout: float = 2.0) -> None:
 
 
 def _patch_cleanup(monkeypatch, called: list) -> AsyncMock:
-    async def fake_cleanup(card_id, project_key):
+    async def fake_cleanup(card_id, project_key, claimed_by=None):
         called.append((card_id, project_key))
         return {"cleaned": True}
 

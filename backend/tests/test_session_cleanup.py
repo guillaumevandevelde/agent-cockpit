@@ -290,7 +290,7 @@ class TestOnCardMovedToDone:
         called_with = []
         finished = asyncio.Event()
 
-        async def fake_cleanup(card_id, project_key):
+        async def fake_cleanup(card_id, project_key, claimed_by=None):
             called_with.append((card_id, project_key))
             finished.set()
             return {"cleaned": True}

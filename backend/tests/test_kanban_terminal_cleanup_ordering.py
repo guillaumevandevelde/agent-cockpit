@@ -45,8 +45,9 @@ def fired(monkeypatch):
     calls: list[tuple[str, str]] = []
     import app.kanban.session_cleanup as sc
 
-    monkeypatch.setattr(sc, "on_card_moved_to_done",
-                        lambda card_id, project_key: calls.append((card_id, project_key)))
+    monkeypatch.setattr(
+        sc, "on_card_moved_to_done",
+        lambda card_id, project_key, claimed_by=None: calls.append((card_id, project_key)))
     return calls
 
 
