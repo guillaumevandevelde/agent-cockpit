@@ -3944,7 +3944,13 @@ def match_project_paths(
     key_of: Callable[[str], str] = resolve_project_key,
 ) -> dict[str, str]:
     """Map each enabled board key to a local path on this device, by computing the
-    project key of each registered path. First match wins."""
+    project key of each registered path. First match wins.
+
+    This is the *bulk many-key* mapper (single pass, O(n) key computations for
+    the whole board). For the *single-key* reverse lookup use
+    `app.kanban.project_key.resolve_project_path`; do not call it once per key
+    here — that would turn one O(n) pass into O(k·n) with k separate DB fetches.
+    """
     out: dict[str, str] = {}
     for path in project_paths:
         try:

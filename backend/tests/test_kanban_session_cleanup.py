@@ -77,7 +77,7 @@ async def test_cleanup_continues_when_tmux_already_dead(monkeypatch):
     cleanup should still remove the worktree and release the claim."""
     monkeypatch.setattr(session_cleanup, "_kill_tmux_session", lambda _: False)
     monkeypatch.setattr(session_cleanup, "_remove_worktree_at", lambda _a, _b: True)
-    monkeypatch.setattr(session_cleanup, "_get_project_path", AsyncMock(return_value="/tmp/test-repo"))
+    monkeypatch.setattr(session_cleanup, "resolve_project_path", AsyncMock(return_value="/tmp/test-repo"))
 
     async with KanbanSessionLocal() as s:
         cid = await _seed_card(s)
@@ -101,7 +101,7 @@ async def test_cleanup_releases_claim_even_on_tmux_dead(monkeypatch):
     """The claim should always be released, even if tmux kill fails."""
     monkeypatch.setattr(session_cleanup, "_kill_tmux_session", lambda _: False)
     monkeypatch.setattr(session_cleanup, "_remove_worktree_at", lambda _a, _b: True)
-    monkeypatch.setattr(session_cleanup, "_get_project_path", AsyncMock(return_value="/tmp/test-repo"))
+    monkeypatch.setattr(session_cleanup, "resolve_project_path", AsyncMock(return_value="/tmp/test-repo"))
 
     async with KanbanSessionLocal() as s:
         cid = await _seed_card(s)
@@ -125,7 +125,7 @@ async def test_cleanup_removes_worktree_when_tmux_dead(monkeypatch):
 
     monkeypatch.setattr(session_cleanup, "_kill_tmux_session", lambda _: False)
     monkeypatch.setattr(session_cleanup, "_remove_worktree_at", track_remove)
-    monkeypatch.setattr(session_cleanup, "_get_project_path", AsyncMock(return_value="/tmp/test-repo"))
+    monkeypatch.setattr(session_cleanup, "resolve_project_path", AsyncMock(return_value="/tmp/test-repo"))
 
     async with KanbanSessionLocal() as s:
         cid = await _seed_card(s)
@@ -178,7 +178,7 @@ def _make_project_with_worktree(tmp_path, session_name="k-test-1234",
 @pytest.mark.asyncio
 async def test_find_worktree_unmerged_warning_detects_unmerged_commits(monkeypatch, tmp_path):
     repo = _make_project_with_worktree(tmp_path, ahead=2)
-    monkeypatch.setattr(session_cleanup, "_get_project_path", AsyncMock(return_value=str(repo)))
+    monkeypatch.setattr(session_cleanup, "resolve_project_path", AsyncMock(return_value=str(repo)))
 
     async with KanbanSessionLocal() as s:
         cid = await _seed_card(s)
@@ -196,7 +196,7 @@ async def test_find_worktree_unmerged_warning_detects_unmerged_commits(monkeypat
 @pytest.mark.asyncio
 async def test_find_worktree_unmerged_warning_none_when_merged_and_clean(monkeypatch, tmp_path):
     repo = _make_project_with_worktree(tmp_path, ahead=1, merged=True)
-    monkeypatch.setattr(session_cleanup, "_get_project_path", AsyncMock(return_value=str(repo)))
+    monkeypatch.setattr(session_cleanup, "resolve_project_path", AsyncMock(return_value=str(repo)))
 
     async with KanbanSessionLocal() as s:
         cid = await _seed_card(s)
@@ -210,7 +210,7 @@ async def test_find_worktree_unmerged_warning_none_when_merged_and_clean(monkeyp
 @pytest.mark.asyncio
 async def test_find_worktree_unmerged_warning_flags_dirty_even_when_merged(monkeypatch, tmp_path):
     repo = _make_project_with_worktree(tmp_path, ahead=1, merged=True, dirty=True)
-    monkeypatch.setattr(session_cleanup, "_get_project_path", AsyncMock(return_value=str(repo)))
+    monkeypatch.setattr(session_cleanup, "resolve_project_path", AsyncMock(return_value=str(repo)))
 
     async with KanbanSessionLocal() as s:
         cid = await _seed_card(s)
@@ -225,7 +225,7 @@ async def test_find_worktree_unmerged_warning_flags_dirty_even_when_merged(monke
 
 @pytest.mark.asyncio
 async def test_find_worktree_unmerged_warning_none_without_worktree(monkeypatch):
-    monkeypatch.setattr(session_cleanup, "_get_project_path", AsyncMock(return_value=None))
+    monkeypatch.setattr(session_cleanup, "resolve_project_path", AsyncMock(return_value=None))
 
     async with KanbanSessionLocal() as s:
         cid = await _seed_card(s)

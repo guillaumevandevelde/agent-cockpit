@@ -3,10 +3,13 @@
 Primary key = normalized git remote ("git:<host>/<path>"); fallback =
 "slug:<basename>" so repos without a remote still get a stable-ish key.
 """
+import logging
 import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _git_remote(project_path: str) -> str | None:
@@ -60,3 +63,39 @@ def safe_resolve_project_key(
         return resolve_project_key(project_path, _remote_getter=_remote_getter)
     except Exception:
         return None
+
+
+async def resolve_project_path(project_key: str) -> str | None:
+    """Reverse of `resolve_project_key`: the local filesystem path of the
+    first registered project whose computed key matches `project_key`.
+
+    Scans all registered projects, computing each one's key, and returns the
+    first matching path. Returns None when no registered project matches or on
+    a DB error; a candidate whose own key lookup raises (e.g. not a git repo)
+    is skipped rather than aborting the scan.
+
+    This is the single public helper for the `project_key -> path` direction —
+    see the earlier three-way duplication (`session_cleanup._get_project_path`,
+    the run-ledger service, and `dispatch.match_project_paths`) that motivated
+    it. Note: O(n) `resolve_project_key` calls, each shelling out to git, with
+    no caching; callers needing to map *many* keys in one shot should use the
+    single-pass bulk mapper `dispatch.match_project_paths` instead of calling
+    this once per key.
+    """
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models.database import Project
+
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(select(Project.path))).scalars().all()
+        for path in rows:
+            try:
+                if resolve_project_key(path) == project_key:
+                    return path
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning("Could not look up project path for %s: %s", project_key, e)
+    return None
