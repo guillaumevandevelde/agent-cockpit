@@ -137,27 +137,33 @@ async def test_create_project_from_intake_happy_path(tmp_path: Path):
                 target_path=str(target),
             )
 
-    assert result.project_id  # non-empty
+    assert result["project_id"]  # non-empty
     assert target.exists() and target.is_dir()
     assert (target / ".git").exists()  # git init ran
-    assert (target / ".claude" / "CLAUDE.md").exists()  # minimal seed
-    assert result.first_card_id  # non-empty
-    assert result.new_project_key.startswith("slug:")  # no remote yet
+    # CLAUDE.md is a sibling of .claude/, not inside it (BlueprintService
+    # convention — see _write_claudemd), and .claude/ itself is seeded.
+    assert (target / "CLAUDE.md").exists()  # minimal seed
+    assert (target / ".claude").is_dir()
+    assert result["first_card_id"]  # non-empty
+    assert result["new_project_key"].startswith("slug:")  # no remote yet
 
     # New kanban card lives in the new project's Backlog with plan_ref.
     async with KanbanSessionLocal() as s:
-        new_card = await service.get_card(s, result.first_card_id)
-        assert new_card.project_key == result.new_project_key
+        new_card = await service.get_card(s, result["first_card_id"])
+        assert new_card.project_key == result["new_project_key"]
         assert new_card.column == "Backlog"
         # plan_ref is a separate deliverable that points at the intake card.
         plan_refs = [d for d in new_card.deliverables if d.kind == "plan_ref"]
         assert plan_refs, "expected a plan_ref deliverable on the new card"
         assert intake_id in plan_refs[0].ref
 
-        # Intake card was moved to Done with a summary.
+        # Intake card was moved to Done with a summary. `done_summary` is
+        # request-time enrichment over the op-log, not an ORM column — read
+        # it via enrich_done_info (the same path the API/board uses).
         intake = await service.get_card(s, intake_id)
         assert intake.column == "Done"
-        assert intake.done_summary  # non-empty
+        summary, _ = await service.enrich_done_info(s, intake_id)
+        assert summary  # non-empty
 
 
 # ---- create_project_from_intake: validation -------------------------------
@@ -326,7 +332,7 @@ async def test_new_project_autodispatch_meta_is_set(tmp_path: Path):
             )
 
     async with KanbanSessionLocal() as s:
-        enabled = await dispatch.is_autodispatch_enabled(s, result.new_project_key)
+        enabled = await dispatch.is_autodispatch_enabled(s, result["new_project_key"])
         assert enabled is True
 
 
@@ -349,6 +355,6 @@ async def test_intake_card_without_plan_deliverable_still_works(tmp_path: Path):
             )
 
     async with KanbanSessionLocal() as s:
-        new_card = await service.get_card(s, result.first_card_id)
+        new_card = await service.get_card(s, result["first_card_id"])
         plan_refs = [d for d in new_card.deliverables if d.kind == "plan_ref"]
         assert plan_refs == []  # no plan → no plan_ref

@@ -25,14 +25,14 @@ import logging
 import shutil
 import subprocess
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from sqlalchemy import select
 
 from app.kanban import dispatch
 from app.kanban import service as kanban_service
-from app.kanban.models import KanbanCard
+from app.kanban.models import KanbanCard, KanbanDeliverable
 from app.kanban.operations import apply_operation
 from app.kanban.project_key import resolve_project_key
 from app.models.database import Project
@@ -211,17 +211,30 @@ class InceptionService:
             # Uses the existing `link_plan_ref` op-type so the materialised
             # shape is identical to child-cards born from `add_plan_attachment`
             # in the multi-agent flow — no new schema.
-            import json
-            await apply_operation(
-                self.kanban, op_type="link_plan_ref", entity_type="deliverable",
-                project_key=new_project_key, entity_id=first_card_id,
-                payload={
-                    "ref_json": json.dumps({
-                        "source_card_id": intake_card_id,
-                        "source_project_key": intake.project_key,
-                    }),
-                },
-            )
+            #
+            # Only when the intake card actually carries a plan deliverable
+            # (kind="plan"). An intake the human hasn't approved a design for
+            # yet has no plan, so the new card gets no plan_ref — linking one
+            # would leave a dangling reference to a non-existent plan (see
+            # test_intake_card_without_plan_deliverable_still_works).
+            intake_has_plan = (await self.kanban.execute(
+                select(KanbanDeliverable.id).where(
+                    KanbanDeliverable.card_id == intake_card_id,
+                    KanbanDeliverable.kind == "plan",
+                ).limit(1)
+            )).first() is not None
+            if intake_has_plan:
+                import json
+                await apply_operation(
+                    self.kanban, op_type="link_plan_ref", entity_type="deliverable",
+                    project_key=new_project_key, entity_id=first_card_id,
+                    payload={
+                        "ref_json": json.dumps({
+                            "source_card_id": intake_card_id,
+                            "source_project_key": intake.project_key,
+                        }),
+                    },
+                )
 
             # ---- step 8: move intake card to Done with summary ------------
             await apply_operation(
@@ -258,11 +271,15 @@ class InceptionService:
                 intake_card_id, project_name, new_project_key, first_card_id,
             )
 
-            return {
-                "project_id": project.id,
-                "new_project_key": new_project_key,
-                "first_card_id": first_card_id,
-            }
+            # Construct the typed result at the call site (the three fields
+            # are checked against the dataclass) and hand back a plain dict so
+            # the REST layer's ``CreateProjectFromIntakeResponse(**result)`` and
+            # the MCP tool's ``return result`` (JSON-serialised) keep working.
+            return asdict(InceptionResult(
+                project_id=project.id,
+                new_project_key=new_project_key,
+                first_card_id=first_card_id,
+            ))
 
         except Exception:
             # Atomic rollback. The kanban session's transaction holds steps
