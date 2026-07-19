@@ -97,6 +97,15 @@ CORE_FCR_INVARIANTS: list[tuple[str, str]] = [
         "non-overlap marker with code-review",
         "code-quality-check",
     ),
+    # Carve-out: a docs-only / analyst leaf-spike deliverable has no
+    # feature-diff to review, so it skips the subagent-FCR and does an
+    # inline compliance-check instead (card cf3f456c). Keeping this in the
+    # invariants list means the carve-out itself can't silently drift out
+    # of one mirror.
+    (
+        "carve-out: docs-only / analyst leaf-spike skips subagent-FCR",
+        "Carve-out — docs-only / analyst leaf-spike",
+    ),
 ]
 
 
