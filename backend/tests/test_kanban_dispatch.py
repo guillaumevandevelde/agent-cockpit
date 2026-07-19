@@ -1043,6 +1043,106 @@ async def test_get_transport_for_project_defaults_worktree(monkeypatch):
     assert t is not dispatch.sandcastle_transport  # a worktree transport callable
 
 
+# ---- risk_class-driven dispatch defaults ----------------------------------
+
+
+def test_skip_permissions_for_risk_class_only_meta_stays_permissive():
+    # meta (and the no-profile fallback) keep the historical bypass...
+    assert dispatch._skip_permissions_for_risk_class("meta") is True
+    assert dispatch._skip_permissions_for_risk_class(None) is True
+    # ...every product/untrusted class enforces permissions.
+    assert dispatch._skip_permissions_for_risk_class("product-staging") is False
+    assert dispatch._skip_permissions_for_risk_class("product-prod") is False
+    assert dispatch._skip_permissions_for_risk_class("untrusted") is False
+
+
+def test_transport_for_risk_class_products_default_to_sandcastle():
+    assert dispatch._transport_for_risk_class("meta") == "worktree"
+    assert dispatch._transport_for_risk_class(None) == "worktree"
+    assert dispatch._transport_for_risk_class("product-staging") == "sandcastle"
+    assert dispatch._transport_for_risk_class("untrusted") == "sandcastle"
+
+
+@pytest.mark.asyncio
+async def test_get_skip_permissions_product_project_defaults_to_false(monkeypatch):
+    async def _risk(project_key):
+        return "product-staging"
+    monkeypatch.setattr(dispatch, "_project_risk_class", _risk)
+    async with KanbanSessionLocal() as s:
+        assert await dispatch.get_skip_permissions(s, PK) is False
+
+
+@pytest.mark.asyncio
+async def test_get_skip_permissions_meta_project_stays_true(monkeypatch):
+    async def _risk(project_key):
+        return None  # no security profile -> meta/legacy default
+    monkeypatch.setattr(dispatch, "_project_risk_class", _risk)
+    async with KanbanSessionLocal() as s:
+        assert await dispatch.get_skip_permissions(s, PK) is True
+
+
+@pytest.mark.asyncio
+async def test_get_skip_permissions_explicit_override_wins(monkeypatch):
+    async def _risk(project_key):
+        return "product-staging"  # would default to False without an override
+    monkeypatch.setattr(dispatch, "_project_risk_class", _risk)
+    async with KanbanSessionLocal() as s:
+        # Explicit KanbanMeta override to True beats the product-safe default.
+        await dispatch.set_skip_permissions(s, PK, True)
+        await s.commit()
+        assert await dispatch.get_skip_permissions(s, PK) is True
+
+
+@pytest.mark.asyncio
+async def test_get_default_transport_product_project_defaults_to_sandcastle(monkeypatch):
+    async def _risk(project_key):
+        return "product-staging"
+    monkeypatch.setattr(dispatch, "_project_risk_class", _risk)
+    async with KanbanSessionLocal() as s:
+        assert await dispatch.get_default_transport(s, PK) == "sandcastle"
+
+
+@pytest.mark.asyncio
+async def test_get_default_transport_explicit_override_wins(monkeypatch):
+    async def _noop(project_key, enabled):
+        return None
+    monkeypatch.setattr(dispatch, "_sync_sandcastle_enabled", _noop)
+
+    async def _risk(project_key):
+        return "product-staging"  # would default to sandcastle
+    monkeypatch.setattr(dispatch, "_project_risk_class", _risk)
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_default_transport(s, PK, "worktree")
+        await s.commit()
+        assert await dispatch.get_default_transport(s, PK) == "worktree"
+
+
+def test_resolve_project_secrets_reads_store_as_env(monkeypatch):
+    class FakeStore:
+        def list(self, project_key):
+            return ["API_TOKEN", "DB_URL"]
+
+        def get(self, project_key, name):
+            return {"API_TOKEN": "t0k", "DB_URL": "sqlite://"}.get(name)
+
+    monkeypatch.setattr(dispatch, "_secret_store", lambda: FakeStore())
+    assert dispatch._resolve_project_secrets(PK) == {
+        "API_TOKEN": "t0k",
+        "DB_URL": "sqlite://",
+    }
+
+
+def test_resolve_project_secrets_swallows_store_errors(monkeypatch):
+    class BrokenStore:
+        def list(self, project_key):
+            raise RuntimeError("no passphrase configured")
+
+    monkeypatch.setattr(dispatch, "_secret_store", lambda: BrokenStore())
+    # A misconfigured store must never break dispatch — empty dict, no raise.
+    assert dispatch._resolve_project_secrets(PK) == {}
+    assert dispatch._resolve_project_secrets(None) == {}
+
+
 @pytest.mark.asyncio
 async def test_dispatch_no_todo_cards_is_a_noop():
     transport = RecordingTransport()
