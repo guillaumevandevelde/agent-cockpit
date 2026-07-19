@@ -153,6 +153,19 @@ altijd door.
    > `file:line`-refs. Dit is een **feature-compliance-check**, geen
    > code-quality-check — die is al apart gelopen via `/code-review`.
 
+   **Carve-out — docs-only / analyst leaf-spike:** De FCR is een
+   *feature-compliance*-check op een **code-diff**. Heeft je kaart geen
+   feature-diff om te reviewen — een analyst leaf-spike (`work_type='analysis'`,
+   geen `analyst_agent_id`) of een docs-only deliverable waarvan het resultaat
+   een `docs/cockpit/*.md`-analyse is, zonder API/UI en zonder siblings om te
+   breken — dan sla je de subagent-FCR **over** (spawn dus géén review-subagent;
+   dat respecteert ook de top-level "spawn geen agents tenzij gevraagd"-richtlijn)
+   en doe je in plaats daarvan een **inline** compliance-check tegen de
+   kaart-eisen: is de gevraagde analyse-breedte gedekt, zijn de gevraagde
+   artefacten opgeleverd, en zijn de follow-up-kaarten aangemaakt die de kaart
+   vroeg. Alleen een kaart met een echte code-diff draait de subagent-FCR
+   hierboven.
+
    **Resultaat interpreteren:**
    - **OK** → ga door naar stap 8 (`Kaart bijwerken → Done`).
    - **Blokkerende issues** → fix die eerst in dezelfde sessie (geen nieuwe kaart
