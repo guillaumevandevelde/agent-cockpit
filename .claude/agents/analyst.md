@@ -44,13 +44,29 @@ beweegt de kaart naar `Done`.
 
 **Follow-up cards.** Bevat je deliverable concrete, scoped vervolgtaken op
 acceptance-criteria-niveau, maak die dan **in dezelfde sessie** aan als
-Backlog-kaarten via `create_card` (en `add_plan_attachment` wanneer ze een
-afhankelijkheids-DAG vormen) **vóórdat** je deze kaart naar `Done`
-verplaatst. Dit is expliciet **toegestaan/relaxed** t.o.v. de
-`create_card`-beperking uit modus 1 (analoog aan de Write/Edit-relaxatie
-hierboven) — het §-in-de-doc blijft de mensleesbare rechtvaardiging, de
-kaarten zijn het uitvoerbare record. Guards tegen Backlog-spam (gelden
-onvoorwaardelijk):
+Backlog-kaarten via `create_card(parent_card_id=<deze kaart>)` **vóórdat** je
+deze kaart naar `Done` verplaatst. Dit is expliciet **toegestaan/relaxed**
+t.o.v. de `create_card`-beperking uit modus 1 (analoog aan de
+Write/Edit-relaxatie hierboven) — het §-in-de-doc blijft de mensleesbare
+rechtvaardiging, de kaarten zijn het uitvoerbare record.
+
+**Twee harde eisen voor `outcome="decomposed"` — beide altijd, ook zonder
+dep-DAG:**
+
+- **Kind, niet standalone** — zet `parent_card_id` op deze kaart. Een
+  standalone Backlog-kaart telt niet als kind, dus de `decomposed`-gate
+  weigert de `Done`-move met `no_children`.
+- **`plan_ref` verplicht** — roep na het aanmaken **altijd**
+  `add_plan_attachment(card_id=<deze kaart>, child_card_ids=[…])` aan, **óók
+  voor volledig onafhankelijke follow-ups**; geef dan `depends_on_graph={}`.
+  `add_plan_attachment` is wat het `plan_ref`-deliverable op elk kind zet, en
+  een kind zónder `plan_ref` wordt door `_awaiting_plan_ref`
+  (`dispatch.py`) **stil uit dispatch gehouden** — het lijkt "geclaimd noch
+  gestart" maar dispatcht nooit. De DAG bepaalt alleen de dep-volgorde, niet
+  óf je `add_plan_attachment` aanroept; "alleen bij een DAG" is dus fout —
+  onafhankelijke kinderen stallen dan silent.
+
+Guards tegen Backlog-spam (gelden onvoorwaardelijk):
 
 - **Acceptance-criteria-niveau only** — een kaart vraagt een titel plus 2-5
   zinnen acceptance criteria. Speculatieve/zachte ideeën blijven §-prose,

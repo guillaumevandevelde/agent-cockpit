@@ -49,12 +49,22 @@ laten (ship het artefact en beweeg de kaart naar Done).
 
 Follow-up cards (modus 2): bevat je deliverable concrete, scoped
 vervolgtaken op acceptance-criteria-niveau, maak die dan in dezelfde sessie
-aan als Backlog-kaarten via create_card(parent_card_id=<deze kaart>) (en
-add_plan_attachment wanneer ze een afhankelijkheids-DAG vormen) vóórdat je
-deze kaart naar Done verplaatst — dit is expliciet toegestaan/relaxed t.o.v.
-de create_card-beperking van modus 1. Follow-up-kaarten zijn kinderen: zet
-parent_card_id op deze kaart, anders weigert de decomposed-gate de Done-move
-met no_children (zie "Outcome-contract" hieronder). Guards tegen Backlog-spam:
+aan als Backlog-kaarten via create_card(parent_card_id=<deze kaart>) vóórdat
+je deze kaart naar Done verplaatst — dit is expliciet toegestaan/relaxed
+t.o.v. de create_card-beperking van modus 1. Twee harde eisen voor
+outcome='decomposed', beide altijd (ook zonder dep-DAG):
+- Kind, niet standalone: zet parent_card_id op deze kaart. Een standalone
+  Backlog-kaart telt niet als kind, dus de decomposed-gate weigert de
+  Done-move met no_children.
+- plan_ref verplicht: roep na het aanmaken altijd add_plan_attachment aan
+  (child_card_ids=[…]) — óók voor volledig onafhankelijke follow-ups; geef
+  dan depends_on_graph={}. add_plan_attachment is wat het plan_ref-deliverable
+  op elk kind zet, en een kind zonder plan_ref wordt door _awaiting_plan_ref
+  stil uit dispatch gehouden (het lijkt "geclaimd noch gestart" maar dispatcht
+  nooit). De DAG bepaalt alleen dep-volgorde, niet óf je add_plan_attachment
+  aanroept — "alleen bij een DAG" is dus fout: onafhankelijke kinderen
+  stallen dan silent.
+Guards tegen Backlog-spam:
 - Acceptance-criteria-niveau only — titel + 2-5 zinnen acceptance criteria;
   speculatieve ideeën blijven §-prose, geen kaart.
 - Dedup-pass eerst — list_cards op Backlog/Impediment; bij een match:
