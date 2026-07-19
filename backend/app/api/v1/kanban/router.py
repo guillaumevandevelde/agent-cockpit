@@ -359,6 +359,32 @@ async def list_cards(
 
 
 async def _reload(s, cid: str) -> CardResponse:
+    """Re-read a card after a mutation and shape it into a CardResponse.
+
+    Stale-collection trap — read this before adding a handler that mutates
+    `deliverables` or `attachments`. `service.get_card` eager-loads both via
+    `selectinload`, and the session runs with `expire_on_commit=False`. A
+    loader option does **not** re-populate a relationship that is already
+    loaded on an identity-mapped instance (that needs `populate_existing()`),
+    so if the same card object is still alive when `_reload` runs, this call
+    hands back the pre-mutation collection.
+
+    Two conditions must both hold for it to bite:
+
+    1. A pre-commit `service.get_card` result is **bound to a live variable**
+       (`card = await service.get_card(...)`). The identity map holds weak
+       refs, so an unbound `if await service.get_card(...) is None:` is
+       collected immediately and does *not* trigger this.
+    2. The op changes collection **membership** (INSERT/DELETE of a
+       deliverable/attachment row). An ORM-enabled UPDATE of an already
+       loaded row synchronizes fine — that is why `update_plan_attachment`
+       is safe despite binding `card`.
+
+    So: for a pre-commit existence check in a handler that adds or removes a
+    deliverable/attachment, use `await s.get(KanbanCard, cid)` — it leaves the
+    relationships unloaded (see `upload_attachment`). `s.expire_all()` after
+    the commit works too, at the cost of re-reading every attribute.
+    """
     card = await service.get_card(s, cid)
     if card is None:
         raise HTTPException(404, "card not found")
@@ -754,7 +780,7 @@ async def upload_attachment(cid: str, file: UploadFile = File(...)):
         # Existence check via s.get (not service.get_card) so the card's
         # attachments relationship stays unloaded — otherwise the post-commit
         # _reload would return the stale (pre-upload) collection from the
-        # identity map.
+        # identity map. See the _reload docstring for the full trap.
         if await s.get(KanbanCard, cid) is None:
             raise HTTPException(404, "card not found")
         try:
