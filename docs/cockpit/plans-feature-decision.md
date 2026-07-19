@@ -177,6 +177,10 @@ apart werk. Aanbevolen vervolgkaarten (indien go), grofweg in volgorde:
 - **[plans-window] `kanban_plans` uitfaseren** — demoteer/verwijder tabel + CRUD +
   migratie na bevestiging dat geen externe caller `POST /plans` gebruikt; update
   `docs/features/plans.md`.
+  *(Correctie na uitvoering, kaart `4279100a…`: "geen **externe** caller" was te smal —
+  `GET /plans/stats` had nog een in-repo caller (`DashboardContext.tsx`) die de 404 stil
+  zou slikken. Removal-kaarten eisen voortaan een in-repo caller-sweep over frontend én
+  backend; zie `.claude/agents/analyst.md` → *Guards tegen Backlog-spam*.)*
 
 Deze kaart maakt die kaarten **niet** aan (leaf-spike = één deliverable); ze wachten op
 de go/no-go hieronder.
