@@ -32,16 +32,24 @@ Hieronder volgt de oorspronkelijke claude-deck-documentatie (codebase-structuur 
 
 ## Doel & oriëntatie
 
-Agentic developers platform: agents bouwen/beheren (1) externe applicaties — primaire
-bestaansreden — en (2) deze codebase continu. De orchestratie-kern (dispatch, worktrees,
-agent mail, dependency-DAG, session-lifecycle) is agent- en repo-onafhankelijk ontworpen.
-Volledige missietekst, kernprincipes en zelfverbeteringsdoelen: `docs/cockpit/00-orientation.md`.
+**Claude Cockpit is een agentic software factory — een beheerapplicatie voor die factory.**
+Het is de controlekamer waarin autonome agents een *software factory* aansturen: een
+lopende band waarin agents (1) externe applicaties bouwen/beheren — primaire
+bestaansreden — en (2) deze codebase continu verbeteren. De cockpit levert de
+factory-vloer (kanban-dispatch, multi-agent-decompositie, worktrees, agent mail,
+dependency-DAG, session-lifecycle) én het beheer-/observatiepaneel eromheen. De
+orchestratie-kern is agent- en repo-onafhankelijk ontworpen, zodat dezelfde software
+factory elke agent-runtime en elk doel-repo kan aandrijven. Volledige missietekst,
+kernprincipes en zelfverbeteringsdoelen: `docs/cockpit/00-orientation.md`.
 
 ---
 
 # Agent Cockpit
 
-Web app for managing Claude Code configurations, MCP servers, commands, plugins, hooks, and permissions.
+Beheerapplicatie voor een **agentic software factory**: autonome agents bouwen en
+onderhouden externe applicaties én deze codebase, aangestuurd vanuit één cockpit.
+Bovenop die factory beheert de web-app ook de Claude Code-omgeving zelf —
+configuraties, MCP servers, commands, plugins, hooks en permissions.
 
 ## Commands
 
