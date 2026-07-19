@@ -179,6 +179,16 @@ Bouw geen parallel systeem; formaliseer wat er al is. Fundament → franje:
    `srcExclude` te lichten + een gegenereerde sidebar) is een optionele uitbreiding op
    dezelfde generator — genoemd, niet als aparte kaart.
 
+   ✅ Geïmplementeerd (kaart `340a30101a914637af9827ece0c55218`):
+   `scripts/generate-doc-index.py` leest de frontmatter en (re)genereert de
+   complete README-indexblok (100% dekking, gegroepeerd op `type` met
+   `status`-badges, tussen `<!-- BEGIN/END GENERATED DOC INDEX -->`-markers)
+   + `docs/cockpit/llms.txt` (H1 + blockquote + gelinkte lijst). `--check
+   [--strict]` bewaakt de drift (advisory, hetzelfde patroon als
+   `check-doc-frontmatter.sh`); bash-tests in
+   `scripts/test_generate_doc_index.sh`. De VitePress-uitbreiding is bewust
+   niet meegenomen (optioneel, niet vereist voor Done).
+
 3. **Kennisgraaf: uitgesteld & voorwaardelijk.** Understand-Anything blijft bewaard als een
    losse spike, alleen te trekken als *code*-navigatie (niet docs) een gemeten pijn wordt.
    Niet nu — hij lost de gestelde vraag niet op en voegt zware, staleness-gevoelige infra toe.
