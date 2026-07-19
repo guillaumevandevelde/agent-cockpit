@@ -101,6 +101,18 @@ altijd door.
    documenteerde voor commit 558ca55 (de `provider` → `cli` rename shipte
    met 2 latent-red tests). Het script grept `backend/app/` én
    `backend/tests/` op resterende verwijzingen.
+
+   **Bron-analysedoc bijwerken (na een gefilede follow-up):** rondt je kaart een
+   follow-up af die in zijn beschrijving of `metadata.facet`/`metadata.parent_card`
+   naar een `docs/cockpit/*.md`-analyse-/designdoc verwijst, voeg dan **vóór de
+   commit** een korte `✅ Geïmplementeerd (kaart <id>)`-regel toe aan de paragraaf
+   van dat doc die de gap beschreef. Zo blijft het doc niet als "niets
+   geïmplementeerd, alleen analyse + gefilede gaten" staan terwijl zijn eigen
+   follow-ups al gemerged zijn (geobserveerd op de vier facet-docs van
+   synthese-kaart `c980a926…`: 33 van 35 follow-ups waren al gemerged terwijl 2
+   van de 4 docs zich nog als pure analyse presenteerden). **Geen retroactieve
+   verplichting** — alleen het doc dat jouw kaart raakt; raakt je kaart geen
+   analysedoc, sla je deze stap over.
 6. **Zelf-review via `iteration-loop` met preset `verify` (standaard)**:
    draai de nieuwe `iteration-loop`-skill met preset `verify` (frontend
    `npm run lint && npm run build`; backend `pytest` wordt niet lokaal
