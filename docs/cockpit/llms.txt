@@ -87,6 +87,7 @@
 - [Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten](./build-prioriteiten-analyse.md): type=analysis status=active
 - [Kaarten refereerbaar maken — analyse](./card-references-analysis.md): type=analysis status=active
 - [Communicatie & weergave — analyse](./communicatie-en-weergave-analyse.md): type=analysis status=active
+- [Controlled auto-dispatch — selectief dispatchen per soort werk](./controlled-auto-dispatch-analysis.md): type=analysis status=active
 - [Analyse — verweesde `depends_on` blokkeren kaarten permanent en onzichtbaar](./dangling-depends-on-analyse.md): type=analysis status=active
 - [Spike: headless `stream-json`-transport (Claude) achter `SpawnTransport`](./headless-stream-json-transport-spike.md): type=analysis status=decided
 - [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md): type=analysis status=active
