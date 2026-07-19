@@ -223,6 +223,25 @@ describe("CardItem ReadyStateBadge", () => {
     expect(screen.queryByText("In Progress")).toBeNull();
   });
 
+  it("renders a red 'Missing dep' badge naming the deleted dep id and its permanence", () => {
+    // A dangling depends_on (dep on a deleted card) is a permanent block that
+    // needs a human — it must read differently from a live "Dependent" wait.
+    render(
+      <CardItem
+        card={{ ...baseCard, depends_on: ["deleted-parent"] }}
+        readyState="missing_dep"
+        missingDepIds={["deleted-parent"]}
+        onOpen={() => {}}
+      />,
+    );
+    const missing = screen.getByText("Missing dep");
+    expect(missing).not.toBeNull();
+    const tooltip = missing.closest("[data-ready-state]")?.getAttribute("title");
+    expect(tooltip).toContain("deleted-parent");
+    expect(tooltip).toContain("permanent");
+    expect(screen.queryByText("Dependent")).toBeNull();
+  });
+
   it("renders an 'In Progress' badge when readyState='in_progress' is supplied", () => {
     render(
       <CardItem
