@@ -110,6 +110,7 @@ export function CardItem({
   onOpen,
   readyState,
   blockerTitles,
+  missingDepIds,
   subtasks,
   projectPath,
   onPromote,
@@ -118,6 +119,7 @@ export function CardItem({
   onOpen: (c: Card) => void;
   readyState?: ReadyState;
   blockerTitles?: string[];
+  missingDepIds?: string[];
   // Subtask rollup counts (done/total among cards whose parent_card_id
   // points at this card) — drives the compact "N/M subtasks" counter so
   // the operator can scan progress without opening the drawer.
@@ -222,7 +224,11 @@ export function CardItem({
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {readyState && (
-          <ReadyStateBadge state={readyState} blockerTitles={blockerTitles} />
+          <ReadyStateBadge
+            state={readyState}
+            blockerTitles={blockerTitles}
+            missingDepIds={missingDepIds}
+          />
         )}
         {subtasks && subtasks.total > 0 && (
           <Badge

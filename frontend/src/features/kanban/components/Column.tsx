@@ -6,6 +6,9 @@ import { CardItem } from "./CardItem";
 export interface CardMeta {
   readyState: ReadyState;
   blockerTitles: string[];
+  // Dangling `depends_on` ids (deps whose card no longer exists). Populated
+  // only for `readyState === "missing_dep"`; drives the badge tooltip.
+  missingDepIds?: string[];
 }
 
 // Per-parent subtask rollup (done/total counts among cards whose
@@ -114,6 +117,7 @@ export function Column({
                 onOpen={onOpen}
                 readyState={meta?.readyState}
                 blockerTitles={meta?.blockerTitles}
+                missingDepIds={meta?.missingDepIds}
                 subtasks={subtaskCounts?.get(c.id)}
                 projectPath={projectPath}
                 onPromote={onPromote}

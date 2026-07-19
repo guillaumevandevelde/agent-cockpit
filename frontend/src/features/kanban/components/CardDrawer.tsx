@@ -1012,7 +1012,11 @@ function SubtasksSection({
             >
               <span className="truncate">{child.title}</span>
               {meta?.readyState && (
-                <ReadyStateBadge state={meta.readyState} blockerTitles={meta.blockerTitles} />
+                <ReadyStateBadge
+                  state={meta.readyState}
+                  blockerTitles={meta.blockerTitles}
+                  missingDepIds={meta.missingDepIds}
+                />
               )}
             </button>
           );

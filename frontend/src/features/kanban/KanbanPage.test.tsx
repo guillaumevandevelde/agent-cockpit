@@ -250,7 +250,7 @@ describe("KanbanPage ready-state precedence", () => {
     name: "Impediment",
   };
 
-  it("applies completed > impeded > in_progress > dependent > ready precedence", async () => {
+  it("applies completed > impeded > in_progress > missing_dep > dependent > ready precedence", async () => {
     (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
       columns: [BACKLOG_COLUMN, DONE_COLUMN, IMPEDIMENT_COLUMN],
     });
@@ -261,7 +261,12 @@ describe("KanbanPage ready-state precedence", () => {
         makeCard({ id: "card-done", column: "Done", claimed_by: "agent:tmux-x" }),
         makeCard({ id: "card-impeded", column: "Impediment", claimed_by: "agent:tmux-y" }),
         makeCard({ id: "card-in-progress", claimed_by: "agent:tmux-z" }),
-        makeCard({ id: "card-dependent", depends_on: ["missing-parent"] }),
+        // Dep on a card that no longer exists → permanent "missing_dep" block,
+        // distinct from a live non-Done sibling (dangling-depends-on-analyse.md).
+        makeCard({ id: "card-missing-dep", depends_on: ["deleted-parent"] }),
+        // Dep on a live, non-Done sibling → temporary "dependent" block.
+        makeCard({ id: "card-live-parent", column: "Backlog" }),
+        makeCard({ id: "card-dependent", depends_on: ["card-live-parent"] }),
         makeCard({ id: "card-ready" }),
       ],
     });
@@ -278,6 +283,7 @@ describe("KanbanPage ready-state precedence", () => {
     await waitFor(() => expect(stateOf("card-done")).toBe("completed"));
     expect(stateOf("card-impeded")).toBe("impeded");
     expect(stateOf("card-in-progress")).toBe("in_progress");
+    expect(stateOf("card-missing-dep")).toBe("missing_dep");
     expect(stateOf("card-dependent")).toBe("dependent");
     expect(stateOf("card-ready")).toBe("ready");
   });

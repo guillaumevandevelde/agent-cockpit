@@ -215,7 +215,8 @@ export default function KanbanPage() {
   // is present and Done. Precedence, highest first: completed (column ===
   // "Done") → impeded (column === "Impediment") → dependent (parked in
   // "Awaiting Subtasks", waiting on its own children) → in_progress
-  // (claimed_by starts with "agent:") → dependent (open depends_on) →
+  // (claimed_by starts with "agent:") → missing_dep (depends_on a deleted
+  // card — permanent block) → dependent (open depends_on on a live card) →
   // ready. The column-based terminal/parked states win over the claim so a
   // card with a stale claim sitting in Done/Impediment/Awaiting Subtasks
   // doesn't show as in_progress (analyse-levenscyclus-decision.md §3/§5).
@@ -250,16 +251,29 @@ export default function KanbanPage() {
       }
       const deps = card.depends_on ?? [];
       const blockerTitles: string[] = [];
+      const missingDepIds: string[] = [];
       for (const depId of deps) {
         const parent = cardsById.get(depId);
-        if (!parent || parent.column !== "Done") {
-          blockerTitles.push(parent?.title ?? "(missing)");
+        if (!parent) {
+          // Dep on a card that no longer exists (deleted parent). This is a
+          // *permanent* fail-closed block — the dep never becomes Done — and
+          // needs a human (clear the dep or restore the card), unlike a live
+          // non-Done sibling that resolves on its own
+          // (dangling-depends-on-analyse.md §1.3/§4).
+          missingDepIds.push(depId);
+        } else if (parent.column !== "Done") {
+          blockerTitles.push(parent.title);
         }
       }
-      meta.set(card.id, {
-        readyState: blockerTitles.length === 0 ? "ready" : "dependent",
-        blockerTitles,
-      });
+      // A missing dep is the more severe, human-actionable signal, so it wins
+      // over a live dependent state.
+      const readyState =
+        missingDepIds.length > 0
+          ? "missing_dep"
+          : blockerTitles.length > 0
+            ? "dependent"
+            : "ready";
+      meta.set(card.id, { readyState, blockerTitles, missingDepIds });
     }
     return meta;
   }, [cards]);
