@@ -10,6 +10,7 @@ import logging
 import subprocess
 from pathlib import Path
 
+from app.kanban.project_key import resolve_project_path
 from app.services.sandcastle_service import sandcastle_service
 
 logger = logging.getLogger(__name__)
@@ -65,32 +66,6 @@ def _kill_tmux_session(session_name: str) -> bool:
         session_name, last_stderr,
     )
     return False
-
-
-async def _get_project_path(project_key: str) -> str | None:
-    """Look up the local project path for a kanban project key.
-
-    Scans all registered projects and returns the first whose computed key
-    matches. Returns None when no match is found or on error.
-    """
-    from sqlalchemy import select
-
-    from app.database import AsyncSessionLocal
-    from app.kanban.project_key import resolve_project_key
-    from app.models.database import Project
-
-    try:
-        async with AsyncSessionLocal() as db:
-            rows = (await db.execute(select(Project.path))).scalars().all()
-        for path in rows:
-            try:
-                if resolve_project_key(path) == project_key:
-                    return path
-            except Exception:
-                continue
-    except Exception as e:
-        logger.warning("Could not look up project path for %s: %s", project_key, e)
-    return None
 
 
 def _remove_worktree_at(session_name: str, project_path: str) -> bool:
@@ -187,7 +162,7 @@ async def _worktree_path_for_card(card) -> Path | None:
     """
     session_name = _extract_session_name(getattr(card, "claimed_by", None))
     if session_name:
-        project_path = await _get_project_path(card.project_key)
+        project_path = await resolve_project_path(card.project_key)
         if project_path:
             candidate = Path(project_path) / ".claude" / "worktrees" / session_name
             if candidate.is_dir():
@@ -312,7 +287,7 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
                 "running", session_name, card_id
             )
 
-        project_path = await _get_project_path(project_key)
+        project_path = await resolve_project_path(project_key)
         if project_path:
             _remove_worktree_at(session_name, project_path)
         else:

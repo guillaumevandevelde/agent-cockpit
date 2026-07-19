@@ -28,6 +28,7 @@ from app.kanban.dispatch import (
     get_ship_mode,
     resolve_phase,
 )
+from app.kanban.project_key import resolve_project_path
 from app.kanban.schemas import (
     RunLedger,
     RunLedgerContextStep,
@@ -37,7 +38,6 @@ from app.kanban.schemas import (
     RunLedgerTaskStep,
     RunLedgerTestsStep,
 )
-from app.kanban.session_cleanup import _get_project_path
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ async def _build_files_step(card) -> RunLedgerFilesStep:
         )
         return RunLedgerFilesStep(available=False, note=note)
 
-    project_path = await _get_project_path(card.project_key)
+    project_path = await resolve_project_path(card.project_key)
     if project_path is None:
         return RunLedgerFilesStep(available=False, branch=branch,
             note="project path not registered")
@@ -217,7 +217,7 @@ async def _build_tests_step(card) -> RunLedgerTestsStep:
         return RunLedgerTestsStep(available=False, ci_url=ci_url,
             note="no branch deliverable — no worktree to read iteration state from")
 
-    project_path = await _get_project_path(card.project_key)
+    project_path = await resolve_project_path(card.project_key)
     if project_path is None:
         return RunLedgerTestsStep(available=False, ci_url=ci_url,
             note="project path not registered")

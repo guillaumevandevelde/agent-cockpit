@@ -9,7 +9,6 @@ import pytest
 from app.kanban import session_cleanup
 from app.kanban.session_cleanup import (
     _extract_session_name,
-    _get_project_path,
     _kill_tmux_session,
     _remove_worktree_at,
     cleanup_session_for_card,
@@ -77,62 +76,6 @@ class TestKillTmuxSession:
         assert mock_run.call_count == 2
 
 
-class TestGetProjectPath:
-    @pytest.mark.asyncio
-    async def test_returns_matching_path(self):
-        with patch("app.database.AsyncSessionLocal") as mock_sl, \
-             patch("app.kanban.project_key.resolve_project_key",
-                   return_value="git:example.com/me/repo"):
-            mock_session = AsyncMock()
-            mock_execute = MagicMock()
-            mock_execute.scalars.return_value.all.return_value = ["/home/me/repo"]
-            mock_session.execute = AsyncMock(return_value=mock_execute)
-            mock_sl.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sl.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            path = await _get_project_path("git:example.com/me/repo")
-            assert path == "/home/me/repo"
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_match(self):
-        with patch("app.database.AsyncSessionLocal") as mock_sl, \
-             patch("app.kanban.project_key.resolve_project_key",
-                   return_value="git:other.com/repo"):
-            mock_session = AsyncMock()
-            mock_execute = MagicMock()
-            mock_execute.scalars.return_value.all.return_value = ["/home/me/repo"]
-            mock_session.execute = AsyncMock(return_value=mock_execute)
-            mock_sl.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sl.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            path = await _get_project_path("git:example.com/me/repo")
-            assert path is None
-
-    @pytest.mark.asyncio
-    async def test_returns_none_on_db_error(self):
-        with patch("app.database.AsyncSessionLocal") as mock_sl:
-            mock_sl.return_value.__aenter__ = AsyncMock(side_effect=Exception("db error"))
-            mock_sl.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            path = await _get_project_path("git:example.com/me/repo")
-            assert path is None
-
-    @pytest.mark.asyncio
-    async def test_skips_paths_where_key_lookup_fails(self):
-        with patch("app.database.AsyncSessionLocal") as mock_sl, \
-             patch("app.kanban.project_key.resolve_project_key",
-                   side_effect=[Exception("not a git repo"), "git:example.com/me/repo"]):
-            mock_session = AsyncMock()
-            mock_execute = MagicMock()
-            mock_execute.scalars.return_value.all.return_value = ["/bad/path", "/home/me/repo"]
-            mock_session.execute = AsyncMock(return_value=mock_execute)
-            mock_sl.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_sl.return_value.__aexit__ = AsyncMock(return_value=None)
-
-            path = await _get_project_path("git:example.com/me/repo")
-            assert path == "/home/me/repo"
-
-
 class TestRemoveWorktreeAt:
     def test_removes_existing_worktree(self, tmp_path):
         worktree = tmp_path / ".claude" / "worktrees" / "k-test-1234"
@@ -185,7 +128,7 @@ class TestCleanupSessionForCard:
                    new=AsyncMock(return_value=False)), \
              patch("app.kanban.session_cleanup._kill_tmux_session",
                    return_value=True) as mock_kill, \
-             patch("app.kanban.session_cleanup._get_project_path",
+             patch("app.kanban.session_cleanup.resolve_project_path",
                    new=AsyncMock(return_value="/home/me/repo")), \
              patch("app.kanban.session_cleanup._remove_worktree_at",
                    return_value=True) as mock_rm:
@@ -245,7 +188,7 @@ class TestCleanupSessionForCard:
              patch("app.kanban.session_cleanup._cancel_sandcastle_run",
                    new=AsyncMock(return_value=False)), \
              patch("app.kanban.session_cleanup._kill_tmux_session", return_value=False), \
-             patch("app.kanban.session_cleanup._get_project_path",
+             patch("app.kanban.session_cleanup.resolve_project_path",
                    new=AsyncMock(return_value="/tmp/repo")), \
              patch("app.kanban.session_cleanup._remove_worktree_at"):
             mock_session = AsyncMock()
@@ -268,7 +211,7 @@ class TestCleanupSessionForCard:
              patch("app.kanban.session_cleanup._cancel_sandcastle_run",
                    new=AsyncMock(return_value=False)), \
              patch("app.kanban.session_cleanup._kill_tmux_session", return_value=True), \
-             patch("app.kanban.session_cleanup._get_project_path",
+             patch("app.kanban.session_cleanup.resolve_project_path",
                    new=AsyncMock(return_value=None)), \
              patch("app.kanban.session_cleanup._remove_worktree_at") as mock_rm:
             mock_session = AsyncMock()
