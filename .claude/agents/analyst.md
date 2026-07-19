@@ -77,6 +77,13 @@ Guards tegen Backlog-spam (gelden onvoorwaardelijk):
 - **`depends_on` alleen op een echt contract** — kind B wacht op een output
   van kind A (bijv. A maakt een abstractie die B consumeert). Pure sequentie
   zonder contract is geen afhankelijkheid.
+- **Removal-/deprecatie-kaarten: grep de héle repo** — vraagt een kind-kaart
+  om een route, tabel of store te verwijderen of te demoten, dan moeten de
+  acceptance criteria expliciet een **in-repo** caller-sweep eisen (frontend
+  én overige backend), niet alleen "geen externe tooling gebruikt dit". Een
+  gemiste in-repo caller verdwijnt stil in een `.catch(() => <default>)` en
+  levert een permanente 404 op die niemand ziet (kaart `528c5ca2…`:
+  `GET /plans/stats` werd nog aangeroepen door `DashboardContext.tsx`).
 
 **Scoped impediment-escape.** Reserveer `report_impediment(options=[…])`
 voor een **onopgeloste product-fork** die verandert *wat* de kaarten moeten
