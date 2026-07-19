@@ -86,7 +86,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 88 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 89 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -145,10 +145,11 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Claude Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (26)
+### Decision (27)
 
 | Document | Status |
 |---|---|
+| [9Router-integratie — analyse & beslissing](./9router-integratie-analyse.md) | 🔵 decided |
 | [Beslissing: ACP (Agent-Client Protocol) als gestructureerd transport achter `SpawnTransport`](./acp-transport-decision.md) | 🔵 decided |
 | [Beslissing — De analyse-levenscyclus op het bord: parkeerkolom, subtaak-rollup, statusvocabulaire](./analyse-levenscyclus-decision.md) | 🔵 decided |
 | [Beslissing — De analyse-fase krijgt een afdwingbaar uitkomst-contract](./analysis-outcome-contract-decision.md) | 🔵 decided |
