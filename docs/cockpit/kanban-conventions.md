@@ -235,6 +235,58 @@ uit de kaart-beschrijving: een kind-kaart met `depends_on` op een `Done`
 parent en `metadata.gated_on="second-executor-provider-onboarded"` mag niet
 gespawned worden door `dispatch_project` tot een mens de sleutel verwijdert.
 
+## 3b. Workflow-poorten zitten op het **agent-pad**, niet op de REST-move
+
+> **Bron van waarheid:** [`backend/app/kanban/mcp_server.py:move_card`](../../backend/app/kanban/mcp_server.py)
+> (alle poorten) vs. [`backend/app/api/v1/kanban/router.py:move_card`](../../backend/app/api/v1/kanban/router.py)
+> (dunne, bewust ongegate REST-mirror).
+
+Vier workflow-poorten hangen aan de Done-move, en ze leven **allemaal en
+uitsluitend** in `mcp_server.move_card` — het pad dat agents gebruiken:
+
+| Poort | Wat hij afdwingt | Doc |
+|---|---|---|
+| `summary_required` | `Done`/`Impediment` zonder `summary` wordt geweigerd | §2 |
+| Analyse-outcome-contract | Analyse-kaart naar `Done` moet `outcome` ∈ {`decomposed`, `not_feasible`, `no_action_needed`} declareren; `decomposed` wordt geverifieerd tegen ≥1 kind-kaart | [`analysis-outcome-contract-decision.md`](./analysis-outcome-contract-decision.md) |
+| Parent-parking | Kaart met ≥1 kind gaat naar `Awaiting Subtasks` i.p.v. `Done` | [`analyse-levenscyclus-decision.md`](./analyse-levenscyclus-decision.md) §3 |
+| Reviewer-gate | Kaart naar echte `Done` wordt omgeleid naar de `reviewer`-kolom (mits die kolom bestaat) | [`reviewer-agent-decision.md`](./reviewer-agent-decision.md) |
+
+De REST-endpoint `POST /api/v1/kanban/cards/{cid}/move` doet daarentegen een
+rauwe `apply_operation("move", …)` zonder één van deze checks. **Dat is
+opzettelijk, geen gat.** Een mens die in de UI een kaart naar Done sleept
+omzeilt dus alle vier — en dat mag.
+
+### Waarom het pad-asymmetrisch is (en niet gecentraliseerd)
+
+De poorten dwingen **agent-discipline** af: ze bestaan omdat drie rondes
+prompt-niveau-instructies genegeerd werden zolang geen machinepad ze
+verifieerde (zie de outcome-decision §1). Een mens is niet de partij die
+gedisciplineerd moet worden — die is de **autoriteit** die corrigeert wanneer
+een agent een kaart verkeerd parkeerde. Zonder ongegate override-oppervlak is
+een kaart die door een poort verkeerd geklemd raakt (bv. een verweesd
+kind-kaartje dat parent-parking eeuwig open houdt) alleen nog met een
+DB-edit los te trekken.
+
+Technisch sluit het ontwerp centraliseren bovendien uit: `MoveRequest`
+([`schemas.py`](../../backend/app/kanban/schemas.py)) draagt alleen `column` +
+`rank` — géén `summary`, géén `outcome`. De poorten op het REST-pad leggen
+zou daarom **elke** UI-drag-naar-Done weigeren, tot de UI een
+summary/outcome-dialoog krijgt. Dat is een aparte productbeslissing, geen
+consistentie-fix.
+
+### Consequenties voor wie hier code raakt
+
+- **Voeg je een nieuwe Done-move-poort toe?** Die hoort in
+  `mcp_server.move_card`, niet in de REST-router. Noteer 'm in de tabel
+  hierboven.
+- **Wil je een poort bord-afgedwongen noemen?** Dat geldt voor het
+  agent-pad. Een mens kan er in de UI altijd omheen — beschrijf de garantie
+  dus als *"een agent kan dit niet overslaan"*, niet als *"dit kan niet
+  gebeuren"*.
+- **Bouw je tooling die kaarten programmatisch verplaatst?** Kies bewust:
+  MCP als je de workflow-semantiek wilt, REST als je expliciet een
+  administratieve correctie doet.
+
 ## 4a. MCP-affordances voor `depends_on` (sibling-deps zonder plan-flow)
 
 Sibling-deps worden in de **analyst-fase** vanzelf gewired door
