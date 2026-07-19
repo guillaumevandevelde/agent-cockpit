@@ -237,13 +237,23 @@ async def find_worktree_unmerged_warning(card) -> dict | None:
     }
 
 
-async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
+async def cleanup_session_for_card(
+    card_id: str, project_key: str, claimed_by: str | None = None
+) -> dict:
     """Clean up the agent session that worked on a completed card.
 
     Called when a card moves to "Done". Steps:
     1. Resolve the tmux session name from the card's claimant field.
     2. Kill the tmux session.
     3. Remove the git worktree (looked up via the project registry).
+
+    `claimed_by` is the claim captured *at schedule time* (before the move
+    committed). It exists to beat a race: for a Done→non-Done terminal move
+    (`Impediment`, `Awaiting Subtasks`) `_materialize` clears `card.claimed_by`
+    synchronously in the same transaction, so a fresh DB read here would see
+    `None` and silently skip the kill (`no_agent_session`) — no tmux-kill, no
+    worktree-remove (kanban card 7b63463e). The captured value wins; the fresh
+    read is only a fallback for callers that don't pass one.
 
     Returns a dict with cleanup results.
     """
@@ -259,7 +269,10 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
                 result["error"] = "card_not_found"
                 return result
 
-            session_name = _extract_session_name(card.claimed_by)
+            session_name = (
+                _extract_session_name(claimed_by)
+                or _extract_session_name(card.claimed_by)
+            )
             if not session_name:
                 result["error"] = "no_agent_session"
                 return result
@@ -317,7 +330,9 @@ async def cleanup_session_for_card(card_id: str, project_key: str) -> dict:
 _cleanup_tasks: set = set()
 
 
-def on_card_moved_to_done(card_id: str, project_key: str) -> None:
+def on_card_moved_to_done(
+    card_id: str, project_key: str, claimed_by: str | None = None
+) -> None:
     """Schedule session cleanup when a card moves to a terminal column
     (Done or Impediment).
 
@@ -327,6 +342,10 @@ def on_card_moved_to_done(card_id: str, project_key: str) -> None:
     `dispatch._build_ship_instructions` and `mcp_server.report_impediment`,
     so they share the same kill-the-tmux + remove-the-worktree pipeline.
 
+    `claimed_by` is captured at schedule time and forwarded to the cleanup so
+    it survives the synchronous claim-clear that `_materialize` runs for
+    Done→non-Done terminal moves (kanban card 7b63463e).
+
     Always called from within a running async context (the kanban operations
     pipeline), so we schedule the cleanup as a background task via the
     already-running event loop, keeping a strong reference until it completes.
@@ -334,7 +353,7 @@ def on_card_moved_to_done(card_id: str, project_key: str) -> None:
     import asyncio
 
     async def _cleanup() -> dict:
-        return await cleanup_session_for_card(card_id, project_key)
+        return await cleanup_session_for_card(card_id, project_key, claimed_by)
 
     try:
         loop = asyncio.get_running_loop()
