@@ -29,7 +29,11 @@ from app.kanban import subscription_pool
 from app.kanban.dep_resolver import meets_dep_prerequisites
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
-from app.kanban.project_key import resolve_project_key, safe_resolve_project_key
+from app.kanban.project_key import (
+    resolve_project_key,
+    resolve_project_path,
+    safe_resolve_project_key,
+)
 from app.kanban.service import (
     get_card,
     get_column_default_model,
@@ -290,11 +294,65 @@ async def disable_all_autodispatch(session) -> None:
     await session.flush()
 
 
+# ---- risk_class-driven dispatch defaults ----------------------------------
+#
+# A project's ``ProjectSecurityProfile.risk_class`` (docs/cockpit/risk-class-
+# taxonomie.md §0) drives the safe-by-default dispatch stance when no explicit
+# per-project KanbanMeta override is set. Only the path-anchored ``meta`` class
+# (Cockpit's own repo) keeps the historical permissive defaults — every
+# product/untrusted class enforces permissions and runs in a sandbox. Signals
+# may lower trust autonomously, never raise it.
+
+
+async def _project_risk_class(project_key: str) -> str | None:
+    """Resolve ``project_key`` to its ``ProjectSecurityProfile.risk_class``.
+
+    Returns ``None`` when the key can't be resolved to a registered project
+    path, the project has no security profile yet, or on any DB error —
+    callers treat ``None`` as "no profile, keep the permissive meta default".
+    """
+    try:
+        project_path = await resolve_project_path(project_key)
+        if project_path is None:
+            return None
+        from app.database import AsyncSessionLocal
+        from app.services.security_profile_service import SecurityProfileService
+        async with AsyncSessionLocal() as db:
+            profile = await SecurityProfileService(db).get(project_path)
+        return profile.risk_class if profile is not None else None
+    except Exception:
+        logger.debug("risk_class lookup failed for %s", project_key, exc_info=True)
+        return None
+
+
+def _skip_permissions_for_risk_class(risk_class: str | None) -> bool:
+    """Safe ``skip_permissions`` default for a ``risk_class``.
+
+    Only ``meta`` (and the no-profile fallback) keep the permissive bypass;
+    every product/untrusted class defaults to enforcing permissions.
+    """
+    return risk_class is None or risk_class == "meta"
+
+
+def _transport_for_risk_class(risk_class: str | None) -> str:
+    """Safe ``default_transport`` for a ``risk_class``.
+
+    ``meta`` (and the no-profile fallback) stay on the host worktree; every
+    product/untrusted class defaults to the isolating ``sandcastle`` transport.
+    """
+    if risk_class is None or risk_class == "meta":
+        return DEFAULT_TRANSPORT
+    return "sandcastle"
+
+
 async def get_skip_permissions(session, project_key: str) -> bool:
     row = await session.get(KanbanMeta, SKIP_PERMISSIONS_PREFIX + project_key)
-    if row is None:
-        return True  # default: bypass permissions (existing behaviour)
-    return row.value == "1"
+    if row is not None:
+        return row.value == "1"  # explicit per-project override wins
+    # No explicit override: consult the project's security profile. A
+    # product/untrusted risk_class enforces permissions (skip=False); a meta
+    # project (or no profile at all) keeps the historical bypass.
+    return _skip_permissions_for_risk_class(await _project_risk_class(project_key))
 
 
 async def set_skip_permissions(session, project_key: str, enabled: bool) -> None:
@@ -317,8 +375,10 @@ async def set_skip_permissions(session, project_key: str, enabled: bool) -> None
 async def get_default_transport(session, project_key: str) -> str:
     row = await session.get(KanbanMeta, TRANSPORT_PREFIX + project_key)
     if row and row.value in TRANSPORTS:
-        return row.value
-    return DEFAULT_TRANSPORT
+        return row.value  # explicit per-project override wins
+    # No explicit override: let the project's risk_class pick the transport
+    # (product/untrusted -> sandcastle, meta/none -> worktree).
+    return _transport_for_risk_class(await _project_risk_class(project_key))
 
 
 async def set_default_transport(session, project_key: str, value: str) -> None:
@@ -1819,6 +1879,39 @@ def _known_cli_ids() -> set[str]:
     return {p.id for p in get_agentic_clis()}
 
 
+def _secret_store():
+    """Factory for the project-scoped SecretStore. Overridable in tests.
+
+    Mirrors ``app.api.v1.secrets._store`` — cheap to construct, resolves its
+    passphrase lazily on the first CRUD call.
+    """
+    from app.services.secrets_store import AGESecretStore
+    return AGESecretStore()
+
+
+def _resolve_project_secrets(project_key: str | None) -> dict[str, str]:
+    """Best-effort read of every stored secret for ``project_key`` as env vars.
+
+    Feeds ``spawn_session``'s ``extra_env`` so a project's agents see only
+    their own project-scoped secrets. Any failure (no store file, no passphrase
+    configured, decryption error) yields an empty dict — a missing or
+    misconfigured secret store must never break dispatch.
+    """
+    if not project_key:
+        return {}
+    try:
+        store = _secret_store()
+        env: dict[str, str] = {}
+        for name in store.list(project_key):
+            value = store.get(project_key, name)
+            if value is not None:
+                env[name] = value
+        return env
+    except Exception:
+        logger.debug("secret-store read failed for %s", project_key, exc_info=True)
+        return {}
+
+
 def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass."""
     def _transport(*, directory: str, prompt: str, session_name: str,
@@ -1857,6 +1950,10 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         # without a `COCKPIT_PROJECT_KEY` to audit against.
         project_key = safe_resolve_project_key(repo)
 
+        # Project-scoped secrets become the spawn's explicit env (never the
+        # backend's os.environ). Best-effort: no store / no passphrase -> {}.
+        extra_env = _resolve_project_secrets(project_key)
+
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
             skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
@@ -1869,6 +1966,7 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
                 session_name=session_name,
                 project_key=project_key,
                 runtime="worktree",
+                extra_env=extra_env,
             )
         except Exception:
             subprocess.run(["git", "-C", repo, "worktree", "remove", worktree_path, "--force"],
