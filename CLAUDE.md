@@ -78,6 +78,7 @@ bash scripts/test_pytest_baseline.sh                      # Bash tests for pytes
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
 bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
 bash scripts/test_list_orphan_bridge_sessions.sh           # Bash tests for list-orphan-bridge-sessions.sh (uses real tmux sessions)
+bash scripts/test_sweep_dangling_depends_on.sh             # Bash tests for sweep_dangling_depends_on.py (synthetic SQLite fixtures)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
@@ -89,6 +90,10 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 
 # Analysis outcome sweeper (vangnet voor het REST-gat + historische voorraad)
 ./scripts/check-analysis-outcomes.sh          # Flag Done-analyses zonder Outcome-comment/label/kinderen (advisory; --strict = exit 1; --since YYYY-MM-DD voor historic-grens)
+
+# Dangling-dep sweepers (vangnet voor verweesde kanban-references — advisory; --strict = exit 1; JSON op stdout)
+./scripts/sweep_dangling_depends_on.py        # Flag niet-Done kaarten waarvan een depends_on-id naar een niet-bestaande kaart verwijst
+./scripts/sweep_dangling_plan_refs.py         # Flag plan_ref-deliverables waarvan de parent of het plan niet meer resolvet
 
 # Lint
 cd frontend && npm run lint      # ESLint
