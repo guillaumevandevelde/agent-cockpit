@@ -203,3 +203,48 @@ def test_init_local_uses_dummy_identity_when_repo_has_none(tmp_path, monkeypatch
         capture_output=True, text=True, check=True,
     )
     assert cfg.stdout.strip()  # non-empty dummy
+
+# ---------------------------------------------------------------------------
+# BootstrapPolicy wiring (LICENSE)
+# ---------------------------------------------------------------------------
+
+
+def test_init_local_writes_license_from_policy(tmp_path):
+    """When a BootstrapPolicy is passed, init_local writes LICENSE from it and
+    commits it as part of the first commit (bootstrap-policy.md §1.6)."""
+    from app.services.bootstrap_policy import BootstrapPolicy
+
+    target = tmp_path / "licensed"
+    RepoBootstrapService().init_local(
+        str(target), project_name="licensed",
+        policy=BootstrapPolicy(license="MIT", copyright_holder="Acme Inc"),
+    )
+
+    body = (target / "LICENSE").read_text()
+    assert "MIT License" in body
+    assert "Acme Inc" in body
+    # LICENSE is part of the committed tree, not left as an untracked file.
+    tracked = subprocess.run(
+        ["git", "-C", str(target), "ls-files", "LICENSE"],
+        capture_output=True, text=True, check=True,
+    )
+    assert tracked.stdout.strip() == "LICENSE"
+
+
+def test_init_local_no_policy_writes_no_license(tmp_path):
+    """No policy → historical behaviour: no LICENSE file shipped."""
+    target = tmp_path / "unlicensed"
+    RepoBootstrapService().init_local(str(target), project_name="unlicensed")
+    assert not (target / "LICENSE").exists()
+
+
+def test_init_local_policy_license_none_writes_no_license(tmp_path):
+    """policy.license=None (proprietary) → no LICENSE file."""
+    from app.services.bootstrap_policy import BootstrapPolicy
+
+    target = tmp_path / "proprietary"
+    RepoBootstrapService().init_local(
+        str(target), project_name="proprietary",
+        policy=BootstrapPolicy(license=None),
+    )
+    assert not (target / "LICENSE").exists()

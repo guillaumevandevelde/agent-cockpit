@@ -330,6 +330,82 @@ async def test_new_project_autodispatch_meta_is_set(tmp_path: Path):
         assert enabled is True
 
 
+# ---- BootstrapPolicy wiring --------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_birth_reflects_bootstrap_policy(tmp_path: Path):
+    """A newly-birthed project's autodispatch + LICENSE reflect the injected
+    ``BootstrapPolicy``, not ad-hoc code-path defaults (bootstrap-policy.md §1.1
+    autodispatch, §1.6 MIT license, §1.5 no CI at birth, §1.3 first-commit)."""
+    from app.kanban.project_key import resolve_project_key
+    from app.services.bootstrap_policy import BootstrapPolicy
+    from app.services.inception_service import InceptionService
+
+    intake_id = await _create_intake_card("meta")
+    target = tmp_path / "myapp"
+    policy = BootstrapPolicy(
+        autodispatch_default=False,        # override the intake opt-in
+        license="MIT",
+        copyright_holder="Acme Inc",
+    )
+
+    async with KanbanSessionLocal() as ks:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            await svc.create_project_from_intake(
+                intake_card_id=intake_id, project_name="MyApp",
+                target_path=str(target), policy=policy,
+            )
+
+    new_project_key = resolve_project_key(str(target))
+
+    # §1.1 — autodispatch reflects the policy value (False), not the hardcoded True.
+    async with KanbanSessionLocal() as s:
+        enabled = await dispatch.is_autodispatch_enabled(s, new_project_key)
+        assert enabled is False
+
+    # §1.6 — LICENSE written from the policy (MIT body + the policy's holder).
+    license_body = (target / "LICENSE").read_text()
+    assert "MIT License" in license_body
+    assert "Acme Inc" in license_body
+
+    # §1.5 — no CI copied at birth (ci_bootstrap default False).
+    assert not (target / ".github").exists()
+
+    # §1.3 — the birth tree is captured in a first commit (repo is branchable).
+    head = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "HEAD"],
+        capture_output=True, text=True,
+    )
+    assert head.returncode == 0 and head.stdout.strip()
+
+
+@pytest.mark.asyncio
+async def test_birth_with_license_none_writes_no_license_file(tmp_path: Path):
+    """``policy.license is None`` (proprietary/internal) → no LICENSE file, but the
+    project is still birthed and committed."""
+    from app.services.bootstrap_policy import BootstrapPolicy
+    from app.services.inception_service import InceptionService
+
+    intake_id = await _create_intake_card("meta")
+    target = tmp_path / "myapp"
+
+    async with KanbanSessionLocal() as ks:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            await svc.create_project_from_intake(
+                intake_card_id=intake_id, project_name="MyApp",
+                target_path=str(target),
+                policy=BootstrapPolicy(license=None),
+            )
+
+    assert not (target / "LICENSE").exists()
+    assert (target / ".git").exists()
+
+
 @pytest.mark.asyncio
 async def test_intake_card_without_plan_deliverable_still_works(tmp_path: Path):
     """An intake card may have no plan deliverable (the human hasn't

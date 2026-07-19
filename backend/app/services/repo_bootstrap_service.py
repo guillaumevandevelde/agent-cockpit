@@ -48,9 +48,11 @@ import subprocess
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.kanban.project_key import _slug, normalize_remote
+from app.services.bootstrap_policy import BootstrapPolicy, render_license
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +244,7 @@ class RepoBootstrapService:
         *,
         project_name: str,
         gitignore_profile: str = "default",
+        policy: BootstrapPolicy | None = None,
     ) -> InitResult:
         """Atomically initialise a local git repo at ``path``.
 
@@ -306,6 +309,7 @@ class RepoBootstrapService:
             self._write_gitignore(staging, gitignore_profile)
             self._write_readme(staging, project_name)
             self._configure_local_identity(staging)
+            self._write_license(staging, policy, project_name)
             sha = self._initial_commit(staging, project_name)
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
@@ -434,6 +438,24 @@ class RepoBootstrapService:
             "the project.\n"
         )
         (staging / "README.md").write_text(body)
+
+    def _write_license(
+        self, staging: Path, policy: BootstrapPolicy | None, project_name: str
+    ) -> None:
+        """Write ``LICENSE`` from ``policy`` (§1.6), or nothing when no policy.
+
+        No policy means the caller opts out of policy-driven content entirely —
+        we keep the historical behaviour of not shipping a LICENSE. A policy with
+        ``license=None`` (proprietary) also writes no file.
+        """
+        if policy is None:
+            return
+        holder = policy.copyright_holder or DUMMY_GIT_USER_NAME
+        body = render_license(
+            policy, holder=holder, year=datetime.now(UTC).year
+        )
+        if body is not None:
+            (staging / "LICENSE").write_text(body)
 
     def _configure_local_identity(self, staging: Path) -> None:
         """Set ``user.name`` + ``user.email`` *inside* the new repo only.
