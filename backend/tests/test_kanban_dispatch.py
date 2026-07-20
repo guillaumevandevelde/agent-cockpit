@@ -1,4 +1,6 @@
 # backend/tests/test_kanban_dispatch.py
+import os
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -6488,4 +6490,331 @@ async def test_set_resume_then_immediate_dispatch_defers_to_next_tick():
     assert len(worktree_calls) == 0
     assert card_after_next_pass.claimed_by is not None
     assert card_after_next_pass.claimed_by.startswith("agent:")
+
+
+# ---- re-dispatch prompt: prior-branch warning (kaart ff2d03fce…) ----------
+#
+# Acceptance criteria (from the card):
+#   [1] re-dispatch with prior branch ahead of origin/master → warning
+#       rendered with branch name + commit count
+#   [2] first dispatch (no prior branch) → no warning
+#   [3] test covers both paths
+#
+# Two layers, each with its own pure helper:
+#   1. `_build_prior_branch_warning(project_path, prior_session_name)` runs
+#      `git log origin/master..<branch> --oneline` against the project repo
+#      (NOT the worktree — the worktree may already be GC'd) and renders a
+#      warning block when the output is non-empty. Returns "" otherwise.
+#   2. `build_card_prompt` accepts an optional `prior_branch_warning` arg and
+#      prepends the warning near the top of the prompt when non-empty, so a
+#      re-dispatched agent sees it in early context (same parity principle as
+#      the worktree-safety callout).
+#
+# The git checks run synchronously against a tmp_path repo with a real
+# `origin/master` and a feature branch; this keeps the test hermetic and
+# avoids depending on kanban DB state.
+
+def _tmp_repo_with_master(tmp_path):
+    """Init a tmp git repo with a 'master' branch on a fake origin — shared
+    by both prior-branch test classes so each test doesn't pay the setup cost."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    env = {
+        "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@x",
+        "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@x",
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        **os.environ,
+    }
+    def run(*args, **kwargs):
+        return subprocess.run(
+            list(args), capture_output=True, text=True, env=env,
+            cwd=str(proj), **kwargs,
+        )
+    run("git", "init", "-q", "-b", "master", ".")
+    run("git", "config", "user.email", "t@x")
+    run("git", "config", "user.name", "T")
+    (proj / "README").write_text("hi\n")
+    run("git", "add", "README")
+    run("git", "commit", "-q", "-m", "initial")
+    origin = tmp_path / "origin.git"
+    origin.mkdir()
+    run("git", "init", "-q", "--bare", str(origin))
+    run("git", "remote", "add", "origin", str(origin))
+    run("git", "push", "-q", "origin", "master")
+    return proj
+
+
+class TestBuildPriorBranchWarning:
+    """Pure helper that surfaces "a prior dispatch left commits behind" warnings."""
+
+    def test_returns_empty_when_no_prior_session(self, tmp_path):
+        proj = _tmp_repo_with_master(tmp_path)
+        # No prior session name → no warning (the empty string is the explicit
+        # "no warning" sentinel — callers prepend it only when non-empty).
+        assert dispatch._build_prior_branch_warning(str(proj), None) == ""
+        assert dispatch._build_prior_branch_warning(str(proj), "") == ""
+
+    def test_returns_empty_when_prior_branch_has_no_unmerged_commits(self, tmp_path):
+        proj = _tmp_repo_with_master(tmp_path)
+        env = {
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@x",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@x",
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            **__import__("os").environ,
+        }
+        def run(*args):
+            return subprocess.run(
+                list(args), capture_output=True, text=True, env=env, cwd=str(proj),
+            )
+        # A branch with NO new commits → nothing to warn about.
+        run("git", "checkout", "-q", "-b", "k-prior-clean-abcd")
+        assert (
+            dispatch._build_prior_branch_warning(str(proj), "k-prior-clean-abcd") == ""
+        )
+
+    def test_returns_warning_when_prior_branch_ahead_of_master(self, tmp_path):
+        proj = _tmp_repo_with_master(tmp_path)
+        env = {
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@x",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@x",
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            **__import__("os").environ,
+        }
+        def run(*args):
+            return subprocess.run(
+                list(args), capture_output=True, text=True, env=env, cwd=str(proj),
+            )
+        # A branch with 2 commits ahead of origin/master → warning expected.
+        run("git", "checkout", "-q", "-b", "k-prior-dirty-abcd")
+        (proj / "A").write_text("a\n")
+        run("git", "add", "A")
+        run("git", "commit", "-q", "-m", "add A")
+        (proj / "B").write_text("b\n")
+        run("git", "add", "B")
+        run("git", "commit", "-q", "-m", "add B")
+        out = dispatch._build_prior_branch_warning(str(proj), "k-prior-dirty-abcd")
+        # Branch name + commit count are explicit acceptance criteria.
+        assert "k-prior-dirty-abcd" in out
+        assert "2" in out
+        # Heading + a usable inspection hint must both be present.
+        assert "Let op" in out or "WAARSCHUWING" in out.upper() or "warning" in out.lower()
+        assert "git log" in out
+
+    def test_returns_empty_when_prior_branch_does_not_exist(self, tmp_path):
+        # Branch was force-deleted or never pushed → no warning, no crash.
+        proj = _tmp_repo_with_master(tmp_path)
+        assert (
+            dispatch._build_prior_branch_warning(str(proj), "k-never-existed-xxxx") == ""
+        )
+
+    def test_returns_empty_when_repo_unavailable(self, tmp_path):
+        # Malformed project path → fail open (empty), never raise — a transient
+        # git hiccup must not wedge dispatch.
+        assert (
+            dispatch._build_prior_branch_warning("/nonexistent/repo", "k-x-yz01") == ""
+        )
+
+
+class TestBuildCardPromptPriorBranchWarning:
+    """build_card_prompt must surface the prior-branch warning at the top of
+    the prompt when one is supplied, and stay silent when it isn't (the
+    'no ruis in de normale prompt' acceptance criterion)."""
+
+    def _card(self):
+        class _C:
+            title = "T"
+            description = "do thing"
+        return _C()
+
+    def test_warning_prepended_when_supplied(self):
+        warning = (
+            "**Let op:** een eerdere sessie (`k-prior-abcd`) liet 2 commits "
+            "achter die nog niet gemerged zijn."
+        )
+        prompt = dispatch.build_card_prompt(
+            self._card(), persona=None, ship_mode="direct",
+            prior_branch_warning=warning,
+        )
+        # Acceptance criterion: warning present with branch + count.
+        assert "k-prior-abcd" in prompt
+        assert "2 commits" in prompt
+        # The warning must land BEFORE the ship workflow so the agent sees it
+        # in early context (same parity as the worktree-safety callout).
+        assert prompt.index("k-prior-abcd") < prompt.index("Session-end workflow")
+
+    def test_no_warning_section_when_none(self):
+        prompt = dispatch.build_card_prompt(
+            self._card(), persona=None, ship_mode="direct",
+            prior_branch_warning=None,
+        )
+        # Acceptance criterion: no ruis — first dispatch keeps the legacy shape.
+        assert "Let op" not in prompt
+        assert "eeerdere sessie" not in prompt
+        assert "git log origin/master..<branch>" not in prompt
+
+    def test_warning_section_renders_inside_a_named_heading(self, tmp_path):
+        """The end-to-end shape: when the helper renders a warning for a real
+        prior branch, that warning sits inside a markdown `##`-style heading
+        so a human skimming the prompt recognises it at a glance, and future
+        prompt tests can pin the exact substring without coupling to the
+        prose. This exercises the dispatcher wiring (helper → builder →
+        prompt), not the builder alone — the builder is a dumb renderer, the
+        heading comes from the helper."""
+        # Build a tmp repo with a prior branch that is actually ahead of
+        # origin/master (one commit pushed to the local branch, none on the
+        # remote) so `_build_prior_branch_warning` produces real output —
+        # the helper only renders a warning when there are commits to surface.
+        proj = _tmp_repo_with_master(tmp_path)
+        env = {
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@x",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@x",
+            "PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+        }
+        def run(*args):
+            return subprocess.run(
+                list(args), capture_output=True, text=True, env=env, cwd=str(proj),
+            )
+        run("git", "checkout", "-q", "-b", "k-prior-abcd")
+        (proj / "prior.txt").write_text("prior\n")
+        run("git", "add", "prior.txt")
+        run("git", "commit", "-q", "-m", "prior commit")
+        warning = dispatch._build_prior_branch_warning(str(proj), "k-prior-abcd")
+        assert "##" in warning, (
+            f"helper output must contain a markdown heading; got {warning!r}"
+        )
+        # Now verify the rendered warning reaches the prompt intact, inside
+        # its heading.
+        prompt = dispatch.build_card_prompt(
+            self._card(), persona=None, ship_mode="direct",
+            prior_branch_warning=warning,
+        )
+        # Both the heading and the body land in the prompt.
+        assert "##" in prompt
+        assert warning.strip().splitlines()[0] in prompt
+
+
+class TestResolvePriorBranchWarning:
+    """End-to-end: the dispatcher injects a prior-branch warning when (and
+    only when) the card has a prior `agent:` claim and that prior branch is
+    ahead of origin/master. This is the actual acceptance criterion from
+    kaart ff2d03fce… — the helper is wired into `_run_card`, and the wiring
+    reaches every dispatch entry point (auto-tick, manual dispatch_card,
+    redispatch_card, dispatch_impediment_card).
+
+    Uses a real RecordingTransport so we can assert on the prompt that
+    reaches the spawned session, not just intermediate state."""
+
+    async def test_first_dispatch_has_no_warning(self, tmp_path):
+        """A card that was never claimed before → no prior-branch warning in
+        the spawned prompt. 'Geen ruis in de normale prompt' (AC #2)."""
+        proj = _tmp_repo_with_master(tmp_path)
+        transport = RecordingTransport()
+        async with KanbanSessionLocal() as s:
+            cid = await _make_card(s, title="fresh card")
+            await s.commit()
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path=str(proj),
+                transport=transport,
+            )
+        assert len(transport.calls) == 1
+        prompt = transport.calls[0]["prompt"]
+        assert "PRID-BRANCH-WAARSCHUWING" not in prompt
+        assert "Let op" not in prompt or "Let op:" not in prompt.split("Let op")[0] + "x"
+
+    async def test_redispatch_with_unmerged_commits_injects_warning(self, tmp_path):
+        """A card that was previously claimed by a session whose branch is
+        ahead of origin/master → the new spawned session sees the
+        `## PRID-BRANCH-WAARSCHUWING` block with branch + commit count.
+        (AC #1)."""
+        proj = _tmp_repo_with_master(tmp_path)
+        env = {
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@x",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@x",
+            "PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+        }
+        def run(*args):
+            return subprocess.run(
+                list(args), capture_output=True, text=True, env=env, cwd=str(proj),
+            )
+        # Simulate the prior session: create the worktree-style branch on the
+        # project repo, push 2 commits ahead of origin/master. The branch
+        # name matches what the dispatcher would have minted (k-<slug>-<4hex>)
+        # — we don't need to match exactly, only need it to look like one.
+        prior_branch = "k-prior-card-abcd"
+        run("git", "checkout", "-q", "-b", prior_branch)
+        (proj / "p1.txt").write_text("p1\n")
+        run("git", "add", "p1.txt")
+        run("git", "commit", "-q", "-m", "p1")
+        (proj / "p2.txt").write_text("p2\n")
+        run("git", "add", "p2.txt")
+        run("git", "commit", "-q", "-m", "p2")
+
+        transport = RecordingTransport()
+        async with KanbanSessionLocal() as s:
+            cid = await _make_card(s, title="redisp")
+            # Stage the op-log to look like a prior claim (and release) of
+            # this same session name. This is the trace the reaper leaves
+            # behind when a session dies between commit and merge.
+            await apply_operation(
+                s, op_type="claim", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"claimed_by": f"agent:{prior_branch}"},
+            )
+            await apply_operation(
+                s, op_type="release", entity_type="card", project_key=PK,
+                entity_id=cid, payload={},
+            )
+            await s.commit()
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path=str(proj),
+                transport=transport,
+            )
+        assert len(transport.calls) == 1
+        prompt = transport.calls[0]["prompt"]
+        # Branch name + commit count must be in the prompt.
+        assert prior_branch in prompt
+        assert "2" in prompt
+        assert "PRID-BRANCH-WAARSCHUWING" in prompt
+
+    async def test_redispatch_with_merged_branch_emits_no_warning(self, tmp_path):
+        """A prior branch that has zero commits ahead of origin/master (e.g.
+        already merged in a concurrent merge) → no warning; the helper
+        correctly identifies 'nothing to surface' and stays silent. This is
+        the third path the acceptance criteria cover."""
+        proj = _tmp_repo_with_master(tmp_path)
+        env = {
+            "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@x",
+            "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@x",
+            "PATH": "/usr/bin:/bin", "HOME": str(tmp_path),
+        }
+        def run(*args):
+            return subprocess.run(
+                list(args), capture_output=True, text=True, env=env, cwd=str(proj),
+            )
+        # Branch with no new commits (no checkout, just create and leave).
+        merged_branch = "k-already-merged-1234"
+        run("git", "checkout", "-q", "-b", merged_branch)
+        run("git", "checkout", "-q", "master")
+
+        transport = RecordingTransport()
+        async with KanbanSessionLocal() as s:
+            cid = await _make_card(s, title="merged")
+            await apply_operation(
+                s, op_type="claim", entity_type="card", project_key=PK,
+                entity_id=cid, payload={"claimed_by": f"agent:{merged_branch}"},
+            )
+            await apply_operation(
+                s, op_type="release", entity_type="card", project_key=PK,
+                entity_id=cid, payload={},
+            )
+            await s.commit()
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path=str(proj),
+                transport=transport,
+            )
+        assert len(transport.calls) == 1
+        prompt = transport.calls[0]["prompt"]
+        assert "PRID-BRANCH-WAARSCHUWING" not in prompt
 

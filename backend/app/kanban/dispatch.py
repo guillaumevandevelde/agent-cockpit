@@ -1043,12 +1043,133 @@ def _build_attachments_section(card) -> str:
     return "\n".join(lines)
 
 
+def _build_prior_branch_warning(project_path: str, prior_session_name: str | None) -> str:
+    """Render a warning block when a prior dispatch left unmerged commits behind.
+
+    Closes the "re-dispatch starts cold" gap (kanban card ff2d03fce…): when
+    a session is interrupted after `git commit` but before the merge, the
+    reaper eventually releases the claim and the dispatcher spawns a fresh
+    worktree for the same card. Without this hint, that fresh session has
+    no signal that its predecessor already shipped commits that just need
+    to land on master — so it redoes the work and the two diverge.
+
+    Pure synchronous helper (uses ``subprocess.run`` against the project
+    repo, NOT the worktree path — the worktree may already be GC'd by the
+    time we run this check). Returns ``""`` in three cases, so callers can
+    treat the empty string as the explicit "no warning" sentinel and
+    prepend only when non-empty:
+
+      - ``prior_session_name`` is falsy (no prior claim found in the op-log,
+        or the card was never picked up before).
+      - the prior branch doesn't exist on the remote (was force-pushed
+        away, never pushed, or its session was killed before pushing).
+      - the prior branch has zero commits ahead of ``origin/master``
+        (already merged in a concurrent merge, or the commit was empty).
+      - any subprocess / repo error — fail open, never wedge dispatch on a
+        transient git hiccup.
+
+    Acceptance criteria (from the card): the rendered block must name both
+    the branch and the commit count so a re-dispatched agent can act on it
+    with one `git log origin/master..<branch>` inspection rather than
+    rediscovering the gap from scratch.
+    """
+    if not prior_session_name or not project_path:
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", project_path, "log", "--oneline",
+             f"origin/master..{prior_session_name}"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    count = len(lines)
+    return (
+        f"## PRID-BRANCH-WAARSCHUWING\n"
+        f"**Let op:** een eerdere sessie (`{prior_session_name}`) liet "
+        f"{count} commit{'s' if count != 1 else ''} achter die nog niet "
+        f"gemerged zijn. Inspecteer die branch eerst vóór je opnieuw begint "
+        f"— mogelijk is het werk al af en hoef je alleen te shippen/verifiëren:\n\n"
+        f"```\n"
+        f"git log origin/master..{prior_session_name} --oneline\n"
+        f"git diff origin/master..{prior_session_name} --stat\n"
+        f"```\n"
+        f"\nAls de branch al precies doet wat de kaart vraagt, ga dan direct "
+        f"door naar de ship-stappen hieronder (in plaats van het werk te "
+        f"herbouwen). Is de branch achterhaald of conflicterend, dan mag je "
+        f"opnieuw beginnen — maar bevestig dat expliciet in een "
+        f"`**Self-improve:**` comment op deze kaart.\n"
+    )
+
+
+async def _resolve_prior_branch_warning(
+    session, *, card, project_path: str,
+) -> str:
+    """Build a prior-branch warning for ``card`` if a previous dispatch
+    left commits behind, otherwise return ``""``.
+
+    Glue between ``_build_prior_branch_warning`` (the pure git-aware
+    renderer) and the kanban op-log (which knows whether the card was
+    ever picked up before). Walks the op-log backwards, finds the latest
+    ``claim`` op whose ``claimed_by`` starts with ``agent:`` and whose
+    session name is NOT the current session (the new claim that the caller
+    is about to commit is excluded — we want the *previous* session's
+    branch, not the one the freshly-spawned session is creating right
+    now), and feeds that name to the helper.
+
+    Async + DB-bound because it queries the op-log via ``card_activity``,
+    same shape as the revisit/resume resolvers above.
+
+    Returns ``""`` (the explicit no-warning sentinel) when:
+      - the card has no prior claim (first dispatch, or manual restart
+        after a manual release — both common),
+      - the prior branch has nothing ahead of ``origin/master`` (already
+        merged, never pushed, or GC'd),
+      - the op-log query fails (fail open — a transient DB hiccup must
+        never wedge dispatch).
+
+    Wired into ``_run_card`` so the warning reaches every dispatch path
+    (auto-tick, manual ``dispatch_card``, ``redispatch_card``, ``dispatch_impediment_card``).
+    """
+    from app.kanban.service import card_activity
+
+    try:
+        activity = await card_activity(session, card.id)
+    except Exception:
+        logger.debug(
+            "could not read op-log for prior-branch warning (card %s); skipping",
+            card.id, exc_info=True,
+        )
+        return ""
+    current_session = _claimant_session(card)
+    for op in reversed(list(activity)):
+        if op.op_type != "claim":
+            continue
+        claimed_by = (op.payload or {}).get("claimed_by") or ""
+        if not claimed_by.startswith(CLAIMANT_PREFIX):
+            continue
+        session_name = claimed_by[len(CLAIMANT_PREFIX):]
+        # Skip the brand-new claim the caller is about to commit — we want
+        # the *previous* session's branch, not the new worktree that's
+        # still empty.
+        if session_name == current_session:
+            continue
+        return _build_prior_branch_warning(project_path, session_name)
+    return ""
+
+
 def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       phase: str = "executor",
                       impediment_question: str | None = None,
                       impediment_answer: str | None = None,
                       revisit_question: str | None = None,
-                      revisit_prior_decision: dict | None = None) -> str:
+                      revisit_prior_decision: dict | None = None,
+                      prior_branch_warning: str | None = None) -> str:
     # A card dispatched in the executor phase (no `analyst_agent_id`) can
     # still resolve to the analyst persona via `work_type='analysis'` or
     # `card.agent='analyst'` (the "leaf analyst spike" case — see
@@ -1142,6 +1263,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         f"# {card.title}\n"
         f"{getattr(card, 'description', '') or ''}\n"
         f"{attachments_section}"
+        f"{prior_branch_warning or ''}\n"
         f"{impediment_section}\n"
         f"{revisit_section}\n"
         f"Ship mode: {ship_mode}\n\n"
@@ -2804,12 +2926,24 @@ async def _run_card(
         effective_model_override, card.model, column_default_model, persona_model,
         provider=provider,
     )
+    # Re-dispatch safety net (kaart ff2d03fce…): when this card was previously
+    # claimed by a session whose branch has unmerged commits, inject a
+    # warning block so the new agent sees the existing branch and can
+    # ship/verify instead of rebuilding from scratch. The op-log query is
+    # cheap (one indexed scan of an already-materialised activity feed)
+    # and only runs once per dispatch — the helper returns "" on first
+    # dispatch or when the prior branch has no commits ahead of
+    # origin/master, so the hot path is unaffected for ordinary cards.
+    prior_branch_warning = await _resolve_prior_branch_warning(
+        session, card=card, project_path=project_path,
+    )
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         phase=phase,
         impediment_question=impediment_question,
         impediment_answer=impediment_answer,
         revisit_question=revisit_question,
-        revisit_prior_decision=revisit_prior_decision)
+        revisit_prior_decision=revisit_prior_decision,
+        prior_branch_warning=prior_branch_warning)
     if phase == "executor" and card.parent_card_id is not None:
         # Only child cards (parent_card_id set) get the PLAN CONTEXT section.
         # Legacy single-agent cards never have a parent; prepending the
