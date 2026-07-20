@@ -1,6 +1,6 @@
 ---
 name: market-research
-description: Use when researching competitor open-source agent platforms, ecosystem trends, or new techniques — and converting findings into concrete, scoped Backlog kanban cards. Provides a fixed external sources list, a filter+dedupe gate against existing cards, and a card template that forces acceptatiecriteria-niveau scope.
+description: Use when doing a periodic outward sweep over a fixed competitor/ecosystem sources list — pulling releases, GitHub topics, and changelogs — and turning findings into scoped Backlog kanban cards. Do NOT use for evaluating one specific external project ("should we build X?", "assess this OSS project for integration") — that's a single-card plan, not a sweep.
 ---
 
 # market-research
