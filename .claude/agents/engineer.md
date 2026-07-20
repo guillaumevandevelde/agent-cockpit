@@ -135,7 +135,31 @@ altijd door.
    stap vult dat gat. **Vóór je de kaart naar Done verplaatst**, draai je een
    subagent-call met **cleared context** die de implementatie toetst aan de
    oorspronkelijke kaart-spec: kaart-titel, kaart-beschrijving, en de committed
-   diff tegen `origin/master`. Voer letterlijk deze prompt uit:
+   diff tegen `origin/master`.
+
+   **Voorkeur-volgorde van subagent-type** — kies het type op basis van wat de
+   FCR moet doen. De `Agent`-tool default (`general-purpose`) trekt de hele
+   toolset mee en kan bij kaarten met een lange beschrijving (>~2k tekens)
+   of een grote diff-context **falen op "Prompt is too long"**; in de praktijk
+   kost dat 1–3 retries of de agent breekt de FCR-stap af. Gebruik daarom
+   standaard het smallere type:
+
+   1. **`Explore`** (default) — read-only, smalle toolset, past binnen élke
+      prompt-lengte. Voor de standaard compliance-check (diff vs.
+      kaart-beschrijving) is dit genoeg en het is wat je in ~95% van de
+      feature-kaarten gebruikt. Bewust gekozen na een observatie dat twee
+      opeenvolgende `general-purpose`-FCR-calls faalden en een derde
+      poging met `Explore` meteen slaagde.
+   2. **`Plan`** — als de FCR een ontwerp-element of refactor-impact moet
+      beoordelen en de bredere Plan-toolset nodig is.
+   3. **`general-purpose`** — alleen wanneer de FCR-shell-uitvoering nodig
+      heeft die `Explore`/`Plan` niet bieden (bv. een commando draaien om
+      een deliverable te valideren). Wees je bewust van de
+      context-cap: combineer kaart-context en diff-context liever in twee
+      kleinere calls dan in één grote, en val terug op een smaller type
+      zodra je merkt dat de prompt tegen de limiet aan loopt.
+
+   Voer letterlijk deze prompt uit:
 
    > Je reviewt een feature-implementatie tegen zijn oorspronkelijke
    > specificatie. Inputs: de oorspronkelijke kaart-titel, -beschrijving, en
