@@ -248,7 +248,14 @@ describe("CardEditDialog", () => {
     const values = Array.from(
       document.getElementById(listId)!.querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).toContain("MiniMax-M3[1m]");
+    // Regression guard for kanban card "Column model setting": the bracketed
+    // `MiniMax-M3[1m]` form was a legacy context-window suffix that MiniMax's
+    // API rejects as an unknown model (see commit 0ce81be in
+    // backend/app/services/agentic_cli/provider_env.py). Never offer it as a
+    // picker suggestion — the bare `MiniMax-M3` form is what the dispatcher
+    // actually accepts.
+    expect(values).toContain("MiniMax-M3");
+    expect(values).not.toContain("MiniMax-M3[1m]");
     expect(values).not.toContain("sonnet");
 
     // The analyst column has no provider override -> keeps the claude-code list.
@@ -258,7 +265,7 @@ describe("CardEditDialog", () => {
       document.getElementById(analystListId)!.querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
     expect(analystValues).toContain("sonnet");
-    expect(analystValues).not.toContain("MiniMax-M3[1m]");
+    expect(analystValues).not.toContain("MiniMax-M3");
   });
 
   it("pre-fills existing column_overrides from initial", async () => {
