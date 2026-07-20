@@ -110,9 +110,15 @@ voor de leaf-spike-sessie:
    voor dit leaf-geval **gerelaxeerd** — net als Write/Edit al is.
 2. **Instructie:** als de deliverable **concrete, scoped vervolgtaken op acceptance-criteria-
    niveau** aanbeveelt, maak die in **dezelfde sessie** aan als Backlog-kaarten (via
-   `create_card`; via `add_plan_attachment` wanneer ze een afhankelijkheids-DAG vormen) —
-   **vóór** je THIS-kaart naar Done verplaatst. De §-in-het-doc blijft de menselijk-leesbare
-   verantwoording; de kaarten zijn de uitvoerbare neerslag.
+   `create_card(parent_card_id=<deze kaart>)`) — **vóór** je THIS-kaart naar Done verplaatst.
+   Daarna **altijd** `add_plan_attachment(card_id=<deze kaart>, child_card_ids=[…])`
+   aanroepen, ook wanneer de kinderen geen onderlinge afhankelijkheids-DAG vormen
+   (`depends_on_graph={}`); de DAG bepaalt alleen de dep-volgorde, niet óf
+   `add_plan_attachment` draait. "Alleen bij een DAG" is dezelfde valkuil die kaart
+   `e51b465b…` in `analyst_prompt.py` / `.claude/agents/analyst.md` al heeft gecorrigeerd:
+   onafhankelijke kinderen zonder `plan_ref`-deliverable worden door `_awaiting_plan_ref`
+   stil uit dispatch gehouden. De §-in-het-doc blijft de menselijk-leesbare verantwoording;
+   de kaarten zijn de uitvoerbare neerslag.
 3. **Impediment-escape (scoped):** reserveer `report_impediment(options=[…])` uitsluitend voor
    een echte onopgeloste **product-fork** die verandert *wat* de kaarten moeten zijn. Beslis
    verantwoorde forks best-effort (documenteer de aanname + bewaar het alternatief als
