@@ -76,6 +76,7 @@ cd frontend && npm run build     # Same as above
 bash backend/test_commands_api.sh                         # Curl-based API tests
 bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
+bash scripts/test_check_doc_links.sh                      # Bash tests for check-doc-links.sh
 bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
 bash scripts/test_list_orphan_bridge_sessions.sh           # Bash tests for list-orphan-bridge-sessions.sh (uses real tmux sessions)
 bash scripts/test_sweep_dangling_depends_on.sh             # Bash tests for sweep_dangling_depends_on.py (synthetic SQLite fixtures)
@@ -89,6 +90,7 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Docs / decision register
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
 ./scripts/check-doc-frontmatter.sh            # Flag docs/cockpit/*.md zonder OKF-frontmatter of met onbekende type/status (advisory; --strict = exit 1)
+./scripts/check-doc-links.sh                  # Flag relatieve Markdown-links in docs/cockpit/*.md met ontbrekend target (advisory; --strict = exit 1)
 ./scripts/generate-doc-index.py               # Regenereer de README-index (100% dekking, gegroepeerd op type + status-badges) + docs/cockpit/llms.txt uit de frontmatter
 ./scripts/generate-doc-index.py --check --strict  # Faal als de gegenereerde index/llms.txt out-of-sync is met de frontmatter (advisory zonder --strict)
 
