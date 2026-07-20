@@ -271,6 +271,18 @@ export const kanbanApi = {
       `${BASE}/project-key?project_path=${encodeURIComponent(projectPath)}`
     ),
 
+  /**
+   * "Wacht op jou" — PO-facing aggregation of every human-blocked item in
+   * the project (kanban card `c7ea21b0…`). Returns a flat, oldest-first
+   * sorted list across impediment_needs_answer / gate_open /
+   * review_requested / awaiting_plan_ref. Empty when nothing is waiting
+   * (no 404 for an unknown project — a wachtrij is a *view*, not a write).
+   */
+  wachtrij: (projectKey: string): Promise<import("./types").WachtrijResponse> =>
+    apiClient<import("./types").WachtrijResponse>(
+      `${BASE}/wachtrij?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
   mcpStatus: (projectPath: string): Promise<{ enabled: boolean }> =>
     apiClient<{ enabled: boolean }>(
       `${BASE}/mcp-status?project_path=${encodeURIComponent(projectPath)}`

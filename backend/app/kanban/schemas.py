@@ -705,3 +705,34 @@ class WorkTypeMappingBulk(BaseModel):
     """
     project_key: str
     mappings: list[WorkTypeMappingUpdate]
+
+
+# PO-wachtrij ("wacht op jou") — single finite list of every human-blocked
+# item on the board. See kanban card `c7ea21b0…` and
+# `docs/cockpit/product-owner-volgbaarheid-analyse.md` §2b/§4.1/§5 kaart B.
+
+
+class WachtrijItem(BaseModel):
+    """One row in the PO-wachtrij. Field semantics mirror the JSON the
+    ``service.po_wachtrij`` helper returns — ``kind`` discriminates the
+    four detection categories; ``reason`` is a short human-readable
+    snippet of the underlying question / note / "plan not yet attached".
+    """
+
+    card_id: str
+    card_title: str
+    card_column: str
+    kind: str
+    reason: str
+    created_at: str
+    wait_seconds: int
+
+
+class WachtrijResponse(BaseModel):
+    """Envelope for the wachtrij endpoint. ``items`` is sorted oldest-first
+    (longest wait on top); ``total`` is ``len(items)`` and is included so
+    the UI can render a counter without iterating twice."""
+
+    project_key: str
+    total: int
+    items: list[WachtrijItem]

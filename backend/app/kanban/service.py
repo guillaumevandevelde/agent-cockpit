@@ -10,10 +10,12 @@ from app.kanban.dep_resolver import meets_dep_prerequisites
 from app.kanban.models import (
     KanbanCard,
     KanbanColumn,
+    KanbanDeliverable,
     KanbanGate,
     KanbanOp,
     KanbanWorkTypeMapping,
 )
+from app.utils.timeutils import ensure_aware
 
 
 def is_analyst_leaf_spike(card) -> bool:
@@ -1101,3 +1103,248 @@ async def delete_work_type_mapping(
     )
     await session.flush()
     return result.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# PO-wachtrij: "Wacht op jou" — finite, sortable list of human-blocked items.
+# ---------------------------------------------------------------------------
+#
+# Background (kanban card c7ea21b0…):
+#
+# The product owner wants a single, sorted list of everything that is blocked
+# on a human decision, instead of having to scan multiple columns + the
+# metadata for gate/review/plan_ref edges. Four detection categories, in
+# priority order when ties collide on wait_seconds (older wins regardless):
+#
+#   1. impediment_needs_answer — card on Impediment column with an open
+#      question (impediment_status_for_card == 'needs_answer'). Reason text
+#      is the latest `**Impediment:**` comment.
+#   2. gate_open — any KanbanGate with status='open'. (Gates are usually on
+#      Impediment cards; this branch handles the column-independent case.)
+#      Reason text is the gate's question.
+#   3. review_requested — card whose metadata.reviewed_card_id is set, i.e.
+#      a review-card sibling that the analyst needs to triage.
+#   4. awaiting_plan_ref — child card (has parent_card_id) without a
+#      kind='plan_ref' deliverable. Dispatcher holds it out until the
+#      analyst's add_plan_attachment lands; if the analyst stalls, only the
+#      human can unblock.
+#
+# All four reuse already-existing signals — no new column, no new workflow
+# concept, no new persisted state. The wachtrij is a *view* on top of the
+# existing board. See docs/cockpit/product-owner-volgbaarheid-analyse.md
+# §2b + §4.1 + §5 (kaart B) for the framing.
+
+
+async def _latest_impediment_question(session, card_id: str) -> str | None:
+    """Latest `**Impediment:** <text>` comment on the card, newest-first.
+
+    Mirrors the resolution walker in `impediment_status_for_card`: the most
+    recent `**Impediment:**` comment wins, and a later `**Resolution:**`
+    flips the status out of `needs_answer` (so this function is only called
+    when the status is already `needs_answer`).
+    """
+    stmt = (
+        select(KanbanOp)
+        .where(KanbanOp.entity_id == card_id)
+        .where(KanbanOp.op_type == "comment")
+        .order_by(KanbanOp.hlc.desc())
+    )
+    for op in (await session.execute(stmt)).scalars().all():
+        text = op.payload.get("text") or ""
+        if text.startswith(_IMPEDIMENT_QUESTION_PREFIX):
+            return text[len(_IMPEDIMENT_QUESTION_PREFIX):]
+    return None
+
+
+async def _latest_review_requested_note(session, card_id: str) -> str | None:
+    """Latest `**Review requested:** <note>` comment on the card."""
+    stmt = (
+        select(KanbanOp)
+        .where(KanbanOp.entity_id == card_id)
+        .where(KanbanOp.op_type == "comment")
+        .order_by(KanbanOp.hlc.desc())
+    )
+    for op in (await session.execute(stmt)).scalars().all():
+        text = op.payload.get("text") or ""
+        if text.startswith(_REVIEW_REQUESTED_PREFIX):
+            return text[len(_REVIEW_REQUESTED_PREFIX):]
+    return None
+
+
+def _first_paragraph(text: str) -> str:
+    """First paragraph of a multi-paragraph string, trimmed.
+
+    Used to surface the human's note from the review-card description,
+    where `_review_description` plants the note as paragraph 0 before the
+    `**Original summary:**` and `**Deliverables:**` blocks.
+    """
+    if not text:
+        return ""
+    # Split on double newline (markdown paragraph separator); strip
+    # surrounding whitespace; cap so a sprawling description doesn't blow up
+    # the wachtrij line.
+    for chunk in text.split("\n\n"):
+        chunk = chunk.strip()
+        if chunk:
+            return chunk[:280]
+    return ""
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _wait_seconds(created_at: datetime, now: datetime) -> int:
+    """Seconds since `created_at`. Both sides are normalized to UTC via
+    `ensure_aware` so a stored naive datetime (SQLite's default) doesn't
+    trip `can't subtract offset-naive and offset-aware datetimes`."""
+    return max(0, int((now - ensure_aware(created_at)).total_seconds()))
+
+
+async def po_wachtrij(session, project_key: str) -> list[dict]:
+    """Return the PO-facing "wacht op jou" list for `project_key`.
+
+    Each item:
+
+      * ``card_id``           — the card the human must look at
+      * ``card_title``        — convenience for the UI
+      * ``card_column``       — current column (Backlog / Impediment / …)
+      * ``kind``              — one of impediment_needs_answer | gate_open |
+                                review_requested | awaiting_plan_ref
+      * ``reason``            — short human-readable snippet of the question
+                                / note / "plan not yet attached"
+      * ``created_at``        — ISO-8601 timestamp the item entered the queue
+                                (op-log for comments/gates/review; card
+                                created_at for awaiting_plan_ref children)
+      * ``wait_seconds``      — now − created_at; integer seconds
+
+    Sorted oldest-first (longest wait at top) so the most-urgent
+    decision surfaces first.
+
+    The function is read-only: no commit, no op-log write. The caller (REST
+    router, future MCP tool) wraps it in its own session and may run it
+    concurrently — the only writes inside this function are session.flush()
+    calls inside helper predicates, and the request-review path that already
+    ran the comment ops.
+    """
+    now = _now()
+    items: list[dict] = []
+
+    # Pull all candidate cards for the project in one round-trip. We
+    # deliberately skip the heavy selectinload(deliverables/attachments) from
+    # list_cards — the wachtrij reader only needs the per-card gate count
+    # and (for awaiting_plan_ref) whether a plan_ref deliverable exists;
+    # both are fast point-queries keyed on card.id below.
+    cards = await list_cards(session, project_key, compact=True)
+
+    # Open gates for *any* card in the project, regardless of column —
+    # one batched query so a project with 100+ gates still costs O(1)
+    # round-trips.
+    open_gate_rows = (await session.execute(
+        select(KanbanGate)
+        .where(KanbanGate.project_key == project_key)
+        .where(KanbanGate.status == "open")
+    )).scalars().all()
+    open_gate_by_card: dict[str, KanbanGate] = {}
+    for g in open_gate_rows:
+        # If multiple open gates exist on the same card (rare), keep the
+        # most recent — matches `impediment_status_for_card`'s "newest
+        # wins" semantics.
+        prev = open_gate_by_card.get(g.card_id)
+        if prev is None or g.created_at > prev.created_at:
+            open_gate_by_card[g.card_id] = g
+
+    for card in cards:
+        # An open gate is the strongest "needs human" signal: it renders in
+        # the UI as choice buttons regardless of which column the card is
+        # on. Emit it as `gate_open` and skip the impediment-status branch
+        # below (gate wins, otherwise the same card would appear twice).
+        gate = open_gate_by_card.get(card.id)
+        if gate is not None:
+            items.append({
+                "card_id": card.id,
+                "card_title": card.title,
+                "card_column": card.column,
+                "kind": "gate_open",
+                "reason": gate.question,
+                "created_at": ensure_aware(gate.created_at).isoformat(),
+                "wait_seconds": _wait_seconds(gate.created_at, now),
+            })
+            continue
+
+        # Impediment lane: card is parked on Impediment AND still has an
+        # open question (the `**Resolution:**` hasn't landed yet, or a
+        # later `**Impediment:**` re-opened it).
+        if card.column == "Impediment":
+            status = await impediment_status_for_card(session, card)
+            if status == "needs_answer":
+                question = await _latest_impediment_question(
+                    session, card.id
+                ) or "(geen vraagtekst — open impedimen zonder commentaar)"
+                # `created_at` for an impediment is when the question was
+                # last asked; that's the moment the human started waiting.
+                created_at = card.updated_at or card.created_at
+                items.append({
+                    "card_id": card.id,
+                    "card_title": card.title,
+                    "card_column": card.column,
+                    "kind": "impediment_needs_answer",
+                    "reason": question,
+                    "created_at": ensure_aware(created_at).isoformat(),
+                    "wait_seconds": _wait_seconds(created_at, now),
+                })
+                continue
+
+        # Review card: the analyst needs the human's doubt re-investigated.
+        # Detected via metadata.reviewed_card_id, set by request_review. The
+        # `**Review requested:**` comment is posted on the *original* Done
+        # card (see request_review), not on the review card itself — but
+        # `_review_description` plants the note as the first paragraph of
+        # the review card's description, so we read from there.
+        meta = getattr(card, "meta", None) or {}
+        reviewed_card_id = meta.get("reviewed_card_id")
+        if reviewed_card_id:
+            note = _first_paragraph(card.description or "")
+            if not note:
+                note = "(review zonder notitie)"
+            created_at = card.updated_at or card.created_at
+            items.append({
+                "card_id": card.id,
+                "card_title": card.title,
+                "card_column": card.column,
+                "kind": "review_requested",
+                "reason": note,
+                "created_at": ensure_aware(created_at).isoformat(),
+                "wait_seconds": _wait_seconds(created_at, now),
+            })
+            continue
+
+        # Child awaiting plan_ref: parent_card_id set, no kind='plan_ref'
+        # deliverable on the card yet. The dispatcher holds these out; if
+        # the analyst's add_plan_attachment never lands, only the human
+        # can chase it.
+        if getattr(card, "parent_card_id", None):
+            has_plan_ref = (await session.execute(
+                select(func.count())
+                .select_from(KanbanDeliverable)
+                .where(KanbanDeliverable.card_id == card.id)
+                .where(KanbanDeliverable.kind == "plan_ref")
+            )).scalar_one()
+            if not has_plan_ref:
+                created_at = card.updated_at or card.created_at
+                items.append({
+                    "card_id": card.id,
+                    "card_title": card.title,
+                    "card_column": card.column,
+                    "kind": "awaiting_plan_ref",
+                    "reason": (
+                        "Wacht op plan van analyst "
+                        f"(parent {card.parent_card_id[:8]})"
+                    ),
+                    "created_at": ensure_aware(created_at).isoformat(),
+                    "wait_seconds": _wait_seconds(created_at, now),
+                })
+
+    # Oldest-first so the longest-waiting item is on top.
+    items.sort(key=lambda x: x["wait_seconds"], reverse=True)
+    return items

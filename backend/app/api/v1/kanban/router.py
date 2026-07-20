@@ -55,6 +55,8 @@ from app.kanban.schemas import (
     SubscriptionPoolRequest,
     TakeOverRequest,
     UpdatePlanAttachmentRequest,
+    WachtrijItem,
+    WachtrijResponse,
     WorkTypeMappingBulk,
     WorkTypeMappingResponse,
 )
@@ -294,6 +296,38 @@ async def agent_stats(project_key: str = Query(...)):
         agents=core["agents"],
         common_failures=core["common_failures"],
         tokens_available=tokens_available,
+    )
+
+
+@router.get("/wachtrij", response_model=WachtrijResponse)
+async def po_wachtrij(project_key: str = Query(...)):
+    """Return the PO-facing "wacht op jou" list — every card state that
+    is blocked on a human decision, sorted oldest-first.
+
+    Four detection categories, all reusing already-existing signals (no new
+    column or workflow concept):
+
+      * impediment_needs_answer — Impediment card with an open question
+        (open KanbanGate or `**Impediment:**` comment without later
+        `**Resolution:**`).
+      * gate_open — any open KanbanGate regardless of column.
+      * review_requested — review card whose
+        ``metadata.reviewed_card_id`` is set.
+      * awaiting_plan_ref — child card with ``parent_card_id`` but no
+        ``kind='plan_ref'`` deliverable (the dispatcher holds these out
+        until the analyst's ``add_plan_attachment`` lands).
+
+    See kanban card `c7ea21b0…` and
+    ``docs/cockpit/product-owner-volgbaarheid-analyse.md`` §2b/§4.1/§5 (kaart
+    B). Unlike ``GET /cards``, this endpoint does NOT 404 on an unknown
+    project key — a wachtrij is a *view*, and an empty board has no waiters.
+    """
+    async with KanbanSessionLocal() as s:
+        rows = await service.po_wachtrij(s, project_key)
+    return WachtrijResponse(
+        project_key=project_key,
+        total=len(rows),
+        items=[WachtrijItem(**row) for row in rows],
     )
 
 

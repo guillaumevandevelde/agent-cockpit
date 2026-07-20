@@ -188,6 +188,9 @@ agent-facing doc-navigatie, de Dashboard-pagina is config-inventaris.
   'm bouwt.
 - **Kaart B — "Wacht op jou"-PO-wachtrij** (`feature`): backend-aggregatie + frontend-view die
   alle mens-geblokkeerde items op één plek toont.
+  ✅ Geïmplementeerd (kaart `c7ea21b0`): `GET /api/v1/kanban/wachtrij?project_key=...`
+  (`backend/app/kanban/service.py::po_wachtrij`) + `WachtrijSection` op de Projects-pagina
+  (`frontend/src/features/projects/components/WachtrijSection.tsx`).
 - **Kaart C — Product-taal-conventie voor Done-summaries & impediment-options** (`chore`):
   conventie-doc + persona-prompt-aanpassingen zodat samenvattingen met productbetekenis
   leiden en impediment-opties als tradeoffs zijn geformuleerd.
