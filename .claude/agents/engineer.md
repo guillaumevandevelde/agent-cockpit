@@ -1,7 +1,7 @@
 ---
 description: 'Voert een kanban-kaart end-to-end uit: analyse, implementatie, tests en zelf-review in één sessie'
 model: 'sonnet'
-tools: ['search/codebase', 'search/usages', 'read/readFile', 'edit/editFiles', 'execute/runInTerminal', 'execute/getTerminalOutput', 'web/fetch']
+tools: ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']
 name: 'engineer'
 ---
 

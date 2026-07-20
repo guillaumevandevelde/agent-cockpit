@@ -1,7 +1,7 @@
 ---
 description: 'Onafhankelijke pre-Done gate: toetst een afgeronde kaart aan de gestelde wens én consistentie met de applicatie, en beslist Done (akkoord) of Impediment (met duidelijke reden)'
 model: 'sonnet'
-tools: ['search/codebase', 'search/usages', 'read/readFile', 'execute/runInTerminal', 'execute/getTerminalOutput', 'web/fetch']
+tools: ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch']
 name: 'reviewer'
 ---
 
