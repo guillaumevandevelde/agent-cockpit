@@ -13,19 +13,85 @@
 # The script is read-only against the DB (no schema changes, no writes).
 #
 # Usage:
-#   bash scripts/check-kanban-conventions.sh                 # default DB path
+#   bash scripts/check-kanban-conventions.sh                 # auto-discover DB
 #   bash scripts/check-kanban-conventions.sh /path/to/db.sqlite
+#
+# DB-path resolution chain (first that resolves to a real file wins):
+#   1. The argument path, when given and present on disk.
+#   2. KANBAN_DB env var, when set and present on disk.
+#   3. MAIN_DB_PATH env var, when set and present on disk (escape hatch
+#      for setups where the main checkout lives at a non-default path).
+#   4. The default kanban DB at ~/.claude-registry/kanban.db (anchored by
+#      backend/app/config.py:_default_kanban_database_url). One board per
+#      machine; worktrees share it.
+#   5. git-common-dir discovery: walk `git rev-parse --git-common-dir` to
+#      the repo root and look for `backend/claude_registry.db` there as a
+#      legacy fallback (kept for backwards-compat with older setups that
+#      colocated the board in the repo). Without this + (4), the script
+#      would silently skip in every dispatched worktree session — exactly
+#      the gap kanban card 71e88ac2 documented.
+#   6. Nothing found → skip (exit 0) instead of failing, so a fresh clone
+#      or an unrelated CI checkout doesn't break the build.
 #
 # Set KANBAN_CONVENTIONS_QUIET=1 to suppress per-project output and only
 # print the summary line (handy in CI).
 
 set -euo pipefail
 
-DB_PATH="${1:-backend/claude_registry.db}"
+# --- arg parsing -----------------------------------------------------------
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    --)
+      # trailing sentinel; anything after is treated literally below
+      ;;
+  esac
+done
+
 QUIET="${KANBAN_CONVENTIONS_QUIET:-0}"
 
-if [ ! -f "$DB_PATH" ]; then
-  echo "check-kanban-conventions: DB '$DB_PATH' not found — skipping (run uvicorn once to create it, or pass a path)." >&2
+# --- resolve the DB path ---------------------------------------------------
+DB_PATH=""
+candidate="${1:-}"
+if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+  DB_PATH="$candidate"
+elif [ -n "${KANBAN_DB:-}" ] && [ -f "$KANBAN_DB" ]; then
+  DB_PATH="$KANBAN_DB"
+elif [ -n "${MAIN_DB_PATH:-}" ] && [ -f "$MAIN_DB_PATH" ]; then
+  DB_PATH="$MAIN_DB_PATH"
+else
+  # Default: the board DB at ~/.claude-registry/kanban.db. Mirrors
+  # backend/app/config.py:_default_kanban_database_url so the script
+  # validates the same store the app reads from. One board per machine
+  # is the design — worktrees share it.
+  if [ -n "${HOME:-}" ] && [ -f "$HOME/.claude-registry/kanban.db" ]; then
+    DB_PATH="$HOME/.claude-registry/kanban.db"
+  fi
+fi
+
+# Last-resort fallback: walk to the main checkout via git-common-dir and
+# look for backend/claude_registry.db there. Works from a bare checkout,
+# from any subdir of the main checkout, and from inside a linked worktree
+# (where git-common-dir still points at the main checkout's .git).
+# Legacy path kept for backwards-compat with older colocated setups; the
+# default above already handles modern per-machine-anchored boards.
+if [ -z "$DB_PATH" ] && command -v git >/dev/null 2>&1; then
+  if common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" \
+     && [ -n "$common_dir" ]; then
+    abs_common="$(cd "$common_dir" 2>/dev/null && pwd -P)" || abs_common=""
+    if [ -n "$abs_common" ]; then
+      main_root="$(dirname "$abs_common")"
+      candidate="$main_root/backend/claude_registry.db"
+      [ -f "$candidate" ] && DB_PATH="$candidate"
+    fi
+  fi
+fi
+
+if [ -z "$DB_PATH" ]; then
+  echo "check-kanban-conventions: no kanban DB found — skipping (run uvicorn once to create it, set KANBAN_DB or MAIN_DB_PATH, or pass a path)." >&2
   exit 0
 fi
 
