@@ -816,6 +816,70 @@ async def test_column_cap_defaults_null_means_no_per_column_limit(project_with_a
     assert len(transport.calls) == 4
 
 
+@pytest.mark.asyncio
+async def test_zero_column_cap_blocks_dispatch(project_with_agents):
+    """max_sessions=0 pauses dispatch to that target column without claiming it."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(s, project_key=PK, name="engineer",
+                                     default_agent="engineer", max_sessions=0)
+        cid = await _make_card(s, title="paused", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "engineer"},
+        )
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert result is None
+    assert transport.calls == []
+    assert card.column == "Backlog"
+    assert card.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_zero_column_cap_does_not_block_other_columns(project_with_agents):
+    """A paused target column is skipped so another target can dispatch in the same tick."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(s, project_key=PK, name="engineer",
+                                     default_agent="engineer", max_sessions=0)
+        await service.create_column(s, project_key=PK, name="review",
+                                     default_agent="review", max_sessions=None)
+        paused_id = await _make_card(s, title="paused", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=paused_id, payload={"agent": "engineer"},
+        )
+        review_id = await _make_card(s, title="reviewable", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=review_id, payload={"agent": "review"},
+        )
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        paused = await get_card(s, paused_id)
+        review = await get_card(s, review_id)
+
+    assert result is not None
+    assert len(transport.calls) == 1
+    assert paused.column == "Backlog"
+    assert paused.claimed_by is None
+    assert review.column == "review"
+    assert (review.claimed_by or "").startswith("agent:")
+
+
 @pytest.fixture
 def project_with_analyst(tmp_path):
     """Project with engineer + analyst persona files, mirroring the real repo
