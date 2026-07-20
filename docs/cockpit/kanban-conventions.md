@@ -287,7 +287,9 @@ consistentie-fix.
   MCP als je de workflow-semantiek wilt, REST als je expliciet een
   administratieve correctie doet.
 
-## 4a. MCP-affordances voor `depends_on` (sibling-deps zonder plan-flow)
+## 4. MCP-affordances en SUPERSEDED-discipline
+
+### 4a. MCP-affordances voor `depends_on` (sibling-deps zonder plan-flow)
 
 Sibling-deps worden in de **analyst-fase** vanzelf gewired door
 `add_plan_attachment(depends_on_graph=...)` — de planner post één keer een
@@ -329,7 +331,7 @@ De waarde landt via `apply_operation("update", ...)` in
 code-path als de REST PATCH — dus dispatcher-gating, op-log-replay en
 `rematerialize()` gedragen zich identiek voor MCP- en REST-clients.
 
-## 4b. Same-file Vervolgkaarten uit één analyse-doc — `depends_on` chainen
+### 4b. Same-file Vervolgkaarten uit één analyse-doc — `depends_on` chainen
 
 Wanneer één analyse-doc (typisch `docs/cockpit/*-analyse.md`) onderaan
 een **"Vervolgkaarten"-tabel** N follow-ups uitspuugt die hetzelfde
@@ -368,7 +370,7 @@ parallelisme niet actief voor overlappende kaarten, de discipline
 zit aan de analyst-/curator-kant bij het opstellen van de
 `depends_on_graph`.
 
-## 4c. Doc SUPERSEDED = banner + cross-ref audit (before you ship)
+### 4c. Doc SUPERSEDED = banner + cross-ref audit (before you ship)
 
 Een **SUPERSEDED-banner** bovenaan een `docs/cockpit/*.md` of
 `docs/superpowers/{plans,specs}/*.md`-doc markeert dat de gearchiveerde tekst
@@ -427,7 +429,78 @@ hierboven zijn tekstueel en vragen om een lees-beslissing per hit — een
 handmatige grep + drie-categorieën-tabel is sneller dan het schrijven van de
 checker en blijft auditeerbaar in de PR-diff.
 
-## 4. Bron van waarheid — waar lees je wat?
+## 5. Product-taal voor Done-summaries en impediment-options
+
+> **Bron van waarheid:** dit is de canonieke § voor de
+> product-taal-conventie uit
+> [`product-owner-volgbaarheid-analyse.md`](./product-owner-volgbaarheid-analyse.md)
+> §4.2 (kaart `75c0952f…`, follow-up kaart `4358fe0a00e342878bc7a77fd21ffebe`).
+> Drift-guard:
+> `backend/tests/test_product_language_convention.py` — elke mirror (deze
+> doc, de drie persona-prompts, de analyst-prompt-Python-mirror, de
+> `move_card`/`report_impediment` MCP docstrings, en de dispatch-ship-
+> instructies) moet dezelfde vier anker-substrings dragen. Wijzig de
+> conventie-tekst op alle mirrors in dezelfde commit, anders faalt CI.
+
+### 5a. De regel
+
+Twee schrijfregels, beide even hard:
+
+1. **Elke Done-`summary` leidt met één zin productbetekenis** — wat kan
+   de product owner nu doen / zien / beslissen dat voorheen niet kon?
+   *Engineering-detail volgt erna*, niet ervoor. Voorbeeld: niet
+   *"POST /usage/subscription endpoint + SubscriptionUsageCard.tsx"*,
+   maar *"Product owner kan nu het abonnementsverbruik zien op de
+   Usage-pagina — nieuwe `/usage/subscription`-endpoint +
+   `SubscriptionUsageCard.tsx`."*
+2. **Elke impediment-`options`-lijst drukt producttrade-offs uit, geen
+   implementatie-forks.** Niet *"APScheduler of Celery"*; wél *"A:
+   sneller live, meer onderhoud later — B: trager live, minder
+   onderhoud"*. De product owner beslist op gevolg, niet op techniek.
+
+### 5b. Voorbeelden — vóór en ná
+
+**Done-`summary` (engineer / reviewer / analyst leaf-spike):**
+
+- ❌ Vóór (engineering-eerst):
+  > Added `/usage/subscription` endpoint and `SubscriptionUsageCard.tsx`
+  > component. Touches `backend/app/api/v1/usage/`, `frontend/src/features/
+  > usage/`. 4 unit tests added.
+- ✅ Na (product-eerst):
+  > Product owner kan nu het abonnementsverbruik per provider zien op de
+  > Usage-pagina. Implementeert via nieuwe `/usage/subscription`-endpoint
+  > en `SubscriptionUsageCard.tsx`; 4 unit tests toegevoegd.
+
+**Impediment-`options`:**
+
+- ❌ Vóór (implementatie-fork):
+  > Hoe lossen we de scheduler-trap op?
+  > A. APScheduler in-process
+  > B. Celery worker
+- ✅ Na (producttrade):
+  > Hoe lossen we de scheduler-trap op?
+  > A. Snel live (1-2 sprints), daarna meer onderhoud aan in-process
+  >    scheduler naarmate features groeien
+  > B. Trager live (~4 sprints setup), daarna schaalbaar zonder
+  >    refactor-terugslag
+
+### 5c. Waar wordt het afgedwongen?
+
+- **Persona-prompts** (`.claude/agents/{engineer,analyst,reviewer}.md`)
+  herinneren de agent aan de regel vóór `move_card → Done` / `report_
+  impediment`.
+- **MCP-tool beschrijvingen** (`mcp_server.move_card`,
+  `mcp_server.report_impediment`) zijn de afdwingplek voor gedispatchte
+  sessies die hun persona-prompt niet (kunnen) lezen.
+- **Drift-guard** in `backend/tests/test_product_language_convention.py`
+  — tien bronnen, vier ankers, één test faalt als één mirror de regel
+  vergeet.
+
+Menselijke moves via de REST-endpoint blijven ongepoort (de regel is
+*agent-discipline*, geen DB-constraint — een mens mag een kale
+engineering-summary posten als dat om een of andere reden passend is).
+
+## 6. Bron van waarheid — waar lees je wat?
 
 | Vraag | Eerst hier kijken |
 |---|---|
@@ -444,7 +517,7 @@ checker en blijft auditeerbaar in de PR-diff.
 | Welke agent-kolommen kunnen bestaan? | Per-project afgeleid van `.claude/agents/*.md`-filenames — `service.sync_agent_columns` + `router.enable:707`. |
 | Welke agent-kolommen worden op dit moment gedispatched? | `dispatch._DISPATCH_COLUMNS` ∪ eventuele "orphan" agent-kolommen met ongeclaimde kaarten (`dispatch._next_card:1725–1737`). |
 
-## 5. Validation
+## 7. Validation
 
 [`scripts/check-kanban-conventions.sh`](../../scripts/check-kanban-conventions.sh)
 valideert dat elk project dat `kanban` enabled heeft (≥1 `kanban_columns`-rij) een

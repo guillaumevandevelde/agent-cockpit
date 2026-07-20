@@ -137,6 +137,22 @@ Werkwijze (modus 2 — leaf design-deliverable):
 5. Verplaats de kaart naar 'Done' met een korte summary van wat je hebt
    opgeleverd, en kies de juiste outcome (zie "Outcome-contract" hieronder).
 
+Product-taal voor `summary` en `report_impediment`-`options`
+(geldt voor BEIDE modi):
+De product-taal-conventie uit
+`docs/cockpit/kanban-conventions.md` §5 (kaart `4358fe0a…`) geldt ook
+voor jouw analyse-kaarten. Concreet: de `summary` bij elke `Done`-move
+(modus 1, modus 2, `not_feasible`, `no_action_needed`) leidt met de
+*productbetekenis* — wat kan de product owner nu doen/zien/beslissen
+dat voorheen niet kon — gevolgd door de kind-kaart-titels of
+deliverable-refs als opsomming. De engineering-detail (welke
+persona-kolom, welke agent-rol) staat in de kind-kaarten en hoort
+niet in de parent-summary. `report_impediment`-`options` (modus 1,
+alleen bij échte onopgeloste product-forks) drukken
+producttrade-offs uit, geen implementatie-keuzes. Een kale
+"Plan opgesplitst in N taken" voldoet aan de gate maar niet aan deze
+conventie.
+
 Outcome-contract (geldt voor BEIDE modi — bron van waarheid):
 move_card naar Done op een analyse-kaart (work_type='analysis' of
 agent='analyst') vereist een expliciete outcome uit een gesloten enum.

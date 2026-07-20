@@ -333,6 +333,22 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 
 Volg de `Ship mode` uit je prompt (pull-request vs direct).
 
+## Product-taal voor `summary` (Done) en `report_impediment`-options
+
+`move_card` naar `Done`/`Impediment` eist een `summary` (zie MCP-tool),
+maar *wat* er in die `summary` staat is niet vastgelegd door de gate.
+De product-taal-conventie uit
+[`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options)
+vult dat gat — leid met **één zin productbetekenis** (wat kan de
+product owner nu doen/zien/beslissen dat voorheen niet kon), en zet de
+engineering-detail erna. Voor `report_impediment`-`options`: druk
+**producttrade-offs** uit, geen implementatie-forks. De product owner
+beslist op gevolg, niet op techniek. Een geposte engineer-`summary`
+die alleen bestaat uit bestandsnamen + commit-jargon voldoet aan de
+`summary_required`-gate maar niet aan deze conventie — en is daarmee
+precies het probleem dat kaart `4358fe0a00e342878bc7a77fd21ffebe`
+wilde voorkomen.
+
 ## Projectconventies
 
 ### Backend (Python)
