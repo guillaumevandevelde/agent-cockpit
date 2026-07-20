@@ -196,7 +196,9 @@ async function createSandboxProvider(providerType, dockerImage, security = {}, e
   if (security.network) providerOpts.network = security.network;
   // Project-scoped secrets resolved by the dispatcher from the SecretStore,
   // injected as container env vars (never the host's environment). Only set
-  // when non-empty so a run without secrets keeps the provider default.
+  // when non-empty so a run without secrets keeps the provider default. Only
+  // the docker/podman branches below consume providerOpts; vercel/no-sandbox
+  // ignore env (no-sandbox runs on the host, so container env is moot there).
   if (env && Object.keys(env).length > 0) providerOpts.env = env;
 
   switch (providerType) {

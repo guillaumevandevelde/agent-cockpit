@@ -303,7 +303,10 @@ class SandcastleService:
         from the ``SecretStore``) that must reach the agent *inside the
         container* — never the backend's ``os.environ``. They are threaded into
         the run-config JSON and injected as the sandbox provider's ``env`` by
-        ``sandcastle_runner.mjs`` (docker/podman/no-sandbox all support it).
+        ``sandcastle_runner.mjs`` for the container providers (docker/podman);
+        the no-sandbox provider runs on the host and takes no ``env`` option, so
+        secrets are not injected there (moot — risk_class routes product/
+        untrusted projects to a container, not no-sandbox).
         """
         async with AsyncSessionLocal() as session:
             # Get config
