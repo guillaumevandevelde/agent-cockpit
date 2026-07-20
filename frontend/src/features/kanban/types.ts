@@ -75,7 +75,15 @@ export const DEFAULT_MODEL_SUGGESTIONS = ["sonnet", "opus", "haiku"] as const;
 // minimax column/override would suggest sonnet/opus/haiku, which MiniMax
 // rejects. Not an enum -- free text is still accepted; these only back the
 // datalist. Keep in sync with the backend default by hand.
-export const MINIMAX_MODEL_SUGGESTIONS = ["MiniMax-M3[1m]", "MiniMax-M3"] as const;
+//
+// MiniMax's API only accepts BARE model identifiers ("MiniMax-M3",
+// "MiniMax-M2.7", …); the historical "MiniMax-M3[1m]" bracketed
+// context-window suffix form is rejected as an unknown model (see commit
+// 0ce81be in provider_env.py). The 1M context window is requested separately
+// via CLAUDE_CODE_AUTO_COMPACT_WINDOW, so the suffix was redundant as well
+// as breaking — never offer it as a picker suggestion. The attribution layer
+// still recognises the suffix in older JSONL rows (subscriptions/attribution.py).
+export const MINIMAX_MODEL_SUGGESTIONS = ["MiniMax-M3"] as const;
 
 // Providers with a static, non-claude model suggestion list. Providers absent
 // here fall back to the dynamic claude-code options from getModelOptions().
