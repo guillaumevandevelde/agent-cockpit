@@ -17,6 +17,15 @@
 # This script is meant to be invoked either standalone (when an engineer
 # wants a quick triage) or wired into iteration-loop as the
 # `pytest-attr` preset that gates an engineer card.
+#
+# Caveat — the baseline is FULL-SUITE-scoped (see pytest-baseline.sh's
+# top-of-file note + kanban card 446efe9b). A test that is red only in a
+# targeted/subset run because of ordering between test files will not
+# appear in the baseline, so this script will report it as NEW even
+# though it isn't your regression. If a NEW failure surprises you, re-run
+# that test inside the full suite (`pytest` with no path filter, or
+# `scripts/pytest-baseline.sh --regen` then a fresh full-suite run) to
+# distinguish an ordering artefact from a real one.
 
 set -euo pipefail
 

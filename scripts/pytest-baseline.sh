@@ -4,6 +4,17 @@
 # "pre-existing" without a manual `git stash -u && pytest && git stash pop`
 # dance (see kanban card 4c7c5346 for the motivation).
 #
+# IMPORTANT — scope of the baseline: the failures captured here come from a
+# FULL-SUITE pytest run on origin/master. A test that is order-dependent
+# (red in a targeted/subset run, green in the full suite) will NOT appear
+# in the baseline, even though `pytest-compare.sh` will list it as NEW
+# when you reproduce it with e.g. `run-single-test.sh` or
+# `pytest tests/test_x.py`. If `pytest-compare.sh` reports a NEW failure
+# that surprises you, re-run that test inside the full suite to distinguish
+# an ordering artefact from a real regression — a passing full-suite run
+# means the failure is order-dependent, not yours. See kanban card
+# 446efe9b for the original report.
+#
 # Strategy: check out origin/master in a detached worktree, run pytest there,
 # parse FAILED/ERROR lines, write the unique test names to
 # `.claude/state/pytest-baseline.txt`. Subsequent runs reuse the cached file
