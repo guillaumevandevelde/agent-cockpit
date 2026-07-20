@@ -142,6 +142,9 @@ export function ColumnSettingsDialog({
           <DialogDescription>
             The Backlog column is always present. Add columns by selecting an
             agent from the dropdown — the column will take the agent's name.
+            Each column's session limit can be a number (max concurrent
+            sessions), ∞ (no per-column limit), or Paused — pausing stops new
+            dispatches into that column while letting running sessions finish.
           </DialogDescription>
         </DialogHeader>
 
@@ -219,12 +222,16 @@ export function ColumnSettingsDialog({
                   <div className="flex items-center gap-1">
                     <button
                       className="h-7 w-7 rounded border text-sm hover:bg-accent disabled:opacity-30"
-                      onClick={() => setEditMaxSessions(Math.max(1, (editMaxSessions ?? 0) - 1))}
-                      disabled={(editMaxSessions ?? 0) <= 1}
+                      onClick={() => setEditMaxSessions(Math.max(0, (editMaxSessions ?? 1) - 1))}
+                      disabled={editMaxSessions === null || editMaxSessions <= 0}
                       title="Decrease max sessions"
                     >−</button>
-                    <span className="w-12 text-center text-xs tabular-nums">
-                      {editMaxSessions ?? "∞"}
+                    <span className="w-16 text-center text-xs tabular-nums">
+                      {editMaxSessions === null
+                        ? "∞"
+                        : editMaxSessions === 0
+                          ? "Paused"
+                          : editMaxSessions}
                     </span>
                     <button
                       className="h-7 w-7 rounded border text-sm hover:bg-accent"
@@ -233,9 +240,14 @@ export function ColumnSettingsDialog({
                     >+</button>
                     <button
                       className="ml-1 h-7 rounded border px-2 text-[10px] hover:bg-accent"
-                      onClick={() => setEditMaxSessions(0)}
+                      onClick={() => setEditMaxSessions(null)}
                       title="No per-column limit (use project cap)"
                     >∞</button>
+                    <button
+                      className="h-7 rounded border px-2 text-[10px] hover:bg-accent"
+                      onClick={() => setEditMaxSessions(0)}
+                      title="Pause — stops new dispatches into this column; running sessions keep going"
+                    >Pause</button>
                   </div>
                   <Button size="sm" onClick={() => handleUpdate(col.id)}>
                     Save
@@ -264,8 +276,17 @@ export function ColumnSettingsDialog({
                       </div>
                     )}
                   </div>
-                  <div className="text-xs text-muted-foreground tabular-nums mr-2" title="Max concurrent sessions">
-                    {col.max_sessions != null && col.max_sessions > 0 ? `max ${col.max_sessions}` : "∞"}
+                  <div
+                    className="text-xs tabular-nums mr-2"
+                    title="Max concurrent sessions — Paused (0) stops new dispatches; running sessions are not interrupted"
+                  >
+                    {col.max_sessions === 0 ? (
+                      <span className="font-medium text-amber-600 dark:text-amber-500">Paused</span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {col.max_sessions != null && col.max_sessions > 0 ? `max ${col.max_sessions}` : "∞"}
+                      </span>
+                    )}
                   </div>
                   {!isBacklog(col.name) && (
                     <>
@@ -277,7 +298,7 @@ export function ColumnSettingsDialog({
                           setEditAgent(col.default_agent ?? "");
                           setEditProvider(col.default_provider ?? DEFAULT_PROVIDER_SENTINEL);
                           setEditModel(col.default_model ?? "");
-                          setEditMaxSessions(col.max_sessions ?? 0);
+                          setEditMaxSessions(col.max_sessions);
                         }}
                       >
                         Edit

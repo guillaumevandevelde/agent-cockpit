@@ -163,3 +163,88 @@ describe("ColumnSettingsDialog model field", () => {
     expect(minimaxValues).not.toContain("MiniMax-M3[1m]");
   });
 });
+
+describe("ColumnSettingsDialog session limit (pause)", () => {
+  it("renders null max_sessions as ∞", () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[{ ...COLUMN, max_sessions: null }]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    expect(screen.getByText("∞")).toBeTruthy();
+    expect(screen.queryByText("Paused")).toBeNull();
+  });
+
+  it("renders max_sessions=0 as Paused", () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[{ ...COLUMN, max_sessions: 0 }]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    expect(screen.getByText("Paused")).toBeTruthy();
+  });
+
+  it("renders a positive max_sessions as max n", () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[{ ...COLUMN, max_sessions: 3 }]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    expect(screen.getByText("max 3")).toBeTruthy();
+  });
+
+  it("PATCHes max_sessions=null when the ∞ button is clicked", async () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[{ ...COLUMN, max_sessions: 2 }]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.click(screen.getByRole("button", { name: "∞" }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(updateColumn).toHaveBeenCalledWith(
+      "c1",
+      expect.objectContaining({ max_sessions: null }),
+    ));
+  });
+
+  it("PATCHes max_sessions=0 when the Pause button is clicked", async () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[{ ...COLUMN, max_sessions: 2 }]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^pause$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(updateColumn).toHaveBeenCalledWith(
+      "c1",
+      expect.objectContaining({ max_sessions: 0 }),
+    ));
+  });
+});
