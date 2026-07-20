@@ -29,6 +29,7 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 |---|---|---|
 | **Naamgeving / glossary** | [`terminology.md`](./terminology.md) | — |
 | **Oriëntatie / repo-map** | [`00-orientation.md`](./00-orientation.md) | — |
+| **Start een nieuw spec-driven project** (intake → Promote → geboorte) | [`new-project-startup-flow.md`](./new-project-startup-flow.md) | `specs/...` van de intake-pipeline zijn via dat doc ontsloten |
 | **Scheduled messages** | [`fase-2-spec.md`](./fase-2-spec.md) (spec) + [`fase-2-plan.md`](./fase-2-plan.md) (plan) | `specs/2026-06-13-scheduled-session-resume-design.md`, `plans/2026-06-14-scheduled-session-resume.md` |
 | **Scheduled — runtime-checklist** | [`fase-1-validation.md`](./fase-1-validation.md) | — |
 | **Kanban v1 (passief bord)** | [`kanban-spec.md`](./kanban-spec.md) + [`kanban-plan.md`](./kanban-plan.md) | — |

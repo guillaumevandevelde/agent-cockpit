@@ -25,6 +25,12 @@ lagen:
 
 ## Huidige staat
 
+> **Wil je een nieuw app-idee spec-driven starten?** Het end-to-end-pad
+> (intake-authoring → intake-kaart → Promote → geboorte van een nieuwe project-repo
+> met geseede `.claude/`) staat in één doc:
+> **[`docs/cockpit/new-project-startup-flow.md`](./new-project-startup-flow.md)**.
+> Het Projects-scherm in de UI heeft dezelfde hint, met link naar dat doc.
+
 ### Scheduled-messages — fase 2 vrijwel af
 
 Het implementatieplan staat in **`fase-2-plan.md`** (12 TDD-tasks). **Tasks 1–11 zijn
