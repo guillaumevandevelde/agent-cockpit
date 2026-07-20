@@ -2461,6 +2461,178 @@ async def test_dispatch_all_pending_picks_up_card_after_dep_clears():
     assert len(results_after) == 1
 
 
+# ---- regression: dep-gate must require terminal Done, not just "claimed" --
+#
+# The existing `test_dispatch_all_pending_skips_blocked_card` covers the
+# Backlog-Open parent case (parent never picked up). Card 2eaa87166… reported
+# the dispatch gate firing for a parent that was *already claimed* and moved
+# to an agent column — i.e. mid-flight, not yet terminal. The helper is
+# supposed to require `column == "Done"` (the strictest terminal), so this
+# pair locks that behaviour in for the bulk dispatch paths explicitly.
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_skips_child_when_dep_claimed_in_agent_column():
+    """A child whose depends_on points to a parent that is *claimed* and
+    currently sitting in an agent column (e.g. "engineer") — i.e. mid-flight,
+    not yet terminal — must NOT be picked up by ``dispatch_all_pending``.
+
+    Regression for kanban card 2eaa87166…: the dispatcher briefly let a
+    frontend child through while its backend parent was in `engineer`. The
+    fix is purely on the helper's column check (already ``!= "Done"``); the
+    test pins the contract so a future relaxation can't reintroduce the race.
+    """
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Parent already claimed (simulating a session in flight): column is an
+        # agent column, claimed_by is set, claim is fresh. The child lists
+        # this parent in depends_on.
+        parent = await _make_card(s, title="parent", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=parent, payload={"claimed_by": "agent:some-session"},
+        )
+        # An unblocked card that should still go through — proves the gate is
+        # not over-eager (a "skip everything" test would be vacuous).
+        await _make_card(s, title="free", column="Backlog")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        # Create the child with the depends_on AFTER the seed commit so the
+        # parent's `claim` op above is durable. (apply_operation's create
+        # path is idempotent on existing ids, but the claim guard is
+        # conditional on `claimed_by IS NULL`; adding it after the seed
+        # commit is the only deterministic order.)
+        parent_row = await get_card(s, parent)
+        assert parent_row is not None  # sanity: parent exists post-commit
+        child = await _make_card(s, title="child", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=child, payload={"depends_on": [parent]},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    # Only the free card dispatches. The child stays in Backlog (its parent
+    # is mid-flight in `engineer`, not Done).
+    assert len(results) == 1, f"expected only free card dispatched, got {results}"
+    assert len(transport.calls) == 1
+    # And the child is still where we left it — not silently claimed or moved.
+    async with KanbanSessionLocal() as s:
+        child_after = await get_card(s, child)
+    assert child_after.column == "Backlog"
+    assert child_after.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_picks_up_child_after_dep_moves_from_agent_to_done():
+    """After the parent transitions from a mid-flight agent column to Done,
+    the previously-blocked child becomes dispatchable on the next bulk call.
+
+    Mirrors ``test_dispatch_all_pending_picks_up_card_after_dep_clears`` but
+    starts the parent in an agent column (claimed) instead of Backlog — the
+    same "dep gate requires strict Done" property, on the transition side.
+    """
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=parent, payload={"claimed_by": "agent:some-session"},
+        )
+        child = await _make_card(s, title="child", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=child, payload={"depends_on": [parent]},
+        )
+        await s.commit()
+
+    # First bulk call: child is blocked (parent is mid-flight in engineer).
+    async with KanbanSessionLocal() as s:
+        results_before = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results_before) == 0, (
+        f"expected child to be blocked while parent is mid-flight, got {results_before}"
+    )
+
+    # Parent finishes: agent column → Done. Child's deps are now satisfied.
+    async with KanbanSessionLocal() as s:
+        await apply_operation(
+            s, op_type="move", entity_type="card", project_key=PK,
+            entity_id=parent, payload={"column": "Done"},
+        )
+        await s.commit()
+
+    # Second bulk call: child is now dispatchable.
+    async with KanbanSessionLocal() as s:
+        results_after = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results_after) == 1, (
+        f"expected child to dispatch after parent → Done, got {results_after}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_project_skips_child_when_dep_claimed_in_agent_column():
+    """Same regression as ``...skips_child_when_dep_claimed_in_agent_column``
+    but on the auto-dispatch tick (``dispatch_project``) — the path the
+    card-2eaa87166… bug report actually describes.
+
+    A child whose parent is mid-flight (column=``engineer``, claimed) must
+    NOT be picked up by the tick. After the parent transitions agent → Done,
+    the next tick picks the child up.
+    """
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=parent, payload={"claimed_by": "agent:some-session"},
+        )
+        child = await _make_card(s, title="child", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=child, payload={"depends_on": [parent]},
+        )
+        await s.commit()
+
+    # First tick: child is blocked — the tick must NOT dispatch it.
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(transport.calls) == 0, (
+        "child dispatched despite parent being claimed in an agent column"
+    )
+
+    # Parent finishes: agent column → Done. Next tick must pick the child up.
+    async with KanbanSessionLocal() as s:
+        await apply_operation(
+            s, op_type="move", entity_type="card", project_key=PK,
+            entity_id=parent, payload={"column": "Done"},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(transport.calls) == 1, (
+        "child did not dispatch after parent moved to Done"
+    )
+
+
 # ---- card transport field persistence ------------------------------------
 
 @pytest.mark.asyncio
