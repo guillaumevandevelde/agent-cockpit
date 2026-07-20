@@ -168,40 +168,64 @@ async def test_set_pool_rejects_out_of_range_drempel():
             await subscription_pool.set_subscription_pool(s, PK, bad2)
 
 
-# ---- the cli field was removed (card 0b3ad6e2…) -------------------------
+# ---- the cli field is consumed (card 8f40d443…) -------------------------
 #
-# `PoolEntry.cli` was dropped because the dispatcher never consumed it
-# (analysis §3 D3) and the CLI is board-wide pinned to ``claude-code``
-# (analysis §2.3). The pool's snapshot lookup key uses the ``POOL_CLI``
-# constant instead — see subscription_pool.py.
+# `PoolEntry.cli` was previously removed in card 0b3ad6e2… because the
+# dispatcher never consumed it (analysis §3 D3) and the CLI was
+# board-wide pinned to ``claude-code`` (analysis §2.3). Kaart 8f40d443
+# detected that this orphaned four of the five registered CLIs from
+# every quota gate — the snapshot lookup key uses ``PoolEntry.cli``
+# (with ``cli=None`` defaulting to ``DEFAULT_POOL_CLI``) so an OpenCode
+# session now follows its own quota axis. The acceptance criterion
+# 'PoolEntry.cli is consumed' is enforced by the router filtering
+# entries on it; the tests below pin both halves (dataclass accepts
+# ``cli``, legacy KanbanMeta rows round-trip without manual surgery).
 
-@pytest.mark.asyncio
-async def test_pool_entry_no_longer_accepts_cli_kwarg():
-    """PoolEntry's surface is now ``(provider, model, drempel)`` — the
-    legacy ``cli`` field is gone (analysis §3 D3 + card 0b3ad6e2…).
+def test_pool_entry_cli_kwarg_is_stored_on_dataclass():
+    """Kaart 8f40d443: ``PoolEntry`` accepts a ``cli`` field again — the
+    per-CLI quota axis is back. The earlier 'rejects ``cli=...``' test
+    is inverted: passing ``cli`` is the documented way to express an
+    entry that targets a non-default CLI."""
+    entry = subscription_pool.PoolEntry(
+        cli="open-code", provider="anthropic", model=None, drempel=0.9,
+    )
+    assert entry.cli == "open-code"
+    assert entry.provider == "anthropic"
 
-    Constructing with ``cli=...`` must raise TypeError so a caller that
-    is still passing it (e.g. a stale UI bundle) fails loudly instead of
-    silently losing the field."""
-    with pytest.raises(TypeError):
+
+def test_pool_entry_cli_defaults_to_default_pool_cli():
+    """``cli=None`` → dataclass populates ``cli`` with
+    ``DEFAULT_POOL_CLI`` (constants), so legacy callers that do not
+    pass a CLI continue to behave exactly as before — the snapshot
+    lookup key still matches ``DEFAULT_POOL_CLI:provider``."""
+    entry = subscription_pool.PoolEntry(
+        provider="anthropic", model=None, drempel=0.9,
+    )
+    assert entry.cli == subscription_pool.DEFAULT_POOL_CLI
+
+
+def test_pool_entry_rejects_unknown_cli_value():
+    """A ``cli`` that is not registered in the agentic_cli registry is
+    rejected at construction time so a typo never silently degrades to
+    'no snapshot → always available'. Mirrors the ``provider``
+    allow-list shape so the storage boundary stays strict."""
+    with pytest.raises(ValueError):
         subscription_pool.PoolEntry(
-            cli="claude-code", provider="anthropic", model=None, drempel=0.9,
+            cli="nonexistent-cli", provider="anthropic",
+            model=None, drempel=0.9,
         )
 
 
-def test_deserialize_tolerates_legacy_cli_field():
-    """A row whose JSON still contains ``cli`` (from before this chore)
-    must round-trip cleanly — the field is silently stripped on read so
-    the dispatcher never wedges on a legacy KanbanMeta row.
+def test_deserialize_preserves_legacy_cli_field():
+    """A row whose JSON still contains ``cli`` (from card 8f40d443 or
+    earlier builds) round-trips through ``_deserialize_entries`` —
+    the ``cli`` value is preserved (not stripped) so the router
+    can discriminate on it. The earlier 'silently strip' shim (kaart
+    0b3ad6e2…) is now redundant: ``cli`` is again a first-class field
+    and the older rows load with their original CLI preserved.
 
-    Pins the migration contract: a stored row written by a pre-fix
-    build must still load without manual data surgery. See card
-    0b3ad6e2… acceptance criterion #3.
-
-    This test is synchronous but lives under the module-level
-    ``pytestmark = pytest.mark.asyncio`` (so it shares the async DB
-    fixtures with the rest of the file). pytest-asyncio emits a warning
-    about that — it's harmless and the test is wired correctly."""
+    Pins the migration contract for forward-compat: a row written
+    today by any future build (with or without ``cli``) still loads."""
     import json as _json
     legacy_row = _json.dumps([
         {"cli": "claude-code", "provider": "anthropic",
@@ -212,12 +236,30 @@ def test_deserialize_tolerates_legacy_cli_field():
     result = subscription_pool._deserialize_entries(legacy_row)
     assert result is not None
     assert len(result) == 2
+    assert result[0].cli == "claude-code"
     assert result[0].provider == "anthropic"
     assert result[0].model is None
     assert result[0].drempel == 0.9
+    assert result[1].cli == "claude-code"
     assert result[1].provider == "minimax"
     assert result[1].model == "MiniMax-M3[1m]"
     assert result[1].drempel == 0.95
+
+
+def test_deserialize_defaults_cli_for_rows_without_it():
+    """A row written without a ``cli`` field (from after this chore's
+    ``cli=None`` becomes DEFAULT_POOL_CLI path) loads with the default
+    so existing tools that build entries programmatically keep
+    working without ceremony."""
+    import json as _json
+    cli_less_row = _json.dumps([
+        {"provider": "anthropic", "model": None, "drempel": 0.9},
+    ])
+    result = subscription_pool._deserialize_entries(cli_less_row)
+    assert result is not None
+    assert len(result) == 1
+    assert result[0].cli == subscription_pool.DEFAULT_POOL_CLI
+    assert result[0].provider == "anthropic"
 
 
 # ---- the storage row is independent from the override row -------------------

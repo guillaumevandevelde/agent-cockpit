@@ -25,24 +25,28 @@ can't silently invert any branch):
 from __future__ import annotations
 
 from app.kanban.subscription_pool import (
+    DEFAULT_POOL_CLI,
     PoolEntry,
     has_available_spillover,
     pick_subscription,
+    pick_subscription_for_cli,
 )
 from app.services.subscriptions.base import SubscriptionUsage
 
 
-def _entry(*, provider="anthropic", model=None, drempel=0.9):
+def _entry(*, provider="anthropic", model=None, drempel=0.9, cli=None):
     """Shorthand for a pool entry — the keys users actually care about.
 
-    The legacy ``cli`` kwarg was dropped in card 0b3ad6e2… (analysis §3
-    D3): the pool always routes through the single supported CLI
-    (``subscription_pool.POOL_CLI``). Tests that want to express a
-    non-claude-code CLI (rare; legacy snapshots) build the PoolEntry
-    directly — the snapshot-lookup key still uses the ``claude-code``
-    prefix because that's what the dispatched session actually runs.
+    The ``cli`` kwarg is back (kaart 8f40d443…): a per-card dispatched
+    CLI may differ from the board-wide default (e.g. an OpenCode
+    session dispatched against an open-code-anchored entry), so the
+    router must discriminate on ``cli`` to honour the per-CLI quota
+    axis. ``cli=None`` falls back to ``DEFAULT_POOL_CLI`` so the
+    vast-majority claude-code rows still build without ceremony.
     """
-    return PoolEntry(provider=provider, model=model, drempel=drempel)
+    if cli is None:
+        return PoolEntry(provider=provider, model=model, drempel=drempel)
+    return PoolEntry(cli=cli, provider=provider, model=model, drempel=drempel)
 
 
 def _usage(*, subscription_id, beschikbaar=True, drempel_gebruikt=None,
@@ -65,12 +69,12 @@ class TestPickSubscriptionPriority:
     def test_first_entry_under_threshold_is_chosen(self):
         entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
         usages = {
-            "claude-code:anthropic": _usage(
-                subscription_id="claude-code:anthropic",
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
                 drempel_gebruikt=0.3,
             ),
-            "claude-code:minimax": _usage(
-                subscription_id="claude-code:minimax",
+            f"{DEFAULT_POOL_CLI}:minimax": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:minimax",
                 drempel_gebruikt=0.1,
             ),
         }
@@ -82,12 +86,12 @@ class TestPickSubscriptionPriority:
         """Anthropic above the drempel → spill to MiniMax."""
         entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
         usages = {
-            "claude-code:anthropic": _usage(
-                subscription_id="claude-code:anthropic",
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
                 drempel_gebruikt=0.95,
             ),
-            "claude-code:minimax": _usage(
-                subscription_id="claude-code:minimax",
+            f"{DEFAULT_POOL_CLI}:minimax": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:minimax",
                 drempel_gebruikt=0.1,
             ),
         }
@@ -98,12 +102,12 @@ class TestPickSubscriptionPriority:
     def test_first_entry_paused_falls_through_to_next(self):
         entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
         usages = {
-            "claude-code:anthropic": _usage(
-                subscription_id="claude-code:anthropic",
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
                 drempel_gebruikt=0.1,
             ),
-            "claude-code:minimax": _usage(
-                subscription_id="claude-code:minimax",
+            f"{DEFAULT_POOL_CLI}:minimax": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:minimax",
                 drempel_gebruikt=0.1,
             ),
         }
@@ -115,13 +119,13 @@ class TestPickSubscriptionPriority:
         """Provider returned ``beschikbaar=False`` (hard limit hit) → skip."""
         entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
         usages = {
-            "claude-code:anthropic": _usage(
-                subscription_id="claude-code:anthropic",
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
                 beschikbaar=False,
                 drempel_gebruikt=1.2,
             ),
-            "claude-code:minimax": _usage(
-                subscription_id="claude-code:minimax",
+            f"{DEFAULT_POOL_CLI}:minimax": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:minimax",
                 drempel_gebruikt=0.1,
             ),
         }
@@ -143,12 +147,12 @@ class TestPickSubscriptionFallback:
         that is over drempel, the pause is the next-line gate, not ours)."""
         entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
         usages = {
-            "claude-code:anthropic": _usage(
-                subscription_id="claude-code:anthropic",
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
                 drempel_gebruikt=0.95,
             ),
-            "claude-code:minimax": _usage(
-                subscription_id="claude-code:minimax",
+            f"{DEFAULT_POOL_CLI}:minimax": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:minimax",
                 drempel_gebruikt=0.95,
             ),
         }
@@ -180,8 +184,8 @@ class TestPickSubscriptionFallback:
         return None when there is at least one entry — the caller decides)."""
         entries = [_entry(provider="anthropic")]
         usages = {
-            "claude-code:anthropic": _usage(
-                subscription_id="claude-code:anthropic",
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
                 drempel_gebruikt=0.95,
             ),
         }
@@ -211,8 +215,8 @@ class TestPickSubscriptionNoSignal:
                    _entry(provider="codex", drempel=0.9)]
         usages = {
             # Anthropic: above drempel → skip
-            "claude-code:anthropic": _usage(
-                subscription_id="claude-code:anthropic",
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
                 drempel_gebruikt=0.95,
             ),
             # No entry for codex → treated as "no signal"
@@ -289,8 +293,8 @@ class TestHasAvailableSpillover:
         is not a real spillover target (would just re-hit a wall)."""
         entries = [_entry(provider="anthropic"), _entry(provider="minimax")]
         usages = {
-            "claude-code:minimax": _usage(
-                subscription_id="claude-code:minimax",
+            f"{DEFAULT_POOL_CLI}:minimax": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:minimax",
                 drempel_gebruikt=0.95,
             ),
         }
@@ -324,3 +328,187 @@ class TestHasAvailableSpillover:
         assert has_available_spillover(
             entries, usages={}, paused_providers={"anthropic"},
         ) is True
+
+
+class TestPickSubscriptionCliAware:
+    """Kaart 8f40d443… — the pool must discriminate on ``cli``.
+
+    The earlier pool was board-wide pinned to ``POOL_CLI =
+    'claude-code'``, so four of the five registered CLI adapters
+    (open-code, codex-cli, copilot-cli, mimo-code) dispatched outside
+    every quota gate. The router now consumes the per-entry ``cli``
+    field (re-introduced with explicit consumption) so a snapshot under
+    e.g. ``open-code:anthropic`` is consulted only by entries whose
+    ``cli='open-code'``.
+
+    The acceptance criterion "if ``PoolEntry.cli`` returns, it is
+    consumed" is enforced by the router accepting a ``cli_id`` arg and
+    filtering entries on it — without that filter a single
+    ``claude-code:anthropic`` snapshot would satisfy an ``open-code``
+    entry, which is the exact pitfall (kaart 0b3ad6e2…)."""
+
+    def test_entry_with_cli_consults_only_match_snapshot(self):
+        """An ``open-code:anthropic`` entry looks up under
+        ``open-code:anthropic`` — a ``claude-code:anthropic`` snapshot
+        registered for the same provider does NOT count as a signal for
+        the open-code entry (different subscription identity: analyse §3
+        {cli, provider})."""
+        entry = _entry(cli="open-code", provider="anthropic")
+        usages = {
+            "claude-code:anthropic": _usage(
+                subscription_id="claude-code:anthropic",
+                drempel_gebruikt=0.5,
+            ),
+            "open-code:anthropic": _usage(
+                subscription_id="open-code:anthropic",
+                drempel_gebruikt=0.95,
+            ),
+        }
+        chosen = pick_subscription_for_cli(
+            [entry], usages, paused_providers=set(),
+            cli_id="open-code",
+        )
+        assert chosen is not None
+        assert chosen.cli == "open-code"
+        assert chosen.provider == "anthropic"
+        # The router consulted open-code:anthropic (above threshold
+        # 0.9), so the entry falls through — the pool returns it as the
+        # 'laatste val-terug'. The fact that it falls through (instead
+        # of being silently treated as available because of the
+        # claude-code:anthropic snapshot) proves the cli filter ran.
+
+    def test_default_cli_entry_uses_default_snapshot_key(self):
+        """``cli=None`` (the common case for legacy claude-code pools)
+        defaults to ``DEFAULT_POOL_CLI`` — the existing snapshot key
+        ``claude-code:anthropic`` still matches. Regressietest for the
+        acceptatie-criterium 'bestaand claude-code-gedrag ongewijzigd'."""
+        entries = [_entry(provider="anthropic", cli=None)]
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                drempel_gebruikt=0.3,
+            ),
+        }
+        chosen = pick_subscription(
+            entries, usages, paused_providers=set(),
+        )
+        assert chosen is not None
+        assert chosen.cli == DEFAULT_POOL_CLI
+        assert chosen.provider == "anthropic"
+
+    def test_mixed_cli_pool_isolates_signals(self):
+        """Pool contains both claude-code and open-code entries; each
+        one looks up under its own ``{cli}:{provider}`` key, ignoring
+        snapshots keyed for the other CLI. This is the core acceptance
+        criterion — without it the quota-axis mismatch returns
+        silently."""
+        entries = [
+            _entry(cli="claude-code", provider="anthropic", drempel=0.9),
+            _entry(cli="open-code", provider="anthropic", drempel=0.9),
+        ]
+        usages = {
+            # claude-code:anthropic above drempel (skip)…
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                drempel_gebruikt=0.95,
+            ),
+            # …but open-code:anthropic is fine. The router picks the
+            # second entry, keyed under open-code — the only snapshot
+            # whose CLI matches.
+            "open-code:anthropic": _usage(
+                subscription_id="open-code:anthropic",
+                drempel_gebruikt=0.1,
+            ),
+        }
+        chosen = pick_subscription_for_cli(
+            entries, usages, paused_providers=set(),
+            cli_id="open-code",
+        )
+        assert chosen is not None
+        assert chosen.cli == "open-code"
+        assert chosen.provider == "anthropic"
+
+    def test_no_snapshot_for_entry_cli_is_treated_as_no_signal(self):
+        """An entry whose ``{cli}:{provider}`` has no registered snapshot
+        is treated as 'no signal → available' (analyse §6.3). Without
+        this graceful degradation an OpenCode session would block on a
+        missing provider that simply has no live signal source yet."""
+        entries = [_entry(cli="open-code", provider="anthropic", drempel=0.9)]
+        chosen = pick_subscription_for_cli(
+            entries, usages={}, paused_providers=set(),
+            cli_id="open-code",
+        )
+        assert chosen is not None
+        assert chosen.cli == "open-code"
+        assert chosen.provider == "anthropic"
+
+    def test_priority_order_within_mixed_cli_pool(self):
+        """When several entries match the requested CLI, priority order
+        wins — first matching entry in configured order under its
+        drempel is the choice (same rule as the legacy pool, just with
+        a CLI pre-filter)."""
+        entries = [
+            _entry(cli="open-code", provider="anthropic", drempel=0.9),
+            _entry(cli="open-code", provider="minimax", drempel=0.9),
+        ]
+        usages = {
+            "open-code:anthropic": _usage(
+                subscription_id="open-code:anthropic",
+                drempel_gebruikt=0.3,
+            ),
+            "open-code:minimax": _usage(
+                subscription_id="open-code:minimax",
+                drempel_gebruikt=0.1,
+            ),
+        }
+        chosen = pick_subscription_for_cli(
+            entries, usages, paused_providers=set(),
+            cli_id="open-code",
+        )
+        assert chosen is not None
+        assert chosen.cli == "open-code"
+        assert chosen.provider == "anthropic"
+
+    def test_pool_with_only_other_cli_entry_returns_none_choice_for_default(self):
+        """A pool that has entries for an *unmatched* CLI (e.g. only
+        ``open-code``) but the router is asked to pick for the default
+        CLI: no entry matches → the router returns ``None`` so the
+        caller falls through to the column-default chain (the
+        acceptatie-criterium 'geen entry voor deze CLI' as a distinct
+        case)."""
+        entries = [_entry(cli="open-code", provider="anthropic", drempel=0.9)]
+        chosen = pick_subscription_for_cli(
+            entries, usages={},
+            paused_providers=set(), cli_id="claude-code",
+        )
+        assert chosen is None
+
+
+class TestPickSubscriptionForCliFilter:
+    """The router's CLI-filter API lives behind a public helper —
+    ``pick_subscription_for_cli(entries, usages, *, paused_providers,
+    cli_id)`` — so the dispatch wiring can ask 'given this CLI, which
+    pool entry wins?' without re-implementing the CLI discrimination
+    logic. The legacy ``pick_subscription`` keeps its board-wide
+    signature (default-CLI pool) for the existing call sites — it
+    delegates to ``pick_subscription_for_cli`` with ``cli_id =
+    DEFAULT_POOL_CLI``."""
+
+    def test_legacy_pick_subscription_delegates_with_default_cli(self):
+        """The original ``pick_subscription(entries, usages, *,
+        paused_providers)`` keeps working — it now passes
+        ``cli_id=DEFAULT_POOL_CLI`` through to the new helper, so all
+        pre-kaart-8f40d443 call sites (esp. ``dispatch._pick_pool_choice``
+        and ``has_available_spillover``) keep their contract."""
+        entries = [_entry(provider="anthropic")]
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                drempel_gebruikt=0.1,
+            ),
+        }
+        chosen = pick_subscription(
+            entries, usages, paused_providers=set(),
+        )
+        assert chosen is not None
+        assert chosen.cli == DEFAULT_POOL_CLI

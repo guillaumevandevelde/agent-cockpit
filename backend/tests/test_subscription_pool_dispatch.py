@@ -69,45 +69,70 @@ class RecordingTransport:
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
 
-async def _make_card(s, title="Task", column="Backlog"):
+async def _make_card(s, title="Task", column="Backlog", executor_agent_id=None):
+    """Helper — create a card. ``executor_agent_id`` is forwarded to the
+    kanban op so the CLI-aware tests can pin the card's executor CLI
+    (e.g. ``open-code``) for the dispatch path's
+    ``_phase_cli_id`` resolution (kaart 8f40d443…)."""
+    payload = {"title": title, "column": column}
+    if executor_agent_id is not None:
+        payload["executor_agent_id"] = executor_agent_id
     return await apply_operation(
         s, op_type="create", entity_type="card", project_key=PK,
         entity_id=None,
-        payload={"title": title, "column": column},
+        payload=payload,
     )
 
 
-def _entry(*, provider="anthropic", model=None, drempel=0.9):
-    return PoolEntry(provider=provider, model=model, drempel=drempel)
+def _entry(*, provider="anthropic", model=None, drempel=0.9, cli=None):
+    """Shorthand for a PoolEntry. ``cli=None`` defaults to
+    ``DEFAULT_POOL_CLI`` (``"claude-code"``) so the legacy
+    claude-code-only tests keep building without ceremony. The
+    CLI-aware tests (kaart 8f40d443…) pass ``cli="open-code"`` etc.
+    explicitly to pin the per-CLI quota axis."""
+    if cli is None:
+        return PoolEntry(provider=provider, model=model, drempel=drempel)
+    return PoolEntry(
+        cli=cli, provider=provider, model=model, drempel=drempel,
+    )
 
 
 def _patch_pool_pick(monkeypatch, snapshots):
-    """Patch ``pick_subscription`` to inject the provided snapshots dict.
+    """Patch ``pick_subscription_for_cli`` (and the legacy
+    ``pick_subscription`` alias) to inject the provided snapshots dict.
 
-    We patch the symbol *on the source module* so every importer of
-    ``app.kanban.subscription_pool.pick_subscription`` (including the
-    dispatcher's binding) sees the test version. The snapshots dict
-    mirrors what a real ``SubscriptionUsageProvider.get_usage()`` call
-    would produce.
-
-    The snapshot key is ``f"{POOL_CLI}:{provider}"`` (constant
-    ``claude-code`` prefix since the pool dropped its cli field —
-    kaart 0b3ad6e2…). Each test's entries lookup matches that.
+    Kaart 8f40d443…: dispatch now calls
+    ``pick_subscription_for_cli(cli_id=...)`` directly, so the patch
+    must mirror that. The dispatch-side binding is
+    ``from app.kanban import subscription_pool`` then
+    ``subscription_pool.pick_subscription_for_cli`` — patching the
+    symbol on the source module catches both. The snapshot key is
+    ``f"{e.cli}:{e.provider}"`` so the per-entry ``cli`` (re-
+    introduced in kaart 8f40d443…) discriminates the quota axis on a
+    per-CLI basis.
     """
-    from app.kanban.subscription_pool import POOL_CLI
     import app.kanban.subscription_pool as pool_mod
     snapshot_map = {
-        f"{POOL_CLI}:{e.provider}": snap
+        f"{e.cli}:{e.provider}": snap
         for e, snap in snapshots.items()
     }
 
+    real_pick_for_cli = pool_mod.pick_subscription_for_cli
     real_pick = pool_mod.pick_subscription
 
-    def patched(entries, usages, *, paused_providers):
+    def patched_for_cli(entries, usages, *, paused_providers, cli_id):
+        merged = {**usages, **snapshot_map}
+        return real_pick_for_cli(
+            entries, merged,
+            paused_providers=paused_providers, cli_id=cli_id,
+        )
+
+    def patched_legacy(entries, usages, *, paused_providers):
         merged = {**usages, **snapshot_map}
         return real_pick(entries, merged, paused_providers=paused_providers)
 
-    monkeypatch.setattr(pool_mod, "pick_subscription", patched)
+    monkeypatch.setattr(pool_mod, "pick_subscription_for_cli", patched_for_cli)
+    monkeypatch.setattr(pool_mod, "pick_subscription", patched_legacy)
 
 
 def _usage(*, drempel_gebruikt=None, beschikbaar=True, betrouwbaarheid="onbekend"):
@@ -412,7 +437,19 @@ async def test_post_and_get_subscription_pool_endpoint():
             "/api/v1/kanban/subscription-pool",
             params={"project_key": PK},
         )
-    assert r2.json()["pool"] == body["pool"]
+    # Kaart 8f40d443…: the GET response now also carries the (server-
+    # back-filled) ``cli`` field for every entry; a body that omitted
+    # ``cli`` is back-filled to ``DEFAULT_POOL_CLI`` on read. The POST
+    # response mirrors the stored body verbatim (no back-fill there
+    # — the server validates and stores what was sent) so the GET
+    # round-trip is what we assert against, with back-filled ``cli``.
+    expected = [
+        {"cli": "claude-code", "provider": "anthropic",
+         "model": None, "drempel": 0.9},
+        {"cli": "claude-code", "provider": "minimax",
+         "model": "MiniMax-M3[1m]", "drempel": 0.95},
+    ]
+    assert r2.json()["pool"] == expected
 
 
 @pytest.mark.asyncio
@@ -447,19 +484,18 @@ async def test_post_subscription_pool_invalid_provider():
 
 
 @pytest.mark.asyncio
-async def test_post_subscription_pool_strips_legacy_cli_field():
-    """A request payload that still carries ``cli`` on each entry (sent
-    by a pre-fix UI bundle, or by a hand-crafted curl during the
-    upgrade window) is accepted — the field is silently dropped by the
-    storage layer's migration shim (kaart 0b3ad6e2…).
-
-    Pins the migration contract on the POST side too: a stale UI does
-    not have to be force-refreshed before the user can save a pool.
-    The stored row carries ``provider / model / drempel`` only."""
+async def test_post_subscription_pool_preserves_cli_field():
+    """Kaart 8f40d443…: a POST body that carries an explicit ``cli``
+    field on each entry is preserved end-to-end — the field is
+    again first-class (kaart 0b3ad6e2… had stripped it on the same
+    path). The migration contract for forward-compat: a UI that
+    already passes ``cli`` keeps working, and the router discriminates
+    on it. The stored row carries ``cli / provider / model /
+    drempel`` — the full ``PoolEntry`` shape."""
     body = {
         "project_key": PK,
         "pool": [
-            {"cli": "claude-code", "provider": "anthropic",
+            {"cli": "open-code", "provider": "anthropic",
              "model": None, "drempel": 0.9},
         ],
     }
@@ -472,7 +508,37 @@ async def test_post_subscription_pool_strips_legacy_cli_field():
         )
     stored = r2.json()["pool"]
     assert stored == [
-        {"provider": "anthropic", "model": None, "drempel": 0.9},
+        {"cli": "open-code", "provider": "anthropic",
+         "model": None, "drempel": 0.9},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_with_omitted_cli_defaults_server_side():
+    """A POST body that omits the ``cli`` field (legacy UIs that have
+    not yet been refreshed, or hand-curated curl during the upgrade
+    window) is accepted — the server back-fills ``DEFAULT_POOL_CLI``
+    so the row loads with the historical claude-code shape without
+    manual data surgery. Mirrors the ``_deserialize_entries``
+    forward-compat path on the read side."""
+    body = {
+        "project_key": PK,
+        "pool": [
+            {"provider": "anthropic",
+             "model": None, "drempel": 0.9},
+        ],
+    }
+    async with _client() as c:
+        r = await c.post("/api/v1/kanban/subscription-pool", json=body)
+        assert r.status_code == 200
+        r2 = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK},
+        )
+    stored = r2.json()["pool"]
+    assert stored == [
+        {"cli": "claude-code", "provider": "anthropic",
+         "model": None, "drempel": 0.9},
     ]
 
 
@@ -679,3 +745,147 @@ async def test_dispatch_pool_spills_when_first_entry_above_threshold():
     # (minimax) — NOT the column default (bedrock), NOT entry #1
     # (anthropic).
     assert transport.calls[0]["provider"] == "minimax"
+
+
+# ---- CLI-aware dispatch integration (kaart 8f40d443…) ----------------------
+#
+# End-to-end: when the spawned CLI is ``open-code`` (or any non-
+# default CLI), the pool's per-{cli, provider} axis is honoured.
+# Without this, the pool's router was board-wide pinned to
+# ``POOL_CLI = 'claude-code'``, so an OpenCode-spawned card always
+# fell through to the column default — no drempel, no pause, no
+# spill. These tests pin the wiring at the dispatch level; one
+# negative case (entry doesn't match the spawned CLI) plus two
+# positive cases (threshold spill with a non-default CLI, and an
+# open-code entry with no signal degrades gracefully).
+
+
+@pytest.mark.asyncio
+async def test_pool_entry_for_other_cli_does_not_match_default_cli_spawn():
+    """A card spawned under cli_id='open-code' must NOT pick a
+    pool entry whose ``cli='claude-code'`` — those quotas are
+    orthogonal (analyse §3 {cli, provider}). The router filters on
+    the resolved cli_id, so the entry is skipped and dispatch falls
+    through to the column default (``bedrock`` here).
+
+    Note: the column is named ``"engineer"`` because
+    ``_phase_target_agent`` resolves the spawn target to that string
+    (no ``.claude/agents/open-code.md`` persona exists in ``/p``),
+    and the column default lookup is keyed on the resolved
+    ``target_agent``, not on the kanban-card's ``column`` field. Same
+    routing semantics, just named after the actual lookup key.
+    """
+    transport = RecordingTransport()
+    pool = [_entry(provider="anthropic")]  # default cli = claude-code
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer", default_provider="bedrock",
+        )
+        cid = await _make_card(
+            s, column="engineer", executor_agent_id="open-code",
+        )
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    # The pool only has a claude-code entry; the open-code card has
+    # no matching entry → falls through to column.default_provider
+    # ("bedrock"), proving the CLI filter ran.
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["cli_id"] == "open-code"
+    assert transport.calls[0]["provider"] == "bedrock"
+
+
+@pytest.mark.asyncio
+async def test_open_code_entry_applies_threshold_for_open_code_spawn():
+    """OpenCode-spawned card with an ``open-code:anthropic`` entry
+    above drempel routes to the next entry's provider — the per-CLI
+    quota gate that card 8f40d443 added. Without the fix the pool's
+    router ignored cli_id and always picked entry #1."""
+    transport = RecordingTransport()
+    pool = [
+        _entry(cli="open-code", provider="anthropic"),
+        _entry(cli="open-code", provider="bedrock"),
+    ]
+    snapshots = {
+        _entry(cli="open-code", provider="anthropic"): _usage(
+            drempel_gebruikt=0.95,  # above drempel
+        ),
+        _entry(cli="open-code", provider="bedrock"): _usage(
+            drempel_gebruikt=0.1,   # fresh
+        ),
+    }
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="open-code",
+            default_agent="open-code", default_provider="minimax",
+        )
+        cid = await _make_card(
+            s, column="open-code", executor_agent_id="open-code",
+        )
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert len(transport.calls) == 1
+    # Pool picked entry #2 (bedrock) — the open-code-cli's
+    # anthropic entry was above drempel. Column default was minimax
+    # but the pool beats that.
+    assert transport.calls[0]["cli_id"] == "open-code"
+    assert transport.calls[0]["provider"] == "bedrock"
+
+
+@pytest.mark.asyncio
+async def test_open_code_pool_entry_with_no_signal_does_not_block():
+    """Acceptance criterion: 'een ontbrekende snapshot degradeert
+    expliciet in plaats van als 0% te tellen' — an OpenCode entry
+    whose (cli, provider) has no registered snapshot must be treated
+    as 'no signal → available' so a non-claude-code session
+    dispatches even when its provider has no live signal source yet
+    (analyse §6.3)."""
+    from app.services.subscriptions.unknown import UnknownUsageProvider
+    transport = RecordingTransport()
+    pool = [_entry(cli="open-code", provider="anthropic")]
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="open-code",
+            default_agent="open-code", default_provider="bedrock",
+        )
+        cid = await _make_card(
+            s, column="open-code", executor_agent_id="open-code",
+        )
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    with _registry_state() as reg:
+        # Register the open-code:anthropic provider as an honest
+        # 'unknown' (no signal) to mirror a real-world provider that
+        # exists but has no usage endpoint yet.
+        reg.register_provider(UnknownUsageProvider(
+            subscription_id="open-code:anthropic",
+            subscription_label="test-opencode-anthropic",
+        ))
+        async with KanbanSessionLocal() as s:
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert len(transport.calls) == 1
+    # The pool's open-code:anthropic entry (no signal) wins over the
+    # column default ('bedrock') for an open-code-spawned card.
+    assert transport.calls[0]["cli_id"] == "open-code"
+    assert transport.calls[0]["provider"] == "anthropic"
