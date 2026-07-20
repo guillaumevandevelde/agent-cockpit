@@ -70,8 +70,8 @@ export const DEFAULT_MODEL_SUGGESTIONS = ["sonnet", "opus", "haiku"] as const;
 
 // Model suggestions for the MiniMax provider. MiniMax exposes its models via
 // the Anthropic-compatible endpoint (the ANTHROPIC_MODEL env var — see
-// backend/app/services/agentic_cli/provider_env.py MINIMAX_DEFAULT_MODEL). The
-// dynamic getModelOptions() list is claude-code-only, so without this a
+// backend/app/services/agentic_cli/provider_env.py MINIMAX_DEFAULT_MODEL).
+// The dynamic getModelOptions() list is claude-code-only, so without this a
 // minimax column/override would suggest sonnet/opus/haiku, which MiniMax
 // rejects. Not an enum -- free text is still accepted; these only back the
 // datalist. Keep in sync with the backend default by hand.
