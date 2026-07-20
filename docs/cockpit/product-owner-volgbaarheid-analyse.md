@@ -145,6 +145,12 @@ Het ontbrekende stuk. Twee vormen, samen kaart **A** en **B** in §5:
 Kaart **C**. De Done-`summary` en de impediment-`options` zijn nú geschreven voor de volgende
 agent. Een lichte conventie draait dat om:
 
+✅ Geïmplementeerd (kaart `4358fe0a00e342878bc7a77fd21ffebe`): conventie staat in
+`docs/cockpit/kanban-conventions.md` §5 met vóór/na voorbeelden, drift-guard
+`backend/tests/test_product_language_convention.py` (10 bronnen × 4 ankers), en
+lockstep-updates van `move_card`/`report_impediment` MCP-docstrings +
+persona-prompts (engineer/analyst/reviewer) + dispatch-mirrors.
+
 - **Elke Done-`summary` leidt met één zin productbetekenis** vóór de engineering-details:
   *"Product owner kan nu het abonnementsverbruik zien op de Usage-pagina"* vóór *"nieuwe
   `/usage/subscription`-endpoint + `SubscriptionUsageCard.tsx`"*. De persona-prompts en de

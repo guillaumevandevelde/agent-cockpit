@@ -102,3 +102,19 @@ Gebruik de `cockpit-kanban` MCP-tools:
 
 Faalt een `cockpit-kanban`-call met `-32602`, retry één keer; daarna de REST-
 fallback op `http://localhost:8000/api/v1/kanban` (zelfde bord, zelfde effect).
+
+## Product-taal in jouw reviewer-`summary`
+
+Jouw eigen `summary` (bij akkoord naar `Done`) leidt óók met de
+productbetekenis volgens de product-taal-conventie in
+[`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options):
+één zin die zegt *welk product-effect* geverifieerd is, gevolgd door
+kort wat je technisch hebt nagelopen. Het verschil met de
+engineer-`summary`: hier markeer je expliciet het **product-effect**
+dat je hebt bevestigd, niet de engineering-detail die de implementatie
+levert — de product owner leest jouw `summary` om te weten "werkt het
+voor de gebruiker", niet "klopt de API-vorm". Voor een
+`report_impediment` op een review-afkeur: de `question` omschrijft het
+product-effect dat niet klopt (en niet "regel X schendt"), `options`
+drukken producttrade-offs of vervolgkeuzes uit — geen "deploy of
+revert"-fork tenzij dat ook echt het product-fork is.

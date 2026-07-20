@@ -1865,8 +1865,19 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "7. **Move the card to Done** — ``move_card`` with ``column=\"Done\"`` "
             "and ``summary=<what you did>``, a few sentences on the work you "
             "completed.  ``summary`` is required for this move; the call is "
-            "rejected without it.  The backend will kill this session and remove "
-            "the worktree.\n"
+            "rejected without it.  **Product-taal** (conventie §5 van "
+            "`docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…`): leid "
+            "met één zin *productbetekenis* (wat kan de product owner nu "
+            "doen / zien / beslissen dat voorheen niet kon), zet de "
+            "engineering-detail (bestanden, endpoints, tests) erna. Voorbeeld: "
+            "niet \"POST /usage/subscription + SubscriptionUsageCard.tsx\", wél "
+            "\"Product owner kan nu het abonnementsverbruik zien op de "
+            "Usage-pagina (POST /usage/subscription + SubscriptionUsageCard.tsx)"
+            "\". Een kale engineering-summary voldoet aan de gate maar niet "
+            "aan de product-taal-conventie. Voor een "
+            "``report_impediment`` met ``options``: druk de opties uit als "
+            "**producttrade-offs**, niet als implementatie-forks.  "
+            "The backend will kill this session and remove the worktree.\n"
         )
     else:
         shipping = (
@@ -1924,10 +1935,16 @@ def _build_ship_instructions(ship_mode: str) -> str:
             "8. **Move the card** — if the PR merged, ``move_card`` with "
             "``column=\"Done\"`` and ``summary=<what you did>``, a few sentences "
             "on the work you completed (``summary`` is required for this move; "
-            "the call is rejected without it).  If the poll loop exited because a "
+            "the call is rejected without it).  **Product-taal** (de "
+            "product-taal-conventie §5 van "
+            "`docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…`): leid "
+            "met één zin *productbetekenis*, zet de engineering-detail erna. "
+            "Een kale engineering-summary voldoet aan de gate maar niet aan "
+            "de product-taal-conventie.  If the poll loop exited because a "
             "check failed, the PR was closed, or the wait timed out, call "
             "``report_impediment`` instead so a human can look at it — do not "
-            "move to Done.\n"
+            "move to Done. Voor een ``report_impediment``: druk ``options`` als "
+            "*producttrade-offs* uit, niet als implementatie-forks.\n"
         )
 
     return feature_compliance_review + sync + tests + commit + shipping
@@ -1979,7 +1996,15 @@ def _build_analyst_session_end_instructions() -> str:
         "with ``column=\"Done\"`` and a summary of the plan (``summary`` is "
         "required for this move; the call is rejected without it). This is "
         "your exit signal — the backend then kills this session and removes "
-        "the worktree.\n"
+        "the worktree. **Product-taal** (conventie §5 van "
+        "`docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…`): leid met "
+        "één zin *productbetekenis* (wat kan de product owner nu doen / "
+        "zien / beslissen dat voorheen niet kon), zet de engineering-"
+        "detail (kind-kaart-titels of deliverable-refs) als opsomming "
+        "erna. Een kale \"Plan opgesplitst in N taken\" voldoet aan de gate "
+        "maar niet aan de product-taal-conventie. Voor een "
+        "``report_impediment``: druk de ``options`` als "
+        "**producttrade-offs** uit, niet als implementatie-forks.\n"
     )
     return retro + move
 

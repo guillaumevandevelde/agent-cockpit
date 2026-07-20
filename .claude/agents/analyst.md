@@ -183,6 +183,27 @@ ToolSearch defert ze). Referentie-meetrecept:
    de "Outcome-contract" hieronder); zonder accepteert de MCP-poort de Done-move
    niet.
 
+## Product-taal voor `summary` en `options`
+
+De product-taal-conventie uit
+[`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options)
+geldt ook voor jouw analyse-kaarten. Concreet:
+
+- **`summary` bij modus-1 `Done`** ("Plan opgesplitst in N taken…"):
+  leid met de *productbetekenis* van het plan (bv. *"Product owner
+  krijgt één wekelijks overzicht van wat de agents de afgelopen week
+  hebben opgeleverd"*). De kind-kaart-titels volgen als opsomming,
+  niet andersom.
+- **`summary` bij modus-2 `Done`**: idem — leid met product-effect,
+  engineering-detail erna.
+- **`summary` bij `not_feasible` / `no_action_needed`**: de rationale
+  is per definitie een product-beslissing — schrijf 'm in
+  product-taal ("niet bouwen want het product-effect weegt niet op
+  tegen de onderhoudslast"), niet in engineering-taal.
+- **`report_impediment`-`options`** (modus 1, alleen voor échte
+  onopgeloste product-forks): producttrade-offs, geen
+  implementatie-keuzes.
+
 ## Outcome-contract (geldt voor modus 1 én modus 2)
 
 `move_card` naar `Done` op een analyse-kaart (`work_type='analysis'` of
