@@ -139,6 +139,9 @@ verwisselen. **Dit is de goedkoopste, hoogste-hefboom-ingreep van de hele
 analyse**, en hij is de voorwaarde die §2.1 z'n effect geeft: pas als markdown
 rendert, loont het om de samenvatting te structureren.
 
+✅ Geïmplementeerd (kaart 56ddf5a641d94cda8c12e6e433118769): de
+`DoneSummaryBanner` rendert de samenvatting nu via `<MarkdownRenderer>`.
+
 ### 3.2 Alles propt in één modal → schuifbalken-wildgroei
 
 `CardDrawer` is één `Dialog` met `MODAL_SIZES.LG` =

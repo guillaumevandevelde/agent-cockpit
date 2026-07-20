@@ -172,6 +172,29 @@ describe("CardDrawer Done summary banner", () => {
     expect(banner.textContent).toMatch(/Took 2h 15m/);
   });
 
+  it("renders markdown formatting in the Done summary banner", () => {
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      done_summary: "**Outcome.** Done.\n\n- First change\n- Second change",
+      completed_at: "2026-07-10T12:15:00Z",
+    };
+
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const banner = screen.getByTestId("done-summary-banner");
+    expect(banner.querySelector("strong")?.textContent).toBe("Outcome.");
+    expect(banner.querySelectorAll("li")).toHaveLength(2);
+    expect(banner.textContent).not.toContain("**Outcome.**");
+  });
+
   it("does not show the summary banner when card is not in the Done column", () => {
     const doingCard: Card = {
       ...baseCard,

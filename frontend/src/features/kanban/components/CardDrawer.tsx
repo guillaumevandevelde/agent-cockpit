@@ -345,9 +345,7 @@ function DoneSummaryBanner({ card }: { card: Card }) {
       <div className="mb-1 text-xs font-semibold uppercase text-green-700 dark:text-green-400">
         ✅ Completed
       </div>
-      {summary && (
-        <div className="text-foreground whitespace-pre-wrap">{summary}</div>
-      )}
+      {summary && <MarkdownRenderer content={summary} />}
       {(completedAt || duration) && (
         <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
           {completedAt && <span>{formatCompletedAt(completedAt)}</span>}
