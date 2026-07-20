@@ -77,6 +77,11 @@ symptom. Match on: same file/tool/endpoint, same error signature, same
 misleading doc. A card titled differently but describing the same underlying
 issue still counts as a duplicate.
 
+**Timing:** re-pull Backlog/Impediment *directly* before filing — not just
+once per session. A scan from minutes ago is stale as soon as a parallel
+session on the same board files an overlapping card (kaart `3a4ca295…`).
+The dedupe pass is bound to the `create_card` call, not to session start.
+
 - **Duplicate found** → `comment(card_id, text)` with what's new: your own
   evidence, a different trigger path, confirmation it's still happening, or
   a narrower root cause than what's already written. Don't create a second

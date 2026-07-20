@@ -127,6 +127,11 @@ Read titles and descriptions for the **same underlying improvement**,
 not the same keyword. A `[problem]` card about a flaky test and a
 `[self-improve]` card about the same flaky test are duplicates.
 
+**Timing:** re-pull Backlog/Impediment *directly* before filing, not at
+start-of-session. A scan from minutes ago is stale as soon as a parallel
+session on the same board files an overlapping card (kaart `3a4ca295…`);
+the dedupe pass is bound to the `create_card` call, not to retro-start.
+
 - **Duplicate found** → `comment(card_id, text)` with what's new: this
   session's confirmation, a different trigger path, a narrower scope,
   or evidence the impact is worse than originally captured.

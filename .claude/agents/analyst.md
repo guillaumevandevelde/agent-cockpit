@@ -71,9 +71,13 @@ Guards tegen Backlog-spam (gelden onvoorwaardelijk):
 - **Acceptance-criteria-niveau only** — een kaart vraagt een titel plus 2-5
   zinnen acceptance criteria. Speculatieve/zachte ideeën blijven §-prose,
   geen kaart.
-- **Dedup-pass eerst** — `list_cards` op Backlog/Impediment vóór het
-  aanmaken; bij een match: `comment` op de bestaande kaart in plaats van
-  dupliceren (zelfde discipline als de `flag-problem`-skill).
+- **Dedup-pass direct vóór elke `create_card`-batch** — `list_cards` op
+  Backlog/Impediment net voor het aanmaken (niet alleen aan analyse-start);
+  bij een match: `comment` op de bestaande kaart in plaats van dupliceren.
+  Reden: een eerdere scan is stale zodra een parallelle sessie binnen dat
+  tijdvenster een overlappende kaart filed (zie kaart `3a4ca295…`); een
+  aanmaak-zonder-scan garandeert duplicaten, een aanmaak-met-eerdere-scan
+  doet het bij concurrent werk (zelfde discipline als de `flag-problem`-skill).
 - **`depends_on` alleen op een echt contract** — kind B wacht op een output
   van kind A (bijv. A maakt een abstractie die B consumeert). Pure sequentie
   zonder contract is geen afhankelijkheid.
