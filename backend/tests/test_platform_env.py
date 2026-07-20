@@ -229,3 +229,146 @@ def test_minimax_env_never_includes_bedrock_keys():
     assert "CLAUDE_CODE_USE_BEDROCK" not in env
     assert "AWS_REGION" not in env
     assert "AWS_PROFILE" not in env
+
+
+# --- PROVIDER_COMPATIBLE ("anthropic-compatible") ---------------------------
+#
+# Data-driven branch: the endpoint (base_url + model) and the credential come
+# from configuration the caller already resolved. The contract mirrors MiniMax
+# — always set ANTHROPIC_BASE_URL/ANTHROPIC_MODEL explicitly, never
+# conditionally, so a stale ambient env value can't leak through.
+
+
+def test_compatible_minimal_sets_base_url_and_model():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="https://api.groq.com/anthropic",
+        model="llama-3.3-70b",
+    )
+    assert env == {
+        "ANTHROPIC_BASE_URL": "https://api.groq.com/anthropic",
+        "ANTHROPIC_MODEL": "llama-3.3-70b",
+    }
+
+
+def test_compatible_with_auth_token_sets_anthropic_auth_token():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="https://api.example.com",
+        model="model-x",
+        auth_token="sk-test-token",
+    )
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-test-token"
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.example.com"
+    assert env["ANTHROPIC_MODEL"] == "model-x"
+
+
+def test_compatible_missing_base_url_raises():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    with pytest.raises(ValueError):
+        build_provider_env(PROVIDER_COMPATIBLE, model="m")
+
+
+def test_compatible_blank_base_url_raises():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    with pytest.raises(ValueError):
+        build_provider_env(
+            PROVIDER_COMPATIBLE, base_url="   ", model="m",
+        )
+
+
+def test_compatible_missing_model_raises():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    with pytest.raises(ValueError):
+        build_provider_env(
+            PROVIDER_COMPATIBLE, base_url="https://api.example.com",
+        )
+
+
+def test_compatible_blank_auth_token_is_omitted():
+    """A missing/blank key is not an error: the env var simply isn't set
+    (matches the MiniMax convention — never raises on a missing secret
+    because the caller may legitimately let the host env provide it)."""
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="https://api.example.com",
+        model="m",
+        auth_token="   ",
+    )
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+
+def test_compatible_strips_surrounding_whitespace():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="  https://api.example.com  ",
+        model="  m  ",
+        auth_token="  tok  ",
+    )
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.example.com"
+    assert env["ANTHROPIC_MODEL"] == "m"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "tok"
+
+
+def test_compatible_rejects_newline_in_base_url():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    with pytest.raises(ValueError):
+        build_provider_env(
+            PROVIDER_COMPATIBLE,
+            base_url="https://api.example.com\nFOO=bar",
+            model="m",
+        )
+
+
+def test_compatible_env_never_includes_bedrock_or_minimax_keys():
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="https://api.example.com",
+        model="m",
+        auth_token="tok",
+    )
+    assert "CLAUDE_CODE_USE_BEDROCK" not in env
+    assert "AWS_REGION" not in env
+    assert "AWS_PROFILE" not in env
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in env

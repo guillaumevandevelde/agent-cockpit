@@ -41,6 +41,7 @@ from app.kanban.models import KanbanMeta
 from app.services.agentic_cli.provider_env import (
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
+    PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
 )
 from app.services.subscriptions.base import SubscriptionUsage
@@ -52,8 +53,13 @@ SUBSCRIPTION_POOL_PREFIX = "subscription_pool:"
 # Mirror the active-subscription-override allow-list so both knobs stay
 # consistent. Adding a new provider is one edit (provider_env.py) plus
 # this tuple — both surfaces share the same source of truth.
+# ``PROVIDER_COMPATIBLE`` (the data-driven ``anthropic-compatible`` branch
+# — see ``app/services/agentic_cli/endpoints.py``) is on the allow-list
+# so a pool entry can point at a named endpoint row; per-endpoint auth
+# stays out of the pool (the credential lookup is the caller's job).
 _ALLOWED_POOL_PROVIDERS = (
     PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
+    PROVIDER_COMPATIBLE,
 )
 
 # The single CLI the pool routes through today. ``column.default_agent``
@@ -76,9 +82,12 @@ class PoolEntry:
 
     Fields:
         provider: which vendor the CLI authenticates against
-            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"`` for the
-            ``claude-code`` CLI that the pool actually routes — see
-            ``POOL_CLI``).
+            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"`` |
+            ``"anthropic-compatible"`` for the ``claude-code`` CLI that the
+            pool actually routes — see ``POOL_CLI``). The
+            ``"anthropic-compatible"`` value is the data-driven branch
+            (``app/services/agentic_cli/endpoints.py``); per-endpoint auth
+            stays out of the pool.
         model: optional model pin. ``None`` = no model pin — dispatch
             falls through to the column/card/persona precedence chain.
             This mirrors the partial-override shape of the existing

@@ -133,6 +133,23 @@ async def test_set_pool_rejects_unknown_provider():
 
 
 @pytest.mark.asyncio
+async def test_set_pool_accepts_anthropic_compatible_provider():
+    """The data-driven ``anthropic-compatible`` branch (see
+    ``app/services/agentic_cli/endpoints.py``) is on the allow-list so a
+    pool entry can point at a named endpoint row.
+    """
+    entries = [subscription_pool.PoolEntry(
+        provider="anthropic-compatible", model=None, drempel=0.9,
+    )]
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, entries)
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        got = await subscription_pool.get_subscription_pool(s, PK)
+    assert got == entries
+
+
+@pytest.mark.asyncio
 async def test_set_pool_rejects_out_of_range_drempel():
     """Drempel must be in (0, 1]. 0 disables the entry (always "above
     threshold") and >1 disables the spillover entirely. Reject up front
