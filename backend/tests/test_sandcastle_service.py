@@ -207,6 +207,30 @@ def test_build_run_command_no_caps_yields_empty_flags(tmp_path):
     assert data["network"] is None  # bridge => provider default
 
 
+def test_build_run_command_threads_extra_env_into_config(tmp_path):
+    svc = SandcastleService()
+    config = _config(tmp_path, sandbox_provider="docker")
+    run = SimpleNamespace(id=5, prompt="x")
+    svc._build_run_command(
+        config, run, branch_name=None, max_iterations=None,
+        extra_env={"API_TOKEN": "t0k", "DB_URL": "sqlite://"},
+    )
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-5.json").read_text())
+    # Project-scoped secrets land in the run-config `env` the runner reads and
+    # injects as the sandbox provider's env vars.
+    assert data["env"] == {"API_TOKEN": "t0k", "DB_URL": "sqlite://"}
+
+
+def test_build_run_command_no_extra_env_yields_empty_dict(tmp_path):
+    svc = SandcastleService()
+    config = _config(tmp_path, sandbox_provider="docker")
+    run = SimpleNamespace(id=6, prompt="x")
+    svc._build_run_command(config, run, branch_name=None, max_iterations=None)
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-6.json").read_text())
+    # No secrets => empty dict (the runner skips setting provider.env for it).
+    assert data["env"] == {}
+
+
 # ---- parallel-run command building -----------------------------------------
 
 def test_build_parallel_command_threads_shared_sandbox_flag(tmp_path):
