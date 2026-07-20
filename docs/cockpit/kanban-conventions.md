@@ -164,11 +164,11 @@ als je er een introduceert.
 
 ## 3a. Card-gate (`metadata.gated_on`) — business-triggers buiten de kaart-DAG
 
-> **Bron van waarheid:** [`backend/app/kanban/dispatch.py:_is_gated`](../backend/app/kanban/dispatch.py)
+> **Bron van waarheid:** [`backend/app/kanban/dispatch.py:_is_gated`](../../backend/app/kanban/dispatch.py)
 > (de predicate die de dispatcher elke tick uitleest) +
-> [`backend/app/kanban/mcp_server.py:set_card_gate`](../backend/app/kanban/mcp_server.py)
+> [`backend/app/kanban/mcp_server.py:set_card_gate`](../../backend/app/kanban/mcp_server.py)
 > (canonieke set/clear tool) +
-> [`backend/app/api/v1/kanban/router.py:set_gate`](../backend/app/api/v1/kanban/router.py)
+> [`backend/app/api/v1/kanban/router.py:set_gate`](../../backend/app/api/v1/kanban/router.py)
 > (REST mirror op `POST /api/v1/kanban/cards/{cid}/set-gate`).
 
 Een kaart kan **bewust gepoort** zijn op een *business-trigger* die geen
