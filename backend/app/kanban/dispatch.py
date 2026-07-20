@@ -646,8 +646,14 @@ async def _gather_pool_usage_snapshots(
     lookup mirrors ``SubscriptionUsageProvider.DEFAULT_ID`` so the
     router's snapshot map aligns with the snapshot's own ``id`` field.
     Missing snapshots (or snapshots that raise) are simply absent from
-    the returned dict — ``pick_subscription`` interprets absent as
-    "no signal → available", which is exactly analyse §6.3.
+    the returned dict — ``pick_subscription_for_cli`` interprets
+    absent as "no signal → available", which is exactly analyse §6.3.
+
+    Kaart 8f40d443…: each ``PoolEntry`` carries its own ``cli`` (the
+    per-CLI quota axis). The registry lookup uses that entry-level
+    ``cli`` so an OpenCode entry looks up ``open-code:{provider}`` and
+    a Codex entry looks up ``codex-cli:{provider}`` — quotas are
+    orthogonal across CLIs.
     """
     from app.services.subscriptions import registry as _registry
 
@@ -658,15 +664,8 @@ async def _gather_pool_usage_snapshots(
         # which the surrounding ``except Exception`` in ``_pick_pool_choice``
         # silently swallows → empty snapshot map → drempel branch is dead
         # code. Drop the ``await``. See kanban card ea7e038b… (D1).
-        #
-        # ``cli`` is no longer on ``PoolEntry`` (kaart 0b3ad6e2…) — the
-        # pool always routes through the single supported CLI (see
-        # ``subscription_pool.POOL_CLI``). The snapshot-lookup key keeps
-        # the historical ``{cli}:{provider}`` shape so the registry's
-        # default providers — registered as ``claude-code:{provider}``
-        # in ``services/subscriptions/registry.py`` — still match.
         provider = _registry.get_provider_for(
-            cli=subscription_pool.POOL_CLI, provider=entry.provider,
+            cli=entry.resolved_cli, provider=entry.provider,
         )
         if provider is None:
             continue
@@ -695,15 +694,24 @@ async def _paused_providers_for_pool(
 
 
 async def _pick_pool_choice(
-    session, entries: list[PoolEntry], *, project_key: str,
+    session, entries: list[PoolEntry], *, project_key: str, cli_id: str,
 ) -> PoolEntry | None:
-    """Run the pure ``pick_subscription`` against the live usage snapshot
-    map and the currently-paused providers.
+    """Run the pure ``pick_subscription_for_cli`` against the live usage
+    snapshot map and the currently-paused providers, scoped to the
+    dispatched CLI.
 
-    Returns the chosen ``PoolEntry`` or ``None`` when the pool is empty
-    (handled by the pure router). A failure inside the live-snapshot
-    gathering falls back to "no signal → first entry wins" so a flaky
-    usage provider cannot block dispatch.
+    Kaart 8f40d443…: the pool router is called with the dispatched
+    ``cli_id`` (resolved earlier in this dispatcher by ``_phase_cli_id``
+    + ``_run_card``) so an OpenCode-spawned session picks from
+    OpenCode-only pool entries and never silently degrades to a
+    claude-code quota. Returns the chosen ``PoolEntry`` or ``None``
+    when the pool has no entry for ``cli_id`` — the dispatch path then
+    falls through to the column-default chain (matching the acceptance
+    criterion 'geen entry voor deze CLI').
+
+    A failure inside the live-snapshot gathering falls back to "no
+    signal → first entry of cli_id wins" so a flaky usage provider
+    cannot block dispatch.
     """
     paused = await _paused_providers_for_pool(session)
     try:
@@ -720,11 +728,14 @@ async def _pick_pool_choice(
             project_key,
         )
         snapshots = {}
-    return subscription_pool.pick_subscription(entries, snapshots, paused_providers=paused)
+    return subscription_pool.pick_subscription_for_cli(
+        entries, snapshots,
+        paused_providers=paused, cli_id=cli_id,
+    )
 
 
 async def _pool_spillover_available(
-    session, *, project_key: str, limited_provider: str,
+    session, *, project_key: str, limited_provider: str, cli_id: str,
 ) -> bool:
     """Fase 2 (analyse §4 Optie B / §5): can the just-limited card spill
     over onto another subscription in the pool instead of waiting for
@@ -734,9 +745,15 @@ async def _pool_spillover_available(
     ``limited_provider`` (plus every already-paused provider) as
     unavailable, then ask ``has_available_spillover`` whether the pool
     still offers a genuinely-available subscription to route to. Returns
-    False when the project has no pool, or when every subscription is now
+    False when the project has no pool, when the pool has no entry for
+    ``cli_id``, or when every subscription for ``cli_id`` is now
     paused/exhausted — the reactive limit path then keeps its existing
     behaviour (per-provider pause → "To Resume" + reset-time scheduled_at).
+
+    Kaart 8f40d443…: the spillover check is now CLI-aware — the reactive
+    limit path supplies the dispatched ``cli_id`` so the drempel-/failover
+    branch only considers entries of the same CLI as the spawned session
+    (an OpenCode-limit only spills to other OpenCode entries).
 
     ``limited_provider`` is added explicitly (not only read from the
     per-provider pause slots) so the decision is correct even when the
@@ -760,7 +777,10 @@ async def _pool_spillover_available(
             project_key,
         )
         snapshots = {}
-    return subscription_pool.has_available_spillover(entries, snapshots, paused_providers=paused)
+    return subscription_pool.has_available_spillover(
+        entries, snapshots,
+        paused_providers=paused, cli_id=cli_id,
+    )
 
 
 # ---- persona helpers -------------------------------------------------------
@@ -2876,8 +2896,14 @@ async def _run_card(
     pool_entries = await get_subscription_pool(session, project_key)
     pool_choice: PoolEntry | None = None
     if pool_entries is not None and not global_override:
+        # Kaart 8f40d443…: the pool router is CLI-aware, so the router
+        # consults only entries whose ``cli == cli_id``. An
+        # ``open-code``-spawned card never sees a
+        # ``claude-code``-targeted entry (and vice versa) — quotas
+        # are per {cli, provider}, not per provider alone.
         pool_choice = await _pick_pool_choice(
             session, pool_entries, project_key=project_key,
+            cli_id=cli_id,
         )
     # A per-card override for this phase's resolved target column (persona) wins
     # over the column defaults for BOTH provider and model. Because analyst and
@@ -3245,11 +3271,23 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
         # pool router whether another subscription is still available. When
         # it is, drop scheduled_at so the card re-dispatches now instead of
         # waiting for the limited provider to reset.
+        #
+        # Kaart 8f40d443…: the spillover is now CLI-aware — the dispatcher
+        # resolves the spawned CLI from the card's resolved phase
+        # (``_phase_cli_id``) so the spillover only considers entries
+        # whose CLI matches the original spawn. An OpenCode-rate-limited
+        # card only spills to other OpenCode entries — a Codex entry
+        # is not a valid spillover target.
         limited_provider = await _provider_for_card(ks, project_key, card, card.column)
         spillover = False
         if limited_provider is not None:
             spillover = await _pool_spillover_available(
-                ks, project_key=project_key, limited_provider=limited_provider,
+                ks, project_key=project_key,
+                limited_provider=limited_provider,
+                cli_id=_phase_cli_id(
+                    card, phase=resolve_phase(card),
+                    known_clis=_known_cli_ids(),
+                ),
             )
         effective_scheduled_at = None if spillover else scheduled_at
 

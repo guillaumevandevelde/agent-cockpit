@@ -15,21 +15,30 @@ unit-testable (see ``tests/test_subscription_pool_pick.py``) and makes the
 contract obvious: "given this state, pick this subscription".
 
 Subscription identity follows analyse §3: a subscription is identified
-by its ``provider`` (the vendor the CLI authenticates against). The CLI
-is fixed — see ``POOL_CLI`` for the rationale (analysis §3 D3 + §2.3).
-``model`` is
-optional — a ``None`` model leaves the dispatch precedence chain (column
-default / card model / persona frontmatter) to fill it in, matching the
-shape of the existing per-card ``column_overrides[col]``.
+by its ``{cli, provider}`` pair. Subscription pool entries carry both
+fields — the per-entry ``cli`` (re-introduced in kanban card 8f40d443…)
+is **consumed** by the router: the router filters the candidate entries
+on the dispatch-resolved ``cli_id`` so an OpenCode-spawned card
+consults only ``open-code:provider`` snapshots and a Codex-spawned card
+consults only ``codex-cli:provider`` snapshots. ``cli=None`` on
+construction defaults to ``DEFAULT_POOL_CLI`` (claude-code) so the
+common case of a pre-kaart-8f40d443 pool keeps working unchanged.
+
+``model`` is optional — a ``None`` model leaves the dispatch precedence
+chain (column default / card model / persona frontmatter) to fill it in,
+matching the shape of the existing per-card ``column_overrides[col]``.
 
 Storage: a project-scoped pool lives in the ``KanbanMeta`` key-value
 table under ``subscription_pool:<project_key>`` (same shape as the
 board-wide active-subscription-override from fase 0 — see
 ``dispatch.SUBSCRIPTION_OVERRIDE_PREFIX``). That keeps the dispatcher
 free of schema migrations and keeps the precedence logic discoverable
-in one module. The JSON payload is ``[{"provider": ..., "model": ...,
-"drempel": ...}, ...]`` — pre-fix payloads that also carry ``cli`` are
-tolerated (the field is stripped on read; kaart 0b3ad6e2…).
+in one module. The JSON payload is ``[{"cli": ..., "provider": ...,
+"model": ..., "drempel": ...}, ...]`` — rows without ``cli`` are
+accepted and back-filled with ``DEFAULT_POOL_CLI`` on read so a
+stored row written by a pre-kaart-8f40d443 build (or by an existing UI
+that has not yet been refreshed) still loads without manual data
+surgery.
 """
 from __future__ import annotations
 
@@ -50,30 +59,45 @@ logger = logging.getLogger(__name__)
 
 SUBSCRIPTION_POOL_PREFIX = "subscription_pool:"
 
+# The CLI a ``PoolEntry(cli=None)`` falls back to. Pre-kaart-8f40d443
+# pools were board-wide pinned to claude-code; this constant preserves
+# that exact behaviour as the default so legacy rows and existing
+# call sites keep matching. The dispatch integration can override
+# ``cli`` per entry to route e.g. ``open-code`` or ``codex-cli``
+# subscriptions — see ``pick_subscription_for_cli``.
+DEFAULT_POOL_CLI = "claude-code"
+
 # Mirror the active-subscription-override allow-list so both knobs stay
 # consistent. Adding a new provider is one edit (provider_env.py) plus
 # this tuple — both surfaces share the same source of truth.
-# ``PROVIDER_COMPATIBLE`` (the data-driven ``anthropic-compatible`` branch
-# — see ``app/services/agentic_cli/endpoints.py``) is on the allow-list
-# so a pool entry can point at a named endpoint row; per-endpoint auth
-# stays out of the pool (the credential lookup is the caller's job).
 _ALLOWED_POOL_PROVIDERS = (
     PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
     PROVIDER_COMPATIBLE,
 )
 
-# The single CLI the pool routes through today. ``column.default_agent``
-# never reaches the dispatcher (analysis §2.3), so the CLI axis is
-# board-wide pinned to claude-code regardless of what the pool says.
-# Earlier builds carried ``PoolEntry.cli`` and a UI select for it; that
-# field was validated and stored but **never consumed** — ``cli_id``
-# comes from ``agent_override`` / ``analyst_agent_id`` /
-# ``executor_agent_id`` / ``card.agent`` (``dispatch._phase_cli_id``),
-# resolved *before* the pool is queried (analyse §3 D3). The field was
-# dropped in kanban card ``0b3ad6e2…`` to stop promising a capability
-# the code does not have; the snapshot-lookup key uses this constant
-# instead of a per-entry value.
-POOL_CLI = "claude-code"
+
+def _known_pool_clis() -> frozenset[str]:
+    """Return the set of CLI ids the router is willing to filter on.
+
+    Derived from the agentic_cli registry (the single source of truth
+    for which CLIs the spawn layer can dispatch — mirrors
+    ``dispatch._known_cli_ids``). Re-derived on every call so a CLI
+    register/unregister hook stays effective without restarting the
+    process; the call is a cheap dict.get and only fires at pool
+    construction + dispatch pick, never inside the per-card hot path.
+    """
+    try:
+        from app.services.agentic_cli import get_agentic_clis
+    except Exception:
+        # Defensive: keep the router importable even when the agentic_cli
+        # registry is unreachable (unit tests that import this module in
+        # isolation). Fall back to the legacy hardcoded list — same
+        # baseline as before the refactor.
+        return frozenset({
+            "claude-code", "codex-cli", "copilot-cli",
+            "mimo-code", "open-code",
+        })
+    return frozenset(cli.id for cli in get_agentic_clis())
 
 
 @dataclass(frozen=True)
@@ -81,13 +105,17 @@ class PoolEntry:
     """Eén subscription in de pool.
 
     Fields:
+        cli: which spawn transport the entry targets (one of the
+            agentic_cli registry ids — ``"claude-code"``,
+            ``"codex-cli"``, ``"copilot-cli"``, ``"mimo-code"``,
+            ``"open-code"``). ``cli=None`` falls back to
+            ``DEFAULT_POOL_CLI`` so the common claude-code case keeps
+            building without ceremony. The router **consumes** this
+            field (kaart 8f40d443 + analyse §3): a ``open-code`` spawn
+            consults only entries whose ``cli="open-code"`` so the
+            per-CLI quota axis is honoured end-to-end.
         provider: which vendor the CLI authenticates against
-            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"`` |
-            ``"anthropic-compatible"`` for the ``claude-code`` CLI that the
-            pool actually routes — see ``POOL_CLI``). The
-            ``"anthropic-compatible"`` value is the data-driven branch
-            (``app/services/agentic_cli/endpoints.py``); per-endpoint auth
-            stays out of the pool.
+            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"``).
         model: optional model pin. ``None`` = no model pin — dispatch
             falls through to the column/card/persona precedence chain.
             This mirrors the partial-override shape of the existing
@@ -104,6 +132,33 @@ class PoolEntry:
     provider: str
     model: str | None
     drempel: float
+    cli: str | None = None
+
+    def __post_init__(self) -> None:
+        # ``frozen=True`` rejects ``self.cli = ...`` but
+        # ``object.__setattr__`` still works on the underlying object.
+        # Materialise the default into the public field so equality,
+        # pickling, dataclass-based introspection all see the resolved
+        # value — ``resolved_cli`` is just an alias that doubles as
+        # the snapshot-lookup key for the router's hot path.
+        resolved = self.cli or DEFAULT_POOL_CLI
+        object.__setattr__(self, "cli", resolved)
+        allowed = _known_pool_clis()
+        if resolved not in allowed:
+            raise ValueError(
+                f"unknown cli: {resolved!r}; "
+                f"expected one of {sorted(allowed)}",
+            )
+
+    @property
+    def resolved_cli(self) -> str:
+        """The CLI the router will use as the snapshot-lookup key.
+
+        Falls back to ``DEFAULT_POOL_CLI`` when ``cli=None`` was
+        passed at construction. Materialised in __post_init__ so the
+        router can do a single string format per entry without a
+        per-iteration default-resolution branch."""
+        return self.cli  # always populated by __post_init__
 
 
 def _is_above_threshold(
@@ -126,47 +181,53 @@ def _is_above_threshold(
     return usage.drempel_gebruikt >= entry.drempel
 
 
-def pick_subscription(
+def pick_subscription_for_cli(
     entries: list[PoolEntry],
     usages: dict[str, SubscriptionUsage],
     *,
     paused_providers: set[str],
+    cli_id: str,
 ) -> PoolEntry | None:
-    """Kies de eerste subscription in prioriteitsvolgorde die nog
-    beschikbaar is; valt terug op de laatste entry wanneer alles vol of
-    gepauzeerd is (analyse §4 "laatste val-terug").
+    """Kies de eerste subscription van ``cli_id`` in prioriteitsvolgorde
+    die nog beschikbaar is; valt terug op de laatste entry wanneer alles
+    vol of gepauzeerd is (analyse §4 "laatste val-terug").
 
-    Args:
-        entries: de geordende pool (volgorde = prioriteit). Een lege lijst
-            betekent "geen pool geconfigureerd" → return None.
-        usages: mapping ``{subscription_id: SubscriptionUsage}``. Een
-            entry zonder entry in deze map wordt behandeld als "geen
-            signaal" (analyse §6.3).
-        paused_providers: providers waarvan de per-provider pause nog
-            loopt. Een entry met een paused provider wordt overgeslagen —
-            ongeacht de usage-snapshot.
+    Kaart 8f40d443…: ``cli_id`` is the spawn transport the dispatched
+    session will run under (resolved by ``dispatch._phase_cli_id`` /
+    ``_run_card``). The router filters candidates on
+    ``entry.cli == cli_id`` so an OpenCode spawn consults only
+    ``open-code:{provider}`` snapshots — quotas are per ``{cli,
+    provider}``, never per provider alone.
 
     Returns:
-        De gekozen ``PoolEntry``, of None wanneer de pool leeg is.
-        Wanneer de pool niet leeg is wordt er altijd een entry terug­
-        gegeven, ook als élke entry boven drempel of gepauzeerd is — de
-        "laatste val-terug"-tak uit analyse §4. De uiteindelijke gate
-        tegen een gepauzeerde fallback is de per-provider pause die de
-        dispatch zelf afvangt; deze functie geeft een deterministisch
-        "als ik móét kiezen, dan deze" terug zodat de caller exact weet
-        welk pad de spawn heeft gekozen (en kan loggen waarom).
+        De gekozen ``PoolEntry``, of None wanneer geen enkele entry
+        van ``cli_id`` overleeft de priority scan (lege pool, of de
+        pool heeft alleen entries van een andere CLI). De
+        cli-discriminatie is hier bewust hard: "geen entry voor
+        deze CLI" is een eigen geval (acceptatie-criterium) dat de
+        dispatcher dwingt terug te vallen op de column-default chain.
+
+        Wanneer de pool entries van ``cli_id`` bevat maar élk daarvan
+        boven drempel of gepauzeerd is, wordt de laatste entry van
+        die CLI teruggegeven — de "laatste val-terug"-tak uit
+        analyse §4. De uiteindelijke gate tegen een gepauzeerde
+        fallback is de per-provider pause die de dispatch zelf
+        afvangt; deze functie geeft een deterministisch "als ik móét
+        kiezen, dan deze" terug zodat de caller exact weet welk pad
+        de spawn heeft gekozen (en kan loggen waarom).
     """
-    if not entries:
+    cli_candidates = [e for e in entries if e.resolved_cli == cli_id]
+    if not cli_candidates:
         return None
 
     chosen: PoolEntry | None = None
-    for entry in entries:
-        # Zodra een entry zowel onder drempel als niet-paauze is,
+    for entry in cli_candidates:
+        # Zodra een entry zowel onder drempel als niet-pauze is,
         # is dit de winnaar — eerste in prioriteit wint.
         if entry.provider in paused_providers:
             chosen = entry  # val terug op de laatst geziene entry
             continue
-        usage = usages.get(f"{POOL_CLI}:{entry.provider}")
+        usage = usages.get(f"{entry.resolved_cli}:{entry.provider}")
         if _is_above_threshold(entry, usage):
             chosen = entry
             continue
@@ -174,40 +235,76 @@ def pick_subscription(
     return chosen
 
 
+def pick_subscription(
+    entries: list[PoolEntry],
+    usages: dict[str, SubscriptionUsage],
+    *,
+    paused_providers: set[str],
+) -> PoolEntry | None:
+    """Legacy entry point — delegates to ``pick_subscription_for_cli``
+    with ``cli_id=DEFAULT_POOL_CLI``.
+
+    Pre-kaart-8f40d443 callers (incl. the existing dispatch wiring and
+    the historical pool tests) used the board-wide-pinned
+    ``POOL_CLI = 'claude-code'`` behaviour. ``pick_subscription``
+    preserves that exact contract so no caller needs to change. New
+    wiring that resolves a per-card ``cli_id`` should call
+    ``pick_subscription_for_cli`` directly.
+    """
+    return pick_subscription_for_cli(
+        entries, usages,
+        paused_providers=paused_providers,
+        cli_id=DEFAULT_POOL_CLI,
+    )
+
+
 def has_available_spillover(
     entries: list[PoolEntry],
     usages: dict[str, SubscriptionUsage],
     *,
     paused_providers: set[str],
+    cli_id: str = DEFAULT_POOL_CLI,
 ) -> bool:
     """Fase 2 (analyse §4 Optie B / §5): is er nog een subscription om naar
     over te *spillen* wanneer het huidige abonnement zijn limiet raakt?
+
+    Kaart 8f40d443…: the spillover check is now per-CLI. The router
+    filters candidates on the dispatched ``cli_id`` so a spillover for
+    an OpenCode-spawned card only considers OpenCode pool entries;
+    a Codex-spawned card considers Codex entries. ``cli_id`` defaults
+    to ``DEFAULT_POOL_CLI`` so legacy callers that don't know about
+    CLIs yet (notably the per-provider pause's reactive limit path)
+    keep their contract.
 
     Dit is de drempel-/failover-tak van de pool-router: de reactieve
     limiet-lus (``dispatch.move_limited_session_to_resume``) voegt de
     zojuist-gelimiteerde provider toe aan ``paused_providers`` en vraagt
     hier of er dán nog een échte val-terug is. "Echt beschikbaar" betekent
-    de *schone* keuze-tak van ``pick_subscription`` — een entry die niet
-    gepauzeerd is én niet boven zijn drempel — niet louter de "laatste
-    val-terug" (die geeft ``pick_subscription`` ook terug als álles
+    de *schone* keuze-tak van ``pick_subscription_for_cli`` — een entry
+    die niet gepauzeerd is én niet boven zijn drempel — niet louter de
+    "laatste val-terug" (die geeft de router ook terug als álles
     uitgeput is, puur zodat de caller een deterministisch slot heeft).
 
     Returns:
         True  → er is een niet-gepauzeerde, onder-drempel subscription:
                 de kaart kan meteen doorschuiven i.p.v. te wachten op de
                 reset (analyse §2.3 "sluit de reactieve failover-lus").
-        False → lege pool, of elke subscription is nu gepauzeerd/uitgeput:
-                val terug op de bestaande per-provider pause (wachten tot
-                reset).
+        False → lege pool, geen entry van ``cli_id``, of elke subscription
+                van die CLI is nu gepauzeerd/uitgeput: val terug op de
+                bestaande per-provider pause (wachten tot reset).
     """
-    chosen = pick_subscription(entries, usages, paused_providers=paused_providers)
+    chosen = pick_subscription_for_cli(
+        entries, usages,
+        paused_providers=paused_providers, cli_id=cli_id,
+    )
     if chosen is None:
         return False
     if chosen.provider in paused_providers:
-        # ``pick_subscription`` viel terug op de "laatste val-terug" — die
-        # provider is zelf gepauzeerd, dus er is geen echte spillover-target.
+        # ``pick_subscription_for_cli`` viel terug op de "laatste
+        # val-terug" — die provider is zelf gepauzeerd, dus er is geen
+        # echte spillover-target.
         return False
-    usage = usages.get(f"{POOL_CLI}:{chosen.provider}")
+    usage = usages.get(f"{chosen.resolved_cli}:{chosen.provider}")
     # De fallback kan ook een niet-gepauzeerde maar bóven-drempel entry zijn
     # (alles vol); dat telt niet als beschikbare spillover.
     return not _is_above_threshold(chosen, usage)
@@ -226,11 +323,14 @@ def has_available_spillover(
 
 def _validate_entries(entries: list[PoolEntry]) -> None:
     """Validate the pool up front so a corrupt row never reaches
-    ``pick_subscription``. Raises ``ValueError`` with a concrete message
-    the API layer surfaces as 422.
+    ``pick_subscription_for_cli``. Raises ``ValueError`` with a
+    concrete message the API layer surfaces as 422.
 
     - Empty pool is rejected (use ``None`` to clear).
     - Each entry's provider must be on the allow-list.
+    - Each entry's ``cli`` (after the ``DEFAULT_POOL_CLI`` default)
+      must be on the agentic_cli registry's CLI allow-list — keeps
+      the per-CLI quota axis from silently degrading on a typo.
     - ``drempel`` must be in ``(0, 1]`` — 0 would always be "above
       threshold" (silently disable the entry) and >1 disables the
       spillover entirely.
@@ -253,6 +353,7 @@ def _validate_entries(entries: list[PoolEntry]) -> None:
 def _serialize_entries(entries: list[PoolEntry]) -> str:
     payload = [
         {
+            "cli": e.resolved_cli,
             "provider": e.provider,
             "model": e.model, "drempel": e.drempel,
         }
@@ -274,10 +375,12 @@ def _deserialize_entries(value: str) -> list[PoolEntry] | None:
     for raw in parsed:
         if not isinstance(raw, dict):
             return None
-        # Migration shim (kaart 0b3ad6e2…): pre-fix rows carried a `cli`
-        # field on every entry. ``PoolEntry.cli` is gone, so the field
-        # is silently stripped on read instead of wedging the
-        # dispatcher on a legacy KanbanMeta row.
+        # kaart 8f40d443…: ``cli`` is again a first-class field on
+        # ``PoolEntry``. Pre-kaart-8f40d443 rows that lack a ``cli``
+        # key (or whose ``cli`` is ``None``) get back-filled with
+        # ``DEFAULT_POOL_CLI`` so the historical claude-code-only
+        # pools keep working without manual surgery.
+        cli = raw.get("cli") or DEFAULT_POOL_CLI
         provider = raw.get("provider")
         model = raw.get("model")
         drempel = raw.get("drempel")
@@ -288,7 +391,8 @@ def _deserialize_entries(value: str) -> list[PoolEntry] | None:
         if not isinstance(drempel, (int, float)):
             return None
         out.append(PoolEntry(
-            provider=provider, model=model, drempel=float(drempel),
+            cli=cli, provider=provider,
+            model=model, drempel=float(drempel),
         ))
     return out
 

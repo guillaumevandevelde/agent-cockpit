@@ -469,22 +469,28 @@ class ActiveSubscriptionOverrideRequest(BaseModel):
 class SubscriptionPoolEntry(BaseModel):
     """One entry in the subscription pool (fase 1b).
 
-    The pool always routes through the single supported CLI (see
-    ``subscription_pool.POOL_CLI``); the ``cli`` field that earlier
-    builds carried was dropped in kaart 0b3ad6e2… because the
-    dispatcher never consumed it (analysis §3 D3). ``provider`` is the
-    vendor the CLI authenticates against (validated against the same
-    allow-list as the active-subscription-override). ``model`` is
-    optional — ``None`` leaves the dispatch precedence chain (column
-    default / card model / persona) to fill it in. ``drempel`` is the
-    fraction (0..1] at which the router considers this entry "full"
-    and spills to the next entry.
+    Kaart 8f40d443…: the per-entry ``cli`` field is back and
+    **consumed** by the router. ``cli`` is the spawn transport the
+    entry targets (``"claude-code"``, ``"codex-cli"``,
+    ``"copilot-cli"``, ``"mimo-code"``, ``"open-code"``); ``cli=None``
+    falls back to ``subscription_pool.DEFAULT_POOL_CLI`` so the
+    common claude-code case keeps building without ceremony. The
+    previously-removed cli field (kaart 0b3ad6e2…) is required again
+    so OpenCode/Codex-spawned sessions consult their own quota axis
+    instead of silently riding the claude-code one.
 
-    Legacy payloads that still include a ``cli`` field on each entry
-    are accepted by the migration shim in
-    ``subscription_pool._deserialize_entries``; the field is silently
-    stripped on read so a stored row written by a pre-fix build still
-    loads without manual data surgery."""
+    ``provider`` is the vendor the CLI authenticates against
+    (validated against the same allow-list as the
+    active-subscription-override). ``model`` is optional — ``None``
+    leaves the dispatch precedence chain (column default / card model
+    / persona) to fill it in. ``drempel`` is the fraction (0..1] at
+    which the router considers this entry "full" and spills to the
+    next entry.
+
+    Legacy payloads that omit ``cli`` are accepted by the deserialiser
+    shim — the field is back-filled with ``DEFAULT_POOL_CLI`` on read
+    so a row written by a pre-kaart-8f40d443 build still loads."""
+    cli: str | None = None
     provider: str
     model: str | None = None
     drempel: float
@@ -511,7 +517,7 @@ class SubscriptionPoolRequest(BaseModel):
             return None
         return [
             PoolEntry(
-                provider=e.provider,
+                cli=e.cli, provider=e.provider,
                 model=e.model, drempel=e.drempel,
             )
             for e in self.pool
