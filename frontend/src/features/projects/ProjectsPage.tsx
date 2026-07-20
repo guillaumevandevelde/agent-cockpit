@@ -8,6 +8,7 @@ import { useProjectContext } from '@/contexts/ProjectContext';
 import { ProjectList } from './ProjectList';
 import { ProjectDiscovery } from './ProjectDiscovery';
 import { AddProjectDialog } from './AddProjectDialog';
+import { WachtrijSection } from './components/WachtrijSection';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { RefreshButton } from '@/components/shared/RefreshButton';
@@ -98,6 +99,12 @@ export function ProjectsPage() {
       )}
 
       <AddProjectDialog open={showAddFolder} onOpenChange={setShowAddFolder} />
+
+      {/* "Wacht op jou" — PO-facing aggregation of human-blocked items across
+          all tracked projects. Sits above the project list so the highest-
+          leverage action (answer a waiting question) is the first thing the
+          PO sees on landing. See kanban card `c7ea21b0…`. */}
+      <WachtrijSection />
 
       {error && (
         <Card className="border-destructive">
