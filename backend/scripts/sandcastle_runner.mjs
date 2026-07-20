@@ -166,7 +166,7 @@ function securityFromConfig(config) {
 }
 
 // Helper to create sandbox provider
-async function createSandboxProvider(providerType, dockerImage, security = {}) {
+async function createSandboxProvider(providerType, dockerImage, security = {}, env = undefined) {
   // Auto-mount Claude credentials for subscription-based auth. Note: this gives the
   // sandboxed agent your Claude account token; the secure compose keeps the agent on
   // an isolated network to limit exfiltration risk.
@@ -194,6 +194,10 @@ async function createSandboxProvider(providerType, dockerImage, security = {}) {
   const providerOpts = { imageName: dockerImage, mounts };
   if (typeof security.cpus === "number") providerOpts.cpus = security.cpus;
   if (security.network) providerOpts.network = security.network;
+  // Project-scoped secrets resolved by the dispatcher from the SecretStore,
+  // injected as container env vars (never the host's environment). Only set
+  // when non-empty so a run without secrets keeps the provider default.
+  if (env && Object.keys(env).length > 0) providerOpts.env = env;
 
   switch (providerType) {
     case "docker": {
@@ -257,7 +261,8 @@ async function executeRun(sandcastle, config, runConfig) {
   const sandboxProvider = await createSandboxProvider(
     config.sandbox_provider,
     config.docker_image,
-    securityFromConfig(config)
+    securityFromConfig(config),
+    config.env
   );
 
   const agentOptions = {};
@@ -266,7 +271,7 @@ async function executeRun(sandcastle, config, runConfig) {
   } else {
     agentOptions.model = "sonnet";
   }
-  
+
   const agentProvider = await createAgentProvider(
     sandcastle,
     config.agent_provider,
@@ -335,7 +340,8 @@ async function executeParallelRuns(sandcastle, config, runs) {
     const sandboxProvider = await createSandboxProvider(
       config.sandbox_provider,
       config.docker_image,
-      securityFromConfig(config)
+      securityFromConfig(config),
+      config.env
     );
     
     const agentOptions = {};

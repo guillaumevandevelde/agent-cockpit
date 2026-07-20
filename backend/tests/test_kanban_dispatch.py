@@ -2701,6 +2701,112 @@ def test_sandcastle_transport_raises_with_counter_ceiling_message(monkeypatch):
     assert "not the binding constraint" in msg.lower() or "not the binding" in msg.lower()
 
 
+def test_sandcastle_transport_injects_project_scoped_secrets(monkeypatch):
+    """The sandcastle transport resolves the project's SecretStore secrets and
+    forwards them to start_run so they reach the container as env vars.
+
+    risk_class-driven defaults route product/untrusted projects to sandcastle,
+    so this is the transport where per-project secret isolation matters most.
+    """
+    import app.services.scheduling.session_registry as sreg
+
+    reg = sreg.SessionRegistry(max_sessions=10)
+    monkeypatch.setattr(sreg, "session_registry", reg)
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda d: "proj-A")
+    monkeypatch.setattr(
+        dispatch, "_resolve_project_secrets",
+        lambda pk: {"API_TOKEN": "secret-A"} if pk == "proj-A" else {},
+    )
+
+    captured = {}
+
+    class FakeService:
+        async def start_run(self, *, project_path, prompt, branch_name, extra_env=None):
+            captured["extra_env"] = extra_env
+            captured["project_path"] = project_path
+            return SimpleNamespace(id=1)
+
+    import app.services.sandcastle_service as scmod
+    monkeypatch.setattr(scmod, "sandcastle_service", FakeService())
+
+    # No running loop => the transport runs _start() to completion via asyncio.run.
+    result = dispatch.sandcastle_transport(
+        directory="/projects/A", prompt="hi", session_name="k-a-abcd",
+    )
+
+    assert result["transport"] == "sandcastle"
+    assert captured["extra_env"] == {"API_TOKEN": "secret-A"}
+
+
+def test_sandcastle_transport_secrets_do_not_leak_across_projects(monkeypatch):
+    """Project A's secrets never reach project B's spawn — each resolves its own."""
+    import app.services.scheduling.session_registry as sreg
+
+    reg = sreg.SessionRegistry(max_sessions=10)
+    monkeypatch.setattr(sreg, "session_registry", reg)
+
+    per_project_secrets = {
+        "proj-A": {"API_TOKEN": "secret-A"},
+        "proj-B": {"API_TOKEN": "secret-B"},
+    }
+    dir_to_key = {"/projects/A": "proj-A", "/projects/B": "proj-B"}
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda d: dir_to_key[d])
+    monkeypatch.setattr(
+        dispatch, "_resolve_project_secrets",
+        lambda pk: dict(per_project_secrets.get(pk, {})),
+    )
+
+    seen = []
+
+    class FakeService:
+        async def start_run(self, *, project_path, prompt, branch_name, extra_env=None):
+            seen.append((project_path, extra_env))
+            return SimpleNamespace(id=len(seen))
+
+    import app.services.sandcastle_service as scmod
+    monkeypatch.setattr(scmod, "sandcastle_service", FakeService())
+
+    dispatch.sandcastle_transport(directory="/projects/A", prompt="a", session_name="k-a-0001")
+    dispatch.sandcastle_transport(directory="/projects/B", prompt="b", session_name="k-b-0002")
+
+    assert ("/projects/A", {"API_TOKEN": "secret-A"}) in seen
+    assert ("/projects/B", {"API_TOKEN": "secret-B"}) in seen
+    # No cross-contamination: B's spawn never saw A's token.
+    b_env = next(env for path, env in seen if path == "/projects/B")
+    assert b_env == {"API_TOKEN": "secret-B"}
+
+
+def test_resume_transport_reinjects_project_scoped_secrets(monkeypatch):
+    """A resume spawns a fresh tmux session with env rebuilt from scratch, so
+    project-scoped secrets must be re-injected — same as worktree/sandcastle."""
+    import app.services.scheduling.session_registry as sreg
+
+    reg = sreg.SessionRegistry(max_sessions=10)
+    monkeypatch.setattr(sreg, "session_registry", reg)
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda d: "proj-A")
+    monkeypatch.setattr(
+        dispatch, "_resolve_project_secrets",
+        lambda pk: {"API_TOKEN": "secret-A"} if pk == "proj-A" else {},
+    )
+
+    captured = {}
+
+    def fake_spawn_session(cli_id, options, *, session_name=None, project_key=None,
+                           runtime=None, extra_env=None, **kwargs):
+        captured["extra_env"] = extra_env
+        return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
+
+    import app.services.runs.spawn as spawnmod
+    monkeypatch.setattr(spawnmod, "spawn_session", fake_spawn_session)
+
+    transport = dispatch.make_resume_transport(
+        session_id="abc-123", project_folder="-home-user-repo",
+    )
+    transport(directory="/projects/A", prompt="continue", session_name="k-a-abcd")
+
+    assert captured["extra_env"] == {"API_TOKEN": "secret-A"}
+
+
 def test_make_resume_transport_raises_with_counter_ceiling_message(monkeypatch):
     """Resume transport uses the same cause-aware message builder."""
     import app.services.scheduling.session_registry as sreg

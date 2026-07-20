@@ -295,8 +295,16 @@ class SandcastleService:
         config_id: int | None = None,
         branch_name: str | None = None,
         max_iterations: int | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> SandcastleRun:
-        """Start a new sandcastle run."""
+        """Start a new sandcastle run.
+
+        ``extra_env`` carries project-scoped secrets (resolved by the dispatcher
+        from the ``SecretStore``) that must reach the agent *inside the
+        container* — never the backend's ``os.environ``. They are threaded into
+        the run-config JSON and injected as the sandbox provider's ``env`` by
+        ``sandcastle_runner.mjs`` (docker/podman/no-sandbox all support it).
+        """
         async with AsyncSessionLocal() as session:
             # Get config
             if config_id:
@@ -332,7 +340,7 @@ class SandcastleService:
             await session.refresh(run)
 
             # Start the run in background
-            asyncio.create_task(self._execute_run(run.id, config, branch_name, max_iterations))
+            asyncio.create_task(self._execute_run(run.id, config, branch_name, max_iterations, extra_env))
 
             return run
 
@@ -392,6 +400,7 @@ class SandcastleService:
         config: SandcastleConfig,
         branch_name: str | None = None,
         max_iterations: int | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> None:
         """Execute a sandcastle run via Node.js subprocess."""
         async with AsyncSessionLocal() as session:
@@ -414,7 +423,7 @@ class SandcastleService:
                 await self._ensure_sandbox_image_ready(config)
 
                 # Build the command
-                cmd = self._build_run_command(config, run, branch_name, max_iterations)
+                cmd = self._build_run_command(config, run, branch_name, max_iterations, extra_env)
 
                 # Create log file
                 log_dir = Path(config.project_path) / ".sandcastle" / "logs"
@@ -505,6 +514,7 @@ class SandcastleService:
         run: SandcastleRun,
         branch_name: str | None,
         max_iterations: int | None,
+        extra_env: dict[str, str] | None = None,
     ) -> list[str]:
         """Build the Node.js command to execute sandcastle."""
         # Create a temporary config file for this run
@@ -525,6 +535,10 @@ class SandcastleService:
             "network": _network_option(getattr(config, "network_mode", None)),
             "container_run_flags": _container_security_flags(config),
             "egress_allowlist": getattr(config, "egress_allowlist", None),
+            # Project-scoped secrets injected into the sandbox container as env
+            # vars (never the backend's os.environ). The runner passes these to
+            # the sandbox provider's `env` option. Empty dict => no injection.
+            "env": extra_env or {},
         }
 
         # Write config to temp file

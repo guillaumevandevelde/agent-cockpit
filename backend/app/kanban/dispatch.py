@@ -2043,12 +2043,20 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
     # when the run finishes (_execute_run), or immediately if start_run fails.
     session_registry.reserve_external(session_name)
 
+    # Project-scoped secrets reach the sandbox container as env vars (never the
+    # backend's os.environ). risk_class-driven defaults route product/untrusted
+    # projects here, so this is the transport where per-project secret isolation
+    # actually matters. Best-effort: no store / no passphrase -> {}.
+    project_key = safe_resolve_project_key(directory)
+    extra_env = _resolve_project_secrets(project_key)
+
     async def _start():
         try:
             return await sandcastle_service.start_run(
                 project_path=directory,
                 prompt=prompt,
                 branch_name=session_name,
+                extra_env=extra_env,
             )
         except Exception:
             session_registry.release_external(session_name)
@@ -4269,12 +4277,21 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
         # registered project root. Falls back to None on failure so the
         # resume still works; the audit hook will skip logging in that case.
         project_key = safe_resolve_project_key(directory)
+        # A resume spawns a *fresh* tmux session whose env is rebuilt from
+        # scratch via `-e` flags (spawn_session never inherits the backend's
+        # os.environ, and the original spawn's env does not carry over to the
+        # new process). So project-scoped secrets must be re-injected here or a
+        # resumed session would silently lose them — the same wiring the
+        # worktree and sandcastle transports already do. Best-effort: no store
+        # / no passphrase -> {}.
+        extra_env = _resolve_project_secrets(project_key)
         result = spawn_session(
             cli_id,
             options,
             session_name=session_name,
             project_key=project_key,
             runtime="worktree",
+            extra_env=extra_env,
         )
         # Track the spawn so the dispatch reaper can detect a resumed session
         # that immediately hits a 429 Token Plan limit and never initialises
