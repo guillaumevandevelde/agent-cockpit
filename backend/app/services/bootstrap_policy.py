@@ -1,17 +1,18 @@
-"""Prototype ``BootstrapPolicy`` — the centralised "cockpit-defaults" of repo-bootstrap.
+"""``BootstrapPolicy`` — the centralised "cockpit-defaults" of repo-bootstrap.
 
-This is a **design-only prototype** (facet-B follow-up #5 of
-``docs/cockpit/repo-provisioning-bootstrap.md`` §6). It concentrates the policy
-toggles from §4.3 of that analysis in one typed dataclass so the bootstrap
-implementation cards (atomic-init, blueprint-apply, gh-remote, …) reconcile against
-a single source of truth instead of each re-deciding the same defaults.
+Facet-B follow-up #5 of ``docs/cockpit/repo-provisioning-bootstrap.md`` §6. It
+concentrates the policy toggles from §4.3 of that analysis in one typed dataclass so
+the bootstrap implementation cards (atomic-init, blueprint-apply, gh-remote, …)
+reconcile against a single source of truth instead of each re-deciding the same
+defaults.
 
-**It is intentionally not imported by any production module yet.** The runtime wiring
-(loading a policy from config, threading it through ``RepoBootstrapService``,
-policy-resolution unit tests) lands in the implementation card that consumes this
-prototype — see ``docs/cockpit/bootstrap-policy.md`` for the full decision rationale
-and the consuming-card matrix. Until then this file only has to *compile* as valid
-types; it carries no behaviour.
+**It is now consumed by the new-project birth flow.** ``InceptionService`` (facet A's
+``create_project_from_intake``) threads a ``BootstrapPolicy`` through the birth so that
+autodispatch-at-birth, the MIT license default, the first-commit-template choice and
+the no-CI-at-birth stance come from this policy instead of ad-hoc code-path defaults;
+``RepoBootstrapService.init_local`` also accepts a policy to write the LICENSE. See
+``docs/cockpit/bootstrap-policy.md`` for the full decision rationale and the
+consuming-card matrix.
 
 Field → decision mapping (see ``bootstrap-policy.md`` §1):
 
@@ -115,3 +116,47 @@ class BootstrapPolicy:
 #: The out-of-the-box cockpit defaults. A convenience singleton for consumers that want
 #: "just the defaults" without constructing their own instance.
 COCKPIT_DEFAULT_POLICY = BootstrapPolicy()
+
+
+#: Full MIT license body (§1.6). ``{year}`` / ``{holder}`` are substituted at render
+#: time. Kept verbatim from the SPDX MIT reference text so a birthed repo ships a
+#: legally-standard LICENSE, not a paraphrase.
+MIT_LICENSE_TEMPLATE = """\
+MIT License
+
+Copyright (c) {year} {holder}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
+
+def render_license(policy: BootstrapPolicy, *, holder: str, year: int) -> str | None:
+    """Render the ``LICENSE`` body for ``policy`` (§1.6), or ``None`` for no file.
+
+    * ``policy.license is None`` → ``None`` (proprietary/internal: write no LICENSE).
+    * ``policy.license == "MIT"`` → the full MIT text with ``holder`` / ``year`` filled in.
+    * any other SPDX id → a minimal header naming the id. We only ship the full MIT
+      body today; other ids are a valid opt-in but the caller supplies their own text
+      if they need the complete license.
+    """
+    if policy.license is None:
+        return None
+    if policy.license == "MIT":
+        return MIT_LICENSE_TEMPLATE.format(year=year, holder=holder)
+    return f"{policy.license} License\n\nCopyright (c) {year} {holder}\n"

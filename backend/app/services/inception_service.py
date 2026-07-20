@@ -25,7 +25,8 @@ import logging
 import shutil
 import subprocess
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -38,9 +39,21 @@ from app.kanban.project_key import resolve_project_key
 from app.models.database import Project
 from app.models.schemas import ProjectCreate
 from app.services.blueprint import Blueprint, BlueprintService, BlueprintServiceError
+from app.services.bootstrap_policy import (
+    COCKPIT_DEFAULT_POLICY,
+    BootstrapPolicy,
+    render_license,
+)
 from app.services.project_service import ProjectService
 
 logger = logging.getLogger(__name__)
+
+
+# The birth flow is the human-approved intake path (see bootstrap-policy.md §1.1):
+# a human just approved the intake, so autodispatch-at-birth opts in to ``True`` even
+# though the safe policy default (for non-intake callers) is ``False``. Every other
+# field inherits the cockpit defaults (MIT license, first-commit-template, no CI).
+_INTAKE_DEFAULT_POLICY = replace(COCKPIT_DEFAULT_POLICY, autodispatch_default=True)
 
 
 # Marker deliverable kind used to wire a child card back to its parent's plan
@@ -72,14 +85,22 @@ class InceptionService:
 
     async def create_project_from_intake(
         self, *, intake_card_id: str, project_name: str, target_path: str,
+        policy: BootstrapPolicy | None = None,
     ) -> dict:
         """See module docstring for the 6-step contract.
+
+        ``policy`` supplies the ``BootstrapPolicy`` (bootstrap-policy.md) that governs
+        the birth: autodispatch-at-birth (§1.1), the LICENSE default (§1.6), the
+        first-commit-template choice (§1.3) and the no-CI-at-birth stance (§1.5). When
+        omitted it defaults to ``_INTAKE_DEFAULT_POLICY`` — the cockpit defaults with
+        autodispatch opted in, since a human just approved the intake.
 
         Raises:
             ValueError: card not found, or card is not in the intake column.
             FileExistsError: target_path already exists on disk.
             RuntimeError: git init failed.
         """
+        policy = policy or _INTAKE_DEFAULT_POLICY
         target = Path(target_path).resolve()
 
         # ---- step 1: validate intake card ---------------------------------
@@ -162,6 +183,18 @@ class InceptionService:
                     f"blueprint apply failed at {target}: {exc}"
                 ) from exc
 
+            # ---- step 4b: LICENSE + first commit (BootstrapPolicy) ----------
+            # §1.6: write the policy's LICENSE (MIT by default; None → no file).
+            # §1.5: no CI at birth — ``policy.ci_bootstrap`` is False, so we copy
+            # no ``.github/workflows/`` (that is facet-D's CITemplateService).
+            # §1.3: capture the rendered template tree (.gitignore/README from any
+            # template + CLAUDE.md/.claude seed + LICENSE) in one first commit so
+            # the birthed repo is branchable. A failure here unwinds via the
+            # rmtarget closure registered in step 2.
+            self._write_license(target, policy, project_name)
+            if policy.first_commit_content == "template":
+                self._first_commit(target, policy, project_name, intake_card_id)
+
             # ---- step 5: ProjectService.add_project ------------------------
             # add_project commits internally; rollback below handles the
             # failure case via _delete_project (separate path because we
@@ -178,7 +211,9 @@ class InceptionService:
             # set_autodispatch only flushes — safe to rollback via the
             # kanban session's transaction.
             new_project_key = resolve_project_key(str(target))
-            await dispatch.set_autodispatch(self.kanban, new_project_key, True)
+            await dispatch.set_autodispatch(
+                self.kanban, new_project_key, policy.autodispatch_default
+            )
             rollback_actions.append(
                 _set_autodispatch_factory(new_project_key, False)
             )
@@ -299,6 +334,69 @@ class InceptionService:
                 except Exception:
                     logger.exception("inception rollback cleanup failed")
             raise
+
+    # ------------------------------------------------------------------
+    # BootstrapPolicy step helpers (LICENSE + first commit)
+    # ------------------------------------------------------------------
+
+    def _write_license(
+        self, target: Path, policy: BootstrapPolicy, project_name: str
+    ) -> None:
+        """Write ``LICENSE`` from ``policy`` (§1.6), or nothing when disabled."""
+        holder = policy.copyright_holder or self._git_user_name() or project_name
+        body = render_license(policy, holder=holder, year=datetime.now(UTC).year)
+        if body is not None:
+            (target / "LICENSE").write_text(body)
+
+    def _first_commit(
+        self, target: Path, policy: BootstrapPolicy, project_name: str,
+        intake_card_id: str,
+    ) -> None:
+        """Configure a local git identity and capture the birth tree in one commit.
+
+        The birthed repo has no committer configured (the ad-hoc ``git init`` in
+        step 3 does not touch ``--global``), so we pin a per-repo dummy identity —
+        never the user's machine-wide config — just for the bootstrap commit.
+        """
+        message = policy.first_commit_message.format(
+            project_name=project_name, intake_card_id=intake_card_id,
+        )
+        try:
+            subprocess.run(
+                ["git", "-C", str(target), "config", "user.name", "Repo Bootstrap"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(target), "config", "user.email",
+                 "repo-bootstrap@localhost"],
+                capture_output=True, text=True, timeout=5, check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(target), "add", "."],
+                capture_output=True, text=True, timeout=10, check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(target), "commit", "-m", message],
+                capture_output=True, text=True, timeout=15, check=True,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                FileNotFoundError) as exc:
+            raise RuntimeError(
+                f"first commit failed at {target}: {exc}"
+            ) from exc
+
+    @staticmethod
+    def _git_user_name() -> str | None:
+        """Best-effort ``git config user.name`` for the LICENSE copyright holder."""
+        try:
+            result = subprocess.run(
+                ["git", "config", "user.name"],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        name = result.stdout.strip()
+        return name or None
 
 
 # ---- rollback helpers ------------------------------------------------------
