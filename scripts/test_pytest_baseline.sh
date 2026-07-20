@@ -36,10 +36,21 @@ check "pytest-baseline.sh --help mentions Usage" \
     'echo "$out1" | grep -qE "Usage:"'
 check "pytest-baseline.sh --help mentions --regen" \
     'echo "$out1" | grep -qE "\-\-regen"'
+# Regression guard for the FULL-SUITE-scoping caveat added per kanban
+# card 446efe9b. Without this grep a future docstring cleanup (or a
+# script that rebalances what `--help` prints by truncating at the first
+# blank line) silently strips the user-facing safety message about
+# order-dependent tests being reported as NEW. Same shape as the other
+# Task 1 greps — no new test framework needed; this just locks the
+# caveat text into the harness.
+check "pytest-baseline.sh --help mentions FULL-SUITE caveat" \
+    'echo "$out1" | grep -qE "FULL-SUITE"'
 
 out2=$(bash "$SCRIPT_DIR/pytest-compare.sh" --help 2>&1 || true)
 check "pytest-compare.sh --help mentions --pre-existing-only" \
     'echo "$out2" | grep -qE "\-\-pre-existing-only"'
+check "pytest-compare.sh --help mentions FULL-SUITE caveat" \
+    'echo "$out2" | grep -qE "FULL-SUITE"'
 
 # ----------------------------------------------------------------------------
 echo
