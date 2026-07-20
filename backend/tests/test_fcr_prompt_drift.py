@@ -106,6 +106,16 @@ CORE_FCR_INVARIANTS: list[tuple[str, str]] = [
         "carve-out: docs-only / analyst leaf-spike skips subagent-FCR",
         "Carve-out — docs-only / analyst leaf-spike",
     ),
+    # Subagent-type preference (kaart 27e743eb49d2480d8734f6ee3c484490):
+    # the default ``Agent`` fallback (``general-purpose``) trips "Prompt is
+    # too long" on long card descriptions. Both mirrors must steer the agent
+    # toward ``Explore`` first; if this anchor disappears from one mirror,
+    # the engineer persona and the dispatch prompt disagree about *which*
+    # subagent-type the FCR should use.
+    (
+        "FCR subagent-type preference: Explore default",
+        "Voorkeur-volgorde van subagent-type",
+    ),
 ]
 
 
