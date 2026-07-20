@@ -167,3 +167,10 @@ of het handmatige pad echt schuurt.
 
 Kaart 2 hangt aan 1 omdat het label "Paused" in de UI pas waar is zodra de
 backend `0` daadwerkelijk als blokkade leest; andersom zou de UI liegen.
+
+✅ Geïmplementeerd (kaart `18a97128…`): `ColumnSettingsDialog` schrijft nu `null`
+weg voor "geen per-kolom-limiet" (∞-knop), heeft een expliciete **Pause**-knop
+die `max_sessions=0` wegschrijft, en rendert de read-only regel als `∞` (null) /
+`Paused` (0) / `max n` (n>0). De stepper mag naar 0. Hulptekst + tooltips maken
+duidelijk dat pauzeren alleen nieuwe dispatches stopt en lopende sessies niet
+afbreekt. Vitest-dekking in `ColumnSettingsDialog.test.tsx`.
