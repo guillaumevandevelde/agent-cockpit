@@ -228,24 +228,48 @@ niet vanuit de hoofd-checkout.
 
 ### cwd-trap — git-mutaties op de verkeerde checkout
 
-Bash-cwd reset **niet** automatisch tussen tool-calls. Dat betekent: een
-`cd /home/vdvgu/claude-cockpit/...` in één `Bash`-call *blijft* hangen voor
-de rest van die call, maar een nieuwe `Bash`-call begint weer vanuit je
-worktree. De valkuil is dus **binnen één call**:
+Bash-cwd **persisteert** tussen tool-calls (per de Bash-tool-documentatie:
+"The working directory persists between commands"). Concreet betekent
+dit dat een `cd docs/cockpit` in call N meeneemt naar call N+1 — een
+daaropvolgende `cd docs/cockpit` faalt dan met
+`no such file or directory: docs/cockpit`, en een git-commando dat
+verwacht vanuit de worktree-root te draaien landt op de verkeerde plek.
+De valkuil is dus **tussen calls**, niet alleen binnen één call:
 `cd /home/vdvgu/claude-cockpit/backend && git stash` laat de `git stash`
-op de **gedeelde hoofd-checkout** landen — niet op jouw worktree. In een
-drukke sessie kan dat een andere tegelijk-draaiende sessie raken: haar
-werkboom verstoren, een merge-conflict veroorzaken die je niet aan jouw
-kaart kunt toeschrijven, of — in het slechtste geval — op `master` committen.
+op de **gedeelde hoofd-checkout** landen — niet op jouw worktree, omdat
+de hoofd-checkout op dat pad resideert. In een drukke sessie kan dat
+een andere tegelijk-draaiende sessie raken: haar werkboom verstoren,
+een merge-conflict veroorzaken die je niet aan jouw kaart kunt
+toeschrijven, of — in het slechtste geval — op `master` committen.
 
-Vuistregels:
+**Geverifieerde reproductie** (in deze sessie, huidige worktree):
+
+```bash
+# call 1 — één commando, persist-de-cwd-side-effect
+cd docs/cockpit && pwd
+# /home/vdvgu/.claude/worktrees/k-self-improve-e3a7/docs/cockpit
+
+# call 2 — verwacht worktree-root, krijgt docs/cockpit
+cd docs/cockpit && pwd
+# (eval):cd:1: no such file or directory: docs/cockpit
+```
+
+Vuistregels (harness-contract: cwd lekt tussen calls):
 
 - **Nooit** `cd /home/vdvgu/claude-cockpit/...` in een worktree-sessie —
   niet voor tests, niet voor tooling, niet "even tussendoor".
-- Run git altijd als `git -C <worktree>` of houd cwd binnen je worktree.
-- Run backend-tooling als
-  `/home/vdvgu/claude-cockpit/backend/venv/bin/{python,pytest,ruff}` vanuit
-  je worktree-cwd — geen `cd` naar de hoofd-checkout.
+- **Voor tijdelijke subdir-cd:** wikkel in een **subshell** zodat de
+  directorywissel niet lekt naar de volgende Bash-call:
+  `( cd backend && pytest tests/test_x.py )` of
+  `( cd docs/cockpit && ./scripts/foo.sh )`. De buitenste cwd blijft
+  je worktree-root.
+- **Voor absolute repo-root-commando's:** gebruik
+  `git -C /home/vdvgu/claude-cockpit/.claude/worktrees/<branch> ...`
+  in plaats van `cd <pad> && git ...`. Hetzelfde patroon werkt voor
+  andere tools die expliciet een werkboom accepteren.
+- **Voor backend-tooling:** draai als
+  `/home/vdvgu/claude-cockpit/backend/venv/bin/{python,pytest,ruff}`
+  vanuit je worktree-cwd (geen `cd` nodig).
 
 (CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$TMP/merge-$$"`-patroon
 voor de merge-stap — de slot-naam `merge-$$` (per-proces uniek) voorkomt dat
