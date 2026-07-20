@@ -81,6 +81,7 @@ class SpawnRequest(BaseModel):
     aws_profile: str | None = None
     bedrock_model: str | None = None
     minimax_base_url: str | None = None
+    endpoint_name: str | None = None
     host_id: int | None = None
     agent: str | None = None
     context_tier: str | None = None
@@ -173,6 +174,154 @@ def set_minimax_credentials(request: MinimaxCredentialsRequest):
 def clear_minimax_credentials():
     minimax_credentials.clear_minimax_api_key()
     return {"configured": False}
+
+
+# ---- Anthropic-compatible endpoint registry ------------------------------
+#
+# ``PROVIDER_COMPATIBLE`` (see ``app.services.agentic_cli.provider_env``) is
+# the data-driven branch: a row of {name, base_url, model, credential_name}
+# stored per project_key, no provider-side code changes per new upstream.
+# The list endpoint feeds the NewSessionDialog's vendor-provider select
+# (which used to hardcode ``'anthropic' | 'bedrock' | 'minimax'``). The
+# actual credential lookup stays server-side; the response deliberately
+# omits any secret and only echoes back the *name* of the credential so
+# the UI can render a "configured / not configured" hint without ever
+# receiving the key.
+
+
+class EndpointResponse(BaseModel):
+    name: str
+    base_url: str
+    model: str
+    credential_name: str | None = None
+    credential_configured: bool = False
+
+
+class EndpointListResponse(BaseModel):
+    endpoints: list[EndpointResponse]
+
+
+class EndpointUpsertRequest(BaseModel):
+    name: str
+    base_url: str
+    model: str
+    credential_name: str | None = None
+
+
+def _credential_configured(credential_name: str | None) -> bool:
+    """Is the named credential resolvable for this server?
+
+    Mirrors the MiniMax status semantics (``bool(settings.minimax_api_key)``):
+    a non-None credential_name is "configured" only when the secret store
+    (or, for the MiniMax legacy path, ``Settings``) actually has a value.
+    For an MVP the only credential the backend knows about is MiniMax's,
+    so a non-MiniMax endpoint without a value in ``Settings`` is reported
+    as ``credential_configured=False`` even when a SecretStore row exists
+    for it — the SecretStore-backed lookup is wired in a follow-up card
+    so this endpoint stays honest today (no false positives).
+    """
+    if not credential_name:
+        return False
+    if credential_name == "minimax":
+        return bool(settings.minimax_api_key)
+    # Future: SecretStore-backed lookup (kaart follow-up #4).
+    return False
+
+
+@router.get("/platforms/endpoints", response_model=EndpointListResponse)
+async def list_endpoints_endpoint(
+    project_key: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return every configured Anthropic-compatible endpoint for the project.
+
+    ``credential_configured`` is computed server-side so the UI never has
+    to ask the user to paste a key — it only needs a "not configured"
+    hint, identical to the MiniMax ``configured`` boolean.
+
+    ``project_key`` is optional: callers without a project context (e.g.
+    the NewSessionDialog before the user picks a directory) pass nothing
+    and read the shared default bucket. Project-scoped callers pass
+    their resolved project_key and see only that project's endpoints.
+    """
+    from app.services.agentic_cli.endpoints import (
+        DEFAULT_PROJECT_KEY,
+    )
+    from app.services.agentic_cli.endpoints import (
+        list_endpoints as _list,
+    )
+
+    key = project_key or DEFAULT_PROJECT_KEY
+    endpoints = await _list(db, key)
+    return EndpointListResponse(
+        endpoints=[
+            EndpointResponse(
+                name=e.name,
+                base_url=e.base_url,
+                model=e.model,
+                credential_name=e.credential_name,
+                credential_configured=_credential_configured(e.credential_name),
+            )
+            for e in endpoints
+        ],
+    )
+
+
+@router.post("/platforms/endpoints", response_model=EndpointResponse)
+async def upsert_endpoint_endpoint(
+    request: EndpointUpsertRequest,
+    project_key: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Insert or overwrite a single endpoint. Validation lives at the
+    storage boundary (``endpoints.serialize_endpoint``) so a corrupt row
+    is refused with a 400 instead of wedging the dispatcher on a bad
+    KanbanMeta row."""
+    from app.services.agentic_cli.endpoints import (
+        DEFAULT_PROJECT_KEY,
+        Endpoint,
+    )
+    from app.services.agentic_cli.endpoints import (
+        upsert_endpoint as _upsert,
+    )
+    try:
+        ep = Endpoint(
+            name=request.name,
+            base_url=request.base_url,
+            model=request.model,
+            credential_name=request.credential_name,
+        )
+        await _upsert(db, project_key or DEFAULT_PROJECT_KEY, ep)
+        await db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return EndpointResponse(
+        name=ep.name,
+        base_url=ep.base_url,
+        model=ep.model,
+        credential_name=ep.credential_name,
+        credential_configured=_credential_configured(ep.credential_name),
+    )
+
+
+@router.delete("/platforms/endpoints/{name}", response_model=dict)
+async def delete_endpoint_endpoint(
+    name: str,
+    project_key: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.agentic_cli.endpoints import (
+        DEFAULT_PROJECT_KEY,
+    )
+    from app.services.agentic_cli.endpoints import (
+        delete_endpoint as _delete,
+    )
+    try:
+        await _delete(db, project_key or DEFAULT_PROJECT_KEY, name)
+        await db.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"deleted": True}
 
 
 @router.get("/token")
@@ -337,6 +486,63 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             from app.services.host_service import get_host as get_host_data
             host_data = await get_host_data(db, request.host_id)
 
+        # Resolve the named Anthropic-compatible endpoint (if any) into
+        # the explicit fields the provider-env builder expects. We do
+        # this here (and not inside ``spawn_session``) so the spawn
+        # service stays DB-free and the DB session lifetime stays in
+        # the request handler.
+        endpoint_base_url: str | None = None
+        endpoint_auth_token: str | None = None
+        endpoint_name = request.endpoint_name
+        if request.provider == "anthropic-compatible":
+            if not endpoint_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "anthropic-compatible provider requires endpoint_name; "
+                        "configure one via /api/v1/agent-bridge/platforms/endpoints"
+                    ),
+                )
+            from app.services.agentic_cli.endpoints import (
+                DEFAULT_PROJECT_KEY,
+            )
+            from app.services.agentic_cli.endpoints import (
+                get_endpoint as _get_endpoint,
+            )
+            endpoint = await _get_endpoint(db, DEFAULT_PROJECT_KEY, endpoint_name)
+            if endpoint is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"unknown endpoint {endpoint_name!r}",
+                )
+            endpoint_base_url = endpoint.base_url
+            # MVP credential resolution: only MiniMax's legacy .env-backed
+            # key is recognised here. SecretStore-backed lookup lands in
+            # the follow-up card so this path can stay honest today (no
+            # false positives that would let a CLI launch unauthenticated
+            # and silently 401 on the first request).
+            if endpoint.credential_name == "minimax" and settings.minimax_api_key:
+                endpoint_auth_token = settings.minimax_api_key
+            elif endpoint.credential_name:
+                # A named credential the backend can't currently resolve:
+                # surface a 400 so the user gets a clear error instead of
+                # a session that authenticates as anonymous.
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"endpoint {endpoint_name!r} requires credential "
+                        f"{endpoint.credential_name!r}, which is not configured"
+                    ),
+                )
+            # The endpoint's model is the per-endpoint default; the
+            # request-level ``model`` is the optional per-session override.
+            # Fall through to the endpoint default when the caller didn't
+            # pin one — keeps the provider-env builder happy (it requires
+            # a non-empty model) without forcing every client to repeat
+            # the endpoint's model on every spawn.
+            if not request.model:
+                request.model = endpoint.model
+
         options = SpawnCommandOptions(
             directory=request.directory,
             mode=request.mode,
@@ -359,6 +565,9 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
             minimax_base_url=request.minimax_base_url,
+            endpoint_name=endpoint_name,
+            endpoint_base_url=endpoint_base_url,
+            endpoint_auth_token=endpoint_auth_token,
             host_id=request.host_id,
             agent=request.agent,
             context_tier=request.context_tier,

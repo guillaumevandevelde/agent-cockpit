@@ -61,11 +61,12 @@ export interface SpawnSessionRequest {
   no_alt_screen?: boolean
   dangerously_bypass_approvals_and_sandbox?: boolean
   use_last?: boolean
-  provider?: 'anthropic' | 'bedrock' | 'minimax'
+  provider?: 'anthropic' | 'bedrock' | 'minimax' | 'anthropic-compatible'
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
   minimax_base_url?: string
+  endpoint_name?: string
   host_id?: number
   agent?: string
   context_tier?: string
@@ -114,6 +115,25 @@ export interface BulkResumeResponse {
 
 export interface ProviderStatusResponse {
   configured: boolean
+}
+
+export interface EndpointResponse {
+  name: string
+  base_url: string
+  model: string
+  credential_name: string | null
+  credential_configured: boolean
+}
+
+export interface EndpointListResponse {
+  endpoints: EndpointResponse[]
+}
+
+export interface EndpointUpsertRequest {
+  name: string
+  base_url: string
+  model: string
+  credential_name?: string | null
 }
 
 export interface KillSessionResponse {

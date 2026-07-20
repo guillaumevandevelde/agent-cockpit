@@ -44,6 +44,15 @@ class SpawnCommandOptions:
     aws_profile: str | None = None
     bedrock_model: str | None = None
     minimax_base_url: str | None = None
+    # Data-driven Anthropic-compatible endpoint (see
+    # ``app.services.agentic_cli.endpoints``): when ``provider ==
+    # "anthropic-compatible"`` the API layer resolves the named endpoint
+    # row and threads base_url + auth_token through here, so the
+    # provider-env builder never has to touch the DB. ``endpoint_name``
+    # is the slug from the registry; it stays here for audit logs.
+    endpoint_name: str | None = None
+    endpoint_base_url: str | None = None
+    endpoint_auth_token: str | None = None
     host_id: int | None = None
     agent: str | None = None
     context_tier: str | None = None

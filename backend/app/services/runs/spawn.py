@@ -217,6 +217,13 @@ def spawn_session(
         minimax_api_key=settings.minimax_api_key,
         minimax_base_url=options.minimax_base_url or settings.minimax_base_url,
         cli_id=cli.id,
+        # Data-driven Anthropic-compatible branch: ``endpoint_*`` are
+        # caller-resolved from the endpoints registry (the API layer
+        # owns the DB session so the spawn service stays sync). Passing
+        # ``None`` for unused fields is harmless — the builder only
+        # touches them on ``provider == PROVIDER_COMPATIBLE``.
+        base_url=options.endpoint_base_url,
+        auth_token=options.endpoint_auth_token,
     )
 
     # Build the explicit env dict for the spawned tmux session. Single

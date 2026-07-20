@@ -23,13 +23,19 @@ import { MODAL_SIZES } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { formatTimestamp } from '@/features/usage/utils'
 import { fetchHosts } from '@/features/hosts/api'
-import { spawnSession, fetchResumableSessions, bulkResumeSessions, fetchMinimaxProviderStatus } from './api'
+import {
+  spawnSession,
+  fetchResumableSessions,
+  bulkResumeSessions,
+  fetchMinimaxProviderStatus,
+  fetchEndpoints,
+} from './api'
 import { fetchCodexLaunchOptions } from '@/hooks/useProviders'
 import { Link } from 'react-router-dom'
 import { useProjectContext } from '@/contexts/ProjectContext'
 import { useProviderContext } from '@/contexts/ProviderContext'
 import type { AgenticCliId, CodexLaunchOptionsResponse } from '@/types/providers'
-import type { SpawnSessionRequest } from './types'
+import type { EndpointResponse, SpawnSessionRequest } from './types'
 import type { ResumableSession } from '@/types/sessions'
 import type { Host } from '@/features/hosts/types'
 import type { ProjectResponse } from '@/types/projects'
@@ -64,7 +70,7 @@ type CopilotRemote = 'default' | 'remote' | 'local'
 
 const PROVIDER_STORAGE_KEY = 'cc-bridge.provider'
 
-type VendorProvider = 'anthropic' | 'bedrock' | 'minimax'
+type VendorProvider = 'anthropic' | 'bedrock' | 'minimax' | 'anthropic-compatible'
 
 const MINIMAX_BASE_URL_INTERNATIONAL = 'https://api.minimax.io/anthropic'
 const MINIMAX_BASE_URL_CHINA = 'https://api.minimaxi.com/anthropic'
@@ -90,7 +96,10 @@ function loadRememberedProvider(): RememberedProvider {
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as Partial<RememberedProvider>
     const provider: VendorProvider =
-      parsed.provider === 'bedrock' ? 'bedrock' : parsed.provider === 'minimax' ? 'minimax' : 'anthropic'
+      parsed.provider === 'bedrock' ? 'bedrock'
+      : parsed.provider === 'minimax' ? 'minimax'
+      : parsed.provider === 'anthropic-compatible' ? 'anthropic-compatible'
+      : 'anthropic'
     return {
       provider,
       aws_region: typeof parsed.aws_region === 'string' ? parsed.aws_region : '',
@@ -144,6 +153,14 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
   const [bedrockModel, setBedrockModel] = useState('')
   const [minimaxBaseUrl, setMinimaxBaseUrl] = useState(MINIMAX_BASE_URL_INTERNATIONAL)
   const [minimaxConfigured, setMinimaxConfigured] = useState<boolean | null>(null)
+  // Data-driven vendor: the API lists named endpoints (see
+  // docs/cockpit/9router-integratie-analyse.md §6). The select picks a
+  // row, the base_url + model flow into the spawn payload verbatim, and
+  // the credential is resolved server-side (never reaching the
+  // browser). MiniMax keeps its own hardcoded branch — out of scope
+  // for this card.
+  const [endpoints, setEndpoints] = useState<EndpointResponse[]>([])
+  const [selectedEndpointName, setSelectedEndpointName] = useState<string>('')
   const [codexLaunchOptions, setCodexLaunchOptions] = useState<CodexLaunchOptionsResponse | null>(null)
   const [copilotAgent, setCopilotAgent] = useState('')
   const [copilotContextTier, setCopilotContextTier] = useState('')
@@ -243,6 +260,31 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     return () => { cancelled = true }
   }, [open, vendorProvider])
 
+  // Fetch the project's named Anthropic-compatible endpoints so the
+  // vendor-select can render data-driven rows (groq / 9router / litellm /
+  // …) instead of a hardcoded union. Backend resolves the project
+  // bucket; we don't ship the project_key here because the dialog isn't
+  // project-scoped until the user picks a directory.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    fetchEndpoints()
+      .then((data) => {
+        if (cancelled) return
+        setEndpoints(data.endpoints)
+        // Auto-select the first endpoint if the user previously had a
+        // valid one selected but it has since been deleted.
+        setSelectedEndpointName((current) => {
+          if (current && data.endpoints.some((e) => e.name === current)) {
+            return current
+          }
+          return data.endpoints[0]?.name ?? ''
+        })
+      })
+      .catch(() => { if (!cancelled) { setEndpoints([]); setSelectedEndpointName('') } })
+    return () => { cancelled = true }
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -313,6 +355,8 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       setSelectedHostId(null)
       setHosts([])
       setMinimaxConfigured(null)
+      setSelectedEndpointName('')
+      setEndpoints([])
       setCodexLaunchOptions(null)
       setCopilotAgent('')
       setCopilotContextTier('')
@@ -330,6 +374,7 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
       return directory.trim().length > 0 && (useLast || codexSessionId.trim().length > 0)
     }
     if (!isCodex && !isCopilot && mode === 'resume') return directory.trim().length > 0 && selectedSessionIds.size > 0
+    if (vendorProvider === 'anthropic-compatible' && !selectedEndpointName) return false
     return directory.trim().length > 0
   })()
 
@@ -340,6 +385,8 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
     try {
       const isBedrock = !isCopilot && vendorProvider === 'bedrock'
       const isMinimax = !isCodex && !isCopilot && vendorProvider === 'minimax'
+      const isCompatible = !isCodex && !isCopilot && vendorProvider === 'anthropic-compatible'
+      const selectedEndpoint = endpoints.find((e) => e.name === selectedEndpointName)
       try {
         localStorage.setItem(
           PROVIDER_STORAGE_KEY,
@@ -416,6 +463,10 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
         ...(isBedrock && bedrockModel.trim() && { bedrock_model: bedrockModel.trim() }),
         ...(isMinimax && { provider: 'minimax' as const }),
         ...(isMinimax && minimaxBaseUrl.trim() && { minimax_base_url: minimaxBaseUrl.trim() }),
+        ...(isCompatible && selectedEndpoint && {
+          provider: 'anthropic-compatible' as const,
+          endpoint_name: selectedEndpoint.name,
+        }),
         ...(selectedHostId !== null && { host_id: selectedHostId }),
       }
 
@@ -843,6 +894,9 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                   <SelectItem value="anthropic">Anthropic (default)</SelectItem>
                   <SelectItem value="bedrock">Amazon Bedrock</SelectItem>
                   {!isCodex && <SelectItem value="minimax">MiniMax</SelectItem>}
+                  {!isCodex && endpoints.length > 0 && (
+                    <SelectItem value="anthropic-compatible">Custom endpoint</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -896,6 +950,56 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+          )}
+
+          {!isCodex && !isCopilot && vendorProvider === 'anthropic-compatible' && (
+            <div className="space-y-3 rounded-md border border-border p-3">
+              {endpoints.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No endpoints configured. Add one on the{' '}
+                  <Link to="/subscriptions" className="underline hover:text-foreground">
+                    Subscriptions page
+                  </Link>
+                  .
+                </p>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label>Endpoint</Label>
+                    <Select
+                      value={selectedEndpointName}
+                      onValueChange={setSelectedEndpointName}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {endpoints.map((ep) => (
+                          <SelectItem key={ep.name} value={ep.name}>
+                            {ep.name} — {ep.model}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(() => {
+                    const selected = endpoints.find((e) => e.name === selectedEndpointName)
+                    if (!selected) return null
+                    if (selected.credential_configured) return null
+                    if (!selected.credential_name) return null
+                    return (
+                      <p className="text-xs text-muted-foreground">
+                        Credential <code>{selected.credential_name}</code> is not configured.{' '}
+                        <Link to="/subscriptions" className="underline hover:text-foreground">
+                          Set it up on the Subscriptions page
+                        </Link>
+                        .
+                      </p>
+                    )
+                  })()}
+                </>
+              )}
             </div>
           )}
 

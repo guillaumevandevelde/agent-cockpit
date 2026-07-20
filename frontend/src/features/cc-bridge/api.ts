@@ -10,6 +10,8 @@ import type {
   CCSessionsResponse,
   CCPreviewResponse,
   CCTokenResponse,
+  EndpointListResponse,
+  EndpointUpsertRequest,
   GitStatusResponse,
   SpawnSessionRequest,
   SpawnSessionResponse,
@@ -111,6 +113,32 @@ export async function clearMinimaxApiKey(): Promise<ProviderStatusResponse> {
   return apiClient<ProviderStatusResponse>(BASE + '/platforms/minimax/credentials', {
     method: 'DELETE',
   })
+}
+
+export async function fetchEndpoints(projectKey?: string): Promise<EndpointListResponse> {
+  return apiClient<EndpointListResponse>(
+    buildEndpoint(BASE + '/platforms/endpoints', { project_key: projectKey }),
+  )
+}
+
+export async function upsertEndpoint(
+  projectKey: string,
+  request: EndpointUpsertRequest,
+): Promise<EndpointListResponse['endpoints'][number]> {
+  return apiClient<EndpointListResponse['endpoints'][number]>(
+    buildEndpoint(BASE + '/platforms/endpoints', { project_key: projectKey }),
+    {
+      method: 'POST',
+      body: JSON.stringify(request),
+    },
+  )
+}
+
+export async function deleteEndpoint(projectKey: string, name: string): Promise<{ deleted: boolean }> {
+  return apiClient<{ deleted: boolean }>(
+    `${BASE}/platforms/endpoints/${encodeURIComponent(name)}${buildEndpoint('', { project_key: projectKey })}`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function bulkResumeSessions(request: BulkResumeRequest): Promise<BulkResumeResponse> {

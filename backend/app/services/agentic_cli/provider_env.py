@@ -6,7 +6,9 @@ never resolves or stores secrets: for Bedrock only non-secret
 configuration (region, profile name, model id) is set and the AWS SDK
 credential chain on the host resolves actual creds; for MiniMax the API
 key must be resolved by the caller (e.g. a secrets store) and passed in
-as ``minimax_api_key``.
+as ``minimax_api_key``; for the ``anthropic-compatible`` provider the
+endpoint (base_url + model) is caller-resolved configuration and the
+auth token is the caller-resolved credential (same convention).
 
 ``build_spawn_env`` is the single entry point for ``services/runs/spawn.py``
 (agent-bridge) and ``services/runs/cc_spawn.py`` (legacy CC-bridge) — both
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_BEDROCK = "bedrock"
 PROVIDER_MINIMAX = "minimax"
+PROVIDER_COMPATIBLE = "anthropic-compatible"
 
 CLAUDE_CODE_CLI_ID = "claude-code"
 
@@ -59,11 +62,14 @@ def build_provider_env(
     minimax_api_key: str | None = None,
     minimax_base_url: str | None = None,
     cli_id: str = CLAUDE_CODE_CLI_ID,
+    base_url: str | None = None,
+    auth_token: str | None = None,
 ) -> dict[str, str]:
     """Return the env vars for a provider selection (empty for Anthropic).
 
-    ``minimax_api_key`` is the caller-resolved credential (e.g. from a secrets
-    store); this function never hardcodes or looks up secrets itself.
+    ``minimax_api_key`` and ``auth_token`` are caller-resolved credentials
+    (e.g. from a secrets store); this function never hardcodes or looks up
+    secrets itself.
 
     CLAUDE_CODE_USE_BEDROCK and ANTHROPIC_MODEL are Claude-Code-specific and
     would be meaningless (or actively wrong) for any other CLI, so they
@@ -103,6 +109,35 @@ def build_provider_env(
         cleaned_key = _clean(minimax_api_key)
         if cleaned_key:
             env["ANTHROPIC_AUTH_TOKEN"] = cleaned_key
+        return env
+
+    if provider == PROVIDER_COMPATIBLE:
+        # Data-driven branch: ``base_url`` and ``model`` come from caller-
+        # resolved endpoint configuration (see
+        # ``app.services.agentic_cli.endpoints``). This module never looks
+        # up secrets — ``auth_token`` is the caller-resolved credential,
+        # mirroring the MiniMax convention. Both fields are required so the
+        # spawned CLI always points at an explicit endpoint (the same
+        # "no stale ambient env leak" discipline MiniMax uses); a missing
+        # base_url or model is a configuration error and raises here rather
+        # than silently falling back to the Anthropic API.
+        cleaned_base_url = _clean(base_url)
+        if not cleaned_base_url:
+            raise ValueError(
+                "anthropic-compatible provider requires a non-empty base_url",
+            )
+        cleaned_model = _clean(model)
+        if not cleaned_model:
+            raise ValueError(
+                "anthropic-compatible provider requires a non-empty model",
+            )
+        env = {
+            "ANTHROPIC_BASE_URL": cleaned_base_url,
+            "ANTHROPIC_MODEL": cleaned_model,
+        }
+        cleaned_token = _clean(auth_token)
+        if cleaned_token:
+            env["ANTHROPIC_AUTH_TOKEN"] = cleaned_token
         return env
 
     return {}
