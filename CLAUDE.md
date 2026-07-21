@@ -80,6 +80,7 @@ bash scripts/test_check_analysis_outcomes.sh              # Bash tests for check
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
 bash scripts/test_check_doc_links.sh                      # Bash tests for check-doc-links.sh
 bash scripts/test_check_kanban_conventions.sh             # Bash tests for check-kanban-conventions.sh (synthetic SQLite fixtures)
+bash scripts/test_check_litellm_hardening.sh              # Bash tests for check-litellm-hardening.sh (synthetic stdlib http.server fake proxy)
 bash scripts/test_check_problem_card_staleness.sh         # Bash tests for check-problem-card-staleness.sh
 bash scripts/test_check_schema_rename_coverage.sh         # Bash tests for check-schema-rename-coverage.sh
 bash scripts/test_check_test_harness_coverage.sh         # Bash tests for check-test-harness-coverage.sh

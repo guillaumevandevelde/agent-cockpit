@@ -342,8 +342,56 @@ Deze beslissing is niet "nooit". Heropen bij een van deze triggers:
 
 ---
 
+## 11. Operationele voorwaarde — hardening-check
+
+**Deze sectie is de operationele leeswijzer voor §11.2 van de herziening
+(2026-07-21, kaart `27cdc2bd…`)**. §11.2 zelf is elders in dit traject
+vastgelegd; deze §11 is de uitvoeringskant daarvan.
+
+De sidecar-GO op een LiteLLM-proxy (§6, vormgelijk aan de MiniMax-tak) staat
+of valt met vijf hardnekkige eigenschappen van die proxy: hij mag de prompt
+niet muteren, geen telemetry/callbacks naar buiten sturen, alleen op loopback
+luisteren, credentials in `os.environ/VAR` of een `credential_list` zetten
+(geen plaintext), en `master_key`-auth afdwingen. Een check die **één** daarvan
+mist is erger dan geen check — een groen-vinkje dat niets verifieert leidt tot
+stil vertrouwen.
+
+Daarom `scripts/check-litellm-hardening.sh` (kaart `94011364…`): een
+`check-*.sh`-vormige runtime-check (advisory standaard, `--strict` voor de
+gate) die **tegen een draaiende proxy** elk van de vijf eigenschappen
+verifieert. Drie checks via gedrag (de proxy endpoints, dus wat de proxy
+feitelijk doet): `/health/liveliness` als bereikbaarheidsbewijs,
+`ss -tln` op de poort als loopback-bewijs, en `POST /v1/messages` zonder
+`Authorization` als master-key-bewijs. Twee checks via de **geladen**
+configuratie — niet de aanwezigheid van een string in een bestand,
+maar de inhoud die de proxy daadwerkelijk binnenhaalt — geverifieerd met
+`--config-yaml <pad>` of `--master-key <key>`. Alle flag-namen komen uit de
+upstream LiteLLM docs (`success_callback`, `failure_callback`,
+`service_callbacks`, `callbacks`, `guardrails`, `router_settings.plugins`,
+`alerting`, `database_url`), niet uit een gok.
+
+Resultaat: `--strict` exit 1 bij een afwijking; advisory default exit 0 met
+uitgebreide `fix:`-regels onder elke FAIL. Vangnet: niet elke property kan
+zonder `--config-yaml` worden geverifieerd (geen `--master-key`-pad tegen de
+bekende `/api/v1/config`-leak); de check waarschuwt luid wanneer 3-5 worden
+overgeslagen in plaats van ze stiekem groen te kleuren.
+
+**Documentatieverplichting.** Het pilot-resultaat (`bbfcb365…`) en het
+schrijven van deze check (§11) zijn onlosmakelijk: zonder een groene check
+op een echte LiteLLM is de sidecar-route geen GO. De `iteration-loop verify`-preset
+draait de test van `test_check_litellm_hardening.sh` (33 asserts) als
+end-of-card-gate. Een afwijking in deze suite betekent **niet** "de check ligt
+eraan": het betekent de proxy ligt eraan, en die moet eerst worden gefikst
+voor de sidecar in productie kan.
+
+---
+
 **Meet-verantwoording.** Alle cijfers in §3 komen uit de GitHub-API op
 2026-07-19 (`gh api repos/decolua/9router`, `search/issues`, paginering-headers
 voor de PR-telling). De technische feiten in §2 komen uit de repo-tree en
 `next.config.mjs` op commit `0513bf39`, niet uit de README. De tokenbesparings-
-claim in §2.1 is **niet gemeten** en is als zodanig gelabeld.
+claim in §2.1 is **niet gemeten** en is als zodanig gelabeld. De §11-config-flag-namen
+(`success_callback`, `failure_callback`, `service_callbacks`, `guardrails`,
+`plugins`, `alerting`, `database_url`) zijn geverifieerd tegen de upstream
+LiteLLM-documentatie op 2026-07-21, niet uit de originele kaarttekst overgenomen
+(de kaart waarschuwt expliciet om zelf op te zoeken — kaart `94011364…`).
