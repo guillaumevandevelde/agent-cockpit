@@ -20,6 +20,7 @@ import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
 import { PROVIDERS, PROVIDER_LABELS, DEFAULT_MODEL_SUGGESTIONS, MINIMAX_MODEL_SUGGESTIONS, modelSuggestionsForProvider } from "../types";
 import type { KanbanColumn } from "../types";
+import { modelForProviderChange } from "../columnModel";
 
 const BACKLOG_COLUMN = "Backlog";
 const DEFAULT_PROVIDER_SENTINEL = "__default__";
@@ -228,7 +229,23 @@ export function ColumnSettingsDialog({
                   </Select>
                   <Select
                     value={editProvider}
-                    onValueChange={setEditProvider}
+                    onValueChange={(v) => {
+                      // Kaart 1782fa43… follow-up: switching provider must
+                      // clear the model when the current model doesn't fit
+                      // the new provider — otherwise the user can save
+                      // (provider=minimax, model=opus) and the column is
+                      // stuck on opus. The helper does the clear/keep
+                      // decision; see columnModel.ts.
+                      const resolved = v === DEFAULT_PROVIDER_SENTINEL ? null : v;
+                      const newSuggestions = resolved === "minimax"
+                        ? minimaxOptions
+                        : modelSuggestionsForProvider(resolved, modelOptions);
+                      setEditProvider(v);
+                      setEditModel(modelForProviderChange(
+                        editModel, editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider,
+                        resolved, newSuggestions,
+                      ));
+                    }}
                   >
                     <SelectTrigger className="w-40">
                       <SelectValue placeholder="Provider" />

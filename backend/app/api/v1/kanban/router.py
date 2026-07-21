@@ -188,14 +188,53 @@ async def update_column(column_id: str, payload: ColumnUpdate):
     # to None. Without exclude_unset, the silent drop in service.update_column
     # would make every "clear X" a no-op (the same gap that hid behind the
     # provider→cli rename in kaart ad15e0827… — don't reintroduce it).
+    patch = payload.model_dump(exclude_unset=True)
     async with KanbanSessionLocal() as s:
-        col = await service.update_column(
-            s, column_id, **payload.model_dump(exclude_unset=True),
-        )
+        # (provider, model) co-validation: a column with default_provider=minimax
+        # and default_model=opus would silently fall through to opus at dispatch
+        # time — the "stuck on opus" report behind kaart 1782fa43…. Reject the
+        # mismatch with 422 so the inconsistency can't land (kaart 1782fa43…
+        # follow-up). Validation is skipped when either side is null (the
+        # dispatch chain re-validates the resolved combo at spawn time) or when
+        # the provider has no model-options cache (e.g. bedrock).
+        if "default_provider" in patch or "default_model" in patch:
+            existing = await service.get_column(s, column_id)
+            if existing is None:
+                raise HTTPException(404, "column not found")
+            new_provider = patch.get("default_provider", existing.default_provider)
+            new_model = patch.get("default_model", existing.default_model)
+            if new_provider and new_model:
+                allowed = await _allowed_models_for_provider(s, new_provider)
+                if allowed is not None and new_model not in allowed:
+                    raise HTTPException(
+                        422,
+                        f"model {new_model!r} is not valid for provider "
+                        f"{new_provider!r}; known options: {allowed}",
+                    )
+        col = await service.update_column(s, column_id, **patch)
         if col is None:
             raise HTTPException(404, "column not found")
         await s.commit()
         return ColumnResponse.model_validate(col)
+
+
+async def _allowed_models_for_provider(session, provider: str) -> list[str] | None:
+    """Return the list of models the column-update validator accepts for a
+    given provider, or ``None`` when the provider has no model-options
+    cache and free-form model strings are allowed.
+
+    Provider→cache mapping mirrors ``dispatch.get_cached_model_options``
+    (claude-code aliases — sonnet/opus/haiku/…) and
+    ``dispatch.get_cached_minimax_model_options`` (discovered-from-JSONL).
+    Bedrock has no cache (AWS model ids are ARN-shaped, not the bare aliases
+    the cli returns); ``None`` means "no validation, accept any string".
+    """
+    from app.kanban import dispatch
+    if provider == "minimax":
+        return await dispatch.get_cached_minimax_model_options(session)
+    if provider == "anthropic":
+        return await dispatch.get_cached_model_options(session)
+    return None
 
 
 @router.delete("/columns/{column_id}", status_code=status.HTTP_204_NO_CONTENT)
