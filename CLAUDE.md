@@ -88,6 +88,7 @@ bash scripts/test_sweep_dangling_depends_on.sh             # Bash tests for swee
 bash scripts/test_sweep_dangling_plan_refs.sh             # Bash tests for sweep_dangling_plan_refs.py (synthetic SQLite fixtures)
 bash scripts/test_generate_doc_index.sh                    # Bash tests for generate-doc-index.py (synthetic frontmatter fixtures)
 bash scripts/test_worktree_gc.sh                          # Bash tests for worktree-gc.sh
+bash scripts/test_worktree_trap.sh                        # Bash tests for scripts/lib/worktree-trap.sh (mktemp-d cleanup trap)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
@@ -189,6 +190,17 @@ Done-kaart `d9447e49`).
   worktrees — alleen als (a) clean, (b) gemerged in master, en (c) niet
   vastgehouden door een actieve `agent:` claim (kaart niet in Done/Impediment).
   `cockpit.sh start` nudged wanneer leftovers bestaan.
+- **Harness-script scratch worktrees** moeten `scripts/lib/worktree-trap.sh`
+  sourcen en `with_scratch_worktree <repo> WT` gebruiken in plaats van
+  `WT="$(mktemp -d -p "$REPO_ROOT")/wt-$$"` + handmatige EXIT-trap. De naive
+  `mktemp -d -p` shape laat de `.tmp.<id>`-parent in de werkboom achter bij elke
+  iteratie (`ls` ziet 'm niet, dus accumulatie bleef onopgemerkt — kaart
+  `5c508644…` moest er zes handmatig `mv`-en). De helper bezit zowel het
+  worktree als zijn `tmp-<id>`-parent en ruimt beide op in alle EXIT-paden
+  (success, error, signal). Belangrijk: `with_scratch_worktree` moet in de
+  parent-shell draaien (redirect stdout naar een tempfile of lees een
+  globale variabele) — `$()` zandbakst het in een subshell waar de
+  geïnstalleerde trap verloren gaat.
 - **Geen lokale pre-push gate** (sinds 2026-07-05): full pytest + lint/build liep
   in CI (`quality.yml`). Backend pytest + ruff en frontend lint/test/build draaien
   in CI als backend/frontend-gate; draai zelf de frontend-checks voor ships die
