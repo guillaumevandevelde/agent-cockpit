@@ -92,6 +92,35 @@ check "subshell EXIT trap removed the tmp-<id> parent" \
 check "subshell EXIT trap removed the worktree subdir" '[ ! -e "$(cat "$OUT3" 2>/dev/null)" ]'
 rm -f "$OUT3"
 
+# A non-zero shell exit still runs EXIT cleanup.
+(
+  source "$LIB"
+  with_scratch_worktree "$REPO" WT >/dev/null
+  exit 17
+) || true
+check "non-zero exit leaves no tmp-* parent" \
+    '[ -z "$(cd "$REPO" && ls -d tmp-* 2>/dev/null || true)" ]'
+
+# A dispatched harness may be terminated by the supervisor. Verify that a TERM
+# signal reaches the EXIT cleanup instead of leaving the helper-owned parent.
+OUT_SIGNAL="$(mktemp)"
+bash -c '
+  source "$1"
+  with_scratch_worktree "$2" WT >/dev/null
+  printf "%s\n" "$WT" > "$3"
+  while :; do sleep 1; done
+' _ "$LIB" "$REPO" "$OUT_SIGNAL" &
+SIGNAL_PID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -s "$OUT_SIGNAL" ] && break
+    sleep 0.05
+done
+kill -TERM "$SIGNAL_PID"
+wait "$SIGNAL_PID" 2>/dev/null || true
+check "TERM signal leaves no tmp-* parent" \
+    '[ -z "$(cd "$REPO" && ls -d tmp-* 2>/dev/null || true)" ]'
+rm -f "$OUT_SIGNAL"
+
 # ----------------------------------------------------------------------------
 echo "Task 4: cleanup_scratch_worktree is idempotent and safe on caller dirs"
 
@@ -116,6 +145,29 @@ echo "do not delete" > "$SENTINEL"
   cleanup_scratch_worktree "$REPO" "$WT" )
 check "external sentinel file still present (helper doesn't touch non-tmp-* parents)" \
     '[ -f "$SENTINEL" ]'
+
+# -----------------------------------------------------------------------------
+echo "Task 5: caller can choose the scratch worktree source ref"
+
+# The generic helper defaults to HEAD, but callers such as the token-saver
+# measurement need a stable master baseline even when invoked from a feature
+# branch. The optional third argument must be honored.
+git -C "$REPO" checkout -qb feature
+echo feature > "$REPO/seed.txt"
+git -C "$REPO" add seed.txt
+git -C "$REPO" commit -qm feature
+
+OUT5="$(mktemp)"
+(
+  source "$LIB"
+  with_scratch_worktree "$REPO" WT master
+  cat "$WT/seed.txt" > "$OUT5"
+)
+check "explicit master ref wins over feature-branch HEAD" \
+    '[ "$(cat "$OUT5")" = "seed" ]'
+check "explicit-ref scratch still leaves no tmp-* parent" \
+    '[ -z "$(cd "$REPO" && ls -d tmp-* 2>/dev/null || true)" ]'
+rm -f "$OUT5"
 
 # ----------------------------------------------------------------------------
 echo ""

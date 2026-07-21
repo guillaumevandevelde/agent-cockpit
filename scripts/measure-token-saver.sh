@@ -74,15 +74,19 @@ claude --version >/dev/null 2>&1 || {
 # survives — `$()` would sandbox it into a subshell where the trap
 # is lost.
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BASE_REF="$(resolve_measurement_base_ref "$REPO_ROOT")"
 WT_PATH_FILE="$(mktemp)"
-with_scratch_worktree "$REPO_ROOT" WT > "$WT_PATH_FILE"
+with_scratch_worktree "$REPO_ROOT" WT "$BASE_REF" > "$WT_PATH_FILE"
 WT="$(cat "$WT_PATH_FILE")"
 rm -f "$WT_PATH_FILE"
 
 # Apply the "revert" — set the dispatch.py line to the broken `> 0` state.
 # b30a9bb's tests already live on master, so we only need to flip the one
-# line in the working tree.
-sed -i 's/r.max_sessions >= 0/r.max_sessions > 0/' "$WT/backend/app/kanban/dispatch.py"
+# line in the working tree. Fail closed if the selected baseline does not
+# contain that fixed line; a no-op would make the measurement meaningless.
+if ! prepare_golden_revert "$WT"; then
+    exit 4
+fi
 
 # Build the deterministic prompt
 PROMPT_FILE="$WT/.measure-prompt.txt"
