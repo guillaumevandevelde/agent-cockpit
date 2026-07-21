@@ -312,6 +312,15 @@ beginnen — minder verloren werk en minder verbruikte quota per onderbreking.
 Analyse-kaart (het ontwerp raakt reaper, session_recovery én headless_runner, dus
 scope-bepaling hoort vóór implementatie). Overgenomen patroon: §4.1.
 
+✅ Geanalyseerd (kaart `805d747f…`) →
+[`run-hold-buffered-events-analyse.md`](./run-hold-buffered-events-analyse.md).
+**Uitkomst: het hold-window uit §4.1 wordt niet overgenomen.** Lemma's `_HeldRun`
+bemiddelt tussen een levende daemon en een weggevallen *remote* websocket; wij
+hebben die tussentoestand niet, en voor het transport dat we draaien (tmux) is de
+robuustheid al bereikt doordat de agent in een onafhankelijke procesboom leeft en
+liveness elke tick opnieuw uit `tmux ls` wordt afgeleid. Het echte gat zit in het
+(opt-in, ongebruikte) `headless`-transport; daaruit volgden twee scoped kaarten.
+
 ### 7.2 Approval-model: privilege-scheiding tussen agent en gebruiker
 Analyse-kaart. Vereist eerst een autorisatiegrens die we vandaag niet hebben
 (`--dangerously-skip-permissions`), dus scope-bepaling gaat vooraf aan bouwen.
