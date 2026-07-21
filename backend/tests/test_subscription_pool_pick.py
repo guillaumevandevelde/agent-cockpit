@@ -27,9 +27,11 @@ from __future__ import annotations
 from app.kanban.subscription_pool import (
     DEFAULT_POOL_CLI,
     PoolEntry,
+    SignalStatus,
     has_available_spillover,
     pick_subscription,
     pick_subscription_for_cli,
+    pick_subscription_with_status,
 )
 from app.services.subscriptions.base import SubscriptionUsage
 
@@ -512,3 +514,231 @@ class TestPickSubscriptionForCliFilter:
         )
         assert chosen is not None
         assert chosen.cli == DEFAULT_POOL_CLI
+
+
+class TestSignalStatusClassify:
+    """Kaart 8f40d443… (quota-pool CLI-agnostisch): the four-way
+    snapshot-side status — explicit "no signal" vs "0%" vs "above
+    threshold" vs "hard exhausted". ``SignalStatus.classify`` is the
+    pure helper that ``pick_subscription_with_status`` delegates to;
+    the tests here pin the four branches so a future refactor can't
+    silently collapse them."""
+
+    def test_no_snapshot_is_no_signal(self):
+        """No snapshot for the entry's ``{cli}:{provider}`` → ``AVAILABLE_NO_SIGNAL``.
+
+        Distinct from ``AVAILABLE_WITH_SIGNAL``: the router keeps
+        the entry eligible (analyse §6.3) but the UI must render a
+        "geen signaal-bron"-badge so the operator doesn't confuse
+        it with a healthy low-usage subscription."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        status = SignalStatus.classify(entry, None)
+        assert status is SignalStatus.AVAILABLE_NO_SIGNAL
+
+    def test_zero_percent_is_available_with_signal(self):
+        """``drempel_gebruikt=0`` with ``beschikbaar=True`` → ``AVAILABLE_WITH_SIGNAL``.
+
+        The signal is honest (a real number from a real provider);
+        the operator sees "0% used" instead of the "geen signaal"-
+        badge. Same eligibility as ``AVAILABLE_NO_SIGNAL`` but a
+        different operator-facing copy — that distinction is the
+        whole point of this enum (kaart 8f40d443…)."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usage = _usage(
+            subscription_id=f"{entry.resolved_cli}:anthropic",
+            beschikbaar=True, drempel_gebruikt=0.0,
+        )
+        status = SignalStatus.classify(entry, usage)
+        assert status is SignalStatus.AVAILABLE_WITH_SIGNAL
+
+    def test_above_threshold_is_unavailable_above_threshold(self):
+        """Real number at or above the entry's drempel → ``UNAVAILABLE_ABOVE_THRESHOLD``.
+
+        The router spills to the next entry; the UI shows the
+        actual percentage so the operator can see *why* this entry
+        skipped."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usage = _usage(
+            subscription_id=f"{entry.resolved_cli}:anthropic",
+            beschikbaar=True, drempel_gebruikt=0.95,
+        )
+        status = SignalStatus.classify(entry, usage)
+        assert status is SignalStatus.UNAVAILABLE_ABOVE_THRESHOLD
+
+    def test_hard_exhausted_is_unavailable_exhausted(self):
+        """``beschikbaar=False`` → ``UNAVAILABLE_EXHAUSTED`` even when the
+        drempel number is missing or low.
+
+        Distinct from ``UNAVAILABLE_ABOVE_THRESHOLD`` because a
+        hard-exhausted provider typically resets on a longer clock
+        than a drempel-spill; the UI shows "limit bereikt" instead
+        of "X% used — boven drempel"."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usage = _usage(
+            subscription_id=f"{entry.resolved_cli}:anthropic",
+            beschikbaar=False, drempel_gebruikt=0.5,
+        )
+        status = SignalStatus.classify(entry, usage)
+        assert status is SignalStatus.UNAVAILABLE_EXHAUSTED
+
+    def test_signal_present_but_no_number_is_no_signal(self):
+        """Snapshot with ``beschikbaar=True`` but ``drempel_gebruikt=None``
+        → ``AVAILABLE_NO_SIGNAL``.
+
+        The snapshot exists but the drempel-axis number is missing
+        (analyse §6.3 — no fabrication). The router keeps the
+        entry eligible, the UI shows "geen signaal" — distinct from
+        ``AVAILABLE_WITH_SIGNAL`` even though both are eligible."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usage = _usage(
+            subscription_id=f"{entry.resolved_cli}:anthropic",
+            beschikbaar=True, drempel_gebruikt=None,
+        )
+        status = SignalStatus.classify(entry, usage)
+        assert status is SignalStatus.AVAILABLE_NO_SIGNAL
+
+
+class TestPickSubscriptionWithStatus:
+    """Kaart 8f40d443…: ``pick_subscription_with_status`` mirrors
+    ``pick_subscription_for_cli`` but bundles the chosen entry with a
+    ``SignalStatus``. The dispatch wiring can opt into the new shape
+    to render an honest badge; the legacy ``pick_subscription_for_cli``
+    callers keep their ``PoolEntry | None`` contract untouched."""
+
+    def test_zero_percent_choice_carrys_available_with_signal(self):
+        """A real ``0%`` snapshot is labelled ``AVAILABLE_WITH_SIGNAL`` —
+        not ``AVAILABLE_NO_SIGNAL``. This is the operator-facing
+        distinction the UI renders as "0% used" vs "geen signaal-bron"."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                beschikbaar=True, drempel_gebruikt=0.0,
+            ),
+        }
+        choice = pick_subscription_with_status(
+            [entry], usages, paused_providers=set(),
+        )
+        assert choice is not None
+        assert choice.entry is entry
+        assert choice.status is SignalStatus.AVAILABLE_WITH_SIGNAL
+
+    def test_missing_snapshot_choice_carrys_available_no_signal(self):
+        """No snapshot at all → ``AVAILABLE_NO_SIGNAL``.
+
+        Same eligibility as the 0%-case (the router keeps it) but
+        a different status — the UI must surface this distinction
+        honestly."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        choice = pick_subscription_with_status(
+            [entry], usages={}, paused_providers=set(),
+        )
+        assert choice is not None
+        assert choice.entry is entry
+        assert choice.status is SignalStatus.AVAILABLE_NO_SIGNAL
+
+    def test_no_signal_distinct_from_zero_percent(self):
+        """The two available-states are distinct even though both
+        keep the entry eligible.
+
+        Pinning the four-way case here so a future refactor can't
+        silently collapse ``AVAILABLE_WITH_SIGNAL`` and
+        ``AVAILABLE_NO_SIGNAL`` into one — which would defeat the
+        whole point of the explicit-degradation acceptance criterion.
+        """
+        zero = _entry(provider="anthropic", drempel=0.9)
+        no_signal = _entry(provider="minimax", drempel=0.9)
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                beschikbaar=True, drempel_gebruikt=0.0,
+            ),
+            # No entry for claude-code:minimax → "no signal"
+        }
+        choice_zero = pick_subscription_with_status(
+            [zero], usages, paused_providers=set(),
+        )
+        choice_none = pick_subscription_with_status(
+            [no_signal], usages, paused_providers=set(),
+        )
+        assert choice_zero is not None
+        assert choice_none is not None
+        assert (
+            choice_zero.status is SignalStatus.AVAILABLE_WITH_SIGNAL
+        )
+        assert (
+            choice_none.status is SignalStatus.AVAILABLE_NO_SIGNAL
+        )
+        # And the enum values themselves differ — a future refactor
+        # that conflates them would break this assertion.
+        assert (
+            SignalStatus.AVAILABLE_WITH_SIGNAL
+            is not SignalStatus.AVAILABLE_NO_SIGNAL
+        )
+
+    def test_hard_exhausted_choice_carrys_unavailable_exhausted(self):
+        """``beschikbaar=False`` with low drempel → the entry is
+        selected as the "laatste val-terug" with status
+        ``UNAVAILABLE_EXHAUSTED`` so the UI can show the right copy."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                beschikbaar=False, drempel_gebruikt=0.1,
+            ),
+        }
+        choice = pick_subscription_with_status(
+            [entry], usages, paused_providers=set(),
+        )
+        assert choice is not None
+        assert choice.entry is entry
+        assert choice.status is SignalStatus.UNAVAILABLE_EXHAUSTED
+
+    def test_above_threshold_choice_carrys_unavailable_above_threshold(self):
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                beschikbaar=True, drempel_gebruikt=0.95,
+            ),
+        }
+        choice = pick_subscription_with_status(
+            [entry], usages, paused_providers=set(),
+        )
+        assert choice is not None
+        assert choice.entry is entry
+        assert choice.status is SignalStatus.UNAVAILABLE_ABOVE_THRESHOLD
+
+    def test_cli_filter_still_applies_in_with_status(self):
+        """The CLI-filter rule from ``pick_subscription_for_cli``
+        carries through: a pool with only ``open-code`` entries
+        returns ``None`` when the caller asks for the default CLI."""
+        entries = [_entry(cli="open-code", provider="anthropic", drempel=0.9)]
+        choice = pick_subscription_with_status(
+            entries, usages={},
+            paused_providers=set(), cli_id=DEFAULT_POOL_CLI,
+        )
+        assert choice is None
+
+    def test_pure_no_side_effects(self):
+        """``pick_subscription_with_status`` is side-effect-free —
+        identical input shapes produce identical outputs across
+        repeated calls. Pins the contract the dispatch wiring
+        (which calls this per spawn) relies on."""
+        entry = _entry(provider="anthropic", drempel=0.9)
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                beschikbaar=True, drempel_gebruikt=0.0,
+            ),
+        }
+        first = pick_subscription_with_status(
+            [entry], usages, paused_providers=set(),
+        )
+        second = pick_subscription_with_status(
+            [entry], usages, paused_providers=set(),
+        )
+        assert first is not None and second is not None
+        assert first.entry is entry
+        assert second.entry is entry
+        assert first.status is second.status

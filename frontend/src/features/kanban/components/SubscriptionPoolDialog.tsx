@@ -20,7 +20,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
-import { PROVIDERS, PROVIDER_LABELS } from "../types";
+import {
+  KNOWN_POOL_CLIS,
+  POOL_CLI_LABELS,
+  PROVIDERS,
+  PROVIDER_LABELS,
+} from "../types";
 import type { PoolEntry } from "../types";
 
 /** Sentinel value used by the override's provider <Select>. The Radix
@@ -29,12 +34,28 @@ import type { PoolEntry } from "../types";
 const NONE_VALUE = "__none__";
 
 /** Sensible-default entry for the "Add first subscription" affordance —
- *  matches what the previous standalone SubscriptionPool seeded. The
- *  legacy `cli` field was dropped in card 0b3ad6e2… (analysis §3 D3):
- *  the pool always routes through the single supported CLI
- *  (claude-code) and there's no per-entry CLI choice to make. */
+ *  matches what the previous standalone SubscriptionPool seeded. Kaart
+ *  8f40d443… (quota-pool CLI-agnostisch): the default targets the
+ *  canonical claude-code transport so legacy / pre-feature rows keep
+ *  building without ceremony (the backend also back-fills
+ *  ``DEFAULT_POOL_CLI`` on read for legacy JSON). */
 function makeDefaultEntry(): PoolEntry {
-  return { provider: "anthropic", model: null, drempel: 0.9 };
+  return {
+    cli: "claude-code",
+    provider: "anthropic",
+    model: null,
+    drempel: 0.9,
+  };
+}
+
+/** Resolve the per-entry CLI for picker state. PoolEntry.cli is
+ *  optional on the wire (legacy rows omit it; the backend back-fills
+ *  DEFAULT_POOL_CLI). The picker needs a concrete string for the
+ *  controlled <Select>; falling back to DEFAULT_POOL_CLI keeps the
+ *  Radix SelectItem happy without showing "no CLI selected" on
+ *  legacy rows. */
+function entryCli(entry: PoolEntry): string {
+  return entry.cli ?? "claude-code";
 }
 
 /** Combined dialog for board-wide subscription routing:
@@ -387,7 +408,31 @@ export function SubscriptionPoolDialog({
                       </button>
                     </div>
 
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-9 gap-2">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-2">
+                      <div className="sm:col-span-3">
+                        <label className="block text-xs text-muted-foreground mb-1">
+                          CLI
+                        </label>
+                        <Select
+                          value={entryCli(entry)}
+                          onValueChange={(v) =>
+                            updateEntry(index, { cli: v })
+                          }
+                          disabled={overrideLockedPool}
+                        >
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {KNOWN_POOL_CLIS.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {POOL_CLI_LABELS[c] ?? c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
                       <div className="sm:col-span-3">
                         <label className="block text-xs text-muted-foreground mb-1">
                           Provider

@@ -49,18 +49,46 @@ export interface ColumnOverride {
 // the next entry. Priority is the entry's position in the pool list —
 // index 0 is the preferred subscription.
 //
-// The legacy `cli` field that pre-fix builds carried on each entry
-// was dropped in kanban card 0b3ad6e2… (analysis §3 D3): the pool
-// always routes through the single supported CLI (claude-code), and
-// `cli_id` is resolved earlier in dispatch than the pool is even
-// consulted — so the field was a UI promise the backend never kept.
-// A backend migration shim strips the field on read so stale KanbanMeta
-// rows still load.
+// Kaart 8f40d443… (quota-pool CLI-agnostisch): the per-entry `cli`
+// field is back and **consumed** by the router. `cli` is the spawn
+// transport the entry targets (one of `KNOWN_POOL_CLIS`). The router
+// filters candidates on `cli` so an OpenCode-spawned session picks
+// only `open-code:*` entries (analyse §3 {cli, provider}-identity).
+// `cli` is optional in the wire shape (the backend defaults to
+// `DEFAULT_POOL_CLI = "claude-code"` on read for legacy rows), but
+// the dialog UI should always emit an explicit value so the operator
+// sees which CLI each row targets.
 export interface PoolEntry {
+  cli?: string | null;
   provider: string;
   model: string | null;
   drempel: number;
 }
+
+// The CLIs the pool dialog lets the operator target. Mirrors the
+// agentic_cli registry's `id` field — the router accepts anything in
+// that set as a per-entry `cli`. Kept as a static tuple (not
+// generated) so the dialog stays trivially testable; if the registry
+// adds a sixth CLI the dialog UI must be updated by hand.
+export const KNOWN_POOL_CLIS = [
+  "claude-code",
+  "codex-cli",
+  "copilot-cli",
+  "mimo-code",
+  "open-code",
+] as const;
+export type KnownPoolCli = (typeof KNOWN_POOL_CLIS)[number];
+
+// Human-readable label per CLI id. Records are indexed by string (not
+// KnownPoolCli) so a legacy row carrying an unknown CLI id still
+// renders something instead of throwing.
+export const POOL_CLI_LABELS: Record<string, string> = {
+  "claude-code": "Claude Code",
+  "codex-cli": "Codex CLI",
+  "copilot-cli": "Copilot CLI",
+  "mimo-code": "MiMo Code",
+  "open-code": "OpenCode",
+};
 
 // Seed suggestions shown in the model free-text field before the list has
 // ever been refreshed from the installed CLI. Mirrors backend/app/kanban/

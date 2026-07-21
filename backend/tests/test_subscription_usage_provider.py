@@ -662,6 +662,38 @@ class TestRegistrySeeding:
                 cli="claude-code", provider=prov,
             ) is not None, f"missing default provider for {prov}"
 
+    def test_seeds_per_cli_no_signal_stubs(self):
+        """Kaart 8f40d443… (quota-pool CLI-agnostisch): the seed covers
+        every registered CLI × provider combination — not just
+        ``claude-code``.
+
+        Without per-CLI stubs the pool router's per-CLI filter would
+        silently skip a non-claude-code entry (``get_provider_for``
+        returns ``None`` → ``_gather_pool_usage_snapshots`` omits
+        the row → "no signal" with no honest stub to render on the
+        Subscriptions-pagina). The acceptance criterion is "the
+        Subscriptions-pagina UI shows the operator an honest
+        'geen signaal-bron'-badge for each non-claude-code CLI"
+        — the per-CLI seed is what makes that possible.
+        """
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        # Every CLI in the agentic_cli registry gets a row per provider
+        # (incl. ``anthropic-compatible`` — same router-eindpunt shape
+        # as claude-code today, but seeded as a generic UnknownUsageProvider
+        # for non-claude-code CLIs since the router concept is
+        # claude-code-only — see registry._supported_cli_ids).
+        cli_ids = ("claude-code", "codex-cli", "copilot-cli",
+                   "mimo-code", "open-code")
+        for cli_id in cli_ids:
+            for prov in ("anthropic", "bedrock", "minimax",
+                         "anthropic-compatible"):
+                provider = reg.get_provider_for(cli=cli_id, provider=prov)
+                assert provider is not None, (
+                    f"missing default no-signal stub for "
+                    f"{cli_id}:{prov}"
+                )
+
     async def test_seeded_providers_return_onbekend_snapshots(self):
         from app.services.subscriptions import registry as reg
         reg.register_default_providers()
@@ -676,6 +708,31 @@ class TestRegistrySeeding:
             assert usage.betrouwbaarheid == "onbekend"
             assert usage.drempel_gebruikt is None
             assert usage.beschikbaar is True
+
+    async def test_per_cli_stubs_return_onbekend_snapshots(self):
+        """Kaart 8f40d443…: every per-CLI stub returns the same honest
+        no-signal shape — ``onbekend``/``None``/``True`` — so the
+        router treats every CLI uniformly under analyse §6.3. The
+        UI then renders the same "geen signaal-bron"-badge across
+        every registered CLI regardless of which vendor (claude,
+        minimax, router) the registry entry targets."""
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        cli_ids = ("claude-code", "codex-cli", "copilot-cli",
+                   "mimo-code", "open-code")
+        for cli_id in cli_ids:
+            provider = reg.get_provider_for(
+                cli=cli_id, provider="anthropic",
+            )
+            usage = await provider.get_usage()
+            assert usage.betrouwbaarheid == "onbekend"
+            assert usage.drempel_gebruikt is None
+            assert usage.beschikbaar is True
+            # And the snapshot id is the per-CLI keyed id — without
+            # this the pool router's ``usages.get(f"{cli}:{provider}")``
+            # lookup would still see "no signal" and the per-CLI seed
+            # would silently degrade to the pre-feature behaviour.
+            assert usage.subscription_id == f"{cli_id}:anthropic"
 
     async def test_anthropic_compatible_seeded_as_router_provider(self):
         # Kaart 390756e6... AC#2: de `anthropic-compatible` (router)

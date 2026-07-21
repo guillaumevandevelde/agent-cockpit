@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from enum import Enum
 
 from app.kanban.models import KanbanMeta
 from app.services.agentic_cli.provider_env import (
@@ -161,6 +162,73 @@ class PoolEntry:
         return self.cli  # always populated by __post_init__
 
 
+class SignalStatus(Enum):
+    """Explicit snapshot-side status for one ``(entry, usage)`` pair.
+
+    Kaart 8f40d443… (quota-pool CLI-agnostisch): the router must
+    distinguish "no signal at all" from "0% used" — both are
+    mathematically *below threshold* but they tell the operator
+    completely different stories (analyse §6.1 "no fabrication" +
+    §6.3 "no signal → available"). Returning a status alongside the
+    choice lets the Subscriptions-pagina UI render an honest
+    badge ("geen signaal" vs "0% gebruikt") instead of silently
+    collapsing the two.
+
+    The router itself keeps the analyse §6.3 behaviour — both
+    ``AVAILABLE_NO_SIGNAL`` and ``AVAILABLE_WITH_SIGNAL`` keep the
+    entry eligible. The status is informational; the gate against a
+    real hard stop is the per-provider pause downstream.
+    """
+
+    AVAILABLE_WITH_SIGNAL = "available_with_signal"
+    """Snapshot present, ``beschikbaar=True``, ``drempel_gebruikt``
+    is a real number under the entry's drempel. The router is happy
+    to pick this and the operator sees a normal "X% used" badge."""
+
+    AVAILABLE_NO_SIGNAL = "available_no_signal"
+    """No snapshot registered for ``{entry.cli}:{entry.provider}``,
+    or the snapshot's ``drempel_gebruikt`` is ``None``. The router
+    treats this as "available until the per-provider pause catches
+    it" (analyse §6.3) and the UI must show a "geen
+    signaal-bron"-badge so the operator doesn't confuse it with a
+    healthy low-usage subscription. Distinct from
+    ``AVAILABLE_WITH_SIGNAL`` even though both are eligible."""
+
+    UNAVAILABLE_ABOVE_THRESHOLD = "unavailable_above_threshold"
+    """Snapshot present with ``drempel_gebruikt >= entry.drempel``.
+    The router spills to the next entry; the UI shows the actual
+    percentage so the operator can see *why* this entry skipped."""
+
+    UNAVAILABLE_EXHAUSTED = "unavailable_exhausted"
+    """Snapshot present with ``beschikbaar=False`` (provider's hard
+    limit hit). Distinct from ``UNAVAILABLE_ABOVE_THRESHOLD`` because
+    a hard-exhausted provider typically resets on a longer clock
+    than a drempel-spill; the UI may show different copy ("limit
+    bereikt" vs "X% used — boven drempel")."""
+
+    @classmethod
+    def classify(
+        cls, entry: PoolEntry, usage: SubscriptionUsage | None,
+    ) -> "SignalStatus":
+        """Classify a single ``(entry, usage)`` pair into a status.
+
+        Public helper so the Subscriptions-pagina UI can render the
+        same status per row that the router saw at pick-time —
+        without re-deriving the four-way case at the call site.
+        Preserves the order: a hard ``beschikbaar=False`` overrides
+        a high ``drempel_gebruikt`` because the operator's reset
+        question is different."""
+        if usage is None:
+            return cls.AVAILABLE_NO_SIGNAL
+        if not usage.beschikbaar:
+            return cls.UNAVAILABLE_EXHAUSTED
+        if usage.drempel_gebruikt is None:
+            return cls.AVAILABLE_NO_SIGNAL
+        if usage.drempel_gebruikt >= entry.drempel:
+            return cls.UNAVAILABLE_ABOVE_THRESHOLD
+        return cls.AVAILABLE_WITH_SIGNAL
+
+
 def _is_above_threshold(
     entry: PoolEntry, usage: SubscriptionUsage | None,
 ) -> bool:
@@ -173,7 +241,16 @@ def _is_above_threshold(
        beschikbaar tot de per-provider pause hem raakt).
     2. Snapshot zonder ``drempel_gebruikt`` (geen getal — idem).
     3. ``drempel_gebruikt`` is een getal maar onder de entry's drempel.
-    """
+
+    Kaart 8f40d443… (quota-pool CLI-agnostisch): the four-way
+    available/unavailable distinction is surfaced separately via
+    ``SignalStatus.classify`` (called from
+    ``pick_subscription_with_status``) so the UI can render an honest
+    badge. This function stays binary — analyse §6.3 says a missing
+    signal is *available*, so we return False for both "0%" and
+    "missing" without a quota-axis distinction. The status lives in a
+    parallel channel so a future contributor can render the four-way
+    case without rewriting the priority scan."""
     if usage is None:
         return False
     if usage.drempel_gebruikt is None:
@@ -256,6 +333,91 @@ def pick_subscription(
         paused_providers=paused_providers,
         cli_id=DEFAULT_POOL_CLI,
     )
+
+
+@dataclass(frozen=True)
+class PoolChoice:
+    """The router's decision bundled with the snapshot-side status.
+
+    Kaart 8f40d443… (quota-pool CLI-agnostisch): a "no signal"
+    snapshot (analyse §6.3) and a "0% used" snapshot are both
+    *eligible* (the router keeps them) but the operator-facing
+    meaning is different. This dataclass carries the choice *and*
+    the ``SignalStatus`` so callers (the dispatcher + the
+    Subscriptions-pagina UI) can render the distinction without
+    re-classifying the same pair on every render.
+
+    Kept as a separate return type so the existing
+    ``pick_subscription_for_cli`` / ``pick_subscription`` stay
+    ``PoolEntry | None`` — preserving the side-effect-free,
+    pool-entry-shape contract every historical test pins. New
+    wiring that wants the status calls ``pick_subscription_with_status``
+    instead; legacy wiring that only needs the chosen entry keeps
+    working unchanged."""
+    entry: PoolEntry
+    status: SignalStatus
+
+
+def pick_subscription_with_status(
+    entries: list[PoolEntry],
+    usages: dict[str, SubscriptionUsage],
+    *,
+    paused_providers: set[str],
+    cli_id: str = DEFAULT_POOL_CLI,
+) -> PoolChoice | None:
+    """CLI-aware pick that bundles the choice with the snapshot status.
+
+    Same priority scan as ``pick_subscription_for_cli`` — first
+    in-config-order entry of ``cli_id`` whose snapshot is below
+    threshold and not paused wins, else the last entry of
+    ``cli_id`` as the "laatste val-terug" (analyse §4). Returns
+    ``None`` when no entry of ``cli_id`` exists in the pool
+    (the "geen entry voor deze CLI"-case — acceptatie-criterium).
+
+    Status semantics (see ``SignalStatus``):
+
+    * ``AVAILABLE_WITH_SIGNAL`` — the chosen entry is below its
+      drempel *and* has a real ``drempel_gebruikt`` snapshot. The
+      UI shows a normal "X% used" badge.
+    * ``AVAILABLE_NO_SIGNAL`` — the chosen entry has no snapshot
+      at all, or the snapshot's ``drempel_gebruikt`` is ``None``.
+      The router still picks it (analyse §6.3) but the UI shows a
+      "geen signaal-bron"-badge.
+    * ``UNAVAILABLE_ABOVE_THRESHOLD`` / ``UNAVAILABLE_EXHAUSTED`` —
+      the router fell through to the "laatste val-terug"; the
+      caller should treat this as a degraded pick (a hard stop
+      downstream — the per-provider pause — is what actually
+      halts the spawn). The UI distinguishes the two for the
+      reset-copy the operator sees.
+
+    Side-effect-free: identical to ``pick_subscription_for_cli`` in
+    that it does no I/O. The status is derived from the same
+    ``usages`` snapshot dict the caller already supplied, so a test
+    pinning the four-way case stays trivial to write.
+    """
+    cli_candidates = [e for e in entries if e.resolved_cli == cli_id]
+    if not cli_candidates:
+        return None
+
+    chosen_entry: PoolEntry | None = None
+    chosen_status: SignalStatus | None = None
+    for entry in cli_candidates:
+        usage = usages.get(f"{entry.resolved_cli}:{entry.provider}")
+        if entry.provider in paused_providers:
+            chosen_entry = entry
+            chosen_status = SignalStatus.classify(entry, usage)
+            continue
+        status = SignalStatus.classify(entry, usage)
+        if status in (
+            SignalStatus.AVAILABLE_WITH_SIGNAL,
+            SignalStatus.AVAILABLE_NO_SIGNAL,
+        ):
+            return PoolChoice(entry=entry, status=status)
+        chosen_entry = entry
+        chosen_status = status
+    if chosen_entry is None or chosen_status is None:
+        return None
+    return PoolChoice(entry=chosen_entry, status=chosen_status)
 
 
 def has_available_spillover(
