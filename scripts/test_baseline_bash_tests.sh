@@ -301,6 +301,56 @@ check "compare exits 1 when new failures exist" \
 
 # ----------------------------------------------------------------------------
 echo
+echo "Task 7b: comparator groups NEW and FIXED failures by harness"
+fake_group="$TMPDIR/fake_group"
+mkdir -p "$fake_group/scripts"
+cat > "$fake_group/scripts/test_alpha.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "  FAIL: aaa first"
+echo "  FAIL: zzz second"
+exit 1
+EOF
+chmod +x "$fake_group/scripts/test_alpha.sh"
+cat > "$fake_group/scripts/test_beta.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "  FAIL: mmm third"
+exit 1
+EOF
+chmod +x "$fake_group/scripts/test_beta.sh"
+
+cat > "$state_dir/bash-test-baseline.txt" <<'EOF'
+test_fixed_alpha.sh	FAIL: fixed alpha first
+test_fixed_alpha.sh	FAIL: fixed alpha second
+test_fixed_beta.sh	FAIL: fixed beta only
+EOF
+
+out=$(BASH_TEST_BASELINE_PATH="$state_dir/bash-test-baseline.txt" \
+      BASH_TEST_FAKE_WORKTREE=1 BASH_TEST_CWD="$fake_group" \
+      bash "$SCRIPT_DIR/compare-bash-tests.sh" 2>&1 || true)
+new_section=$(printf '%s\n' "$out" | awk '/^NEW /{in_section=1; next} /^FIXED /{in_section=0} in_section')
+fixed_section=$(printf '%s\n' "$out" | awk '/^FIXED /{in_section=1; next} in_section')
+expected_new='  test_alpha.sh
+    FAIL: aaa first
+    FAIL: zzz second
+  test_beta.sh
+    FAIL: mmm third'
+expected_fixed='  test_fixed_alpha.sh
+    FAIL: fixed alpha first
+    FAIL: fixed alpha second
+  test_fixed_beta.sh
+    FAIL: fixed beta only'
+check "NEW failures remain grouped under sorted harness headers" \
+    '[ "$new_section" = "$expected_new" ]'
+check "FIXED failures remain grouped under sorted harness headers" \
+    '[ "$fixed_section" = "$expected_fixed" ]'
+
+# Restore the Task 7 fixture before the --pre-existing-only assertions.
+cat > "$state_dir/bash-test-baseline.txt" <<'EOF'
+test_preex.sh	FAIL: preexist failure
+EOF
+
+# ----------------------------------------------------------------------------
+echo
 echo "Task 8: --pre-existing-only suppresses the new/fixed listing"
 out=$(BASH_TEST_BASELINE_PATH="$state_dir/bash-test-baseline.txt" \
       BASH_TEST_FAKE_WORKTREE=1 BASH_TEST_CWD="$fake_scripts2" \

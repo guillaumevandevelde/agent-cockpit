@@ -131,14 +131,15 @@ if [ "$pre_count" -gt 0 ]; then
         | sed '1i\  affected harnesses:'
 fi
 
-# Per-harness grouping: buffer NEW lines keyed on the harness-name prefix
-# (column 1 of the tab-separated baseline row). The `awk` end block prints
-# one header + indented list per harness, sorted by harness name.
+# Per-harness grouping: sort the raw tab-separated records by harness name
+# (then failure description) before awk streams one header + its indented lines.
+# Sorting rendered multi-line blocks would split headers from their failures.
 group_by_harness() {
+    LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2 |
     awk -F'\t' '
-        { h[$1] = h[$1] ? h[$1] "\n    " $2 : "    " $2 }
-        END { for (k in h) print "  " k "\n" h[k] }
-    ' | sort
+        $1 != current { current = $1; printf "  %s\n", current }
+        { printf "    %s\n", $2 }
+    '
 }
 
 if [ "$new_count" -gt 0 ]; then
