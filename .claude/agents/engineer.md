@@ -250,7 +250,7 @@ toeschrijven, of — in het slechtste geval — op `master` committen.
 ```bash
 # call 1 — één commando, persist-de-cwd-side-effect
 cd docs/cockpit && pwd
-# /home/vdvgu/.claude/worktrees/k-self-improve-e3a7/docs/cockpit
+# <worktree-root>/docs/cockpit
 
 # call 2 — verwacht worktree-root, krijgt docs/cockpit
 cd docs/cockpit && pwd
