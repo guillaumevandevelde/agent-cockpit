@@ -14,7 +14,7 @@ from app.kanban import service
 from app.kanban.db import KanbanSessionLocal
 from app.kanban.models import KanbanAttachment, KanbanCard
 from app.kanban.operations import ClaimRejected, apply_operation, release_card_claim
-from app.kanban.project_key import resolve_project_key
+from app.kanban.project_key import resolve_project_key, resolve_project_path
 from app.kanban.schemas import (
     WORK_TYPES,
     ActiveSubscriptionOverrideRequest,
@@ -228,6 +228,70 @@ async def refresh_model_options():
             raise HTTPException(502, f"failed to query claude CLI: {e}") from e
         await s.commit()
         return {"provider": "claude-code", "options": options}
+
+
+@router.get("/model-options/minimax")
+async def minimax_model_options():
+    """Cached list of MiniMax model ids (discovered from JSONL usage logs).
+
+    Discovery path is sync ``glob ~/.claude/projects/**/*.jsonl`` and
+    filter-by-prefix — there is no `claude -p "/model"` equivalent for
+    MiniMax (the subscription speaks Anthropic-compatible, not the
+    model-picker CLI). Seed defaults to ``MiniMax-M3`` until the first
+    refresh; refresh is best-effort and 502s only on hard filesystem
+    errors (the cached list / seed is left untouched otherwise).
+    """
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        return {
+            "provider": "minimax",
+            "options": await dispatch.get_cached_minimax_model_options(s),
+        }
+
+
+@router.post("/model-options/minimax/refresh")
+async def refresh_minimax_model_options():
+    """Re-scan JSONL logs for unique MiniMax model ids and cache the list.
+
+    Returns the freshly discovered list (which may equal the seed on a
+    machine that has never dispatched a MiniMax session). The cache is
+    only overwritten when the scan yields a non-empty list, mirroring the
+    claude-code refresh path's "don't clobber good cache with empty
+    result" guard.
+    """
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        try:
+            options = await dispatch.refresh_minimax_model_options(s)
+        except OSError as e:
+            raise HTTPException(502, f"failed to scan minimax JSONL: {e}") from e
+        await s.commit()
+        return {"provider": "minimax", "options": options}
+
+
+@router.get("/columns/{column_id}/effective-model")
+async def column_effective_model(column_id: str):
+    """Resolved provider/model/source for a column (UI precedence display).
+
+    Walks the same chain dispatch.py uses (board-wide override → pool →
+    per-card column_override → column.default_model → persona) and
+    returns ``provider``, ``model``, and a ``provider_source`` /
+    ``model_source`` label naming which level actually won. The
+    column-settings dialog renders this beneath the model input so the
+    user sees *why* a board-wide override or pool choice silently wins
+    over their selection (kaart 1782fa43…).
+    """
+    from app.kanban import dispatch
+    async with KanbanSessionLocal() as s:
+        column = await service.get_column(s, column_id)
+        if column is None:
+            raise HTTPException(404, "column not found")
+        project_path = await resolve_project_path(column.project_key)
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=column.project_key, column_name=column.name,
+            project_path=project_path or "",
+        )
+    return info
 
 
 # Work-type → persona routing (per-project overrides; falls back to

@@ -25,6 +25,7 @@ const listColumnsMock = vi.fn(async () => ({
 vi.mock("../api", () => ({
   kanbanApi: {
     getModelOptions: vi.fn(async () => ({ provider: "claude-code", options: ["sonnet", "opus", "haiku"] })),
+    getMinimaxModelOptions: vi.fn(async () => ({ provider: "minimax", options: ["MiniMax-M3", "MiniMax-M2.7"] })),
     listColumns: (...args: unknown[]) => listColumnsMock(...(args as [])),
   },
 }));

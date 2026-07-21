@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
-import { PROVIDERS, PROVIDER_LABELS, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider } from "../types";
+import { PROVIDERS, PROVIDER_LABELS, DEFAULT_MODEL_SUGGESTIONS, MINIMAX_MODEL_SUGGESTIONS, modelSuggestionsForProvider } from "../types";
 import type { KanbanColumn } from "../types";
 
 const BACKLOG_COLUMN = "Backlog";
@@ -48,6 +48,22 @@ export function ColumnSettingsDialog({
   const [editModel, setEditModel] = useState<string>("");
   const [editMaxSessions, setEditMaxSessions] = useState<number | null>(null);
   const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
+  const [minimaxOptions, setMinimaxOptions] = useState<string[]>([
+    ...MINIMAX_MODEL_SUGGESTIONS,
+  ]);
+  // One effective-model fetch per column; only columns whose effective
+  // value diverges from their own defaults carry a non-null entry here.
+  const [effectiveByColumn, setEffectiveByColumn] = useState<
+    Record<string, {
+      provider: string;
+      model: string | null;
+      provider_source: string;
+      model_source: string;
+      global_override: { provider: string; model: string | null } | null;
+      pool_choice: { provider: string; model: string | null } | null;
+    }>
+  >({});
+  const effectiveModelFor = (id: string) => effectiveByColumn[id];
 
   useEffect(() => {
     setItems(columns);
@@ -63,7 +79,34 @@ export function ColumnSettingsDialog({
     kanbanApi.getModelOptions()
       .then((r) => { if (Array.isArray(r?.options)) setModelOptions(r.options); })
       .catch(() => {});
-  }, [open]);
+    kanbanApi.getMinimaxModelOptions()
+      .then((r) => { if (Array.isArray(r?.options)) setMinimaxOptions(r.options); })
+      .catch(() => {});
+    // Fetch effective-model info for every column in parallel — only
+    // entries that diverge from the column's own defaults land in state,
+    // so a quiet board (no override / pool / persona override) stays
+    // visually quiet. The resolve endpoint is cheap (one DB read, no
+    // filesystem / CLI probes), so fanning out across N columns is fine.
+    const next: typeof effectiveByColumn = {};
+    Promise.all(
+      items.map(async (col) => {
+        try {
+          const r = await kanbanApi.getColumnEffectiveModel(col.id);
+          // Only keep rows where an override / pool / persona is actually
+          // winning — the column's own defaults are already visible above.
+          if (
+            (r.provider_source !== "column_default" && r.provider_source !== "none") ||
+            (r.model_source !== "column_default" && r.model_source !== "none")
+          ) {
+            next[col.id] = r;
+          }
+        } catch {
+          // 404 / network hiccup — leave the column's own defaults as
+          // the only signal. The Save path is unaffected.
+        }
+      }),
+    ).then(() => setEffectiveByColumn(next));
+  }, [open, items]);
 
   const handleRefreshModels = async () => {
     try {
@@ -71,6 +114,14 @@ export function ColumnSettingsDialog({
       if (Array.isArray(r?.options)) setModelOptions(r.options);
     } catch {
       toast.error("Failed to refresh model list");
+    }
+    try {
+      const r = await kanbanApi.refreshMinimaxModelOptions();
+      if (Array.isArray(r?.options)) setMinimaxOptions(r.options);
+    } catch {
+      // The minimax refresh scans JSONL logs; a transient IO error here is
+      // not worth toasting on top of the claude-side error above. The
+      // cached list (seed or last-good) is left in place.
     }
   };
 
@@ -204,9 +255,12 @@ export function ColumnSettingsDialog({
                       onChange={(e) => setEditModel(e.target.value)}
                     />
                     <datalist id={`model-suggestions-${col.id}`}>
-                      {modelSuggestionsForProvider(
-                        editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider,
-                        modelOptions,
+                      {((editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider) === "minimax"
+                        ? minimaxOptions
+                        : modelSuggestionsForProvider(
+                            editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider,
+                            modelOptions,
+                          )
                       ).map((m) => (
                         <option key={m} value={m} />
                       ))}
@@ -274,6 +328,15 @@ export function ColumnSettingsDialog({
                       <div className="text-xs text-muted-foreground">
                         Model: {col.default_model}
                       </div>
+                    )}
+                    {/* Effective-model precedence line. Only surfaces when an
+                        override / pool / persona is silently winning over the
+                        column's own defaults (kaart 1782fa43…). A user editing
+                        the column sees *why* their change isn't applied. */}
+                    {effectiveModelFor(col.id) && (
+                      <EffectiveModelLine
+                        effective={effectiveModelFor(col.id)!}
+                      />
                     )}
                   </div>
                   <div
@@ -346,5 +409,69 @@ export function ColumnSettingsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Maps a precedence-source label to a short human-readable reason.
+// Order matches the dispatch precedence in `dispatch.py` (board-wide
+// override > pool > column_override > column.default > persona).
+const SOURCE_LABEL: Record<string, string> = {
+  global_override: "board-wide subscription pin",
+  pool: "subscription pool",
+  column_override: "per-card column override",
+  card_model: "card-level model",
+  column_default: "column default",
+  persona: "persona frontmatter",
+  none: "no model set",
+};
+
+/** One-line "Will use X (source: …)" beneath the model defaults.
+
+  Renders only when an override / pool / persona is silently winning over
+  the column's own defaults (kaart 1782fa43…). Shows the effective
+  provider/model + which precedence level won, so the user editing the
+  column understands why their saved setting isn't applied at dispatch
+  time.
+*/
+function EffectiveModelLine({ effective }: {
+  effective: {
+    provider: string;
+    model: string | null;
+    provider_source: string;
+    model_source: string;
+    global_override: { provider: string; model: string | null } | null;
+    pool_choice: { provider: string; model: string | null } | null;
+  };
+}) {
+  const providerLabel = PROVIDER_LABELS[effective.provider] ?? effective.provider;
+  const modelLabel = effective.model ?? "(provider default)";
+  // Source priority: pick the most interesting source — provider_source
+  // outranks model_source only when they disagree, otherwise take the
+  // more descriptive of the two.
+  const interestingSource =
+    effective.provider_source !== "column_default" && effective.provider_source !== "none"
+      ? effective.provider_source
+      : effective.model_source;
+  const sourceLabel = SOURCE_LABEL[interestingSource] ?? interestingSource;
+  // Detail: if the provider_source and model_source disagree (e.g.
+  // pool pins provider only, column default supplies the model), show
+  // both so the user can see the full chain.
+  const showDetail =
+    interestingSource === effective.provider_source &&
+    effective.provider_source !== effective.model_source;
+  return (
+    <div
+      className="text-[11px] text-amber-700 dark:text-amber-400 mt-1"
+      title={`Effective provider: ${providerLabel} (${effective.provider_source}); effective model: ${modelLabel} (${effective.model_source})`}
+    >
+      Effective: <span className="font-medium">{providerLabel}</span>
+      {effective.model ? <> · <span className="font-medium">{effective.model}</span></> : null}
+      <span className="text-muted-foreground"> — from {sourceLabel}</span>
+      {showDetail && (
+        <span className="text-muted-foreground">
+          {" "}(model: {SOURCE_LABEL[effective.model_source] ?? effective.model_source})
+        </span>
+      )}
+    </div>
   );
 }

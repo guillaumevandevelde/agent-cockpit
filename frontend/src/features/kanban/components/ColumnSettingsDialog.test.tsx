@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const { getModelOptions, refreshModelOptions, updateColumn } = vi.hoisted(() => ({
+const { getModelOptions, refreshModelOptions, updateColumn, getMinimaxModelOptions, refreshMinimaxModelOptions, getColumnEffectiveModel } = vi.hoisted(() => ({
   getModelOptions: vi.fn(async () => ({ provider: "claude-code", options: ["sonnet", "opus", "haiku"] })),
   refreshModelOptions: vi.fn(async () => ({ provider: "claude-code", options: ["sonnet", "opus", "haiku", "fable"] })),
   updateColumn: vi.fn(async (id: string, body: Record<string, unknown>) => ({
@@ -10,6 +10,15 @@ const { getModelOptions, refreshModelOptions, updateColumn } = vi.hoisted(() => 
     default_agent: "engineer", default_provider: null, default_model: null,
     max_sessions: null, created_at: "", updated_at: "",
     ...body,
+  })),
+  getMinimaxModelOptions: vi.fn(async () => ({ provider: "minimax", options: ["MiniMax-M3", "MiniMax-M2.7"] })),
+  refreshMinimaxModelOptions: vi.fn(async () => ({ provider: "minimax", options: ["MiniMax-M3", "MiniMax-M2.7"] })),
+  getColumnEffectiveModel: vi.fn(async () => ({
+    provider: "anthropic", model: "sonnet",
+    provider_source: "column_default", model_source: "column_default",
+    global_override: null, pool_choice: null,
+    column_default_provider: "anthropic", column_default_model: "sonnet",
+    persona_model: null,
   })),
 }));
 
@@ -19,6 +28,9 @@ vi.mock("../api", () => ({
     getModelOptions,
     refreshModelOptions,
     updateColumn,
+    getMinimaxModelOptions,
+    refreshMinimaxModelOptions,
+    getColumnEffectiveModel,
   },
 }));
 
@@ -32,11 +44,17 @@ const COLUMN = {
 
 afterEach(() => {
   cleanup();
-  // clearAllMocks (not restoreAllMocks) — the vi.mock factory above installs
-  // vi.fn() defaults once at module load. For a bare vi.fn() with no real
-  // implementation to restore to, mockRestore() strips the factory default
-  // (equivalent to mockReset()), and any subsequent test that relies on the
-  // shared default silently breaks when an earlier test's afterEach runs.
+  // vi.clearAllMocks() only clears the call history — mock implementations
+  // (mockReturnValue / mockResolvedValue) survive across tests. Reset the
+  // ones this file overrides per-test back to their vi.hoisted() default.
+  getColumnEffectiveModel.mockReset();
+  getColumnEffectiveModel.mockResolvedValue({
+    provider: "anthropic", model: "sonnet",
+    provider_source: "column_default", model_source: "column_default",
+    global_override: null, pool_choice: null,
+    column_default_provider: "anthropic", column_default_model: "sonnet",
+    persona_model: null,
+  });
   vi.clearAllMocks();
 });
 
@@ -89,6 +107,100 @@ describe("ColumnSettingsDialog model field", () => {
     fireEvent.click(screen.getByRole("button", { name: /edit/i }));
     fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
     await waitFor(() => expect(refreshModelOptions).toHaveBeenCalled());
+    // The minimax refresh is best-effort; the claude-code toast should be
+    // the only user-visible signal.
+    await waitFor(() => expect(refreshMinimaxModelOptions).toHaveBeenCalled());
+  });
+
+  // Regression for kanban card 1782fa43… (column model setting): the
+  // datalist under the model input now uses the discovered JSONL list
+  // (`getMinimaxModelOptions`) instead of the hardcoded
+  // `["MiniMax-M3"]` constant. A subscription that has actually used
+  // `MiniMax-M2.7` would not see it in the picker under the old
+  // constant — kaart asked for the picker to reflect what the
+  // subscription has actually run.
+  it("uses the discovered minimax list when provider=minimax", async () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[{ ...COLUMN, default_provider: "minimax", default_model: "MiniMax-M3" }]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    // First, the dynamic minimax options must be fetched on open.
+    await waitFor(() => expect(getMinimaxModelOptions).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    const modelInput = screen.getByLabelText(/default model/i) as HTMLInputElement;
+    const listId = modelInput.getAttribute("list")!;
+    const datalist = document.getElementById(listId)!;
+    const values = Array.from(datalist.querySelectorAll("option")).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    // The discovered list ("MiniMax-M3", "MiniMax-M2.7") wins over the
+    // seed constant — so M2.7 must appear in the picker.
+    expect(values).toContain("MiniMax-M2.7");
+  });
+
+  // Kaart 1782fa43…: a board-wide subscription-override (or pool choice)
+  // silently wins over a column's `default_provider` / `default_model`.
+  // The dialog now surfaces that fact as an "Effective: …" line under
+  // the column, so the user can see why their saved setting isn't
+  // applied at dispatch time.
+  it("renders an Effective line when an override is silently winning", async () => {
+    // Override this one call to return a divergent effective-model.
+    getColumnEffectiveModel.mockResolvedValue({
+      provider: "minimax", model: "MiniMax-M3",
+      provider_source: "global_override", model_source: "global_override",
+      global_override: { provider: "minimax", model: "MiniMax-M3" },
+      pool_choice: null,
+      column_default_provider: "anthropic", column_default_model: "sonnet",
+      persona_model: null,
+    } as never);
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[COLUMN]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    // The EffectiveModelLine uses two sibling spans (one for the value,
+    // one for "— from <source>"). Match the source label so the test
+    // doesn't have to span JSX siblings.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/from board-wide subscription pin/i),
+      ).toBeTruthy(),
+    );
+  });
+
+  it("does NOT render an Effective line when only column defaults apply", async () => {
+    // The default mock already returns provider_source=column_default.
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[COLUMN]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    // Wait for the effect to settle.
+    await waitFor(() => expect(getColumnEffectiveModel).toHaveBeenCalled());
+    // The "from board-wide subscription pin" phrase that only appears in
+    // the EffectiveModelLine must NOT be present — the column's defaults
+    // are already visible in the read-only row above.
+    expect(
+      screen.queryByText(/from board-wide subscription pin/i),
+    ).toBeNull();
+    expect(screen.queryByText(/from subscription pool/i)).toBeNull();
   });
 
   // Regression for kanban card "Column model setting": the minimax datalist
