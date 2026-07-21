@@ -14,13 +14,14 @@
 #
 # What this file provides
 # -----------------------
-#   with_scratch_worktree  <repo_root> <var_name>
+#   with_scratch_worktree  <repo_root> <var_name> [source_ref]
 #       Creates a scratch worktree at
 #         <repo_root>/.tmp-<uniq-id>/wt-<pid>
 #       owned by this helper, installs an EXIT trap that removes
 #       BOTH the `.tmp-<uniq-id>` parent AND the worktree on exit,
 #       and binds the worktree path to <var_name> in the caller's
-#       scope. Echoes the worktree path on stdout.
+#       scope. Echoes the worktree path on stdout. source_ref defaults to
+#       HEAD; callers that require a stable baseline must pass it explicitly.
 #
 #   cleanup_scratch_worktree <repo_root> <wt_path>
 #       Same as the EXIT trap (idempotent). Caller can invoke it
@@ -44,6 +45,7 @@
 #   $1 — repo root (where `git worktree` is anchored)
 #   $2 — name of the variable in the caller's scope to bind the
 #        resolved path to
+#   $3 — optional git source ref (defaults to HEAD)
 #
 # IMPORTANT — must run in the caller's scope (no `$()`):
 #   `WT=$(with_scratch_worktree "$repo" WT)` puts the helper in a
@@ -60,7 +62,7 @@
 # installed up-front so a failed install still removes whatever was
 # created.
 with_scratch_worktree() {
-    local repo="$1" var="$2"
+    local repo="$1" var="$2" source_ref="${3:-HEAD}"
 
     # Build the path under a mktemp parent INSIDE the repo root. We
     # use a non-leading-dot prefix (`tmp-`) so the parent is visible
@@ -86,7 +88,7 @@ with_scratch_worktree() {
     mkdir -p "$wt_path"
 
     local err
-    if ! err="$(command git -C "$repo" worktree add --detach "$wt_path" HEAD 2>&1)"; then
+    if ! err="$(command git -C "$repo" worktree add --detach "$wt_path" "$source_ref" 2>&1)"; then
         echo "error: with_scratch_worktree: git worktree add failed at $wt_path: $err" >&2
         # Force cleanup so the failed parent doesn't linger.
         cleanup_scratch_worktree "$repo" "$wt_path"

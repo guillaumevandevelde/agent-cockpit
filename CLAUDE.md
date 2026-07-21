@@ -206,7 +206,9 @@ Done-kaart `d9447e49`).
   (success, error, signal). Belangrijk: `with_scratch_worktree` moet in de
   parent-shell draaien (redirect stdout naar een tempfile of lees een
   globale variabele) — `$()` zandbakst het in een subshell waar de
-  geïnstalleerde trap verloren gaat.
+  geïnstalleerde trap verloren gaat. De helper defaultt op `HEAD`; een harnas
+  dat een vaste baseline nodig heeft geeft die als derde argument mee, bv.
+  `with_scratch_worktree "$REPO_ROOT" WT origin/master`.
 - **Geen lokale pre-push gate** (sinds 2026-07-05): full pytest + lint/build liep
   in CI (`quality.yml`). Backend pytest + ruff en frontend lint/test/build draaien
   in CI als backend/frontend-gate; draai zelf de frontend-checks voor ships die

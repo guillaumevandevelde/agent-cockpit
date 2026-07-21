@@ -10,6 +10,8 @@
 #   parse_usage <json>              — emits input / cache_creation / cache_read / output on 4 lines
 #   score_golden <worktree>         — emits "pass_tests=<0|1>\npass_diff=<0|1>" on 2 lines
 #   build_prompt <worktree>         — emits the deterministic golden-task prompt on stdout
+#   resolve_measurement_base_ref    — origin/master → master → HEAD
+#   prepare_golden_revert <worktree> — creates the broken fixture or fails closed
 #   make_worktree <repo> <path>     — echo the new worktree path on stdout
 #   cleanup_worktree <repo> <path>  — git worktree remove --force + prune
 
@@ -137,25 +139,50 @@ score_golden() {
     echo "pass_diff=$pass_diff"
 }
 
+# --- resolve_measurement_base_ref -----------------------------------------
+# Preserve the harness's original stable-baseline order even when it is run
+# from a feature worktree.
+resolve_measurement_base_ref() {
+    local repo="$1"
+    if command git -C "$repo" rev-parse --verify origin/master >/dev/null 2>&1; then
+        echo "origin/master"
+    elif command git -C "$repo" rev-parse --verify master >/dev/null 2>&1; then
+        echo "master"
+    else
+        echo "HEAD"
+    fi
+}
+
+# --- prepare_golden_revert ------------------------------------------------
+# Put the fixture in the known-broken state. Refuse to continue when the
+# selected baseline does not contain the expected fixed line: sed otherwise
+# succeeds without changing anything and the harness reports plausible but
+# meaningless measurements.
+prepare_golden_revert() {
+    local wt="$1"
+    local dispatch_py="$wt/backend/app/kanban/dispatch.py"
+    local fixed='r.max_sessions >= 0'
+    local broken='r.max_sessions > 0'
+
+    if [ ! -f "$dispatch_py" ] || ! grep -qF "$fixed" "$dispatch_py"; then
+        echo "error: golden task expected fixed line '$fixed' in $dispatch_py" >&2
+        return 1
+    fi
+
+    sed -i "s/$fixed/$broken/" "$dispatch_py"
+}
+
 # --- make_worktree -------------------------------------------------------
 # Create a detached scratch worktree. Tries origin/master first, then
 # master, then HEAD. Echoes the new worktree path on stdout. Returns
 # non-zero if no usable ref exists. Caller's responsibility to invoke
 # cleanup_worktree on EXIT.
 make_worktree() {
-    local repo="$1" path="$2"
-    # Try in order: origin/master → master → HEAD. Use `command git` so any
-    # shell function aliases don't intercept the call (some interactive
-    # zsh setups have `git` aliased). Redirect both stdout and stderr of
-    # the worktree-add to /dev/null so the progress text doesn't leak
-    # into the caller's stdout capture.
-    if command git -C "$repo" rev-parse origin/master >/dev/null 2>&1; then
-        command git -C "$repo" worktree add --detach "$path" origin/master >/dev/null 2>&1
-    elif command git -C "$repo" rev-parse master >/dev/null 2>&1; then
-        command git -C "$repo" worktree add --detach "$path" master >/dev/null 2>&1
-    else
-        command git -C "$repo" worktree add --detach "$path" HEAD >/dev/null 2>&1
-    fi
+    local repo="$1" path="$2" source_ref
+    source_ref="$(resolve_measurement_base_ref "$repo")"
+    # Use `command git` so shell aliases do not intercept this call. Redirect
+    # progress output so it cannot leak into the caller's stdout capture.
+    command git -C "$repo" worktree add --detach "$path" "$source_ref" >/dev/null 2>&1
     echo "$path"
 }
 

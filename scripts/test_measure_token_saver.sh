@@ -165,6 +165,38 @@ check "worktree directory was created" '[ -f "$TMP/wt-rt.out" ] && grep -q "^WT=
 check "worktree directory was cleaned up" '[ ! -d "$TMP/wt-rt" ]'
 
 # ----------------------------------------------------------------------------
+echo "Task 5: measurement baseline and golden revert are fail-closed"
+
+# A feature branch may differ from master. The measurement must still seed its
+# golden task from origin/master (or local master when no remote exists).
+git -C "$REPO" checkout -qb feature
+echo feature > "$REPO/a.txt"
+git -C "$REPO" add a.txt
+git -C "$REPO" commit -qm feature
+
+( source "$LIB" 2>/dev/null && \
+  BASE_REF="$(resolve_measurement_base_ref "$REPO")" && \
+  echo "$BASE_REF" > "$TMP/base-ref.out" )
+check "measurement baseline prefers local master over feature HEAD" \
+    '[ "$(cat "$TMP/base-ref.out")" = "master" ]'
+
+mkdir -p "$TMP/golden/backend/app/kanban"
+printf '%s\n' 'return r.max_sessions >= 0' > "$TMP/golden/backend/app/kanban/dispatch.py"
+( source "$LIB" 2>/dev/null && prepare_golden_revert "$TMP/golden" )
+check "golden revert changes the expected fixed line" \
+    'grep -q "r.max_sessions > 0" "$TMP/golden/backend/app/kanban/dispatch.py"'
+
+printf '%s\n' 'return feature-content' > "$TMP/golden/backend/app/kanban/dispatch.py"
+if ( source "$LIB" 2>/dev/null && prepare_golden_revert "$TMP/golden" ) >"$TMP/noop.out" 2>"$TMP/noop.err"; then
+    NOOP_RC=0
+else
+    NOOP_RC=$?
+fi
+check "missing golden-task precondition exits non-zero" '[ "$NOOP_RC" -ne 0 ]'
+check "missing golden-task precondition explains the invalid baseline" \
+    'grep -q "expected fixed line" "$TMP/noop.err"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
