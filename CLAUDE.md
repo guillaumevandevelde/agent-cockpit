@@ -82,6 +82,7 @@ bash scripts/test_check_doc_links.sh                      # Bash tests for check
 bash scripts/test_check_kanban_conventions.sh             # Bash tests for check-kanban-conventions.sh (synthetic SQLite fixtures)
 bash scripts/test_check_litellm_hardening.sh              # Bash tests for check-litellm-hardening.sh (synthetic stdlib http.server fake proxy)
 bash scripts/test_check_problem_card_staleness.sh         # Bash tests for check-problem-card-staleness.sh
+bash scripts/test_measure_token_saver.sh                  # Bash tests for measure-token-saver.sh (stub claude CLI; 4 isolated runs + counterbalance)
 bash scripts/test_check_schema_rename_coverage.sh         # Bash tests for check-schema-rename-coverage.sh
 bash scripts/test_check_test_harness_coverage.sh         # Bash tests for check-test-harness-coverage.sh
 bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh

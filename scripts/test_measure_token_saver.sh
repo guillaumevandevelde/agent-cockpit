@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Test harness for scripts/lib/measure_token_saver_lib.sh — the pure helpers
-# behind scripts/measure-token-saver.sh.
+# Test harness for scripts/lib/measure_token_saver_lib.sh + the
+# scripts/measure-token-saver.sh driver (the counterbalanced smoke).
 #
 # Covers:
 #   1. apply_saver byte-stability: identical input → identical SHA-256 across
@@ -16,6 +16,16 @@
 #      tests pre-installed, and (c) the pytest invocation that exercises
 #      them. The fixture builds a temporary pytest-stub returning a
 #      deterministic exit code so we don't need a real pytest run.
+#   4. resolve_measurement_base_ref + prepare_golden_revert: baseline ref
+#      resolves to origin/master when present, falls back to master, then to
+#      HEAD; prepare_golden_revert fails closed on a worktree whose
+#      dispatch.py lacks the expected fixed line and succeeds on one that
+#      has it.
+#   5. compare smoke: driver runs four isolated Claude invocations across
+#      two counterbalanced trials, every run in its own scratch worktree
+#      seeded from the resolved base ref, and the output table reports all
+#      four rows. Uses a stub claude CLI that logs PWD/variant/golden-task
+#      line per run, so no network or real Claude is required.
 
 set -u
 
@@ -149,54 +159,101 @@ check "failing pytest → pass_tests=0" 'grep -q "^pass_tests=0" "$TMP/score_fai
 check "pass_diff stays 1 (diff is still right)" 'grep -q "^pass_diff=1" "$TMP/score_fail.out"'
 
 # ----------------------------------------------------------------------------
-echo "Task 4: make_worktree + cleanup_worktree round-trip"
+echo "Task 4: resolve_measurement_base_ref + prepare_golden_revert"
 
 REPO="$TMP/repo"
 mkdir -p "$REPO"
 ( cd "$REPO" && git init -q -b master && git config user.email t@t && git config user.name t && echo a > a.txt && git add a.txt && git commit -qm a )
 
+# --- resolve_measurement_base_ref -----------------------------------------
+# Local-only repo (no origin remote): should fall back to master.
 ( source "$LIB" 2>/dev/null && \
-  WT=$( make_worktree "$REPO" "$TMP/wt-rt" ) && \
-  echo "WT=$WT" > "$TMP/wt-rt.out" && \
-  [ -d "$WT" ] && \
-  cleanup_worktree "$REPO" "$WT" )
-
-check "worktree directory was created" '[ -f "$TMP/wt-rt.out" ] && grep -q "^WT=" "$TMP/wt-rt.out"'
-check "worktree directory was cleaned up" '[ ! -d "$TMP/wt-rt" ]'
-
-# ----------------------------------------------------------------------------
-echo "Task 5: measurement baseline and golden revert are fail-closed"
-
-# A feature branch may differ from master. The measurement must still seed its
-# golden task from origin/master (or local master when no remote exists).
-git -C "$REPO" checkout -qb feature
-echo feature > "$REPO/a.txt"
-git -C "$REPO" add a.txt
-git -C "$REPO" commit -qm feature
-
-( source "$LIB" 2>/dev/null && \
-  BASE_REF="$(resolve_measurement_base_ref "$REPO")" && \
-  echo "$BASE_REF" > "$TMP/base-ref.out" )
-check "measurement baseline prefers local master over feature HEAD" \
+  echo "$(resolve_measurement_base_ref "$REPO")" > "$TMP/base-ref.out" )
+check "resolve_measurement_base_ref returns master when origin/master is absent" \
     '[ "$(cat "$TMP/base-ref.out")" = "master" ]'
 
-mkdir -p "$TMP/golden/backend/app/kanban"
-printf '%s\n' 'return r.max_sessions >= 0' > "$TMP/golden/backend/app/kanban/dispatch.py"
-( source "$LIB" 2>/dev/null && prepare_golden_revert "$TMP/golden" )
-check "golden revert changes the expected fixed line" \
-    'grep -q "r.max_sessions > 0" "$TMP/golden/backend/app/kanban/dispatch.py"'
+# Add a feature branch to confirm the baseline prefers master over feature HEAD.
+( cd "$REPO" && git checkout -qb feature && echo feature > a.txt && git add a.txt && git commit -qm feature )
 
+( source "$LIB" 2>/dev/null && \
+  echo "$(resolve_measurement_base_ref "$REPO")" > "$TMP/base-ref2.out" )
+check "resolve_measurement_base_ref still prefers master on a feature branch" \
+    '[ "$(cat "$TMP/base-ref2.out")" = "master" ]'
+
+# --- prepare_golden_revert -----------------------------------------------
+mkdir -p "$TMP/golden/backend/app/kanban"
+printf '%s\n' 'return {r.name: r.max_sessions for r in rows if r.max_sessions is not None and r.max_sessions >= 0}' > \
+    "$TMP/golden/backend/app/kanban/dispatch.py"
+
+( source "$LIB" 2>/dev/null && prepare_golden_revert "$TMP/golden" )
+check "prepare_golden_revert flips the fixed line to broken" \
+    'grep -q "r.max_sessions > 0" "$TMP/golden/backend/app/kanban/dispatch.py" && \
+     ! grep -q "r.max_sessions >= 0" "$TMP/golden/backend/app/kanban/dispatch.py"'
+
+# Idempotency / second call: the broken line is now the only one — calling
+# prepare_golden_revert again should be a no-op (still leaves broken > 0).
+( source "$LIB" 2>/dev/null && prepare_golden_revert "$TMP/golden" )
+check "prepare_golden_revert is idempotent on already-broken state" \
+    'grep -q "r.max_sessions > 0" "$TMP/golden/backend/app/kanban/dispatch.py" && \
+     ! grep -q "r.max_sessions >= 0" "$TMP/golden/backend/app/kanban/dispatch.py"'
+
+# Fail-closed: a worktree whose dispatch.py lacks the fixed line must refuse.
 printf '%s\n' 'return feature-content' > "$TMP/golden/backend/app/kanban/dispatch.py"
 if ( source "$LIB" 2>/dev/null && prepare_golden_revert "$TMP/golden" ) >"$TMP/noop.out" 2>"$TMP/noop.err"; then
     NOOP_RC=0
 else
     NOOP_RC=$?
 fi
-check "missing golden-task precondition exits non-zero" '[ "$NOOP_RC" -ne 0 ]'
-check "missing golden-task precondition explains the invalid baseline" \
+check "prepare_golden_revert exits non-zero when fixed line is missing" '[ "$NOOP_RC" -ne 0 ]'
+check "prepare_golden_revert explains the invalid baseline" \
     'grep -q "expected fixed line" "$TMP/noop.err"'
 
 # ----------------------------------------------------------------------------
-echo ""
+echo "Task 5: compare isolates and counterbalances every Claude run"
+
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/claude" <<'EOF'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = "--version" ]; then
+    echo "claude-stub 0"
+    exit 0
+fi
+prompt=$(cat)
+variant=baseline
+case "$prompt" in
+    *"[SAVER:CAVEMAN]"*) variant=with-saver ;;
+esac
+line=$(grep 'r.max_sessions' backend/app/kanban/dispatch.py || true)
+printf '%s|%s|%s\n' "$PWD" "$variant" "$line" >> "$MEASURE_CLAUDE_LOG"
+sed -i 's/r.max_sessions > 0/r.max_sessions >= 0/' backend/app/kanban/dispatch.py
+printf '{"usage":{"input_tokens":10,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":4}}\n'
+EOF
+chmod +x "$TMP/bin/claude"
+cat > "$TMP/bin/fake-pytest" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/bin/fake-pytest"
+
+MEASURE_CLAUDE_LOG="$TMP/claude.log" \
+PYTEST_CMD="$TMP/bin/fake-pytest" \
+PATH="$TMP/bin:$PATH" \
+bash "$SCRIPT_DIR/measure-token-saver.sh" compare > "$TMP/compare.out" 2> "$TMP/compare.err"
+
+check "compare invokes exactly four isolated Claude runs" \
+    '[ "$(wc -l < "$TMP/claude.log")" -eq 4 ]'
+check "each compare run starts with the broken golden-task line" \
+    '[ "$(grep -c "r.max_sessions > 0" "$TMP/claude.log")" -eq 4 ]'
+check "each compare run uses a distinct worktree" \
+    '[ "$(cut -d"|" -f1 "$TMP/claude.log" | sort -u | wc -l)" -eq 4 ]'
+check "first trial runs baseline before with-saver" \
+    '[ "$(sed -n 1p "$TMP/claude.log" | cut -d"|" -f2)" = baseline ] && [ "$(sed -n 2p "$TMP/claude.log" | cut -d"|" -f2)" = with-saver ]'
+check "second trial reverses the variant order" \
+    '[ "$(sed -n 3p "$TMP/claude.log" | cut -d"|" -f2)" = with-saver ] && [ "$(sed -n 4p "$TMP/claude.log" | cut -d"|" -f2)" = baseline ]'
+check "compare reports both trials" \
+    '[ "$(grep -c "| trial-[12]-baseline" "$TMP/compare.out")" -eq 2 ] && [ "$(grep -c "| trial-[12]-with-saver" "$TMP/compare.out")" -eq 2 ]'
+
+# ----------------------------------------------------------------------------
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
