@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 95 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 96 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -181,7 +181,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
 | [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
 
-### Analysis (28)
+### Analysis (29)
 
 | Document | Status |
 |---|---|
@@ -205,6 +205,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio ↔ security overdracht — drie open vragen voor facet D](./portfolio-security-handoff.md) | 🟡 proposed |
 | [Analyse — Volgbaarheid van het project voor de product owner](./product-owner-volgbaarheid-analyse.md) | 🟢 active |
 | [Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel](./recurring-cadence-proposal.md) | 🟡 proposed |
+| [Analyse — Run vasthouden + gebufferde events over een transport-onderbreking](./run-hold-buffered-events-analyse.md) | 🔵 decided |
 | [Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse](./spawn-test-bridge-sessions-analyse.md) | 🟢 active |
 | [Spec-driven development als single source of truth — analyse](./spec-driven-development-analysis.md) | 🟢 active |
 | [Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor](./spike-same-vendor-multi-account-isolation.md) | 🔵 decided |
