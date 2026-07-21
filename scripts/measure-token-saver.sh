@@ -18,6 +18,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/measure_token_saver_lib.sh"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/lib/worktree-trap.sh"
 
 CMD="${1:-compare}"
 case "$CMD" in
@@ -61,12 +63,21 @@ claude --version >/dev/null 2>&1 || {
     exit 3
 }
 
-# Resolve repo + scratch worktree
+# Resolve repo + scratch worktree. Worktree + parent tmp-<id> dir are
+# cleaned up automatically by the EXIT trap installed inside
+# `with_scratch_worktree` — see scripts/lib/worktree-trap.sh for the
+# rationale (the prior `mktemp -d -p "$REPO_ROOT"` shape leaked the
+# parent directory into the repo working tree on every harness run).
+#
+# We redirect stdout into a tempfile rather than `$(...)` so the
+# helper runs in the parent shell and the EXIT trap it installs
+# survives — `$()` would sandbox it into a subshell where the trap
+# is lost.
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-WT="$(mktemp -d -p "$REPO_ROOT")/wt-$$"
-trap 'cleanup_worktree "$REPO_ROOT" "$WT"; rmdir "$(dirname "$WT")" 2>/dev/null || true' EXIT
-
-WT=$( make_worktree "$REPO_ROOT" "$WT" )
+WT_PATH_FILE="$(mktemp)"
+with_scratch_worktree "$REPO_ROOT" WT > "$WT_PATH_FILE"
+WT="$(cat "$WT_PATH_FILE")"
+rm -f "$WT_PATH_FILE"
 
 # Apply the "revert" — set the dispatch.py line to the broken `> 0` state.
 # b30a9bb's tests already live on master, so we only need to flip the one
