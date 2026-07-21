@@ -41,18 +41,45 @@
 #     end-of-file. Anything outside that block (e.g. an incidental mention
 #     in a description elsewhere in CLAUDE.md) does NOT count.
 #
+# Carve-out list: some harnesses intentionally live OUTSIDE the `# Test`
+# block (supervisor section, feature-specific docs) and we don't want
+# the guard to flag them as missing-from-CLAUDE.md. The list below
+# declares those exceptions in one place — visible intent, easy to
+# audit, and master can stay CLEAN with `--strict` enabled. Each entry
+# must carry a one-line rationale. Adding an entry that doesn't justify
+# itself is the failure mode this list prevents (cf. the card's complaint
+# about "guarded but inert").
+#
+#   test_cockpit.sh             — supervisor harness, lives in the
+#                                 Self-healing dev stack section
+#   test_measure_token_saver.sh — feature harness for the token-saver
+#                                 meet-recept, documented in
+#                                 docs/cockpit/token-saver-meet-harnas.md §4
+#
+# The carve-out only suppresses direction A (missing-from-CLAUDE.md).
+# Direction B (phantom-in-CLAUDE.md, i.e. a name listed in `# Test` that
+# doesn't exist on disk) still fires for carved names — if you accidentally
+# start listing `test_cockpit.sh` in `# Test` while it's been deleted, you
+# want to know.
+#
+# Override with the CARVE_OUTS env var (space-separated basenames, no
+# `scripts/` prefix). Used by the test harness to exercise the path
+# without editing this file.
+#
 # Advisory by design: exits 0 when drift is found and prints a warning.
 # Pass --strict to exit 1 on drift.
 #
 # Usage:
 #   bash scripts/check-test-harness-coverage.sh [--strict]
 #   # Defaults to <repo>/CLAUDE.md and <repo>/scripts. Override with
-#   # CLAUDE_MD / SCRIPTS_DIR env vars (used by the test harness).
+#   # CLAUDE_MD / SCRIPTS_DIR / CARVE_OUTS env vars (used by the test harness).
 #
 # Env:
 #   CLAUDE_MD  path to CLAUDE.md to scan (default: <repo>/CLAUDE.md)
 #   SCRIPTS_DIR  directory whose test_*.sh files are checked
 #                (default: <repo>/scripts)
+#   CARVE_OUTS  space-separated basenames to exclude from missing-from-
+#               CLAUDE.md drift (default: the hardcoded list above)
 
 set -euo pipefail
 
@@ -67,7 +94,7 @@ for arg in "$@"; do
   case "$arg" in
     --strict) STRICT=1 ;;
     --help|-h)
-      sed -n '2,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,82p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     "") ;;
@@ -103,8 +130,12 @@ TEST_BLOCK=$(awk '
 # Match `scripts/test_<name>.sh` as a substring so e.g. `bash scripts/test_X.sh`
 # and `scripts/test_X.sh ...` both register as a reference. Capture just the
 # basename for the comparison.
+# `|| true` swallows grep's exit-1 when there are zero matches — under
+# `set -o pipefail` this would otherwise abort the script on empty
+# fixtures (carve-out scenarios: the `# Test` block is intentionally
+# empty when the only disk harnesses are carved out).
 LISTED=$(printf '%s\n' "$TEST_BLOCK" \
-  | grep -oE 'scripts/test_[A-Za-z0-9_-]+\.sh' \
+  | { grep -oE 'scripts/test_[A-Za-z0-9_-]+\.sh' || true; } \
   | sed 's|^scripts/||' \
   | sort -u)
 
@@ -112,6 +143,38 @@ LISTED=$(printf '%s\n' "$TEST_BLOCK" \
 ON_DISK=$(find "$SCRIPTS_DIR" -maxdepth 1 -type f -name 'test_*.sh' \
   -printf '%f\n' \
   | sort -u)
+
+# --- carve-out list -------------------------------------------------------
+# Default: basenames of scripts/test_*.sh that intentionally live outside
+# the `# Test` block (supervisor section, feature-specific docs). Mirrors
+# the rationale documented in the script header. CARVE_OUTS env var
+# overrides the default for the test harness.
+DEFAULT_CARVE_OUTS=(test_cockpit.sh test_measure_token_saver.sh)
+
+if [ "${CARVE_OUTS+x}" = x ]; then
+  # CARVE_OUTS is set (including to the empty string). Split on whitespace.
+  # An empty value disables the carve-out entirely — useful when a future
+  # operator wants the guard to be strict-by-default.
+  if [ -z "$CARVE_OUTS" ]; then
+    CARVE_OUT_ARR=()
+  else
+    # shellcheck disable=SC2206  # intentional word-split on whitespace
+    CARVE_OUT_ARR=($CARVE_OUTS)
+  fi
+else
+  CARVE_OUT_ARR=("${DEFAULT_CARVE_OUTS[@]}")
+fi
+
+is_carved_out() {
+  local target="$1"
+  local entry
+  for entry in "${CARVE_OUT_ARR[@]}"; do
+    if [ "$entry" = "$target" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 # --- diff in both directions ---------------------------------------------
 MISSING_FROM_CLAUDE=()
@@ -121,6 +184,22 @@ while IFS= read -r harness; do
     MISSING_FROM_CLAUDE+=("$harness")
   fi
 done <<< "$ON_DISK"
+
+# Apply the carve-out: a basename in CARVE_OUT_ARR is silently dropped from
+# the missing-from-CLAUDE.md list. The phantom direction (next block) is
+# untouched — a carved name that *is* in `# Test` but doesn't exist on
+# disk still surfaces as drift, because CLAUDE.md is the source of truth
+# for the # Test block.
+if [ "${#CARVE_OUT_ARR[@]}" -gt 0 ]; then
+  FILTERED_MISSING=()
+  for harness in "${MISSING_FROM_CLAUDE[@]}"; do
+    if is_carved_out "$harness"; then
+      continue
+    fi
+    FILTERED_MISSING+=("$harness")
+  done
+  MISSING_FROM_CLAUDE=("${FILTERED_MISSING[@]}")
+fi
 
 PHANTOM_IN_CLAUDE=()
 while IFS= read -r harness; do
@@ -134,8 +213,26 @@ total_drift=$((${#MISSING_FROM_CLAUDE[@]} + ${#PHANTOM_IN_CLAUDE[@]}))
 
 # --- report ---------------------------------------------------------------
 if [ "$total_drift" -eq 0 ]; then
-  printf 'OK: %d test harness(es) in CLAUDE.md # Test block match scripts/test_*.sh on disk\n' \
-    "$(printf '%s\n' "$ON_DISK" | wc -l)"
+  # Build a count of the harness set actually being reported on:
+  #   listed in `# Test`     + missing-from-# Test but carved out
+  # Carved-out harnesses are intentionally NOT in `# Test` but are also
+  # not drift, so they belong in the "covered" total. The plain
+  # ON_DISK count would over- or under-report against either of those
+  # sets; the union is what the operator wants to see.
+  # Count non-empty lines so empty LISTED doesn't count its trailing
+  # newline as a "line".
+  listed_count=0
+  if [ -n "$LISTED" ]; then
+    listed_count=$(printf '%s\n' "$LISTED" | wc -l)
+  fi
+  carved_in_disk=0
+  for h in $ON_DISK; do
+    if is_carved_out "$h"; then
+      carved_in_disk=$((carved_in_disk + 1))
+    fi
+  done
+  printf 'OK: %d test harness(es) covered (CLAUDE.md # Test + carve-outs)\n' \
+    "$(( listed_count + carved_in_disk ))"
   exit 0
 fi
 
