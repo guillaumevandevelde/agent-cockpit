@@ -16,9 +16,11 @@ from __future__ import annotations
 from app.services.agentic_cli.provider_env import (
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
+    PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
 )
 from app.services.subscriptions.base import SubscriptionUsageProvider
+from app.services.subscriptions.router import RouterUsageProvider
 from app.services.subscriptions.unknown import UnknownUsageProvider
 
 # Concrete providers — one per (cli, provider) that has a real signal
@@ -49,6 +51,15 @@ from app.services.subscriptions.unknown import UnknownUsageProvider
 # without inventing data, so a later call to ``register_provider``
 # with a real ``AnthropicUsageProvider`` (e.g. once a plan-tier is
 # configured) replaces the stub by id without ceremony.
+#
+# Kaart 390756e6... extends the seed with the
+# ``claude-code:anthropic-compatible`` slot: 9router / LiteLLM
+# eindpunten registeren als endpoint-rij onder ``anthropic-compatible``
+# (zie ``agentic_cli/endpoints.py``), maar verborgen meerdere
+# upstreams = geen betrouwbare quota-bron. De seed gebruikt
+# ``RouterUsageProvider`` (specifiek ``bron`` met ``router_eindpunt``
+# prefix) i.p.v. een generieke ``UnknownUsageProvider`` zodat de UI
+# de context niet verliest tussen andere onzekere rijen.
 _PROVIDERS: dict[str, SubscriptionUsageProvider] = {}
 
 
@@ -88,6 +99,18 @@ def register_default_providers() -> None:
             subscription_id=f"claude-code:{prov}",
             subscription_label=f"Claude Code ({prov} — geen signaal-bron)",
         ))
+    # Kaart 390756e6... (router-eindpunt): ``anthropic-compatible`` is
+    # de provider-id voor een data-driven eindpunt (zie
+    # ``agentic_cli/endpoints.py`` — 9router / LiteLLM / etc. zijn
+    # rijen). Een router verbergt meerdere upstreams achter één
+    # endpoint, dus er is geen betrouwbare quota-bron — de seed is
+    # een ``RouterUsageProvider`` (specifieke ``bron``) in plaats van
+    # een generieke ``UnknownUsageProvider`` zodat de UI de
+    # router-context niet verliest tussen andere onzekere rijen.
+    register_provider(RouterUsageProvider(
+        subscription_id=f"claude-code:{PROVIDER_COMPATIBLE}",
+        subscription_label="Claude Code (Router — geen quota-bron)",
+    ))
 
 
 def get_provider_for(

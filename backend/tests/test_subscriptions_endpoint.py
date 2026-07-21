@@ -2,12 +2,17 @@
 per-subscription usage view (kaart 9bce091a...).
 
 Acceptance criteria under test:
-- one row per known subscription (claude-code:{anthropic,minimax,bedrock},
-  codex-cli:codex, copilot-cli:copilot, open-code:open-code);
-- Codex/Copilot/OpenCode/Bedrock (no usable local signal) render an honest
+- one row per known subscription (claude-code:{anthropic,minimax,bedrock,
+  anthropic-compatible}, codex-cli:codex, copilot-cli:copilot,
+  open-code:open-code);
+- Codex/Copilot/OpenCode/Bedrock (no usable local signal) and the
+  router-eindpunt row ``claude-code:anthropic-compatible`` (kaart
+  390756e6... — geen betrouwbare quota-bron) render an honest
   ``betrouwbaarheid="onbekend"`` row, never a fabricated number;
 - the Anthropic row is always ``betrouwbaarheid="schatting"`` once a plan
-  tier is set, never ``"exact"``;
+  tier is set, never ``"exact"``, **and stays distinct from the router
+  row** — geen cross-pollinatie wanneer een gebruiker een
+  router-eindpunt configureert;
 - the plan-tier endpoints round-trip and reject unknown tiers / a
   non-positive custom limit.
 """
@@ -26,6 +31,27 @@ from app.services.usage_service import UsageService
 
 def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+
+@pytest.fixture(autouse=True)
+def _seed_registry(monkeypatch):
+    """Mirror ``main.lifespan``'s seed so the registry contains the
+    realistic default-providers (UnknownUsageProvider for the legacy
+    trio + RouterUsageProvider for ``anthropic-compatible``, kaart
+    390756e6...). The endpoint loop prefers a registered provider over
+    a freshly-constructed UnknownUsageProvider fallback, so this
+    fixture is what makes the router-row's ``bron`` /
+    ``subscription_label`` show up under test — without it the
+    ASGITransport-based client never triggers ``lifespan``, and the
+    registry stays empty.
+    """
+    from app.services.subscriptions import registry as _reg
+    _saved = dict(_reg._PROVIDERS)
+    _reg._PROVIDERS.clear()
+    _reg.register_default_providers()
+    yield
+    _reg._PROVIDERS.clear()
+    _reg._PROVIDERS.update(_saved)
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +96,7 @@ async def test_usage_lists_one_row_per_known_subscription():
         "claude-code:anthropic",
         "claude-code:minimax",
         "claude-code:bedrock",
+        "claude-code:anthropic-compatible",
         "codex-cli:codex",
         "copilot-cli:copilot",
         "open-code:open-code",
@@ -87,6 +114,57 @@ async def test_no_signal_subscriptions_are_honestly_onbekend():
         assert row["drempel_gebruikt"] is None
         assert row["verbruikt"] is None
         assert row["limiet"] is None
+
+
+@pytest.mark.asyncio
+async def test_router_subscription_row_is_honestly_onbekend():
+    # Kaart 390756e6... AC#3: het router-eindpunt (achter
+    # ``anthropic-compatible``) toont op de Subscriptions-pagina een
+    # "Unknown"-rij — geen verzonnen cijfers. Zonder dit zou de UI
+    # van die rij een "0/220000"-progressbar kunnen tonen die de
+    # product owner misleidt.
+    async with _client() as ac:
+        r = await ac.get("/api/v1/subscriptions/usage")
+    rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
+    router = rows["claude-code:anthropic-compatible"]
+    assert router["betrouwbaarheid"] == "onbekend"
+    assert router["drempel_gebruikt"] is None
+    assert router["verbruikt"] is None
+    assert router["limiet"] is None
+    # En de label herinnert de UI eraan dat dit een router-rij is,
+    # anders wordt het een anonieme "Unknown"-cel.
+    assert "Router" in router["subscription_label"] or "router" in router["bron"]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_row_still_schatting_not_router(monkeypatch):
+    # Cross-pollinatie-guard: ook wanneer de ``anthropic-compatible``
+    # router-rij live is, moet de directe ``anthropic``-rij zijn
+    # eigen ``schatting``-label behouden (plan-tier is Anthropic,
+    # niet de router). Anders zou een naïeve "first match wins" in
+    # de endpoint-loop de Anthropic-rij met de router-rij kunnen
+    # overschrijven.
+    active_block = SimpleNamespace(
+        input_tokens=5_000,
+        output_tokens=5_000,
+        cache_creation_tokens=0,
+        cache_read_tokens=0,
+        end_time=None,
+    )
+    monkeypatch.setattr(
+        UsageService,
+        "get_block_usage",
+        AsyncMock(return_value=SimpleNamespace(active_block=active_block)),
+    )
+    async with _client() as ac:
+        put = await ac.put(
+            "/api/v1/subscriptions/anthropic/plan-tier", json={"tier": "pro"}
+        )
+        assert put.status_code == 200, put.text
+        r = await ac.get("/api/v1/subscriptions/usage")
+    rows = {row["subscription_id"]: row for row in r.json()["subscriptions"]}
+    assert rows["claude-code:anthropic"]["betrouwbaarheid"] == "schatting"
+    assert rows["claude-code:anthropic-compatible"]["betrouwbaarheid"] == "onbekend"
 
 
 @pytest.mark.asyncio

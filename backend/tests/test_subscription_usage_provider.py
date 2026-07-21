@@ -13,6 +13,15 @@ Each test class corresponds to one concrete provider. Tests pin:
   onbekend by construction);
 - no fabrication: providers without a usable signal return
   ``betrouwbaarheid="onbekend"`` and ``drempel_gebruikt=None``.
+
+Kaart 390756e6... voegt ``TestRouterUsageProvider`` en
+``TestRouterTokensDoNotPolluteAnthropicCount`` toe: de eerste
+vergrendelt het "no fabrication"-contract voor router-eindpunten
+(geen betrouwbare quota-bron — attribueer geen cijfer); de tweede
+bewijst dat router-upstream-modellenamen
+(``gpt-4o``/``gemini-*``/etc.) niet in de Anthropic 5h-window
+terechtkomen — het regressie-schild tegen herhaling van de
+``a410468d…`` 36,9%-vervuiling.
 """
 from __future__ import annotations
 
@@ -25,6 +34,7 @@ import pytest
 from app.services.subscriptions.anthropic import AnthropicUsageProvider
 from app.services.subscriptions.base import SubscriptionUsage, SubscriptionUsageProvider
 from app.services.subscriptions.minimax import MinimaxUsageProvider
+from app.services.subscriptions.router import RouterUsageProvider
 from app.services.subscriptions.unknown import UnknownUsageProvider
 
 
@@ -436,6 +446,191 @@ class TestMinimaxUsageProvider:
         assert usage.bron == "minimax_api:probe_unparseable"
 
 
+class TestRouterUsageProvider:
+    """Eerlijke ``onbekend`` voor router-eindpunten (9router / LiteLLM).
+
+    Kaart 390756e6...: een router-provider verbergt meerdere upstreams
+    achter één lokaal endpoint, dus er is **geen** betrouwbare
+    quota-bron waarop een ``drempel_gebruikt`` gebaseerd kan worden.
+    De provider geeft standaard ``betrouwbaarheid="onbekend"`` terug
+    zolang er geen externe quota-bron is geconfigureerd.
+
+    De verplichting die deze testset vastpint: dezelfde
+    "no fabrication"-discipline die ``UnknownUsageProvider`` al
+    afdwingt voor Codex/Copilot/OpenCode, maar dan voor de expliciete
+    router-subscription. Documentatie van de bron (``bron``) mag wel
+    iets router-specifieks zeggen zodat de UI duidelijk kan maken
+    waarom deze rij onzeker is.
+    """
+
+    def setup_method(self):
+        self.provider = RouterUsageProvider(
+            subscription_id="claude-code:anthropic-compatible",
+            subscription_label="Claude Code (Router)",
+        )
+
+    async def test_id_and_label_propagate(self):
+        usage = await self.provider.get_usage()
+        assert usage.subscription_id == "claude-code:anthropic-compatible"
+        assert usage.subscription_label == "Claude Code (Router)"
+
+    async def test_signal_is_onbekend_not_fabricated(self):
+        # Kaart 390756e6... AC#2: betrouwbaarheid="onbekend" zolang er
+        # geen betrouwbare quota-bron is. De router belooft geen
+        # upstream-numbers — we laten de UI eerlijk "Unknown" tonen.
+        usage = await self.provider.get_usage()
+        assert usage.betrouwbaarheid == "onbekend"
+
+    async def test_drempel_gebruikt_is_none_no_fabrication(self):
+        # Geen cijfer verzinnen: een drempel vereist een externe
+        # quota-bron die een router niet kan bieden.
+        usage = await self.provider.get_usage()
+        assert usage.drempel_gebruikt is None
+
+    async def test_beschikbaar_is_true(self):
+        # Analyse §6.3 — ook zonder signaal wordt de subscription als
+        # "available" gemarkeerd zodat de pool-router hem niet
+        # voorbij-loopt op een ontbrekende meting; de per-provider
+        # pause blijft de gatekeeper.
+        usage = await self.provider.get_usage()
+        assert usage.beschikbaar is True
+
+    async def test_bron_is_router_specific(self):
+        # De UI moet kunnen uitleggen waarom de rij onzeker is; een
+        # generieke "geen_signaal" verliest de router-context.
+        usage = await self.provider.get_usage()
+        assert usage.bron.startswith("router_eindpunt")
+
+    async def test_display_fields_default_to_none(self):
+        usage = await self.provider.get_usage()
+        assert usage.verbruikt is None
+        assert usage.limiet is None
+        assert usage.venster_label is None
+        assert usage.reset_op is None
+        assert usage.eenheid == "tokens"
+
+
+class TestRouterTokensDoNotPolluteAnthropicCount:
+    """Regression-guard voor kaart 390756e6... AC#1 + AC#4.
+
+    Router-verkeer (achter een Anthropic-compatible eindpunt zoals
+    9router of LiteLLM) landt in dezelfde JSONL-tree als direct
+    Anthropic-verkeer, maar ``AnthropicUsageProvider`` moet het
+    uitsluiten — anders herhaalt de MiniMax-vermenging uit kaart
+    ``a410468d…`` (36,9% van alle tokens op deze host) zich.
+
+    Het mechanisme is dezelfde prefix-attribution als voor MiniMax,
+    maar het scenario is anders: de router kan upstream-modelnamen
+    doorgeven zoals ``gpt-4o`` of ``gemini-1.5-pro``, dus de
+    huidige attributie zal ze als onbekend classificeren — niet als
+    Anthropic. Deze testset vergrendelt dat contract vanaf de
+    provider-kant: zelfs wanneer een router per ongeluk een upstream
+    model exposeert dat op een Anthropic- of MiniMax-prefix lijkt,
+    of wanneer een router op de Anthropic-passthrough draait, telt
+    het **niet** mee in de Anthropic 5h-window.
+    """
+
+    async def test_routed_gpt_tokens_excluded_from_anthropic(self):
+        from app.services.usage_service import LoadedUsageEntry, UsageService
+
+        usage_service = UsageService(db=None)
+        now = datetime.now(UTC)
+
+        def entry(model: str, input_tokens: int) -> LoadedUsageEntry:
+            return LoadedUsageEntry(
+                timestamp=now,
+                input_tokens=input_tokens,
+                output_tokens=0,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=0.0,
+                model=model,
+                session_id="s1",
+                version="1.0.0",
+                project_path="p",
+            )
+
+        # 5k directe Anthropic + 95k router-upstream "gpt-4o". De
+        # Anthropic-prefix matcht enkel het eerste; de tweede is een
+        # upstream-model waar de AnthropicUsageProvider niets van
+        # weten wil.
+        usage_service.get_all_usage_entries = AsyncMock(
+            return_value=[
+                entry("claude-sonnet-4-20250514", 5_000),
+                entry("gpt-4o", 95_000),
+            ]
+        )
+
+        provider = AnthropicUsageProvider(
+            usage_service=usage_service,
+            plan_tier_limit_tokens=100_000,
+        )
+
+        usage = await provider.get_usage()
+
+        assert usage.drempel_gebruikt == pytest.approx(0.05)
+        assert usage.beschikbaar is True
+
+    async def test_routed_gemini_tokens_excluded_from_anthropic(self):
+        from app.services.usage_service import LoadedUsageEntry, UsageService
+
+        usage_service = UsageService(db=None)
+        now = datetime.now(UTC)
+
+        def entry(model: str, input_tokens: int) -> LoadedUsageEntry:
+            return LoadedUsageEntry(
+                timestamp=now,
+                input_tokens=input_tokens,
+                output_tokens=0,
+                cache_creation_tokens=0,
+                cache_read_tokens=0,
+                cost_usd=0.0,
+                model=model,
+                session_id="s1",
+                version="1.0.0",
+                project_path="p",
+            )
+
+        usage_service.get_all_usage_entries = AsyncMock(
+            return_value=[
+                entry("claude-opus-4-7", 7_000),
+                entry("gemini-1.5-pro", 50_000),
+            ]
+        )
+
+        provider = AnthropicUsageProvider(
+            usage_service=usage_service,
+            plan_tier_limit_tokens=70_000,
+        )
+
+        usage = await provider.get_usage()
+
+        assert usage.drempel_gebruikt == pytest.approx(0.1)
+        assert usage.verbruikt == 7_000
+
+    async def test_attribution_function_returns_unknown_for_router_upstreams(self):
+        # De ``subscription_id_for_model`` attributie-functie is de
+        # single-source-of-truth die de UsageService gebruikt; het
+        # moet consequent "unknown" teruggeven voor upstream-model
+        # namen van een router (gpt-*, gemini-*, llama-*, etc.) —
+        # anders lekt router-verkeer alsnog in een
+        # vendor-specifieke subscription-attributie.
+        from app.services.subscriptions.attribution import (
+            UNKNOWN_SUBSCRIPTION_ID,
+            subscription_id_for_model,
+        )
+
+        for upstream in (
+            "gpt-4o", "gpt-4-turbo", "gemini-1.5-pro",
+            "llama-3.1-70b", "mistral-large-2",
+            "deepseek-chat",
+        ):
+            assert subscription_id_for_model(upstream) == UNKNOWN_SUBSCRIPTION_ID, (
+                f"router-upstream {upstream!r} must not match any vendor prefix; "
+                "would re-create the a410468d 36.9% pollusion"
+            )
+
+
 class TestRegistrySeeding:
     """``register_default_providers`` (kaart ea7e038b… D2) — populates
     the registry with honest no-signal stubs for the known
@@ -454,11 +649,14 @@ class TestRegistrySeeding:
         reg._PROVIDERS.clear()
         reg._PROVIDERS.update(self._saved)
 
-    def test_seeds_three_supported_providers(self):
+    def test_seeds_all_supported_providers(self):
         from app.services.subscriptions import registry as reg
         reg.register_default_providers()
         # Every (cli, provider) the pool allow-list permits gets a stub.
-        for prov in ("anthropic", "bedrock", "minimax"):
+        # Includes `anthropic-compatible` since kaart 333af652e... shipped
+        # the data-driven provider, and kaart 390756e6... (this card)
+        # wired its router-eindpunt to an honest onbekend signal.
+        for prov in ("anthropic", "bedrock", "minimax", "anthropic-compatible"):
             assert reg.get_provider_for(
                 cli="claude-code", provider=prov,
             ) is not None, f"missing default provider for {prov}"
@@ -471,12 +669,26 @@ class TestRegistrySeeding:
         # treats drempel_gebruikt=None as "no signal → available", which
         # is the pre-D2 behaviour — so the seed doesn't change routing
         # decisions, it just stops the snapshot path from short-circuiting.
-        for prov in ("anthropic", "bedrock", "minimax"):
+        for prov in ("anthropic", "bedrock", "minimax", "anthropic-compatible"):
             provider = reg.get_provider_for(cli="claude-code", provider=prov)
             usage = await provider.get_usage()
             assert usage.betrouwbaarheid == "onbekend"
             assert usage.drempel_gebruikt is None
             assert usage.beschikbaar is True
+
+    async def test_anthropic_compatible_seeded_as_router_provider(self):
+        # Kaart 390756e6... AC#2: de `anthropic-compatible` (router)
+        # subscription-rij krijgt een RouterUsageProvider, niet de
+        # generieke UnknownUsageProvider — anders verliest de UI de
+        # context die deze provider wel levert (de `bron` begint met
+        # ``router_eindpunt`` zodat de UI kan uitleggen waarom de rij
+        # onzeker is).
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        provider = reg.get_provider_for(
+            cli="claude-code", provider="anthropic-compatible",
+        )
+        assert isinstance(provider, RouterUsageProvider)
 
     async def test_registered_provider_replaces_default(self):
         """A real AnthropicUsageProvider (with plan_tier) registered

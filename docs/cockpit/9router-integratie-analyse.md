@@ -290,6 +290,19 @@ lokaal identiek uit. Dat is geen blokkade, wel een expliciete
 `subscriptions/base.py` heeft daar al taal voor ("no fabrication") en die moet
 hier gerespecteerd worden in plaats van een getal te verzinnen.
 
+✅ **Geïmplementeerd (kaart `390756e6…`):** de router-subscription
+`claude-code:anthropic-compatible` krijgt een eigen
+`RouterUsageProvider` (`backend/app/services/subscriptions/router.py`)
+die `betrouwbaarheid="onbekend"` met `bron="router_eindpunt:…"`
+teruggeeft — geen cijfer, geen fabricage. Geregistreerd via
+`register_provider` zodat de Subscriptions-pagina en de
+pool-router dezelfde eerlijke snapshot zien. Attributie-tests
+bewijzen dat router-upstream-modellenamen (`gpt-4o`,
+`gemini-1.5-pro`, `llama-*`, …) consequent naar
+`UNKNOWN_SUBSCRIPTION_ID` gaan i.p.v. bij `claude-code:anthropic`
+mee te lekken — het regressie-schild tegen de `a410468d…`
+36,9%-vervuiling.
+
 ## 8. Wat dit de gebruiker concreet oplevert
 
 De onderliggende wens was "meer providers, liefst gratis". Eerlijke stand:
