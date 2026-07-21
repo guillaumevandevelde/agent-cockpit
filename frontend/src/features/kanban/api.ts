@@ -476,6 +476,39 @@ export const kanbanApi = {
       method: "POST",
     }),
 
+  getMinimaxModelOptions: (): Promise<{ provider: string; options: string[] }> =>
+    apiClient<{ provider: string; options: string[] }>(`${BASE}/model-options/minimax`),
+
+  refreshMinimaxModelOptions: (): Promise<{ provider: string; options: string[] }> =>
+    apiClient<{ provider: string; options: string[] }>(`${BASE}/model-options/minimax/refresh`, {
+      method: "POST",
+    }),
+
+  getColumnEffectiveModel: (
+    columnId: string,
+  ): Promise<{
+    provider: string;
+    model: string | null;
+    provider_source: string;
+    model_source: string;
+    global_override: { provider: string; model: string | null } | null;
+    pool_choice: { provider: string; model: string | null } | null;
+    column_default_provider: string | null;
+    column_default_model: string | null;
+    persona_model: string | null;
+  }> =>
+    apiClient<{
+      provider: string;
+      model: string | null;
+      provider_source: string;
+      model_source: string;
+      global_override: { provider: string; model: string | null } | null;
+      pool_choice: { provider: string; model: string | null } | null;
+      column_default_provider: string | null;
+      column_default_model: string | null;
+      persona_model: string | null;
+    }>(`${BASE}/columns/${columnId}/effective-model`),
+
   updatePlanAttachment: (
     cardId: string,
     planMarkdown: string,

@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
 import { fetchResumableSessions } from "@/features/cc-bridge/api";
 import { useProviderContext } from "@/contexts/ProviderContext";
-import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider, type Priority, type WorkType, type ColumnOverride, type KanbanColumn } from "../types";
+import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider, MINIMAX_MODEL_SUGGESTIONS, type Priority, type WorkType, type ColumnOverride, type KanbanColumn } from "../types";
 import { kanbanApi } from "../api";
 import type { ResumableSession } from "@/types/sessions";
 
@@ -137,6 +137,9 @@ export function CardEditDialog({
   const [agent, setAgent] = useState<string>(defaultAgent ?? AUTO);
   const [model, setModel] = useState<string>(initial?.model ?? "");
   const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
+  const [minimaxOptions, setMinimaxOptions] = useState<string[]>([
+    ...MINIMAX_MODEL_SUGGESTIONS,
+  ]);
   const [analystAgentId, setAnalystAgentId] = useState<string>(initial?.analyst_agent_id ?? AUTO);
   const [executorAgentId, setExecutorAgentId] = useState<string>(initial?.executor_agent_id ?? AUTO);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(
@@ -169,6 +172,9 @@ export function CardEditDialog({
     if (!open) return;
     kanbanApi.getModelOptions()
       .then((r) => { if (Array.isArray(r?.options)) setModelOptions(r.options); })
+      .catch(() => {});
+    kanbanApi.getMinimaxModelOptions()
+      .then((r) => { if (Array.isArray(r?.options)) setMinimaxOptions(r.options); })
       .catch(() => {});
   }, [open]);
 
@@ -349,7 +355,10 @@ export function CardEditDialog({
                   // resolves to minimax the datalist swaps to minimax models.
                   const effectiveProvider =
                     providerValue === DEFAULT_PROVIDER_SENTINEL ? col.default_provider : providerValue;
-                  const rowSuggestions = modelSuggestionsForProvider(effectiveProvider, modelOptions);
+                  const rowSuggestions =
+                    effectiveProvider === "minimax"
+                      ? minimaxOptions
+                      : modelSuggestionsForProvider(effectiveProvider, modelOptions);
                   const rowListId = `card-model-suggestions-${col.id}`;
                   const defaultLabel = [
                     col.default_model || null,

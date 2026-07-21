@@ -45,6 +45,7 @@ from app.kanban.subscription_pool import (
     get_subscription_pool,
 )
 from app.services.agentic_cli.provider_env import (
+    CLAUDE_CODE_CLI_ID,
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
     PROVIDER_MINIMAX,
@@ -472,6 +473,133 @@ async def _set_model_options_cache(session, options: list[str]) -> None:
     row = await session.get(KanbanMeta, MODEL_OPTIONS_KEY)
     if row is None:
         session.add(KanbanMeta(key=MODEL_OPTIONS_KEY, value=value))
+    else:
+        row.value = value
+    await session.flush()
+
+
+# ---- MiniMax model discovery ----------------------------------------------
+#
+# MiniMax exposes its models through the same Anthropic-compatible CLI as
+# Anthropic itself (only ANTHROPIC_BASE_URL differs — see provider_env.py).
+# There is no `claude -p "/model"`-equivalent for MiniMax: the model picker
+# must be populated from somewhere else. The signal we DO have is the JSONL
+# usage logs: every dispatched session writes a `message.model` line, and
+# the prefix `minimax-` (see subscriptions/attribution.py) tags a row as
+# MiniMax. The set of unique values we've actually seen IS the de-facto
+# catalog of MiniMax models on this machine — same honesty posture as
+# subscriptions/base.py ("no fabrication", no guessing from a hardcoded
+# list). The seed (``MINIMAX_DEFAULT_MODEL``) covers the "first deploy,
+# never seen anything yet" case so the datalist is never empty.
+MINIMAX_MODEL_OPTIONS_KEY = "model_options:minimax"
+MINIMAX_MODEL_OPTIONS_SEED = ("MiniMax-M3",)
+
+
+def _discover_minimax_models_sync_glob() -> list[str]:
+    """Glob ``~/.claude/projects/**/*.jsonl`` into a list of paths.
+
+    Module-level so tests can monkeypatch the path list without touching
+    the real filesystem (the production scanner walks whatever this
+    returns, in mtime-descending order — see
+    ``_discover_minimax_models_sync``).
+    """
+    import glob
+    import os as _os
+
+    pattern = _os.path.join(
+        _os.path.expanduser("~"), ".claude", "projects", "*", "*.jsonl",
+    )
+    return sorted(glob.glob(pattern), key=_os.path.getmtime, reverse=True)
+
+
+def _discover_minimax_models_sync() -> list[str]:
+    """Scan ``~/.claude/projects/**/*.jsonl`` for unique MiniMax model ids.
+
+    Mirrors the claude-code discovery path: a fresh subscription that has
+    never spawned leaves no JSONL rows, so we fall back to the seed (and
+    return the seed alone, not a stale empty list). Order is
+    most-recently-seen first; duplicates are dropped.
+
+    The path list comes from ``_discover_minimax_models_sync_glob`` so
+    tests can patch the glob without touching the real filesystem.
+    """
+    seen_order: list[str] = []
+    seen_set: set[str] = set()
+    for path in _discover_minimax_models_sync_glob():
+        try:
+            entries = _sync_parse_usage_from_jsonl(path)
+        except (OSError, ValueError):
+            continue
+        for entry in entries:
+            model = (entry.get("model") or "").strip()
+            if not model or model in seen_set:
+                continue
+            normalized = model.lower()
+            if not normalized.startswith("minimax-"):
+                continue
+            seen_set.add(model)
+            seen_order.append(model)
+    return seen_order if seen_order else list(MINIMAX_MODEL_OPTIONS_SEED)
+
+
+def _sync_parse_usage_from_jsonl(path: str) -> list[dict]:
+    """Synchronous JSONL scan for the minimax-model-discovery path.
+
+    Mirrors the assistant-message filter from
+    ``UsageService.parse_usage_from_jsonl`` but only returns rows that
+    actually carry a model string — we don't care about token counts
+    here, just the unique model names. Imported lazily so the existing
+    async usage path isn't disturbed by an extra import.
+    """
+    import json as _json
+
+    rows = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = _json.loads(line)
+                except ValueError:
+                    continue
+                if obj.get("type") != "assistant":
+                    continue
+                model = obj.get("message", {}).get("model")
+                if model:
+                    rows.append({"model": model})
+    except OSError:
+        return rows
+    return rows
+
+
+async def refresh_minimax_model_options(session) -> list[str]:
+    """Refresh and cache the MiniMax model list from JSONL logs."""
+    import asyncio
+    options = await asyncio.to_thread(_discover_minimax_models_sync)
+    if options:
+        await _set_minimax_model_options_cache(session, options)
+    return options
+
+
+async def get_cached_minimax_model_options(session) -> list[str]:
+    """Return the cached MiniMax model list (seed if never refreshed)."""
+    row = await session.get(KanbanMeta, MINIMAX_MODEL_OPTIONS_KEY)
+    if row is None:
+        return list(MINIMAX_MODEL_OPTIONS_SEED)
+    try:
+        options = json.loads(row.value)
+    except (TypeError, ValueError):
+        return list(MINIMAX_MODEL_OPTIONS_SEED)
+    return options if options else list(MINIMAX_MODEL_OPTIONS_SEED)
+
+
+async def _set_minimax_model_options_cache(session, options: list[str]) -> None:
+    value = json.dumps(options)
+    row = await session.get(KanbanMeta, MINIMAX_MODEL_OPTIONS_KEY)
+    if row is None:
+        session.add(KanbanMeta(key=MINIMAX_MODEL_OPTIONS_KEY, value=value))
     else:
         row.value = value
     await session.flush()
@@ -921,6 +1049,140 @@ def _effective_model(override_model: str | None, card_model: str | None,
     that may legitimately name a provider-native model."""
     persona_fallback = persona_model if provider in (None, PROVIDER_ANTHROPIC) else None
     return override_model or card_model or column_default_model or persona_fallback or None
+
+
+# Precedence sources, in dispatch order. Used to label where a resolved model
+# (or provider) came from so the column-settings UI can tell the user why
+# their selection isn't applied. Higher indices win over lower ones.
+PRECEDENCE_GLOBAL_OVERRIDE = "global_override"
+PRECEDENCE_POOL = "pool"
+PRECEDENCE_COLUMN_OVERRIDE = "column_override"
+PRECEDENCE_COLUMN_DEFAULT = "column_default"
+PRECEDENCE_PERSONA = "persona"
+PRECEDENCE_NONE = "none"
+
+
+def _resolve_model_source(
+    override_model: str | None,
+    card_model: str | None,
+    column_default_model: str | None,
+    persona_model: str | None,
+    provider: str | None = None,
+) -> str | None:
+    """Return the precedence-level a resolved model came from.
+
+    Mirrors `_effective_model` so the caller can render "Will use X
+    (source: <level>)" beneath the model input — useful when the user
+    picks one in the column-settings UI but a board-wide override or
+    pool choice silently wins (kaart 1782fa43…).
+
+    The provider-gated persona fallback is honored here too: a persona
+    `model:` alias on a non-Anthropic provider is not a real source, the
+    chain falls through past it. When the chain produces nothing this
+    returns None (same shape as `_effective_model`).
+    """
+    if override_model:
+        return PRECEDENCE_COLUMN_OVERRIDE
+    if card_model:
+        return "card_model"
+    if column_default_model:
+        return PRECEDENCE_COLUMN_DEFAULT
+    if persona_model and provider in (None, PROVIDER_ANTHROPIC):
+        return PRECEDENCE_PERSONA
+    return PRECEDENCE_NONE
+
+
+async def resolve_column_effective_model(
+    session,
+    project_key: str,
+    column_name: str,
+    project_path: str,
+    card_model: str | None = None,
+    column_override: dict | None = None,
+) -> dict:
+    """Return the resolved provider/model/source for a column.
+
+    Walks the same precedence chain as `dispatch_card` (board-wide override →
+    pool → per-card column_override → column.default_model → persona) but
+    without spawning anything. Used by the column-settings UI to render an
+    "effective model" line beneath the model input so a user editing a
+    column sees why their selection isn't applied (kaart 1782fa43…).
+
+    `column_name` is the column being inspected (typically the user's
+    own column; can differ from a dispatched card's source/destination).
+    `column_override` is the per-card column_overrides entry to apply
+    for that column (the column-settings UI has no card context, so
+    callers pass None; the dispatcher applies the per-card override at
+    dispatch time, not here).
+    """
+    column_override = column_override or {}
+    global_override = await get_active_subscription_override(session, project_key)
+    pool_entries = await get_subscription_pool(session, project_key)
+    pool_choice: PoolEntry | None = None
+    if pool_entries is not None and not global_override:
+        # CLI awareness is irrelevant here — pool_choice just exposes its
+        # provider/model to the UI; we have no spawn to dispatch, so we
+        # don't run the live usage router. Show the first entry of any
+        # CLI; the user just wants to know "would the pool pin me?" not
+        # "which entry would win on this dispatch".
+        from app.kanban.subscription_pool import pick_subscription_for_cli
+        pool_choice = pick_subscription_for_cli(
+            pool_entries, {}, paused_providers=set(), cli_id=CLAUDE_CODE_CLI_ID,
+        )
+    override_provider = column_override.get("provider") or None
+    override_model = column_override.get("model") or None
+    column_default_provider = await get_column_default_provider(session, project_key, column_name)
+    provider = (
+        (global_override or {}).get("provider")
+        or (pool_choice.provider if pool_choice else None)
+        or override_provider
+        or column_default_provider
+        or PROVIDER_ANTHROPIC
+    )
+    persona_model = _read_persona_model(project_path, f"{column_name}.md")
+    column_default_model = await get_column_default_model(session, project_key, column_name)
+    effective_model_override = (
+        (global_override or {}).get("model")
+        or (pool_choice.model if pool_choice else None)
+        or override_model
+    )
+    model = _effective_model(
+        effective_model_override, card_model, column_default_model, persona_model,
+        provider=provider,
+    )
+    if effective_model_override:
+        if global_override and (global_override.get("model") == effective_model_override):
+            model_source = PRECEDENCE_GLOBAL_OVERRIDE
+        else:
+            model_source = PRECEDENCE_COLUMN_OVERRIDE
+    else:
+        model_source = _resolve_model_source(
+            None, card_model, column_default_model, persona_model, provider=provider,
+        )
+    if global_override:
+        provider_source = PRECEDENCE_GLOBAL_OVERRIDE
+    elif pool_choice:
+        provider_source = PRECEDENCE_POOL
+    elif override_provider:
+        provider_source = PRECEDENCE_COLUMN_OVERRIDE
+    elif column_default_provider:
+        provider_source = PRECEDENCE_COLUMN_DEFAULT
+    else:
+        provider_source = PRECEDENCE_NONE
+    return {
+        "provider": provider,
+        "model": model,
+        "provider_source": provider_source,
+        "model_source": model_source,
+        "global_override": global_override,
+        "pool_choice": (
+            {"provider": pool_choice.provider, "model": pool_choice.model}
+            if pool_choice else None
+        ),
+        "column_default_provider": column_default_provider,
+        "column_default_model": column_default_model,
+        "persona_model": persona_model,
+    }
 
 
 def _persona_for_card(project_path: str, card, column: str) -> str | None:
