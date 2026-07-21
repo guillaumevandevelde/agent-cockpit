@@ -165,6 +165,51 @@ check "worktree directory was created" '[ -f "$TMP/wt-rt.out" ] && grep -q "^WT=
 check "worktree directory was cleaned up" '[ ! -d "$TMP/wt-rt" ]'
 
 # ----------------------------------------------------------------------------
-echo ""
+echo "Task 5: compare isolates and counterbalances every Claude run"
+
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/claude" <<'EOF'
+#!/usr/bin/env bash
+set -u
+if [ "${1:-}" = "--version" ]; then
+    echo "claude-stub 0"
+    exit 0
+fi
+prompt=$(cat)
+variant=baseline
+case "$prompt" in
+    *"[SAVER:CAVEMAN]"*) variant=with-saver ;;
+esac
+line=$(grep 'r.max_sessions' backend/app/kanban/dispatch.py || true)
+printf '%s|%s|%s\n' "$PWD" "$variant" "$line" >> "$MEASURE_CLAUDE_LOG"
+sed -i 's/r.max_sessions > 0/r.max_sessions >= 0/' backend/app/kanban/dispatch.py
+printf '{"usage":{"input_tokens":10,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":4}}\n'
+EOF
+chmod +x "$TMP/bin/claude"
+cat > "$TMP/bin/fake-pytest" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMP/bin/fake-pytest"
+
+MEASURE_CLAUDE_LOG="$TMP/claude.log" \
+PYTEST_CMD="$TMP/bin/fake-pytest" \
+PATH="$TMP/bin:$PATH" \
+bash "$SCRIPT_DIR/measure-token-saver.sh" compare > "$TMP/compare.out" 2> "$TMP/compare.err"
+
+check "compare invokes exactly four isolated Claude runs" \
+    '[ "$(wc -l < "$TMP/claude.log")" -eq 4 ]'
+check "each compare run starts with the broken golden-task line" \
+    '[ "$(grep -c "r.max_sessions > 0" "$TMP/claude.log")" -eq 4 ]'
+check "each compare run uses a distinct worktree" \
+    '[ "$(cut -d"|" -f1 "$TMP/claude.log" | sort -u | wc -l)" -eq 4 ]'
+check "first trial runs baseline before with-saver" \
+    '[ "$(sed -n 1p "$TMP/claude.log" | cut -d"|" -f2)" = baseline ] && [ "$(sed -n 2p "$TMP/claude.log" | cut -d"|" -f2)" = with-saver ]'
+check "second trial reverses the variant order" \
+    '[ "$(sed -n 3p "$TMP/claude.log" | cut -d"|" -f2)" = with-saver ] && [ "$(sed -n 4p "$TMP/claude.log" | cut -d"|" -f2)" = baseline ]'
+check "compare reports both trials" \
+    '[ "$(grep -c "| trial-[12]-baseline" "$TMP/compare.out")" -eq 2 ] && [ "$(grep -c "| trial-[12]-with-saver" "$TMP/compare.out")" -eq 2 ]'
+
+# ----------------------------------------------------------------------------
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

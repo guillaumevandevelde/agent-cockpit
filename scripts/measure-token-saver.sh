@@ -7,7 +7,7 @@
 # without a prompt-mutating saver applied.
 #
 # Subcommands:
-#   compare   — default; runs baseline + with-saver, prints a 3-row table
+#   compare   — default; runs two counterbalanced baseline/saver trials
 #   baseline  — runs only the no-saver variant
 #   with-saver — runs only the saver-mutated variant
 #
@@ -29,21 +29,27 @@ case "$CMD" in
 Usage: $0 [baseline|with-saver|compare]
 
 Subcommands:
-  compare     default; runs both baseline and with-saver, prints one table
-  baseline    runs only the no-saver variant
-  with-saver  runs only the saver-mutated variant
+  compare     default; runs two isolated trials in counterbalanced order
+  baseline    runs one isolated no-saver variant
+  with-saver  runs one isolated saver-mutated variant
 
-Output: a 3-row Markdown table (variant | input | cache_creation |
-cache_read | output | pass_tests | pass_diff).
+Output: a Markdown table with one row per trial/variant and separate input,
+cache_creation, cache_read, output, pass_tests, and pass_diff columns.
 
-The harness creates a scratch git worktree, reverts commit b30a9bb's
-one-character fix in backend/app/kanban/dispatch.py, spawns 'claude -p' once
-per variant against the golden-task prompt, captures usage, and scores the
-result via pytest + git diff. The scratch worktree is removed on exit.
+The harness creates a fresh scratch git worktree and reapplies the
+backend/app/kanban/dispatch.py golden-task revert for every variant. In
+compare mode it runs baseline→with-saver, then with-saver→baseline, so neither
+worktree state nor variant order is a confounder. Scratch worktrees are removed
+on exit.
 
-Requires: claude CLI on PATH, git, pytest (via venv or system), network for
-the initial 'git fetch origin master' (offline tolerated; falls back to
-local master).
+Requires: claude CLI on PATH, git, pytest (via venv or system). Each variant
+runs in its own detached scratch worktree created from the current `HEAD`
+of $REPO_ROOT, so no network is required; the only filesystem footprint
+between invocations is the result directory printed at the end of the run.
+
+Results land in $MEASURE_RESULT_DIR (defaults to
+$REPO_ROOT/.tmp-measure-token-saver/<timestamp>/). Pass an explicit
+absolute path to MEASURE_RESULT_DIR to capture artifacts in a known place.
 EOF
         exit 0
         ;;
@@ -63,123 +69,155 @@ claude --version >/dev/null 2>&1 || {
     exit 3
 }
 
-# Resolve repo + scratch worktree. Worktree + parent tmp-<id> dir are
-# cleaned up automatically by the EXIT trap installed inside
-# `with_scratch_worktree` — see scripts/lib/worktree-trap.sh for the
-# rationale (the prior `mktemp -d -p "$REPO_ROOT"` shape leaked the
-# parent directory into the repo working tree on every harness run).
-#
-# We redirect stdout into a tempfile rather than `$(...)` so the
-# helper runs in the parent shell and the EXIT trap it installs
-# survives — `$()` would sandbox it into a subshell where the trap
-# is lost.
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-WT_PATH_FILE="$(mktemp)"
-with_scratch_worktree "$REPO_ROOT" WT > "$WT_PATH_FILE"
-WT="$(cat "$WT_PATH_FILE")"
-rm -f "$WT_PATH_FILE"
 
-# Apply the "revert" — set the dispatch.py line to the broken `> 0` state.
-# b30a9bb's tests already live on master, so we only need to flip the one
-# line in the working tree.
-sed -i 's/r.max_sessions >= 0/r.max_sessions > 0/' "$WT/backend/app/kanban/dispatch.py"
-
-# Build the deterministic prompt
-PROMPT_FILE="$WT/.measure-prompt.txt"
-build_prompt "$WT" > "$PROMPT_FILE"
-
-# Resolve pytest command (uses shared venv per worktree convention)
-BACKEND_DIR="$WT/backend"
-# shellcheck disable=SC1091
-source "$SCRIPT_DIR/lib/resolve-pytest-cmd.sh" 2>/dev/null || true
-if ! resolve_pytest_cmd "$BACKEND_DIR" 2>/dev/null; then
-    PYTEST_CMD=""
+# Result directory — caller-visible so artifacts aren't dropped into /tmp.
+# Default: $REPO_ROOT/.tmp-measure-token-saver/<UTC-timestamp>/. Set
+# MEASURE_RESULT_DIR to override (an existing directory is refused so we
+# never clobber prior runs). On exit the path is printed so the operator
+# can `ls` / copy files from it; the directory itself is kept (not
+# auto-deleted) so results survive the script ending.
+if [ -n "${MEASURE_RESULT_DIR:-}" ]; then
+    if [ -e "$MEASURE_RESULT_DIR" ]; then
+        echo "error: MEASURE_RESULT_DIR already exists: $MEASURE_RESULT_DIR" >&2
+        exit 4
+    fi
+    RESULT_DIR="$MEASURE_RESULT_DIR"
+else
+    RESULT_DIR="$REPO_ROOT/.tmp-measure-token-saver/$(date -u +%Y%m%dT%H%M%SZ)"
 fi
+mkdir -p "$RESULT_DIR"
 
-# Empty mcp-config so the worktree has zero MCP servers — minimal baseline.
-EMPTY_MCP="$WT/.mcp-empty.json"
-printf '{"mcpServers":{}}' > "$EMPTY_MCP"
-
+# Each call owns one fresh worktree. The result files are copied out before
+# cleanup, because the worktree is deliberately not shared by later variants.
 run_one() {
-    local variant="$1"
-    local out_json="$WT/${variant}.json"
-    local out_err="$WT/${variant}.err"
-    local score_out="$WT/${variant}.score"
-    local raw_prompt="$PROMPT_FILE"
+    local trial="$1" variant="$2"
+    local wt_path_file wt prompt_file empty_mcp backend_dir
+    local result_prefix="$RESULT_DIR/trial-${trial}-${variant}"
+    wt_path_file="$(mktemp)"
+
+    with_scratch_worktree "$REPO_ROOT" WT > "$wt_path_file"
+    wt="$(cat "$wt_path_file")"
+    rm -f "$wt_path_file"
+
+    # Reapply the golden-task revert independently in every scratch worktree.
+    sed -i 's/r.max_sessions >= 0/r.max_sessions > 0/' \
+        "$wt/backend/app/kanban/dispatch.py"
+
+    prompt_file="$wt/.measure-prompt.txt"
+    build_prompt "$wt" > "$prompt_file"
+    backend_dir="$wt/backend"
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/lib/resolve-pytest-cmd.sh" 2>/dev/null || true
+    if ! resolve_pytest_cmd "$backend_dir" 2>/dev/null; then
+        PYTEST_CMD=""
+    fi
+
+    empty_mcp="$wt/.mcp-empty.json"
+    printf '{"mcpServers":{}}' > "$empty_mcp"
+
+    local raw_prompt="$prompt_file"
     if [ "$variant" = "with-saver" ]; then
-        local mutated="$PROMPT_FILE.mutated"
-        apply_saver "$PROMPT_FILE" "$mutated"
+        local mutated="$prompt_file.mutated"
+        apply_saver "$prompt_file" "$mutated"
         raw_prompt="$mutated"
     fi
+
     (
-        cd "$WT"
+        cd "$wt"
         timeout 300 claude -p \
             --dangerously-skip-permissions \
             --output-format json \
             --model "${CLAUDE_MODEL:-sonnet}" \
-            --strict-mcp-config --mcp-config "$EMPTY_MCP" \
-            < "$raw_prompt" > "$out_json" 2> "$out_err"
+            --strict-mcp-config --mcp-config "$empty_mcp" \
+            < "$raw_prompt" > "${result_prefix}.json" \
+            2> "${result_prefix}.err"
     )
-    echo $? > "$WT/${variant}.exit"
-    if [ -s "$out_json" ]; then
-        parse_usage "$out_json" > "$WT/${variant}.usage" 2> "$WT/${variant}.usage.err" || true
+    echo $? > "${result_prefix}.exit"
+    if [ -s "${result_prefix}.json" ]; then
+        parse_usage "${result_prefix}.json" > "${result_prefix}.usage" \
+            2> "${result_prefix}.usage.err" || true
     fi
-    score_golden "$WT" > "$score_out" 2> "$WT/${variant}.score.err" || true
+    BACKEND_DIR="$backend_dir" \
+        score_golden "$wt" > "${result_prefix}.score" \
+        2> "${result_prefix}.score.err" || true
+
+    cleanup_scratch_worktree "$REPO_ROOT" "$wt"
 }
 
-emit_table() {
-    # Header
-    printf '| %-10s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
-        variant input cache_creation cache_read output pass_tests pass_diff
-    printf '|------------|--------------|------------------|--------------|----------|-------------|------------|\n'
+emit_row() {
+    local label="$1"
+    local usage_file="$RESULT_DIR/${label}.usage"
+    local score_file="$RESULT_DIR/${label}.score"
+    local input cc cr out pt pd
+    if [ -s "$usage_file" ]; then
+        input=$(sed -n 1p "$usage_file")
+        cc=$(sed -n 2p "$usage_file")
+        cr=$(sed -n 3p "$usage_file")
+        out=$(sed -n 4p "$usage_file")
+    else
+        input="?"; cc="?"; cr="?"; out="?"
+    fi
+    if [ -s "$score_file" ]; then
+        pt=$(grep '^pass_tests=' "$score_file" | cut -d= -f2)
+        pd=$(grep '^pass_diff=' "$score_file" | cut -d= -f2)
+    else
+        pt="?"; pd="?"
+    fi
+    printf '| %-18s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
+        "$label" "$input" "$cc" "$cr" "$out" "$pt" "$pd"
+}
 
-    for variant in baseline with-saver; do
-        local usage_file="$WT/${variant}.usage"
-        local score_file="$WT/${variant}.score"
-        if [ -s "$usage_file" ]; then
-            local input cc cr out
-            input=$(sed -n 1p "$usage_file")
-            cc=$(sed -n 2p "$usage_file")
-            cr=$(sed -n 3p "$usage_file")
-            out=$(sed -n 4p "$usage_file")
-        else
-            input="?"; cc="?"; cr="?"; out="?"
-        fi
-        local pt pd
-        if [ -s "$score_file" ]; then
-            pt=$(grep '^pass_tests=' "$score_file" | cut -d= -f2)
-            pd=$(grep '^pass_diff=' "$score_file" | cut -d= -f2)
-        else
-            pt="?"; pd="?"
-        fi
-        printf '| %-10s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
-            "$variant" "$input" "$cc" "$cr" "$out" "$pt" "$pd"
-    done
-
-    # Delta row (compute inline; uses string-safe arithmetic with -- + 0 trick)
-    if [ -s "$WT/baseline.usage" ] && [ -s "$WT/with-saver.usage" ]; then
-        printf '| %-10s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
-            delta \
-            "$(( $(sed -n 1p "$WT/with-saver.usage") - $(sed -n 1p "$WT/baseline.usage") ))" \
-            "$(( $(sed -n 2p "$WT/with-saver.usage") - $(sed -n 2p "$WT/baseline.usage") ))" \
-            "$(( $(sed -n 3p "$WT/with-saver.usage") - $(sed -n 3p "$WT/baseline.usage") ))" \
-            "$(( $(sed -n 4p "$WT/with-saver.usage") - $(sed -n 4p "$WT/baseline.usage") ))" \
+emit_delta() {
+    local trial="$1" baseline="$RESULT_DIR/trial-${trial}-baseline.usage"
+    local saver="$RESULT_DIR/trial-${trial}-with-saver.usage"
+    if [ -s "$baseline" ] && [ -s "$saver" ]; then
+        printf '| %-18s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
+            "trial-${trial}-delta" \
+            "$(( $(sed -n 1p "$saver") - $(sed -n 1p "$baseline") ))" \
+            "$(( $(sed -n 2p "$saver") - $(sed -n 2p "$baseline") ))" \
+            "$(( $(sed -n 3p "$saver") - $(sed -n 3p "$baseline") ))" \
+            "$(( $(sed -n 4p "$saver") - $(sed -n 4p "$baseline") ))" \
             "—" "—"
     fi
 }
 
+emit_table() {
+    printf '| %-18s | %12s | %16s | %12s | %8s | %11s | %9s |\n' \
+        label input cache_creation cache_read output pass_tests pass_diff
+    printf '|--------------------|--------------|------------------|--------------|----------|-------------|------------|\n'
+    local trial variant
+    for trial in "$@"; do
+        for variant in baseline with-saver; do
+            if [ -s "$RESULT_DIR/trial-${trial}-${variant}.json" ] \
+                || [ -s "$RESULT_DIR/trial-${trial}-${variant}.score" ]; then
+                emit_row "trial-${trial}-${variant}"
+            fi
+        done
+        if [ "$trial" -gt 0 ]; then
+            emit_delta "$trial"
+        fi
+    done
+}
+
 case "$CMD" in
     baseline)
-        run_one baseline
-        emit_table
+        run_one 1 baseline
+        emit_table 1
         ;;
     with-saver)
-        run_one with-saver
-        emit_table
+        run_one 1 with-saver
+        emit_table 1
         ;;
     compare)
-        run_one baseline
-        run_one with-saver
-        emit_table
+        run_one 1 baseline
+        run_one 1 with-saver
+        run_one 2 with-saver
+        run_one 2 baseline
+        emit_table 1 2
         ;;
 esac
+
+# Print a discoverability footer so artifacts are findable.
+printf '\n# artifacts: %s\n' "$RESULT_DIR"
+printf '# files: %s\n' "$(ls -1 "$RESULT_DIR" 2>/dev/null | wc -l | tr -d ' ')"

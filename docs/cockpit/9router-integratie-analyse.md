@@ -326,18 +326,27 @@ De onderliggende wens was "meer providers, liefst gratis". Eerlijke stand:
 
 Vijf kind-kaarten, gefaseerd zodat het meetwerk vóór het bouwwerk komt.
 
-| # | Kaart | Hangt af van |
+| # | Kaart | Status |
 |---|---|---|
-| K1 | Meet de RTK/token-saver-claim met een reproduceerbaar recept | — |
-| K2 | Vergelijk 9router vs. LiteLLM voor de API-key-tier (spike, kiest de backend) | K1 |
-| K3 | Generieke `ninerouter`-provider-entry in `provider_env.py` + pool-allowlist | K2 |
-| K4 | Hardening-checklist + doctor-check (savers uit, cloud-sync uit, loopback-only) | K3 |
-| K5 | Usage-attributie: eerlijk `betrouwbaarheid="onbekend"` voor router-verkeer | K3 |
+| K1 | Meet de RTK/token-saver-claim met een reproduceerbaar recept | ✅ Geïmplementeerd (kaart `6b67df66…` — zie [`token-saver-meet-harnas.md`](./token-saver-meet-harnas.md) + raw artifacts in [`measure-evidence/2026-07-21-counterbalanced/`](./measure-evidence/2026-07-21-counterbalanced/)) |
+| K2 | Vergelijk 9router vs. LiteLLM voor de API-key-tier (spike, kiest de backend) | hangt af van K1 |
+| K3 | Generieke `ninerouter`-provider-entry in `provider_env.py` + pool-allowlist | hangt af van K2 |
+| K4 | Hardening-checklist + doctor-check (savers uit, cloud-sync uit, loopback-only) | hangt af van K3 |
+| K5 | Usage-attributie: eerlijk `betrouwbaarheid="onbekend"` voor router-verkeer | hangt af van K3 |
 
-K1 zonder deps omdat de meting losstaat van de keuze. K2 hangt aan K1 omdat de
-meetuitslag de vergelijking voedt. K3 hangt aan K2 omdat de spike bepaalt *welk*
-endpoint de entry krijgt. K4 en K5 hangen beide aan K3 (ze hardenen respectievelijk
-attribueren wat K3 oplevert) en zijn onderling onafhankelijk — parallel uitvoerbaar.
+**K1 resultaat (eerste counterbalanced meting, N=2 per trial):**
+`input_tokens` daalt in beide trials (gem. ~45%); `output_tokens` daalt in beide
+trials (gem. ~72%, Caveman-prelude werkt); `cache_read_input_tokens` is
+**volgorde-gedomineerd** op N=2 (Anthropic's sessie-warme prompt-cache maskeert
+het saver-effect) — de oorspronkelijke −42,4% `cache_read`-headline was
+order-confounded en is **ongeldig** verklaard. Volledige tabel, ruwe artifacts,
+en onzekerheids-markers rond `cache_read` vs abonnementsquotum in
+[`token-saver-meet-harnas.md`](./token-saver-meet-harnas.md).
+
+K2 hangt aan K1 omdat de meetuitslag de vergelijking voedt. K3 hangt aan K2 omdat
+de spike bepaalt *welk* endpoint de entry krijgt. K4 en K5 hangen beide aan K3
+(ze hardenen respectievelijk attribueren wat K3 oplevert) en zijn onderling
+onafhankelijk — parallel uitvoerbaar.
 
 ## 10. Heropenen wanneer?
 
