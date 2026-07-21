@@ -9,14 +9,26 @@
 #   4. phantom listed but not on disk → flagged.
 #   5. both directions at once → both flags emitted.
 #   6. --strict turns drift into a non-zero exit.
-#   7. block boundary — a `# Test` mention outside the `# Test` heading
-#      block does NOT count as a listing. Mirrors the card's note that
-#      `test_cockpit.sh` lives in the supervisor section, not the
-#      `# Test` block, and should be treated as missing from the index.
+#   7. carve-out list — a script listed in the SUT's CARVE_OUTS list is
+#      silently excluded from MISSING_FROM_CLAUDE drift, even when it has
+#      no prose mention in CLAUDE.md at all. The card's hard case:
+#      test_cockpit.sh lives in the supervisor section (not `# Test`),
+#      and is on the carve-out list by explicit human decision.
 #   8. block boundary — a `## Test` sub-heading does not start the block
 #      (must be `# Test`, not `## Test`).
 #   9. CLAUDE.md path resolution — CLAUDE_MD env var overrides default.
 #  10. error path — missing CLAUDE_MD → exit 2.
+#  11. carve-out env override — CARVE_OUTS env var lets the test harness
+#      exercise the carve-out path against arbitrary fixtures without
+#      editing the SUT.
+#  12. carve-out does NOT mask phantoms — a carved-out name that *is*
+#      listed in `# Test` but doesn't exist on disk is still a phantom
+#      drift (the carve-out only suppresses direction A).
+#  13. real repo is CLEAN — the actual repo CLAUDE.md is fully covered
+#      after the carve-out for test_cockpit.sh (and test_measure_token_saver.sh)
+#      so the guard reports OK; --strict exits 0.
+#  14. CARVE_OUTS='' disables the carve-out entirely — operators who want
+#      strict-by-default behavior can opt out via the env var.
 
 set -u
 
@@ -166,30 +178,40 @@ out=$(SCRIPTS_DIR="$clean_scripts" CLAUDE_MD="$clean_claude" \
 check "clean + --strict → exit 0"    '[ "$rc" -eq 0 ]'
 
 # ----------------------------------------------------------------------------
-echo "Task 7: prose mention outside # Test does NOT count as a listing"
-# Mirrors the card's carve-out: CLAUDE.md mentions `test_cockpit.sh` in
-# the supervisor section, but the `# Test` block doesn't list it, so the
-# script must still flag it as missing from the index.
+echo "Task 7: CARVE_OUTS list silently absorbs legitimate outside-block harnesses"
+# Default CARVE_OUTS contains `test_cockpit.sh` and `test_measure_token_saver.sh`
+# (supervisor + token-saver-meet feature harness). When any of these files
+# is on disk and not listed in `# Test`, the guard must NOT flag it as
+# drift. We exercise this with the env override so the test doesn't
+# depend on the SUT's literal default list (covered separately in Task 11).
+# Fixture: ONLY `test_xxx_carved.sh` on disk and the carve-out list contains
+# only that name. No `# Test` listing — we want to isolate direction A.
 cardlike_scripts="$TMP/cardlike-scripts"
 cardlike_claude="$TMP/cardlike-claude.md"
-seed_scripts "$cardlike_scripts" test_cockpit.sh
+seed_scripts "$cardlike_scripts" test_xxx_carved.sh
 cat > "$cardlike_claude" <<'EOF'
 # Self-healing dev stack (detached supervisor: auto-restart on crash, logs to logs/, survives terminal close)
 ./scripts/cockpit.sh start       # Start backend+frontend supervised (auto-installs missing/stale deps)
-bash scripts/test_cockpit.sh     # Test the supervisor (bash harness)
 
 # Build
 ./scripts/build.sh               # Production frontend build → frontend/dist
 
-# Test
-bash scripts/test_other.sh
-
 # Some next heading
 EOF
-out=$(SCRIPTS_DIR="$cardlike_scripts" CLAUDE_MD="$cardlike_claude" bash "$SUT" 2>&1); rc=$?
-check "prose-only mention → flagged as missing" \
-  'echo "$out" | grep -qF "test_cockpit.sh"'
-check "prose-only mention → exit 0 (advisory)"  '[ "$rc" -eq 0 ]'
+# Override the carve-out list to the exact name we care about, then
+# verify the script does NOT flag test_xxx_carved.sh as drift.
+out=$(CARVE_OUTS="test_xxx_carved.sh" \
+      SCRIPTS_DIR="$cardlike_scripts" CLAUDE_MD="$cardlike_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "carve-out absorbs missing-from-CLAUDE.md"  '[ "$rc" -eq 0 ]'
+check "carve-out → no WARNING emitted"           '! echo "$out" | grep -qE "WARNING"'
+check "carve-out → OK line emitted"              'echo "$out" | grep -qE "^OK:"'
+
+# Confirm that WITHOUT the carve-out, the same fixture WOULD be flagged —
+# proves the test is exercising the carve-out path, not a coincidental OK.
+out=$(SCRIPTS_DIR="$cardlike_scripts" CLAUDE_MD="$cardlike_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "no carve-out → WARNING for uncarved name" 'echo "$out" | grep -qF "test_xxx_carved.sh"'
 
 # ----------------------------------------------------------------------------
 echo "Task 8: ## Test sub-heading does NOT start the block"
@@ -231,16 +253,84 @@ check "missing SCRIPTS_DIR → exit 2"    '[ "$rc" -eq 2 ]'
 check "missing SCRIPTS_DIR → ERROR"     'echo "$out" | grep -qE "ERROR:.*scripts directory"'
 
 # ----------------------------------------------------------------------------
-echo "Task 11: real repo CLAUDE.md is reported as drift (advisory)"
-# Sanity check that the actual repo state is what the card described —
-# unless we've already updated CLAUDE.md, the harness should warn. We
-# run WITHOUT --strict so the test stays green even after the CLAUDE.md
-# update lands (this test will simply start reporting clean).
+echo "Task 11: real repo CLAUDE.md is CLEAN (advisory + --strict both 0)"
+# After the carve-out lands, the actual repo CLAUDE.md is fully covered:
+# every scripts/test_*.sh on disk is either listed in `# Test` or on the
+# CARVE_OUTS list. The guard must report OK, exit 0 (advisory), and exit 0
+# under --strict — the latter is what makes the guard CI-usable.
 out=$(bash "$SUT" 2>&1); rc=$?
-# The check is advisory; we just verify it runs and prints OK or WARNING.
 check "real repo CLAUDE.md → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
-check "real repo CLAUDE.md → emits OK or WARNING" \
-  'echo "$out" | grep -qE "^(OK|WARNING)"'
+check "real repo CLAUDE.md → emits OK (no drift)" \
+  'echo "$out" | grep -qE "^OK:.*covered"'
+
+out=$(bash "$SUT" --strict 2>&1); rc=$?
+check "real repo CLAUDE.md + --strict → exit 0"  '[ "$rc" -eq 0 ]'
+check "real repo CLAUDE.md + --strict → no ERROR" \
+  '! echo "$out" | grep -qE "ERROR:"'
+
+# ----------------------------------------------------------------------------
+echo "Task 12: CARVE_OUTS env override (space-separated basenames)"
+# The carve-out list is also exercisable via env var so tests can probe
+# the filtering logic against synthetic fixtures. Use names that are NOT
+# in the SUT's default carve-out list (test_cockpit.sh, test_measure_token_saver.sh)
+# so the env override is the only thing that can silence them.
+carve_scripts="$TMP/carve-scripts"
+carve_claude="$TMP/carve-claude.md"
+seed_scripts "$carve_scripts" test_zz_keep.sh test_zz_drop.sh
+write_claude "$carve_claude" "bash scripts/test_zz_keep.sh"
+
+out=$(CARVE_OUTS="test_zz_drop.sh" \
+      SCRIPTS_DIR="$carve_scripts" CLAUDE_MD="$carve_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "CARVE_OUTS override → silenced test_zz_drop.sh"  '[ "$rc" -eq 0 ]'
+check "CARVE_OUTS override → emits OK"                 'echo "$out" | grep -qE "^OK:"'
+
+# Without the override, test_zz_drop.sh would flag — sanity check that
+# the test fixture is actually testing what we think it's testing.
+out=$(SCRIPTS_DIR="$carve_scripts" CLAUDE_MD="$carve_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "no CARVE_OUTS override → test_zz_drop.sh flagged" \
+  'echo "$out" | grep -qF "test_zz_drop.sh"'
+
+# ----------------------------------------------------------------------------
+echo "Task 13: CARVE_OUTS does NOT mask phantom direction"
+# A carved-out name that *is* listed in `# Test` but doesn't exist on
+# disk is still a phantom drift — the carve-out only suppresses
+# direction A (missing-from-CLAUDE.md). The phantom direction fires
+# regardless, because CLAUDE.md is the source of truth for # Test.
+phantom_carve_scripts="$TMP/phantom-carve-scripts"
+phantom_carve_claude="$TMP/phantom-carve-claude.md"
+seed_scripts "$phantom_carve_scripts" test_other.sh
+write_claude "$phantom_carve_claude" \
+  "bash scripts/test_carved_but_missing.sh" \
+  "bash scripts/test_other.sh"
+out=$(CARVE_OUTS="test_carved_but_missing.sh" \
+      SCRIPTS_DIR="$phantom_carve_scripts" CLAUDE_MD="$phantom_carve_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "carved name in # Test but missing on disk → still flagged as phantom" \
+  'echo "$out" | grep -qF "test_carved_but_missing.sh"'
+check "carved phantom → WARNING emitted"  'echo "$out" | grep -qE "WARNING"'
+
+# ----------------------------------------------------------------------------
+echo "Task 14: CARVE_OUTS='' disables the carve-out entirely"
+# Setting CARVE_OUTS to the empty string is an explicit opt-out of the
+# carve-out mechanism — useful for operators who want the guard to be
+# strict-by-default (every missing-from-CLAUDE.md is flagged, no
+# exceptions). Use a name that IS in the default list (test_cockpit.sh)
+# so we can prove the default is bypassed.
+empty_carve_scripts="$TMP/empty-carve-scripts"
+empty_carve_claude="$TMP/empty-carve-claude.md"
+seed_scripts "$empty_carve_scripts" test_cockpit.sh
+cat > "$empty_carve_claude" <<'EOF'
+# Build
+./scripts/build.sh
+EOF
+out=$(CARVE_OUTS="" \
+      SCRIPTS_DIR="$empty_carve_scripts" CLAUDE_MD="$empty_carve_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "CARVE_OUTS='' → test_cockpit.sh flagged despite default carve-out" \
+  'echo "$out" | grep -qF "test_cockpit.sh"'
+check "CARVE_OUTS='' → exit 0 (advisory)"        '[ "$rc" -eq 0 ]'
 
 # ----------------------------------------------------------------------------
 echo ""
