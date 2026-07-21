@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 92 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 94 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -146,7 +146,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Claude Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (28)
+### Decision (30)
 
 | Document | Status |
 |---|---|
@@ -164,6 +164,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md) | 🔵 decided |
 | [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md) | 🔵 decided |
 | [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md) | 🟡 proposed |
+| [Rebrand naar Agent Cockpit — naam, logo en thema](./rebrand-decision.md) | 🔵 decided |
 | [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md) | 🔵 decided |
 | [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md) | 🔵 decided |
 | [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md) | 🔵 decided |
@@ -173,6 +174,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Spike: declaratieve multi-agent workflow-orchestratie — ADR](./spike-declarative-workflow-orchestration.md) | 🔵 decided |
 | [Sync + HLC-laag: bevriezen vs. snoeien — trade-off + beslissing](./sync-hlc-freeze-vs-prune.md) | 🔵 decided |
 | [Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument](./sync-vs-async-delegation-decision.md) | 🔵 decided |
+| [Token-saving mechanismen (RTK / Headroom / Caveman / Ponytail) — analyse & beslissing](./token-saver-mechanismen-decision.md) | 🔵 decided |
 | [Token-saver meet-harnas — ontwerp, proxy, en eerste meting](./token-saver-meet-harnas.md) | 🔵 decided |
 | ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md) | 🔵 decided |
 | [Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing](./upstream-agent-teams-decision.md) | 🔵 decided |

@@ -67,6 +67,7 @@
 - [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md): type=decision status=decided
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided
 - [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md): type=decision status=proposed
+- [Rebrand naar Agent Cockpit — naam, logo en thema](./rebrand-decision.md): type=decision status=decided
 - [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md): type=decision status=decided
 - [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md): type=decision status=decided
 - [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md): type=decision status=decided
@@ -76,6 +77,7 @@
 - [Spike: declaratieve multi-agent workflow-orchestratie — ADR](./spike-declarative-workflow-orchestration.md): type=decision status=decided
 - [Sync + HLC-laag: bevriezen vs. snoeien — trade-off + beslissing](./sync-hlc-freeze-vs-prune.md): type=decision status=decided
 - [Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument](./sync-vs-async-delegation-decision.md): type=decision status=decided
+- [Token-saving mechanismen (RTK / Headroom / Caveman / Ponytail) — analyse & beslissing](./token-saver-mechanismen-decision.md): type=decision status=decided
 - [Token-saver meet-harnas — ontwerp, proxy, en eerste meting](./token-saver-meet-harnas.md): type=decision status=decided
 - ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md): type=decision status=decided
 - [Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing](./upstream-agent-teams-decision.md): type=decision status=decided
