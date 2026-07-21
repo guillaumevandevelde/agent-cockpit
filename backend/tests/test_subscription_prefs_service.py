@@ -102,12 +102,16 @@ class TestSyncAnthropicProviderRegistration:
 
     @pytest.fixture(autouse=True)
     def _isolated_registry(self):
+        # Self-improve kanban card 7a8788af...: the
+        # save/clear/restore dance moved to
+        # ``registry.cleared_registry_for_tests`` — keeps the "clean
+        # registry" shape this class wants (no seed defaults;
+        # register exactly what the test needs) without re-implementing
+        # the dance. Sibling to ``seeded_registry_for_tests`` for
+        # tests that want the lifespan-mirror state.
         from app.services.subscriptions import registry as reg
-        saved = dict(reg._PROVIDERS)
-        reg._PROVIDERS.clear()
-        yield
-        reg._PROVIDERS.clear()
-        reg._PROVIDERS.update(saved)
+        with reg.cleared_registry_for_tests():
+            yield
 
     @pytest.mark.asyncio
     async def test_no_tier_registers_honest_stub(self, db):

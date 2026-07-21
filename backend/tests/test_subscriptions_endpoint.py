@@ -34,7 +34,7 @@ def _client() -> AsyncClient:
 
 
 @pytest.fixture(autouse=True)
-def _seed_registry(monkeypatch):
+def _seed_registry():
     """Mirror ``main.lifespan``'s seed so the registry contains the
     realistic default-providers (UnknownUsageProvider for the legacy
     trio + RouterUsageProvider for ``anthropic-compatible``, kaart
@@ -44,14 +44,19 @@ def _seed_registry(monkeypatch):
     ``subscription_label`` show up under test — without it the
     ASGITransport-based client never triggers ``lifespan``, and the
     registry stays empty.
+
+    Self-improve kanban card 7a8788af...: the
+    save/clear/seed-defaults/restore dance previously lived inline
+    here; it now lives in
+    ``app.services.subscriptions.registry.seeded_registry_for_tests``
+    so a future endpoint-test (or any test that needs the realistic
+    lifespan state) gets it for free without copy-pasting the four
+    steps — and without forgetting the restore that would otherwise
+    leak the seeded defaults into the next test.
     """
     from app.services.subscriptions import registry as _reg
-    _saved = dict(_reg._PROVIDERS)
-    _reg._PROVIDERS.clear()
-    _reg.register_default_providers()
-    yield
-    _reg._PROVIDERS.clear()
-    _reg._PROVIDERS.update(_saved)
+    with _reg.seeded_registry_for_tests():
+        yield
 
 
 @pytest.fixture(autouse=True)

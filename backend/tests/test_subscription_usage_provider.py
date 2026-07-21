@@ -638,16 +638,17 @@ class TestRegistrySeeding:
     the registry non-empty; before D2, ``_PROVIDERS`` was ``{}`` at
     startup and ``get_provider_for`` always returned ``None``."""
 
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    def _isolated_registry(self):
         # Snapshot module-level state so the test doesn't leak.
+        # Self-improve kanban card 7a8788af...: this dance now lives
+        # in ``registry.cleared_registry_for_tests`` (sibling of
+        # ``seeded_registry_for_tests``) — these tests want a clean
+        # registry because they call ``register_default_providers``
+        # themselves to verify what happens after a fresh seed.
         from app.services.subscriptions import registry as reg
-        self._saved = dict(reg._PROVIDERS)
-        reg._PROVIDERS.clear()
-
-    def teardown_method(self):
-        from app.services.subscriptions import registry as reg
-        reg._PROVIDERS.clear()
-        reg._PROVIDERS.update(self._saved)
+        with reg.cleared_registry_for_tests():
+            yield
 
     def test_seeds_all_supported_providers(self):
         from app.services.subscriptions import registry as reg
@@ -724,6 +725,111 @@ class TestRegistrySeeding:
         # the snapshot, both of which are derived from the registered id.
         assert set(reg._PROVIDERS.keys()) == first_keys
         assert len(reg._PROVIDERS) == len(first_keys)
+
+
+class TestSeededRegistryForTests:
+    """``seeded_registry_for_tests`` — the canonical test-side mirror of
+    ``main.lifespan``'s ``register_default_providers`` seed.
+
+    Self-improve kanban card 7a8788af... (analyst leaf-spike): the
+    save/clear/seed/restore dance was copy-pasted across four test
+    files (this one, ``test_subscriptions_endpoint.py``,
+    ``test_subscription_prefs_service.py``, and the
+    ``_registry_state`` contextmanager in
+    ``test_subscription_pool_dispatch.py``). The helper standardises
+    that shape so a future endpoint-test gets the realistic lifespan
+    state without having to know the dance — and so the registry
+    module owns the lifecycle of its own mutable state.
+    """
+
+    def test_helper_seeds_default_providers_while_inside(self):
+        from app.services.subscriptions import registry as reg
+
+        reg._PROVIDERS.clear()
+        try:
+            with reg.seeded_registry_for_tests() as reg_ctx:
+                # Mirror of what ``main.lifespan`` puts in the registry
+                # at startup — every supported (cli, provider) resolves
+                # to a non-None provider, so endpoint-loop tests see
+                # the same lookup-table as production.
+                for prov in (
+                    "anthropic", "bedrock", "minimax", "anthropic-compatible",
+                ):
+                    assert reg_ctx.get_provider_for(
+                        cli="claude-code", provider=prov,
+                    ) is not None, f"missing default provider for {prov}"
+        finally:
+            reg._PROVIDERS.clear()
+
+    def test_helper_restores_pre_entry_state_on_exit(self):
+        # Whatever was registered before the context must come back
+        # after the context exits — including empty registries (no
+        # lifespan ever ran) and registries with custom fakes a
+        # sibling test registered.
+        from app.services.subscriptions import registry as reg
+
+        # Case 1: pre-entry was empty -> post-exit is empty.
+        reg._PROVIDERS.clear()
+        with reg.seeded_registry_for_tests():
+            pass
+        assert reg._PROVIDERS == {}
+
+        # Case 2: pre-entry had a custom fake -> post-exit has the
+        # same fake (not the seeded defaults).
+        sentinel = UnknownUsageProvider(
+            subscription_id="claude-code:custom-fake",
+            subscription_label="custom-fake",
+        )
+        try:
+            reg.register_provider(sentinel)
+            assert reg.get_provider_for(
+                cli="claude-code", provider="custom-fake",
+            ) is sentinel
+            with reg.seeded_registry_for_tests():
+                # Inside the context the sentinel is replaced by the
+                # seeded defaults; the registry doesn't merge.
+                assert reg.get_provider_for(
+                    cli="claude-code", provider="custom-fake",
+                ) is None
+            # Outside, the sentinel is back.
+            assert reg.get_provider_for(
+                cli="claude-code", provider="custom-fake",
+            ) is sentinel
+        finally:
+            reg._PROVIDERS.clear()
+
+    def test_helper_restores_even_when_body_raises(self):
+        # try/finally inside the helper means a test that throws
+        # doesn't leave the global registry in a seeded state and
+        # leak the defaults into the next test.
+        from app.services.subscriptions import registry as reg
+
+        reg._PROVIDERS.clear()
+        try:
+            with pytest.raises(RuntimeError, match="boom"):
+                with reg.seeded_registry_for_tests():
+                    raise RuntimeError("boom")
+            assert reg._PROVIDERS == {}
+        finally:
+            reg._PROVIDERS.clear()
+
+    def test_helper_anthropic_compatible_seeds_router_provider(self):
+        # Same lock as ``TestRegistrySeeding`` — the
+        # ``anthropic-compatible`` slot gets a ``RouterUsageProvider``,
+        # not the generic ``UnknownUsageProvider``, so endpoint-tests
+        # see the router-row's ``bron`` / ``subscription_label`` they
+        # assert against (kaart 390756e6...).
+        from app.services.subscriptions import registry as reg
+
+        reg._PROVIDERS.clear()
+        try:
+            with reg.seeded_registry_for_tests():
+                provider = reg.get_provider_for(
+                    cli="claude-code", provider="anthropic-compatible",
+                )
+            assert isinstance(provider, RouterUsageProvider)
+        finally:
+            reg._PROVIDERS.clear()
 
 
 class TestNoCrossVendorNormalization:
