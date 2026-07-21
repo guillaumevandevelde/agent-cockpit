@@ -75,12 +75,19 @@ cd frontend && npm run build     # Same as above
 # Test
 bash backend/test_commands_api.sh                         # Curl-based API tests
 bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
+bash scripts/test_check_analysis_outcomes.sh              # Bash tests for check-analysis-outcomes.sh
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
 bash scripts/test_check_doc_links.sh                      # Bash tests for check-doc-links.sh
+bash scripts/test_check_kanban_conventions.sh             # Bash tests for check-kanban-conventions.sh (synthetic SQLite fixtures)
+bash scripts/test_check_problem_card_staleness.sh         # Bash tests for check-problem-card-staleness.sh
+bash scripts/test_check_schema_rename_coverage.sh         # Bash tests for check-schema-rename-coverage.sh
+bash scripts/test_check_test_harness_coverage.sh         # Bash tests for check-test-harness-coverage.sh
 bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
 bash scripts/test_list_orphan_bridge_sessions.sh           # Bash tests for list-orphan-bridge-sessions.sh (uses real tmux sessions)
 bash scripts/test_sweep_dangling_depends_on.sh             # Bash tests for sweep_dangling_depends_on.py (synthetic SQLite fixtures)
+bash scripts/test_sweep_dangling_plan_refs.sh             # Bash tests for sweep_dangling_plan_refs.py (synthetic SQLite fixtures)
 bash scripts/test_generate_doc_index.sh                    # Bash tests for generate-doc-index.py (synthetic frontmatter fixtures)
+bash scripts/test_worktree_gc.sh                          # Bash tests for worktree-gc.sh
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
@@ -91,6 +98,7 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
 ./scripts/check-doc-frontmatter.sh            # Flag docs/cockpit/*.md zonder OKF-frontmatter of met onbekende type/status (advisory; --strict = exit 1)
 ./scripts/check-doc-links.sh                  # Flag relatieve Markdown-links in docs/cockpit/*.md met ontbrekend target (advisory; --strict = exit 1)
+./scripts/check-test-harness-coverage.sh      # Flag scripts/test_*.sh niet in de # Test-blok van CLAUDE.md (of vice-versa); advisory + --strict (zie kaart 5e988e4e)
 ./scripts/generate-doc-index.py               # Regenereer de README-index (100% dekking, gegroepeerd op type + status-badges) + docs/cockpit/llms.txt uit de frontmatter
 ./scripts/generate-doc-index.py --check --strict  # Faal als de gegenereerde index/llms.txt out-of-sync is met de frontmatter (advisory zonder --strict)
 
