@@ -181,14 +181,16 @@ async def create_column(payload: ColumnCreate):
 
 @router.patch("/columns/{column_id}", response_model=ColumnResponse)
 async def update_column(column_id: str, payload: ColumnUpdate):
+    # exclude_unset=True distinguishes "field absent from the PATCH" from
+    # "field present and explicitly set to null" — the column-pause UI's ∞
+    # button sends {max_sessions: null} to clear an existing cap, and a future
+    # patch might want to wipe default_agent / default_provider / default_model
+    # to None. Without exclude_unset, the silent drop in service.update_column
+    # would make every "clear X" a no-op (the same gap that hid behind the
+    # provider→cli rename in kaart ad15e0827… — don't reintroduce it).
     async with KanbanSessionLocal() as s:
         col = await service.update_column(
-            s, column_id,
-            name=payload.name, rank=payload.rank,
-            default_agent=payload.default_agent,
-            default_provider=payload.default_provider,
-            default_model=payload.default_model,
-            max_sessions=payload.max_sessions,
+            s, column_id, **payload.model_dump(exclude_unset=True),
         )
         if col is None:
             raise HTTPException(404, "column not found")
