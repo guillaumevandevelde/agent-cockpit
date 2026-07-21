@@ -555,12 +555,22 @@ async def create_column(session, project_key: str, name: str,
 
 
 async def update_column(session, column_id: str, **kwargs):
+    """Apply a partial update to a column row.
+
+    The caller is responsible for filtering to *only the fields it wants set*.
+    The router layer does this via ``payload.model_dump(exclude_unset=True)``
+    so an explicit ``None`` (e.g. ``max_sessions: None`` from the column-pause
+    UI's ∞ button) lands and an omitted field stays untouched. Earlier this
+    helper silently dropped every ``None`` via ``if v is not None: setattr(...)``
+    — fine for the old "0 means no limit" world, broken the moment null
+    became the canonical "no cap" sentinel. The check is gone; callers that
+    pass raw user input must do their own filtering.
+    """
     col = await session.get(KanbanColumn, column_id)
     if col is None:
         return None
     for k, v in kwargs.items():
-        if v is not None:
-            setattr(col, k, v)
+        setattr(col, k, v)
     col.updated_at = datetime.now(UTC)
     await session.flush()
     return col
