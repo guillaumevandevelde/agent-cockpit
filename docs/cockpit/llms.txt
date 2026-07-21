@@ -76,6 +76,7 @@
 - [Spike: declaratieve multi-agent workflow-orchestratie — ADR](./spike-declarative-workflow-orchestration.md): type=decision status=decided
 - [Sync + HLC-laag: bevriezen vs. snoeien — trade-off + beslissing](./sync-hlc-freeze-vs-prune.md): type=decision status=decided
 - [Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument](./sync-vs-async-delegation-decision.md): type=decision status=decided
+- [Token-saver meet-harnas — ontwerp, proxy, en eerste meting](./token-saver-meet-harnas.md): type=decision status=decided
 - ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md): type=decision status=decided
 - [Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing](./upstream-agent-teams-decision.md): type=decision status=decided
 - [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md): type=decision status=decided
@@ -89,6 +90,7 @@
 - [Communicatie & weergave — analyse](./communicatie-en-weergave-analyse.md): type=analysis status=active
 - [Controlled auto-dispatch — selectief dispatchen per soort werk](./controlled-auto-dispatch-analysis.md): type=analysis status=active
 - [Analyse — verweesde `depends_on` blokkeren kaarten permanent en onzichtbaar](./dangling-depends-on-analyse.md): type=analysis status=active
+- [Analyse — is auto-dispatch vastgeklonken aan het Anthropic-abonnement?](./dispatch-vendor-koppeling-analyse.md): type=analysis status=active
 - [Spike: headless `stream-json`-transport (Claude) achter `SpawnTransport`](./headless-stream-json-transport-spike.md): type=analysis status=decided
 - [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md): type=analysis status=active
 - [Wat kunnen we leren van JIRA? — kritische analyse](./jira-lessen-analyse.md): type=analysis status=active
