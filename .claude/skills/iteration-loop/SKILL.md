@@ -1,6 +1,6 @@
 ---
 name: iteration-loop
-description: Use when running a structured repeat-until-clean loop with a named preset — `verify` (test + lint + build), `simplify` (code-review effort=low), `investigate` (read-only sweep), or `flag-cycle` (drain flag-problem findings). Emits `<loop-complete>` when clean and `<loop-blocked>` when stuck; tracks each iteration in `.claude/state/iteration-<card-id>.txt` and posts a summary to the host kanban card.
+description: Use when running a structured repeat-until-clean loop with a named preset — `verify` (test + lint + build), `simplify` (code-review effort=low), `investigate` (read-only sweep), `flag-cycle` (drain flag-problem findings), `pytest-attr` (attribute pytest failures to engineer vs pre-existing on master), or `bash-test-attr` (attribute bash-test failures the same way for `scripts/test_*.sh`). Emits `<loop-complete>` when clean and `<loop-blocked>` when stuck; tracks each iteration in `.claude/state/iteration-<card-id>.txt` and posts a summary to the host kanban card.
 ---
 
 # iteration-loop
@@ -184,6 +184,55 @@ particular `investigate` → `flag-cycle` is a common two-pass.
   needed when the engineer is iterating on a fix (each pass reruns
   pytest + comparison, which is fast since the baseline is cached).
 
+### `bash-test-attr` — attribute bash-test failures to engineer vs pre-existing
+
+- **Use when:** an engineer card touches `scripts/` or `docs/cockpit/` and
+  the engineer wants to know "is this `FAIL: …` line in `scripts/test_*.sh`
+  mine or one of the ~1-3 pre-existing failures on `origin/master`?"
+  without running `git stash -u && bash && git stash pop` four extra times
+  per session. Same motivation as `pytest-attr` (kanban card 4c7c5346),
+  applied to the 16 `scripts/test_*.sh` harnesses; kaart
+  `ecea763e802a4cd59011652dd2537839` is the precedent-tracking ticket.
+- **Runs:**
+  1. If `.claude/state/bash-test-baseline.txt` is missing or older than
+     `--max-age-hours` (env `BASH_TEST_BASELINE_MAX_AGE_HOURS`, default 24),
+     run `scripts/baseline-bash-tests.sh` to refresh it on a clean detached
+     worktree of `origin/master`. No-op if a fresh cache exists.
+  2. Run `scripts/compare-bash-tests.sh` to capture the current failure set
+     and classify each line as `pre-existing`, `NEW (your fault)`, or
+     `FIXED by your changes`. NEW/FIXED sections are grouped by harness-name
+     so the engineer can read across 16 harnesses at a glance; the
+     pre-existing section lists the unique harness names that match.
+- **Harness-shape dependency:** every `scripts/test_*.sh` is expected to
+  follow the project convention (`bad() { echo "  FAIL: $1"; … }` +
+  `Total: $PASS passed, $FAIL failed` summary + exit `$FAIL == 0`).
+  Harnesses that violate this convention (e.g. crash without emitting
+  `FAIL:` lines because of a bash parse error) are still attributed —
+  the comparator synthesizes a single `(harness crashed without FAIL
+  lines)` sentinel so the line survives the comm-based diff.
+- **Worktree sessions:** bash tests need no venv and no interpreter
+  resolution — `bash` is on every PATH, and the scripts under test only
+  touch `scripts/*.sh` and (sometimes) `docs/cockpit/`. The comparator's
+  `BASH_TEST_FAKE_WORKTREE=1` + `BASH_TEST_CWD=` overrides exist only for
+  the test harness, not for normal engineer use.
+- **Clean when:** `compare-bash-tests.sh` exits 0 — every current failure
+  is also in the baseline (no new failures).
+- **"Pre-existing" ≠ "passing".** `compare-bash-tests.sh` classifying a
+  failure as "pre-existing (not your fault)" means the same `FAIL: …`
+  line is already produced by `origin/master` — it does **not** mean
+  the test passes. Read the actual FAIL: line before concluding a
+  targeted-file failure is environmental.
+- **Blocked when:** `compare-bash-tests.sh` exits 1 — at least one NEW
+  failure. The attribution output is what the engineer triages; the
+  loop emits `<loop-blocked>` and the engineer fixes the named
+  harnesses.
+- **Caveat — when NOT to use:** this preset does not run pytest and does
+  not replace `verify` for the standard end-of-card gate. The two
+  presets are orthogonal: `pytest-attr` for backend,
+  `bash-test-attr` for the bash-test suite.
+- **Default iteration cap:** 3 — usually one pass is enough; the
+  baseline is cached, so re-running is cheap.
+
 ## Per-iteration protocol
 
 ```
@@ -257,6 +306,7 @@ After `<loop-complete>` or `<loop-blocked>`:
 | Sweep for one specific pattern across the worktree without changing anything | `investigate` |
 | Work through `[problem]` cards that match this card's scope | `flag-cycle` |
 | Attribute pytest failures to "yours" vs "pre-existing on master" | `pytest-attr` |
+| Attribute bash-test failures (`scripts/test_*.sh`) to "yours" vs "pre-existing on master" | `bash-test-attr` |
 
 If you're not sure, **start with `verify`** — it's the cheapest and the
 most universally applicable.

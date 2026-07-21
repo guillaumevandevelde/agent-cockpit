@@ -129,6 +129,9 @@ altijd door.
    skill met preset `pytest-attr` — die vergelijkt je branch-failures
    met de master-baseline en classificeert ze als `pre-existing` / `NEW`
    / `FIXED`, zodat je niet zelf hoeft te stash-en-vergelijken.
+   Voor `scripts/test_*.sh`-harnassen is de parallelle preset
+   `bash-test-attr` beschikbaar (gebruikt `scripts/baseline-bash-tests.sh`
+   + `scripts/compare-bash-tests.sh`).
 
 7. **Feature-Compliance-Review (FCR) als pre-Done subagent-call** — `/code-review` /
    `iteration-loop verify` hierboven lezen de oorspronkelijke kaart-spec niet; deze

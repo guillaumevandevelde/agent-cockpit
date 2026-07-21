@@ -75,6 +75,7 @@ cd frontend && npm run build     # Same as above
 # Test
 bash backend/test_commands_api.sh                         # Curl-based API tests
 bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
+bash scripts/test_baseline_bash_tests.sh                  # Bash tests for baseline-bash-tests / compare-bash-tests scripts
 bash scripts/test_check_analysis_outcomes.sh              # Bash tests for check-analysis-outcomes.sh
 bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
 bash scripts/test_check_doc_links.sh                      # Bash tests for check-doc-links.sh
@@ -116,6 +117,10 @@ cd frontend && npm run lint      # ESLint
 # Pytest baseline (attribute pre-existing failures on origin/master — kanban card 4c7c5346)
 ./scripts/pytest-baseline.sh                # Capture pre-existing failures (idempotent, cached 24h)
 ./scripts/pytest-compare.sh                 # Run pytest + classify: pre-existing / NEW / FIXED
+
+# Bash-test baseline (attribute pre-existing scripts/test_*.sh failures on origin/master — kanban card ecea763e)
+./scripts/baseline-bash-tests.sh            # Capture pre-existing bash-test failures (idempotent, cached 24h)
+./scripts/compare-bash-tests.sh             # Run scripts/test_*.sh + classify: pre-existing / NEW / FIXED
 
 # Version
 ./scripts/bump-version.sh <major|minor|patch>  # Sync version across VERSION, package.json, pyproject.toml
