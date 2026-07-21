@@ -128,6 +128,16 @@ async def list_cards(
     ]
 
 
+async def all_card_ids(session) -> set[str]:
+    """Board-wide set of every existing card id — the existence oracle used by
+    the dispatch tick to tell a *dangling* ``depends_on`` (id resolves nowhere
+    on the board) apart from a healthy not-yet-Done dep. Board-wide, not
+    project-scoped, so a cross-project dep is never mistaken for dangling —
+    mirrors ``scripts/sweep_dangling_depends_on.py``'s existence check."""
+    rows = (await session.execute(select(KanbanCard.id))).scalars().all()
+    return set(rows)
+
+
 def _dependents_by_parent(cards: list[KanbanCard]) -> dict[str, list[KanbanCard]]:
     """Map each parent card id → the non-Done cards that list it in
     `depends_on`. Single detection seam shared by `_blocking_card_ids`

@@ -22,6 +22,25 @@ def meets_dep_prerequisites(card, cards_by_id: dict) -> bool:
     return True
 
 
+def dangling_dep_ids(card, live_ids) -> list[str]:
+    """Return the entries in ``card.depends_on`` that resolve to no live card.
+
+    ``live_ids`` is the board-wide set of existing card ids — the existence
+    oracle. A dep-id absent from it is *dangling*: the depended-on card was
+    deleted (or never existed), so the fail-closed ``meets_dep_prerequisites``
+    gate blocks this card **permanently and invisibly** — a missing parent is
+    indistinguishable from "not Done yet". A healthy not-yet-Done dep IS in
+    ``live_ids`` (it just isn't in column Done), so it is not returned here.
+
+    Board-wide (not project-scoped) on purpose: a dep pointing at a live card
+    in another project is unusual but not dangling, and must not be flagged —
+    mirrors ``scripts/sweep_dangling_depends_on.py``, which also checks
+    existence board-wide.
+    """
+    deps = getattr(card, "depends_on", None) or []
+    return [d for d in deps if d not in live_ids]
+
+
 def detect_cycle(graph: dict[str, Sequence[str]]) -> list[str] | None:
     """Return the first cycle found as a list [a, b, ..., a], or None if acyclic.
 
