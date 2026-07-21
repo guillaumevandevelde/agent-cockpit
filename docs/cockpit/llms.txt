@@ -97,6 +97,7 @@
 - [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md): type=analysis status=active
 - [Wat kunnen we leren van JIRA? — kritische analyse](./jira-lessen-analyse.md): type=analysis status=active
 - [Kennisopbouw & navigatie — hoe structureren we de docs-berg](./knowledge-structure-navigation-analysis.md): type=analysis status=proposed
+- [Analyse — Lemma Platform: wat kunnen we overnemen of leren?](./lemma-platform-analyse.md): type=analysis status=active
 - [Nieuw project spec-driven starten — is dit al ondersteund?](./new-project-startup-flow.md): type=analysis status=active
 - [Analyse — OpenHands: wat kunnen we overnemen of leren?](./openhands-analyse.md): type=analysis status=active
 - [Orchestration-flow — is onze flow robuust genoeg? — analyse](./orchestration-flow-analysis.md): type=analysis status=active
