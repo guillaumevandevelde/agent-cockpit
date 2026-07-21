@@ -67,6 +67,7 @@
 - [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md): type=decision status=decided
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided
 - [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md): type=decision status=proposed
+- [Rebrand naar Agent Cockpit — naam, logo en thema](./rebrand-decision.md): type=decision status=decided
 - [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md): type=decision status=decided
 - [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md): type=decision status=decided
 - [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md): type=decision status=decided
@@ -95,6 +96,7 @@
 - [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md): type=analysis status=active
 - [Wat kunnen we leren van JIRA? — kritische analyse](./jira-lessen-analyse.md): type=analysis status=active
 - [Kennisopbouw & navigatie — hoe structureren we de docs-berg](./knowledge-structure-navigation-analysis.md): type=analysis status=proposed
+- [Analyse — Lemma Platform: wat kunnen we overnemen of leren?](./lemma-platform-analyse.md): type=analysis status=active
 - [Nieuw project spec-driven starten — is dit al ondersteund?](./new-project-startup-flow.md): type=analysis status=active
 - [Analyse — OpenHands: wat kunnen we overnemen of leren?](./openhands-analyse.md): type=analysis status=active
 - [Orchestration-flow — is onze flow robuust genoeg? — analyse](./orchestration-flow-analysis.md): type=analysis status=active

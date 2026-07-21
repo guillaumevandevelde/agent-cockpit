@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 92 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 94 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -146,7 +146,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Claude Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (28)
+### Decision (29)
 
 | Document | Status |
 |---|---|
@@ -164,6 +164,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md) | 🔵 decided |
 | [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md) | 🔵 decided |
 | [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md) | 🟡 proposed |
+| [Rebrand naar Agent Cockpit — naam, logo en thema](./rebrand-decision.md) | 🔵 decided |
 | [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md) | 🔵 decided |
 | [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md) | 🔵 decided |
 | [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md) | 🔵 decided |
@@ -179,7 +180,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
 | [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
 
-### Analysis (27)
+### Analysis (28)
 
 | Document | Status |
 |---|---|
@@ -194,6 +195,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md) | 🟢 active |
 | [Wat kunnen we leren van JIRA? — kritische analyse](./jira-lessen-analyse.md) | 🟢 active |
 | [Kennisopbouw & navigatie — hoe structureren we de docs-berg](./knowledge-structure-navigation-analysis.md) | 🟡 proposed |
+| [Analyse — Lemma Platform: wat kunnen we overnemen of leren?](./lemma-platform-analyse.md) | 🟢 active |
 | [Nieuw project spec-driven starten — is dit al ondersteund?](./new-project-startup-flow.md) | 🟢 active |
 | [Analyse — OpenHands: wat kunnen we overnemen of leren?](./openhands-analyse.md) | 🟢 active |
 | [Orchestration-flow — is onze flow robuust genoeg? — analyse](./orchestration-flow-analysis.md) | 🟢 active |
