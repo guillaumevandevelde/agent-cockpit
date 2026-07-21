@@ -326,6 +326,21 @@ Analyse-kaart. Vereist eerst een autorisatiegrens die we vandaag niet hebben
 (`--dangerously-skip-permissions`), dus scope-bepaling gaat vooraf aan bouwen.
 Overgenomen patroon: §4.2.
 
+✅ Geanalyseerd (kaart `38d32e94…`) →
+[`approval-privilege-separation-analyse.md`](./approval-privilege-separation-analyse.md).
+**Uitkomst: `execute_as_user` wordt niet overgenomen.** Twee onafhankelijke redenen:
+wij hebben één principal (zelfde OS-gebruiker, home, credentials), dus
+identiteit-strippen is een no-op; en het patroon verdedigt tegen een agent die iets
+doet wat hij *niet mag*, terwijl onze drie gedocumenteerde incidenten alle drie een
+*toegestane* actie waren die op dat moment verkeerd was — de agent had zijn eigen
+escalatie goedgekeurd. Twee premissen van de kaart bleken bovendien onjuist:
+`open_gate` beëindigt de sessie **niet** (het blokkeert inline en geeft het antwoord
+terug), en de autorisatiegrens *bestaat al* per `risk_class` — product-projecten
+draaien met `skip_permissions=False`. Het echte gat is het spiegelbeeld: die grens
+heeft **geen antwoordkanaal** (`--permission-prompt-tool` komt nergens in de codebase
+voor), dus een afgedwongen permissieprompt stalt een onbemande dispatch. Drie
+scoped kaarten daarop.
+
 ### 7.3 (géén nieuwe kaart) — comment op `88f3c990…`
 De bestaande kaart "Headless-transport is de facto Anthropic-only" krijgt een
 comment met Lemma's per-harness-parser-achter-één-`StreamTextState` als concrete

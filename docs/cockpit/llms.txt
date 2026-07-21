@@ -87,6 +87,7 @@
 ## Analysis
 
 - [Audit: voltooide analyses zonder aangemaakte vervolgkaarten](./analyse-orphaned-followups-audit.md): type=analysis status=active
+- [Analyse — Approval-model: privilege-scheiding tussen agent en gebruiker](./approval-privilege-separation-analyse.md): type=analysis status=decided
 - [Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten](./build-prioriteiten-analyse.md): type=analysis status=active
 - [Kaarten refereerbaar maken — analyse](./card-references-analysis.md): type=analysis status=active
 - [Communicatie & weergave — analyse](./communicatie-en-weergave-analyse.md): type=analysis status=active
