@@ -160,3 +160,152 @@ async def test_patch_column_can_set_pause_via_zero():
                            json={"max_sessions": 4})
         assert r.status_code == 200, r.text
         assert r.json()["max_sessions"] == 4
+
+
+# --- (provider, model) validation (kaart 1782fa43…, follow-up) -------------
+#
+# A column's default_provider/default_model must agree: the bug behind the
+# "minimax column stuck on opus" report was that the API would happily
+# persist `(provider=minimax, model=opus)`. The product-owner decision is
+# to refuse such combinations server-side so the inconsistency cannot
+# sneak in even when a script (or a regression in the UI) sends it. The
+# dispatcher also consults these defaults at spawn time, so the same rule
+# prevents a silent fallback to an unrelated Anthropic model.
+#
+# Validation rule:
+#   - effective provider = (patch.default_provider if set else existing)
+#   - effective model    = (patch.default_model    if set else existing)
+#   - if BOTH are non-null: model must be in the provider's known-options
+#     list. Providers without a model-options cache (e.g. bedrock) skip
+#     the check; a null provider skips the check.
+
+
+@pytest.mark.asyncio
+async def test_patch_column_rejects_model_unknown_to_minimax():
+    """`opus` is a claude-code alias, not a minimax model — the API must
+    reject `(provider=minimax, model=opus)` with 422 (kaart 1782fa43…)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })).json()["id"]
+        r = await ac.patch(f"/api/v1/kanban/columns/{cid}", json={
+            "default_provider": "minimax",
+            "default_model": "opus",
+        })
+        assert r.status_code == 422, r.text
+        assert "opus" in r.text and "minimax" in r.text
+
+
+@pytest.mark.asyncio
+async def test_patch_column_accepts_model_known_to_minimax():
+    """`MiniMax-M3` is the seeded minimax model — save must succeed."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })).json()["id"]
+        r = await ac.patch(f"/api/v1/kanban/columns/{cid}", json={
+            "default_provider": "minimax",
+            "default_model": "MiniMax-M3",
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["default_provider"] == "minimax"
+        assert body["default_model"] == "MiniMax-M3"
+
+
+@pytest.mark.asyncio
+async def test_patch_column_rejects_switching_provider_when_old_model_doesnt_fit():
+    """Switching provider to minimax on a column that already has
+    `default_model=opus` must be rejected. The frontend now clears the
+    model field on provider-change, but a direct PATCH (or a regression)
+    must NOT be able to land `(minimax, opus)`."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+            "default_provider": "anthropic",
+            "default_model": "opus",
+        })).json()["id"]
+        r = await ac.patch(f"/api/v1/kanban/columns/{cid}", json={
+            "default_provider": "minimax",
+        })
+        assert r.status_code == 422, r.text
+        # The persisted state must be untouched — neither provider nor
+        # model flipped silently to a partial invalid combo.
+        body = (await ac.get("/api/v1/kanban/columns",
+                              params={"project_key": "PROJ"})
+                ).json()["columns"][0]
+        assert body["default_provider"] == "anthropic"
+        assert body["default_model"] == "opus"
+
+
+@pytest.mark.asyncio
+async def test_patch_column_rejects_model_unknown_to_anthropic():
+    """`MiniMax-M3` is a minimax-only model — `(anthropic, MiniMax-M3)`
+    must be rejected. Symmetric to the minimax guard above."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })).json()["id"]
+        r = await ac.patch(f"/api/v1/kanban/columns/{cid}", json={
+            "default_provider": "anthropic",
+            "default_model": "MiniMax-M3",
+        })
+        assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_patch_column_accepts_null_provider_with_any_model():
+    """`provider=null` skips the check — the column is letting the dispatch
+    chain pick the provider, so any free-text model is acceptable (the
+    chain validates it again at spawn time)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })).json()["id"]
+        r = await ac.patch(f"/api/v1/kanban/columns/{cid}", json={
+            "default_provider": None,
+            "default_model": "opus",
+        })
+        assert r.status_code == 200, r.text
+
+
+@pytest.mark.asyncio
+async def test_patch_column_accepts_null_model_with_any_provider():
+    """A provider with `model=null` is also fine — it's the "set provider,
+    let model fall through" combo, used when the column should pin a
+    vendor but defer the model choice to the dispatch chain."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })).json()["id"]
+        r = await ac.patch(f"/api/v1/kanban/columns/{cid}", json={
+            "default_provider": "minimax",
+            "default_model": None,
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["default_provider"] == "minimax"
+        assert body["default_model"] is None
+
+
+@pytest.mark.asyncio
+async def test_patch_column_accepts_bedrock_with_any_model():
+    """Bedrock has no model-options cache (AWS model ids are ARN-shaped,
+    not the bare aliases the cli returns). Free-form is acceptable; the
+    CLI rejects unknown models at spawn time anyway."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })).json()["id"]
+        r = await ac.patch(f"/api/v1/kanban/columns/{cid}", json={
+            "default_provider": "bedrock",
+            "default_model": "anthropic.claude-3-sonnet-20240229-v1:0",
+        })
+        assert r.status_code == 200, r.text
