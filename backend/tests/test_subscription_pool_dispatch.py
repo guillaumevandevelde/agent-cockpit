@@ -566,6 +566,8 @@ async def test_post_subscription_pool_with_omitted_cli_defaults_server_side():
 
 from contextlib import contextmanager
 
+from app.services.subscriptions import registry as reg
+
 
 @contextmanager
 def _registry_state():
@@ -576,15 +578,15 @@ def _registry_state():
     (and conversely, the lifespan-registered default providers would
     surface here). Mirrors the "save, clear, yield, restore" pattern used
     by ``conftest.py::_patch_kanban_db``.
+
+    Self-improve kanban card 7a8788af...: the dance itself moved into
+    ``registry.cleared_registry_for_tests`` (sibling of
+    ``seeded_registry_for_tests``). Kept the local name so existing
+    ``with _registry_state() as reg:`` call-sites read identically; the
+    body just delegates to the registry helper now.
     """
-    from app.services.subscriptions import registry as reg
-    saved = dict(reg._PROVIDERS)
-    reg._PROVIDERS.clear()
-    try:
-        yield reg
-    finally:
-        reg._PROVIDERS.clear()
-        reg._PROVIDERS.update(saved)
+    with reg.cleared_registry_for_tests() as _reg:
+        yield _reg
 
 
 def _fake_usage_provider(

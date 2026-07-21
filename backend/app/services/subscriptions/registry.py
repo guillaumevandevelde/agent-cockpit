@@ -13,6 +13,8 @@ combination silently becomes "no signal → available", matching analyse
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from app.services.agentic_cli.provider_env import (
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
@@ -142,3 +144,90 @@ def get_unknown_provider(cli: str, provider: str) -> SubscriptionUsageProvider:
         subscription_id=f"{cli}:{provider}",
         subscription_label=f"{cli} ({provider})",
     )
+
+
+@contextmanager
+def seeded_registry_for_tests():
+    """Snapshot, clear, seed defaults, then restore — the canonical
+    test-side mirror of ``main.lifespan``'s
+    ``register_default_providers`` call.
+
+    Self-improve kanban card 7a8788af... standardises the
+    save/clear/seed/restore dance that was previously copy-pasted
+    across ``tests/test_subscriptions_endpoint.py``,
+    ``tests/test_subscription_prefs_service.py``,
+    ``tests/test_subscription_usage_provider.py`` (its
+    ``setup_method``/``teardown_method``) and the
+    ``_registry_state`` contextmanager in
+    ``tests/test_subscription_pool_dispatch.py``. Without this helper
+    a future endpoint-test would copy the same dance again — and
+    forget one of the four steps (usually the restore).
+
+    Yield semantics — what a test sees while inside the ``with``:
+
+    * the registry is empty and then seeded with the default
+      providers (lifespan mirror — same lookup-table the production
+      code reads),
+    * ``get_provider_for(cli, provider)`` therefore resolves for
+      every supported ``(cli, provider)`` pair (incl.
+      ``anthropic-compatible`` → ``RouterUsageProvider``, kaart
+      390756e6...).
+
+    On exit (success *or* exception — the ``try/finally`` covers
+    both), the registry is restored to whatever was registered
+    before the context entered. That means:
+
+    * tests that pre-seeded a custom fake get their fake back;
+    * tests that ran on an empty registry (no lifespan fired under
+      ``ASGITransport``) return to an empty registry;
+    * tests that crashed mid-body don't leak the seeded defaults
+      into the next test.
+
+    Production code never calls this — it lives in the registry
+    module so the registry owns the lifecycle of its own mutable
+    state, and so a future contributor who adds a new mutable
+    registry only has to update one file. Endpoint tests that need
+    the realistic lifespan state (every ``ASGITransport``-based
+    test in particular, since that client never triggers
+    ``lifespan``) wrap this helper in a one-line autouse fixture —
+    see ``tests/test_subscriptions_endpoint.py::_seed_registry``
+    for the canonical pattern.
+    """
+    saved = dict(_PROVIDERS)
+    _PROVIDERS.clear()
+    try:
+        register_default_providers()
+        # Yield the module so callers can call ``reg_ctx.get_provider_for(...)``
+        # without re-importing — keeps the helper self-contained. The
+        # module has no public init, so re-binding here is fine.
+        import app.services.subscriptions.registry as _reg_module
+        yield _reg_module
+    finally:
+        _PROVIDERS.clear()
+        _PROVIDERS.update(saved)
+
+
+@contextmanager
+def cleared_registry_for_tests():
+    """Snapshot, clear, then restore — for tests that register exactly
+    what they need without the lifespan-mirror noise.
+
+    Sibling to ``seeded_registry_for_tests``: tests that want to
+    register exactly what they need without the lifespan-mirror
+    noise use this — a real ``AnthropicUsageProvider`` registered
+    by the test body is the only row visible. The helper preserves
+    that "register your own" shape without re-implementing the
+    save/restore dance. Used by
+    ``test_subscription_prefs_service::_isolated_registry`` and
+    ``test_subscription_usage_provider::_isolated_registry`` (the
+    latter replacing the older ``setup_method``/``teardown_method``
+    pair).
+    """
+    saved = dict(_PROVIDERS)
+    _PROVIDERS.clear()
+    try:
+        import app.services.subscriptions.registry as _reg_module
+        yield _reg_module
+    finally:
+        _PROVIDERS.clear()
+        _PROVIDERS.update(saved)
