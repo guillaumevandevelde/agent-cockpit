@@ -14,7 +14,7 @@ import logging
 import re
 import subprocess
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -1105,46 +1105,63 @@ def _resolve_model_source(
     return PRECEDENCE_NONE
 
 
-async def resolve_column_effective_model(
+async def resolve_effective_provider_and_model(
     session,
+    *,
     project_key: str,
-    column_name: str,
+    target_agent: str,
     project_path: str,
+    pick_pool: Callable[[list[PoolEntry]], Awaitable[PoolEntry | None]] | None,
+    card_overrides: dict | None = None,
     card_model: str | None = None,
-    column_override: dict | None = None,
 ) -> dict:
-    """Return the resolved provider/model/source for a column.
+    """Walk the kanban model-precedence chain once and return the resolved
+    provider/model plus the precedence level each field came from.
 
-    Walks the same precedence chain as `dispatch_card` (board-wide override →
-    pool → per-card column_override → column.default_model → persona) but
-    without spawning anything. Used by the column-settings UI to render an
-    "effective model" line beneath the model input so a user editing a
-    column sees why their selection isn't applied (kaart 1782fa43…).
+    Single source of truth for the chain previously duplicated between
+    ``dispatch_card`` and ``resolve_column_effective_model``. A future
+    tweak to the precedence (new override layer, reorder, etc.) only
+    has to be made here, and the pin-tests in
+    ``test_kanban_column_effective_model.py`` +
+    ``test_dispatch_card_chain_matches_resolver_chain`` catch any
+    drift at both call sites (kaart 8da646d8…).
 
-    `column_name` is the column being inspected (typically the user's
-    own column; can differ from a dispatched card's source/destination).
-    `column_override` is the per-card column_overrides entry to apply
-    for that column (the column-settings UI has no card context, so
-    callers pass None; the dispatcher applies the per-card override at
-    dispatch time, not here).
+    Precedence (highest wins; first non-empty value is used):
+      1. ``global_override`` (board-wide subscription pin)
+      2. ``pool_choice``     (subscription-pool entry picked by caller)
+      3. ``column_override`` (per-card override for ``target_agent``)
+      4. ``column.default_provider`` / ``column.default_model``
+      5. ``persona``         (engineer.md / analyst.md frontmatter
+                                 ``model:`` only; gated on Anthropic
+                                 unless the explicit overrides name a
+                                 provider-native model)
+      → ``PROVIDER_ANTHROPIC`` / ``None`` as the chain-end default.
+
+    Args:
+      - ``pick_pool``: caller-supplied async pool picker. ``dispatch``
+        passes a closure over ``_pick_pool_choice`` (live usage-aware,
+        CLI-scoped); the column-settings UI passes a no-snapshot
+        closure that returns the first pool entry for
+        ``CLAUDE_CODE_CLI_ID`` (no spawn here, so the live router is
+        irrelevant). Pass ``None`` to skip the pool layer entirely
+        (used by tests that pin only the static precedence).
+      - ``card_overrides``: per-card ``column_overrides[target_agent]``.
+        The column-settings UI has no card context, so it passes
+        ``None`` for ``card_overrides`` — the function-level
+        ``column_override`` argument is preserved for backwards
+        compatibility with the existing column-settings caller.
+      - ``card_model``: per-card ``card.model`` — only the dispatch
+        path owns this layer; the column-settings UI leaves it None.
     """
-    column_override = column_override or {}
+    column_override = card_overrides or {}
+    override_provider = column_override.get("provider") or None
+    override_model = column_override.get("model") or None
     global_override = await get_active_subscription_override(session, project_key)
     pool_entries = await get_subscription_pool(session, project_key)
     pool_choice: PoolEntry | None = None
-    if pool_entries is not None and not global_override:
-        # CLI awareness is irrelevant here — pool_choice just exposes its
-        # provider/model to the UI; we have no spawn to dispatch, so we
-        # don't run the live usage router. Show the first entry of any
-        # CLI; the user just wants to know "would the pool pin me?" not
-        # "which entry would win on this dispatch".
-        from app.kanban.subscription_pool import pick_subscription_for_cli
-        pool_choice = pick_subscription_for_cli(
-            pool_entries, {}, paused_providers=set(), cli_id=CLAUDE_CODE_CLI_ID,
-        )
-    override_provider = column_override.get("provider") or None
-    override_model = column_override.get("model") or None
-    column_default_provider = await get_column_default_provider(session, project_key, column_name)
+    if pool_entries is not None and not global_override and pick_pool is not None:
+        pool_choice = await pick_pool(pool_entries)
+    column_default_provider = await get_column_default_provider(session, project_key, target_agent)
     provider = (
         (global_override or {}).get("provider")
         or (pool_choice.provider if pool_choice else None)
@@ -1152,8 +1169,8 @@ async def resolve_column_effective_model(
         or column_default_provider
         or PROVIDER_ANTHROPIC
     )
-    persona_model = _read_persona_model(project_path, f"{column_name}.md")
-    column_default_model = await get_column_default_model(session, project_key, column_name)
+    persona_model = _read_persona_model(project_path, f"{target_agent}.md")
+    column_default_model = await get_column_default_model(session, project_key, target_agent)
     effective_model_override = (
         (global_override or {}).get("model")
         or (pool_choice.model if pool_choice else None)
@@ -1196,6 +1213,50 @@ async def resolve_column_effective_model(
         "column_default_model": column_default_model,
         "persona_model": persona_model,
     }
+
+
+# No-snapshot pool picker used by the column-settings UI: the UI has no
+# spawn to dispatch, so it doesn't run the live usage router — it just
+# shows "would the pool pin me?" via the first entry that matches the
+# claude-code CLI. ``pick_subscription_for_cli`` with empty snapshots
+# + no paused providers falls through to that "first entry" branch.
+async def _column_settings_pool_picker(
+    pool_entries: list[PoolEntry],
+) -> PoolEntry | None:
+    return subscription_pool.pick_subscription_for_cli(
+        pool_entries, {},
+        paused_providers=set(), cli_id=CLAUDE_CODE_CLI_ID,
+    )
+
+
+async def resolve_column_effective_model(
+    session,
+    project_key: str,
+    column_name: str,
+    project_path: str,
+    card_model: str | None = None,
+    column_override: dict | None = None,
+) -> dict:
+    """Return the resolved provider/model/source for a column.
+
+    Thin backward-compatible wrapper around
+    ``resolve_effective_provider_and_model``. Used by the column-settings
+    UI to render an "effective model" line beneath the model input so a
+    user editing a column sees why their selection isn't applied (kaart
+    1782fa43…). The dispatcher applies the per-card override at dispatch
+    time, so this UI-side call passes ``None`` for ``card_overrides`` —
+    a different ``column_override`` path in the column-settings handler
+    surfaces column-level overrides if/when that's added.
+    """
+    return await resolve_effective_provider_and_model(
+        session,
+        project_key=project_key,
+        target_agent=column_name,
+        project_path=project_path,
+        pick_pool=_column_settings_pool_picker,
+        card_overrides=column_override,
+        card_model=card_model,
+    )
 
 
 def _persona_for_card(project_path: str, card, column: str) -> str | None:
@@ -3221,83 +3282,37 @@ async def _run_card(
     else:
         persona = _read_persona_file(project_path, f"{target_agent}.md")
     ship_mode = await get_ship_mode(session, project_key)
-    # Active-subscription-override (fase 0 of
-    # docs/cockpit/subscription-flexibiliteit-analyse.md): a board-wide pin that
-    # routes every dispatch onto one subscription regardless of column or card
-    # defaults. Stored as a single KanbanMeta row keyed by project_key. When
-    # set, it wins over BOTH the subscription pool (fase 1b) and the per-card
-    # column_overrides and the column defaults below — the explicit human
-    # "route everything to X" intent dominates any narrower per-card
-    # configuration. None = no override (the default; preserves today's
-    # dispatch behaviour exactly, see test_active_subscription_override).
-    global_override = await get_active_subscription_override(session, project_key)
-    # Subscription pool (fase 1b of the analyse): an ordered list of
-    # subscriptions with per-subscription drempels, picked at dispatch time
-    # against the per-subscription usage snapshot (analyse §4 / §5). When
-    # set AND no global_override dominates, the pool's chosen entry wins
-    # over both column_overrides and the column default for provider (and
-    # optionally model — same partial-override shape as column_overrides).
-    # When unset, dispatch falls through to the column-default chain
-    # exactly as before (backward-compat).
-    pool_entries = await get_subscription_pool(session, project_key)
-    pool_choice: PoolEntry | None = None
-    if pool_entries is not None and not global_override:
-        # Kaart 8f40d443…: the pool router is CLI-aware, so the router
-        # consults only entries whose ``cli == cli_id``. An
-        # ``open-code``-spawned card never sees a
-        # ``claude-code``-targeted entry (and vice versa) — quotas
-        # are per {cli, provider}, not per provider alone.
-        pool_choice = await _pick_pool_choice(
-            session, pool_entries, project_key=project_key,
+    # Resolve the spawn's provider/model through the shared precedence
+    # chain. ``dispatch_card`` and ``resolve_column_effective_model`` both
+    # delegate to ``resolve_effective_provider_and_model`` so a future
+    # chain tweak (new override layer, reorder) only has to be made once
+    # — see kaart 8da646d8…. The dispatch picker uses
+    # ``_pick_pool_choice`` (live usage-aware, CLI-scoped via
+    # ``_pick_pool_choice``); the column-settings UI uses the no-snapshot
+    # ``_column_settings_pool_picker`` (kaart 8f40d443…).
+    #
+    # Precedence the helper walks (highest wins):
+    #   1. global_override (board-wide subscription pin)
+    #   2. pool_choice     (ordered, usage-aware router)
+    #   3. per-card column_overrides[target_agent]
+    #   4. column.default_provider / column.default_model / card.model
+    #   5. persona frontmatter ``model:`` (Anthropic-only fallback)
+    async def _dispatch_pool_picker(entries: list[PoolEntry]) -> PoolEntry | None:
+        return await _pick_pool_choice(
+            session, entries, project_key=project_key,
             cli_id=cli_id,
         )
-    # A per-card override for this phase's resolved target column (persona) wins
-    # over the column defaults for BOTH provider and model. Because analyst and
-    # executor phases both reach this point with their own `target_agent`, each
-    # phase automatically picks up its own override entry (if any). See
-    # KanbanCard.column_overrides. NOTE: when the pool is set, the pool's
-    # choice beats the per-card override — a per-card override expresses
-    # "this card wants X", but the operator's pool expresses "right now the
-    # right answer for *all* cards is whatever the router picks". The
-    # precedence (highest first) is therefore:
-    #   1. global_override (board-wide pin)
-    #   2. pool_choice    (ordered, usage-aware; this block)
-    #   3. column_override
-    #   4. column.default_provider / column.default_model / card.model / persona
-    column_override = (card.column_overrides or {}).get(target_agent) or {}
-    override_provider = column_override.get("provider") or None
-    override_model = column_override.get("model") or None
-    # The target column decides which subscription/vendor the spawn authenticates
-    # against (see KanbanColumn.default_provider); unset means the dispatcher's own
-    # default, the Anthropic subscription. The board-wide active-subscription
-    # override (when set) takes precedence over everything below; the pool
-    # (when set and no override dominates) sits between the global pin and the
-    # per-card override.
-    provider = (
-        (global_override or {}).get("provider")
-        or (pool_choice.provider if pool_choice else None)
-        or override_provider
-        or await get_column_default_provider(session, project_key, target_agent)
-        or PROVIDER_ANTHROPIC
+    resolved = await resolve_effective_provider_and_model(
+        session,
+        project_key=project_key,
+        target_agent=target_agent,
+        project_path=project_path,
+        pick_pool=_dispatch_pool_picker,
+        card_overrides=(card.column_overrides or {}).get(target_agent),
+        card_model=card.model,
     )
-    persona_model = _read_persona_model(project_path, f"{target_agent}.md")
-    column_default_model = await get_column_default_model(session, project_key, target_agent)
-    # Model precedence mirrors provider: global override > pool > column_override >
-    # column.default_model > persona frontmatter. The global override only sets
-    # the model when one is supplied (`None` falls through), so a
-    # provider-only pin leaves the existing model chain intact — same shape as
-    # a partial column-override, just one level higher in the precedence.
-    # Likewise for the pool: ``pool_choice.model is None`` falls through to
-    # the per-card / column / persona chain.
-    effective_model_override = (
-        (global_override or {}).get("model")
-        or (pool_choice.model if pool_choice else None)
-        or override_model
-    )
-    effective_model = _effective_model(
-        effective_model_override, card.model, column_default_model, persona_model,
-        provider=provider,
-    )
+    provider = resolved["provider"]
+    effective_model = resolved["model"]
     # Re-dispatch safety net (kaart ff2d03fce…): when this card was previously
     # claimed by a session whose branch has unmerged commits, inject a
     # warning block so the new agent sees the existing branch and can

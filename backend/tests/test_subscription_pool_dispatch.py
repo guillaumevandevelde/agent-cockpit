@@ -891,3 +891,113 @@ async def test_open_code_pool_entry_with_no_signal_does_not_block():
     # column default ('bedrock') for an open-code-spawned card.
     assert transport.calls[0]["cli_id"] == "open-code"
     assert transport.calls[0]["provider"] == "anthropic"
+
+
+# ---- precedence chain: both call sites go through the shared resolver ------
+#
+# Kaart 8da646d8…: the precedence chain (board-wide pin > pool >
+# per-card column_override > column.default_* > persona) used to live
+# in TWO places — `dispatch_card` and `resolve_column_effective_model`.
+# A future tweak (new layer, reorder) needed to be made in both, and a
+# missed duplicate silently broke the column-settings UI's "Effective:
+# X — from <source>" line without breaking the spawn itself. The two
+# have been unified behind ``resolve_effective_provider_and_model``;
+# this test pins both call sites to that single helper so a future
+# chain tweak that forgets to wire through one of them breaks THIS
+# test, not the user.
+
+
+@pytest.mark.asyncio
+async def test_dispatch_card_chain_matches_resolver_chain(monkeypatch):
+    """``dispatch_card`` and ``resolve_column_effective_model`` BOTH go
+    through ``resolve_effective_provider_and_model``.
+
+    The spy wraps the helper on the dispatch module so every caller
+    (dispatch + column-settings wrapper) runs through it. ``call_log``
+    records each invocation's kwargs so we can assert that the two
+    sides called the helper with their own expected argument shapes:
+
+      * dispatch path: ``target_agent`` set, ``pick_pool`` is callable,
+        ``card_overrides`` reflects the per-card entry.
+      * column-settings path: ``target_agent`` set, ``pick_pool`` is the
+        no-snapshot picker, ``card_overrides`` is the user-supplied
+        column-level override (or None).
+
+    A future refactor that re-inlines the chain in ``dispatch_card`` —
+    bypassing the helper — drops the dispatch-side entry from
+    ``call_log`` and breaks this test."""
+    import app.kanban.dispatch as dispatch_mod
+
+    real_helper = dispatch_mod.resolve_effective_provider_and_model
+    call_log: list[dict] = []
+
+    async def _spy(*args, **kwargs):
+        call_log.append(kwargs)
+        return await real_helper(*args, **kwargs)
+
+    monkeypatch.setattr(
+        dispatch_mod, "resolve_effective_provider_and_model", _spy,
+    )
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer",
+            default_provider="minimax",
+            default_model="MiniMax-M3",
+        )
+        cid = await _make_card(
+            s, executor_agent_id="claude-code",
+        )
+        await s.commit()
+        # Column-settings side: no card, no dispatch, just resolver.
+        # Pin the column-settings path before the dispatch path so the
+        # call_log assertion below can name each entry by source.
+        await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="engineer",
+            project_path="/p",
+        )
+        await s.commit()
+        # Dispatch side: spawn through the recorder.
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    # Both call sites went through the helper — two distinct entries
+    # with their own argument shapes.
+    assert len(call_log) >= 2, (
+        f"expected at least 2 helper calls "
+        f"(dispatch + column-settings wrapper), got {len(call_log)}: "
+        f"{call_log}"
+    )
+    dispatch_calls = [
+        c for c in call_log if callable(c.get("pick_pool"))
+    ]
+    column_settings_calls = [
+        c for c in call_log
+        if c.get("pick_pool") is dispatch_mod._column_settings_pool_picker
+    ]
+    # The dispatch path passes an async closure over ``_pick_pool_choice``;
+    # the column-settings wrapper passes the module-level no-snapshot
+    # picker. Both are visible in ``call_log``.
+    assert len(dispatch_calls) >= 1, (
+        f"expected at least one dispatch-path helper call "
+        f"(target_agent + live pick_pool closure), got {call_log}"
+    )
+    assert len(column_settings_calls) >= 1, (
+        f"expected at least one column-settings helper call "
+        f"(target_agent + no-snapshot picker), got {call_log}"
+    )
+    # Both call sites route to the same target_agent/column name.
+    assert all(c["target_agent"] == "engineer" for c in call_log), call_log
+    # Same project_key / project_path — proves there's no hidden second
+    # helper instance the two paths bypass each other through.
+    assert all(c["project_key"] == PK for c in call_log), call_log
+    assert all(c["project_path"] == "/p" for c in call_log), call_log
+    # End-to-end result is unchanged: the dispatch path picked minimax
+    # (column default), not anthropic.
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "minimax"
+
