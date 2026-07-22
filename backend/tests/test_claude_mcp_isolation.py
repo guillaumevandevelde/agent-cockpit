@@ -49,14 +49,19 @@ def test_claude_build_spawn_command_passes_strict_mcp_config():
     )
 
 
-def test_claude_build_spawn_command_passes_project_mcp_config():
+def test_claude_build_spawn_command_passes_project_mcp_config(tmp_path):
     """``--mcp-config`` must point to the project's ``.mcp.json`` (absolute)."""
     from app.services.agentic_cli import get_agentic_cli
     from app.services.agentic_cli.base import SpawnCommandOptions
 
+    # The helper now skips ``--mcp-config`` when the file is absent (kanban card
+    # `[problem] Product-project zonder .mcp.json sterft binnen ~2s`), so this
+    # test must materialise the file to assert the *present* branch.
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+
     provider = get_agentic_cli("claude-code")
     command = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="plain", prompt="hi")
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", prompt="hi")
     )
 
     assert "--mcp-config" in command, (
@@ -67,27 +72,28 @@ def test_claude_build_spawn_command_passes_project_mcp_config():
     mcp_path = command[idx + 1]
     # Absolute path so cwd changes (worktree, remote host) don't break resolution.
     assert os.path.isabs(mcp_path), f"--mcp-config must be absolute, got {mcp_path!r}"
-    assert mcp_path == "/tmp/project/.mcp.json", (
+    assert mcp_path == str(tmp_path / ".mcp.json"), (
         f"--mcp-config should target the project .mcp.json; got {mcp_path!r}"
     )
 
 
-def test_claude_strict_mcp_config_present_across_all_modes():
+def test_claude_strict_mcp_config_present_across_all_modes(tmp_path):
     """Plain, worktree, and resume must all carry the isolation flags."""
     from app.services.agentic_cli import get_agentic_cli
     from app.services.agentic_cli.base import SpawnCommandOptions
 
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
     provider = get_agentic_cli("claude-code")
 
     plain_cmd = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="plain")
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain")
     )
     worktree_cmd = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="worktree",
+        SpawnCommandOptions(directory=str(tmp_path), mode="worktree",
                             worktree_name="k-feature-a1b2")
     )
     resume_cmd = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="resume", session_id="sess-1")
+        SpawnCommandOptions(directory=str(tmp_path), mode="resume", session_id="sess-1")
     )
 
     for label, cmd in (("plain", plain_cmd), ("worktree", worktree_cmd), ("resume", resume_cmd)):
@@ -98,6 +104,11 @@ def test_claude_strict_mcp_config_present_across_all_modes():
 def test_spawn_session_forwards_strict_mcp_config_into_tmux_command(monkeypatch, tmp_path):
     """End-to-end: spawn_session's tmux new-session argv carries the flags."""
     import app.services.runs.spawn as spawn
+
+    # Materialise ``.mcp.json`` so the helper actually emits ``--mcp-config``
+    # (the absent branch is covered separately by
+    # ``test_spawn_session_skips_mcp_config_when_no_mcp_json``).
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
 
     captured = {}
 
@@ -128,6 +139,8 @@ def test_spawn_session_forwards_strict_mcp_config_into_tmux_command(monkeypatch,
 def test_cc_spawn_session_forwards_strict_mcp_config(monkeypatch, tmp_path):
     """Legacy CC bridge: same isolation property."""
     import app.services.runs.cc_spawn as cc_spawn
+
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
 
     captured = {}
 
@@ -164,4 +177,121 @@ def test_repo_mcp_json_exposes_cockpit_kanban():
     assert "cockpit-kanban" in servers, (
         f"{mcp_path} must keep the cockpit-kanban entry — without it dispatched "
         f"sessions can't reach the kanban MCP and every card breaks. servers={list(servers)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# No-``.mcp.json`` regression — kanban card
+# `[problem] Product-project zonder .mcp.json sterft binnen ~2s bij elke dispatch`.
+#
+# A brand-new product-project has no ``.mcp.json`` yet. Passing
+# ``--mcp-config <absent>`` makes Claude Code exit 1 in ~2s ("MCP config file
+# not found"), so every dispatch dies before the agent ever runs. The fix is
+# to keep ``--strict-mcp-config`` (so the host ``~/.claude.json`` MCP entries
+# still don't leak — see card ``00fa8325``) but only pass ``--mcp-config`` when
+# the file exists. These tests pin both halves of the contract.
+# ---------------------------------------------------------------------------
+
+
+def test_project_mcp_config_args_omits_mcp_config_when_no_mcp_json(tmp_path):
+    """Helper returns only ``--strict-mcp-config`` when ``.mcp.json`` is absent."""
+    from app.services.runs.cc_spawn import _project_mcp_config_args
+
+    assert not (tmp_path / ".mcp.json").exists(), (
+        "fixture sanity: tmp_path must not already contain .mcp.json"
+    )
+    args = _project_mcp_config_args(str(tmp_path))
+    assert args == ["--strict-mcp-config"], (
+        f"missing .mcp.json must drop the --mcp-config flag; got {args}"
+    )
+
+
+def test_project_mcp_config_args_includes_mcp_config_when_present(tmp_path):
+    """Helper still emits the flag when the project does have ``.mcp.json``."""
+    from app.services.runs.cc_spawn import _project_mcp_config_args
+
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+    args = _project_mcp_config_args(str(tmp_path))
+    assert args == [
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(tmp_path / ".mcp.json"),
+    ]
+
+
+def test_claude_build_spawn_command_skips_mcp_config_when_no_mcp_json(tmp_path):
+    """End-to-end: ``build_spawn_command`` drops ``--mcp-config`` for fresh projects."""
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
+
+    provider = get_agentic_cli("claude-code")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", prompt="hi")
+    )
+
+    assert "--strict-mcp-config" in command, (
+        f"--strict-mcp-config must remain even when .mcp.json is absent; "
+        f"cmd={command}"
+    )
+    assert "--mcp-config" not in command, (
+        f"--mcp-config without a backing file kills the spawn with exit 1; "
+        f"cmd={command}"
+    )
+
+
+def test_spawn_session_skips_mcp_config_when_no_mcp_json(monkeypatch, tmp_path):
+    """Canonical kanban dispatch path: tmux argv omits ``--mcp-config``."""
+    import app.services.runs.spawn as spawn
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return type("R", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "r-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain"),
+    )
+
+    shell_command = captured["cmd"][-1]
+    tokens = _argv_tokens(shell_command)
+    assert "--strict-mcp-config" in tokens, (
+        f"host ~/.claude.json MCPs would leak into the dispatch; "
+        f"full={shell_command}"
+    )
+    assert "--mcp-config" not in tokens, (
+        f"fresh project with no .mcp.json must NOT pass --mcp-config "
+        f"(claude exits 1 in ~2s); full={shell_command}"
+    )
+
+
+def test_cc_spawn_session_skips_mcp_config_when_no_mcp_json(monkeypatch, tmp_path):
+    """Legacy CC bridge: same skip when ``.mcp.json`` is absent."""
+    import app.services.runs.cc_spawn as cc_spawn
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return type("R", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(cc_spawn.subprocess, "run", fake_run)
+    cc_spawn.get_spawned_sessions().clear()
+
+    cc_spawn.spawn_session(directory=str(tmp_path), mode="plain")
+
+    shell_command = captured["cmd"][-1]
+    tokens = _argv_tokens(shell_command)
+    assert "--strict-mcp-config" in tokens, (
+        f"cc_spawn argv lost --strict-mcp-config; full={shell_command}"
+    )
+    assert "--mcp-config" not in tokens, (
+        f"cc_spawn argv must drop --mcp-config when no .mcp.json exists; "
+        f"full={shell_command}"
     )
