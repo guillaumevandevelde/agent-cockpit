@@ -22,7 +22,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     path: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Portfolio tag distinguishing meta-work (claude-cockpit itself) from
+    # Portfolio tag distinguishing meta-work (agent-cockpit itself) from
     # product-work (apps Cockpit builds). Only "meta" | "product" | "archived"
     # are valid; the enum is enforced at the Pydantic layer. ``priority`` is an
     # optional lever for later fair-scheduling. Both are inert for now — no

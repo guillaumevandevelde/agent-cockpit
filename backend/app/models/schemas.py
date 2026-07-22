@@ -52,7 +52,7 @@ class RawFileContent(BaseModel):
 # Project Management Schemas
 
 
-# Portfolio tag: meta-work (claude-cockpit itself) vs product-work (apps built
+# Portfolio tag: meta-work (agent-cockpit itself) vs product-work (apps built
 # by Cockpit). Enforced as an enum at the schema boundary — invalid values 422.
 ProjectKind = Literal["meta", "product", "archived"]
 
@@ -1892,7 +1892,7 @@ InstanceAccent = Literal["blue", "green", "purple", "orange", "red", "pink", "cy
 
 
 class InstanceIdentity(BaseModel):
-    """Runtime identity for the Claude Cockpit backend instance."""
+    """Runtime identity for the Agent Cockpit backend instance."""
 
     id: str
     name: str

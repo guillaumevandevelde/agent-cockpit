@@ -88,8 +88,8 @@ def get_snippets() -> AgentMailSnippets:
         f'}}\n'
     )
     agents_md = (
-        "## Claude Cockpit Agent Mail\n"
-        "You are part of a local agent team coordinated through Claude Cockpit.\n"
+        "## Agent Cockpit Agent Mail\n"
+        "You are part of a local agent team coordinated through Agent Cockpit.\n"
         "- Call `agent_mail_whoami` once when you start working to register and learn your role.\n"
         "- Call `agent_mail_check_inbox` before starting major tasks and after finishing one.\n"
         "- Use `agent_mail_request_context` to ask another repo's agent a question, and\n"

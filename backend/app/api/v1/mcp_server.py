@@ -1,4 +1,4 @@
-"""FastAPI endpoint for the Claude Cockpit MCP server (Streamable HTTP)."""
+"""FastAPI endpoint for the Agent Cockpit MCP server (Streamable HTTP)."""
 import logging
 from datetime import UTC
 
@@ -41,7 +41,7 @@ async def handle_mcp_post(request: Request, db: AsyncSession = Depends(get_db)):
         return JSONResponse(
             status_code=401,
             content={"error": "Unauthorized"},
-            headers={**MCP_HEADERS, "WWW-Authenticate": 'Bearer realm="claude-cockpit"'},
+            headers={**MCP_HEADERS, "WWW-Authenticate": 'Bearer realm="agent-cockpit"'},
         )
 
     try:
@@ -60,7 +60,7 @@ async def handle_mcp_post(request: Request, db: AsyncSession = Depends(get_db)):
             result = {
                 "protocolVersion": "2025-03-26",
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": "claude-cockpit", "version": "1.0.0"},
+                "serverInfo": {"name": "agent-cockpit", "version": "1.0.0"},
             }
             return JSONResponse(
                 content={"jsonrpc": "2.0", "id": req_id, "result": result},
@@ -135,12 +135,12 @@ async def handle_mcp_get(request: Request, db: AsyncSession = Depends(get_db)):
         return JSONResponse(
             status_code=401,
             content={"error": "Unauthorized"},
-            headers={**MCP_HEADERS, "WWW-Authenticate": 'Bearer realm="claude-cockpit"'},
+            headers={**MCP_HEADERS, "WWW-Authenticate": 'Bearer realm="agent-cockpit"'},
         )
 
     return JSONResponse(
         content={
-            "name": "claude-cockpit",
+            "name": "agent-cockpit",
             "version": "1.0.0",
             "transport": "streamable-http",
             "scope": ctx.scope,

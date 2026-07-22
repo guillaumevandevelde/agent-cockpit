@@ -1,4 +1,4 @@
-"""Tests for the Claude Cockpit MCP server."""
+"""Tests for the Agent Cockpit MCP server."""
 import json
 from datetime import UTC
 

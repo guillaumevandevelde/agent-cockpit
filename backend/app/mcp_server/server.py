@@ -1,13 +1,13 @@
-"""Claude Cockpit MCP Server — exposes cockpit data via MCP protocol."""
+"""Agent Cockpit MCP Server — exposes cockpit data via MCP protocol."""
 from mcp.server.fastmcp import FastMCP
 
 from .tools import register_all_tools
 
 mcp = FastMCP(
-    "claude-cockpit",
+    "agent-cockpit",
     instructions=(
-        "Claude Cockpit management server. Provides read access to "
-        "Claude Code sessions, scheduled messages, MCP server configs, "
+        "Agent Cockpit management server. Provides read access to "
+        "agent sessions, scheduled messages, MCP server configs, "
         "projects, and merged configuration settings."
     ),
 )

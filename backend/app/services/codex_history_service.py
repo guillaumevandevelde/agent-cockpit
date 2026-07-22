@@ -41,7 +41,7 @@ class CodexHistoryService:
                 "surface": "diagnostics_only",
                 "reason": (
                     "Codex history currently exposes session_id, ts, and sensitive prompt text. "
-                    "Claude Cockpit summarizes structure only until stable non-sensitive history "
+                    "Agent Cockpit summarizes structure only until stable non-sensitive history "
                     "metadata is available."
                 ),
             },

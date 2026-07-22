@@ -12,7 +12,7 @@ def _utcnow() -> datetime:
 
 
 class MCPAccessToken(Base):
-    """Access token for the Claude Cockpit MCP server."""
+    """Access token for the Agent Cockpit MCP server."""
 
     __tablename__ = "mcp_access_tokens"
 

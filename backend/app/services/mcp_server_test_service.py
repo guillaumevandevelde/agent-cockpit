@@ -77,7 +77,7 @@ class MCPServerTestService(MCPConfigService):
                     "params": {
                         "protocolVersion": "2024-11-05",
                         "capabilities": {},
-                        "clientInfo": {"name": "claude-cockpit-test", "version": "1.0.0"},
+                        "clientInfo": {"name": "agent-cockpit-test", "version": "1.0.0"},
                     },
                 }
                 request_str = json.dumps(init_request)
@@ -342,7 +342,7 @@ class MCPServerTestService(MCPConfigService):
                         "params": {
                             "protocolVersion": "2024-11-05",
                             "capabilities": {},
-                            "clientInfo": {"name": "claude-cockpit-test", "version": "1.0.0"},
+                            "clientInfo": {"name": "agent-cockpit-test", "version": "1.0.0"},
                         },
                     }
                     response = await client.post(

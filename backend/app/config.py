@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     )
 
     # Application settings
-    app_name: str = "Claude Cockpit"
+    app_name: str = "Agent Cockpit"
     app_version: str = _read_version()
     debug: bool = False
 
