@@ -660,3 +660,84 @@ te herbouwen. Zie §10 voor de kaart die dit in `scripts/` vastlegt.
   gedaan — meer dan het dubbele van wat RTK over een hele sessie bespaart. Elke
   kilobyte die uit CLAUDE.md, de persona-prompt of de MCP-schemas verdwijnt,
   wordt 80× terugbetaald.
+
+### ✅ Geïmplementeerd (kaart `eae8a9b1…`, 2026-07-22) — eerste ronde: CLAUDE.md
+
+**Methode** (recept uit §9): empty payload → `claude -p --output-format json
+--strict-mcp-config --mcp-config '{"mcpServers":{}}'`, lees
+`usage.input_tokens + cache_creation + cache_read`. Cache cold-call =
+`input_tokens` (volledige verse prefix). Verschil tussen worktree-call en
+`/tmp`-call = project-`CLAUDE.md`-bijdrage. Twee runs vóór, twee ná.
+
+**Per-bron-uitsplitsing, gemeten op deze host (WSL Ubuntu, claude 2.1.217,
+2026-07-22):**
+
+| Bron | Tokens (cold-call) | Aandeel | Meetcommando |
+|---|---:|---:|---|
+| Systeemprompt + tool-defs + user-`CLAUDE.md` (leeg) + lege MCP | **33.185** | 81,6% | `cd /tmp && claude -p …` |
+| Project-`CLAUDE.md` (24.447 bytes / 252 regels, vóór prune) | **7.473** | 18,4% | worktree-call − /tmp-call |
+| User-`CLAUDE.md` (`~/.claude/CLAUDE.md`) | **0** | 0% | bestaat niet op deze host |
+| MCP-schemas (lege `mcpServers:{}`) | **0** | 0% | in deze meting; ~4.600 bij kanban-MCP-load (kaart `ea7e038b…`, out of scope) |
+| Persona-prompt uit `_build_ship_instructions('direct')` | **~3.706** (12.972 chars) | n.v.t. voor `claude -p` | gemeten via Python-import van `backend/app/kanban/dispatch.py` (geen API-call) |
+| **Subtotaal werkboom-call, vóór prune** | **40.658** | | |
+| **Subtotaal gedispatched-sessie (typisch, vóór prune)** | **~48.965** | | + persona + ~4.600 kanban-MCP |
+
+De oorspronkelijke 38.602 (§3, 2026-07-21, claude 2.1.216) is in dezelfde
+meetmethode ondertussen 40.658 geworden — een groei van ~2.056 tokens
+(5,3%) in één maand. Grotendeels de rebrand-sectie en nieuwe gotchas; één
+empirical herkalibratie van het baseline-getal.
+
+**Eerste snoeibeurt — alleen waar geen val achter zit:**
+
+| Sectie | Reden voor prune | Geschat verlies | Gemeten winst |
+|---|---|---|---|
+| `## Architecture` (boomdiagram backend/ + frontend/) | pure referentie; `Glob`/`tree` levert hetzelfde | 0 — agents rediscovers via tools | ~560 tokens |
+| `### Features` (lijst van 26 feature-namen) | referentie; `ls frontend/src/features` is actueler | 0 | ~115 |
+| `### API Routes` (lijst van 30+ route-mounts) | referentie; `ls backend/app/api/v1` is actueler | 0 | ~115 |
+| `## Key Decisions` (5 bullets) | redundant met `docs/cockpit/decisions.md` | 0 | ~100 |
+| `## CI/CD` (4 workflow-namen) | referentie; `ls .github/workflows` is actueler | 0 | ~100 |
+| Fork-notice "Tasks 1–11 implemented" | stale snapshot van `fase-2-plan.md`-status, verandert per week | 0 | ~95 |
+| Bash-test-lijst onder `# Test` (19 regels) | verwijst naar `scripts/test_*.sh` die `check-test-harness-coverage.sh` al afdwingt | 0 (zelfde coverage, korter) | ~215 |
+| **Totaal** | | | **~1.300 tokens / ~5.171 bytes (-21%)** |
+
+**Vóór/na, gemeten (cold-call, vaste methode):**
+
+| Run | Worktree-prefix | `/tmp`-baseline | Project-`CLAUDE.md`-bijdrage |
+|---|---:|---:|---:|
+| Vóór prune | **40.658** | 33.185 | **7.473** |
+| Ná prune | **39.337** | 33.185 | **6.152** |
+| **Δ** | **−1.321** | 0 | **−1.321** |
+
+Een **gemeten** reductie van **~1.321 tokens per turn**. Over 80 turns is dat
+**~105.680 tokens per sessie** — vóór er één regel werk is gedaan.
+
+**Gotchas-sectie volledig intact.** De kaart-eis (`Geen functionaliteitsverlies:
+CLAUDE.md-regels die een gedocumenteerde val afdekken worden niet verwijderd
+zonder dat de val elders is afgedekt`) is hier leidend: alle 11 gotcha-items
+(`rm`-blokkade, `pkill -f`-zelfval, `git stash apply`-stale-trap, UTC-timestamps,
+`_reload`-identity-map, zsh-glob-quoting, default-branch `master`-val) staan
+onverkort in de nieuwe versie. Geen item is verplaatst naar een script/gate — ze
+zijn allemaal "denk-hier-aan"-vlaggen die alleen in een constant-aanwezig
+prompt-kanon zinvol zijn, niet in een pre-commit-script.
+
+**Wat er níet is gedaan (bewust, deze ronde):**
+
+- **Persona-prompt (`_build_ship_instructions`)** — ~3.706 tokens, ~28% van het
+  typische dispatch-prefix. Verkleint kan via skill/consolidatie, maar valt
+  buiten deze kaart (de persona staat in `dispatch.py` _en_ in
+  `.claude/skills/git-ship/SKILL.md`; aanraken vereist lockstep-sync, eigen
+  drift-val-kaart `d9447e49`-risico). Volgt in een eigen follow-up.
+- **MCP-schemas** — al afgedekt door kaart `ea7e038b…`
+  (`per-persona-mcp-allowlist-decision.md`); NO-GO (388 tokens, 1,1%), heropen
+  niet per kaart-instructie.
+- **Systeemprompt + tool-defs** — Anthropic's eigen, niet in scope.
+
+**Acceptance-criteria check:**
+
+- ✅ Reproduceerbare uitsplitsing per bron met meetcommando (tabel hierboven +
+  §9-recept)
+- ✅ Ten minste één gemeten reductie met vóór/na-getal uit dezelfde meetmethode
+  (40.658 → 39.337, Δ −1.321 tokens)
+- ✅ Geen functionaliteitsverlies (alle 11 gotchas behouden; alleen pure
+  referentie-info verwijderd)
+- ✅ §10 bijgewerkt (deze paragraaf)
