@@ -64,9 +64,23 @@ CORE_FCR_INVARIANTS: list[tuple[str, str]] = [
         "input: card description",
         "kaart-beschrijving",
     ),
+    # Immutable commit-hash input. Replaces the old "diff tegen origin/master"
+    # anchor (kaart 491c7ba1): a reviewer in a fresh isolated worktree based on
+    # origin/master has HEAD == origin/master and an empty worktree diff, so
+    # a generic "diff tegen origin/master" turns into a false-negative verdict.
+    # The SHA is what links the reviewer to the actually-committed
+    # implementation, not their own HEAD. Anchor is the literal token
+    # "commit-hash" so a future revert to a HEAD-anchored diff fails loudly.
     (
-        "input: diff against origin/master",
-        "diff tegen",
+        "input: explicit commit hash",
+        "commit-hash",
+    ),
+    # The diff command must be SHA-anchored (origin/master..<hash>), not a
+    # raw HEAD-anchored diff. Same rationale: reviewer's HEAD == origin/master
+    # in the isolated worktree.
+    (
+        "input: SHA-anchored diff command against origin/master",
+        "origin/master..",
     ),
     # Four specific bullets from reviewer-agent-decision.md
     # §"Wat lost de feature-compliance-review op?".
@@ -116,6 +130,23 @@ CORE_FCR_INVARIANTS: list[tuple[str, str]] = [
         "FCR subagent-type preference: Explore default",
         "Voorkeur-volgorde van subagent-type",
     ),
+    # Reproducibility contract (kaart 491c7ba1). Without an explicit
+    # ``git show`` invocation the reviewer has no way to reconstruct a
+    # committed diff in a fresh origin/master-based worktree — this is
+    # exactly the falsified-verdict trap the old prompt produced.
+    (
+        "reproducibility command: git show against the commit-hash",
+        "git show",
+    ),
+    # Actionable refusal contract: when the commit-hash is missing or
+    # does not resolve, the reviewer must STOP with an actionable error
+    # and NOT produce a content verdict. Without this guard, a reviewer
+    # in a broken setup would silently return OK-or-not-OK against an
+    # empty diff, falsely clearing or falsely blocking the card.
+    (
+        "missing/unresolvable commit-hash → actionable refusal, no verdict",
+        "unresolvable commit-hash",
+    ),
 ]
 
 
@@ -162,8 +193,8 @@ def test_fcr_invariant_present_in_every_mirror(
 
     Parametrised across (source × invariant) so a single regression points
     at exactly which mirror lost which substring — the failure message
-    reads e.g. ``.claude/agents/engineer.md missing input: diff against
-    origin/master: 'diff tegen'``.
+    reads e.g. ``.claude/agents/engineer.md missing input: SHA-anchored
+    diff command against origin/master: 'origin/master..'``.
 
     If this test fails: either the FCR legitimately changed (update both
     mirrors AND ``CORE_FCR_INVARIANTS``), or a mirror silently drifted
@@ -213,8 +244,17 @@ def test_fcr_invariants_list_covers_the_required_inputs() -> None:
     detector's coverage — this guard keeps that from happening silently.
     """
     labels = [label for label, _ in CORE_FCR_INVARIANTS]
-    required_inputs = {"input: card title", "input: card description",
-                       "input: diff against origin/master"}
+    # Kaart 491c7ba1: the "diff against origin/master" input was reframed
+    # into two tighter contract inputs — explicit commit-hash + the
+    # SHA-anchored ``git diff origin/master..<hash>`` command. Both must
+    # be required so a future shrink of the invariants list still trips
+    # this coverage sanity.
+    required_inputs = {
+        "input: card title",
+        "input: card description",
+        "input: explicit commit hash",
+        "input: SHA-anchored diff command against origin/master",
+    }
     assert required_inputs.issubset(set(labels)), (
         f"invariants list lost one or more required FCR inputs; "
         f"missing: {required_inputs - set(labels)}"

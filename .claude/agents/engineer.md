@@ -137,8 +137,10 @@ altijd door.
    `iteration-loop verify` hierboven lezen de oorspronkelijke kaart-spec niet; deze
    stap vult dat gat. **Vóór je de kaart naar Done verplaatst**, draai je een
    subagent-call met **cleared context** die de implementatie toetst aan de
-   oorspronkelijke kaart-spec: kaart-titel, kaart-beschrijving, en de committed
-   diff tegen `origin/master`.
+   oorspronkelijke kaart-spec: kaart-titel, kaart-beschrijving, en — expliciet —
+   de huidige commit-hash die de implementatie bevat (typisch `git rev-parse HEAD`,
+   door jou letterlijk meegegeven in de subagent-prompt; default: voor een sessie
+   die net een FCR-triggerende commit heeft gemaakt).
 
    **Voorkeur-volgorde van subagent-type** — kies het type op basis van wat de
    FCR moet doen. De `Agent`-tool default (`general-purpose`) trekt de hele
@@ -162,12 +164,35 @@ altijd door.
       kleinere calls dan in één grote, en val terug op een smaller type
       zodra je merkt dat de prompt tegen de limiet aan loopt.
 
-   Voer letterlijk deze prompt uit:
+   Voer letterlijk deze prompt uit (eerste regel: vul `<COMMIT_HASH>` in met de
+   letterlijke SHA van de implementatie-commit — typisch `git rev-parse HEAD`
+   direct vóór deze subagent-call; geef het commando door in plaats van de SHA
+   als je de hash niet beschikbaar hebt):
 
    > Je reviewt een feature-implementatie tegen zijn oorspronkelijke
    > specificatie. Inputs: de oorspronkelijke kaart-titel, -beschrijving, en
-   > de diff tegen `origin/master`. Vraag: doet de implementatie wat er
-   > gevraagd werd?
+   > — expliciet — de huidige commit-hash die de implementatie bevat.
+   > Vraag: doet de implementatie wat er gevraagd werd?
+   >
+   > **Bron-van-waarheid: de commit-hash, niet je eigen HEAD of de
+   > werkboom-state.** Jouw sessie draait in een geïsoleerde werkboom
+   > gebaseerd op `origin/master`, waar jouw HEAD identiek is aan
+   > `origin/master`. Reconstrueer de implementatie uitsluitend uit:
+   >   - `git show <COMMIT_HASH>` — voor de files/changes in de commit.
+   >   - `git diff origin/master..<COMMIT_HASH>` — voor de cumulatieve
+   >     delta tegen de `origin/master`-baseline.
+   > Dat is de *enige* manier waarop je de implementatie in deze set-up te
+   > zien krijgt; een lege diff met non-empty requirements is per definitie
+   > een reviewer-blokkade, geen OK.
+   >
+   > **Actionable refusal als de commit-hash ontbreekt of niet resolveert.**
+   > Als `<COMMIT_HASH>` ontbreekt in deze prompt, niet-resolveert via
+   > `git show <COMMIT_HASH>`, of beide diff-commando's leeg zijn waar
+   > implementatie te verwachten is: stop dan met een **actionable
+   > foutmelding** (`unresolvable commit-hash: <wat er ontbreekt of niet
+   > matcht>`) en **geen content-oordeel**. Een false-OK op een
+   > onresolveerbare hash is precies de falsified-verdict die we hiermee
+   > voorkomen.
    >
    > Specifiek:
    > - Elke requirement/bullet uit de beschrijving is geïmplementeerd.
