@@ -117,6 +117,20 @@ de engineer-sessie**, direct vóór `move_card Done`, met deze prompt:
 
 De FCR dekt de drie eigenschappen die de huidige architectuur niet dekt:
 
+> **✅ Geïmplementeerd (kaart `491c7ba1bb7b4843ae3c2fed88a6ba20`,
+> 2026-07-22).** De live-FCR-prompt is verfijnd: de reviewer ontvangt
+> nu de **letterlijke commit-hash** als immutable input, krijgt
+> expliciete reproduceer-commando's
+> (`git show <HASH>` + `git diff origin/master..<HASH>`), en weigert
+> een content-oordeel met een **actionable foutmelding** als de hash
+> ontbreekt of niet resolveert — geen vals OK meer tegen een lege
+> diff. De canonieke live-tekst staat in `.claude/agents/engineer.md`
+> §6 en is geïnlined in `backend/app/kanban/dispatch.py::_build_ship_instructions`;
+> beide mirrors worden door
+> `backend/tests/test_fcr_prompt_drift.py` in lockstep gehouden
+> (drift-val: kaart `d9447e49`). De prompt-quote hieronder blijft
+> staan als historisch ontwerp-anker.
+
 | Eigenschap | `/code-review` | `iteration-loop verify` | CI | **FCR** |
 |---|---|---|---|---|
 | Code-quality (stijl, bugs, eenvoud) | ✅ | ✅ (lint/build) | ✅ (ruff/pytest) | n.v.t. |
