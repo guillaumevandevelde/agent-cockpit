@@ -57,6 +57,16 @@ if [ -n "$FRONTEND_TOUCHED" ]; then
   # `npm ci` leaves some scoped dirs but no `.bin/`, which makes `npm run
   # lint` die with `eslint: not found` and blocks a plain symlink. Move the
   # partial aside (`mv`, not `rm` — `rm` is deny-listed) before bootstrapping.
+  # Note: `<project-root>` is always shell-quoted in the bash below —
+  # the dispatcher uses `shlex.quote`, which wraps the path in single
+  # quotes and escapes any embedded single quote. Single quotes are
+  # stricter than double quotes here: a path like `/tmp/prod$1/...` or
+  # `/tmp/has "quote"/...` stays literal because `sh` does no
+  # variable expansion or quote interpretation inside `'…'`. Project
+  # names can contain spaces (``/home/me/My Project``), shell
+  # metacharacters (``$``/``&``/```/``"``), or backslashes; unquoted
+  # `[ -d … ]` / `ln -s …` silently breaks on all of them
+  # (kaart a962b209… blocker C).
   ( cd frontend && \
     if [ -d node_modules ] && [ ! -d node_modules/.bin ]; then \
       mv node_modules "../node_modules.partial-$(date +%s)" && \
@@ -65,8 +75,8 @@ if [ -n "$FRONTEND_TOUCHED" ]; then
     if [ ! -d node_modules ]; then \
       BASE=$(git merge-base HEAD origin/master) && \
       if git diff --quiet "$BASE" origin/master -- frontend/package-lock.json \
-         && [ -d <project-root>/frontend/node_modules/.bin ]; then \
-        ln -s <project-root>/frontend/node_modules node_modules && \
+         && [ -d "<project-root>/frontend/node_modules/.bin" ]; then \
+        ln -s "<project-root>/frontend/node_modules" node_modules && \
         echo "bootstrapped frontend/node_modules via symlink (lockfile matches master)"; \
       else \
         npm ci; \
