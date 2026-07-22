@@ -129,23 +129,32 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then
   echo 'ERROR: uncommitted/untracked changes — git add + git commit first, then re-run.' >&2; exit 1
 fi
-TMP=$(mktemp -d)
+# Throwaway worktree lives under the shared `.git/worktrees/<name>` — NOT
+# under `mktemp -d`. The Bash tool's harness can reap `/tmp` between calls,
+# so a /tmp-resident worktree may vanish mid-ship: the merge commit lands in
+# a now-missing checkout, the subsequent `git push` fails with a spurious
+# non-fast-forward, and the local merge is lost. Using `git rev-parse
+# --git-common-dir` puts the slot under the same `.git/worktrees/` git
+# already manages for dispatched sessions — persistent for the lifetime of
+# the gitdir, and cleaned up by `git worktree remove` regardless of how
+# many Bash calls intervene. (kanban card 01aa1ef5…)
+WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"
 # Slot name MUST be unique per session: git derives the `.git/worktrees/<name>`
-# entry from the path's basename, so a fixed name (e.g. `m`) collides under
-# concurrent dispatched sessions — both target the same gitdir slot, and a
-# stale HEAD (or a half-pruned gitdir from a crashed predecessor) leaks into
-# the fresh session's merge push, producing a spurious non-fast-forward
+# entry from the path's basename, so a fixed name (e.g. `ship-merge`) collides
+# under concurrent dispatched sessions — both target the same gitdir slot, and
+# a stale HEAD (or a half-pruned gitdir from a crashed predecessor) leaks
+# into the fresh session's merge push, producing a spurious non-fast-forward
 # rejection against origin/master. `$$` (this process's PID) guarantees a
 # fresh slot per invocation — do NOT simplify back to a fixed name.
 # (kanban card c23dfe46…)
-git worktree add --detach "$TMP/merge-$$" origin/master
-if ! git -C "$TMP/merge-$$" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
+git worktree add --detach "$WT" origin/master
+if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
   echo "ERROR: merge conflict merging $BRANCH into master — not pushing." >&2
-  echo "Conflicted worktree left at $TMP/merge-$$ for inspection (not removed)." >&2
+  echo "Conflicted worktree left at $WT for inspection (not removed)." >&2
   exit 1
 fi
-git -C "$TMP/merge-$$" push origin HEAD:master
-git worktree remove --force "$TMP/merge-$$"
+git -C "$WT" push origin HEAD:master
+git worktree remove --force "$WT"
 ```
 
 Then `attach_deliverable` (kind `branch`, ref=`<your-branch-name>`), **run the session-end

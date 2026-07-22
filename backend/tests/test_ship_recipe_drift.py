@@ -58,12 +58,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # point is that an inconsistency here is loud, not silent.
 CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # The throwaway detached worktree that sidesteps the "master already
-    # checked out in the main worktree" error from git-worktree-add. Slot
-    # name is `merge-$$` (PID-unique), not a fixed name — a fixed slot
-    # collides across concurrent dispatched sessions (kanban card c23dfe46).
+    # checked out in the main worktree" error from git-worktree-add. The
+    # worktree lives under the shared `.git/worktrees/<name>` (NOT under
+    # `mktemp -d`) so the Bash tool's harness can't reap it between calls —
+    # otherwise the merge commit lands in a vanished checkout and the
+    # subsequent `git push` fails with a spurious non-fast-forward
+    # (kanban card 01aa1ef5…). Slot name is `ship-merge-$$` (PID-unique),
+    # not a fixed name — a fixed slot collides across concurrent dispatched
+    # sessions (kanban card c23dfe46).
     (
         "detached-worktree merge target",
-        'git worktree add --detach "$TMP/merge-$$" origin/master',
+        'git worktree add --detach "$WT" origin/master',
     ),
     # Required so master history shows a real merge commit, not a fast-forward.
     (
@@ -88,10 +93,11 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "pre-flight untracked-files guard",
         "git ls-files --others --exclude-standard",
     ),
-    # Throwaway detached worktree cleanup (otherwise /tmp leaks).
+    # Throwaway detached worktree cleanup. Slot name MUST be the same `ship-merge-$$`
+    # used by `git worktree add` so the remove targets the entry git actually created.
     (
         "worktree cleanup",
-        'git worktree remove --force "$TMP/merge-$$"',
+        'git worktree remove --force "$WT"',
     ),
     # Generated documentation conflicts have a deterministic recovery path in
     # both mirrors; keep the filenames and strict verification command pinned.
@@ -252,10 +258,10 @@ def test_drift_detector_fails_when_mirror_loses_a_command() -> None:
     case so the contract is enforced, not assumed.
     """
     fake_mirror = (
-        'git worktree add --detach "$TMP/m" origin/master\n'
-        'git -C "$TMP/m" merge --no-ff "$BRANCH" -m "Merge $BRANCH"\n'
-        'git -C "$TMP/m" push origin HEAD:master\n'
-        'git worktree remove "$TMP/m" --force\n'
+        'git worktree add --detach "$WT" origin/master\n'
+        'git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"\n'
+        'git -C "$WT" push origin HEAD:master\n'
+        'git worktree remove "$WT" --force\n'
     )
     pre_flight_label, pre_flight_command = next(
         (label, cmd) for label, cmd in CORE_RECIPE_INVARIANTS

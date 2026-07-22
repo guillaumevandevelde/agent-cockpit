@@ -299,10 +299,14 @@ Vuistregels (harness-contract: cwd lekt tussen calls):
   `/home/vdvgu/claude-cockpit/backend/venv/bin/{python,pytest,ruff}`
   vanuit je worktree-cwd (geen `cd` nodig).
 
-(CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$TMP/merge-$$"`-patroon
-voor de merge-stap — de slot-naam `merge-$$` (per-proces uniek) voorkomt dat
+(CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$WT"`-patroon
+voor de merge-stap, met `$WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"`
+— de slot-naam `ship-merge-$$` (per-proces uniek) voorkomt dat
 concurrent sessies dezelfde `.git/worktrees/`-gitdir hergebruiken; dit is de
-algemene variant voor élke git-mutatie binnen een worktree-sessie.)
+algemene variant voor élke git-mutatie binnen een worktree-sessie. Merk op
+dat dit bewust **niet** onder `$(mktemp -d)` leeft — de Bash-tool kan `/tmp`
+tussen calls reapen, dus de worktree moet onder het persistente shared-gitdir
+staan om niet halverwege de ship te verdwijnen; zie kaart `01aa1ef5…`.)
 
 ### Write/Edit = worktree-relatief (geen absolute paden naar de hoofd-checkout)
 
