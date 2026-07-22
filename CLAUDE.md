@@ -73,6 +73,13 @@ bash scripts/test_cockpit.sh     # Test the supervisor (bash harness)
 cd frontend && npm run build     # Same as above
 
 # Test
+> Note for authors writing `scripts/test_check_*.sh` harnesses: real-state
+> assertions must be SPECIFIC, not tautological. Assert the exact clean-state
+> line emitted by the SUT (e.g. `grep -qE "^OK: <expected phrase>"`) — never
+> `grep -qE "^OK:|WARNING:"`, which passes in both broken and fixed states
+> (the smoking gun behind self-improve card e5136a3f). If a WARN branch is
+> acceptable, document the carve-out at the assertion site, not in the grep
+> itself.
 bash backend/test_commands_api.sh                         # Curl-based API tests
 bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
 bash scripts/test_baseline_bash_tests.sh                  # Bash tests for baseline-bash-tests / compare-bash-tests scripts

@@ -43,7 +43,10 @@
 #  17.  card with no usable keywords (just "[problem]") → never flagged
 #       (no overlap possible).
 #  18.  multiple decision hits on same card → each reported as own line.
-#  19.  real ~/.claude-registry/kanban.db is reachable.
+#  19.  real ~/.claude-registry/kanban.db is reachable AND the real board
+#       emits the clean-state OK line (not the loose "OK or WARNING"
+#       tautology that an earlier shape of this task masked — see
+#       self-improve card e5136a3f959d4886a7757b85e9d31f55).
 
 set -u
 
@@ -407,13 +410,19 @@ if [ -r "$HOME/.claude-registry/kanban.db" ] && [ -r "$HOME/claude-cockpit/docs/
         DECISIONS_MD="$HOME/claude-cockpit/docs/cockpit/decisions.md" \
         REPO_ROOT="$HOME/claude-cockpit" \
         bash "$SUT" 2>&1); rc=$?
-  # Real board may legitimately have hits; we only assert the script reaches
-  # a verdict (not a sqlite error / not a python traceback).
-  check "real board → exit 0 (advisory)"     '[ "$rc" -eq 0 ]'
-  check "real board → no python traceback"   '! echo "$out" | grep -qE "Traceback"'
-  check "real board → OK or WARNING header"  '
-    echo "$out" | grep -qE "^OK:" || echo "$out" | grep -qE "WARNING:"
-  '
+  # Real board is expected to be clean (no open [problem] cards overlap with
+  # newer decision/commit signals). The card that motivated this tightening
+  # (5e988e4e follow-up, e5136a3f) flagged an earlier shape of this very
+  # assertion as tautological: `^OK: || WARNING:` passes in BOTH the broken
+  # and the fixed state, so it never catches a regression. Tighten to the
+  # exact clean-state line emitted by scripts/check-problem-card-staleness.sh
+  # (SUT scripts/check-problem-card-staleness.sh:332). If this assertion
+  # starts failing, either the real board has a real staleness hit (triage
+  # it) or the SUT's clean-state line drifted out of sync with this grep.
+  check "real board → exit 0 (advisory)"           '[ "$rc" -eq 0 ]'
+  check "real board → no python traceback"         '! echo "$out" | grep -qE "Traceback"'
+  check "real board → clean-state OK line"         'echo "$out" | grep -qE "^OK: no Backlog \[problem\] cards overlap"'
+  check "real board → no WARNING emitted"          '! echo "$out" | grep -qE "WARNING:"'
 else
   echo "  (skip — real DB or decisions.md not present)"
 fi
