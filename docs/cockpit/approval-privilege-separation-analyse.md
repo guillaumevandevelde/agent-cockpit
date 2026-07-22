@@ -43,7 +43,11 @@ daar zitten de drie vervolgkaarten.
 4. **Het echte gat is het spiegelbeeld:** de grens die we wél hebben, is onbruikbaar
    onder autonome dispatch. Een afgedwongen permission-prompt heeft **geen
    antwoordkanaal** — `--permission-prompt-tool` komt in de hele codebase niet voor.
-   Een product-dispatch stalt op de eerste `ask`-tool tot de reaper de claim opruimt.
+   **Gemeten (§2.5):** de prompt verschijnt binnen 30 s en de sessie blokkeert
+   permanent — `reap_stale_claims` grijpt níet in (de pane leeft en heeft zijn
+   `SessionStart`-hook al gestuurd), dus er is geen lus en geen symptoom, alleen een
+   claim die blijft staan. Op déze host engageert de grens bovendien helemaal niet:
+   `~/.claude/settings.json` zet host-breed `defaultMode: bypassPermissions`.
 5. **Bij ons draait die grens vandaag alleen niet omdat twee override-rijen hem
    tegenhouden** (§2.3). Deze repo staat als `product-staging` in zijn
    security-profiel; alleen `skip_permissions=1` + `transport=worktree` in
@@ -176,9 +180,13 @@ Dit is het scherpste bevinding van deze analyse.
 Wanneer `skip_permissions=False`, dwingt Claude Code zijn permissiesysteem af:
 `deny` → blokkeren, `ask` → **de mens vragen**, `allow` → doorlaten
 (`docs/features/permissions.md`). In een autonome dispatch zit er niemand aan de
-tmux-pane. De prompt verschijnt, niemand beantwoordt hem, en de sessie staat stil tot
-`reap_stale_claims` de claim als dood beschouwt en de kaart opnieuw dispatcht — waarna
-hetzelfde opnieuw gebeurt.
+tmux-pane. De prompt verschijnt en niemand beantwoordt hem.
+
+Deze paragraaf voorspelde dat de sessie stil zou staan "tot `reap_stale_claims` de claim
+als dood beschouwt en de kaart opnieuw dispatcht — waarna hetzelfde opnieuw gebeurt".
+Die tweede helft is **gemeten en onjuist**: de reaper grijpt nooit in en er is dus ook
+geen lus. De sessie blijft levend in tmux, heeft zijn `SessionStart`-hook al verstuurd,
+en beide feiten samen laten elke reaper-tak vallen — zie §2.5.
 
 Claude Code's eigen remedie hiervoor is `--permission-prompt-tool` (een MCP-tool die de
 permissievraag afhandelt) of het bidirectionele control-protocol
@@ -192,16 +200,146 @@ $ grep -rn "permission-prompt-tool\|permission_prompt_tool" --include="*.py" .
 ```
 
 **Er is geen enkele code die een permissievraag kan beantwoorden.** De veilige default
-voor product-projecten is daarmee vandaag niet alleen ongetest, maar naar alle
-waarschijnlijkheid niet-functioneel onder autonome dispatch.
+voor product-projecten is daarmee niet-functioneel onder autonome dispatch — niet langer
+"waarschijnlijk", maar gemeten (§2.5): engageert de grens, dan blokkeert de sessie
+permanent; engageert hij niet (deze host), dan beschermt hij niets.
 
-> **Eerlijk gelabeld: dit is een code-gebaseerde gevolgtrekking, geen meting.** Ik heb
-> geen product-project gedispatcht om de stall te observeren — er bestaat er geen
-> (`project_security_profiles` bevat één rij, deze repo). De keten is
-> `default_skip_permissions=False` → geen `--dangerously-skip-permissions` →
-> permissiesysteem actief → `ask` zonder `--permission-prompt-tool` → interactieve
-> prompt zonder lezer. De eerste vervolgkaart (§6.1) is bewust een *meting*, geen fix,
-> juist omdat deze conclusie afgeleid is.
+> **Gemeten (2026-07-22, kaart `ea532412…`).** De keten hierboven is uitgevoerd op twee
+> wegwerp-product-projecten. Uitkomst: de grens **engageert vandaag helemaal niet** —
+> `~/.claude/settings.json` zet host-breed `permissions.defaultMode: "bypassPermissions"`,
+> dus een dispatch zónder `--dangerously-skip-permissions` draait alsnog volledig
+> permissief. Neutraliseer je die host-instelling op projectniveau, dán klopt de eerste
+> helft van de voorspelling exact (blokkerende prompt binnen 30 s) en de tweede helft
+> niet (de reaper grijpt nooit in; geen lus, wél een permanente stall). Volledige opzet,
+> reproductie en tijdlijn: **§2.5**.
+
+---
+
+### 2.5 De meting (kaart `ea532412…`, 2026-07-22)
+
+§2.4 was afgeleid uit code. Deze paragraaf vervangt de afleiding door een meting op de
+échte dispatch-pipeline. Twee wegwerp-product-projecten, allebei met het profiel-default
+`risk_class=product-staging` / `default_skip_permissions=false`, allebei
+`transport=worktree` (om sandcastle als variabele te elimineren), allebei gedispatcht via
+`POST /kanban/cards/{id}/dispatch`.
+
+Het verschil tussen de twee is één bestand:
+
+| Probe | `.claude/settings.json` in het projectrepo | Wat de host-instelling doet |
+|---|---|---|
+| **A** | geen | `~/.claude/settings.json` → `defaultMode: bypassPermissions` geldt |
+| **B** | `{"permissions":{"defaultMode":"default"}}` | project-settings overstemmen de host |
+
+#### Bevinding 1 — de veilige default is op deze host een no-op
+
+Probe A's `claude`-proces draait **zonder** `--dangerously-skip-permissions`
+(`/proc/<pid>/cmdline`: `claude --strict-mcp-config --mcp-config <wt>/.mcp.json --model
+haiku <prompt>`), precies zoals `skip_permissions=False` belooft. Toch meldt de statusbalk
+van de pane `⏵⏵ bypass permissions on (shift+tab to cycle)` en voert de agent zijn eerste
+`Write` **zonder enige prompt** uit: dispatch op `08:13:31Z`, en de eerste waarneming op
+`08:13:56Z` (t+25 s) toont de `Write` al voltooid (`● Write(…/result.txt)` → `⎿ Wrote 1
+line`) én een volgend shell-commando al lopend. Geen enkele goedkeuringsvraag onderweg.
+
+De CLI-vlag is dus niet de enige knop: `permissions.defaultMode` in het **user-level**
+`~/.claude/settings.json` zet dezelfde bypass, en die staat op deze host aan. Het
+security-profiel denkt permissies af te dwingen; de host levert ze permissief af. Dat is
+ernstiger dan de voorspelde stall — een niet-functionerende grens die *stil* niet
+functioneert.
+
+#### Bevinding 2 — engageert de grens wél, dan blokkeert de pane binnen 30 s
+
+Probe B, met de host-bypass op projectniveau geneutraliseerd, doet exact wat §2.4
+voorspelde. Dispatch op `08:14:53Z`; op `08:15:23Z` (≤30 s, sampling-interval 15 s) staat
+in de pane:
+
+```
+● Write(result.txt)
+ Do you want to create result.txt?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session (shift+tab)
+   3. No
+ Esc to cancel · Tab to amend
+```
+
+De spawn faalt dus niet en loopt niet door — hij **blokkeert**, op de eerste tool die
+goedkeuring vraagt, zonder dat er iets is dat kan antwoorden.
+
+#### Bevinding 3 — `reap_stale_claims` grijpt níet in: geen lus, een permanente stall
+
+Dit is waar de meting van de afleiding afwijkt. Vanaf de blokkade stond de kaart
+**16 min 25 s** onafgebroken in kolom `engineer` met
+`claimed_by=agent:k-perm-probe-wr-a144` en `dispatch_failures=0` — met auto-dispatch aan
+voor dat project, dus ~98 reaper-ticks (interval 10 s). `updated_at` bleef exact gelijk
+aan het dispatch-moment: er is in dat hele venster geen enkele operatie op de kaart
+toegepast. Geen release, geen her-dispatch, geen lus. De reden staat in
+`reap_stale_claims` (`dispatch.py:3837-3905`) — en `reap_stale_claims` draait als
+**eerste** stap van `dispatch_project` (`dispatch.py:4178-4186`), vóór elke cap-logica,
+dus hij heeft de kaart wel degelijk elke tick gezien. Structureel, niet toevallig:
+
+1. De sessie **leeft** in tmux → `name in live_sessions` → `continue`. De dead-session-tak
+   (release / `_move_to_resume`) wordt nooit bereikt.
+2. De stuck-tak eist "levend maar nooit een hook verstuurd"
+   (`get_stuck_sessions`, `STUCK_SESSION_TIMEOUT_S = 120`). Een sessie die ver genoeg komt
+   om een permissieprompt te tonen, heeft zijn `SessionStart`-hook al gepost; die zet
+   `_spawn_received_hooks` en haalt hem permanent uit de stuck-set.
+3. En zelfs als hij wél stuck heette, ruimt die tak alleen een als **rate-limit**
+   geclassificeerde pane op — een permissieprompt matcht dat patroon niet.
+
+**Positieve controle.** Om "de reaper deed niets" te onderscheiden van "de tick keek nooit
+naar dit project": na afloop is de tmux-sessie handmatig gekild. **Twee seconden** later
+had de reaper de claim vrijgegeven en de kaart naar `To Resume` verplaatst
+(`_move_to_resume`), `claimed_by=None`. Dezelfde tick, hetzelfde project, hetzelfde
+codepad — het enige verschil is de liveness van de pane. Het vangnet werkt dus prima; het
+is per ontwerp blind voor een sessie die leeft maar wacht.
+
+Een geblokkeerde permissieprompt is dus **onzichtbaar voor elk vangnet dat we hebben**:
+de claim houdt een slot van de per-project cap bezet tot een mens de pane vindt. "De kaart
+loopt in een lus" was te optimistisch — een lus zou tenminste een symptoom produceren.
+
+#### Twee incidentele bevindingen (zelfde meting, andere oorzaak)
+
+- **Een product-repo zonder `.mcp.json` sterft binnen ~2 s.** `cc_spawn` geeft
+  altijd `--mcp-config <dir>/.mcp.json` mee (`cc_spawn.py:29-46`); ontbreekt dat bestand,
+  dan stopt Claude Code met exit 1 en `Error: Invalid MCP configuration: MCP config file
+  not found: …`. De eerste dispatch van probe A ging hierop stuk vóórdat permissies
+  überhaupt aan bod kwamen. Deze repo heeft een `.mcp.json`, een vers product-project niet.
+- **De dispatch-prompt stuurt product-agents naar de Cockpit-checkout.**
+  `_build_worktree_safety_callout()` (`dispatch.py:1630-1682`) hardcodeert
+  `/home/vdvgu/claude-cockpit` in de worktree-scope-sectie van **elke** prompt. Probe A's
+  agent nam die letterlijk en schreef zijn `result.txt` in
+  `/home/vdvgu/claude-cockpit/.claude/worktrees/k-perm-probe-wr-adff/` — buiten zijn eigen
+  project. Onder de bypass van bevinding 1 gebeurde dat zonder één prompt.
+
+#### Reproductie
+
+```bash
+# 1. wegwerp-product-project (git-repo + origin + .mcp.json), profiel-default,
+#    transport=worktree, géén skip_permissions-override:
+curl -s "$API/security/profiles?project_path=$REPO"          # lazy-create: product-staging / skip=false
+curl -s -X POST "$API/kanban/transport" -d '{"project_key":"'"$KEY"'","transport":"worktree"}'
+curl -s "$API/kanban/skip-permissions?project_key=$KEY"       # -> {"enabled": false}
+# 2. kaart + dispatch:
+curl -s -X POST "$API/kanban/cards" -d '{…,"confirm_new_project":true}'
+curl -s -X POST "$API/kanban/cards/$CID/dispatch" -d '{"project_path":"'"$REPO"'"}'
+# 3. observeer: tmux capture-pane -p -t <session>   (probe B: de prompt uit bevinding 2)
+#    argv-bewijs:  tr '\0' '\n' < /proc/$(tmux list-panes -t <session> -F '#{pane_pid}')/cmdline
+# Probe B verschilt van A door één gecommit bestand:
+#    .claude/settings.json = {"permissions":{"defaultMode":"default"}}
+```
+
+Volledige opzetscripts stonden in de scratchpad van de meetsessie
+(`setup_probe.sh` / `watch_probe.sh`); ze zijn bewust niet in de repo geland — het zijn
+wegwerp-harnassen, geen herbruikbare tooling.
+
+#### Wat níet gemeten is
+
+- **De sandcastle-variant.** Het profiel-default is `default_transport="sandcastle"`;
+  beide probes zijn bewust op `transport=worktree` gezet om één variabele te isoleren.
+  Wat een container-transport met een blokkerende permissieprompt doet (blijft de run
+  hangen, of tikt er een container-timeout af?) is onbekend.
+- **`deny`-geclassificeerde tools.** Gemeten is alleen het `ask`-pad.
+- **Andere hosts.** Bevinding 1 hangt aan één regel in `~/.claude/settings.json` van
+  déze machine. Een verse installatie zonder die regel valt in bevinding 2/3.
 
 ---
 
@@ -380,6 +518,12 @@ wegwerp-product-project met het profiel-default (`skip_permissions=False`,
 `transport=sandcastle`) legt vast wat er feitelijk gebeurt bij de eerste `ask`-tool:
 stalt de pane, faalt de spawn, of gaat het door. Bewust een meting vóór een fix — als
 het gedrag anders is dan afgeleid, verandert dat de scope van §6.2.
+
+✅ Uitgevoerd (kaart `ea532412…`, 2026-07-22) — resultaat in **§2.5**. Drie afwijkingen
+t.o.v. de afleiding, waarvan twee de scope van §6.2 raken: (a) op deze host engageert de
+grens helemaal niet (host-brede `bypassPermissions`), (b) de blokkade is permanent in
+plaats van een reaper-lus, en (c) de meting is op `transport=worktree` gedaan, niet op
+sandcastle.
 
 ### 6.2 `--permission-prompt-tool` bedraden op het bestaande `KanbanGate`-primitief
 Het antwoordkanaal uit §4: een MCP-tool die een gate opent, wacht, en `allow`/`deny`
