@@ -15,6 +15,31 @@ mutates. Keeping them in one file is what makes "is this headless run still
 alive?" a single-line answer and prevents the two from drifting the way
 sandcastle's two-source wiring didn't (see spike §5 for the precedent).
 
+Restart-survival (kanban card ``a450df1a…``):
+A naive headless runner would die with the backend process — ``kill_tree``
+reaps descendants, the stdout pipe closes on the next write, and the
+in-memory registry is empty after restart. To match the worktree/tmux
+transport's robustness, this module writes a durable **pidfile** per run
+(``<worktree>/.cockpit-headless.json``) holding the pid + worktree + log
+path. The subprocess is spawned with ``start_new_session=True`` so it
+becomes its own session leader (PID == PGID == SID) — a backend exit or
+``cockpit.sh restart`` doesn't propagate. ``live_headless_sessions()``
+combines the in-memory cache with OS-level pid + cwd checks, so a run is
+correctly reported as alive after a backend restart as long as its pidfile
+points to a live process whose cwd is still the original worktree. On
+backend startup, :func:`adopt_headless_runs` walks every registered
+project's worktrees, re-attaches still-alive pidfiles to the in-memory
+registry, and cleans up dead ones — all BEFORE the dispatch scheduler /
+reaper runs, so a reaper tick never sees an adopted run as dead.
+
+Events are written to an on-disk JSONL log (``<worktree>/.cockpit-headless-
+events.jsonl``) capped at 16 MB with head-truncation, so a pathological
+event loop can never blow up disk and a restart can always inspect what
+happened. The cap is measured (analyses §5.3): 16 MB is ~2× the largest
+run ever observed in 998 dispatched transcripts, ~14× p90. Adoption
+re-reads the log from the start; re-processing is idempotent because each
+structured event either just logs or sets a pause timestamp.
+
 Public surface (everything else is module-private):
 
 - :func:`headless_transport` — the ``SpawnTransport`` callable used by the
@@ -27,6 +52,13 @@ Public surface (everything else is module-private):
 - :func:`kill_headless_session` — best-effort SIGTERM for the human-takeover
   promotion (``app.kanban.takeover``); signals only, never mutates the
   registry (``run_headless``'s own ``finally`` block does that).
+- :func:`adopt_headless_runs` — startup hook that walks registered
+  projects' worktrees, OS-verifies each pidfile, and repopulates the
+  in-memory registry. Runs BEFORE the dispatch scheduler/reaper (wired in
+  ``app.main.lifespan``).
+- :class:`EventLogWriter` — bounded JSONL append writer with head-truncation
+  at 16 MB. Tested in isolation so the runner doesn't have to know about
+  the cap mechanism.
 - :func:`map_stream_event` — pure mapping from a raw stream-json payload to
   the dict shape :func:`parse_structured_event` accepts. Tested in isolation
   so the parser doesn't have to know about Claude's wire format.
@@ -36,8 +68,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 import subprocess
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -59,26 +95,196 @@ logger = logging.getLogger("app.kanban.headless_runner")
 
 
 # Module-level registry of in-flight headless subprocesses, keyed by session
-# name. Populated by :func:`run_headless` (or a test stub) before the process
-# has a chance to exit, drained in a ``finally`` block so the liveness source
-# never reports a dead process. Read by :func:`live_headless_sessions` from
-# inside ``app.kanban.dispatch.reap_stale_claims``.
-_headless_processes: dict[str, asyncio.subprocess.Process] = {}
+# name. Populated by :func:`run_headless` (after spawn) and by
+# :func:`adopt_headless_runs` (at backend startup, when the in-memory cache
+# is empty but durable pidfiles are on disk). Each value is a
+# :class:`HeadlessRunRecord` carrying just the durable identity (pid, log
+# path, worktree) — NOT the :class:`asyncio.subprocess.Process` object
+# itself, which doesn't survive a backend restart. OS-level liveness is
+# checked via :func:`_os_pid_alive` each tick.
+#
+# Why records instead of Process objects: the Process object's lifetime is
+# tied to the asyncio loop that created it. After a backend restart the
+# loop is new, every old Process object is gone, and any pid-file that
+# points to a real running subprocess needs to be adopted by the new
+# process. The record shape (pid + paths) is the minimum we need to kill
+# and to detect liveness; the Process wrapper is incidental.
+_HEADLESS_PIDFILE_NAME = ".cockpit-headless.json"
+_HEADLESS_LOG_NAME = ".cockpit-headless-events.jsonl"
+_DEFAULT_LOG_CAP_BYTES = 16 * 1024 * 1024  # 16 MB; see analyse §5.3 for derivation
+_headless_processes: dict[str, HeadlessRunRecord] = {}
+# Project roots that may host a headless worktree. Populated by
+# :func:`adopt_headless_runs` at startup (canonical set, used per dispatch
+# tick) and by :func:`run_headless` (so a fresh run is visible without
+# waiting for the next adoption). Used by
+# :func:`_known_worktree_dirs` to enumerate where pidfiles may live.
+# Bounded by the number of registered projects on the device.
+_known_project_roots: set[str] = set()
+
+
+def _remember_project_root(project_root: str) -> None:
+    """Add ``project_root`` to the cache of pidfile-search roots.
+
+    Idempotent. Called by :func:`run_headless` after spawn and by
+    :func:`adopt_headless_runs` while walking registered projects. Tests
+    use this to seed the cache without going through adoption.
+    """
+    _known_project_roots.add(str(project_root))
+
+
+@dataclass(frozen=True)
+class HeadlessRunRecord:
+    """Durable identity of a single headless run.
+
+    Holds just enough to (a) check liveness via the OS, (b) signal the
+    process group for human-takeover / final cleanup, and (c) locate the
+    on-disk event log. The Process object itself lives in the asyncio
+    loop that spawned it; this record survives a backend restart because
+    it's also persisted to the pidfile and re-derived at adoption time.
+    """
+    session_name: str
+    pid: int
+    worktree_path: str
+    log_path: Path
+    started_at: float  # unix epoch
+
+
+def _os_pid_alive(pid: int, expected_cwd: str) -> bool:
+    """True iff ``pid`` exists AND its cwd matches ``expected_cwd``.
+
+    Two checks because pid-reuse is real (a fresh process can pick up a pid
+    the original run had): the ``os.kill(pid, 0)`` returns no error for any
+    live pid — even one we don't own — so without the cwd sanity check a
+    pid-reuse would falsely report 'alive', the reaper would skip the claim,
+    the original session is long gone, and the work is orphaned. Linux-only
+    ``/proc/<pid>/cwd`` readlink gives the absolute path the process was
+    started in; comparing it to the recorded worktree catches reuse from
+    any other cwd. ``PermissionError`` means "exists but not ours" — we
+    treat that as alive (the operator can inspect it manually) but the cwd
+    check still runs and catches the foreign-cwd case.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # pid exists; let the cwd check decide
+    try:
+        cwd_link = Path(f"/proc/{pid}/cwd").readlink()
+    except PermissionError:
+        # /proc/<pid>/cwd exists but we can't readlink it — usually pid 1
+        # (systemd) or another process in a different user namespace.
+        # Conservative: treat as foreign so we don't keep claims alive
+        # for processes we don't actually own. The reaper will release
+        # the claim and a fresh dispatch will spawn correctly.
+        # NOTE: PermissionError IS a subclass of OSError, so this clause
+        # must come before the broad OSError catch below.
+        return False
+    except (OSError, FileNotFoundError):
+        # Not Linux, or procfs disabled. Fall back to pid-alive only —
+        # the kernel already confirmed the pid exists (kill(pid, 0)
+        # returned without ProcessLookupError).
+        return True
+    return str(cwd_link) == expected_cwd
+
+
+def _read_pidfile(pidfile: Path) -> HeadlessRunRecord | None:
+    """Parse a pidfile into a ``HeadlessRunRecord``; None on any failure.
+
+    Defensive: malformed files are treated as "not a live run" and removed
+    by the caller, so a half-written pidfile (e.g. crashed backend mid-
+    write) doesn't wedge the liveness source.
+    """
+    try:
+        data = json.loads(pidfile.read_text(encoding="utf-8"))
+        return HeadlessRunRecord(
+            session_name=data["session_name"],
+            pid=int(data["pid"]),
+            worktree_path=data["worktree_path"],
+            log_path=Path(data["log_path"]),
+            started_at=float(data["started_at"]),
+        )
+    except (OSError, KeyError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _known_worktree_dirs() -> list[Path]:
+    """Enumerate the worktree directories that may host a pidfile.
+
+    The single source of truth is the on-disk pidfile in each worktree
+    (kaart ``a450df1a…`` AC 2 — liveness without in-memory state). We
+    walk ``<project>/.claude/worktrees/*`` for every project root we've
+    remembered via :func:`_remember_project_root` — populated by
+    :func:`adopt_headless_runs` at startup (canonical set) and by
+    :func:`run_headless` for every fresh run.
+    """
+    return [
+        Path(p) / ".claude" / "worktrees"
+        for p in sorted(_known_project_roots)
+    ]
 
 
 def live_headless_sessions() -> set[str]:
     """Session names of headless subprocesses that are still running.
 
     Third liveness source for ``reap_stale_claims`` (alongside tmux and
-    sandcastle). Defensive: any failure yields ``set()`` so a registry hiccup
-    makes the reaper *eager* (more likely to release a dead claim), never
-    blind (less likely — that's the bug the empty-set policy avoids).
+    sandcastle). Reads from durable pidfiles (one per worktree), NOT the
+    in-memory cache — this is the canonical answer to "is this headless
+    run still alive?" and works correctly even with an empty cache (i.e.
+    immediately after a backend restart, before adoption has run).
+
+    Each pidfile is OS-verified (pid + cwd, see :func:`_os_pid_alive`):
+    a dead pid drops the session from the result; a pid that's alive but
+    in a different cwd is treated as foreign (pid-reuse) and also
+    dropped. The cache is updated lazily: dead records are pruned so it
+    doesn't accumulate, live ones are populated so :func:`kill_headless_session`
+    has a fast path without re-reading the disk.
+
+    Defensive: any failure yields ``set()`` so a hiccup makes the reaper
+    *eager* (more likely to release a dead claim), never blind (less
+    likely — that's the bug the empty-set policy avoids).
     """
     try:
-        return {
-            name for name, proc in _headless_processes.items()
-            if proc.returncode is None
-        }
+        alive: set[str] = set()
+        dead_pids: list[tuple[str, int]] = []
+        for worktrees_dir in _known_worktree_dirs():
+            if not worktrees_dir.is_dir():
+                continue
+            for wt_dir in worktrees_dir.iterdir():
+                if not wt_dir.is_dir():
+                    continue
+                pidfile = wt_dir / _HEADLESS_PIDFILE_NAME
+                if not pidfile.exists():
+                    continue
+                rec = _read_pidfile(pidfile)
+                if rec is None:
+                    # Malformed → drop it so we don't keep retrying.
+                    try:
+                        pidfile.unlink()
+                    except OSError:
+                        pass
+                    continue
+                if _os_pid_alive(rec.pid, rec.worktree_path):
+                    alive.add(rec.session_name)
+                    # Refresh the cache so kill_headless_session has a
+                    # fast path (also: re-reserves the session_registry
+                    # slot on adoption; here we just keep the record
+                    # fresh).
+                    _headless_processes[rec.session_name] = rec
+                else:
+                    # Dead pidfile — prune it so the reaper doesn't
+                    # re-discover it next tick. ``session_recovery`` /
+                    # To Resume handle the dead-card path via the
+                    # normal agent-column cleanup, exactly as analyse
+                    # §5.1 prescribes.
+                    try:
+                        pidfile.unlink()
+                    except OSError:
+                        pass
+                    dead_pids.append((rec.session_name, rec.pid))
+        for name, _pid in dead_pids:
+            _headless_processes.pop(name, None)
+        return alive
     except Exception:
         logger.exception("could not query live headless sessions")
         return set()
@@ -89,22 +295,256 @@ def kill_headless_session(session_name: str) -> bool:
 
     First step of the human-takeover promotion
     (`docs/cockpit/human-takeover-headless-decision.md` §7 point 2): end the
-    headless process before spawning the tmux `--resume` replacement. Only
+    headless process before spawning the tmux ``--resume`` replacement. Only
     signals — :func:`run_headless`'s own ``finally`` block drains
     ``_headless_processes`` once the process actually exits, so mutating the
     registry here would race it.
 
+    Reads the pid from the in-memory cache first, falling back to the
+    on-disk pidfile when the cache is empty (post-restart, before
+    adoption has repopulated). Signals the process group (``os.killpg``)
+    since the subprocess is its own session leader
+    (``start_new_session=True``), so any grandchildren it spawned (e.g.
+    a shell wrapper) get the signal too — same pattern as
+    ``app.services.sandcastle_service._signal_process_group``.
+
     Returns True when a live process was signaled, False when there was
     nothing to kill (unknown session name, or already exited).
     """
-    proc = _headless_processes.get(session_name)
-    if proc is None or proc.returncode is not None:
+    rec = _headless_processes.get(session_name)
+    if rec is None:
+        # Cache miss — try the pidfile (post-restart path).
+        for worktrees_dir in _known_worktree_dirs():
+            pidfile = worktrees_dir / session_name / _HEADLESS_PIDFILE_NAME
+            if pidfile.exists():
+                rec = _read_pidfile(pidfile)
+                break
+    if rec is None:
+        return False
+    if not _os_pid_alive(rec.pid, rec.worktree_path):
+        _headless_processes.pop(session_name, None)
         return False
     try:
-        proc.terminate()
-    except ProcessLookupError:
+        os.killpg(rec.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
         return False
     return True
+
+
+# ---- event-log writer -------------------------------------------------------
+#
+# Bounded JSONL append writer for the headless event stream. Each event line
+# is appended as-is (already a string when callers have it; otherwise
+# json.dumps'd). When the file would exceed ``cap_bytes``, the writer
+# truncates from the *head* — oldest events are dropped first, newest stay.
+# Why head-truncation: the most recent events are also the most likely to
+# still be in-flight at adoption time (the consumer falls behind the
+# producer briefly, then catches up). Truncating the tail would silently
+# lose the events that matter most during a restart, while head-truncation
+# keeps the boundary "you might miss the very first events of a long run,
+# but you will see everything from N seconds before the crash" — which is
+# the visible-fault shape operators actually need.
+#
+# The cap (16 MB by default) is bounded above: even a hypothetical patho-
+# logical loop generating 16 MB of events has to fit in 16 MB on disk. The
+# implementation measures the size on disk after each append so we don't
+# need to track every byte in memory, and re-opens the file in append mode
+# after a truncation so subsequent appends are O(1).
+
+
+class EventLogWriter:
+    """Append-only JSONL event log with head-truncating size cap.
+
+    Appends land as a single line (``str + "\\n"``). When the file would
+    exceed ``cap_bytes``, the writer truncates the oldest bytes (preserving
+    line boundaries — the first byte kept is the byte AFTER the first
+    newline in the truncated window). The cap exists to bound pathological
+    loops; analyse §5.3 shows 16 MB is ~2× the largest run ever observed
+    in 998 dispatched transcripts and ~14× p90, so the truncation path
+    should almost never fire in normal traffic.
+    """
+
+    def __init__(self, path: Path, cap_bytes: int = _DEFAULT_LOG_CAP_BYTES):
+        self.path = path
+        self.cap_bytes = cap_bytes
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._size = self.path.stat().st_size if self.path.exists() else 0
+        self._f = self.path.open("a", encoding="utf-8", buffering=1)
+
+    def append(self, line: str) -> None:
+        if not line.endswith("\n"):
+            line = line + "\n"
+        self._f.write(line)
+        self._f.flush()
+        self._size += len(line.encode("utf-8"))
+        if self._size > self.cap_bytes:
+            self._truncate_head()
+
+    def close(self) -> None:
+        try:
+            self._f.close()
+        except Exception:
+            pass
+
+    def _truncate_head(self) -> None:
+        self._f.close()
+        try:
+            with self.path.open("rb") as f:
+                # Keep the last ``cap_bytes`` bytes (a rough upper bound on
+                # what's left); trim to a line boundary so we don't keep a
+                # half-written first line.
+                f.seek(-self.cap_bytes, 2)
+                buf = f.read()
+            nl = buf.find(b"\n")
+            if 0 <= nl < len(buf) - 1:
+                buf = buf[nl + 1:]
+            self.path.write_bytes(buf)
+            self._size = len(buf)
+        except OSError:
+            logger.exception("event log truncate failed for %s", self.path)
+        self._f = self.path.open("a", encoding="utf-8", buffering=1)
+
+
+def _pidfile_path(worktree_path: str) -> Path:
+    """Where to write the durable headless-run record for ``worktree_path``."""
+    return Path(worktree_path) / _HEADLESS_PIDFILE_NAME
+
+
+def _log_path(worktree_path: str) -> Path:
+    """Where the on-disk event log lives for a worktree."""
+    return Path(worktree_path) / _HEADLESS_LOG_NAME
+
+
+def _write_pidfile(record: HeadlessRunRecord) -> None:
+    """Persist the run record to disk. Atomic via ``write_text``.
+
+    The pidfile is the durable source of truth for restart-survival — if
+    the backend crashes between spawn and the ``run_headless`` finally
+    block, the next backend startup reads it via :func:`adopt_headless_runs`
+    and recovers the run instead of treating it as dead and re-dispatching.
+    """
+    pidfile = _pidfile_path(record.worktree_path)
+    payload = {
+        "session_name": record.session_name,
+        "pid": record.pid,
+        "worktree_path": record.worktree_path,
+        "log_path": str(record.log_path),
+        "started_at": record.started_at,
+    }
+    try:
+        pidfile.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        logger.exception(
+            "could not write headless pidfile for %s", record.session_name,
+        )
+
+
+def _remove_pidfile(worktree_path: str, expected_pid: int) -> None:
+    """Remove the pidfile iff its pid still matches ``expected_pid``.
+
+    The pid check is the same race-detector as the OS-liveness check: if
+    the pidfile has been overwritten by a fresh run after our spawn, we
+    must NOT remove the new run's record. Tolerant of a missing file
+    (already cleaned up by adoption).
+    """
+    pidfile = _pidfile_path(worktree_path)
+    try:
+        raw = pidfile.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError:
+        logger.exception("could not read headless pidfile %s", pidfile)
+        return
+    try:
+        if json.loads(raw).get("pid") != expected_pid:
+            return
+    except (json.JSONDecodeError, KeyError):
+        pass  # malformed → remove and let the next adopt rebuild
+    try:
+        pidfile.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.exception("could not remove headless pidfile %s", pidfile)
+
+
+def adopt_headless_runs(project_paths: list[str]) -> int:
+    """Re-attach still-alive headless runs from durable pidfiles.
+
+    Called once at backend startup, BEFORE the dispatch scheduler and reaper
+    start ticking — see ``app.main.lifespan``. For each registered
+    project, walks every worktree under
+    ``<project>/.claude/worktrees/*`` and, if a ``.cockpit-headless.json``
+    pidfile is present, OS-verifies its pid (pid alive AND cwd matches the
+    recorded worktree, see :func:`_os_pid_alive`).
+
+    The primary job is re-reserving the slot in the in-memory session
+    registry (so ``can_add_session()`` is honest post-restart) and
+    populating the in-memory cache (so ``kill_headless_session`` has a
+    fast path). ``live_headless_sessions()`` itself reads pidfiles
+    directly and doesn't need a populated cache, but the cache keeps
+    the rest of the liveness machinery happy.
+
+    The ordering matters: if the reaper's first tick runs before adoption,
+    every live headless run looks dead → reaper releases the claims →
+    dispatcher re-spawns in the same worktree → two agents on one branch.
+    Adoption-first is the same ordering ``session_recovery`` already uses,
+    so both mechanisms live in the same startup-lifespan block.
+
+    Dead pidfiles are cleaned up here too (rather than waiting for the
+    next ``live_headless_sessions()`` call) so the reaper doesn't see a
+    dead session's pidfile at all on its first tick.
+
+    Returns the number of runs adopted (for tests + an info log).
+    """
+    adopted = 0
+    for project_path in project_paths:
+        project_root = str(project_path)
+        # Always remember the project root, even if no pidfile exists
+        # there — that's how a freshly-registered project becomes visible
+        # to ``live_headless_sessions`` on its first dispatch tick.
+        _remember_project_root(project_root)
+        worktrees_dir = Path(project_root) / ".claude" / "worktrees"
+        if not worktrees_dir.is_dir():
+            continue
+        for wt_dir in worktrees_dir.iterdir():
+            if not wt_dir.is_dir():
+                continue
+            pidfile = _pidfile_path(str(wt_dir))
+            if not pidfile.exists():
+                continue
+            rec = _read_pidfile(pidfile)
+            if rec is None:
+                logger.warning(
+                    "headless adopt: malformed pidfile %s, removing", pidfile,
+                )
+                try:
+                    pidfile.unlink()
+                except OSError:
+                    pass
+                continue
+            if not _os_pid_alive(rec.pid, rec.worktree_path):
+                logger.info(
+                    "headless adopt: pidfile %s points to dead/foreign pid %d; "
+                    "removing",
+                    pidfile, rec.pid,
+                )
+                try:
+                    pidfile.unlink()
+                except OSError:
+                    pass
+                continue
+            _headless_processes[rec.session_name] = rec
+            adopted += 1
+            logger.info(
+                "headless adopt: adopted session %s (pid %d, worktree %s)",
+                rec.session_name, rec.pid, rec.worktree_path,
+            )
+            # Re-reserve the slot in the session registry so the post-restart
+            # ``can_add_session`` count is honest. The pre-restart backend
+            # had reserved it, but that reservation died with the process.
+            session_registry.reserve_external(rec.session_name)
+    return adopted
 
 
 def resolve_cli_executable(cli_id: str) -> str:
@@ -260,13 +700,27 @@ async def run_headless(
 
     - Reserve the slot via ``session_registry.reserve_external`` (caller's
       responsibility, done in :func:`headless_transport`).
-    - Track the subprocess in :data:`_headless_processes` for the liveness
-      source.
+    - Spawn with ``start_new_session=True`` so the subprocess is its own
+      session leader — a backend exit (``cockpit.sh restart`` / SIGTERM to
+      the parent pgid) does NOT propagate. This is the ownership detach
+      the worktree/tmux transport already enjoys for free (kaart
+      ``a450df1a…`` AC 1).
+    - Write a durable pidfile (``<worktree>/.cockpit-headless.json``)
+      holding pid + worktree + log path. The pidfile is the source of
+      truth that survives a backend restart; :func:`adopt_headless_runs`
+      reads it at startup and re-attaches the run to the in-memory
+      registry BEFORE the reaper's first tick.
+    - Track the subprocess in :data:`_headless_processes` (as a
+      :class:`HeadlessRunRecord`) for the liveness source.
     - Drain the stream line by line, parse each into a
       :class:`StructuredEvent`, and dispatch via the local ``_on_event``
-      callback (rate-limit handling is its own function so it's testable in
-      isolation).
-    - Release the slot on exit, regardless of return code.
+      callback (rate-limit handling is its own function so it's testable
+      in isolation). Each parsed event is also written to the on-disk
+      JSONL log so a restart can inspect what happened and the cap bounds
+      a pathological event loop.
+    - Release the slot on exit, regardless of return code. Remove the
+      pidfile only when the recorded pid still matches our pid (a stale
+      or rewritten pidfile is left alone — a fresh run owns that record).
     """
     argv = _build_argv(
         resolve_cli_executable(cli_id), prompt, skip_permissions=skip_permissions,
@@ -280,17 +734,34 @@ async def run_headless(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
+        start_new_session=True,  # kaart a450df1a… AC 1
     )
-    _headless_processes[session_name] = proc
+    record = HeadlessRunRecord(
+        session_name=session_name,
+        pid=proc.pid,
+        worktree_path=directory,
+        log_path=_log_path(directory),
+        started_at=time.time(),
+    )
+    # Project root is two parents up from the worktree:
+    #   <project>/.claude/worktrees/<session_name>
+    # Remembering it makes the run visible to ``live_headless_sessions``
+    # immediately (without waiting for the next adoption cycle).
+    _remember_project_root(Path(directory).parent.parent.parent)
+    _headless_processes[session_name] = record
+    _write_pidfile(record)  # durable; survives backend restart
+    log_writer = EventLogWriter(record.log_path)
     try:
-        returncode = await _consume_stream(proc, session_name, provider=provider)
+        returncode = await _consume_stream(
+            proc, session_name, provider=provider, log_writer=log_writer,
+        )
         return {
             "session_name": session_name,
             "transport": "headless",
             "exit_code": returncode,
         }
     finally:
-        # AC 1 (kanban card d373be64…): every exit path must leave the
+        # AC 1 (kaart d373be64…): every exit path must leave the
         # subprocess gone — ``_consume_stream``'s own finally already
         # terminates the child on the unexpected-exception path, but
         # there's a narrow window where a buggy code path inside
@@ -302,8 +773,11 @@ async def run_headless(
         try:
             if proc.returncode is None:
                 try:
-                    proc.terminate()
-                except ProcessLookupError:
+                    # Kill the entire process group (subprocess is its
+                    # own session leader, so PGID == PID). Same pattern
+                    # as ``app.services.sandcastle_service._signal_process_group``.
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
                     pass
             if proc.returncode is None:
                 try:
@@ -314,13 +788,21 @@ async def run_headless(
                         session_name,
                     )
                     try:
-                        proc.kill()
-                    except ProcessLookupError:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
                         pass
                     await proc.wait()
         except Exception:
             logger.exception(
                 "headless %s: error during subprocess cleanup", session_name,
+            )
+        # Close the event-log writer BEFORE the registry/pidfile cleanup
+        # so the log is flushed to disk in case adopt reads it.
+        try:
+            log_writer.close()
+        except Exception:
+            logger.exception(
+                "headless %s: error closing event log writer", session_name,
             )
         # Drop from the registry and release the slot ONLY after the proc
         # is reaped. Releasing earlier would create a narrow window where
@@ -329,6 +811,10 @@ async def run_headless(
         # state the reaper uses to trigger a re-dispatch, and exactly
         # the failure mode this whole card exists to prevent.
         _headless_processes.pop(session_name, None)
+        # Remove the pidfile only if our pid still owns it. After a
+        # successful run this is true; if a fresh run somehow took over
+        # this worktree, leave the new record alone.
+        _remove_pidfile(directory, expected_pid=proc.pid)
         session_registry.release_external(session_name)
 
 
@@ -372,12 +858,21 @@ def _build_env(*, provider: str, model: str | None,
 
 
 async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
-                          *, provider: str) -> int:
+                          *, provider: str,
+                          log_writer: "EventLogWriter | None" = None) -> int:
     """Drain the subprocess's stdout, parse each JSON line, dispatch via _on_event.
 
     Reads until EOF; collects stderr in parallel so a hang in the parser
     doesn't leak a child. The first ``readline`` after EOF returns ``b""`` so
     the loop terminates naturally.
+
+    Each parsed event is also written verbatim to ``log_writer`` (when
+    supplied) so a backend restart can inspect what happened via the
+    durable on-disk log. Events that fail to map/parse are NOT written
+    to the log — they were already logged with the payload for debugging,
+    and adding a parallel "raw" log would double-write without adding
+    information (analyse §6.2 AC 4 — the log is for visible events, not
+    for the noise we already dropped).
 
     A single unmapped/parse-error event is logged and skipped (same shape as
     the non-JSON-line tolerance a few lines above) — a Claude-side
@@ -430,6 +925,20 @@ async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
                     session_name, payload, type(exc).__name__, exc,
                 )
                 continue
+            # Persist the raw event line to the on-disk log BEFORE
+            # dispatching, so even if _on_event raises unexpectedly the
+            # event is on disk for post-mortem inspection. ``line`` is the
+            # already-stripped raw JSON the subprocess emitted; writing
+            # the raw line keeps the log shape identical to what a
+            # postmortem reader would replay.
+            if log_writer is not None:
+                try:
+                    log_writer.append(line)
+                except Exception:
+                    logger.exception(
+                        "headless %s: could not append event to log",
+                        session_name,
+                    )
             await _on_event(structured, session_name=session_name, provider=provider)
         returncode = await proc.wait()
     finally:
@@ -440,11 +949,15 @@ async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
         # a SIGTERM-ignoring child can't keep the stderr pipe open and
         # hang the drain below. Cleanup errors are caught and logged so
         # they don't replace the original exception propagating up.
+        # Signals the process group (subprocess is its own session
+        # leader via start_new_session=True) so any grandchildren also
+        # get terminated — same pattern as
+        # ``app.services.sandcastle_service._signal_process_group``.
         try:
             if proc.returncode is None:
                 try:
-                    proc.terminate()
-                except ProcessLookupError:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
                     pass
             if proc.returncode is None:
                 try:
@@ -455,8 +968,8 @@ async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
                         session_name,
                     )
                     try:
-                        proc.kill()
-                    except ProcessLookupError:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
                         pass
                     await proc.wait()
         except Exception:

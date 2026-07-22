@@ -17,6 +17,7 @@ Two layers:
   tmux-path's ``FALLBACK_PAUSE_HOURS`` guess.
 """
 import asyncio
+import time
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
@@ -104,33 +105,95 @@ def test_headless_transport_raises_with_counter_ceiling_message(monkeypatch):
 # ---- liveness source -------------------------------------------------------
 
 
-def test_live_headless_sessions_returns_only_running_processes(monkeypatch):
-    # 3 names in the registry, 2 still alive (returncode is None), 1 finished
-    # — only the alive ones count toward liveness.
-    class FakeProc:
-        def __init__(self, returncode):
-            self.returncode = returncode
+def test_live_headless_sessions_returns_only_running_processes(tmp_path):
+    # The new liveness source reads durable pidfiles + OS-level checks
+    # (kaart a450df1a… AC 2). Two live subprocesses + one pidfile pointing
+    # at a dead pid — only the live ones count toward liveness.
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
 
-    monkeypatch.setattr(hr, "_headless_processes", {
-        "k-hl-1": FakeProc(None),
-        "k-hl-2": FakeProc(None),
-        "k-hl-3": FakeProc(0),
-    })
-    assert hr.live_headless_sessions() == {"k-hl-1", "k-hl-2"}
+    from pathlib import Path
+
+    project_root = tmp_path / "proj"
+    wt_1 = project_root / ".claude" / "worktrees" / "k-hl-1"
+    wt_2 = project_root / ".claude" / "worktrees" / "k-hl-2"
+    wt_3 = project_root / ".claude" / "worktrees" / "k-hl-3"
+    for wt in (wt_1, wt_2, wt_3):
+        wt.mkdir(parents=True)
+
+    procs = []
+    try:
+        for wt in (wt_1, wt_2):
+            proc = subprocess.Popen(
+                [sys.executable, "-c",
+                 "import time, sys; sys.stdout.write('READY\\n'); sys.stdout.flush(); time.sleep(120)"],
+                cwd=str(wt),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            # Wait for READY.
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                line = proc.stdout.readline()
+                if line.strip() == b"READY":
+                    break
+            procs.append(proc)
+            (wt / hr._HEADLESS_PIDFILE_NAME).write_text(json.dumps({
+                "session_name": wt.name,
+                "pid": proc.pid,
+                "worktree_path": str(wt),
+                "log_path": str(wt / "events.jsonl"),
+                "started_at": time.time(),
+            }))
+        # Dead pidfile — guaranteed not to be a real process.
+        (wt_3 / hr._HEADLESS_PIDFILE_NAME).write_text(json.dumps({
+            "session_name": "k-hl-3",
+            "pid": 2**30,
+            "worktree_path": str(wt_3),
+            "log_path": str(wt_3 / "events.jsonl"),
+            "started_at": time.time(),
+        }))
+
+        hr._remember_project_root(str(project_root))
+        hr._headless_processes.clear()
+        assert hr.live_headless_sessions() == {"k-hl-1", "k-hl-2"}
+    finally:
+        for proc in procs:
+            try:
+                os.killpg(proc.pid, 15)  # SIGTERM
+                proc.wait(timeout=2.0)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(proc.pid, 9)
+                except ProcessLookupError:
+                    pass
 
 
 def test_live_headless_sessions_empty_on_failure(monkeypatch):
     # The defensive contract: a transient registry glitch yields an empty
     # set (so the reaper is *more* eager, never less). Same fail-open shape
     # as _live_sandcastle_sessions.
-    def _boom():
+    def _boom(*args, **kwargs):
         raise RuntimeError("registry exploded")
-    monkeypatch.setattr(hr, "_headless_processes", property(_boom))
+    monkeypatch.setattr(hr, "_known_worktree_dirs", _boom)
     assert hr.live_headless_sessions() == set()
 
 
 def test_live_headless_sessions_empty_when_registry_empty():
-    assert hr.live_headless_sessions() == set()
+    # No project roots registered → no worktrees to scan → empty set.
+    hr._headless_processes.clear()
+    # Don't clear _known_project_roots globally — that's test-fixture state
+    # shared with sibling tests. Just verify the no-input case.
+    saved = hr._known_project_roots.copy()
+    hr._known_project_roots.clear()
+    try:
+        assert hr.live_headless_sessions() == set()
+    finally:
+        hr._known_project_roots.update(saved)
 
 
 # ---- kill_headless_session (human-takeover promotion) ----------------------
@@ -142,34 +205,80 @@ def test_live_headless_sessions_empty_when_registry_empty():
 # registry itself.
 
 
-def test_kill_headless_session_terminates_live_process(monkeypatch):
-    class FakeProc:
-        def __init__(self):
-            self.returncode = None
-            self.terminated = False
+def test_kill_headless_session_terminates_live_process(tmp_path):
+    # The new kill path uses os.killpg(rec.pid, SIGTERM). It only acts on a
+    # real live subprocess; the registry holds HeadlessRunRecord (pid +
+    # worktree path) and the OS check enforces "is the pid actually ours?"
+    import os
+    import subprocess
+    import sys
+    import time
 
-        def terminate(self):
-            self.terminated = True
+    from app.services.scheduling.session_registry import session_registry
 
-    proc = FakeProc()
-    monkeypatch.setattr(hr, "_headless_processes", {"k-hl-1": proc})
-    assert hr.kill_headless_session("k-hl-1") is True
-    assert proc.terminated is True
+    # Reserve the slot so the kill path's session_registry bookkeeping is honest.
+    session_registry.reserve_external("k-hl-1")
+    try:
+        wt = tmp_path / "wt"
+        wt.mkdir()
+        proc = subprocess.Popen(
+            [sys.executable, "-c",
+             "import time, sys; sys.stdout.write('READY\\n'); sys.stdout.flush(); time.sleep(60)"],
+            cwd=str(wt),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                line = proc.stdout.readline()
+                if line.strip() == b"READY":
+                    break
+            rec = hr.HeadlessRunRecord(
+                session_name="k-hl-1",
+                pid=proc.pid,
+                worktree_path=str(wt),
+                log_path=wt / "events.jsonl",
+                started_at=time.time(),
+            )
+            hr._headless_processes["k-hl-1"] = rec
+
+            assert hr.kill_headless_session("k-hl-1") is True
+            # Wait for the signal to land (subprocess exits via SIGTERM).
+            proc.wait(timeout=5.0)
+        finally:
+            if proc.poll() is None:
+                try:
+                    os.killpg(proc.pid, 9)
+                except ProcessLookupError:
+                    pass
+    finally:
+        session_registry.release_external("k-hl-1")
 
 
 def test_kill_headless_session_false_when_unknown_session():
     assert hr.kill_headless_session("k-hl-does-not-exist") is False
 
 
-def test_kill_headless_session_false_when_already_exited(monkeypatch):
-    class FakeProc:
-        def __init__(self):
-            self.returncode = 0
+def test_kill_headless_session_false_when_already_exited(tmp_path):
+    # Pidfile points at a dead pid → the OS liveness check returns False →
+    # kill_headless_session returns False without signaling anything.
+    import json
+    from pathlib import Path
 
-        def terminate(self):
-            raise AssertionError("must not terminate an already-exited process")
-
-    monkeypatch.setattr(hr, "_headless_processes", {"k-hl-2": FakeProc()})
+    project_root = tmp_path / "proj"
+    wt = project_root / ".claude" / "worktrees" / "k-hl-2"
+    wt.mkdir(parents=True)
+    (wt / hr._HEADLESS_PIDFILE_NAME).write_text(json.dumps({
+        "session_name": "k-hl-2",
+        "pid": 2**30,  # guaranteed dead
+        "worktree_path": str(wt),
+        "log_path": str(wt / "events.jsonl"),
+        "started_at": 0.0,
+    }))
+    hr._remember_project_root(str(project_root))
+    hr._headless_processes.clear()
     assert hr.kill_headless_session("k-hl-2") is False
 
 
@@ -424,15 +533,36 @@ async def test_full_dispatch_cycle_no_reap_loop(monkeypatch, tmp_path, capsys):
                         lambda cli_id: stdlib_sys.executable)
 
     # 3. Run a single headless subprocess via the runner's internals.
+    # Use a real worktree layout (project_root/.claude/worktrees/<name>) so
+    # live_headless_sessions()'s pidfile scan finds the run by name.
+    project_root = tmp_path / "proj"
+    worktree = project_root / ".claude" / "worktrees" / "k-fixture-1"
+    worktree.mkdir(parents=True)
     proc = await asyncio.create_subprocess_exec(
         stdlib_sys.executable, str(fake_cli),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=str(worktree),
+        start_new_session=True,
     )
     # Register it as if headless_runner had spawned it, then consume the stream
     # via the parser. We do this manually here to exercise the public surface
-    # rather than the private _run_async path.
-    hr._headless_processes["k-fixture-1"] = proc
+    # rather than the private _run_async path. The new registry holds a
+    # HeadlessRunRecord (pid + worktree + log path); live_headless_sessions
+    # OS-checks each record, so we must point it at the real subprocess.
+    rec = hr.HeadlessRunRecord(
+        session_name="k-fixture-1",
+        pid=proc.pid,
+        worktree_path=str(worktree),
+        log_path=worktree / "events.jsonl",
+        started_at=time.time(),
+    )
+    hr._headless_processes["k-fixture-1"] = rec
+    # Also write a durable pidfile and register the project root so
+    # live_headless_sessions() (which now reads pidfiles, not memory)
+    # can find this run.
+    hr._write_pidfile(rec)
+    hr._remember_project_root(str(project_root))
 
     # 4. While the proc is still running, the liveness source must report it.
     live = hr.live_headless_sessions()
