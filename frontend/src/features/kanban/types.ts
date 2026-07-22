@@ -306,6 +306,12 @@ export interface DispatchPauseStatus {
   // use site. Names are the same provider IDs the column override uses
   // (``PROVIDER_LABELS`` maps them to display labels).
   paused_providers?: string[];
+  // Operator-toggled indefinite pause per subscription (kaart f056b2888a…).
+  // Independent from both ``paused`` (auto-tripped global) and
+  // ``paused_providers`` (auto-tripped per-provider) — a manual toggle has
+  // no deadline and coexists with the time-based slots. Optional for the same
+  // reason as ``paused_providers``: treat undefined as [] at the use site.
+  manually_paused_providers?: string[];
 }
 
 // Mirrors backend/app/services/run_service.py RunInstance. Used by the

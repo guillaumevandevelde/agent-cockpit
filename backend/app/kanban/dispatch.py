@@ -4414,6 +4414,29 @@ async def dispatch_project(
                 cards = [c for c in cards if c.id != card.id]
                 continue
 
+        # Manual per-subscription pause (kaart f056b2888a…): the operator can
+        # toggle a provider off in the toolbar, which must hold back every
+        # card that would have spawned against that subscription — without
+        # claiming or moving the card, so the resume path picks it up unchanged
+        # once the operator toggles it back on. Resolved via the same
+        # precedence the spawn uses (per-card override → column default →
+        # PROVIDER_ANTHROPIC), so a card whose column_overrides pin provider=X
+        # is gated against X, not against the column's default.
+        from app.kanban.dispatch_pause import is_manually_paused
+        card_provider = await _provider_for_card(
+            session, project_key, card, target_column,
+        )
+        if card_provider is not None and await is_manually_paused(
+            session, card_provider,
+        ):
+            logger.info(
+                "dispatch_project: skipping card %s (target_column=%s, "
+                "provider=%s) — manually paused by operator",
+                card.id, target_column, card_provider,
+            )
+            cards = [c for c in cards if c.id != card.id]
+            continue
+
         # Skip child cards whose parents aren't Done yet — _next_card is rank/
         # priority-aware but doesn't know about depends_on, so the dep filter
         # is the dispatcher's responsibility (see app.kanban.dep_resolver).
@@ -4809,6 +4832,22 @@ async def dispatch_all_pending(
             col_counts = _active_session_count_by_column(cards)
             if col_counts.get(target_column, 0) >= col_cap:
                 continue
+        # Manual per-subscription pause (kaart f056b2888a…): the "Dispatch all"
+        # button must not bypass the operator-toggle either, otherwise the
+        # operator would toggle a provider off and see it immediately
+        # re-engaged by the bulk path. Same provider-resolution precedence
+        # as the auto-tick gate above.
+        from app.kanban.dispatch_pause import is_manually_paused as _imp
+        card_provider = await _provider_for_card(
+            session, project_key, card, target_column,
+        )
+        if card_provider is not None and await _imp(session, card_provider):
+            logger.info(
+                "dispatch_all_pending: skipping card %s "
+                "(target_column=%s, provider=%s) — manually paused",
+                card.id, target_column, card_provider,
+            )
+            continue
         try:
             card_transport = get_transport_for_card(card, transport)
             res = await _run_card(

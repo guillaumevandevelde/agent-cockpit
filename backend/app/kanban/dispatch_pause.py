@@ -18,6 +18,14 @@ Keys:
         feature splits the single global slot into independent slots per
         Claude provider -- ``anthropic``, ``bedrock``, ``minimax`` -- so a
         bedrock-side outage does not freeze anthropic traffic).
+    ``dispatch_paused_manual:<provider>`` -- operator-toggled indefinite pause
+        per subscription. Distinct from the time-based slots above: the value
+        is a boolean flag (``"1"`` = paused), not a deadline, because the
+        operator expects "pause all anthropic dispatches until I say
+        otherwise" rather than "until <future timestamp>". An auto-tripped
+        time-based limit and a manual operator override can coexist on the
+        same provider; either one being active keeps dispatch off (see
+        ``dispatch.py:_dispatch_project``).
 """
 from __future__ import annotations
 
@@ -29,6 +37,7 @@ from app.kanban.models import KanbanMeta
 
 _GLOBAL_PAUSE_KEY = "dispatch_paused_until"
 _PROVIDER_PAUSE_PREFIX = "dispatch_paused_until:"
+_MANUAL_PAUSE_PREFIX = "dispatch_paused_manual:"
 
 
 def _key_for(provider: str | None) -> str:
@@ -101,16 +110,18 @@ async def is_dispatch_paused(session, *, provider: str | None = None) -> bool:
 
 
 async def clear_all_pauses(session) -> None:
-    """Wipe every pause slot -- both the legacy global key and every
-    per-provider key. Used by the manual-resume DELETE route so a single
-    operator click un-freezes the whole device, regardless of which providers
-    currently have a per-provider deadline."""
+    """Wipe every pause slot -- the legacy global key, every per-provider
+    time-based key, and every per-provider manual key. Used by the
+    manual-resume DELETE route so a single operator click un-freezes the
+    whole device, regardless of whether the pause was triggered by an
+    auto-tripped usage limit, an operator toggle, or both."""
     # Pull all pause rows in one query so we don't trigger a per-key
     # round-trip and so a brand-new provider (one whose slot was created by
     # another writer mid-call) is still cleared.
     stmt = select(KanbanMeta).where(
         (KanbanMeta.key == _GLOBAL_PAUSE_KEY)
         | KanbanMeta.key.like(f"{_PROVIDER_PAUSE_PREFIX}%")
+        | KanbanMeta.key.like(f"{_MANUAL_PAUSE_PREFIX}%")
     )
     rows = (await session.execute(stmt)).scalars().all()
     for row in rows:
@@ -144,3 +155,63 @@ async def list_paused_providers(session) -> list[str]:
         if deadline > now:
             result.append(row.key[len(_PROVIDER_PAUSE_PREFIX):])
     return result
+
+
+# ---- manual per-subscription pause (kaart f056b2888a…) ----------------------
+#
+# Independent from the time-based per-provider pause above: an operator who
+# clicks "pause anthropic dispatches" expects the gate to stay off until
+# they unpause it (no deadline), so the value is a boolean flag rather than
+# a deadline. The auto-tripped time-based pause and the manual operator
+# override can coexist on the same provider -- e.g. a usage-limit hit on
+# anthropic plus an operator who paused bedrock "while we're at it" -- and
+# either being active keeps dispatch off (see ``dispatch.py``).
+
+
+def _manual_key_for(provider: str) -> str:
+    """Resolve the KanbanMeta key for a manual pause on ``provider``."""
+    return f"{_MANUAL_PAUSE_PREFIX}{provider}"
+
+
+async def is_manually_paused(session, provider: str) -> bool:
+    """True while the operator has toggled on an indefinite pause for
+    ``provider``. Distinct from ``is_dispatch_paused(provider=...)``, which
+    consults the time-based slot only -- the dispatch gate combines both."""
+    row = await session.get(KanbanMeta, _manual_key_for(provider))
+    return row is not None and row.value == "1"
+
+
+async def set_manual_pause(session, provider: str, paused: bool) -> None:
+    """Toggle the manual pause for ``provider``. ``paused=True`` writes the
+    key (value ``"1"``); ``paused=False`` deletes it. Idempotent: setting an
+    already-set provider to ``True`` is a no-op, and clearing an unset
+    provider is a no-op. The time-based per-provider pause slot is
+    independent and untouched by this call."""
+    key = _manual_key_for(provider)
+    row = await session.get(KanbanMeta, key)
+    if not paused:
+        if row is not None:
+            await session.delete(row)
+            await session.flush()
+        return
+    if row is None:
+        session.add(KanbanMeta(key=key, value="1"))
+    elif row.value != "1":
+        row.value = "1"
+    await session.flush()
+
+
+async def list_manually_paused_providers(session) -> list[str]:
+    """Names of providers whose manual pause is currently active. Used by
+    the GET route to populate ``manually_paused_providers`` so the frontend
+    banner can surface "anthropic is paused until you turn it back on"
+    distinctly from the time-based limit message."""
+    stmt = select(KanbanMeta).where(
+        KanbanMeta.key.like(f"{_MANUAL_PAUSE_PREFIX}%")
+    )
+    rows = (await session.execute(stmt)).scalars().all()
+    return [
+        row.key[len(_MANUAL_PAUSE_PREFIX):]
+        for row in rows
+        if row.value == "1"
+    ]

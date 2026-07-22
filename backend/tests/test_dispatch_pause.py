@@ -291,3 +291,156 @@ async def test_clear_one_per_provider_does_not_touch_others():
         ) is not None
         # And the legacy slot, if there was one, is also untouched.
         assert await dispatch_pause.get_paused_until(s) is None
+
+
+# ---- manual per-subscription pause (kaart f056b2888a…) ---------------------
+#
+# The auto-pause above is time-based (deadline stored in the value). The manual
+# pause is a separate boolean flag -- an operator clicks "pause all anthropic
+# dispatches until I say otherwise" and we hold dispatch off indefinitely.
+# Distinct KanbanMeta key (`dispatch_paused_manual:<provider>`) so the time-
+# based auto-pause and the indefinite manual pause stay independent slots.
+
+
+@pytest.mark.asyncio
+async def test_manual_pause_default_off_per_provider():
+    """is_manually_paused returns False for every provider by default; the
+    manual-pause slot is independent of the legacy / per-provider time-based
+    slots."""
+    async with KanbanSessionLocal() as s:
+        assert await dispatch_pause.is_manually_paused(s, "anthropic") is False
+        assert await dispatch_pause.is_manually_paused(s, "bedrock") is False
+        assert await dispatch_pause.is_manually_paused(s, "minimax") is False
+
+
+@pytest.mark.asyncio
+async def test_set_manual_pause_round_trips_and_is_independent_per_provider():
+    """set_manual_pause(paused=True) writes only that provider's slot;
+    other providers stay unpaused."""
+    async with KanbanSessionLocal() as s:
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        assert await dispatch_pause.is_manually_paused(s, "anthropic") is True
+        assert await dispatch_pause.is_manually_paused(s, "bedrock") is False
+        assert await dispatch_pause.is_manually_paused(s, "minimax") is False
+
+
+@pytest.mark.asyncio
+async def test_set_manual_pause_false_clears_only_that_provider():
+    """set_manual_pause(paused=False) is the toggle-off path: clears only
+    the named provider's slot. Other providers' manual pauses are untouched,
+    and the time-based slots are untouched too."""
+    async with KanbanSessionLocal() as s:
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await dispatch_pause.set_manual_pause(s, "bedrock", True)
+        # A coexisting time-based per-provider pause must survive a manual-toggle-off.
+        await dispatch_pause.set_paused_until(
+            s, datetime.now(UTC) + timedelta(minutes=10), provider="minimax"
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch_pause.set_manual_pause(s, "anthropic", False)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        assert await dispatch_pause.is_manually_paused(s, "anthropic") is False
+        # bedrock manual pause is preserved.
+        assert await dispatch_pause.is_manually_paused(s, "bedrock") is True
+        # And the time-based per-provider pause on minimax is preserved.
+        assert (
+            await dispatch_pause.get_paused_until(s, provider="minimax")
+            is not None
+        )
+
+
+@pytest.mark.asyncio
+async def test_manual_pause_does_not_collide_with_time_based_pause():
+    """Setting a manual pause for provider X must not touch its time-based
+    per-provider slot, and vice versa. The two slots coexist for the same
+    provider (e.g. an auto-tripped limit AND a manual operator override on
+    the same subscription) and either being active must not mask the other
+    in the read helpers."""
+    future = datetime.now(UTC) + timedelta(minutes=10)
+    async with KanbanSessionLocal() as s:
+        # Time-based on anthropic, manual on bedrock.
+        await dispatch_pause.set_paused_until(s, future, provider="anthropic")
+        await dispatch_pause.set_manual_pause(s, "bedrock", True)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        # Manual pause query on anthropic is False (only time-based is set).
+        assert await dispatch_pause.is_manually_paused(s, "anthropic") is False
+        # And the time-based query on bedrock is None (only manual is set).
+        assert (
+            await dispatch_pause.get_paused_until(s, provider="bedrock")
+            is None
+        )
+        # Each helper sees its own slot.
+        assert await dispatch_pause.is_dispatch_paused(
+            s, provider="anthropic"
+        ) is True
+        assert await dispatch_pause.is_manually_paused(s, "bedrock") is True
+
+
+@pytest.mark.asyncio
+async def test_list_manually_paused_providers_returns_active_set():
+    """list_manually_paused_providers returns the provider names whose
+    manual-pause slot is set (value != "1" treated as 'off')."""
+    async with KanbanSessionLocal() as s:
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await dispatch_pause.set_manual_pause(s, "bedrock", True)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        assert sorted(
+            await dispatch_pause.list_manually_paused_providers(s)
+        ) == ["anthropic", "bedrock"]
+
+
+@pytest.mark.asyncio
+async def test_list_manually_paused_providers_empty_by_default():
+    """No manual pauses means an empty list, not None or a sentinel."""
+    async with KanbanSessionLocal() as s:
+        assert (
+            await dispatch_pause.list_manually_paused_providers(s) == []
+        )
+
+
+@pytest.mark.asyncio
+async def test_clear_all_pauses_also_clears_manual_per_provider():
+    """clear_all_pauses wipes every pause slot including the manual
+    per-provider keys -- the existing "Resume auto-dispatch now" button must
+    un-freeze a manually-paused subscription as well as a time-based one."""
+    future = datetime.now(UTC) + timedelta(minutes=10)
+
+    async with KanbanSessionLocal() as s:
+        # Time-based slots across legacy + two providers.
+        await dispatch_pause.set_paused_until(s, future)  # legacy global
+        await dispatch_pause.set_paused_until(s, future, provider="anthropic")
+        # Manual slots across two providers.
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await dispatch_pause.set_manual_pause(s, "bedrock", True)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch_pause.clear_all_pauses(s)
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        # Time-based slots all cleared.
+        assert await dispatch_pause.get_paused_until(s) is None
+        assert (
+            await dispatch_pause.get_paused_until(s, provider="anthropic")
+            is None
+        )
+        # Manual slots all cleared.
+        assert await dispatch_pause.is_manually_paused(s, "anthropic") is False
+        assert await dispatch_pause.is_manually_paused(s, "bedrock") is False
+        # And the listing helpers reflect the clean state.
+        assert await dispatch_pause.list_paused_providers(s) == []
+        assert (
+            await dispatch_pause.list_manually_paused_providers(s) == []
+        )

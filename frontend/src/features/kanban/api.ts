@@ -298,6 +298,27 @@ export const kanbanApi = {
       method: "DELETE",
     }),
 
+  // Kaart f056b2888a…: toggle the operator manual pause for one subscription.
+  // ``paused=true`` writes the slot; ``paused=false`` clears it. Returns the
+  // updated ``manually_paused_providers`` list so the dialog can refresh
+  // without a follow-up GET round-trip.
+  setSubscriptionPause: (
+    provider: string,
+    paused: boolean,
+  ): Promise<{
+    provider: string;
+    paused: boolean;
+    manually_paused_providers: string[];
+  }> =>
+    apiClient<{
+      provider: string;
+      paused: boolean;
+      manually_paused_providers: string[];
+    }>(`${BASE}/dispatch-pause/subscription/${encodeURIComponent(provider)}`, {
+      method: "PUT",
+      body: JSON.stringify({ paused }),
+    }),
+
   enable: (projectPath: string, slug?: string): Promise<{ project_key: string }> =>
     apiClient<{ project_key: string }>(`${BASE}/enable`, {
       method: "POST",

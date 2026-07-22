@@ -1336,9 +1336,13 @@ async def get_dispatch_pause():
         paused = await dispatch_pause.is_dispatch_paused(s)
         paused_until = await dispatch_pause.get_paused_until(s) if paused else None
         paused_providers = await dispatch_pause.list_paused_providers(s)
+        manually_paused_providers = (
+            await dispatch_pause.list_manually_paused_providers(s)
+        )
     return {"paused": paused,
             "paused_until": paused_until.isoformat() if paused_until else None,
-            "paused_providers": paused_providers}
+            "paused_providers": paused_providers,
+            "manually_paused_providers": manually_paused_providers}
 
 
 @router.delete("/dispatch-pause")
@@ -1367,6 +1371,69 @@ async def clear_dispatch_pause():
         await s.commit()
     logger.info("dispatch-pause manually cleared via API (was_paused=%s)", was_paused)
     return {"cleared": cleared, "was_paused": was_paused}
+
+
+# Mirrors the allow-list in app.kanban.subscription_pool._ALLOWED_POOL_PROVIDERS
+# so the manual-pause toggle uses the same vocabulary as the existing pool /
+# override surfaces. Adding a new provider is one edit in provider_env.py
+# plus this tuple -- three surfaces share the same source of truth.
+_MANUAL_PAUSE_PROVIDERS = (
+    "anthropic", "bedrock", "minimax", "anthropic-compatible",
+)
+
+
+@router.put("/dispatch-pause/subscription/{provider}")
+async def set_subscription_pause(provider: str, payload: dict):
+    """Toggle the operator manual pause for a single subscription
+    (kaart f056b2888a...).
+
+    Body: ``{"paused": bool}``. ``paused=true`` writes the
+    ``dispatch_paused_manual:<provider>`` slot; ``paused=false`` clears it.
+    Idempotent -- toggling the same direction twice is a no-op, and toggling
+    off an already-unpaused provider is a no-op.
+
+    Independent from the time-based ``dispatch_paused_until:<provider>`` slot:
+    an auto-tripped limit and an operator toggle can coexist on the same
+    provider, and either being active keeps dispatch off. The bulk-clear
+    DELETE /dispatch-pause wipes both kinds in one click.
+
+    Unknown providers are rejected with 422 so the operator sees the
+    rejection at toggle time -- and the dispatch gate never queries an
+    unknown subscription.
+    """
+    if provider not in _MANUAL_PAUSE_PROVIDERS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"unknown provider: {provider!r}; "
+            f"expected one of {list(_MANUAL_PAUSE_PROVIDERS)}",
+        )
+    if not isinstance(payload, dict) or "paused" not in payload:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "body must be a JSON object with a 'paused' boolean",
+        )
+    paused = payload["paused"]
+    if not isinstance(paused, bool):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "'paused' must be a JSON boolean",
+        )
+    from app.kanban import dispatch_pause
+    async with KanbanSessionLocal() as s:
+        await dispatch_pause.set_manual_pause(s, provider, paused)
+        await s.commit()
+        manually_paused_providers = (
+            await dispatch_pause.list_manually_paused_providers(s)
+        )
+    logger.info(
+        "dispatch-pause subscription manually set via API "
+        "(provider=%s, paused=%s)", provider, paused,
+    )
+    return {
+        "provider": provider,
+        "paused": paused,
+        "manually_paused_providers": manually_paused_providers,
+    }
 
 
 @router.get("/shipmode")
