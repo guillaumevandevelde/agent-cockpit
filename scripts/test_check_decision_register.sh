@@ -169,6 +169,33 @@ out=$(bash "$SUT" --check-headers --strict 2>&1); rc=$?
 check "real tree --check-headers --strict → exit 0" '[ "$rc" -eq 0 ]'
 
 # ----------------------------------------------------------------------------
+echo "Task 13: --check-headers warning count matches the listed-doc count (regression: 2x off)"
+# Three docs each missing Datum → all three should be reported, and the
+# summary line must say "3" (not 6). Regression for the case where the
+# header_mismatches array was populated with two elements per doc, so
+# ${#header_mismatches[@]} was always 2× the actual count.
+multi="$TMP/multi"; mkdir -p "$multi"
+{
+  echo '# reg'
+  echo
+  echo '| d | v | u | [`a-decision.md`](./a-decision.md) | x |'
+  echo '| d | v | u | [`b-decision.md`](./b-decision.md) | x |'
+  echo '| d | v | u | [`c-decision.md`](./c-decision.md) | x |'
+} > "$multi/decisions.md"
+for n in a b c; do
+  cat > "$multi/${n}-decision.md" <<EOF
+# Title
+**Status:** besloten
+**Kaart:** \`abc12345\`
+**Uitkomst:** GO.
+EOF
+done
+out=$(DECISIONS_DIR="$multi" bash "$SUT" --check-headers 2>&1)
+check "multi → WARNING count is 3 (not 6)" 'echo "$out" | grep -qE "WARNING: 3 decision doc"'
+check "multi → does NOT report 6" '! echo "$out" | grep -qE "WARNING: 6 decision doc"'
+check "multi → exactly 3 list lines" '[ "$(echo "$out" | grep -cE "^  - .+-decision\.md  \(")" -eq 3 ]'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
