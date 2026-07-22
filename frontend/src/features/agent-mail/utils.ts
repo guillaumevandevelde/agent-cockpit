@@ -66,8 +66,8 @@ export function wakeStateLabel(state: string): string {
 }
 
 export function wakeStateTitle(state: string): string {
-  if (state === 'wakeable') return 'Claude Cockpit has a wake path for this member.'
-  if (state === 'delivered_waiting') return 'Messages are delivered, but Claude Cockpit cannot wake this visible run.'
+  if (state === 'wakeable') return 'Agent Cockpit has a wake path for this member.'
+  if (state === 'delivered_waiting') return 'Messages are delivered, but Agent Cockpit cannot wake this visible run.'
   if (state === 'offline') return 'No live run is available for this member.'
   return state
 }

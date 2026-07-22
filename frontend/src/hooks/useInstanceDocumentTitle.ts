@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 import type { InstanceIdentity } from '@/types/status'
 
-const BASE_TITLE = 'Claude Cockpit'
+const BASE_TITLE = 'Agent Cockpit'
 
 export function useInstanceDocumentTitle(instance?: InstanceIdentity | null) {
   useEffect(() => {

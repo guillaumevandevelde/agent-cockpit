@@ -82,7 +82,7 @@ export function InstallTab({
     if (confirming === 'codex-apply') {
       return {
         title: 'Install Agent Mail hooks for Codex',
-        description: 'A backup is attempted before Claude Cockpit installs the Codex lifecycle hooks.',
+        description: 'A backup is attempted before Agent Cockpit installs the Codex lifecycle hooks.',
         mutations: [
           `${status.codex_hooks_path || '~/.codex/hooks.json'}: add Agent Mail SessionStart and UserPromptSubmit hooks`,
           `Hook shim: ${status.python_path} ${status.codex_hook_shim_path}`,
@@ -93,7 +93,7 @@ export function InstallTab({
     if (confirming === 'codex-uninstall') {
       return {
         title: 'Remove Agent Mail hooks from Codex',
-        description: 'A backup is attempted before Claude Cockpit removes the managed hooks.',
+        description: 'A backup is attempted before Agent Cockpit removes the managed hooks.',
         mutations: [`${status.codex_hooks_path || '~/.codex/hooks.json'}: remove Agent Mail hook commands`],
         run: onUninstallCodex,
       }

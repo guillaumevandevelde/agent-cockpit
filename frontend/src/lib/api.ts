@@ -29,7 +29,7 @@ export async function apiFetch(url: string, options?: RequestInit): Promise<Resp
     return fetch(url, { ...options, headers: apiHeaders(options?.headers) })
   }
 
-  const token = window.prompt('Claude Cockpit API token')
+  const token = window.prompt('Agent Cockpit API token')
   if (!token) return response
 
   window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token)

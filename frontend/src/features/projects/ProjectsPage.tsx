@@ -19,7 +19,7 @@ import { RefreshButton } from '@/components/shared/RefreshButton';
 // get a project into the list: "birth" (spec-driven intake → Promote) versus
 // "track" (Add Folder for an existing directory).
 const SPEC_DRIVEN_FLOW_DOC_URL =
-  'https://github.com/guillaumevandevelde/claude-cockpit/blob/master/docs/cockpit/new-project-startup-flow.md';
+  'https://github.com/guillaumevandevelde/agent-cockpit/blob/master/docs/cockpit/new-project-startup-flow.md';
 
 export function ProjectsPage() {
   const { projects, loading, error, fetchProjects } = useProjectContext();

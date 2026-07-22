@@ -2,6 +2,7 @@ import { Terminal, Radio, AlertCircle, Server } from "lucide-react";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { AttentionToggle } from "@/components/ui/attention-toggle";
 import { Badge } from "@/components/ui/badge";
+import { CockpitLogo } from "@/components/shared/CockpitLogo";
 import { useSystemStatus } from "@/hooks/useSystemStatus";
 import { useInstanceDocumentTitle } from "@/hooks/useInstanceDocumentTitle";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -20,7 +21,7 @@ export function Header() {
 
   const instanceTitle = instance
     ? [
-        `Claude Cockpit instance: ${instance.name}`,
+        `Agent Cockpit instance: ${instance.name}`,
         `Hostname: ${instance.hostname}`,
         `Opened from: ${typeof window === "undefined" ? "unknown" : window.location.host}`,
       ].join("\n")
@@ -34,13 +35,9 @@ export function Header() {
     <header className={cn("border-b bg-background", instance && "border-t-4", instance && accentClasses.headerBorder)}>
       <div className="flex h-16 items-center justify-between px-6">
         <div className="flex items-center gap-3">
-          <img
-            src="/claude-cockpit-logo.svg"
-            alt="Claude Cockpit"
-            className="h-10 w-10"
-          />
+          <CockpitLogo className="h-10 w-10 text-primary" />
           <div>
-            <h1 className="text-2xl font-bold text-primary leading-tight">Claude Cockpit</h1>
+            <h1 className="text-2xl font-bold text-primary leading-tight">Agent Cockpit</h1>
             <p className="text-xs text-muted-foreground">Mission control for your local agents</p>
           </div>
         </div>

@@ -44,7 +44,7 @@ import type {
 import { toast } from 'sonner'
 
 const RISK_CLASS_OPTIONS: { value: RiskClass; label: string }[] = [
-  { value: 'meta', label: 'meta — claude-cockpit itself' },
+  { value: 'meta', label: 'meta — agent-cockpit itself' },
   { value: 'product-staging', label: 'product-staging — safe default' },
   { value: 'product-prod', label: 'product-prod — released / customer-facing' },
   { value: 'untrusted', label: 'untrusted — sandboxed / hostile input' },
