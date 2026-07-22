@@ -111,6 +111,21 @@ async def lifespan(app: FastAPI):
         await recover_interrupted_sessions()
     except Exception:
         logger.exception("session recovery failed at startup")
+    # Adopt still-running headless transport runs from their durable pidfiles
+    # (kaart a450df1a…). MUST run before the dispatch scheduler/reaper so the
+    # reaper's first tick sees adopted runs as alive — otherwise every live
+    # headless run would look dead, the reaper would release the claims, and
+    # the dispatcher would re-spawn into the same worktree (the same ordering
+    # session_recovery above uses, applied to the third liveness source).
+    from app.kanban.dispatch import _registered_project_paths
+    from app.kanban.headless_runner import adopt_headless_runs
+    try:
+        paths = await _registered_project_paths()
+        adopted = adopt_headless_runs(list(paths.values()))
+        if adopted:
+            logger.info("adopted %d live headless run(s) after restart", adopted)
+    except Exception:
+        logger.exception("headless adoption failed at startup")
     # Install the Notification/Stop/UserPromptSubmit/SessionStart hooks that feed
     # the usage-limit auto-resume pipeline. These used to require a manual click
     # on the Scheduled Messages page, which meant the whole pipeline stayed dead
