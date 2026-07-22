@@ -164,7 +164,7 @@ export function UpdatesPage() {
             Updates
           </h1>
           <p className="text-muted-foreground">
-            One-click self-update voor Claude Cockpit
+            One-click self-update voor Agent Cockpit
           </p>
         </div>
       </div>

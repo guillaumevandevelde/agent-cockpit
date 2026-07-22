@@ -207,7 +207,7 @@ export function AgentMailPage() {
               <p>
                 {!hasConfiguredIntegration
                   ? 'Install the Agent Mail hooks for Claude Code or Codex, and create an MCP token on the MCP Server page, before agents can send, receive, or answer mailbox requests.'
-                  : 'Start or resume a run in a repository, then have it call agent_mail_whoami once so Claude Cockpit can attach it to a participant.'}
+                  : 'Start or resume a run in a repository, then have it call agent_mail_whoami once so Agent Cockpit can attach it to a participant.'}
               </p>
               <div className="flex shrink-0 flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => setHelpOpen(true)}>

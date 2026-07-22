@@ -139,7 +139,7 @@ export function MCPServerPage() {
           MCP Server
         </h1>
         <p className="text-muted-foreground mt-1">
-          Expose Claude Cockpit data to AI agents via the Model Context Protocol.
+          Expose Agent Cockpit data to AI agents via the Model Context Protocol.
         </p>
       </div>
 
@@ -172,7 +172,7 @@ export function MCPServerPage() {
             <pre className="bg-muted p-3 rounded text-xs overflow-x-auto">
 {`{
   "mcpServers": {
-    "claude-cockpit": {
+    "agent-cockpit": {
       "type": "http",
       "url": "${endpoint}",
       "headers": {

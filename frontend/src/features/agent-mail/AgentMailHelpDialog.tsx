@@ -58,7 +58,7 @@ export function AgentMailHelpDialog({ open, onOpenChange }: AgentMailHelpDialogP
           <HelpSection icon={Terminal} title="Non-tmux delivery">
             <p>
               Claude Code and Codex sessions outside tmux can receive mail through MCP, but
-              Claude Cockpit cannot wake their visible terminal session yet. Those messages stay
+              Agent Cockpit cannot wake their visible terminal session yet. Those messages stay
               unread until the run checks its inbox or reaches a hook boundary.
             </p>
           </HelpSection>
