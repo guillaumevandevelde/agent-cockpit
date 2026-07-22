@@ -113,25 +113,61 @@ altijd door.
    van de 4 docs zich nog als pure analyse presenteerden). **Geen retroactieve
    verplichting** — alleen het doc dat jouw kaart raakt; raakt je kaart geen
    analysedoc, sla je deze stap over.
-6. **Zelf-review via `iteration-loop` met preset `verify` (standaard)**:
-   draai de nieuwe `iteration-loop`-skill met preset `verify` (frontend
-   `npm run lint && npm run build`; backend `pytest` wordt niet lokaal
-   gedraaid — zie `git-ship` rationale) als end-of-card gate. De preset
-   is bewust tracked: per iteratie wordt een regel toegevoegd aan
-   `.claude/state/iteration-<card-id>.txt`, en bij `clean` wordt
-   `<loop-complete>` geëmit; bij een harde blocker `<loop-blocked>`. De
-   tag-emits zijn expliciet zichtbaar in de transcript — geen "kijk
-   zelf nog eens goed" onder tijdsdruk. Voor een diepere
-   kwaliteitssweep kan preset `simplify` (code-review effort=low) of
-   preset `investigate` (read-only sweep) gebruikt worden. Verander
-   nooit een test om een bug te maskeren. Komt er tijdens de targeted
-   run een failure uit die niet van jou lijkt? Draai de `iteration-loop`
-   skill met preset `pytest-attr` — die vergelijkt je branch-failures
-   met de master-baseline en classificeert ze als `pre-existing` / `NEW`
-   / `FIXED`, zodat je niet zelf hoeft te stash-en-vergelijken.
-   Voor `scripts/test_*.sh`-harnassen is de parallelle preset
-   `bash-test-attr` beschikbaar (gebruikt `scripts/baseline-bash-tests.sh`
-   + `scripts/compare-bash-tests.sh`).
+6. **Zelf-review via `iteration-loop`** — kies de preset op basis van wat
+   deze kaart aanraakt. **Niet blind `verify` draaien**: voor een
+   pure-scripts-kaart doet `verify` (frontend `npm run lint && npm run build`)
+   niets nuttigs, en de `pytest`-path is sowieso niet lokaal (zie
+   `git-ship` rationale). De preset is bewust tracked: per iteratie wordt
+   een regel toegevoegd aan `.claude/state/iteration-<card-id>.txt`, en bij
+   `clean` wordt `<loop-complete>` geëmit; bij een harde blocker
+   `<loop-blocked>`. De tag-emits zijn expliciet zichtbaar in de transcript
+   — geen "kijk zelf nog eens goed" onder tijdsdruk.
+
+   **Kies de preset naar wat de kaart raakt:**
+
+   - **`bash-test-attr` — default voor pure-scripts-kaarten.** Raakt je
+     kaart `scripts/test_*.sh` of een SUT in `scripts/`? Draai deze preset
+     als end-of-card gate (en níét `verify`). De preset draait
+     `scripts/baseline-bash-tests.sh` + `scripts/compare-bash-tests.sh`
+     in een detached worktree van `origin/master` en classificeert elke
+     `FAIL:`-regel als `pre-existing`, `NEW (your fault)` of
+     `FIXED by your changes`. De reden dat dit de default is voor
+     scripts-only: `verify` dekt hier geen enkel relevant pad — een
+     bash-harness-fail is geen frontend lint/build-issue, en backend
+     `pytest` is geen onderdeel van je kaart.
+
+   - **`verify` — default voor code/frontend-kaarten.** Raakt je kaart
+     `frontend/`, `backend/app/`, of een mix? Dan is `verify` de juiste
+     end-of-card gate: frontend `npm run lint && npm run build`; backend
+     `pytest` draait NIET lokaal op deze gedeelde box (zie `git-ship`
+     rationale — CI's `quality.yml` is de canonieke backend-gate).
+
+   - **`pytest-attr` — alleen voor backend-debug.** Als een
+     engineer-sessie expliciet een falende pytest aan het debuggen is,
+     gebruik deze preset. Draait `scripts/pytest-baseline.sh` +
+     `scripts/pytest-compare.sh` en classificeert pytest-failures hetzelfde
+     als hierboven. **Niet** de standaard end-of-card gate — die blijft
+     `verify` voor backend-kaarten en CI doet de canonieke check.
+
+   - **`simplify` / `investigate`** — voor diepere kwaliteitssweeps
+     (code-review effort=low) of read-only patroon-zweeps. Bovenop een
+     van de bovenstaande gates.
+
+   **Faalt je targeted run en de failure lijkt niet door jouw fix? Gebruik
+   de preset die bij je kaart-type hoort — NIET handmatig
+   `git stash -u && bash && git stash pop` of
+   `git checkout origin/master -- <files>` om de failure op een schone
+   master te reproduceren.** Dat is exact het patroon dat CLAUDE.md
+   waarschuwt als "unsafe in shared multi-session worktrees" (zie
+   `git stash apply stash@{N}`-gotcha — kaart `31c30dbb…`: een stale
+   stash uit een eerdere sessie kan andermans ongecommitte bestanden
+   clobberen; een `git reset --hard` na een conflict-apply kan je eigen
+   files verwijderen). De preset doet hetzelfde attribueren in een
+   geïsoleerd detached worktree van `origin/master`, zonder je eigen
+   werkboom of een gedeelde checkout aan te raken. **Verander nooit een
+   test om een bug te maskeren** — een `NEW`-failure uit
+   `bash-test-attr` of `pytest-attr` is een échte regressie van jouw
+   fix, ook al matcht de regel toevallig iets wat je al kende.
 
 7. **Feature-Compliance-Review (FCR) als pre-Done subagent-call** — `/code-review` /
    `iteration-loop verify` hierboven lezen de oorspronkelijke kaart-spec niet; deze
