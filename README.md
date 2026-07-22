@@ -1,4 +1,4 @@
-# Claude Cockpit
+# Agent Cockpit
 
 [![Quality](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/quality.yml/badge.svg)](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/quality.yml)
 [![Security](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/security.yml/badge.svg)](https://github.com/guillaumevandevelde/claude-cockpit/actions/workflows/security.yml)
@@ -6,26 +6,26 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="cockpit-rebrand-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="cockpit-rebrand-light.png">
-  <img alt="Claude Cockpit dashboard" src="cockpit-rebrand-light.png">
+  <img alt="Agent Cockpit dashboard" src="cockpit-rebrand-light.png">
 </picture>
 
 A self-hosted web application for visualizing and managing local AI coding agents. Provides a unified interface for Claude Code configuration, Codex CLI configuration, MCP servers, plugins, slash commands, hooks, agents, permissions, usage tracking, session transcripts, Agent Bridge, and other local agent extensions.
 
 ## Credits — Forked from claude-deck
 
-Claude Cockpit is a fork of [**claude-deck**](https://github.com/adrirubio/claude-deck) by Adrian Rubio-Punal and Juan A. Rubio, used under the MIT License. Their original copyright and license are retained in [`LICENSE`](./LICENSE). Claude Cockpit adds a scheduled-messages feature (timer/cron → tmux injection) on top of their work.
+Agent Cockpit is a fork of [**claude-deck**](https://github.com/adrirubio/claude-deck) by Adrian Rubio-Punal and Juan A. Rubio, used under the MIT License. Their original copyright and license are retained in [`LICENSE`](./LICENSE). Agent Cockpit adds a scheduled-messages feature (timer/cron → tmux injection) on top of their work.
 
 ## Why This Exists
 
 Claude Code starts simple, then slowly sprawls across config files and directories: `~/.claude.json`, `~/.claude/settings.json`, `.mcp.json`, slash commands, agents, skills, project settings, transcripts, and usage data. That works fine at small scale, but once your setup gets serious it becomes hard to see the whole picture, change things confidently, or understand what is actually configured.
 
-Claude Cockpit gives you one local interface for that sprawl. It also has provider-aware Codex CLI support for tmux sessions, safe TOML configuration, feature flags, diagnostics, MCP/plugin inventory and supported CLI-backed mutations, and redacted export-only backups.
+Agent Cockpit gives you one local interface for that sprawl. It also has provider-aware Codex CLI support for tmux sessions, safe TOML configuration, feature flags, diagnostics, MCP/plugin inventory and supported CLI-backed mutations, and redacted export-only backups.
 
 ## Best For
 
-Claude Cockpit is best for people running multiple Claude Code or Codex CLI sessions, MCP servers, custom commands, hooks, agents, or tracking Claude Code usage across sessions.
+Agent Cockpit is best for people running multiple Claude Code or Codex CLI sessions, MCP servers, custom commands, hooks, agents, or tracking Claude Code usage across sessions.
 
-If you only use Claude Code casually with mostly default config, Claude Cockpit may be overkill.
+If you only use Claude Code casually with mostly default config, Agent Cockpit may be overkill.
 
 ## Trust Model
 
@@ -35,7 +35,7 @@ If you only use Claude Code casually with mostly default config, Claude Cockpit 
 - **Works with your real files** — reads and writes existing Claude Code and Codex config files
 
 > [!WARNING]
-> Claude Cockpit reads and writes your real local agent configuration files. Changes made in the UI affect the files Claude Code and Codex CLI actually use. Review changes carefully, and create a backup before major edits.
+> Agent Cockpit reads and writes your real local agent configuration files. Changes made in the UI affect the files Claude Code and Codex CLI actually use. Review changes carefully, and create a backup before major edits.
 
 ## Features
 
@@ -134,10 +134,10 @@ cd claude-cockpit
 docker compose up
 ```
 
-This builds and starts Claude Cockpit at http://localhost:8000, mounting your `~/.claude` directory and `~/.claude.json` configuration file. Codex support reads `$CODEX_HOME`, defaulting to `~/.codex`, when available in the runtime environment.
+This builds and starts Agent Cockpit at http://localhost:8000, mounting your `~/.claude` directory and `~/.claude.json` configuration file. Codex support reads `$CODEX_HOME`, defaulting to `~/.codex`, when available in the runtime environment.
 
 > [!WARNING]
-> Claude Cockpit is not a mock viewer. It works with your real local agent files, so changes made in the UI can change your working setup.
+> Agent Cockpit is not a mock viewer. It works with your real local agent files, so changes made in the UI can change your working setup.
 
 > [!NOTE]
 > The container mounts your home directory's Claude Code configuration. The container runs as root to access these files; adjust permissions if running as a non-root user.
@@ -188,9 +188,9 @@ API_TOKEN='replace-with-a-long-random-value' ./scripts/dev.sh --host 0.0.0.0
 
 Both servers will then bind to all interfaces. The browser asks for the API token on its first protected request and keeps it in session storage. Configure `CORS_ORIGINS` explicitly when using a reverse proxy or a different frontend origin.
 
-### Naming a Claude Cockpit instance
+### Naming an Agent Cockpit instance
 
-When running Claude Cockpit on several machines, set a display name and accent color so each browser window clearly identifies the backend it controls:
+When running Agent Cockpit on several machines, set a display name and accent color so each browser window clearly identifies the backend it controls:
 
 ```bash
 CLAUDE_COCKPIT_INSTANCE_NAME="Studio Mac" \
@@ -212,7 +212,7 @@ For a release check, `./scripts/build.sh` builds both the app frontend and the d
 
 ## Configuration Files
 
-Claude Cockpit reads and writes these Claude Code configuration files:
+Agent Cockpit reads and writes these Claude Code configuration files:
 
 | File/Directory | Scope | Description |
 |---------------|-------|-------------|
@@ -261,7 +261,7 @@ The sandcastle integration uses [sandcastle](https://github.com/mattpocock/sandc
 
 ## Disclaimer
 
-Claude Cockpit is a community project and is not affiliated with or endorsed by Anthropic.
+Agent Cockpit is a community project and is not affiliated with or endorsed by Anthropic.
 
 ## License
 

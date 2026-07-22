@@ -16,13 +16,13 @@ You can expect an initial response within **5 business days**. We'll work with y
 
 ## Impact Model
 
-Claude Cockpit is a **local-only** tool (see the [Trust Model](./README.md#trust-model) in the README): no cloud backend, no telemetry, no hosted service. It runs on your machine and reads/writes your real Claude Code and Codex CLI configuration files.
+Agent Cockpit is a **local-only** tool (see the [Trust Model](./README.md#trust-model) in the README): no cloud backend, no telemetry, no hosted service. It runs on your machine and reads/writes your real Claude Code and Codex CLI configuration files.
 
-As a result, a vulnerability here typically affects **the local machine running Claude Cockpit** (e.g. arbitrary file read/write beyond intended scope, path traversal, or code execution via the local backend/frontend) rather than a hosted service or other users' data. Please describe the local impact you found — that's still very much worth reporting.
+As a result, a vulnerability here typically affects **the local machine running Agent Cockpit** (e.g. arbitrary file read/write beyond intended scope, path traversal, or code execution via the local backend/frontend) rather than a hosted service or other users' data. Please describe the local impact you found — that's still very much worth reporting.
 
 ## Supported Versions
 
-Claude Cockpit does not yet maintain multiple release branches. Security fixes are applied to the latest version on `master`; please make sure you can reproduce the issue there before reporting.
+Agent Cockpit does not yet maintain multiple release branches. Security fixes are applied to the latest version on `master`; please make sure you can reproduce the issue there before reporting.
 
 ## Automated Scanning
 
