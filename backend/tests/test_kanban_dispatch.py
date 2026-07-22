@@ -4313,7 +4313,7 @@ class TestBuildShipInstructions:
         # Merge happens through a throwaway detached worktree, not `git checkout
         # master` (which deterministically fails in a linked worktree — see the
         # [self-improve] card that motivated this recipe).
-        assert "git worktree add --detach \"$TMP/merge-$$\" origin/master" in instructions
+        assert "git worktree add --detach \"$WT\" origin/master" in instructions
         assert "git checkout master" not in instructions
         assert "merge --no-ff" in instructions
         assert "push origin HEAD:master" in instructions

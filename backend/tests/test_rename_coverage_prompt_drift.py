@@ -167,7 +167,7 @@ def test_rename_coverage_hook_precedes_merge_step() -> None:
             'make sure every change is committed'
         )
         # In pull-request mode the merge step uses `gh pr merge`; in
-        # direct mode it's `git -C "$TMP/m" push`. Anchor on the first
+        # direct mode it's `git -C "$WT" push`. Anchor on the first
         # push-like verb as a coarse "merge-or-push" marker.
         if mode == "direct":
             push_idx = instructions.find("push origin HEAD:master")
