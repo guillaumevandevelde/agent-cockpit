@@ -47,6 +47,17 @@ Deze gate zit op álle dispatch-paden: de auto-tick (`dispatch_project`),
 `dispatch_all_pending` (dispatch.py:3747) en `redispatch_all_orphans` (dispatch.py:3811).
 Er is geen pad dat een dangling-dep-kaart alsnog oppikt.
 
+> ✅ Geïmplementeerd (kaart `76d70fd5`) — de auto-tick (`dispatch_project`) faalt
+> niet langer *stil* op een dangling dep. Bij een `depends_on`-id dat nergens op het
+> bord bestaat (`dep_resolver.dangling_dep_ids` tegen de board-brede
+> `service.all_card_ids`-orakel) verplaatst `dispatch._flag_dangling_dep_card` de
+> kaart naar Impediment met een actionable `**Dangling dependency:** `-comment + het
+> rode `error`-label, in plaats van 'm eindeloos in Backlog te laten hangen. Een
+> gezonde niet-Done-dep (id bestáát, kolom ≠ Done) blijft een stille skip, en een
+> cross-project-dep wordt niet als dangling geflagd (board-brede existentie). De
+> bulk-paden (`dispatch_all_pending`/`redispatch_all_orphans`) blijven bewust een
+> stille skip — die zijn expliciete operator-acties, geen achtergrond-tick.
+
 ### 1.2 `clear_column` / card-delete verwijderen Done-kaarten zonder dep-besef
 
 `backend/app/api/v1/kanban/router.py:1392` (`clear_column`, achter de **"Clear Done"**-knop

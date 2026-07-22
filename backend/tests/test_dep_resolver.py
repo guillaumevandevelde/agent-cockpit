@@ -1,4 +1,8 @@
-from app.kanban.dep_resolver import detect_cycle, meets_dep_prerequisites
+from app.kanban.dep_resolver import (
+    dangling_dep_ids,
+    detect_cycle,
+    meets_dep_prerequisites,
+)
 
 
 class _FakeCard:
@@ -41,3 +45,23 @@ def test_detect_cycle_self_loop():
     cycle = detect_cycle({"a": ["a"]})
     assert cycle is not None
     assert "a" in cycle
+
+
+def test_dangling_dep_ids_no_deps():
+    assert dangling_dep_ids(_FakeCard("c"), {"c"}) == []
+
+
+def test_dangling_dep_ids_all_live():
+    # A live-but-not-Done dep is NOT dangling — its id is on the board.
+    assert dangling_dep_ids(_FakeCard("c", ["parent"]), {"parent", "c"}) == []
+
+
+def test_dangling_dep_ids_flags_missing():
+    assert dangling_dep_ids(_FakeCard("c", ["gone"]), {"c"}) == ["gone"]
+
+
+def test_dangling_dep_ids_only_missing_ones():
+    # Mixed: only the id absent from the board-wide set is returned.
+    out = dangling_dep_ids(_FakeCard("c", ["live", "gone"]), {"live", "c"})
+    assert out == ["gone"]
+

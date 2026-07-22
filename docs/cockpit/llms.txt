@@ -88,6 +88,7 @@
 ## Analysis
 
 - [Audit: voltooide analyses zonder aangemaakte vervolgkaarten](./analyse-orphaned-followups-audit.md): type=analysis status=active
+- [Analyse — Approval-model: privilege-scheiding tussen agent en gebruiker](./approval-privilege-separation-analyse.md): type=analysis status=decided
 - [Bouw-prioriteiten: wat eerst, wat te integreren, wat kan wachten](./build-prioriteiten-analyse.md): type=analysis status=active
 - [Kaarten refereerbaar maken — analyse](./card-references-analysis.md): type=analysis status=active
 - [Communicatie & weergave — analyse](./communicatie-en-weergave-analyse.md): type=analysis status=active
@@ -107,6 +108,7 @@
 - [Portfolio ↔ security overdracht — drie open vragen voor facet D](./portfolio-security-handoff.md): type=analysis status=proposed
 - [Analyse — Volgbaarheid van het project voor de product owner](./product-owner-volgbaarheid-analyse.md): type=analysis status=active
 - [Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel](./recurring-cadence-proposal.md): type=analysis status=proposed
+- [Analyse — Run vasthouden + gebufferde events over een transport-onderbreking](./run-hold-buffered-events-analyse.md): type=analysis status=decided
 - [Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse](./spawn-test-bridge-sessions-analyse.md): type=analysis status=active
 - [Spec-driven development als single source of truth — analyse](./spec-driven-development-analysis.md): type=analysis status=active
 - [Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor](./spike-same-vendor-multi-account-isolation.md): type=analysis status=decided

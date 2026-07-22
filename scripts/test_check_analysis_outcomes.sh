@@ -26,6 +26,10 @@
 #  12.  error path — bad --since format → exit 2.
 #  13.  --strict mode → exit 1 on hits; exit 0 when clean.
 #  14.  unknown argument → exit 2.
+#  15.  real ~/.claude-registry/kanban.db is reachable AND the real board
+#       emits the clean-state OK line (not the loose "OK or WARNING"
+#       tautology that an earlier shape of this task masked — see
+#       self-improve card e5136a3f959d4886a7757b85e9d31f55).
 
 set -u
 
@@ -295,13 +299,20 @@ check "unknown arg → ERROR names the bad flag" 'echo "$out" | grep -qF "unknow
 echo "Task 15: the real ~/.claude-registry/kanban.db is reachable"
 if [ -r "$HOME/.claude-registry/kanban.db" ]; then
   out=$(bash "$SUT" 2>&1); rc=$?
-  # Real board may legitimately have historic pre-gate hits; we only assert
-  # the script reaches a verdict (not a sqlite error / not a python traceback).
-  check "real board → exit 0 (advisory) or 1 (strict)" '[ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]'
-  check "real board → no python traceback" '! echo "$out" | grep -qE "Traceback"'
-  check "real board → OK or WARNING header" '
-    echo "$out" | grep -qE "^OK:" || echo "$out" | grep -qE "WARNING:.*without outcome evidence"
-  '
+  # Real board is expected to be clean (every Done analysis carries an
+  # outcome witness) as of the gate's --since threshold. The earlier
+  # `^OK: || WARNING:.*without outcome evidence` assertion was a partial
+  # tautology: it passed whether the SUT said OK or warned about specific
+  # offenders, so it never caught a regression that turned a clean board
+  # into a stale one. Tighten to the exact clean-state line emitted by
+  # scripts/check-analysis-outcomes.sh (SUT:check-analysis-outcomes.sh:202).
+  # If the WARNING branch ever needs to be allowed again (e.g. a transient
+  # historic-backlog sweep), document the carve-out here — don't relax the
+  # assertion silently.
+  check "real board → exit 0 (advisory)"           '[ "$rc" -eq 0 ]'
+  check "real board → no python traceback"         '! echo "$out" | grep -qE "Traceback"'
+  check "real board → clean-state OK line"         'echo "$out" | grep -qE "^OK: every Done analysis on this board carries outcome evidence"'
+  check "real board → no WARNING emitted"          '! echo "$out" | grep -qE "WARNING:"'
 else
   echo "  (skip — $HOME/.claude-registry/kanban.db not present)"
 fi
