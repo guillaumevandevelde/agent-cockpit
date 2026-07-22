@@ -6,7 +6,7 @@ status: active
 
 # Agent Bridge — spawn, terminal-relay & per-sessie configuratie
 
-> **Canoniek** voor "hoe Claude Cockpit lokale agent-sessies start en bedient". Verzamelt
+> **Canoniek** voor "hoe Agent Cockpit lokale agent-sessies start en bedient". Verzamelt
 > de blijvende beslissingen van vier superpowers-taken die elk een stuk van de Agent Bridge
 > hebben toegevoegd. Voor de TDD-stappen/bestandsdetails van één taak: zie de gelinkte
 > superpowers-spec. Bij overlap: **dit document eerst.**

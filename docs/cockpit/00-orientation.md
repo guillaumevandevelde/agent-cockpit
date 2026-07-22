@@ -1,19 +1,19 @@
 ---
-title: "Claude Cockpit — oriëntatie (lees dit eerst)"
+title: "Agent Cockpit — oriëntatie (lees dit eerst)"
 type: reference
 status: active
 ---
 
-# Claude Cockpit — oriëntatie (lees dit eerst)
+# Agent Cockpit — oriëntatie (lees dit eerst)
 
 Dit is een **fork van [adrirubio/claude-deck](https://github.com/adrirubio/claude-deck)**
-met een eigen identiteit: **Claude Cockpit**. De `upstream` git-remote wijst naar claude-deck
+met een eigen identiteit: **Agent Cockpit**. De `upstream` git-remote wijst naar claude-deck
 (voeg later je eigen `origin` toe als je een GitHub-fork aanmaakt).
 
 ## Doel
 
 Claude-deck levert al sessie-**monitoring** (Sessions / CC Bridge) — dat dekt "welke CC-sessie
-wacht op mijn input" grotendeels. Daar bovenop bouwt Claude Cockpit twee samenhangende
+wacht op mijn input" grotendeels. Daar bovenop bouwt Agent Cockpit twee samenhangende
 lagen:
 
 1. **Scheduled-messages** (vrijwel af) — boodschappen klaarzetten met een eenmalige

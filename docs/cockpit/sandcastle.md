@@ -6,7 +6,7 @@ status: active
 
 # Sandcastle Integration
 
-Sandcastle is integrated into Claude Cockpit for running AI coding agents in isolated sandboxes (Docker, Podman, or Vercel).
+Sandcastle is integrated into Agent Cockpit for running AI coding agents in isolated sandboxes (Docker, Podman, or Vercel).
 
 ## Features
 

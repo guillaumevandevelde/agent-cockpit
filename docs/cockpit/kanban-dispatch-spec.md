@@ -74,7 +74,7 @@ The spawned session opens with a prompt that tells the agent it has already been
 assigned the card and how to report back through the MCP:
 
 ```
-You are an agent picking up a Kanban card from the Claude Cockpit board.
+You are an agent picking up a Kanban card from the Agent Cockpit board.
 The card is already claimed by you and moved to "Doing".
 
 # <title>

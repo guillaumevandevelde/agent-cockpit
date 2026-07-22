@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "Setting up Claude Cockpit..."
+echo "Setting up Agent Cockpit..."
 
 # Check Python version — require 3.11+ (StrEnum, match-statement, etc.)
 PYTHON_CMD=""

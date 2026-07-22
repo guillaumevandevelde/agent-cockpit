@@ -43,9 +43,9 @@ from pathlib import Path
 BEGIN_MARKER = "<!-- BEGIN GENERATED DOC INDEX (scripts/generate-doc-index.py) — DO NOT EDIT BY HAND -->"
 END_MARKER = "<!-- END GENERATED DOC INDEX -->"
 
-PROJECT_NAME = "Claude Cockpit"
+PROJECT_NAME = "Agent Cockpit"
 LLMS_SUMMARY = (
-    "Machine-instapkaart voor de canonieke spec-boom van de fork Claude Cockpit "
+    "Machine-instapkaart voor de canonieke spec-boom van de fork Agent Cockpit "
     "(`docs/cockpit/`). Elke long-lived architectuur-, ontwerp-, beslis- en "
     "analysedoc staat hieronder, gegroepeerd op `type` met zijn `status`. Bij "
     "twijfel of overlap: lees het cockpit-document eerst. Deze lijst is "

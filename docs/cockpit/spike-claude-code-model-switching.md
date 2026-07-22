@@ -10,7 +10,7 @@ status: decided
 **Status:** Decided (build-vs-integrate) — implementation not started
 **Trigger:** kanban-kaart "Claude Code model switch" — analyse van twee externe tools
 (jolehuit/clother en morphllm.com/claude-code-router → musistudio/claude-code-router)
-om te bepalen welke geschikt is om binnen Claude Cockpit te schakelen tussen een
+om te bepalen welke geschikt is om binnen Agent Cockpit te schakelen tussen een
 Anthropic-abonnement en een MiniMax-abonnement, met adaptief gedrag.
 
 Dit is een losstaand initiatief, orthogonaal aan de lopende scheduled-messages

@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "Starting Claude Cockpit development servers..."
+echo "Starting Agent Cockpit development servers..."
 
 # Check if backend venv exists
 if [ ! -d "$PROJECT_ROOT/backend/venv" ]; then
