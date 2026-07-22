@@ -42,6 +42,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pydantic
+
 from app.services.agentic_cli.structured_events import (
     MessageRole,
     RateLimitEvent,
@@ -195,9 +197,12 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
             )
         )
         # Strong reference so the task can't be GC'd before it runs (same
-        # pattern as _sandcastle_start_tasks in dispatch.py).
+        # pattern as _sandcastle_start_tasks in dispatch.py). The done
+        # callback ALSO logs the task's exception if it has one — the
+        # previous ``_headless_start_tasks.discard`` callback silently
+        # dropped exceptions, which is what the card calls out (AC 3).
         _headless_start_tasks.add(task)
-        task.add_done_callback(_headless_start_tasks.discard)
+        task.add_done_callback(_headless_task_done_callback)
 
         return {
             "session_name": session_name,
@@ -220,6 +225,28 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
 # references to tasks, so without this set a fire-and-forget task can be garbage
 # collected mid-flight and the run silently never starts.
 _headless_start_tasks: set = set()
+
+
+def _headless_task_done_callback(task: asyncio.Task) -> None:
+    """Discard a finished headless run task from the strong-ref set, AND surface any exception.
+
+    AC 3 (kanban card d373be64…): the previous callback was
+    ``_headless_start_tasks.discard``, which silently dropped the task's
+    exception. A run that failed for any reason then only surfaced at GC as
+    a "Task exception was never retrieved" warning — invisible from the
+    dispatch log. This callback keeps the strong-ref-set discipline AND
+    logs the exception with the full traceback, so an operator scanning
+    the log sees both the breadcrumb and the cause.
+    """
+    _headless_start_tasks.discard(task)
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.exception(
+            "headless run task %s failed: %s",
+            task.get_name() or "<unnamed>", exc, exc_info=exc,
+        )
 
 
 async def run_headless(
@@ -263,8 +290,44 @@ async def run_headless(
             "exit_code": returncode,
         }
     finally:
-        # Drop from the registry BEFORE releasing the slot so the liveness
-        # source can't briefly report a dead process as alive.
+        # AC 1 (kanban card d373be64…): every exit path must leave the
+        # subprocess gone — ``_consume_stream``'s own finally already
+        # terminates the child on the unexpected-exception path, but
+        # there's a narrow window where a buggy code path inside
+        # _consume_stream might return without finishing the cleanup
+        # (e.g. a CancelledError injected from outside the try block).
+        # This block is the safety net: signal anything still alive, then
+        # wait for the actual reap. Cleanup errors are caught and logged
+        # so they don't replace the original exception propagating up.
+        try:
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                except ProcessLookupError:
+                    pass
+            if proc.returncode is None:
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except TimeoutError:
+                    logger.warning(
+                        "headless %s: SIGTERM did not stop process, killing",
+                        session_name,
+                    )
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    await proc.wait()
+        except Exception:
+            logger.exception(
+                "headless %s: error during subprocess cleanup", session_name,
+            )
+        # Drop from the registry and release the slot ONLY after the proc
+        # is reaped. Releasing earlier would create a narrow window where
+        # ``live_headless_sessions()`` reports the session as dead while
+        # the subprocess is still alive — exactly the "dead-but-alive"
+        # state the reaper uses to trigger a re-dispatch, and exactly
+        # the failure mode this whole card exists to prevent.
         _headless_processes.pop(session_name, None)
         session_registry.release_external(session_name)
 
@@ -315,6 +378,13 @@ async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
     Reads until EOF; collects stderr in parallel so a hang in the parser
     doesn't leak a child. The first ``readline`` after EOF returns ``b""`` so
     the loop terminates naturally.
+
+    A single unmapped/parse-error event is logged and skipped (same shape as
+    the non-JSON-line tolerance a few lines above) — a Claude-side
+    vocabulary we don't yet know about must not kill the run and orphan the
+    subprocess. ``map_stream_event`` deliberately passes unknown types
+    through so the schema's ``ValidationError`` carries the original event
+    verbatim; we catch that here and log the payload for debugging.
     """
     assert proc.stdout is not None
     async def _read_stderr() -> bytes:
@@ -338,10 +408,61 @@ async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
                     session_name, text[:200],
                 )
                 continue
-            structured = parse_structured_event(map_stream_event(payload))
+            # Tolerate a single unmapped/parse-error event — same shape as
+            # the non-JSON-line tolerance above. The exception types here
+            # are the realistic ones for a malformed Claude payload:
+            # pydantic.ValidationError from parse_structured_event, plus
+            # KeyError/TypeError/AttributeError/ValueError from
+            # map_stream_event when ``payload["session_id"]`` is missing,
+            # ``block`` is the wrong shape, etc. We deliberately do NOT
+            # catch these around ``_on_event`` — a real bug there must
+            # still kill the run, exactly as the card-eis asks (AC 2:
+            # "een enkel onparseerbaar of ongemapt event doodt de run
+            # niet" — i.e. parse-side, not handler-side).
+            try:
+                structured = parse_structured_event(map_stream_event(payload))
+            except (
+                pydantic.ValidationError, KeyError, TypeError,
+                AttributeError, ValueError,
+            ) as exc:
+                logger.warning(
+                    "headless %s: dropping event that failed to map/parse: %r (%s: %s)",
+                    session_name, payload, type(exc).__name__, exc,
+                )
+                continue
             await _on_event(structured, session_name=session_name, provider=provider)
         returncode = await proc.wait()
     finally:
+        # AC 1 (kanban card d373be64…): every exit path must leave the
+        # subprocess reaped — both a normal EOF (proc has already exited)
+        # and an unexpected exception (proc might still be alive). We
+        # terminate + wait + kill-with-fallback BEFORE draining stderr so
+        # a SIGTERM-ignoring child can't keep the stderr pipe open and
+        # hang the drain below. Cleanup errors are caught and logged so
+        # they don't replace the original exception propagating up.
+        try:
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                except ProcessLookupError:
+                    pass
+            if proc.returncode is None:
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except TimeoutError:
+                    logger.warning(
+                        "headless %s: SIGTERM did not stop process, killing",
+                        session_name,
+                    )
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    await proc.wait()
+        except Exception:
+            logger.exception(
+                "headless %s: error during subprocess cleanup", session_name,
+            )
         stderr = await stderr_task
         if stderr:
             logger.warning(

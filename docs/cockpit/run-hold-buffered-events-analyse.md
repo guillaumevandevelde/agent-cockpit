@@ -186,6 +186,12 @@ Dit is dezelfde klasse als kaart `4ed4edb9…` (MCP-disconnect → claim-release
 terwijl de sessie leeft), maar met een andere root cause: daar is de liveness-bron
 te gevoelig, hier is hij te vergeetachtig. Beide horen apart gefixt.
 
+✅ **Geïmplementeerd (kaart `d373be64…`)** — aanpassingen in `backend/app/kanban/headless_runner.py`:
+(1) een `pydantic.ValidationError` plus `KeyError`/`TypeError`/`AttributeError`/`ValueError` rond `parse_structured_event(map_stream_event(payload))` in `_consume_stream` wordt gelogd met de originele payload erin en `continue`t — een onbekend event-type of een misvormd payload doodt de run niet meer, exact zoals de bestaande non-JSON-regel-tolerantie;
+(2) `run_headless` en `_consume_stream` termineren het subproces in hun `finally`-blok (SIGTERM + 2s-grace + SIGKILL-fallback) **vóór** ze de registry leeghalen en het slot vrijgeven, zodat élke exit-pad de subprocess dood achterlaat en er geen "dood-gemeld-maar-nog-levend"-venster ontstaat waar de reaper op kan re-dispatchen;
+(3) het `done_callback` logt nu uitzonderingen in plaats van ze stil te laten vallen.
+Regressietests in `backend/tests/test_headless_transport.py`: één voor de tolerantie van één onbekend event, één voor het KeyError-pad (misvormd payload), één voor het terminatie-gedrag op een onverwachte exception, één voor de SIGKILL-fallback tegen een SIGTERM-negérend kind, en één voor de zichtbare logging via het nieuwe `_headless_task_done_callback`.
+
 ---
 
 ## 5. Afbakening en parameters
