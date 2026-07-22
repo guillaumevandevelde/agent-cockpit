@@ -4649,6 +4649,48 @@ async def redispatch_card(
     # Kill existing tmux session if claimed by an agent
     session_name = _claimant_session(card)
     if session_name:
+        # Visibility: `_kill_agent_session` below is unconditional — it
+        # kills the tmux session even when it's still alive. That is the
+        # right behaviour for a deliberate force-restart (operator clicked
+        # Redispatch, an MCP-disconnected session asked for a fresh start,
+        # etc.), but a kill of a still-productive process is exactly the
+        # state change the activity feed must show. Without this comment,
+        # the kill is invisible: `release_without_terminal_move` stays at
+        # 0 (this path bypasses `release_card_claim` by design — see its
+        # docstring for the carve-out), and a redispatch over a live
+        # session looks identical to one over a long-dead one. Surface
+        # the kill explicitly so an operator reading the activity feed
+        # can tell the two cases apart.
+        #
+        # Liveness check is `name in _live_sessions()` — not an MCP-server
+        # state read. The reaper's invariant (see
+        # `reap_stale_claims`'s docstring) is that MCP connection state is
+        # NOT a liveness source; we honour the same boundary here. The
+        # comment text names MCP as the *common* cause for an operator-
+        # triggered redispatch over a live session, but the decision to
+        # kill is driven by the tmux snapshot alone.
+        #
+        # Kaart [self-improve] MCP-serverdisconnect → claim-release +
+        # her-dispatch terwijl de sessie nog productief is (incident
+        # observed on b00f3705…, 2026-07-21T19:17:22, Lemma-analyse).
+        live = _live_sessions()
+        if live is not None and session_name in live:
+            await apply_operation(
+                session, op_type="comment", entity_type="comment",
+                project_key=card.project_key, entity_id=card.id,
+                payload={
+                    "text": (
+                        f"**Note:** Redispatching over live session "
+                        f"`{session_name}` — the tmux session was still "
+                        f"alive when redispatch was invoked. Common cause: "
+                        f"the session's MCP-server connection briefly "
+                        f"dropped (the reaper correctly skips live claims, "
+                        f"MCP state is not a liveness source), but the "
+                        f"operator / an explicit redispatch call chose to "
+                        f"restart anyway. The kill below is intentional."
+                    ),
+                },
+            )
         if not getattr(card, "resume_session_id", None) and card.transport != "sandcastle":
             from app.kanban.session_recovery import _resolve_resume_target
 
