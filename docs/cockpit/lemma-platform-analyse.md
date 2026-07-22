@@ -202,14 +202,20 @@ de gebruiker. Twee details die het patroon af maken: `request_approval` mag zich
 niet goedkeuren, en een goedgekeurde tool die faalt rapporteert de fout terug in de
 run in plaats van de approval-task te laten crashen.
 
-**Waarom dit ons raakt.** Onze `open_gate(card_id, question, options)` is
-*kaart-niveau* en **beëindigt de sessie** — de agent stelt een vraag, de sessie
-sluit, een latere sessie leest het antwoord. Dat is de juiste keuze voor
-product-forks: nooit blokkeren op een open gate, maar de vraag met opties op het
-bord achterlaten. Maar voor "mag ik deze ene
-riskante actie doen" is het grof: je verliest de hele sessie voor één beslissing.
-Lemma's model is fijnmaziger *en* veiliger, want het scheidt privileges in plaats van
-alleen toestemming te vragen.
+**Waarom dit ons raakt.** *Premisse-correctie: `open_gate` is de tool die
+inline blokkeert en het antwoord teruggeeft (`backend/app/kanban/mcp_server.py:846`:
+"this does NOT release the claim or end the session — it simply waits (polling) for
+the human's pick, then returns it so the run can continue inline"). De tool die
+de sessie wél beëindigt en het antwoord voor een latere sessie op het bord
+achterlaat is `report_impediment` (`mcp_server.py:761`). Volledige
+premise-correctie + de bronanalyse van waarom dit patroon desondanks niet
+aanstaat: `approval-privilege-separation-analyse.md` §2.1.* Dat laat
+onverlet: voor "mag ik deze ene riskante actie doen" is *geen* van beide
+vandaag het juiste kanaal — `open_gate` is bewust gedeprioriteerd voor
+productbeslissingen (zie de docstring van `report_impediment`),
+en er is vandaag geen brug tussen `open_gate` en het
+permissiesysteem. Lemma's model is fijnmaziger *en* veiliger, want het
+scheidt privileges in plaats van alleen toestemming te vragen.
 
 **Nuance.** Wij draaien vandaag met `--dangerously-skip-permissions` in dispatch, dus
 er ís geen autorisatiegrens tussen agent en gebruiker om te scheiden. Het patroon
