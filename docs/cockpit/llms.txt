@@ -68,6 +68,7 @@
 - [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md): type=decision status=decided
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided
 - [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md): type=decision status=proposed
+- [Product-analyses uniformeren — template, skill of eigen agent?](./product-analyse-methode-decision.md): type=decision status=decided
 - [Rebrand naar Agent Cockpit — naam, logo en thema](./rebrand-decision.md): type=decision status=decided
 - [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md): type=decision status=decided
 - [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md): type=decision status=decided

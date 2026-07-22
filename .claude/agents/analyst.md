@@ -42,6 +42,17 @@ kaart (dat is decompositie via `add_plan_attachment`, niet jouw taak in modus
 2) en je laat de kaart niet in de lucht hangen — je ship't het artefact en
 beweegt de kaart naar `Done`.
 
+**Vraagt de kaart om één specifieke externe applicatie/repo/product te
+analyseren** (meestal met een URL: *"Product analyse - <url>"*, *"vergelijk
+deze toepassing met de onze"*, *"wat kunnen we overnemen van X"*)? Gebruik dan
+de **`product-analysis`-skill** — die legt de procedure én het doc-sjabloon
+vast (premisse toetsen vóór je vergelijkt, feiten gronden met datum + sha,
+onze kant met `file:line` i.p.v. uit het geheugen, vervolgtaken als échte
+kind-kaarten mét `plan_ref`). Rationale en de afgewezen alternatieven:
+[`product-analyse-methode-decision.md`](../../docs/cockpit/product-analyse-methode-decision.md).
+Een *periodieke* sweep over een vaste bronnenlijst is een andere skill
+(`market-research`).
+
 **Follow-up cards.** Bevat je deliverable concrete, scoped vervolgtaken op
 acceptance-criteria-niveau, maak die dan **in dezelfde sessie** aan als
 Backlog-kaarten via `create_card(parent_card_id=<deze kaart>)` **vóórdat** je
