@@ -1,4 +1,4 @@
-# Contributing to Claude Cockpit
+# Contributing to Agent Cockpit
 
 Thanks for your interest in contributing! We welcome pull requests and issues from everyone.
 By participating, you're expected to uphold our [Code of Conduct](./CODE_OF_CONDUCT.md).
