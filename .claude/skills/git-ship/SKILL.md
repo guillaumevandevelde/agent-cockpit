@@ -156,13 +156,23 @@ retro** (invoke the `session-retro` skill — read
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
 
-If the merge itself reports `CONFLICT` (the block above exits 1 before pushing):
-do not resolve conflict markers by guessing. This means a concurrent session
-touched the same files after you branched. Re-`git fetch origin` and retry the
-merge once — the conflict may already be gone if master moved on unrelated
-files since your `TMP` snapshot. If a real conflict remains, `report_impediment`
-naming the conflicting files so a human can resolve it; never force-push or
-discard either side of the conflict.
+If the merge itself reports `CONFLICT` (the block above exits 1 before pushing), first
+re-fetch `origin/master` and retry the merge once. A conflict that is **exclusively**
+in the generated documentation artifacts `docs/cockpit/README.md` and
+`docs/cockpit/llms.txt` is deterministic: do not hand-merge it or report an
+impediment. In the conflicted merge worktree, keep the generated files from the
+merge result, then regenerate them from the surviving `docs/cockpit/*.md`
+frontmatter:
+
+```bash
+./scripts/generate-doc-index.py
+./scripts/generate-doc-index.py --check --strict
+```
+
+The strict check must pass before pushing. If **any handwritten file is also in
+the conflict set**, this carve-out does not apply: follow the existing rule,
+report an impediment naming all conflicting files so a human can resolve it;
+never force-push or discard either side of the conflict.
 
 ## 4b. Ship mode `pull-request` — open a PR and wait for it to merge
 

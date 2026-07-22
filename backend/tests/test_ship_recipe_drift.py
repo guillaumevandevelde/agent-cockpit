@@ -93,8 +93,21 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "worktree cleanup",
         'git worktree remove --force "$TMP/merge-$$"',
     ),
+    # Generated documentation conflicts have a deterministic recovery path in
+    # both mirrors; keep the filenames and strict verification command pinned.
+    (
+        "generated README conflict carve-out",
+        "docs/cockpit/README.md",
+    ),
+    (
+        "generated llms conflict carve-out",
+        "docs/cockpit/llms.txt",
+    ),
+    (
+        "generated index strict verification",
+        "generate-doc-index.py --check --strict",
+    ),
 ]
-
 
 def _dispatch_direct_prompt() -> str:
     """Render the direct-mode ship instructions as the agent would see them.
