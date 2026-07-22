@@ -1928,6 +1928,118 @@ async def test_redispatch_returns_none_for_missing_card():
 
 
 @pytest.mark.asyncio
+async def test_reaper_spares_live_session_regardless_of_mcp_state(monkeypatch):
+    """Regression for [self-improve] MCP-serverdisconnect → claim-release.
+
+    The reaper's liveness sources are tmux (worktree-transport), SandcastleRun
+    rows (sandcastle-transport), and the headless subprocess registry
+    (headless-transport). None of them reads the kanban MCP-server connection
+    state — and that is intentional: a brief MCP disconnect from a session's
+    Claude CLI says nothing about whether the underlying CLI process is still
+    productive. An MCP disconnect is therefore NOT a liveness signal: as long
+    as tmux lists the session, the claim MUST be preserved.
+
+    Locks in the invariant observed in the b00f3705… incident (Lemma-analyse,
+    2026-07-21T19:17:22): a session's MCP-server connection briefly dropped,
+    the underlying tmux session stayed alive, and a claim-release + redispatch
+    was triggered anyway. The release turned out not to originate in the reaper
+    (it doesn't read MCP state) — but this test guards against any future
+    code path that wires MCP connection state into claim-release.
+    """
+    import unittest.mock as mock
+
+    async with KanbanSessionLocal() as s:
+        live_card = await _make_card(s, title="mcp-disconnected WIP", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=live_card,
+            payload={"claimed_by": "agent:k-product-analy-312c"},
+        )
+        await s.commit()
+
+    # The "MCP-disconnect" is encoded by NOT removing the session from
+    # live_sessions — its alive status in tmux is independent of MCP state.
+    # Mock subprocess.run so `_live_sessions()` returns the session even
+    # when no real tmux server exists in the test environment.
+    class _R:
+        returncode = 0
+        stdout = "k-product-analy-312c\n"
+        stderr = ""
+    with mock.patch.object(dispatch.subprocess, "run", lambda *a, **k: _R()):
+        async with KanbanSessionLocal() as s:
+            reaped = await dispatch.reap_stale_claims(
+                s, project_key=PK,
+                cards=await list_cards(s, PK),
+                live_sessions=dispatch._live_sessions(),
+                sandcastle_live=set(),
+                headless_live=set(),
+            )
+            await s.commit()
+            card = await get_card(s, live_card)
+    assert reaped == 0, (
+        "reaper must NOT release a claim whose session is alive in tmux — "
+        "MCP-server connection state is not a liveness source."
+    )
+    assert card.claimed_by == "agent:k-product-analy-312c"
+
+
+@pytest.mark.asyncio
+async def test_redispatch_kills_live_session_posts_audit_comment(monkeypatch):
+    """When redispatch_card is invoked on a card whose tmux session is still
+    alive, the activity feed MUST show a `**Note:**` audit comment so an
+    operator can distinguish "redispatch over a long-dead session" from
+    "redispatch over a still-productive session".
+
+    Closes the visibility gap behind the b00f3705… incident: a card's
+    `release_without_terminal_move` counter stayed at 0 (redispatch bypasses
+    `release_card_claim` by design — see its docstring), so the activity
+    feed showed no visible signal that a live session had been killed. The
+    audit comment makes the state change traceable on the board itself.
+    """
+    import unittest.mock as mock
+
+    from app.kanban import session_recovery
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="still-productive", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-product-analy-312c"},
+        )
+        await s.commit()
+
+    # Mock the two external interactions so the test is hermetic:
+    #   - `_live_sessions()` reports 312c as still alive in tmux
+    #   - `_resolve_resume_target()` returns no transcript (force fresh spawn)
+    #   - `_kill_agent_session` is observed but does nothing on disk
+    class _R:
+        returncode = 0
+        stdout = "k-product-analy-312c\n"
+        stderr = ""
+    with mock.patch.object(dispatch.subprocess, "run", lambda *a, **k: _R()), \
+         mock.patch.object(session_recovery, "_resolve_resume_target", return_value=None), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        async with KanbanSessionLocal() as s:
+            await dispatch.redispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+            activity = await service.card_activity(s, cid)
+
+    note = [op for op in activity
+            if op.op_type == "comment"
+            and (op.payload or {}).get("text", "").startswith("**Note:**")]
+    assert len(note) == 1, (
+        "redispatch over a still-alive tmux session must post exactly one "
+        "**Note:** audit comment so the activity feed shows the live-session kill."
+    )
+    text = note[0].payload["text"]
+    assert "k-product-analy-312c" in text
+    assert "still alive" in text or "MCP" in text
+
+
+@pytest.mark.asyncio
 async def test_redispatch_all_orphans():
     """Batch redispatch: all unclaimed cards on agent columns get dispatched."""
     transport = RecordingTransport()
