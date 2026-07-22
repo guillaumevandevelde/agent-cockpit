@@ -177,6 +177,23 @@ ToolSearch defert ze). Referentie-meetrecept:
      pass: klopt je eigen samenvatting nog met je eigen acceptance criteria? Zo
      niet, herschrijf de samenvatting totdat ze overeenkomen — schrijf ze niet
      allebei en laat de executor uitzoeken welke klopt.
+   - **Eén niveau dieper: pin claims over bestaand Cockpit-gedrag op
+     `file:line`.** Vergelijkt je analyse-deliverable (of de beschrijving van
+     een kind-kaart) een extern project met onze eigen implementatie, dan
+     draagt elke bewering over *bestaand Cockpit-gedrag* (de "en wij doen
+     X"-helft, of "wij hebben géén Y") een `file:line`-anker in
+     `backend/app/...` of `frontend/src/...` waar de claim verifieerbaar is.
+     Zonder dat anker kan zowel de reviewer als de uitvoerende sessie de
+     claim in één stap natrekken — gemiste anchors kosten een kind-kaart
+     of een hele analyse-spike (kaart `36525dae…`: een claim over
+     `open_gate` is verbatim in een kind-kaart-beschrijving gelekt, en
+     ~40% van de spike ging zitten in het ontdekken dat de premisse niet
+     klopte). Claims over het *externe* project (Lemma, OpenHands,
+     9router, …) hebben dit niet nodig — die zijn per definitie niet
+     lokaal verifieerbaar. Zie ook §2.1 van
+     `docs/cockpit/approval-privilege-separation-analyse.md` voor een
+     uitgewerkte correctie van een onjuiste claim die hieronder was
+     ontsproten.
 5. **Parent verplaatsen naar Done** met `move_card(parent, "Done", summary="Plan
    opgesplitst in N taken: <korte lijst>", outcome="decomposed")`. Dat is je
    exit-signaal — de sessie eindigt hier. Het `outcome`-veld is verplicht (zie
