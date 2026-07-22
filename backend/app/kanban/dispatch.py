@@ -26,7 +26,7 @@ from app.kanban import subscription_pool
 
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
-from app.kanban.dep_resolver import meets_dep_prerequisites
+from app.kanban.dep_resolver import dangling_dep_ids, meets_dep_prerequisites
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import (
@@ -35,6 +35,7 @@ from app.kanban.project_key import (
     safe_resolve_project_key,
 )
 from app.kanban.service import (
+    all_card_ids,
     get_card,
     get_column_default_model,
     get_column_default_provider,
@@ -239,6 +240,18 @@ DEAD_ON_ARRIVAL_SECONDS = 30
 # distinguish it from a card a human parked in Impediment for a decision. The
 # frontend special-cases this exact string (see CardItem.tsx).
 ERROR_LABEL = "error"
+
+# Prefix for the comment posted when the dispatch tick refuses to keep silently
+# holding a card whose `depends_on` names a card id that no longer exists on the
+# board (a *dangling* dep). Deliberately distinct from every consumer-read
+# prefix in docs/cockpit/kanban-conventions.md §2 (`**Impediment:** `,
+# `**Resolution:** `, `[dispatch-failure]`, …) so no classifier/resume walker
+# mistakes it for a question, an answer, or a spawn-failure — it is documentary,
+# mirroring service._DEP_REMOVED_PREFIX. The fix is an operator board-action
+# (recreate the parent, or strip the id from depends_on), not a resume/redispatch,
+# so it must NOT trigger the needs_answer/dispatch_failed flows.
+# See docs/cockpit/dangling-depends-on-analyse.md §1.1/§4.
+DANGLING_DEP_COMMENT_PREFIX = "**Dangling dependency:** "
 
 
 # ---- enablement: device-local, stored in KanbanMeta (not part of the op-log) ----
@@ -4021,6 +4034,63 @@ async def _move_to_impediment_after_repeated_failures(
     )
 
 
+async def _flag_dangling_dep_card(
+    session, *, card, project_key: str, dangling: list[str],
+) -> None:
+    """Move a card whose `depends_on` names non-existent card ids to Impediment
+    with an actionable comment, instead of letting the fail-closed dep-resolver
+    hold it silently and permanently.
+
+    The dep-resolver (`meets_dep_prerequisites`) fails *closed* on a dep that
+    resolves to no live card: a deleted parent is indistinguishable from "not
+    Done yet", so the card is never dispatchable and the board shows no reason.
+    That is exactly the trap documented in
+    docs/cockpit/dangling-depends-on-analyse.md §1.1. The delete-guard
+    (`service.strip_dangling_deps_on_delete`) prevents *new* danglings on the
+    delete path, but cross-project deletes and manual DB edits still leak them
+    in — and the offline sweeper only flags them advisory. This is the runtime
+    seam that makes the block loud: a red Impediment card a human can fix by
+    recreating the parent or stripping the dep, rather than a silent hold.
+
+    Tags ERROR_LABEL (red on the board) and writes a documentary
+    `**Dangling dependency:** ` comment — the fix is an operator board-action,
+    not a resume/redispatch, so the prefix is deliberately kept out of the
+    question/answer/dispatch-failure classifier space."""
+    ids = ", ".join(f"`{d}`" for d in dangling)
+    await apply_operation(
+        session, op_type="comment", entity_type="comment",
+        project_key=project_key, entity_id=card.id,
+        payload={"text": (
+            f"{DANGLING_DEP_COMMENT_PREFIX}deze kaart hangt via `depends_on` af "
+            f"van {ids}, maar die kaart(en) bestaan niet meer op het bord "
+            f"(verwijderd of nooit aangemaakt). De dep-resolver faalt daardoor "
+            f"*closed* — de kaart werd stil en permanent vastgehouden door "
+            f"auto-dispatch. Verplaatst naar Impediment zodat de blokkade "
+            f"zichtbaar is. Herstel: verwijder de dangling id('s) uit "
+            f"`depends_on` als het bedoelde werk al af is, of maak de "
+            f"ontbrekende parent-kaart opnieuw aan; daarna kan de kaart terug "
+            f"naar Backlog. Achtergrond: "
+            f"docs/cockpit/dangling-depends-on-analyse.md §1.1/§4."
+        )},
+    )
+    labels = list(card.labels or [])
+    if ERROR_LABEL not in labels:
+        labels.append(ERROR_LABEL)
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key=project_key, entity_id=card.id, payload={"labels": labels},
+        )
+    await apply_operation(
+        session, op_type="move", entity_type="card",
+        project_key=project_key, entity_id=card.id, payload={"column": "Impediment"},
+    )
+    logger.warning(
+        "card %s has dangling depends_on %s -> moved to Impediment "
+        "(dep ids resolve to no live card)",
+        card.id, dangling,
+    )
+
+
 async def _release_dead_claim(session, *, card, project_key: str, session_name: str) -> None:
     """Release a claim whose session is gone, with no resumable transcript.
 
@@ -4117,6 +4187,13 @@ async def dispatch_project(
     column_caps = await _column_max_sessions(session, project_key)
     last_result: dict | None = None
 
+    # Board-wide existence oracle, fetched once per tick: lets the dep gate
+    # below tell a *dangling* depends_on (id resolves to no card anywhere) apart
+    # from a healthy not-yet-Done dep, so the former is surfaced to Impediment
+    # instead of being silently held forever. Board-wide (not the project-scoped
+    # working set) so a cross-project dep is never mistaken for dangling.
+    board_ids = await all_card_ids(session)
+
     # Fill every dispatchable card in this tick. The per-column cap (when set)
     # is the only structural limit at this level; the hardware/OS-level cap
     # checked inside the transport enforces the actual memory bound.
@@ -4148,10 +4225,24 @@ async def dispatch_project(
         # is the dispatcher's responsibility (see app.kanban.dep_resolver).
         cards_by_id = {c.id: c for c in cards}
         if not meets_dep_prerequisites(card, cards_by_id):
-            # Mark the card as 'skipped this tick' by removing it from the
-            # working set so _next_card doesn't pick it again on the next
-            # iteration of the same tick — _next_card would otherwise loop on
-            # it until the cap is filled or we run out of cards.
+            # Distinguish a *dangling* dep (id resolves to no card anywhere on
+            # the board — a permanent, invisible fail-closed block) from a
+            # healthy not-yet-Done dep (the depended-on card exists, just isn't
+            # Done). Only the former needs human intervention: surface it to
+            # Impediment with an actionable comment instead of silently holding
+            # it forever. See docs/cockpit/dangling-depends-on-analyse.md §1.1.
+            dangling = dangling_dep_ids(card, board_ids)
+            if dangling:
+                await _flag_dangling_dep_card(
+                    session, card=card, project_key=project_key, dangling=dangling,
+                )
+                cards = await list_cards(session, project_key)
+                continue
+            # Healthy blocked card (dep exists, not yet Done): mark it as
+            # 'skipped this tick' by removing it from the working set so
+            # _next_card doesn't pick it again on the next iteration of the same
+            # tick — _next_card would otherwise loop on it until the cap is
+            # filled or we run out of cards.
             cards = [c for c in cards if c.id != card.id]
             continue
 

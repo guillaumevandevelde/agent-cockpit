@@ -2323,6 +2323,117 @@ async def test_redispatch_all_orphans_skips_blocked_card():
     assert len(transport.calls) == 1
 
 
+# ---- dangling depends_on: dispatch tick surfaces to Impediment ------------
+
+@pytest.mark.asyncio
+async def test_dispatch_project_moves_dangling_dep_card_to_impediment():
+    """A Backlog card whose depends_on names a card id that no longer exists on
+    the board must NOT be silently held forever by the fail-closed dep gate.
+    The tick moves it to Impediment with an actionable `**Dangling dependency:**`
+    comment + the red `error` label, so the permanent block is visible. This is
+    the runtime seam from docs/cockpit/dangling-depends-on-analyse.md §1.1/§4."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        blocked = await _make_card(s, title="dangling", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=blocked, payload={"depends_on": ["does-not-exist-0000"]},
+        )
+        # A healthy card that must still dispatch this same tick.
+        await _make_card(s, title="free", column="Backlog")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, blocked)
+        activity = await service.card_activity(s, blocked)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    assert card.column == "Impediment"
+    assert dispatch.ERROR_LABEL in (card.labels or [])
+    assert any(t.startswith(dispatch.DANGLING_DEP_COMMENT_PREFIX) for t in comment_texts)
+    assert any("does-not-exist-0000" in t for t in comment_texts)
+    # Only the healthy "free" card was actually dispatched.
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_project_silently_skips_live_not_done_dep():
+    """A Backlog card whose dep is a live-but-not-Done sibling is *healthy*
+    waiting — it must stay on Backlog, NOT be moved to Impediment and NOT get a
+    dangling-dependency comment. Only a dep that resolves to no card at all is
+    surfaced; this guards against false Impediment moves for normal blocking."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        parent = await _make_card(s, title="parent", column="Backlog")
+        child = await _make_card(s, title="child", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=child, payload={"depends_on": [parent]},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, child)
+        activity = await service.card_activity(s, child)
+        comment_texts = [
+            op.payload["text"] for op in activity if op.op_type == "comment"
+        ]
+    # Still on Backlog (healthy blocked), no Impediment move, no dangling comment.
+    assert card.column == "Backlog"
+    assert dispatch.ERROR_LABEL not in (card.labels or [])
+    assert not any(
+        t.startswith(dispatch.DANGLING_DEP_COMMENT_PREFIX) for t in comment_texts
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_project_ignores_cross_project_dep_as_not_dangling():
+    """A dep pointing at a live card in ANOTHER project is not dangling (it
+    exists board-wide), so it must not be flagged to Impediment — it just stays
+    a healthy silent skip. Prevents a false Impediment move for cross-project
+    deps, matching sweep_dangling_depends_on.py's board-wide existence check."""
+    transport = RecordingTransport()
+    other_pk = "git:example.com/me/other"
+    async with KanbanSessionLocal() as s:
+        # A live card in a different project.
+        cross = await apply_operation(
+            s, op_type="create", entity_type="card", project_key=other_pk,
+            entity_id=None, payload={"title": "cross", "column": "Backlog"},
+        )
+        await s.flush()
+        child = await _make_card(s, title="child", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=child, payload={"depends_on": [cross]},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, child)
+    # Not dangling (cross-project card exists) → healthy skip, stays on Backlog.
+    assert card.column == "Backlog"
+    assert dispatch.ERROR_LABEL not in (card.labels or [])
+
+
 # ---- priority sort on bulk dispatch paths ---------------------------------
 
 def _dispatch_order(transport) -> list[str]:
