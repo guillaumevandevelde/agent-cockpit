@@ -459,3 +459,334 @@ async def test_full_dispatch_cycle_no_reap_loop(monkeypatch, tmp_path, capsys):
     assert rc == 0
     assert "k-fixture-1" not in hr.live_headless_sessions()
     assert parsed == ["system", "assistant", "result"]
+
+
+# ---- AC 2 + AC 4: single unmapped event must not orphan the subprocess ----
+#
+# The card-eis: `map_stream_event` lets an unknown payload pass through
+# (`{"type": ptype, **payload}`) so the schema's ValidationError carries the
+# original event verbatim — a debug-friendly choice. But _consume_stream
+# didn't catch the exception, so run_headless's finally block cleaned the
+# registry while the subprocess kept running. live_headless_sessions then
+# reported the session as dead → reaper released the claim → dispatcher
+# re-spawned a second agent in the same worktree/branch.
+#
+# Fix contract: a single unmapped event is logged and skipped (same shape as
+# the existing non-JSON-line tolerance), so the run continues to drain the
+# rest of the stream and ends naturally. After the run, no live subprocess
+# may remain and the registry must be clean.
+
+
+@pytest.mark.asyncio
+async def test_run_headless_does_not_leave_subprocess_on_unmapped_event(
+    monkeypatch, tmp_path,
+):
+    """AC 2 + AC 4 — regression for the orphan-subprocess bug.
+
+    Before the fix: parse_structured_event raised ValidationError on the
+    unknown ``type``; _consume_stream didn't catch it; run_headless's finally
+    block popped the registry + released the slot but never terminated the
+    subprocess → orphan → reap → second agent in the same branch.
+
+    After the fix: the unmapped event is logged and skipped, the fake CLI's
+    follow-up ``result`` event drains through, and the subprocess exits 0
+    on its own. run_headless returns normally, the PID is dead, and the
+    registry is clean.
+    """
+    import os
+    import sys as stdlib_sys
+
+    pidfile = tmp_path / "fake_cli.pid"
+    fake_cli = tmp_path / "fake_claude.py"
+    fake_cli.write_text(
+        "import json, sys, os\n"
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        "def emit(p): sys.stdout.write(json.dumps(p) + '\\n'); sys.stdout.flush()\n"
+        "emit({'type':'system','subtype':'init','session_id':'sess-bad-event',"
+        "     'cwd':'.','model':'claude-opus-4-8','permissionMode':'acceptEdits'})\n"
+        "emit({'type':'future_event_v99','data':'we do not map this'})\n"
+        "emit({'type':'result','subtype':'success','is_error':False,"
+        "     'duration_ms':1,'total_cost_usd':0.0,'num_turns':1,"
+        "     'usage':{'input_tokens':1,'output_tokens':1}})\n"
+        "sys.exit(0)\n"
+    )
+    # run_headless calls _build_argv which prepends ``-p --output-format
+    # stream-json --verbose -- <prompt>`` to the executable. A bare python
+    # executable would reject the unknown ``-p`` flag — use a shell wrapper
+    # that ignores its argv and runs the Python fixture instead.
+    wrapper = tmp_path / "fake_claude.sh"
+    wrapper.write_text(
+        f"#!/bin/sh\nexec {stdlib_sys.executable} '{fake_cli}' \"$@\"\n"
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setattr(hr, "resolve_cli_executable", lambda cli_id: str(wrapper))
+
+    # Before the fix: this raises pydantic.ValidationError.
+    # After the fix: returns normally with exit_code=0.
+    result = await hr.run_headless(
+        cli_id="claude-code", directory=str(tmp_path), prompt="hi",
+        session_name="k-fixture-bad-event", skip_permissions=True,
+        provider="anthropic", model=None,
+    )
+    assert result["exit_code"] == 0
+
+    # 1. Subprocess is gone.
+    pid = int(pidfile.read_text().strip())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+    # 2. Registry + liveness source are clean.
+    assert "k-fixture-bad-event" not in hr._headless_processes
+    assert "k-fixture-bad-event" not in hr.live_headless_sessions()
+
+
+# ---- AC 1: an unexpected exception must terminate the subprocess ------------
+#
+# The per-event ValidationError fix above is necessary but not sufficient:
+# any other exception that escapes the read loop (a bug in _on_event, an OS
+# error, an asyncio.CancelledError) could still orphan the subprocess.
+# run_headless's finally must guarantee the subprocess is terminated and
+# waited for, on every exit path.
+
+
+@pytest.mark.asyncio
+async def test_run_headless_terminates_subprocess_on_unexpected_exception(
+    monkeypatch, tmp_path,
+):
+    """AC 1 — Unexpected exception → subprocess terminated and waited for.
+
+    The fake CLI emits one well-formed event then sleeps long enough that,
+    without the fix, the test would either hang on the orphan or the
+    ProcessLookupError probe would fail because the process is still alive.
+    The monkeypatched ``_on_event`` raises a non-ValidationError so the
+    catch-around-the-parser does NOT swallow it — the exception is real and
+    the finally-block termination is the only thing that prevents the
+    orphan.
+    """
+    import os
+    import sys as stdlib_sys
+
+    pidfile = tmp_path / "fake_cli.pid"
+    fake_cli = tmp_path / "fake_claude.py"
+    fake_cli.write_text(
+        "import json, sys, os, time\n"
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        "def emit(p): sys.stdout.write(json.dumps(p) + '\\n'); sys.stdout.flush()\n"
+        "emit({'type':'system','subtype':'init','session_id':'sess-explode',"
+        "     'cwd':'.','model':'claude-opus-4-8','permissionMode':'acceptEdits'})\n"
+        "time.sleep(60)\n"
+    )
+    # See AC2/AC4 test for why the wrapper is needed.
+    wrapper = tmp_path / "fake_claude.sh"
+    wrapper.write_text(
+        f"#!/bin/sh\nexec {stdlib_sys.executable} '{fake_cli}' \"$@\"\n"
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setattr(hr, "resolve_cli_executable", lambda cli_id: str(wrapper))
+
+    async def _explode(*args, **kwargs):
+        raise RuntimeError("simulated unexpected failure")
+    monkeypatch.setattr(hr, "_on_event", _explode)
+
+    # The unexpected exception must propagate to the caller (so the operator
+    # sees the real cause); the cleanup must have already terminated the
+    # subprocess by the time it does.
+    with pytest.raises(RuntimeError, match="simulated unexpected failure"):
+        await hr.run_headless(
+            cli_id="claude-code", directory=str(tmp_path), prompt="hi",
+            session_name="k-fixture-explode", skip_permissions=True,
+            provider="anthropic", model=None,
+        )
+
+    # Subprocess must be dead. Poll briefly to absorb the SIGTERM-reap race
+    # but bail fast — the test fixture sleeps 60s, so anything still alive
+    # at this point is the orphan we're trying to prove is impossible.
+    pid = int(pidfile.read_text().strip())
+    deadline = asyncio.get_event_loop().time() + 5.0
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        if asyncio.get_event_loop().time() > deadline:
+            pytest.fail(f"subprocess {pid} still alive after run_headless raised")
+        await asyncio.sleep(0.05)
+
+    assert "k-fixture-explode" not in hr._headless_processes
+    assert "k-fixture-explode" not in hr.live_headless_sessions()
+
+
+# ---- AC 3: an exception escaping the run task must be visibly logged --------
+#
+# The previous done_callback was ``_headless_start_tasks.discard``, which
+# silently dropped the task's exception. The exception then only surfaced at
+# GC as a "Task exception was never retrieved" warning — invisible from the
+# dispatch log. The replacement callback logs the exception via the
+# runner's logger, so an operator scanning the log sees both the breadcrumb
+# and the full traceback.
+
+
+def test_headless_task_done_callback_logs_exceptions(caplog):
+    """AC 3 — done_callback logs the task's exception, not just discards it.
+
+    The callback's job is twofold: keep the strong-ref set from leaking
+    (the original ``_headless_start_tasks.discard`` purpose) AND surface
+    any exception to the operator-visible logger. This test pins the second
+    half — a regression here would silently drop run failures again, which
+    is exactly the gap the card calls out.
+    """
+    import logging
+
+    async def _boom():
+        raise RuntimeError("simulated boom")
+
+    async def _runner():
+        task = asyncio.create_task(_boom(), name="k-test-boom")
+        task.add_done_callback(hr._headless_task_done_callback)
+        # add_done_callback fires synchronously when the task is done; the
+        # exception itself is re-raised by ``await task``, which we catch
+        # here only because the test isn't about exception propagation.
+        try:
+            await task
+        except RuntimeError:
+            pass
+
+    with caplog.at_level(logging.ERROR, logger="app.kanban.headless_runner"):
+        asyncio.run(_runner())
+
+    assert any(
+        "simulated boom" in rec.getMessage() for rec in caplog.records
+    ), f"expected a log record mentioning 'simulated boom'; got: {[r.getMessage() for r in caplog.records]}"
+
+
+# ---- AC 1 (hardened): a SIGTERM-ignoring child must still be reaped ------
+#
+# The first AC 1 test uses a fake CLI that responds to SIGTERM (Python's
+# ``time.sleep`` is interruptible). A pathological child that traps SIGTERM
+# and ignores it (e.g. via ``signal.signal(SIGTERM, SIG_IGN)``) is the real
+# reason for the SIGKILL fallback in the finally block — without it, the
+# stderr drain in ``_consume_stream`` would hang on the still-open pipe.
+# This test pins that escape hatch.
+
+
+@pytest.mark.asyncio
+async def test_run_headless_kills_subprocess_that_ignores_sigterm(
+    monkeypatch, tmp_path,
+):
+    """AC 1 (hardened) — SIGTERM-ignoring child → SIGKILL fallback fires.
+
+    The fake CLI installs ``SIG_IGN`` on SIGTERM, then sleeps long enough
+    that a hung child would blow the test's hard pytest-timeout cap. With
+    the fix: ``_consume_stream``'s finally terminates (ignored), runs out
+    the 2s grace, then kills the child. The test finishes in ~2s and the
+    subprocess is reaped.
+    """
+    import os
+    import sys as stdlib_sys
+
+    pidfile = tmp_path / "fake_cli.pid"
+    fake_cli = tmp_path / "fake_claude.py"
+    fake_cli.write_text(
+        "import json, sys, os, time, signal\n"
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        # Trap SIGTERM — the runner's first-line cleanup is harmless
+        # against this child; only the SIGKILL fallback actually stops it.
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "def emit(p): sys.stdout.write(json.dumps(p) + '\\n'); sys.stdout.flush()\n"
+        "emit({'type':'system','subtype':'init','session_id':'sess-sigign',"
+        "     'cwd':'.','model':'claude-opus-4-8','permissionMode':'acceptEdits'})\n"
+        "time.sleep(120)\n"
+    )
+    wrapper = tmp_path / "fake_claude.sh"
+    wrapper.write_text(
+        f"#!/bin/sh\nexec {stdlib_sys.executable} '{fake_cli}' \"$@\"\n"
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setattr(hr, "resolve_cli_executable", lambda cli_id: str(wrapper))
+
+    async def _explode(*args, **kwargs):
+        raise RuntimeError("forced failure against SIGTERM-ignoring child")
+    monkeypatch.setattr(hr, "_on_event", _explode)
+
+    with pytest.raises(RuntimeError, match="forced failure against SIGTERM-ignoring child"):
+        await hr.run_headless(
+            cli_id="claude-code", directory=str(tmp_path), prompt="hi",
+            session_name="k-fixture-sigign", skip_permissions=True,
+            provider="anthropic", model=None,
+        )
+
+    # Subprocess must be reaped (SIGKILL path, not SIGTERM).
+    pid = int(pidfile.read_text().strip())
+    deadline = asyncio.get_event_loop().time() + 5.0
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        if asyncio.get_event_loop().time() > deadline:
+            pytest.fail(f"SIGTERM-ignoring subprocess {pid} still alive after kill fallback")
+        await asyncio.sleep(0.05)
+
+    assert "k-fixture-sigign" not in hr._headless_processes
+    assert "k-fixture-sigign" not in hr.live_headless_sessions()
+
+
+# ---- AC 2 (hardened): a malformed payload (KeyError in map) must skip -----
+#
+# The first AC 2 test exercises the pydantic.ValidationError branch. But
+# ``map_stream_event`` itself can raise KeyError/TypeError/AttributeError
+# when a payload has the right discriminator shape but a missing required
+# field (``payload["session_id"]``, ``block["id"]``). Those exceptions
+# happen BEFORE pydantic sees the dict and would, without the broadened
+# catch, kill the run the same way the original bug did.
+
+
+@pytest.mark.asyncio
+async def test_run_headless_does_not_leave_subprocess_on_malformed_payload(
+    monkeypatch, tmp_path,
+):
+    """AC 2 (hardened) — KeyError/TypeError from map_stream_event is also tolerated.
+
+    The fake CLI emits a ``system/init`` event without ``session_id``,
+    which trips ``payload["session_id"]`` inside ``map_stream_event`` (a
+    KeyError). Before the fix that propagated up and orphaned the
+    subprocess; after, it's logged and skipped so the run continues
+    past the malformed event and exits naturally.
+    """
+    import os
+    import sys as stdlib_sys
+
+    pidfile = tmp_path / "fake_cli.pid"
+    fake_cli = tmp_path / "fake_claude.py"
+    fake_cli.write_text(
+        "import json, sys, os\n"
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        "def emit(p): sys.stdout.write(json.dumps(p) + '\\n'); sys.stdout.flush()\n"
+        # Missing session_id → map_stream_event's payload['session_id'] KeyErrors.
+        "emit({'type':'system','subtype':'init',"
+        "     'cwd':'.','model':'claude-opus-4-8','permissionMode':'acceptEdits'})\n"
+        "emit({'type':'result','subtype':'success','is_error':False,"
+        "     'duration_ms':1,'total_cost_usd':0.0,'num_turns':1,"
+        "     'usage':{'input_tokens':1,'output_tokens':1}})\n"
+        "sys.exit(0)\n"
+    )
+    wrapper = tmp_path / "fake_claude.sh"
+    wrapper.write_text(
+        f"#!/bin/sh\nexec {stdlib_sys.executable} '{fake_cli}' \"$@\"\n"
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setattr(hr, "resolve_cli_executable", lambda cli_id: str(wrapper))
+
+    result = await hr.run_headless(
+        cli_id="claude-code", directory=str(tmp_path), prompt="hi",
+        session_name="k-fixture-malformed", skip_permissions=True,
+        provider="anthropic", model=None,
+    )
+    assert result["exit_code"] == 0
+
+    pid = int(pidfile.read_text().strip())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+    assert "k-fixture-malformed" not in hr._headless_processes
+    assert "k-fixture-malformed" not in hr.live_headless_sessions()
