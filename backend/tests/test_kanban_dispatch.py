@@ -191,6 +191,274 @@ def test_card_prompt_warns_against_writes_to_canonical_checkout():
         )
 
 
+def test_card_prompt_callout_interpolates_dispatched_project_path():
+    """Regression for kanban card a962b209…: when the dispatcher passes a
+    real ``project_path`` + ``worktree_path`` to ``build_card_prompt``, the
+    worktree-safety callout must name *those* paths — not the hardcoded
+    ``/home/vdvgu/claude-cockpit`` that only holds for the meta-project.
+    A dispatched agent that reads "your writable surface is
+    ``/home/vdvgu/claude-cockpit/...``" on a non-meta project wrote a
+    deliverable into the Cockpit checkout (instead of its own worktree) —
+    observable blast-radius was "every product dispatch can leave files in
+    Cockpit's tree", in the worst case on top of a concurrent session's
+    uncommitted work.
+    """
+    class _C:
+        title = "T"
+        description = ""
+    project_path = "/scratch/scratchpad/product-claude-cockpit-a462b209"
+    worktree_path = (
+        f"{project_path}/.claude/worktrees/k-problem-dispa-81b8"
+    )
+    prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct",
+        project_path=project_path, worktree_path=worktree_path,
+    )
+
+    # The callout must name the dispatched project's path as the canonical
+    # checkout that is the FORBIDDEN target — not the meta-project path.
+    assert project_path in prompt
+    # The "sole writable surface" line must point at this session's
+    # worktree, with the real branch substituted in for the <branch>
+    # placeholder that the legacy hardcode used.
+    assert worktree_path in prompt
+    assert "<branch>" not in prompt
+
+    # The forbidden canonical path inside the callout must match the
+    # dispatched project's main checkout, *not* /home/vdvgu/claude-cockpit
+    # (which is a totally different tree that the product-project agent
+    # has no business writing to). Just check that the callout's Wrong
+    # example points at the dispatched project_path, not at the legacy
+    # /home/vdvgu/claude-cockpit/ prefix.
+    wrong_idx = prompt.find("- **Wrong:**")
+    assert wrong_idx != -1, "callout must keep a Wrong example"
+    wrong_block = prompt[wrong_idx:wrong_idx + 400]
+    assert project_path + "/docs/cockpit" in wrong_block, (
+        f"Wrong example should reference the *dispatched* project, got: "
+        f"{wrong_block[:200]!r}"
+    )
+
+
+def test_card_prompt_does_not_leak_meta_project_path_for_dispatched_project():
+    """AC #3 (kaart a962b209…): a prompt for project X must contain no
+    path of project Y. Without the interpolation shipped in this card,
+    every dispatched session reads ``/home/vdvgu/claude-cockpit/...`` in
+    its worktree-safety callout — even when it was spawned for a
+    throwaway product project under ``/scratch/...``.
+    """
+    class _C:
+        title = "T"
+        description = ""
+    project_path = "/scratch/scratchpad/product-claude-cockpit-a462b209"
+    worktree_path = (
+        f"{project_path}/.claude/worktrees/k-problem-dispa-81b8"
+    )
+    prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct",
+        project_path=project_path, worktree_path=worktree_path,
+    )
+
+    assert "/home/vdvgu/claude-cockpit" not in prompt, (
+        "dispatched project's prompt should not hardcode the meta "
+        "project's /home/vdvgu/claude-cockpit path"
+    )
+    assert (
+        "/home/vdvgu/claude-cockpit/.claude/worktrees/<branch>"
+        not in prompt
+    )
+    # And the frontend-gate symlink path must follow the dispatched
+    # project, not the meta project's node_modules.
+    assert (
+        "/home/vdvgu/claude-cockpit/frontend/node_modules"
+        not in prompt
+    )
+
+
+def test_card_prompt_callout_falls_back_to_meta_path_when_project_unknown():
+    """Backwards-compat (kaart a962b209…): callers that pre-date the
+    project_path threading (legacy tests, ad-hoc callers) must still get
+    a useful callout with the meta project path as the safe fallback, so
+    the existing ``test_card_prompt_warns_against_writes_to_canonical_checkout``
+    contract is preserved."""
+    class _C:
+        title = "T"
+        description = ""
+    prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct",
+        # no project_path / worktree_path passed
+    )
+    assert "/home/vdvgu/claude-cockpit" in prompt
+
+
+def test_ship_instructions_frontend_gate_interpolates_project_path():
+    """The frontend-gate symlink-shortcut hardcodes
+    ``/home/vdvgu/claude-cockpit/frontend/node_modules`` as the source of
+    the symlink — that's the meta project's tree, not the dispatched
+    project's. When ``_build_ship_instructions`` gets a real project_path,
+    it must interpolate the project's own ``frontend/node_modules`` so a
+    product-project agent doesn't symlink Cockpit's deps into its own
+    worktree."""
+    project_path = "/scratch/scratchpad/product-claude-cockpit-a462b209"
+    instructions = dispatch._build_ship_instructions(
+        "direct", project_path=project_path,
+    )
+    assert f"{project_path}/frontend/node_modules" in instructions
+    assert (
+        "/home/vdvgu/claude-cockpit/frontend/node_modules"
+        not in instructions
+    )
+
+
+def test_ship_instructions_frontend_gate_quotes_path_with_spaces():
+    """FCR blocker 2 (kaart a962b209…): when ``project_path`` itself
+    contains whitespace (e.g. a project named ``My Project``) or shell
+    metacharacters (``prod$1``), the interpolated path inside the bash
+    snippet must be shell-quoted — otherwise ``[ -d … ]`` splits on
+    the space and ``ln -s …`` creates a symlink to a partial path.
+    The unquoted legacy ``/home/vdvgu/claude-cockpit/frontend/node_modules``
+    happened to contain no space, so the bug was silent for the meta
+    project; a product project triggers it on the first dispatch.
+
+    The dispatcher uses ``shlex.quote``, which wraps the path in single
+    quotes (FCR blocker C kaart a962b209…). Single-quoted shell strings
+    are stricter than double-quoted ones — a path containing ``$``,
+    backticks, or embedded ``"`` stays literal because ``sh`` performs
+    no expansion or quote interpretation inside ``'…'``.
+    """
+    import shlex as _shlex
+
+    project_with_spaces = "/home/me/My Project/claude-cockpit"
+    instructions = dispatch._build_ship_instructions(
+        "direct", project_path=project_with_spaces,
+    )
+    # The `[ -d … ]` test and the `ln -s …` source must both wrap the
+    # path in shell quotes. Compute the expected quoted form via the
+    # same ``shlex.quote`` the dispatcher uses so the assertion stays
+    # in lockstep with the implementation.
+    expected_bin = _shlex.quote(
+        f"{project_with_spaces}/frontend/node_modules/.bin"
+    )
+    expected_nm = _shlex.quote(
+        f"{project_with_spaces}/frontend/node_modules"
+    )
+    assert (
+        f"[ -d {expected_bin} ]" in instructions
+    ), (
+        f"frontend-gate `test -d` must shell-quote project_path; "
+        f"expected `[ -d {expected_bin} ]` in instructions"
+    )
+    assert (
+        f"ln -s {expected_nm} node_modules" in instructions
+    ), (
+        f"frontend-gate `ln -s` source must shell-quote project_path; "
+        f"expected `ln -s {expected_nm} node_modules` in instructions"
+    )
+
+
+def test_ship_instructions_frontend_gate_quotes_path_with_metacharacter():
+    """FCR blocker C (kaart a962b209…): the spaces test only exercises
+    whitespace; a path with a shell metacharacter (``$1``, backticks,
+    embedded ``"``, backslashes) breaks *double-quote* wrapping because
+    ``sh`` still expands ``$`` and backticks and tokenises on embedded ``"``.
+    ``shlex.quote`` uses single quotes for that reason — a literal
+    round-trip through ``shlex.split`` proves the path is shell-safe.
+    """
+    import shlex as _shlex
+
+    project_with_meta = "/tmp/prod$1/claude-cockpit"
+    instructions = dispatch._build_ship_instructions(
+        "direct", project_path=project_with_meta,
+    )
+    # Pick out the two bash lines we care about and round-trip them
+    # through ``shlex.split``; the third positional arg of ``ln -s``
+    # must be the literal path, not a shell-expanded variant.
+    ln_line = next(
+        line for line in instructions.splitlines() if "ln -s" in line
+    )
+    parts = _shlex.split(ln_line.strip().rstrip("\\"))
+    assert len(parts) >= 3, f"unexpected `ln -s` line: {ln_line!r}"
+    assert parts[0] == "ln"
+    assert parts[1] == "-s"
+    assert parts[2] == f"{project_with_meta}/frontend/node_modules", (
+        f"shlex.split round-trip lost the literal $1: got {parts[2]!r}"
+    )
+    # Same round-trip for the `[ -d … ]` test source. The template
+    # renders two `[ -d` lines: one checks the inner worktree's
+    # ``node_modules``, the other probes the main checkout's ``.bin``.
+    # Pick the one whose shlex-split args include the project path.
+    test_lines = [
+        line for line in instructions.splitlines()
+        if "[ -d" in line and "node_modules/.bin" in line
+    ]
+    matched = None
+    for candidate in test_lines:
+        try:
+            test_parts = _shlex.split(candidate.strip().rstrip("\\"))
+        except ValueError:
+            continue
+        if f"{project_with_meta}/frontend/node_modules/.bin" in test_parts:
+            matched = test_parts
+            break
+    assert matched is not None, (
+        f"could not find a `[ -d … ]` line whose shlex.split yields "
+        f"the literal project path; candidates: {test_lines!r}"
+    )
+
+
+def test_card_prompt_callout_omits_worktree_path_for_resume_session():
+    """FCR blocker 1 (kaart a962b209…): when the card carries a
+    ``resume_session_id``, ``_run_card`` must NOT fabricate a worktree
+    path keyed on the brand-new mint — the prior session's cwd comes
+    from ``resume_project_folder`` and may live under a completely
+    different branch name. Passing the freshly-minted path would lie
+    to the agent about where its shell actually starts.
+
+    AC2 (kaart a962b209…): when ``worktree_path`` is not passed (resume,
+    sandcastle, or headless transports), the callout must render
+    *neutral* cwd guidance instead of claiming the agent was spawned
+    in a git worktree at a fabricated path. The legacy ``<branch>``
+    placeholder fallback was a hidden lie — the resume session's cwd
+    has nothing to do with a worktree branch name minted seconds ago.
+    """
+    class _C:
+        title = "T"
+        description = ""
+
+    # Mirror the dispatcher-side guard by calling build_card_prompt
+    # directly: the FCR's specific failure mode is that an unconditional
+    # ``worktree_path`` interpolates into the prompt. We exercise that
+    # by passing a project_path without a worktree_path and asserting
+    # the resulting prompt does NOT claim a fresh-worktree spawn.
+    prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct",
+        project_path="/scratch/somewhere",
+        # worktree_path omitted — simulates a resume / sandcastle /
+        # headless dispatch where the cwd is determined by the
+        # transport, not a freshly-minted worktree.
+    )
+    # AC2 fix: the legacy "You were spawned in a git worktree at
+    # ``<project>/.claude/worktrees/<branch>``" framing must NOT
+    # appear when worktree_path is unknown — that's a fabricated
+    # claim about a directory that doesn't exist for resume/sandcastle
+    # /headless transports.
+    assert "<branch>" not in prompt, (
+        "When worktree_path is not passed, the callout must NOT "
+        "fabricate a `<project>/.claude/worktrees/<branch>` path — "
+        "that's a lie to the agent about its real cwd."
+    )
+    # The neutral framing mentions the resume/sandcastle/headless
+    # carve-out so the agent knows why no worktree path is given.
+    assert "resume / sandcastle / headless" in prompt or (
+        "freshly-minted git worktree" in prompt
+    ), (
+        "When worktree_path is not passed, the callout must explain "
+        "why (resume / sandcastle / headless skip the worktree step)."
+    )
+    # And the actual project_path is still honored as the canonical
+    # forbidden target.
+    assert "/scratch/somewhere" in prompt
+
+
 def test_direct_ship_recipe_has_uncommitted_changes_preflight():
     """Direct-mode ship recipe must guard against the silent no-op where the
     detached worktree only sees COMMITTED state: uncommitted/untracked changes

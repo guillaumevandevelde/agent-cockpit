@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 import subprocess
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
@@ -1588,7 +1589,9 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       impediment_answer: str | None = None,
                       revisit_question: str | None = None,
                       revisit_prior_decision: dict | None = None,
-                      prior_branch_warning: str | None = None) -> str:
+                      prior_branch_warning: str | None = None,
+                      project_path: str | None = None,
+                      worktree_path: str | None = None) -> str:
     # A card dispatched in the executor phase (no `analyst_agent_id`) can
     # still resolve to the analyst persona via `work_type='analysis'` or
     # `card.agent='analyst'` (the "leaf analyst spike" case — see
@@ -1668,10 +1671,14 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
     elif getattr(card, "agent", None) == "reviewer":
         ship_instructions = _build_reviewer_session_end_instructions()
     else:
-        ship_instructions = _build_ship_instructions(ship_mode)
+        ship_instructions = _build_ship_instructions(
+            ship_mode, project_path=project_path,
+        )
     problem_flag_instructions = _build_problem_flag_instructions()
     mcp_fallback_instructions = _build_mcp_fallback_instructions()
-    worktree_safety_callout = _build_worktree_safety_callout()
+    worktree_safety_callout = _build_worktree_safety_callout(
+        project_path=project_path, worktree_path=worktree_path,
+    )
     attachments_section = _build_attachments_section(card)
 
     return (
@@ -1753,20 +1760,23 @@ def _build_problem_flag_instructions() -> str:
     )
 
 
-def _build_worktree_safety_callout() -> str:
+def _build_worktree_safety_callout(
+    project_path: str | None = None,
+    worktree_path: str | None = None,
+) -> str:
     """Top-of-prompt callout forbidding writes to the canonical checkout path.
 
     Background — kanban card 513e37a1a86e41db8b6af8423292f6b6: a dispatched
     analyst session edited two docs via the absolute path
-    ``/home/vdvgu/claude-cockpit/docs/cockpit/...`` instead of its worktree
-    path. ``Edit`` succeeded because the committed content matched in both
+    ``<project_path>/docs/cockpit/...`` instead of its worktree path.
+    ``Edit`` succeeded because the committed content matched in both
     checkouts, so ``old_string`` resolved; the change landed on top of a
     concurrent session's uncommitted work in the main checkout. The persona
-    doc already warns against ``cd /home/vdvgu/claude-cockpit/...`` for
-    shell commands but says nothing about Write/Edit — an agent reading the
-    card description (which references ``/home/vdvgu/claude-cockpit/...`` for
-    canonical filenames) easily constructs an absolute *write* path that
-    bypasses the worktree.
+    doc already warns against ``cd <project_path>/...`` for shell commands
+    but says nothing about Write/Edit — an agent reading the card description
+    (which references ``/home/vdvgu/claude-cockpit/...`` for canonical
+    filenames) easily constructs an absolute *write* path that bypasses the
+    worktree.
 
     This callout is the in-prompt mirror of the persona-doc guidance: it
     names the safe pattern, names the forbidden one, and names the tools that
@@ -1775,33 +1785,74 @@ def _build_worktree_safety_callout() -> str:
     early context, not buried under later steps — same parity principle as
     the ship-instructions inline.
 
-    The exact path string (``/home/vdvgu/claude-cockpit``) is hard-coded
-    because that is the canonical checkout location on this host; the
-    guidance is that the worktree is
-    ``<that-root>/.claude/worktrees/<branch>/`` and absolute writes outside
-    it are forbidden.
+    ``project_path`` and ``worktree_path`` are interpolated when the
+    dispatcher knows them (kanban card a962b209aea4489680c15de3562eb8bb).
+    Before this card the callout hardcoded the meta project's
+    ``/home/vdvgu/claude-cockpit`` and the ``<branch>`` placeholder — those
+    values are *wrong* for any non-meta dispatched project and silently
+    coaxed an agent on a throwaway product project into writing its
+    deliverable into the meta project's tree. Pass ``None`` (the legacy
+    fallback) only when the dispatcher hasn't resolved a project yet —
+    kept as a default so pre-existing callers and tests keep working.
+
+    The forbidden canonical path here is the project's *own* main checkout,
+    not the meta project tree: a card dispatched against project X must
+    not be allowed to write into project X's shared checkout either, for
+    exactly the same concurrent-session reason.
+
+    When ``worktree_path`` is ``None`` the callout deliberately drops the
+    "spawned in a git worktree at …" framing — that framing is only true
+    for the worktree transport. Resume sessions, sandcastle sessions, and
+    headless sessions do NOT run in a freshly-minted host-side worktree;
+    naming a fabricated path (the legacy ``<branch>`` placeholder was a
+    fallback for unresolved cases but reads as a real claim to the agent)
+    tells the agent a lie about its actual cwd. The forbidden canonical
+    path guidance still applies — concurrent dispatched sessions on this
+    project can still have uncommitted work in the main checkout.
     """
+    canonical_main = project_path or "/home/vdvgu/claude-cockpit"
+    # Branch into two templates: when the dispatcher knows the worktree
+    # path, render the full claim ("spawned in a git worktree at …");
+    # otherwise render a neutral "your shell cwd is …" framing so resume
+    # / sandcastle / headless sessions don't get a false claim.
+    if worktree_path:
+        scope_intro = (
+            f"You were spawned in a git worktree at ``{worktree_path}`` "
+            "(see your shell's cwd). Your **only** writable surface is "
+            "that worktree root."
+        )
+        right_example = (
+            f"absolute ``{worktree_path}/docs/cockpit/foo.md``"
+        )
+    else:
+        scope_intro = (
+            "Your shell's cwd is your writable surface for this card — "
+            "it is **not** a freshly-minted git worktree (resume / "
+            "sandcastle / headless transports skip the worktree step), "
+            "so write into that cwd and nowhere else."
+        )
+        right_example = (
+            "relative ``docs/cockpit/foo.md`` from your shell's cwd"
+        )
+
     return (
         "## Worktree scope — write only inside your worktree\n"
-        "You were spawned in a git worktree at "
-        "``/home/vdvgu/claude-cockpit/.claude/worktrees/<branch>/`` "
-        "(see your shell's cwd). Your **only** writable surface is that "
-        "worktree root. **Never** call ``Write``, ``Edit``, ``MultiEdit``, "
-        "or ``NotebookEdit`` with an absolute path that resolves to "
-        "``/home/vdvgu/claude-cockpit/...`` *outside* your worktree — that "
-        "is the shared canonical checkout where ``master`` is checked out, "
-        "and concurrent dispatched sessions may have uncommitted work there. "
-        "A write to that path silently lands on top of someone else's "
-        "changes (kanban card 513e37a1a86e41db8b6af8423292f6b6 was a "
-        "near-clobber from exactly this).\n\n"
+        f"{scope_intro} **Never** call ``Write``, ``Edit``, ``MultiEdit``, "
+        f"or ``NotebookEdit`` with an absolute path that resolves to "
+        f"``{canonical_main}/...`` outside your writable surface — that "
+        "is the shared canonical checkout where ``master`` is checked "
+        "out, and concurrent dispatched sessions may have uncommitted "
+        "work there. A write to that path silently lands on top of "
+        "someone else's changes (kanban card "
+        "513e37a1a86e41db8b6af8423292f6b6 was a near-clobber from "
+        "exactly this).\n\n"
         "Concretely:\n"
         "- **Right:** ``docs/cockpit/foo.md``, ``backend/app/x.py``, or "
-        "absolute "
-        "``/home/vdvgu/claude-cockpit/.claude/worktrees/<branch>/docs/cockpit/foo.md``.\n"
-        "- **Wrong:** ``/home/vdvgu/claude-cockpit/docs/cockpit/foo.md`` — "
-        "this resolves to the *main* checkout, not your worktree, even "
-        "though the file content is identical.\n\n"
-        "Same rule for shell: don't ``cd /home/vdvgu/claude-cockpit/...`` "
+        f"{right_example}.\n"
+        f"- **Wrong:** ``{canonical_main}/docs/cockpit/foo.md`` — "
+        "this resolves to the *main* checkout, not your writable "
+        "surface, even though the file content is identical.\n\n"
+        f"Same rule for shell: don't ``cd {canonical_main}/...`` "
         "and run a write from there — see the persona's *Werkomgeving in "
         "worktree* section for the broader cwd-safety rules. Read paths to "
         "the canonical checkout are fine; only writes are forbidden.\n"
@@ -2047,7 +2098,7 @@ async def _resolve_plan_for_child(session, card) -> tuple[str, str | None, str |
     return (PLAN_MISSING_ON_PARENT, None, plan_id, parent_id)
 
 
-def _build_ship_instructions(ship_mode: str) -> str:
+def _build_ship_instructions(ship_mode: str, project_path: str | None = None) -> str:
     """Build the standardised session-end workflow instructions.
 
     These instructions are provider-agnostic: they work the same for Claude Code,
@@ -2163,6 +2214,36 @@ def _build_ship_instructions(ship_mode: str) -> str:
     sync = (
         "1. **Sync** — `git fetch origin` so you are up to date with the remote.\n"
     )
+    # ``project_path`` interpolation (kanban card a962b209…): the dispatched
+    # project is not always the meta project — pin the ``node_modules``
+    # symlink to the *dispatched* project's main checkout, not the hardcoded
+    # ``/home/vdvgu/claude-cockpit`` that only held for the meta project.
+    # The legacy fallback (``project_path=None``) keeps the hardcoded string
+    # so pre-existing tests/observers still match.
+    #
+    # Bash-quoting (kaart a962b209… blocker 2): ``project_path`` can contain
+    # spaces or shell metacharacters (the dispatch target may live under
+    # ``/scratch/scratchpad/My Project/...``). Both the `test -d` probe and
+    # the `ln -s` source must wrap the path in double quotes; an unquoted
+    # path with a space silently turns `[ -d /foo bar/... ]` into a syntax
+    # error and `ln -s /foo bar/...` into a symlink to ``/foo``.
+    frontend_root = (
+        project_path.rstrip('/') if project_path
+        else "/home/vdvgu/claude-cockpit"
+    )
+    nm_path = f"{frontend_root}/frontend/node_modules"
+    bin_path = f"{nm_path}/.bin"
+    # Pre-quoted forms for the bash snippets below. ``shlex.quote`` (kaart
+    # a962b209… blocker C) wraps the path in single quotes and escapes any
+    # embedded single quotes — a path like ``/tmp/prod$1/claude-cockpit``
+    # survives variable expansion, command substitution, and embedded
+    # double quotes, where a bare double-quote wrapper would still let
+    # ``$``/``\```/``"`` through to the shell. Single-quoted shell strings
+    # also tolerate spaces without the awkward escape sequences a manual
+    # wrapper would have to grow. The legacy fallback path contains no
+    # metacharacters, so ``shlex.quote`` produces an equivalent result.
+    nm_q = shlex.quote(nm_path)
+    bin_q = shlex.quote(bin_path)
     tests = (
         "2. **Run frontend checks yourself before shipping (only when the branch "
         "touches ``frontend/``)** — there is no pre-push gate; nothing blocks a "
@@ -2178,15 +2259,21 @@ def _build_ship_instructions(ship_mode: str) -> str:
         "   if [ -n \"$FRONTEND_TOUCHED\" ]; then\n"
         "     # Fresh worktrees have no node_modules (gitignored). Fast path: "
         "when ``frontend/package-lock.json`` is unchanged vs origin/master, "
-        "symlink the main checkout's already-installed ``frontend/node_modules`` "
+        f"symlink the main checkout's already-installed ``{nm_path}`` "
         "instead of paying a multi-minute ``npm ci``. Fall back to ``npm ci`` "
-        "when the lockfile diverged (frontend deps changed) or main's "
+        "when the lockfile diverges (frontend deps changed) or main's "
         "``node_modules`` is absent / itself missing ``.bin/`` (partial).\n"
         "     # Card 15cc257d… also handled the partial-install trap: an "
         "interrupted ``npm ci`` leaves some scoped dirs but no ``.bin/``, which "
         "makes ``npm run lint`` die with ``eslint: not found`` and blocks a "
         "plain symlink. Move the partial aside (``mv``, not ``rm`` — ``rm`` is "
         "deny-listed) before bootstrapping.\n"
+        "     # Note: ``<project-root>`` in the bash below is the absolute path "
+        "of the dispatched project's main checkout — never the worktree path "
+        "(that tree has no node_modules yet). The dispatcher inlines the exact "
+        "string (see ``_build_ship_instructions`` in backend/app/kanban/"
+        "dispatch.py, kaart a962b209…). Path is double-quoted so a project "
+        "named ``My Project`` or ``prod$1`` doesn't break the test/ln.\n"
         "     ( cd frontend && \\\n"
         "       if [ -d node_modules ] && [ ! -d node_modules/.bin ]; then \\\n"
         "         mv node_modules \"../node_modules.partial-$(date +%s)\" && \\\n"
@@ -2195,9 +2282,9 @@ def _build_ship_instructions(ship_mode: str) -> str:
         "       if [ ! -d node_modules ]; then \\\n"
         "         BASE=$(git merge-base HEAD origin/master) && \\\n"
         "         if git diff --quiet \"$BASE\" origin/master -- frontend/package-lock.json \\\n"
-        "            && [ -d /home/vdvgu/claude-cockpit/frontend/node_modules/.bin ]; then \\\n"
-        "           ln -s /home/vdvgu/claude-cockpit/frontend/node_modules node_modules && \\\n"
-        "           echo \"bootstrapped frontend/node_modules via symlink (lockfile matches master)\"; \\\n"
+        f"            && [ -d {bin_q} ]; then \\\n"
+        f"           ln -s {nm_q} node_modules && \\\n"
+        f"           echo \"bootstrapped frontend/node_modules via symlink (lockfile matches master)\"; \\\n"
         "         else \\\n"
         "           npm ci; \\\n"
         "         fi; \\\n"
@@ -3428,13 +3515,39 @@ async def _run_card(
     prior_branch_warning = await _resolve_prior_branch_warning(
         session, card=card, project_path=project_path,
     )
+    # The worktree path the spawn will actually use (kanban card
+    # a962b209aea4489680c15de3562eb8bb): compute it from the same
+    # ``name``/``project_path`` pair the worktree transport uses, so the
+    # callout and ship-recipe's ``cwd`` references point at the real
+    # on-disk location of *this* dispatch and don't default to the meta
+    # project. Only the worktree transport creates a fresh host-side
+    # ``.claude/worktrees/<name>`` checkout:
+    # - sandcastle: no host worktree exists; the constructed path would
+    #   point at a non-existent directory and lie to the agent about its
+    #   actual cwd (which lives inside a container).
+    # - resume (`card.resume_session_id` set → ``make_resume_transport``):
+    #   the spawned session's cwd is the *prior* session's project_folder,
+    #   NOT a fresh worktree keyed on the brand-new ``name`` minted here.
+    # - headless: no per-card worktree path by construction; the runner
+    #   sets up cwd differently.
+    # An earlier version of this predicate used ``!= sandcastle_transport``
+    # which incorrectly classified the headless transport as a worktree
+    # creator; use an explicit identity check against ``worktree_transport``
+    # instead (FCR blocker B, kaart a962b209…).
+    is_fresh_worktree = card_transport is worktree_transport
+    worktree_path = (
+        str(Path(project_path) / ".claude" / "worktrees" / name)
+        if is_fresh_worktree else None
+    )
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         phase=phase,
         impediment_question=impediment_question,
         impediment_answer=impediment_answer,
         revisit_question=revisit_question,
         revisit_prior_decision=revisit_prior_decision,
-        prior_branch_warning=prior_branch_warning)
+        prior_branch_warning=prior_branch_warning,
+        project_path=project_path,
+        worktree_path=worktree_path)
     if phase == "executor" and card.parent_card_id is not None:
         # Only child cards (parent_card_id set) get the PLAN CONTEXT section.
         # Legacy single-agent cards never have a parent; prepending the
