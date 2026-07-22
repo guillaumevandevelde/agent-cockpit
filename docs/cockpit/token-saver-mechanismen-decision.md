@@ -117,6 +117,21 @@ verdrinkt output-besparing in de ruis. In scenario B valt RTK's compounding weg 
 alleen de eenmalige `cache_creation` telt — en wordt output ineens 10,3% van de
 noemer, waarmee Caveman het sterkste mechanisme van de vier wordt.
 
+> **✅ BESLECHT MET EEN METING (2026-07-21, kaart `97e623f9…`) — Scenario B is
+> de werkelijkheid.** Een gecontroleerde injectie-meting op dit abonnement
+> (Anthropic's eigen `five_hour.utilization`-teller, de bron achter `/usage`)
+> vindt een effectief cache_read-gewicht van **w = 0,014** — statistisch nul.
+> Het model-vrije bewijs: twee intervallen bewogen allebei **exact 4
+> procentpunt** terwijl hun cache_read 1,8× verschilde (2,05 M vs. 3,69 M). Dus:
+> **RTK ≈ 1,6% / Caveman ≈ 6,7% — Caveman is het sterkste mechanisme.** De
+> hedge blijft verstandig (beide opt-in, per-lane), maar de bouwinspanning weegt
+> nu richting output-reductie. De tegen-evidentie
+> ([claude-code#24147](https://github.com/anthropics/claude-code/issues/24147),
+> "99,93% of quota") beschrijft token-*boekhouding* die cache_read meesommeert,
+> niet de werkelijke quotum-consumptie. Volledige meting + reproductie:
+> [`cache-read-quota-decision.md`](./cache-read-quota-decision.md). Deze
+> §2.3-doorrekening blijft staan als het waarom; de meting kiest de kolom.
+
 Dat is een ongemakkelijke uitkomst, maar het is de eerlijke. Twee praktische
 gevolgen:
 

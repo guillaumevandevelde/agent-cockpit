@@ -91,6 +91,7 @@ bash scripts/test_check_litellm_hardening.sh              # Bash tests for check
 bash scripts/test_check_problem_card_staleness.sh         # Bash tests for check-problem-card-staleness.sh
 bash scripts/test_check_schema_rename_coverage.sh         # Bash tests for check-schema-rename-coverage.sh
 bash scripts/test_check_test_harness_coverage.sh         # Bash tests for check-test-harness-coverage.sh
+bash scripts/test_measure_cache_read_quota.sh            # Bash tests for measure-cache-read-quota.sh (offline price-reconstruction + fit-CLI asserts)
 bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
 bash scripts/test_list_orphan_bridge_sessions.sh           # Bash tests for list-orphan-bridge-sessions.sh (uses real tmux sessions)
 bash scripts/test_sweep_dangling_depends_on.sh             # Bash tests for sweep_dangling_depends_on.py (synthetic SQLite fixtures)

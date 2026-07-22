@@ -71,6 +71,11 @@ tegelijk aangezet), generalisatie naar niet-dispatch prompts.
   expliciet als "best available inference, not authoritative"; heropen
   zodra Anthropic dit expliciet maakt of zodra een Claude-account een
   tegengestelde observatie laat zien.
+- **✅ GEMETEN BEVESTIGD (2026-07-21, kaart `97e623f9…`).** Deze inferentie is
+  niet langer alleen inferentie: een gecontroleerde injectie-meting tegen
+  Anthropic's eigen `five_hour.utilization`-teller vindt een effectief
+  cache_read-gewicht van **w ≈ 0** (Scenario B) — `cache_read` telt niet mee.
+  Zie [`cache-read-quota-decision.md`](./cache-read-quota-decision.md).
 
 ## 3. Proxy-ontwerp — wat we wel/niet emuleren
 
