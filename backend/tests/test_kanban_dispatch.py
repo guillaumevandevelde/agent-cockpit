@@ -2298,13 +2298,288 @@ async def test_redispatch_kills_live_session_posts_audit_comment(monkeypatch):
     note = [op for op in activity
             if op.op_type == "comment"
             and (op.payload or {}).get("text", "").startswith("**Note:**")]
-    assert len(note) == 1, (
+    # Two Note comments are now expected since the caller_source feature: one
+    # for the live-session kill (this test's contract) and one labelling the
+    # redispatch entry-point. Both are intentional, so assert on the live-
+    # kill Note by its content rather than a brittle count.
+    kill_notes = [op for op in note
+                  if "k-product-analy-312c" in (op.payload or {}).get("text", "")]
+    assert len(kill_notes) == 1, (
         "redispatch over a still-alive tmux session must post exactly one "
-        "**Note:** audit comment so the activity feed shows the live-session kill."
+        "live-kill **Note:** audit comment; "
+        f"got {len(kill_notes)} Note(s) containing the session name."
     )
-    text = note[0].payload["text"]
+    text = kill_notes[0].payload["text"]
     assert "k-product-analy-312c" in text
     assert "still alive" in text or "MCP" in text
+
+
+@pytest.mark.asyncio
+async def test_redispatch_posts_caller_source_audit_comment():
+    """Regression for [self-improve] Redispatch-trigger-bron onzichtbaar in activity-feed.
+
+    Every redispatch_card invocation MUST post a `**Note:** Redispatched via <source>`
+    audit comment on the card so the activity feed tells an operator (without extra
+    grep-werk) which entry-point fired: REST UI (`ui`), MCP-tool (`mcp:<session_id>`),
+    `redispatch_all_orphans` (`bulk_orphans`), or `recover_project`
+    (`recover_interrupted_sessions`). The string-conventions-prefix `**Note:**`
+    matches the existing live-session-kill audit comment so they style uniformly.
+    """
+    from app.kanban.service import card_activity
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="ui-redispatch", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-source-aaaa"},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        result = await dispatch.redispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+            caller_source="ui",
+        )
+        await s.commit()
+        activity = await card_activity(s, cid)
+
+    assert result is not None, "redispatch must succeed even without live tmux session"
+
+    # The audit comment is a **Note:** comment (matching the existing
+    # live-session-kill Note convention) and includes the source verbatim so
+    # operators can grep for it. Must be exactly one such comment — the
+    # caller-source Note must not collide with or duplicate the live-kill Note
+    # (which only fires when the prior tmux session is still alive in this test
+    # it isn't).
+    note = [op for op in activity
+            if op.op_type == "comment"
+            and (op.payload or {}).get("text", "").startswith("**Note:**")]
+    source_notes = [op for op in note
+                    if "Redispatched via" in (op.payload or {}).get("text", "")]
+    assert len(source_notes) == 1, (
+        "redispatch_card must post exactly one `**Note:** Redispatched via "
+        f"<source>` audit comment when caller_source is supplied; got {len(source_notes)}."
+    )
+    text = source_notes[0].payload["text"]
+    assert "ui" in text, f"caller_source label must appear verbatim in audit comment; got {text!r}"
+
+
+@pytest.mark.asyncio
+async def test_redispatch_defaults_caller_source_to_unspecified():
+    """When called without caller_source, redispatch_card must still post an
+    audit comment (so the activity feed never silently loses the trace) and
+    must label the source `unspecified` — distinguishing legacy callers from
+    the three current entry-points that already pass an explicit label.
+    Keeps the function back-compat-safe without forcing every internal caller
+    to be retrofitted in the same commit.
+    """
+    from app.kanban.service import card_activity
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="legacy-redispatch", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-legacy-bbbb"},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        # No caller_source kwarg — mirrors the in-process callers
+        # (session_recovery.recover_project, existing tests) that don't know
+        # about the new label yet.
+        await dispatch.redispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        activity = await card_activity(s, cid)
+
+    source_notes = [op for op in activity
+                    if op.op_type == "comment"
+                    and "Redispatched via" in (op.payload or {}).get("text", "")]
+    assert len(source_notes) == 1, (
+        "legacy callers must still produce exactly one source-audit comment "
+        f"(with `unspecified` label); got {len(source_notes)}."
+    )
+    assert "unspecified" in source_notes[0].payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_redispatch_all_orphans_tags_every_redispatch_with_bulk_source():
+    """`redispatch_all_orphans` must tag each redispatch it triggers with the
+    `bulk_orphans` source label so a future operator investigating "who
+    redispatched card X" can see it came from the bulk path — not from the
+    REST UI or an MCP-tool call.
+    """
+    from app.kanban.service import card_activity
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid1 = await _make_card(s, title="orphan-bulk-1", column="developer")
+        cid2 = await _make_card(s, title="orphan-bulk-2", column="testing")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        cids = [cid1, cid2]
+        activities = [(c, await card_activity(s, c)) for c in cids]
+
+    assert len(results) == 2
+    for cid, activity in activities:
+        source_notes = [op for op in activity
+                        if op.op_type == "comment"
+                        and "Redispatched via" in (op.payload or {}).get("text", "")]
+        assert len(source_notes) == 1, (
+            f"card {cid} must have exactly one source-audit comment from bulk_orphans; "
+            f"got {len(source_notes)}."
+        )
+        assert "bulk_orphans" in source_notes[0].payload["text"], (
+            f"bulk redispatch must label source `bulk_orphans`; got {source_notes[0].payload['text']!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_mcp_redispatch_card_wrapper_forwards_mcp_source_label():
+    """End-to-end through the MCP-tool wrapper: invoking the registered
+    `mcp_server.redispatch_card` async function must leave a
+    `**Note:** Redispatched via `mcp`` audit comment on the card.
+
+    Closes the FCR-flagged test-coverage gap from kaart 57785696c9444c1ba539b438a3666e76:
+    the audit-comment unit test exercises `dispatch.redispatch_card` directly,
+    but a regression in `mcp_server.redispatch_card` (e.g. a typo that strips
+    the `caller_source` kwarg) would not be caught without this end-to-end
+    coverage. Follows the same direct-import pattern that
+    `test_kanban_done_summary.py` and `test_kanban_mcp.py` already use for
+    MCP-tool wrappers — skipping `mcp.tool()` registration avoids importing
+    the full FastMCP server, which needs a long-lived transport.
+    """
+    import unittest.mock as mock
+
+    from app.kanban import mcp_server as m
+    from app.kanban.service import card_activity
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="mcp-wrapper-e2e", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-mcp-wrapp-7"},
+        )
+        await s.commit()
+
+    # Mock `_live_sessions` to None so the live-kill Note branch is *not*
+    # triggered — keeps the assertion focused on exactly one `**Note:**
+    # Redispatched via <source>` comment (the wrapper's caller_source label).
+    # Mock `_run_card` so the spawn side (which would otherwise try
+    # `git fetch origin` on `/p`, an invalid path) is skipped. The audit
+    # comment is posted *before* `_run_card` is called inside
+    # `dispatch.redispatch_card`, so mocking `_run_card` lets us assert on
+    # the comment without standing up a real transport.
+    async def fake_run_card(*args, **kwargs):
+        return {"session_name": "k-mcp-fake-0001", "tmux_target": "k-mcp-fake-0001:0.0"}
+
+    with mock.patch.object(dispatch, "_live_sessions", return_value=None), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None), \
+         mock.patch.object(dispatch, "_run_card", side_effect=fake_run_card):
+        result = await m.redispatch_card(
+            card_id=cid, project_path="/p", agent=None,
+        )
+    # The wrapper returns a {ok, card_id, session_name} dict; check we got
+    # the canonical success shape before reading the activity feed.
+    assert result.get("ok") is True, (
+        f"MCP wrapper returned a non-OK response: {result!r}"
+    )
+    assert result["card_id"] == cid
+
+    # Activity feed must have the `mcp` source label, not `unspecified`.
+    async with KanbanSessionLocal() as s:
+        activity = await card_activity(s, cid)
+
+    source_notes = [op for op in activity
+                    if op.op_type == "comment"
+                    and "Redispatched via" in (op.payload or {}).get("text", "")]
+    assert len(source_notes) == 1, (
+        "MCP end-to-end must post exactly one source-audit comment; "
+        f"got {len(source_notes)}."
+    )
+    assert "mcp" in source_notes[0].payload["text"]
+    assert "unspecified" not in source_notes[0].payload["text"], (
+        "MCP wrapper must propagate its `mcp` label to dispatch.redispatch_card; "
+        f"got {source_notes[0].payload['text']!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_rest_redispatch_card_endpoint_forwards_ui_source_label():
+    """End-to-end through the REST handler: POST /cards/{cid}/redispatch from
+    the operator's UI must leave a `**Note:** Redispatched via `ui`` audit
+    comment on the card.
+
+    Closes the same FCR-flagged gap as the MCP end-to-end test: verifying the
+    REST wiring actually forwards `payload.caller_source or "ui"` through the
+    handler to `dispatch.redispatch_card` instead of silently dropping it.
+    Uses `httpx.AsyncClient` against the FastAPI ASGI app — the same pattern
+    as `test_kanban_done_summary._client`.
+    """
+    import unittest.mock as mock
+
+    from httpx import ASGITransport, AsyncClient
+
+    from app.kanban.service import card_activity
+    from app.main import app
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="rest-handler-e2e", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-rest-handl-9"},
+        )
+        await s.commit()
+
+    # Mock `_live_sessions` so the live-kill branch doesn't fire alongside
+    # the source audit comment. Mock `_run_card` so the worktree-transport
+    # `git fetch origin` on `/p` is bypassed (the audit comment is posted
+    # *before* `_run_card`, so this doesn't affect the assertion).
+    async def fake_run_card(*args, **kwargs):
+        return {"session_name": "k-rest-fake-0001", "tmux_target": "k-rest-fake-0001:0.0"}
+
+    with mock.patch.object(dispatch, "_live_sessions", return_value=None), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None), \
+         mock.patch.object(dispatch, "_run_card", side_effect=fake_run_card):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as ac:
+            r = await ac.post(
+                f"/api/v1/kanban/cards/{cid}/redispatch",
+                json={"project_path": "/p", "agent": None},
+            )
+
+    assert r.status_code == 200, (
+        f"REST redispatch endpoint must succeed for a live-claimed card; "
+        f"got {r.status_code} {r.text!r}"
+    )
+
+    async with KanbanSessionLocal() as s:
+        activity = await card_activity(s, cid)
+
+    source_notes = [op for op in activity
+                    if op.op_type == "comment"
+                    and "Redispatched via" in (op.payload or {}).get("text", "")]
+    assert len(source_notes) == 1, (
+        f"REST end-to-end must post exactly one source-audit comment; "
+        f"got {len(source_notes)}."
+    )
+    assert "ui" in source_notes[0].payload["text"], (
+        "REST handler default must propagate `ui` caller_source when the "
+        f"request omits the optional caller_source field; got {source_notes[0].payload['text']!r}"
+    )
+    assert "unspecified" not in source_notes[0].payload["text"], (
+        "REST handler must NOT pass through the unspecified default — "
+        f"its canonical label is `ui`; got {source_notes[0].payload['text']!r}"
+    )
 
 
 @pytest.mark.asyncio

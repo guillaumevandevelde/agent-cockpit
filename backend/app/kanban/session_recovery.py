@@ -142,7 +142,8 @@ async def recover_project(
         )
         await session.flush()
         try:
-            result = await redispatch(session, card_id=card.id, project_path=project_path)
+            result = await redispatch(session, card_id=card.id, project_path=project_path,
+                                       caller_source="recover_interrupted_sessions")
         except Exception:
             logger.exception("resume redispatch failed for card %s", card.id)
             continue

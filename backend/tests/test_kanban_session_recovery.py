@@ -103,7 +103,7 @@ def test_resolve_resume_target_none_without_transcript(tmp_path):
 async def test_recover_project_resumes_dead_session():
     calls = []
 
-    async def fake_redispatch(session, *, card_id, project_path):
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
         card = await get_card(session, card_id)
         calls.append({
             "card_id": card_id,
@@ -140,7 +140,7 @@ async def test_recover_project_resumes_dead_session():
 async def test_recover_project_skips_when_no_resumable_transcript():
     called = []
 
-    async def fake_redispatch(session, *, card_id, project_path):
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
         called.append(card_id)
         return {"card_id": card_id}
 
@@ -166,7 +166,7 @@ async def test_recover_project_skips_when_no_resumable_transcript():
 async def test_recover_project_ignores_live_human_and_fixed_columns():
     called = []
 
-    async def fake_redispatch(session, *, card_id, project_path):
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
         called.append(card_id)
         return {"card_id": card_id}
 
@@ -198,7 +198,7 @@ async def test_recover_project_respects_session_budget(monkeypatch):
     budget comes from session_registry.effective_max_sessions."""
     calls = []
 
-    async def fake_redispatch(session, *, card_id, project_path):
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
         calls.append(card_id)
         return {"card_id": card_id, "session_name": f"k-new-{card_id}"}
 
@@ -240,7 +240,7 @@ async def test_recover_project_counts_live_sessions_against_session_budget(monke
     ones."""
     calls = []
 
-    async def fake_redispatch(session, *, card_id, project_path):
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
         calls.append(card_id)
         return {"card_id": card_id, "session_name": f"k-new-{card_id}"}
 
