@@ -1,12 +1,6 @@
 # ⚠️ Fork: Agent Cockpit — lees dit eerst
 
-Dit is een **fork** van claude-deck, hernoemd naar **Agent Cockpit**. De oorspronkelijke
-**scheduled-messages** feature (timer/cron → injectie in CC-sessies via tmux) is
-**vrijwel af** — Tasks 1–11 van `docs/cockpit/fase-2-plan.md` zijn geïmplementeerd
-(backend-tests groen, frontend build clean), alleen **Task 12 (runtime e2e)** en de
-**fase-1 runtime-checklist** (`fase-1-validation.md`) zijn mensenwerk.
-
-Het zwaartepunt van de **actieve** ontwikkeling ligt nu bij de kanban-/multi-agent-laag:
+Dit is een **fork** van claude-deck, hernoemd naar **Agent Cockpit**. Het zwaartepunt van de **actieve** ontwikkeling ligt nu bij de kanban-/multi-agent-laag:
 
 - **Kanban auto-dispatch** — de dispatcher claimt + spawnt Todo-kaarten
   (`docs/cockpit/kanban-dispatch-spec.md`, follow-ups in `kanban-followups.md`).
@@ -81,24 +75,7 @@ cd frontend && npm run build     # Same as above
 > acceptable, document the carve-out at the assertion site, not in the grep
 > itself.
 bash backend/test_commands_api.sh                         # Curl-based API tests
-bash scripts/test_pytest_baseline.sh                      # Bash tests for pytest-baseline / pytest-compare scripts
-bash scripts/test_baseline_bash_tests.sh                  # Bash tests for baseline-bash-tests / compare-bash-tests scripts
-bash scripts/test_check_analysis_outcomes.sh              # Bash tests for check-analysis-outcomes.sh
-bash scripts/test_check_decision_register.sh              # Bash tests for check-decision-register.sh
-bash scripts/test_check_doc_links.sh                      # Bash tests for check-doc-links.sh
-bash scripts/test_check_kanban_conventions.sh             # Bash tests for check-kanban-conventions.sh (synthetic SQLite fixtures)
-bash scripts/test_check_litellm_hardening.sh              # Bash tests for check-litellm-hardening.sh (synthetic stdlib http.server fake proxy)
-bash scripts/test_check_problem_card_staleness.sh         # Bash tests for check-problem-card-staleness.sh
-bash scripts/test_check_schema_rename_coverage.sh         # Bash tests for check-schema-rename-coverage.sh
-bash scripts/test_check_test_harness_coverage.sh         # Bash tests for check-test-harness-coverage.sh
-bash scripts/test_measure_cache_read_quota.sh            # Bash tests for measure-cache-read-quota.sh (offline price-reconstruction + fit-CLI asserts)
-bash scripts/test_run_single_test.sh                      # Bash tests for run-single-test.sh
-bash scripts/test_list_orphan_bridge_sessions.sh           # Bash tests for list-orphan-bridge-sessions.sh (uses real tmux sessions)
-bash scripts/test_sweep_dangling_depends_on.sh             # Bash tests for sweep_dangling_depends_on.py (synthetic SQLite fixtures)
-bash scripts/test_sweep_dangling_plan_refs.sh             # Bash tests for sweep_dangling_plan_refs.py (synthetic SQLite fixtures)
-bash scripts/test_generate_doc_index.sh                    # Bash tests for generate-doc-index.py (synthetic frontmatter fixtures)
-bash scripts/test_worktree_gc.sh                          # Bash tests for worktree-gc.sh
-bash scripts/test_worktree_trap.sh                        # Bash tests for scripts/lib/worktree-trap.sh (mktemp-d cleanup trap)
+# Bash harnesses for scripts/test_*.sh — volledige lijst: `ls scripts/test_*.sh` (zie CLAUDE.md gotcha over check-test-harness-coverage)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
@@ -134,48 +111,6 @@ cd frontend && npm run lint      # ESLint
 # Version
 ./scripts/bump-version.sh <major|minor|patch>  # Sync version across VERSION, package.json, pyproject.toml
 ```
-
-## Architecture
-
-```
-backend/                  # FastAPI + async SQLAlchemy + aiosqlite
-├── app/
-│   ├── main.py          # FastAPI app, CORS, lifespan
-│   ├── config.py        # pydantic-settings (defaults in code, no .env required)
-│   ├── database.py      # Async SQLAlchemy engine + session
-│   ├── api/v1/          # 30 route modules (router.py aggregates all), incl. subdir routers:
-│   │                    #   cc_bridge/, kanban/, runs/, sandcastle/, scheduled_messages/
-│   ├── models/          # database.py (ORM), schemas.py (Pydantic)
-│   ├── services/        # 58 service files (business logic), incl. subdirs:
-│   │                    #   agentic_cli/, agent_mail/, blueprint/, runs/, scheduling/, templates/
-│   └── utils/           # path_utils, file_utils
-
-frontend/                 # React 19 + Vite + TypeScript + shadcn/ui
-├── src/
-│   ├── App.tsx          # Routes (29 pages)
-│   ├── features/        # Feature modules (26 dirs, each with page + components + API + types)
-│   ├── components/      # layout/, shared/, ui/ (19 shadcn components)
-│   ├── hooks/           # useApi, useProjects, useSessionsApi, useUsageApi
-│   ├── contexts/        # ProjectContext, ThemeContext
-│   ├── types/           # Shared TypeScript types (15 files)
-│   └── lib/             # api.ts, constants.ts, utils.ts
-```
-
-### Features
-
-Config, MCP Servers, MCP Server (registry), Commands, Plugins, Hooks, Permissions, Agents, Agent Performance, Skills, Memory, Context, Projects, Backup, Output Styles, Status Line, Sessions, CC Bridge, Kanban, Scheduled Messages, Plans, Presence, Sandcastle, APM, Usage, Updates, Dashboard
-
-### API Routes
-
-All under `/api/v1/`: config, projects, cli, mcp, mcp-server, commands, plugins, hooks, permissions, agents, agent-activity, backup, output-styles, statusline, sessions, usage, memory, context, plans, presence, providers, codex-config, status, apm, files, plus subdir routers: cc-bridge, agent-bridge, kanban, scheduled-messages, sandcastle
-
-## Key Decisions
-
-- **Backend**: FastAPI + async SQLAlchemy + aiosqlite + SQLite
-- **Frontend**: React 19 + Vite 7 + TypeScript + TailwindCSS + shadcn/ui
-- **Database**: SQLite at `backend/claude_registry.db` (auto-created via `create_all`, no migrations)
-- **API**: RESTful `/api/v1/`, Vite proxies `/api` → `http://localhost:8000`
-- **CORS**: `localhost:5173`
 
 ## Code Style
 
@@ -226,14 +161,6 @@ Done-kaart `d9447e49`).
   dus PR-branches ruimen zichzelf op bij merge. Branches van PRs die nooit
   mergen stranden op `origin` — handmatige `git cherry master origin/<branch>`
   + delete.
-
-## CI/CD
-
-GitHub Actions workflows in `.github/workflows/`:
-- `claude.yml` — Claude Code integration (triggers on @claude mentions)
-- `codeql.yml` — CodeQL security analysis
-- `quality.yml` — backend (ruff + pytest) and frontend (lint + test + build), on push/PR to `master`
-- `release.yml` — Manual release (builds frontend, creates GitHub release)
 
 ## Gotchas
 
