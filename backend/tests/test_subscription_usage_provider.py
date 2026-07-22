@@ -41,19 +41,28 @@ from app.services.subscriptions.unknown import UnknownUsageProvider
 def _make_block(
     *,
     total_tokens: int,
+    cache_read_tokens: int = 0,
     is_active: bool = True,
     start_time: datetime | None = None,
 ) -> SimpleNamespace:
-    """Mimic a SessionBlock enough for the providers' tests."""
+    """Mimic a SessionBlock enough for the providers' tests.
+
+    ``total_tokens`` is the quota-counted total (input + output +
+    cache_creation), split evenly across those three buckets.
+    ``cache_read_tokens`` is added verbatim to the block but must NOT
+    affect the quota estimate — per docs/cockpit/cache-read-quota-decision.md
+    cache_read costs no subscription quota.
+    """
     start = start_time or datetime.now(UTC)
+    third = total_tokens // 3
     return SimpleNamespace(
         is_active=is_active,
         start_time=start.isoformat(),
         end_time=(start + timedelta(hours=5)).isoformat(),
-        input_tokens=total_tokens // 4,
-        output_tokens=total_tokens // 4,
-        cache_creation_tokens=total_tokens // 4,
-        cache_read_tokens=total_tokens // 4,
+        input_tokens=third,
+        output_tokens=third,
+        cache_creation_tokens=total_tokens - 2 * third,
+        cache_read_tokens=cache_read_tokens,
     )
 
 
@@ -247,6 +256,20 @@ class TestAnthropicUsageProvider:
         usage = await self.provider.get_usage()
         assert usage.betrouwbaarheid == "schatting"
         assert usage.betrouwbaarheid != "exact"
+
+    async def test_large_cache_read_does_not_push_over_limit(self):
+        # Regressie voor kaart d63e83f0... — docs/cockpit/cache-read-quota-decision.md
+        # (Scenario B, gemeten w≈0): cache_read kost geen abonnementsquotum.
+        # Een 5M cache_read-block bovenop 40k gewoon verbruik mag de drempel
+        # NIET over de limiet duwen (pre-fix: (40k+5M)/100k = 50.4x -> pauze).
+        block = _make_block(total_tokens=40_000, cache_read_tokens=5_000_000)
+        self.usage_service.get_block_usage = AsyncMock(
+            return_value=SimpleNamespace(active_block=block)
+        )
+        usage = await self.provider.get_usage()
+        assert usage.drempel_gebruikt == pytest.approx(0.4)
+        assert usage.beschikbaar is True
+        assert usage.verbruikt == 40_000
 
     async def test_zero_limit_does_not_divide_by_zero(self):
         # A bogus plan-tier limit of 0 must not crash and must not report
