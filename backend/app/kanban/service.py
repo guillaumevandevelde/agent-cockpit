@@ -15,7 +15,44 @@ from app.kanban.models import (
     KanbanOp,
     KanbanWorkTypeMapping,
 )
+from app.services.agentic_cli.provider_env import (
+    PROVIDER_ANTHROPIC,
+    PROVIDER_BEDROCK,
+    PROVIDER_COMPATIBLE,
+    PROVIDER_MINIMAX,
+)
 from app.utils.timeutils import ensure_aware
+
+
+# Single source of truth for the providers the dispatcher knows how to
+# spawn against. ``KanbanColumn.default_provider`` is validated against
+# this tuple at the service boundary so a typo can't silently corrupt
+# the dispatcher (kaart 293d1faa… acceptance criterion). Keep in sync
+# with the ``provider_env.PROVIDER_*`` constants — any new provider
+# added there must also be added here. The legacy "unknown string gets
+# stored and later fails MAX_DISPATCH_FAILURES times" path is closed:
+# the API now returns 422 instead.
+ALLOWED_COLUMN_PROVIDERS: tuple[str, ...] = (
+    PROVIDER_ANTHROPIC,
+    PROVIDER_BEDROCK,
+    PROVIDER_MINIMAX,
+    PROVIDER_COMPATIBLE,
+)
+
+
+def _validate_default_provider(value: str | None) -> None:
+    """Reject a ``default_provider`` value that's not on the dispatcher's
+    known-provider list, surfacing a ``ValueError`` the API layer maps to
+    a 422. ``None`` is allowed — it explicitly clears the column's pin
+    and falls through to the dispatcher's own defaults.
+    """
+    if value is None:
+        return
+    if value not in ALLOWED_COLUMN_PROVIDERS:
+        raise ValueError(
+            f"unknown default_provider: {value!r}; "
+            f"expected one of {list(ALLOWED_COLUMN_PROVIDERS)}",
+        )
 
 
 def is_analyst_leaf_spike(card) -> bool:
@@ -549,6 +586,7 @@ async def create_column(session, project_key: str, name: str,
                         default_provider: str | None = None,
                         default_model: str | None = None,
                         max_sessions: int | None = None):
+    _validate_default_provider(default_provider)
     col = KanbanColumn(
         id=uuid.uuid4().hex,
         project_key=project_key,
@@ -579,6 +617,8 @@ async def update_column(session, column_id: str, **kwargs):
     col = await session.get(KanbanColumn, column_id)
     if col is None:
         return None
+    if "default_provider" in kwargs:
+        _validate_default_provider(kwargs["default_provider"])
     for k, v in kwargs.items():
         setattr(col, k, v)
     col.updated_at = datetime.now(UTC)
@@ -648,6 +688,29 @@ async def get_column_default_provider(session, project_key: str, column_name: st
     )
     col = (await session.execute(stmt)).scalar_one_or_none()
     return col.default_provider if col else None
+
+
+async def get_column_default_endpoint_name(
+    session, project_key: str, column_name: str,
+) -> str | None:
+    """Resolve the (currently always-None) column-level endpoint name.
+
+    Today ``KanbanColumn`` carries ``default_provider`` / ``default_model``
+    but no ``default_endpoint_name`` column — the analysis in
+    ``docs/cockpit/dispatch-vendor-koppeling-analyse.md`` §4 explicitly
+    defers that to a follow-up because the column model has no migration
+    path on this repo. The dispatch precedence chain still calls this
+    helper so the lowest precedence slot is a real name (and a future
+    column-default column lands as one helper-extension, not a hot-path
+    rewrite).
+    """
+    # ``default_provider`` is the only column-level vendor knob we
+    # currently persist; ``endpoint_name`` is read out of the JSON
+    # carriers (pool / override / column_override). Until the column
+    # model gains one, this returns None — the dispatch helper then
+    # falls through and lets ``build_provider_env`` raise the original
+    # ``ValueError`` when the project_key itself has no resolved endpoint.
+    return None
 
 
 async def get_column_default_model(session, project_key: str, column_name: str) -> str | None:

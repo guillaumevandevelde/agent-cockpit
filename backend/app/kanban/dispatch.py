@@ -37,6 +37,7 @@ from app.kanban.project_key import (
 from app.kanban.service import (
     all_card_ids,
     get_card,
+    get_column_default_endpoint_name,
     get_column_default_model,
     get_column_default_provider,
     list_cards,
@@ -49,6 +50,7 @@ from app.services.agentic_cli.provider_env import (
     CLAUDE_CODE_CLI_ID,
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
+    PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
 )
 from app.services.memory_monitor import get_memory_status_cached
@@ -684,8 +686,14 @@ async def set_ship_mode(session, project_key: str, mode: str) -> None:
 # `None` = exactly today's behaviour — see test_active_subscription_override.
 
 SUBSCRIPTION_OVERRIDE_PREFIX = "subscription_override:"
+# ``anthropic-compatible`` is accepted here, but only when the override
+# carries a resolvable ``endpoint_name`` — see ``set_active_subscription_override``
+# for the fail-fast check. The allow-list mirrors the storage shape of
+# ``subscription_pool._ALLOWED_POOL_PROVIDERS`` so both pin-shape knobs share
+# the same source of truth (kaart 293d1faa…).
 _ALLOWED_OVERRIDE_PROVIDERS = (
     PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
+    PROVIDER_COMPATIBLE,
 )
 
 
@@ -694,11 +702,23 @@ async def get_active_subscription_override(
 ) -> dict | None:
     """Return the board-wide subscription override for `project_key`, or None.
 
-    Shape when set: ``{"provider": "anthropic|bedrock|minimax", "model": str|None}``.
+    Shape when set::
+
+        {"provider": "anthropic|bedrock|minimax|anthropic-compatible",
+         "model": str|None,
+         "endpoint_name": str|None}
+
     ``model`` is optional — an override that pins only the provider leaves the
     model to fall through to the column default / card model / persona
     frontmatter chain (same shape as a partial column-override, just one level
-    higher in the precedence)."""
+    higher in the precedence). ``endpoint_name`` is required when ``provider``
+    is ``"anthropic-compatible"``; see ``set_active_subscription_override``
+    for the storage-side fail-fast check and ``_resolve_compatible_endpoint``
+    for the dispatch-side helper that turns the name into ``base_url`` +
+    credential.
+
+    Earlier rows (pre-kaart-293d1faa…) without ``endpoint_name`` round-trip
+    with that key as ``None`` so legacy overrides keep working unchanged."""
     row = await session.get(
         KanbanMeta, SUBSCRIPTION_OVERRIDE_PREFIX + project_key,
     )
@@ -718,7 +738,12 @@ async def get_active_subscription_override(
     if provider not in _ALLOWED_OVERRIDE_PROVIDERS:
         return None
     model = parsed.get("model")
-    return {"provider": provider, "model": model if isinstance(model, str) else None}
+    endpoint_name = parsed.get("endpoint_name")
+    return {
+        "provider": provider,
+        "model": model if isinstance(model, str) else None,
+        "endpoint_name": endpoint_name if isinstance(endpoint_name, str) else None,
+    }
 
 
 async def set_active_subscription_override(
@@ -729,6 +754,14 @@ async def set_active_subscription_override(
     ``override`` is validated against the allow-list before storage; an
     unknown provider raises ValueError so the caller surfaces a 422 instead
     of writing a row that the dispatcher would then refuse to honour.
+
+    When the provider is ``"anthropic-compatible"`` a non-empty ``endpoint_name``
+    is required, and that name must resolve to a row in the project's endpoint
+    registry (``agents.endpoints.list_endpoints``). The check happens here so
+    a board-wide pin that the dispatcher can't honour never lands on disk;
+    the same fail-fast is mirrored on the pool side
+    (``subscription_pool._validate_entries``) and on the per-card
+    ``column_overrides`` write path.
 
     Storing `None` deletes the row entirely so a follow-up read sees no
     override and falls through to the column-default precedence — keeping
@@ -749,7 +782,37 @@ async def set_active_subscription_override(
     model = override.get("model")
     if model is not None and not isinstance(model, str):
         raise ValueError("override.model must be a string or null")
-    value = json.dumps({"provider": provider, "model": model if model else None})
+    endpoint_name = override.get("endpoint_name")
+    if endpoint_name is not None and not isinstance(endpoint_name, str):
+        raise ValueError("override.endpoint_name must be a string or null")
+    if provider == PROVIDER_COMPATIBLE:
+        if not endpoint_name:
+            raise ValueError(
+                "anthropic-compatible provider requires a non-empty endpoint_name; "
+                "configure one via /api/v1/agent-bridge/platforms/endpoints",
+            )
+        # Fail-fast at write time: an endpoint_name the backend can't
+        # resolve to a base_url/auth_token is precisely the
+        # ``ValueError in build_provider_env`` failure mode the dispatcher
+        # used to hit three times before the card landed in Impediment
+        # (kaart 293d1faa…). The endpoint lookup uses the same helper
+        # dispatch does, so the validation here cannot drift from the
+        # resolution path at run time.
+        from app.services.agentic_cli.endpoints import (
+            get_endpoint as _get_endpoint,
+        )
+        endpoint = await _get_endpoint(session, project_key, endpoint_name)
+        if endpoint is None:
+            raise ValueError(
+                f"endpoint {endpoint_name!r} is not registered for project "
+                f"{project_key!r}; configure it via "
+                f"/api/v1/agent-bridge/platforms/endpoints",
+            )
+    value = json.dumps({
+        "provider": provider,
+        "model": model if model else None,
+        "endpoint_name": endpoint_name if endpoint_name else None,
+    })
     row = await session.get(KanbanMeta, key)
     if row is None:
         session.add(KanbanMeta(key=key, value=value))
@@ -2417,9 +2480,20 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass."""
     def _transport(*, directory: str, prompt: str, session_name: str,
                    cli_id: str = "claude-code", provider: str = "anthropic",
-                   model: str | None = None) -> dict:
+                   model: str | None = None,
+                   endpoint_name: str | None = None,
+                   endpoint_base_url: str | None = None,
+                   endpoint_auth_token: str | None = None) -> dict:
         """Create a worktree off origin/master, then spawn a `cli_id` session in it,
-        against the given `provider` subscription (anthropic | bedrock | minimax).
+        against the given `provider` subscription
+        (anthropic | bedrock | minimax | anthropic-compatible).
+
+        ``endpoint_*`` are forwarded into ``SpawnCommandOptions`` only when
+        the resolved provider is ``"anthropic-compatible"`` — see
+        ``SpawnCommandOptions.endpoint_*`` for the field semantics
+        (kaart 293d1faa…). They are accepted for every other provider so
+        the dispatch helper never has to branch on provider; non-compatible
+        providers simply ignore them.
 
         Raises MemoryLimitExceeded if hardware memory limits are reached.
         """
@@ -2459,6 +2533,9 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
             directory=worktree_path, mode="plain", prompt=prompt,
             skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
             provider=provider, model=model,
+            endpoint_name=endpoint_name,
+            endpoint_base_url=endpoint_base_url,
+            endpoint_auth_token=endpoint_auth_token,
         )
         try:
             result = spawn_session(
@@ -2495,12 +2572,18 @@ _sandcastle_start_tasks: set = set()
 
 def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
                          cli_id: str = "claude-code", provider: str = "anthropic",
-                         model: str | None = None) -> dict:
+                         model: str | None = None,
+                         endpoint_name: str | None = None,
+                         endpoint_base_url: str | None = None,
+                         endpoint_auth_token: str | None = None) -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
 
-    `cli_id`, `provider` and `model` are accepted for transport-signature
-    parity but ignored: sandcastle runs use the per-project sandcastle config's
-    `agent_provider`, not the card's, column's, or persona's.
+    `cli_id`, `provider`, `model`, and the `endpoint_*` carrier are accepted
+    for transport-signature parity but ignored: sandcastle runs use the
+    per-project sandcastle config's `agent_provider`, not the card's,
+    column's, or persona's. kaart 293d1faa…: future sandcastle work will
+    forward the endpoint_* fields; until then, accepting them keeps the
+    transport callable from the same dispatcher code path without branching.
 
     Runs the agent in a Docker/Podman container. The actual run is kicked off
     asynchronously; this function returns immediately after scheduling it.
@@ -3335,9 +3418,58 @@ async def _run_card(
             card_description=getattr(card, "description", None),
         )
         prompt = plan_section + prompt
+    # kaart 293d1faa…: when the resolved provider is
+    # ``anthropic-compatible`` the auto-dispatch path used to skip the
+    # endpoint resolution (only the REST interactive spawn did that),
+    # which made every pool/override/column_override pin of this
+    # provider silently fail at spawn time. The endpoint name comes
+    # from the same precedence chain as the provider — global_override
+    # > pool_choice > column_override > column.default_provider —
+    # then ``resolve_compatible_endpoint`` (shared with the REST path)
+    # turns the name into ``base_url`` + ``auth_token`` so
+    # ``build_provider_env`` never raises on a missing base_url.
+    endpoint_resolution: dict | None = None
+    endpoint_name: str | None = None
+    if provider == PROVIDER_COMPATIBLE:
+        endpoint_name = (
+            (global_override or {}).get("endpoint_name")
+            or (pool_choice.endpoint_name if pool_choice else None)
+            or column_override.get("endpoint_name")
+            or await get_column_default_endpoint_name(
+                session, project_key=project_key, column_name=target_agent,
+            )
+        )
+        from app.services.agentic_cli.endpoints import (
+            resolve_compatible_endpoint as _resolve_compatible_endpoint,
+        )
+        endpoint_resolution = await _resolve_compatible_endpoint(
+            session, project_key, endpoint_name,
+            requested_model=effective_model,
+        )
+        # The endpoint row carries its own ``model`` as the per-endpoint
+        # default — the REST path falls back to it when the request
+        # didn't pin one. The dispatch path mirrors the same contract
+        # so ``build_provider_env`` always receives a non-empty model
+        # and the spawned CLI never inherits the column-default chain
+        # (which is for Anthropic, not the named endpoint).
+        if endpoint_resolution and endpoint_resolution.get("model"):
+            effective_model = endpoint_resolution["model"]
+    # Only forward the endpoint kwargs when the spawn actually targets
+    # an anthropic-compatible provider — the unthreaded default is to
+    # keep the existing transport signature (directory, prompt,
+    # session_name, cli_id, provider, model) so all non-endpoint
+    # test fakes + sandcastle forwarders keep working unchanged.
+    endpoint_kwargs: dict = {}
+    if provider == PROVIDER_COMPATIBLE and endpoint_resolution is not None:
+        endpoint_kwargs = {
+            "endpoint_name": endpoint_resolution["name"],
+            "endpoint_base_url": endpoint_resolution["base_url"],
+            "endpoint_auth_token": endpoint_resolution["auth_token"],
+        }
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
-                                 cli_id=cli_id, provider=provider, model=effective_model)
+                                 cli_id=cli_id, provider=provider, model=effective_model,
+                                 **endpoint_kwargs)
     except Exception as exc:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,

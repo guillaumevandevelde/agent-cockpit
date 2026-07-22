@@ -115,11 +115,20 @@ class PoolEntry:
             consults only entries whose ``cli="open-code"`` so the
             per-CLI quota axis is honoured end-to-end.
         provider: which vendor the CLI authenticates against
-            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"``).
+            (``"anthropic"`` | ``"bedrock"`` | ``"minimax"`` |
+            ``"anthropic-compatible"``).
         model: optional model pin. ``None`` = no model pin — dispatch
             falls through to the column/card/persona precedence chain.
             This mirrors the partial-override shape of the existing
             per-card ``column_overrides[col].model``.
+        endpoint_name: optional endpoint slug from the project-scoped
+            endpoint registry (``services.agentic_cli.endpoints``).
+            Required when ``provider="anthropic-compatible"``: the
+            dispatch path resolves the name to ``base_url`` +
+            ``auth_token`` so ``build_provider_env`` always receives a
+            non-empty URL. ``None`` for every other provider — the
+            field is part of the JSON wire shape so legacy rows that
+            predate this card round-trip as null and keep working.
         drempel: fraction (0..1) above which this subscription is
             considered "full" and the router spills to the next entry.
             0.9 means "skip when the snapshot shows 90%+ consumed";
@@ -133,6 +142,7 @@ class PoolEntry:
     model: str | None
     drempel: float
     cli: str | None = None
+    endpoint_name: str | None = None
 
     def __post_init__(self) -> None:
         # ``frozen=True`` rejects ``self.cli = ...`` but
@@ -331,9 +341,20 @@ def _validate_entries(entries: list[PoolEntry]) -> None:
     - Each entry's ``cli`` (after the ``DEFAULT_POOL_CLI`` default)
       must be on the agentic_cli registry's CLI allow-list — keeps
       the per-CLI quota axis from silently degrading on a typo.
+    - For ``provider="anthropic-compatible"`` the entry must carry a
+      non-empty ``endpoint_name`` and that name must resolve to a
+      row in the project's endpoint registry (kaart 293d1faa…:
+      fail-fast at storage so a misconfigured pool cannot loop the
+      dispatcher through ``MAX_DISPATCH_FAILURES`` before the card
+      lands in Impediment).
     - ``drempel`` must be in ``(0, 1]`` — 0 would always be "above
       threshold" (silently disable the entry) and >1 disables the
       spillover entirely.
+
+    NOTE: the endpoint existence check is done by the storage caller
+    (``set_subscription_pool``) which owns the project-keyed session —
+    see ``_validate_compatible_endpoint`` there — because the pure
+    function above has no DB access by design.
     """
     if not entries:
         raise ValueError("subscription pool must not be empty (use null to clear)")
@@ -348,6 +369,11 @@ def _validate_entries(entries: list[PoolEntry]) -> None:
                 f"subscription pool entry.drempel must be in (0, 1]; "
                 f"got {entry.drempel!r}",
             )
+        if entry.provider == PROVIDER_COMPATIBLE and not entry.endpoint_name:
+            raise ValueError(
+                "anthropic-compatible pool entry requires endpoint_name; "
+                "configure it via /api/v1/agent-bridge/platforms/endpoints",
+            )
 
 
 def _serialize_entries(entries: list[PoolEntry]) -> str:
@@ -356,6 +382,7 @@ def _serialize_entries(entries: list[PoolEntry]) -> str:
             "cli": e.resolved_cli,
             "provider": e.provider,
             "model": e.model, "drempel": e.drempel,
+            "endpoint_name": e.endpoint_name,
         }
         for e in entries
     ]
@@ -384,6 +411,13 @@ def _deserialize_entries(value: str) -> list[PoolEntry] | None:
         provider = raw.get("provider")
         model = raw.get("model")
         drempel = raw.get("drempel")
+        # ``endpoint_name`` is optional (None) for non-compatible
+        # providers. kaart 293d1faa… introduced it as part of the
+        # JSON carrier; legacy rows (pre-this-card) lack it and
+        # deserialise cleanly as None.
+        endpoint_name = raw.get("endpoint_name")
+        if endpoint_name is not None and not isinstance(endpoint_name, str):
+            return None
         if not isinstance(provider, str):
             return None
         if model is not None and not isinstance(model, str):
@@ -393,6 +427,7 @@ def _deserialize_entries(value: str) -> list[PoolEntry] | None:
         out.append(PoolEntry(
             cli=cli, provider=provider,
             model=model, drempel=float(drempel),
+            endpoint_name=endpoint_name,
         ))
     return out
 
@@ -427,6 +462,14 @@ async def set_subscription_pool(
     ``None`` deletes the row entirely so a follow-up read sees no pool
     and falls through to the column-default precedence — keeping the
     "unset = exact pre-feature behaviour" contract testable.
+
+    kaart 293d1faa…: when an entry's provider is
+    ``"anthropic-compatible"`` and ``endpoint_name`` is present, the
+    name is checked against the project's endpoint registry (same
+    helper the dispatch path uses) so a misconfigured pool is rejected
+    at save time, not at spawn time. The pure ``_validate_entries``
+    checks the absent / shape layer; this side-effect check makes sure
+    the named endpoint actually exists.
     """
     key = SUBSCRIPTION_POOL_PREFIX + project_key
     if entries is None:
@@ -436,6 +479,24 @@ async def set_subscription_pool(
             await session.flush()
         return
     _validate_entries(entries)
+    # Fail-fast at storage: every anthropic-compatible entry's
+    # endpoint_name must point at a registered endpoint. Done before
+    # serialization so the error message names the project+endpoint
+    # combo the operator is trying to wire up.
+    for entry in entries:
+        if entry.provider == PROVIDER_COMPATIBLE and entry.endpoint_name:
+            from app.services.agentic_cli.endpoints import (
+                get_endpoint as _get_endpoint,
+            )
+            endpoint = await _get_endpoint(
+                session, project_key, entry.endpoint_name,
+            )
+            if endpoint is None:
+                raise ValueError(
+                    f"endpoint {entry.endpoint_name!r} is not registered "
+                    f"for project {project_key!r}; configure it via "
+                    f"/api/v1/agent-bridge/platforms/endpoints",
+                )
     value = _serialize_entries(entries)
     row = await session.get(KanbanMeta, key)
     if row is None:

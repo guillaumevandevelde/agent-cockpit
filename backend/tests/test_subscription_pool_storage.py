@@ -137,11 +137,30 @@ async def test_set_pool_accepts_anthropic_compatible_provider():
     """The data-driven ``anthropic-compatible`` branch (see
     ``app/services/agentic_cli/endpoints.py``) is on the allow-list so a
     pool entry can point at a named endpoint row.
+
+    kaart 293d1faa…: a ``anthropic-compatible`` pool entry must carry
+    a non-empty ``endpoint_name`` referencing a registered endpoint;
+    both the legacy "no endpoint_name" shape and any new "unknown
+    endpoint name" case are rejected by ``set_subscription_pool``.
+    The endpoint-backed happy path is exercised in
+    ``test_set_pool_accepts_anthropic_compatible_with_resolvable_endpoint``
+    further down; this test confirms the storage layer still accepts
+    the provider on the allow-list at all (gated by a registered
+    endpoint to stay within the new contract).
     """
-    entries = [subscription_pool.PoolEntry(
-        provider="anthropic-compatible", model=None, drempel=0.9,
-    )]
+    from app.services.agentic_cli.endpoints import Endpoint, upsert_endpoint
     async with KanbanSessionLocal() as s:
+        await upsert_endpoint(
+            s, PK, Endpoint(
+                name="legacy-compatible-pool",
+                base_url="https://legacy-compatible.example/v1",
+                model="claude-legacy-pool",
+            ),
+        )
+        entries = [subscription_pool.PoolEntry(
+            provider="anthropic-compatible", model=None, drempel=0.9,
+            endpoint_name="legacy-compatible-pool",
+        )]
         await subscription_pool.set_subscription_pool(s, PK, entries)
         await s.commit()
     async with KanbanSessionLocal() as s:
@@ -166,6 +185,79 @@ async def test_set_pool_rejects_out_of_range_drempel():
     async with KanbanSessionLocal() as s:
         with pytest.raises(ValueError):
             await subscription_pool.set_subscription_pool(s, PK, bad2)
+
+
+# ---- anthropic-compatible: endpoint_name carrier + fail-fast -----------
+#
+# Card 293d1faa…: ``PoolEntry`` gains an optional ``endpoint_name``
+# field. Setting a pool entry with provider=anthropic-compatible but no
+# resolvable endpoint name is rejected at storage so a bad row never
+# reaches dispatch (where the spawn would loop through
+# ``MAX_DISPATCH_FAILURES`` before dropping into Impediment).
+
+
+@pytest.mark.asyncio
+async def test_set_pool_accepts_anthropic_compatible_with_resolvable_endpoint():
+    """Happy path: pool pin pointing at a registered endpoint survives
+    validation and round-trips with the endpoint_name intact."""
+    from app.services.agentic_cli.endpoints import Endpoint, upsert_endpoint
+    async with KanbanSessionLocal() as s:
+        await upsert_endpoint(
+            s, PK, Endpoint(
+                name="router-pool", base_url="https://router-pool.example/v1",
+                model="claude-test-pool",
+            ),
+        )
+        await subscription_pool.set_subscription_pool(
+            s, PK, [subscription_pool.PoolEntry(
+                provider="anthropic-compatible", model=None,
+                drempel=0.9, endpoint_name="router-pool",
+            )],
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        got = await subscription_pool.get_subscription_pool(s, PK)
+    assert got is not None
+    assert got[0].provider == "anthropic-compatible"
+    assert got[0].endpoint_name == "router-pool"
+
+
+@pytest.mark.asyncio
+async def test_set_pool_rejects_compatible_without_endpoint_name():
+    """``provider=anthropic-compatible`` without ``endpoint_name`` is
+    rejected at storage — same principle as the override's storage
+    validation. The existing ``test_set_pool_accepts_anthropic_compatible_provider``
+    already covers the "endpoint_name=None still accepted" path for
+    backwards compatibility on rows that predate this card."""
+    bad = [subscription_pool.PoolEntry(
+        provider="anthropic-compatible", model=None, drempel=0.9,
+    )]
+    async with KanbanSessionLocal() as s:
+        with pytest.raises(ValueError):
+            await subscription_pool.set_subscription_pool(s, PK, bad)
+
+
+@pytest.mark.asyncio
+async def test_set_pool_rejects_compatible_with_unknown_endpoint_name():
+    """Endpoint name present but not in the registry is rejected so the
+    dispatcher never has to refuse mid-spawn."""
+    bad = [subscription_pool.PoolEntry(
+        provider="anthropic-compatible", model=None, drempel=0.9,
+        endpoint_name="missing",
+    )]
+    async with KanbanSessionLocal() as s:
+        with pytest.raises(ValueError):
+            await subscription_pool.set_subscription_pool(s, PK, bad)
+
+
+def test_pool_entry_endpoint_name_kwarg_defaults_to_none():
+    """``endpoint_name`` is optional — non-compatible providers leave it
+    null. The dataclass keeps the field on the instance so equality +
+    JSON serialization match the wire shape."""
+    entry = subscription_pool.PoolEntry(
+        provider="anthropic", model=None, drempel=0.9,
+    )
+    assert entry.endpoint_name is None
 
 
 # ---- the cli field is consumed (card 8f40d443…) -------------------------
@@ -278,5 +370,5 @@ async def test_pool_and_override_coexist():
     async with KanbanSessionLocal() as s:
         override = await dispatch.get_active_subscription_override(s, PK)
         pool = await subscription_pool.get_subscription_pool(s, PK)
-    assert override == {"provider": "minimax", "model": None}
+    assert override == {"provider": "minimax", "model": None, "endpoint_name": None}
     assert pool == _valid_pool()

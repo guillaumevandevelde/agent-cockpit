@@ -490,7 +490,9 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
         # the explicit fields the provider-env builder expects. We do
         # this here (and not inside ``spawn_session``) so the spawn
         # service stays DB-free and the DB session lifetime stays in
-        # the request handler.
+        # the request handler. The same helper serves the auto-
+        # dispatch path so both surfaces share their error messages
+        # and validation — kaart 293d1faa…
         endpoint_base_url: str | None = None
         endpoint_auth_token: str | None = None
         endpoint_name = request.endpoint_name
@@ -507,33 +509,22 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
                 DEFAULT_PROJECT_KEY,
             )
             from app.services.agentic_cli.endpoints import (
-                get_endpoint as _get_endpoint,
+                resolve_compatible_endpoint as _resolve_compatible,
             )
-            endpoint = await _get_endpoint(db, DEFAULT_PROJECT_KEY, endpoint_name)
-            if endpoint is None:
+            try:
+                resolved = await _resolve_compatible(
+                    db, DEFAULT_PROJECT_KEY, endpoint_name,
+                    requested_model=request.model,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if resolved is None:
                 raise HTTPException(
                     status_code=404,
                     detail=f"unknown endpoint {endpoint_name!r}",
                 )
-            endpoint_base_url = endpoint.base_url
-            # MVP credential resolution: only MiniMax's legacy .env-backed
-            # key is recognised here. SecretStore-backed lookup lands in
-            # the follow-up card so this path can stay honest today (no
-            # false positives that would let a CLI launch unauthenticated
-            # and silently 401 on the first request).
-            if endpoint.credential_name == "minimax" and settings.minimax_api_key:
-                endpoint_auth_token = settings.minimax_api_key
-            elif endpoint.credential_name:
-                # A named credential the backend can't currently resolve:
-                # surface a 400 so the user gets a clear error instead of
-                # a session that authenticates as anonymous.
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"endpoint {endpoint_name!r} requires credential "
-                        f"{endpoint.credential_name!r}, which is not configured"
-                    ),
-                )
+            endpoint_base_url = resolved["base_url"]
+            endpoint_auth_token = resolved["auth_token"]
             # The endpoint's model is the per-endpoint default; the
             # request-level ``model`` is the optional per-session override.
             # Fall through to the endpoint default when the caller didn't
@@ -541,7 +532,7 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             # a non-empty model) without forcing every client to repeat
             # the endpoint's model on every spawn.
             if not request.model:
-                request.model = endpoint.model
+                request.model = resolved["model"]
 
         options = SpawnCommandOptions(
             directory=request.directory,

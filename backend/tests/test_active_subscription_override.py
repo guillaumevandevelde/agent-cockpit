@@ -40,10 +40,15 @@ class RecordingTransport:
         self.calls = []
 
     def __call__(self, *, directory, prompt, session_name, cli_id="claude-code",
-                 provider="anthropic", model=None):
+                 provider="anthropic", model=None,
+                 endpoint_name=None, endpoint_base_url=None,
+                 endpoint_auth_token=None):
         self.calls.append({"directory": directory, "prompt": prompt,
                            "session_name": session_name, "cli_id": cli_id,
-                           "provider": provider, "model": model})
+                           "provider": provider, "model": model,
+                           "endpoint_name": endpoint_name,
+                           "endpoint_base_url": endpoint_base_url,
+                           "endpoint_auth_token": endpoint_auth_token})
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
 
@@ -55,10 +60,19 @@ async def _make_card(s, title="Task", column="Backlog"):
     )
 
 
-def _override(*, provider="anthropic", model=None):
+def _override(*, provider="anthropic", model=None, endpoint_name=None):
     """Build a clean override dict — explicit about which keys are set so a
-    None model survives the JSON round-trip as null (the storage shape)."""
-    return {"provider": provider, "model": model}
+    None model survives the JSON round-trip as null (the storage shape).
+
+    ``endpoint_name`` is the third carrier added by kaart 293d1faa…; it
+    is ``None`` for every provider except ``"anthropic-compatible"`` so
+    legacy tests keep matching without ceremony.
+    """
+    return {
+        "provider": provider,
+        "model": model,
+        "endpoint_name": endpoint_name,
+    }
 
 
 # ---- storage layer: get / set on KanbanMeta ---------------------------------
@@ -113,6 +127,77 @@ async def test_set_active_override_overwrites_previous():
         assert await dispatch.get_active_subscription_override(
             s, PK,
         ) == _override(provider="bedrock")
+
+
+# ---- anthropic-compatible: endpoint_name carrier + fail-fast --------------
+#
+# Card 293d1faa…: the override dict gains an optional ``endpoint_name``
+# field. When the provider is ``anthropic-compatible`` and no
+# endpoint_name is set, the storage layer must refuse — a row that
+# dispatch would have to abandon in MAX_DISPATCH_FAILURES is silently
+# broken at write time. The dispatch helper does its own fail-fast too
+# (see ``test_dispatch_compatible_endpoint.py``), but storage-time
+# validation means the API can return a 422 in place of letting the
+# operator watch their card migrate to Impediment.
+
+
+@pytest.mark.asyncio
+async def test_set_override_accepts_anthropic_compatible_provider_with_endpoint():
+    """The allow-list grows to include ``anthropic-compatible`` so the
+    override can route to a named endpoint. Mirrors the pool decision in
+    ``test_subscription_pool_storage.py``."""
+    async with KanbanSessionLocal() as s:
+        from app.services.agentic_cli.endpoints import Endpoint, upsert_endpoint
+        await upsert_endpoint(
+            s, PK, Endpoint(
+                name="router-ov", base_url="https://router-ov.example/v1",
+                model="claude-test-ov",
+            ),
+        )
+        await dispatch.set_active_subscription_override(
+            s, PK, {
+                "provider": "anthropic-compatible",
+                "model": None,
+                "endpoint_name": "router-ov",
+            },
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        assert await dispatch.get_active_subscription_override(s, PK) == {
+            "provider": "anthropic-compatible",
+            "model": None,
+            "endpoint_name": "router-ov",
+        }
+
+
+@pytest.mark.asyncio
+async def test_set_override_rejects_compatible_without_endpoint_name():
+    """``anthropic-compatible`` provider without ``endpoint_name`` is
+    rejected at storage so the dispatcher never has to fail at
+    dispatch time."""
+    async with KanbanSessionLocal() as s:
+        with pytest.raises(ValueError):
+            await dispatch.set_active_subscription_override(
+                s, PK, {
+                    "provider": "anthropic-compatible",
+                    "model": None,
+                },
+            )
+
+
+@pytest.mark.asyncio
+async def test_set_override_rejects_compatible_with_unknown_endpoint_name():
+    """Endpoint name present but not in the registry is rejected so the
+    saved row is always dispatchable end-to-end."""
+    async with KanbanSessionLocal() as s:
+        with pytest.raises(ValueError):
+            await dispatch.set_active_subscription_override(
+                s, PK, {
+                    "provider": "anthropic-compatible",
+                    "model": None,
+                    "endpoint_name": "missing",
+                },
+            )
 
 
 # ---- dispatch precedence ---------------------------------------------------
@@ -251,7 +336,8 @@ async def test_get_subscription_override_endpoint_default():
 @pytest.mark.asyncio
 async def test_post_and_get_subscription_override_endpoint():
     body = {"project_key": PK,
-            "override": {"provider": "minimax", "model": "MiniMax-M3[1m]"}}
+            "override": {"provider": "minimax", "model": "MiniMax-M3[1m]",
+                         "endpoint_name": None}}
     async with _client() as c:
         r = await c.post(
             "/api/v1/kanban/subscription-override", json=body,
@@ -273,7 +359,8 @@ async def test_post_subscription_override_clear():
         await c.post(
             "/api/v1/kanban/subscription-override",
             json={"project_key": PK,
-                  "override": {"provider": "minimax", "model": None}},
+                  "override": {"provider": "minimax", "model": None,
+                               "endpoint_name": None}},
         )
         r = await c.post(
             "/api/v1/kanban/subscription-override",
