@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude Cockpit dev supervisor — self-healing backend + frontend.
+# Agent Cockpit dev supervisor — self-healing backend + frontend.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

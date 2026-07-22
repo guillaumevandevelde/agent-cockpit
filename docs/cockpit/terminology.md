@@ -6,7 +6,7 @@ status: active
 
 # Terminology — canonieke woordenlijst
 
-> **Bron van waarheid** voor de vijf kernbegrippen in Claude Cockpit. Elke term
+> **Bron van waarheid** voor de vijf kernbegrippen in Agent Cockpit. Elke term
 > hieronder is canoniek; de kolom "Vroegere synoniemen" documenteert wat er
 > is uitgefaseerd (kind-kaarten 2 t/m 5 van de terminologie-parent `23ac6715…`
 > zijn inmiddels geland — backend rename, frontend rename, cc_bridge-consolidatie,

@@ -6,7 +6,7 @@ status: active
 
 # `docs/cockpit/` — de canonieke spec-boom (index)
 
-> **Dit is de single source of truth voor "hoe werkt de fork Claude Cockpit vandaag".**
+> **Dit is de single source of truth voor "hoe werkt de fork Agent Cockpit vandaag".**
 > Bij twijfel of overlap: **lees het cockpit-document eerst.** Er zijn nog twee andere
 > doc-bomen, maar geen van beide is leidend:
 >
@@ -100,7 +100,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 | Document | Status |
 |---|---|
-| [Claude Cockpit — oriëntatie (lees dit eerst)](./00-orientation.md) | 🟢 active |
+| [Agent Cockpit — oriëntatie (lees dit eerst)](./00-orientation.md) | 🟢 active |
 | [Trigger-poort: ACP-adaptertransport (§6 kaart 5) — status bij premature dispatch](./acp-transport-trigger-gate.md) | 🟡 proposed |
 | [Agent Bridge — spawn, terminal-relay & per-sessie configuratie](./agent-bridge.md) | 🟢 active |
 | [Blueprints — taxonomie van `project_blueprint`-archetypes](./blueprints-typology.md) | 🟢 active |
@@ -140,11 +140,11 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 | Document | Status |
 |---|---|
-| [Claude Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md) | 🟢 active |
+| [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md) | 🟢 active |
 | [Kanban Implementation Plan](./kanban-plan.md) | 🟢 active |
 | [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md) | 🟢 active |
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
-| [Sandcastle Integration Plan — Claude Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
+| [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
 ### Decision (31)
 

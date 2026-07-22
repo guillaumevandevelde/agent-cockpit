@@ -90,7 +90,7 @@ aanwezig engineering-team laat draaien. Het bestaat uit vier lagen:
 
 ## 2. Cockpit ↔ OpenHands — waar staan we tegenover elkaar
 
-| As | OpenHands | Claude Cockpit |
+| As | OpenHands | Agent Cockpit |
 |---|---|---|
 | **Executie-substraat** | Getypeerde Action/Observation-event-stream + REST `ActionExecutionServer`. | tmux `send-keys` + subprocess-CLI in worktree; hybride hooks (push) + **terminal-scraping** (bros). |
 | **Billing (default)** | Token/API via LiteLLM. | **Subscription-first**: spawnt echte CLI die op OAuth-abonnement rijdt. |

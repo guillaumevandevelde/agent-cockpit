@@ -1,10 +1,10 @@
 ---
-title: "Sandcastle Integration Plan — Claude Cockpit"
+title: "Sandcastle Integration Plan — Agent Cockpit"
 type: plan
 status: active
 ---
 
-# Sandcastle Integration Plan — Claude Cockpit
+# Sandcastle Integration Plan — Agent Cockpit
 
 ## 1. Critical Analysis: Sandcastle vs Existing CC Bridge / Agent Bridge
 
@@ -47,7 +47,7 @@ Sandcastle should **complement** CC Bridge/Agent Bridge, not replace them:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    Claude Cockpit UI                      │
+│                    Agent Cockpit UI                      │
 │                                                          │
 │  ┌──────────┐  ┌──────────┐  ┌───────────────────────┐  │
 │  │CC Bridge │  │Agent Brg │  │   Sandcastle (NEW)    │  │

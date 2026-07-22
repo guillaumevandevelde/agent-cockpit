@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "Building Claude Cockpit for production..."
+echo "Building Agent Cockpit for production..."
 
 # Build frontend
 echo ""

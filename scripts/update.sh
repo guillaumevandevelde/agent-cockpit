@@ -1,5 +1,5 @@
 #!/bin/bash
-# update.sh — One-click self-update for Claude Cockpit.
+# update.sh — One-click self-update for Agent Cockpit.
 #
 # Called by the backend API. Streams structured JSON events to stdout:
 #   {"event":"<type>","message":"...","data":{...}}

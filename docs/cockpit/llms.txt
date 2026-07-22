@@ -1,6 +1,6 @@
-# Claude Cockpit
+# Agent Cockpit
 
-> Machine-instapkaart voor de canonieke spec-boom van de fork Claude Cockpit (`docs/cockpit/`). Elke long-lived architectuur-, ontwerp-, beslis- en analysedoc staat hieronder, gegroepeerd op `type` met zijn `status`. Bij twijfel of overlap: lees het cockpit-document eerst. Deze lijst is gegenereerd uit de YAML-frontmatter — bewerk 'm niet met de hand, draai `scripts/generate-doc-index.py`.
+> Machine-instapkaart voor de canonieke spec-boom van de fork Agent Cockpit (`docs/cockpit/`). Elke long-lived architectuur-, ontwerp-, beslis- en analysedoc staat hieronder, gegroepeerd op `type` met zijn `status`. Bij twijfel of overlap: lees het cockpit-document eerst. Deze lijst is gegenereerd uit de YAML-frontmatter — bewerk 'm niet met de hand, draai `scripts/generate-doc-index.py`.
 
 ## Index
 
@@ -9,7 +9,7 @@
 
 ## Reference
 
-- [Claude Cockpit — oriëntatie (lees dit eerst)](./00-orientation.md): type=reference status=active
+- [Agent Cockpit — oriëntatie (lees dit eerst)](./00-orientation.md): type=reference status=active
 - [Trigger-poort: ACP-adaptertransport (§6 kaart 5) — status bij premature dispatch](./acp-transport-trigger-gate.md): type=reference status=proposed
 - [Agent Bridge — spawn, terminal-relay & per-sessie configuratie](./agent-bridge.md): type=reference status=active
 - [Blueprints — taxonomie van `project_blueprint`-archetypes](./blueprints-typology.md): type=reference status=active
@@ -45,11 +45,11 @@
 
 ## Plan
 
-- [Claude Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md): type=plan status=active
+- [Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan](./fase-2-plan.md): type=plan status=active
 - [Kanban Implementation Plan](./kanban-plan.md): type=plan status=active
 - [Pane-Targeted Attention Implementation Plan](./pane-attention-plan.md): type=plan status=active
 - [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md): type=plan status=active
-- [Sandcastle Integration Plan — Claude Cockpit](./sandcastle-integration-plan.md): type=plan status=active
+- [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md): type=plan status=active
 
 ## Decision
 

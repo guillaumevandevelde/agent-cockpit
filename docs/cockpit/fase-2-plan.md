@@ -1,10 +1,10 @@
 ---
-title: "Claude Cockpit — Fase 2: Scheduled Messages — Implementation Plan"
+title: "Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan"
 type: plan
 status: active
 ---
 
-# Claude Cockpit — Fase 2: Scheduled Messages — Implementation Plan
+# Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
