@@ -178,6 +178,104 @@ async def get_endpoint(session, project_key: str, name: str) -> Endpoint | None:
     return deserialize_endpoint(row.value)
 
 
+# ---- shared resolution helper (kaart 293d1faa…) ---------------------------
+#
+# The single place that turns an endpoint slug + DB session into the
+# `(base_url, auth_token)` tuple ``build_provider_env`` requires.
+# Both the interactive REST spawn (``api/v1/runs/router.py``) and the
+# auto-dispatch path (``backend/app/kanban/dispatch.py``) call this so
+# they cannot drift — earlier cards flagged the divergence as a
+# duplication smell; centralising it here replaces two near-identical
+# blocks and makes the validation surface obvious to the next reader.
+
+# Provider constants are imported lazily inside ``resolve_compatible_endpoint``
+# to avoid an import cycle (``provider_env`` has no DB deps and is imported
+# very early in the app bootstrap).
+
+# Credential resolution is intentionally narrow: only the hard-coded
+# MiniMax key from ``Settings`` is recognised today. ``SecretStore``-
+# driven lookup arrives with the next card (see
+# ``subscription-pool-dispatch-analyse.md``); the helper signature is
+# fixed so that swap is a one-place change.
+
+async def resolve_compatible_endpoint(
+    session,
+    project_key: str,
+    endpoint_name: str | None,
+    *,
+    requested_model: str | None = None,
+) -> dict | None:
+    """Resolve an ``anthropic-compatible`` endpoint slug to the kwargs
+    ``SpawnCommandOptions`` expects.
+
+    Returns a dict with ``name``, ``base_url``, ``auth_token`` and
+    ``model`` (always populated — falls back to the endpoint's own
+    ``model`` when the caller didn't pin one, matching the
+    interactive-path contract in
+    ``api/v1/runs/router.py:543``). ``auth_token`` is ``None`` when
+    the endpoint is configured with ``credential_name=None`` (caller
+    is expected to find the credential in its own environment).
+
+    Returns ``None`` when ``endpoint_name`` is falsy (caller has not
+    pinned an endpoint — let the provider chain resolve the
+    provider/model independently).
+
+    Raises:
+        ValueError: ``endpoint_name`` was supplied but no row with
+            that slug exists in the project registry, OR the endpoint
+            references a credential the backend cannot resolve.
+            Both errors are surfaced upstream as the clean refusal
+            the dispatcher wants (kaart 293d1faa… acceptance
+            criterion: "fail-fast op configuratietijd … niet pas
+            bij de derde mislukte dispatch").
+
+    The REST handler converts a ``ValueError`` into an HTTP 400 with
+    the helper's concrete message. The dispatch handler propagates
+    the exception to the synchronously-failing spawn path so the
+    card is bumped through the standard
+    ``MAX_DISPATCH_FAILURES`` loop and lands in Impediment with the
+    exact problem in the activity feed.
+    """
+    if not endpoint_name:
+        return None
+    endpoint = await get_endpoint(session, project_key, endpoint_name)
+    if endpoint is None:
+        raise ValueError(
+            f"unknown endpoint {endpoint_name!r} for project {project_key!r}; "
+            f"register it via /api/v1/agent-bridge/platforms/endpoints",
+        )
+    auth_token: str | None = None
+    if endpoint.credential_name is None:
+        # Ambient-credential pattern (e.g. the CLI's own
+        # ANTHROPIC_AUTH_TOKEN from the host). The CLI may still find
+        # one and use it; ``build_provider_env`` only sets
+        # ``ANTHROPIC_AUTH_TOKEN`` when the token is non-empty.
+        pass
+    elif endpoint.credential_name == "minimax":
+        # MVP credential resolution: only MiniMax's legacy ``.env``-
+        # backed key is recognised. ``SecretStore``-backed lookup
+        # lands in a follow-up card (see dispatch-vendor-koppeling-
+        # analyse.md §3 G1 + the SecretStore follow-up referenced
+        # from ``provider_env.py``).
+        from app.config import settings
+        auth_token = settings.minimax_api_key
+    else:
+        # A named credential the backend can't currently resolve:
+        # surface a clean refusal so the caller sees the exact
+        # problem rather than a silent 401 on the first request.
+        raise ValueError(
+            f"endpoint {endpoint_name!r} requires credential "
+            f"{endpoint.credential_name!r}, which is not configured",
+        )
+    model = requested_model or endpoint.model
+    return {
+        "name": endpoint.name,
+        "base_url": endpoint.base_url,
+        "auth_token": auth_token,
+        "model": model,
+    }
+
+
 async def upsert_endpoint(session, project_key: str, endpoint: Endpoint) -> None:
     """Insert or overwrite a single endpoint. Validation happens here so
     a corrupt row never lands in storage; raises ``ValueError`` to let

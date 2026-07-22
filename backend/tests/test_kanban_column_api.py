@@ -107,6 +107,74 @@ async def test_patch_column_can_clear_default_model_with_null():
         assert r.json()["default_model"] is None
 
 
+# ---- default_provider validation (card 293d1faa…) ------------------------
+#
+# Today ``KanbanColumn.default_provider`` is unvalidated free-text —
+# a typo (``"anthropc"``) silently loops the card through
+# ``MAX_DISPATCH_FAILURES`` before it reaches Impediment. The card
+# pins allow-list validation at the service boundary so the operator
+# gets a 422 at save time instead.
+
+
+@pytest.mark.asyncio
+async def test_post_column_accepts_known_default_provider():
+    """Known providers all pass."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+            "default_provider": "anthropic-compatible",
+        })
+    # POST /columns is registered with status_code=201 — the column was created.
+    assert r.status_code == 201, r.text
+    assert r.json()["default_provider"] == "anthropic-compatible"
+
+
+@pytest.mark.asyncio
+async def test_post_column_rejects_unknown_default_provider():
+    """Unknown provider strings get a 422 — not a persisted typo."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+            "default_provider": "anthropc",
+        })
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_patch_column_rejects_unknown_default_provider():
+    """A typo PATCH is rejected the same way — no path past validation."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })).json()["id"]
+        r = await ac.patch(
+            f"/api/v1/kanban/columns/{cid}",
+            json={"default_provider": "openai"},
+        )
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_patch_column_can_clear_default_provider_with_unknown_still_passes_after_validation():
+    """A null PATCH still clears the column — distinct from the
+    typo-rejection path."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        cid = (await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+            "default_provider": "anthropic",
+        })).json()["id"]
+        r = await ac.patch(
+            f"/api/v1/kanban/columns/{cid}",
+            json={"default_provider": None},
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["default_provider"] is None
+
+
 @pytest.mark.asyncio
 async def test_patch_column_omitted_fields_are_left_alone():
     """A PATCH that only mentions max_sessions must not touch default_agent."""

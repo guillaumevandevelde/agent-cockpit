@@ -168,13 +168,19 @@ async def columns(project_key: str = Query(...)):
 @router.post("/columns", response_model=ColumnResponse, status_code=status.HTTP_201_CREATED)
 async def create_column(payload: ColumnCreate):
     async with KanbanSessionLocal() as s:
-        col = await service.create_column(
-            s, project_key=payload.project_key, name=payload.name,
-            rank=payload.rank, default_agent=payload.default_agent,
-            default_provider=payload.default_provider,
-            default_model=payload.default_model,
-            max_sessions=payload.max_sessions,
-        )
+        try:
+            col = await service.create_column(
+                s, project_key=payload.project_key, name=payload.name,
+                rank=payload.rank, default_agent=payload.default_agent,
+                default_provider=payload.default_provider,
+                default_model=payload.default_model,
+                max_sessions=payload.max_sessions,
+            )
+        except ValueError as e:
+            # kaart 293d1faa…: unknown ``default_provider`` surfaces as 422
+            # so the operator sees the rejection at config time (matches the
+            # active-subscription-override and subscription-pool handlers).
+            raise HTTPException(422, str(e))
         await s.commit()
         return ColumnResponse.model_validate(col)
 
@@ -211,7 +217,12 @@ async def update_column(column_id: str, payload: ColumnUpdate):
                         f"model {new_model!r} is not valid for provider "
                         f"{new_provider!r}; known options: {allowed}",
                     )
-        col = await service.update_column(s, column_id, **patch)
+        try:
+            col = await service.update_column(s, column_id, **patch)
+        except ValueError as e:
+            # kaart 293d1faa…: same fail-fast as ``create_column`` — an
+            # unknown provider in a PATCH body is rejected with 422.
+            raise HTTPException(422, str(e))
         if col is None:
             raise HTTPException(404, "column not found")
         await s.commit()

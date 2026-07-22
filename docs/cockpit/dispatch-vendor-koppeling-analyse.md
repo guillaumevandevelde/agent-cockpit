@@ -136,6 +136,8 @@ API-endpoint (eigen Anthropic API-key, LiteLLM-router, of welk Anthropic-compati
 endpoint dan ook) — werkt in de New-Session-dialog en **niet** voor de agents die het
 bord leegwerken.
 
+✅ **Geïmplementeerd (kaart 293d1faa…):** dispatch roept nu dezelfde `resolve_compatible_endpoint`-helper aan als REST (`endpoints.py:201`), zodat de twee paden niet meer kunnen driften. De `SpawnCommandOptions` worden voorzien van `endpoint_name` / `endpoint_base_url` / `endpoint_auth_token`, en het `provider_env`-pad ontvangt een geldige `base_url`. Dekking: `tests/test_dispatch_compatible_endpoint.py`.
+
 ### G2 — de pool accepteert een provider die dispatch niet kan uitvoeren
 
 `subscription_pool.py:73-77` laat `anthropic-compatible` toe als pool-provider:
@@ -157,6 +159,8 @@ stil falende dispatches.**
 Tweede helft van hetzelfde gat: `KanbanColumn.default_provider` kent **geen enkele
 validatie** (`service.py:539` neemt elke string aan). Een typefout in de kolom-instelling
 geeft dezelfde faalcyclus.
+
+✅ **Geïmplementeerd (kaart 293d1faa…):** drie opslag-grenzen weigeren nu een onvolledige configuratie **vóór** de eerste dispatch: (1) `_ALLOWED_OVERRIDE_PROVIDERS` is uitgebreid met `PROVIDER_COMPATIBLE`, en `set_active_subscription_override` weigert compatibel zonder `endpoint_name` of met een onbekende naam; (2) `set_subscription_pool` doet hetzelfde voor pool-entries, inclusief endpoint-existence-check; (3) `_validate_default_provider` in `service.py` (aangeroepen door `create_column`/`update_column`) weigert een niet-allowlist-waarde met HTTP 422 — `router.py:168-218`. Defense-in-depth: `resolve_compatible_endpoint` blijft `ValueError` raisen voor onbekende endpoint-namen zodat een corrupte KanbanMeta-rij ook op dispatch-tijd wordt geweigerd (zie `test_dispatch_raises_when_endpoint_name_unknown`).
 
 De kanban-UI verbergt dit vandaag toevallig — `PROVIDER_LABELS` in
 `frontend/src/features/kanban/types.ts:29-33` kent maar drie providers — maar de UI is
