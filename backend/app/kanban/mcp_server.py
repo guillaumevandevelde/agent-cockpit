@@ -989,6 +989,14 @@ async def redispatch_card(card_id: str, project_path: str, agent: str | None = N
         result = await dispatch_mod.redispatch_card(
             s, card_id=card_id, project_path=project_path,
             agent_override=agent,
+            # The MCP-tool entry-point vs. the REST/UI one is the operator's
+            # primary triage question (see kaart [self-improve] Redispatch-
+            # trigger-bron onzichtbaar). A static `mcp` label discriminates
+            # that; plumbing the per-call `Context.session_id` through to
+            # disambiguate concurrent MCP callers can come later if anyone
+            # needs it — the activity-feed contract is "what entry-point",
+            # not "which caller".
+            caller_source="mcp",
         )
         await s.commit()
 

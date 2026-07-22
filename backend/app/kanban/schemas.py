@@ -551,6 +551,13 @@ class CreateProjectFromIntakeResponse(BaseModel):
 class RedispatchRequest(BaseModel):
     project_path: str
     agent: str | None = None  # override: use this agent instead of card's current agent
+    # Optional caller-source label, surfaced in the activity feed as
+    # `**Note:** Redispatched via <source>`. The REST handler hard-codes
+    # `ui` today (the operator clicked the CardDrawer button); the field is
+    # there for future API integrations that want to forward their own
+    # identity (e.g. an external orchestrator that calls this endpoint
+    # programmatically).
+    caller_source: str | None = None
 
 
 class TakeOverRequest(BaseModel):

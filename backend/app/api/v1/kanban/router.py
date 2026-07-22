@@ -1626,6 +1626,14 @@ async def redispatch_now(cid: str, payload: RedispatchRequest):
             res = await dispatch.redispatch_card(
                 s, card_id=cid, project_path=payload.project_path,
                 agent_override=payload.agent,
+                # The REST handler is the CardDrawer's Redispatch button —
+                # label it `ui` so an operator investigating a redispatch
+                # from the activity feed sees a human-facing source.
+                # Programmatically called REST clients (e.g. an external
+                # orchestrator) MAY override via `caller_source` in the
+                # request body for their own identity; the default `ui` is
+                # still appropriate when they don't (or as a fallback).
+                caller_source=payload.caller_source or "ui",
             )
         except Exception as e:
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"redispatch failed: {e}")

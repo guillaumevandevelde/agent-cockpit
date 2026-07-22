@@ -4735,6 +4735,7 @@ async def redispatch_card(
     session, *, card_id: str, project_path: str,
     transport: SpawnTransport | None = None,
     agent_override: str | None = None,
+    caller_source: str = "unspecified",
 ) -> dict | None:
     """Release a stuck card, optionally kill its session, and re-dispatch.
 
@@ -4761,6 +4762,23 @@ async def redispatch_card(
         project_path: Path to the project
         transport: The spawn transport to use (auto-selects based on card if None)
         agent_override: Optional agent to use instead of card's current agent
+        caller_source: Free-form label identifying the entry-point that
+            triggered this redispatch. Posted as a `**Note:** Redispatched via
+            <source>` activity comment so future "who redispatched this?" hunts
+            resolve from the activity feed alone. The three known entry-points
+            each pass a distinguishing label:
+
+            - ``ui`` — REST handler (``POST /cards/{cid}/redispatch``)
+            - ``mcp:<session_id>`` — MCP-tool wrapper (`mcp_server.redispatch_card`)
+            - ``bulk_orphans`` — `redispatch_all_orphans`
+            - ``recover_interrupted_sessions`` — `session_recovery.recover_project`
+
+            New entry-points SHOULD pick a ``<bucket>`` label and document it
+            on this docstring so the activity-feed search space stays curated.
+            ``unspecified`` is the back-compat default for in-process callers
+            that haven't been retrofitted yet — once an entry-point is
+            labelled, the operator can spot leftover anonymous calls by grepping
+            for ``unspecified`` in the activity feed.
 
     Returns:
         Result dict or None if the card was not found
@@ -4768,6 +4786,16 @@ async def redispatch_card(
     card = await get_card(session, card_id)
     if card is None:
         return None
+
+    # Visibility — every redispatch must leave a trace in the activity feed so
+    # "who redispatched this card?" is answerable without grepping the codebase.
+    # The convention-prefix `**Note:**` matches the live-session-kill audit
+    # comment just below so the two render as a uniform family.
+    await apply_operation(
+        session, op_type="comment", entity_type="comment",
+        project_key=card.project_key, entity_id=card.id,
+        payload={"text": f"**Note:** Redispatched via `{caller_source}`."},
+    )
 
     # Kill existing tmux session if claimed by an agent
     session_name = _claimant_session(card)
@@ -4974,10 +5002,13 @@ async def redispatch_all_orphans(
             )
             continue
         try:
-            # Pass None so redispatch_card auto-selects per-card transport
+            # Pass None so redispatch_card auto-selects per-card transport.
+            # `bulk_orphans` is the canonical caller_source label for the
+            # bulk orphan redispatch path so the activity feed tells the
+            # operator every redispatch this loop triggered.
             res = await redispatch_card(
                 session, card_id=card.id, project_path=project_path,
-                transport=transport,
+                transport=transport, caller_source="bulk_orphans",
             )
             if res is not None:
                 results.append(res)
