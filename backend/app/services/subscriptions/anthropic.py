@@ -123,11 +123,15 @@ class AnthropicUsageProvider(SubscriptionUsageProvider):
                 betrouwbaarheid="onbekend",
             )
 
+        # cache_read_tokens telt bewust NIET mee: de gecontroleerde meting in
+        # docs/cockpit/cache-read-quota-decision.md (Scenario B, w≈0) toont dat
+        # cache_read geen abonnementsquotum kost, terwijl het ~96% van het
+        # tokenvolume is. Meesommeren overschatte drempel_gebruikt ~20x en
+        # pauzeerde subscription_pool-abonnementen veel te vroeg.
         total_tokens = (
             getattr(active_block, "input_tokens", 0)
             + getattr(active_block, "output_tokens", 0)
             + getattr(active_block, "cache_creation_tokens", 0)
-            + getattr(active_block, "cache_read_tokens", 0)
         )
         drempel_gebruikt = total_tokens / self._plan_tier_limit_tokens
         return SubscriptionUsage(

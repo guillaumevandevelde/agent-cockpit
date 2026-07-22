@@ -183,6 +183,8 @@ Als cache_read meetelde (model A), had interval 5 ~7,8 pp moeten stijgen i.p.v.
   verbruik is en géén quotum kost, overschat de provider het verbruik dramatisch
   — de drempel-gebaseerde spillover in `subscription_pool` pauzeert abonnementen
   veel te vroeg. Dit is een aparte Backlog-kaart (§8).
+  ✅ Geïmplementeerd (kaart `d63e83f0…`) — `AnthropicUsageProvider.get_usage`
+  sommeert `cache_read_tokens` niet meer mee in `drempel_gebruikt`.
 
 ## 7. Reproductie
 
