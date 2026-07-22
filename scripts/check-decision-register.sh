@@ -189,7 +189,11 @@ while IFS= read -r -d '' f; do
     fi
 
     if [ "${#problems[@]}" -gt 0 ]; then
-      header_mismatches+=("$rel|" "$(IFS=, ; echo "${problems[*]}")")
+      # One entry per drifted doc: "<rel>|<comma-joined problems>". Pushing
+      # two array elements per doc would make ${#header_mismatches[@]} twice
+      # the actual count and turn every "WARNING: N doc(s)" line into a tally
+      # that's confusingly off (kaart ce0ea8d6 / card f3ae648c…).
+      header_mismatches+=("$rel|$(IFS=, ; echo "${problems[*]}")")
     fi
   fi
 done < <(find "$DECISIONS_DIR" -maxdepth 1 -type f -name '*-decision.md' -print0 2>/dev/null | sort -z)
@@ -200,14 +204,11 @@ header_clean=1
 if [ "$CHECK_HEADERS" -eq 1 ] && [ "${#header_mismatches[@]}" -gt 0 ]; then
   header_clean=0
   echo "WARNING: ${#header_mismatches[@]} decision doc(s) have header drift (Datum/Status/Kaart/Uitkomst):" >&2
-  # header_mismatches is a flat list: entries come in pairs (rel, problems).
-  i=0
-  while [ "$i" -lt "${#header_mismatches[@]}" ]; do
-    rel="${header_mismatches[$i]}"
-    probs="${header_mismatches[$((i+1))]}"
-    # `rel` ends with '|' — strip it for the echo
-    echo "  - ${rel%|}  (${probs})" >&2
-    i=$((i+2))
+  # Each entry is "<rel>|<comma-joined problems>"; split on the first '|'.
+  for entry in "${header_mismatches[@]}"; do
+    rel="${entry%%|*}"
+    probs="${entry#*|}"
+    echo "  - ${rel}  (${probs})" >&2
   done
   echo "" >&2
   echo "Add the four-field header at the top of each *-decision.md:" >&2
