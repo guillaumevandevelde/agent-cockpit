@@ -6044,7 +6044,7 @@
         "type": "object"
       },
       "InstanceIdentity": {
-        "description": "Runtime identity for the Claude Cockpit backend instance.",
+        "description": "Runtime identity for the Agent Cockpit backend instance.",
         "properties": {
           "accent": {
             "enum": [

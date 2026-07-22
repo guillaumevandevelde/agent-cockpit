@@ -1,5 +1,5 @@
 """
-Plugin Service for Claude Cockpit
+Plugin Service for Agent Cockpit
 
 Facade combining plugin registry (discovery/listing), installer
 (install/uninstall/toggle), and marketplace (marketplace API, sync, updates)

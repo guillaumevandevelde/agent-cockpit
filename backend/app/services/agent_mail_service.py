@@ -47,7 +47,7 @@ STALE_REQUEST_MINUTES = 15
 AUTO_NUDGE_COOLDOWN_SECONDS = 30
 TMUX_WAKE_CLIS = {"claude-code", "codex-cli"}
 INBOX_CHECK_PROMPT = (
-    "Claude Cockpit Agent Mail: please call `agent_mail_check_inbox(unread_only=False)` now, "
+    "Agent Cockpit Agent Mail: please call `agent_mail_check_inbox(unread_only=False)` now, "
     "then answer any pending context requests or handoffs before continuing."
 )
 
@@ -748,7 +748,7 @@ class AgentMailService:
         me = next((c for c in team if c.id == member_id), None)
         others = [c for c in team if c.id != member_id]
 
-        lines = ["[Claude Cockpit Agent Mail]"]
+        lines = ["[Agent Cockpit Agent Mail]"]
         role = f" ({member.role})" if member.role else ""
         lines.append(f'You are "{member.display_name}"{role} - repo: {member.repo_name}.')
         if member.charter:

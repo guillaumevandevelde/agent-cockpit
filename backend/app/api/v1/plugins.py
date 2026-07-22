@@ -1,5 +1,5 @@
 """
-Plugin API endpoints for Claude Cockpit
+Plugin API endpoints for Agent Cockpit
 """
 
 import asyncio

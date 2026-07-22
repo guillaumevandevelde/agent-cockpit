@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING — MCP server rename**: the management MCP server is now registered as `agent-cockpit` (was `claude-cockpit`) as part of the rebrand to Agent Cockpit. Migration: rename the `claude-cockpit` key to `agent-cockpit` in any `.mcp.json` that references this server (the separate `cockpit-kanban` server is unchanged).
+
 ### Added
 - **Models**: Claude Sonnet 5 is now selectable as a model, with correct context-window and usage-cost calculation
 - **Kanban**: Dispatch board for handing work to Claude Code/Codex agents — cards move through columns as agents claim, work, and hand them off, with per-agent performance stats, impediment reporting, and scheduling a card for a future time

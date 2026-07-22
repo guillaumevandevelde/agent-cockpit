@@ -1,4 +1,4 @@
-"""Runtime identity metadata for this Claude Cockpit backend instance."""
+"""Runtime identity metadata for this Agent Cockpit backend instance."""
 
 from __future__ import annotations
 
