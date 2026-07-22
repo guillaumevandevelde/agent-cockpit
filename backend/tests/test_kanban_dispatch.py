@@ -191,6 +191,124 @@ def test_card_prompt_warns_against_writes_to_canonical_checkout():
         )
 
 
+def test_card_prompt_callout_interpolates_dispatched_project_path():
+    """Regression for kanban card a962b209…: when the dispatcher passes a
+    real ``project_path`` + ``worktree_path`` to ``build_card_prompt``, the
+    worktree-safety callout must name *those* paths — not the hardcoded
+    ``/home/vdvgu/claude-cockpit`` that only holds for the meta-project.
+    A dispatched agent that reads "your writable surface is
+    ``/home/vdvgu/claude-cockpit/...``" on a non-meta project wrote a
+    deliverable into the Cockpit checkout (instead of its own worktree) —
+    observable blast-radius was "every product dispatch can leave files in
+    Cockpit's tree", in the worst case on top of a concurrent session's
+    uncommitted work.
+    """
+    class _C:
+        title = "T"
+        description = ""
+    project_path = "/scratch/scratchpad/product-claude-cockpit-a462b209"
+    worktree_path = (
+        f"{project_path}/.claude/worktrees/k-problem-dispa-81b8"
+    )
+    prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct",
+        project_path=project_path, worktree_path=worktree_path,
+    )
+
+    # The callout must name the dispatched project's path as the canonical
+    # checkout that is the FORBIDDEN target — not the meta-project path.
+    assert project_path in prompt
+    # The "sole writable surface" line must point at this session's
+    # worktree, with the real branch substituted in for the <branch>
+    # placeholder that the legacy hardcode used.
+    assert worktree_path in prompt
+    assert "<branch>" not in prompt
+
+    # The forbidden canonical path inside the callout must match the
+    # dispatched project's main checkout, *not* /home/vdvgu/claude-cockpit
+    # (which is a totally different tree that the product-project agent
+    # has no business writing to). Just check that the callout's Wrong
+    # example points at the dispatched project_path, not at the legacy
+    # /home/vdvgu/claude-cockpit/ prefix.
+    wrong_idx = prompt.find("- **Wrong:**")
+    assert wrong_idx != -1, "callout must keep a Wrong example"
+    wrong_block = prompt[wrong_idx:wrong_idx + 400]
+    assert project_path + "/docs/cockpit" in wrong_block, (
+        f"Wrong example should reference the *dispatched* project, got: "
+        f"{wrong_block[:200]!r}"
+    )
+
+
+def test_card_prompt_does_not_leak_meta_project_path_for_dispatched_project():
+    """AC #3 (kaart a962b209…): a prompt for project X must contain no
+    path of project Y. Without the interpolation shipped in this card,
+    every dispatched session reads ``/home/vdvgu/claude-cockpit/...`` in
+    its worktree-safety callout — even when it was spawned for a
+    throwaway product project under ``/scratch/...``.
+    """
+    class _C:
+        title = "T"
+        description = ""
+    project_path = "/scratch/scratchpad/product-claude-cockpit-a462b209"
+    worktree_path = (
+        f"{project_path}/.claude/worktrees/k-problem-dispa-81b8"
+    )
+    prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct",
+        project_path=project_path, worktree_path=worktree_path,
+    )
+
+    assert "/home/vdvgu/claude-cockpit" not in prompt, (
+        "dispatched project's prompt should not hardcode the meta "
+        "project's /home/vdvgu/claude-cockpit path"
+    )
+    assert (
+        "/home/vdvgu/claude-cockpit/.claude/worktrees/<branch>"
+        not in prompt
+    )
+    # And the frontend-gate symlink path must follow the dispatched
+    # project, not the meta project's node_modules.
+    assert (
+        "/home/vdvgu/claude-cockpit/frontend/node_modules"
+        not in prompt
+    )
+
+
+def test_card_prompt_callout_falls_back_to_meta_path_when_project_unknown():
+    """Backwards-compat (kaart a962b209…): callers that pre-date the
+    project_path threading (legacy tests, ad-hoc callers) must still get
+    a useful callout with the meta project path as the safe fallback, so
+    the existing ``test_card_prompt_warns_against_writes_to_canonical_checkout``
+    contract is preserved."""
+    class _C:
+        title = "T"
+        description = ""
+    prompt = dispatch.build_card_prompt(
+        _C(), persona=None, ship_mode="direct",
+        # no project_path / worktree_path passed
+    )
+    assert "/home/vdvgu/claude-cockpit" in prompt
+
+
+def test_ship_instructions_frontend_gate_interpolates_project_path():
+    """The frontend-gate symlink-shortcut hardcodes
+    ``/home/vdvgu/claude-cockpit/frontend/node_modules`` as the source of
+    the symlink — that's the meta project's tree, not the dispatched
+    project's. When ``_build_ship_instructions`` gets a real project_path,
+    it must interpolate the project's own ``frontend/node_modules`` so a
+    product-project agent doesn't symlink Cockpit's deps into its own
+    worktree."""
+    project_path = "/scratch/scratchpad/product-claude-cockpit-a462b209"
+    instructions = dispatch._build_ship_instructions(
+        "direct", project_path=project_path,
+    )
+    assert f"{project_path}/frontend/node_modules" in instructions
+    assert (
+        "/home/vdvgu/claude-cockpit/frontend/node_modules"
+        not in instructions
+    )
+
+
 def test_direct_ship_recipe_has_uncommitted_changes_preflight():
     """Direct-mode ship recipe must guard against the silent no-op where the
     detached worktree only sees COMMITTED state: uncommitted/untracked changes
