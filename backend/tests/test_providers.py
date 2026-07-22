@@ -328,31 +328,38 @@ def test_copilot_spawn_command_rejects_unsupported_mode():
         provider.build_spawn_command(SpawnCommandOptions(directory="/tmp/project", mode="worktree"))
 
 
-def test_claude_code_spawn_command_includes_model_flag_when_set():
+def test_claude_code_spawn_command_includes_model_flag_when_set(tmp_path):
     from app.services.agentic_cli import get_agentic_cli
     from app.services.agentic_cli.base import SpawnCommandOptions
 
+    # The helper only emits ``--mcp-config`` when ``.mcp.json`` actually exists
+    # (kanban card `[problem] Product-project zonder .mcp.json sterft binnen
+    # ~2s`); materialise it here so this test pins the *present* branch.
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+
     provider = get_agentic_cli("claude-code")
     command = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="plain", model="opus", prompt="do the thing")
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", model="opus", prompt="do the thing")
     )
 
     assert command == [
         "claude",
         "--strict-mcp-config",
         "--mcp-config",
-        "/tmp/project/.mcp.json",
+        str(tmp_path / ".mcp.json"),
         "--model", "opus", "do the thing",
     ]
 
 
-def test_claude_code_spawn_command_omits_model_flag_when_unset():
+def test_claude_code_spawn_command_omits_model_flag_when_unset(tmp_path):
     from app.services.agentic_cli import get_agentic_cli
     from app.services.agentic_cli.base import SpawnCommandOptions
 
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+
     provider = get_agentic_cli("claude-code")
     command = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="plain", prompt="do the thing")
+        SpawnCommandOptions(directory=str(tmp_path), mode="plain", prompt="do the thing")
     )
 
     assert "--model" not in command
@@ -360,19 +367,21 @@ def test_claude_code_spawn_command_omits_model_flag_when_unset():
         "claude",
         "--strict-mcp-config",
         "--mcp-config",
-        "/tmp/project/.mcp.json",
+        str(tmp_path / ".mcp.json"),
         "do the thing",
     ]
 
 
-def test_claude_code_spawn_command_includes_model_flag_across_modes():
+def test_claude_code_spawn_command_includes_model_flag_across_modes(tmp_path):
     from app.services.agentic_cli import get_agentic_cli
     from app.services.agentic_cli.base import SpawnCommandOptions
+
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
 
     provider = get_agentic_cli("claude-code")
 
     worktree_command = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="worktree",
+        SpawnCommandOptions(directory=str(tmp_path), mode="worktree",
                             worktree_name="k-feature-a1b2", model="sonnet")
     )
     assert worktree_command == [
@@ -380,12 +389,12 @@ def test_claude_code_spawn_command_includes_model_flag_across_modes():
         "--worktree", "k-feature-a1b2",
         "--strict-mcp-config",
         "--mcp-config",
-        "/tmp/project/.mcp.json",
+        str(tmp_path / ".mcp.json"),
         "--model", "sonnet",
     ]
 
     resume_command = provider.build_spawn_command(
-        SpawnCommandOptions(directory="/tmp/project", mode="resume",
+        SpawnCommandOptions(directory=str(tmp_path), mode="resume",
                             session_id="sess-123", model="haiku")
     )
     assert resume_command == [
@@ -393,6 +402,6 @@ def test_claude_code_spawn_command_includes_model_flag_across_modes():
         "--resume", "sess-123",
         "--strict-mcp-config",
         "--mcp-config",
-        "/tmp/project/.mcp.json",
+        str(tmp_path / ".mcp.json"),
         "--model", "haiku",
     ]

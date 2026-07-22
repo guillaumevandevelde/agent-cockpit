@@ -27,23 +27,29 @@ _DEFAULT_RUNTIME = "worktree"
 
 
 def _project_mcp_config_args(directory: str) -> list[str]:
-    """Return ``--strict-mcp-config`` + ``--mcp-config`` flags for ``directory``.
+    """Return the MCP-isolation flags for ``directory``.
 
-    Pinning MCP servers to the project's own ``.mcp.json`` keeps a host-user's
-    global ``~/.claude.json`` MCP entries — and any plugin-discovered MCPs —
-    from leaking into dispatched sessions. Without these flags every extra
-    tool schema lands in the system prompt of every spawned agent.
+    Always emits ``--strict-mcp-config`` so a host-user's global
+    ``~/.claude.json`` MCP entries — and any plugin-discovered MCPs — never
+    leak into dispatched sessions. See kanban card ``00fa8325`` /
+    ``docs/cockpit/token-optimization-analysis.md`` §4 R5.
 
-    See kanban card ``00fa8325`` / ``docs/cockpit/token-optimization-analysis.md``
-    §4 R5. Single source of truth: both this legacy bridge and the newer
+    Only emits ``--mcp-config`` when the project's ``.mcp.json`` actually
+    exists: a fresh product-project has none, and Claude Code would otherwise
+    exit 1 in ~2s with ``MCP config file not found`` (see kanban card
+    `[problem] Product-project zonder .mcp.json sterft binnen ~2s bij elke
+    dispatch`). When the file is absent, ``--strict-mcp-config`` alone means
+    zero MCPs are loaded — the safest possible default for a brand-new project.
+
+    Single source of truth: both this legacy bridge and the newer
     ``agentic_cli/claude_code.build_spawn_command`` import the same helper so a
     security fix can't drift between paths.
     """
-    return [
-        "--strict-mcp-config",
-        "--mcp-config",
-        str(Path(directory) / ".mcp.json"),
-    ]
+    args = ["--strict-mcp-config"]
+    mcp_path = Path(directory) / ".mcp.json"
+    if mcp_path.is_file():
+        args += ["--mcp-config", str(mcp_path)]
+    return args
 
 
 def _resolve_project_directory(project_folder: str, session_id: str | None = None) -> str:
