@@ -1272,6 +1272,25 @@ async def resolve_effective_provider_and_model(
         provider_source = PRECEDENCE_COLUMN_DEFAULT
     else:
         provider_source = PRECEDENCE_NONE
+    # Endpoint-name resolution rides the *same* precedence chain as the
+    # provider (global_override > pool_choice > column_override >
+    # column.default_endpoint_name) — this is the single source of truth
+    # the dispatch path consumes as ``resolved["endpoint_name"]``. Keeping
+    # it here (rather than re-deriving global_override/pool_choice/
+    # column_override in ``dispatch_card``, where those intermediates don't
+    # exist) is what closes the F821 crash from commit 0ed8796. Gated on
+    # ``PROVIDER_COMPATIBLE`` so the common Anthropic path pays no extra DB
+    # call for the column-default lookup.
+    endpoint_name: str | None = None
+    if provider == PROVIDER_COMPATIBLE:
+        endpoint_name = (
+            (global_override or {}).get("endpoint_name")
+            or (pool_choice.endpoint_name if pool_choice else None)
+            or column_override.get("endpoint_name")
+            or await get_column_default_endpoint_name(
+                session, project_key=project_key, column_name=target_agent,
+            )
+        )
     return {
         "provider": provider,
         "model": model,
@@ -1285,6 +1304,7 @@ async def resolve_effective_provider_and_model(
         "column_default_provider": column_default_provider,
         "column_default_model": column_default_model,
         "persona_model": persona_model,
+        "endpoint_name": endpoint_name,
     }
 
 
@@ -3589,14 +3609,7 @@ async def _run_card(
     endpoint_resolution: dict | None = None
     endpoint_name: str | None = None
     if provider == PROVIDER_COMPATIBLE:
-        endpoint_name = (
-            (global_override or {}).get("endpoint_name")
-            or (pool_choice.endpoint_name if pool_choice else None)
-            or column_override.get("endpoint_name")
-            or await get_column_default_endpoint_name(
-                session, project_key=project_key, column_name=target_agent,
-            )
-        )
+        endpoint_name = resolved["endpoint_name"]
         from app.services.agentic_cli.endpoints import (
             resolve_compatible_endpoint as _resolve_compatible_endpoint,
         )

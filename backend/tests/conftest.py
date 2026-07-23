@@ -38,8 +38,8 @@ import app.models  # noqa: F401
 # ``app.services.agent_mail_service`` would see ``projects``/``backups``
 # missing from the test DB and fail with ``no such table: projects``.
 import app.models.database  # noqa: F401
-
-from tests.app_database_test_db import TestSessionLocal as _AppDbSessionLocal, test_engine as _app_db_test_engine
+from tests.app_database_test_db import TestSessionLocal as _AppDbSessionLocal
+from tests.app_database_test_db import test_engine as _app_db_test_engine
 from tests.kanban_test_db import TestSessionLocal, test_engine
 
 _test_sf = TestSessionLocal()

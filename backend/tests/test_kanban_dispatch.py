@@ -1328,15 +1328,13 @@ async def test_manual_pause_respects_global_subscription_override(project_with_a
         await dispatch_pause.set_manual_pause(s, "minimax", True)
         await s.commit()
 
-        result = await dispatch.dispatch_project(
+        await dispatch.dispatch_project(
             s, project_key=PK, project_path=project_with_agents,
             transport=transport,
         )
         await s.commit()
         held_back = await get_card(s, cid)
-
-    # `dispatch_project` returns the last spawn's result dict; when no card
-    # was dispatched (gate held the only one back) it returns None.
+    # No card was dispatched (gate held the only one back).
     # The card stayed put — the gate caught the override-routed spawn.
     assert transport.calls == []
     assert held_back.column == "Backlog"
@@ -1352,13 +1350,11 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
     Pre-fix the gate used ``_provider_for_card`` (column-only), so
     pausing the column default would have wrongly held back a card the
     pool was about to route to a different provider."""
-    from app.kanban import dispatch_pause
-    from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
-
     # Pool snapshots are no-ops in this test environment; the pool router
     # falls through to "first entry of cli_id wins" when no signal is
     # available, which is enough to drive the precedence chain.
-    import app.kanban.db as kdb
+    from app.kanban import dispatch_pause
+    from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
     async def _no_snapshots(entries):
         return {}
     dispatch._gather_pool_usage_snapshots = _no_snapshots
@@ -1387,7 +1383,7 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
         await dispatch_pause.set_manual_pause(s, "bedrock", True)
         await s.commit()
 
-        result = await dispatch.dispatch_project(
+        await dispatch.dispatch_project(
             s, project_key=PK, project_path=project_with_agents,
             transport=transport,
         )
@@ -1412,7 +1408,7 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
         await dispatch_pause.set_manual_pause(s, "bedrock", False)
         await s.commit()
 
-        result = await dispatch.dispatch_project(
+        await dispatch.dispatch_project(
             s, project_key=PK, project_path=project_with_agents,
             transport=transport,
         )
@@ -1437,8 +1433,6 @@ async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_
     paused must NOT spawn a card even though the picker returns it."""
     from app.kanban import dispatch_pause
     from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
-
-    import app.kanban.db as kdb
     async def _no_snapshots(entries):
         return {}
     dispatch._gather_pool_usage_snapshots = _no_snapshots
@@ -1485,12 +1479,10 @@ async def test_manual_pause_holds_back_queued_memory_retry(project_with_agents):
     must NOT spawn on the next memory-available retry tick. FCR-blokkade:
     the previous ``_retry_queued_cards`` only checked column caps before
     calling ``_run_card`` and let queued cards through."""
-    from app.kanban import dispatch_pause
-    from app.services.scheduling.pending_queue import pending_queue
-
     # Pool snapshots are no-ops; the pool router falls through to the
     # "first entry" branch — sufficient to drive the precedence chain.
-    import app.kanban.db as kdb
+    from app.kanban import dispatch_pause
+    from app.services.scheduling.pending_queue import pending_queue
     async def _no_snapshots(entries):
         return {}
     dispatch._gather_pool_usage_snapshots = _no_snapshots
@@ -1524,7 +1516,6 @@ async def test_manual_pause_holds_back_queued_memory_retry(project_with_agents):
         )
         # Patch get_retryable_cards to ignore retry_interval.
         import unittest.mock as mock
-        real_get_retryable = pending_queue.get_retryable_cards
 
         def _force_retryable():
             return list(pending_queue._queue.values())
@@ -2897,7 +2888,6 @@ async def test_mcp_redispatch_card_wrapper_forwards_mcp_source_label():
     from app.kanban import mcp_server as m
     from app.kanban.service import card_activity
 
-    transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="mcp-wrapper-e2e", column="engineer")
         await apply_operation(

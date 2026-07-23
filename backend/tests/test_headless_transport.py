@@ -115,8 +115,6 @@ def test_live_headless_sessions_returns_only_running_processes(tmp_path):
     import sys
     import time
 
-    from pathlib import Path
-
     project_root = tmp_path / "proj"
     wt_1 = project_root / ".claude" / "worktrees" / "k-hl-1"
     wt_2 = project_root / ".claude" / "worktrees" / "k-hl-2"
@@ -265,7 +263,6 @@ def test_kill_headless_session_false_when_already_exited(tmp_path):
     # Pidfile points at a dead pid → the OS liveness check returns False →
     # kill_headless_session returns False without signaling anything.
     import json
-    from pathlib import Path
 
     project_root = tmp_path / "proj"
     wt = project_root / ".claude" / "worktrees" / "k-hl-2"

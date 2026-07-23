@@ -728,12 +728,13 @@ async def test_delete_dispatch_pause_clears_manual_pauses_too():
     """The bulk-clear DELETE /dispatch-pause must wipe manual pauses along
     with the time-based ones — a single 'Resume auto-dispatch now' click
     un-freezes everything, regardless of how the freeze started."""
+    from datetime import UTC, datetime, timedelta
+
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.dispatch_pause import (
         is_manually_paused,
         set_paused_until,
     )
-    from datetime import UTC, datetime, timedelta
 
     future = datetime.now(UTC) + timedelta(minutes=10)
 

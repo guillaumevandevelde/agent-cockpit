@@ -7,6 +7,7 @@ from app.database import AsyncSessionLocal
 from app.models.agent_mail import MailAgentSession
 from app.models.agent_mail_schemas import MailAgentRegisterRequest
 from app.services.agent_mail_service import agent_mail_service
+
 # Schema is created by ``_reset_app_database_tables`` in conftest.
 
 

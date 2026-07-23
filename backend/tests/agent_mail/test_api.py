@@ -2,6 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+
 # Schema + per-test reset handled by ``_reset_app_database_tables`` +
 # ``_patch_app_database`` in conftest.py. No per-file monkeypatch of
 # ``app.database.AsyncSessionLocal`` needed — every consumer (including

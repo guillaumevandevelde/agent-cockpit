@@ -29,12 +29,7 @@ from app.kanban import dispatch, service, subscription_pool
 from app.kanban.operations import apply_operation
 from app.services.agentic_cli import endpoints as agent_endpoints
 from app.services.agentic_cli.endpoints import Endpoint
-from app.services.agentic_cli.provider_env import (
-    MINIMAX_BASE_URL_INTERNATIONAL,
-    PROVIDER_MINIMAX,
-)
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
-
 
 KanbanSessionLocal = TestSessionLocal()
 
@@ -179,6 +174,7 @@ def _seed_corrupt_pool_row(s, *, endpoint_name: str) -> None:
     storage corruption that the dispatcher is required to refuse.
     """
     import json
+
     from app.kanban.models import KanbanMeta
     from app.kanban.subscription_pool import (
         DEFAULT_POOL_CLI,

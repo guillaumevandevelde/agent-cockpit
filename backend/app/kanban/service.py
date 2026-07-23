@@ -23,7 +23,6 @@ from app.services.agentic_cli.provider_env import (
 )
 from app.utils.timeutils import ensure_aware
 
-
 # Single source of truth for the providers the dispatcher knows how to
 # spawn against. ``KanbanColumn.default_provider`` is validated against
 # this tuple at the service boundary so a typo can't silently corrupt

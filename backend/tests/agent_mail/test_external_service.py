@@ -12,6 +12,7 @@ from app.services.external_agent_mail_service import (
     ExternalAgentMailRateLimitError,
     external_agent_mail_service,
 )
+
 # Schema is created by ``_reset_app_database_tables`` in conftest.
 # Per-test reset of ``external_agent_mail_service._send_windows`` lives in
 # ``conftest.py:_reset_singleton_state`` so the next service that gains

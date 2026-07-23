@@ -859,7 +859,7 @@ def _build_env(*, provider: str, model: str | None,
 
 async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
                           *, provider: str,
-                          log_writer: "EventLogWriter | None" = None) -> int:
+                          log_writer: EventLogWriter | None = None) -> int:
     """Drain the subprocess's stdout, parse each JSON line, dispatch via _on_event.
 
     Reads until EOF; collects stderr in parallel so a hang in the parser

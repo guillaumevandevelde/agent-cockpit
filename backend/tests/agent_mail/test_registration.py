@@ -3,6 +3,7 @@ import pytest
 from app.database import AsyncSessionLocal
 from app.models.agent_mail_schemas import MailAgentRegisterRequest
 from app.services.agent_mail_service import agent_mail_service
+
 # No autouse ``_create_tables`` fixture needed: ``tests/conftest.py``'s
 # ``_reset_app_database_tables`` drops + recreates the full ``Base.metadata``
 # schema (incl. ``mail_team_members``/``mail_agent_sessions``/...) before every

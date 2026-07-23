@@ -3,6 +3,7 @@ import json
 import pytest
 
 from app.mcp_server.server import mcp
+
 # Schema + per-test reset handled by ``_reset_app_database_tables`` in
 # conftest.py, and ``_patch_app_database`` identity-swaps
 # ``AsyncSessionLocal`` on every module that did

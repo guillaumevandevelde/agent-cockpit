@@ -10,6 +10,7 @@ from app.models.agent_mail import (
     MailReceipt,
     MailTeamMember,
 )
+
 # Schema is created by ``_reset_app_database_tables`` in conftest.
 
 

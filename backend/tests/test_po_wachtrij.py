@@ -25,6 +25,7 @@ Sort: oldest-first (longest wait surfaces on top). Empty list when nothing is
 waiting on the human.
 """
 import json
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -146,8 +147,8 @@ async def test_open_gate_appears():
     """A card with an open KanbanGate shows up regardless of column."""
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="pick provider")
-        gate = await _open_gate(s, cid, question="Anthropic or Bedrock?",
-                                options=("Anthropic", "Bedrock"))
+        await _open_gate(s, cid, question="Anthropic or Bedrock?",
+                         options=("Anthropic", "Bedrock"))
         await s.commit()
 
     async with KanbanSessionLocal() as s:
@@ -281,7 +282,7 @@ async def test_sorted_oldest_first():
     underlying `updated_at` so the older blocker has a clearly earlier
     timestamp.
     """
-    from datetime import datetime, timedelta, UTC
+    from datetime import UTC, datetime, timedelta
 
     from app.kanban.models import KanbanCard
 
