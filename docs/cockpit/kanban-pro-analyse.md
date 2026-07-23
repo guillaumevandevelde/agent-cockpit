@@ -203,6 +203,11 @@ geen nieuw endpoint.
 **Wat het de product owner oplevert:** "waarom staat dit bord stil?" wordt op het bord zelf
 beantwoord in plaats van via een log-dive of een sweeper-script.
 
+✅ Geïmplementeerd (kaart `3b4c3d79…`) — `ReadyStateBadge` draagt nu een `awaiting_plan_ref`
+(`Awaiting plan`, amber) en een `gated` (`Gated`, rood, ⚠) toestand; `KanbanPage.tsx` spiegelt
+de dispatcher-precedentie (gated > missing_dep > awaiting_plan_ref > dependent > ready) en
+de gated-tooltip toont de `gated_on`-trigger via het bestaande `title`-attribuut.
+
 ### 4.2 ⭐ Portabiliteit en duurzaamheid van de borddata
 
 **Bij hen** is dit de hele productthese: `.md` + YAML op jouw schijf, *"fully portable,
