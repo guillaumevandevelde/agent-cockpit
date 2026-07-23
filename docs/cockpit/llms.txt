@@ -16,6 +16,7 @@
 - [ProjectBootstrapPolicy — de \"cockpit-defaults\" van repo-bootstrap](./bootstrap-policy.md): type=reference status=active
 - [Brainstorm-to-impediment-bridge — van real-time dialogue naar `report_impediment`-flows](./brainstorm-to-impediment-bridge.md): type=reference status=active
 - [CITemplateService — drie GitHub-Actions-templates voor pasgeboren projecten](./ci-templates.md): type=reference status=active
+- [Cockpit capability-baseline](./cockpit-capability-baseline.md): type=reference status=active
 - [Fase 1 — Validatiechecklist (werkt claude-deck onder WSL?)](./fase-1-validation.md): type=reference status=active
 - [Isolated component preview (light + dark screenshot)](./isolated-component-preview.md): type=reference status=active
 - [Kanban-DB conventions](./kanban-conventions.md): type=reference status=active
