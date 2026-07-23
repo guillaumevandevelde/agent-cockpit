@@ -287,6 +287,8 @@ moet **kaarttekst = prompt = uitvoerbare instructie** daar kunnen vinden, niet o
 - **Windows-installer is unsigned en dat staat gewoon in de README.** Onder-beloven en
   klopmaken is ook een productkeuze.
 
+✅ **Geïmplementeerd (kaart 90b51b5fac3a4f12b96931da3f60fe57)** — `useCommandPaletteData.ts:58` geeft de kaart-id door via `/kanban?card=<id>`; de bestaande `searchParams`-effect op `KanbanPage` opent de drawer zonder extra wiring — ook bij een navigate-die-al-mount-is (`NavigateOnClick`-test dekt dat geval af). Plus een lichte `<Input data-testid="board-filter">` boven het bord die titel + labels case-insensitive filtert; lege query is een no-op en geeft de originele array-referentie terug, kolommen blijven staan bij zero-match. Filter zit bewust niet in de URL (geen botsing met `?card=`). Vitest-dekking voor beide; `npm run lint && npm run build` groen.
+
 ## 5. Wat we bewust NIET overnemen
 
 **Markdown-op-schijf als *primaire* store.** Verleidelijk (§4.2 leunt erop), maar het botst

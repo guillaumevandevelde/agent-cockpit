@@ -55,7 +55,15 @@ async function kanbanItems(activeProject: ProjectResponse | null, navigate: (pat
     subtitle: `${card.column}${card.priority ? ` · ${card.priority}` : ''}`,
     icon: KanbanSquare,
     keywords: card.labels ?? [],
-    onSelect: () => navigate('/kanban'),
+    // kanban-pro-analyse.md §4.4 (problem 1): the palette used to drop the
+    // card id here, leaving the user on a plain /kanban board with the
+    // drawer closed. KanbanPage already implements a `?card=<id>` deep-link
+    // (the `searchParams`-driven `useEffect`), so the palette only has to
+    // navigate to the deep-link URL — the drawer then opens against the
+    // same card without any extra wiring. The other end of the round-trip
+    // is unit-tested in `KanbanPage.test.tsx` ("already-mounted ?card=
+    // deep link") so the same deep-link handles the same-mount case too.
+    onSelect: () => navigate(`/kanban?card=${encodeURIComponent(card.id)}`),
   }))
 }
 
