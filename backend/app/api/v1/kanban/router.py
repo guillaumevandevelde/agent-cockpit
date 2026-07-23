@@ -2,6 +2,7 @@
 import json
 import logging
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
@@ -158,6 +159,26 @@ async def _assert_project_key_known(s, project_key: str, *, for_create: bool) ->
 router = APIRouter(prefix="/kanban", tags=["Kanban"])
 
 
+@contextmanager
+def _column_validation_errors():
+    """Translate a column storage-validation ``ValueError`` into a 422.
+
+    The column create/update service calls, plus the inline (provider, model)
+    co-validation, all reject bad config by raising ``ValueError``; the API
+    surfaces every one of them as a 422 so the operator sees the rejection at
+    save time (matching the active-subscription-override and subscription-pool
+    handlers). Centralising the conversion here keeps the three sites from
+    drifting when a fourth column-validation rule lands — the near-identical
+    ``try/except ValueError → HTTPException(422)`` blocks this replaced were the
+    documented drift risk (kaart cc113dbc…). Non-``ValueError`` raises (e.g. the
+    404 for a missing column) pass through untouched.
+    """
+    try:
+        yield
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
 @router.get("/columns")
 async def columns(project_key: str = Query(...)):
     async with KanbanSessionLocal() as s:
@@ -168,7 +189,10 @@ async def columns(project_key: str = Query(...)):
 @router.post("/columns", response_model=ColumnResponse, status_code=status.HTTP_201_CREATED)
 async def create_column(payload: ColumnCreate):
     async with KanbanSessionLocal() as s:
-        try:
+        # unknown ``default_provider`` surfaces as 422 so the operator sees the
+        # rejection at config time (kaart 293d1faa…); conversion is centralised
+        # in ``_column_validation_errors`` (kaart cc113dbc…).
+        with _column_validation_errors():
             col = await service.create_column(
                 s, project_key=payload.project_key, name=payload.name,
                 rank=payload.rank, default_agent=payload.default_agent,
@@ -176,11 +200,6 @@ async def create_column(payload: ColumnCreate):
                 default_model=payload.default_model,
                 max_sessions=payload.max_sessions,
             )
-        except ValueError as e:
-            # kaart 293d1faa…: unknown ``default_provider`` surfaces as 422
-            # so the operator sees the rejection at config time (matches the
-            # active-subscription-override and subscription-pool handlers).
-            raise HTTPException(422, str(e))
         await s.commit()
         return ColumnResponse.model_validate(col)
 
@@ -196,35 +215,36 @@ async def update_column(column_id: str, payload: ColumnUpdate):
     # provider→cli rename in kaart ad15e0827… — don't reintroduce it).
     patch = payload.model_dump(exclude_unset=True)
     async with KanbanSessionLocal() as s:
-        # (provider, model) co-validation: a column with default_provider=minimax
-        # and default_model=opus would silently fall through to opus at dispatch
-        # time — the "stuck on opus" report behind kaart 1782fa43…. Reject the
-        # mismatch with 422 so the inconsistency can't land (kaart 1782fa43…
-        # follow-up). Validation is skipped when either side is null (the
-        # dispatch chain re-validates the resolved combo at spawn time) or when
-        # the provider has no model-options cache (e.g. bedrock).
-        if "default_provider" in patch or "default_model" in patch:
-            existing = await service.get_column(s, column_id)
-            if existing is None:
-                raise HTTPException(404, "column not found")
-            new_provider = patch.get("default_provider", existing.default_provider)
-            new_model = patch.get("default_model", existing.default_model)
-            if new_provider and new_model:
-                allowed = await _allowed_models_for_provider(s, new_provider)
-                if allowed is not None and new_model not in allowed:
-                    raise HTTPException(
-                        422,
-                        f"model {new_model!r} is not valid for provider "
-                        f"{new_provider!r}; known options: {allowed}",
-                    )
-        try:
+        # All storage-validation ValueErrors (the co-validation below and the
+        # unknown-provider raise inside ``service.update_column``) become a 422
+        # via the shared helper (kaart cc113dbc…). The 404 for a missing column
+        # is an HTTPException, not a ValueError, so it passes through untouched.
+        with _column_validation_errors():
+            # (provider, model) co-validation: a column with default_provider=minimax
+            # and default_model=opus would silently fall through to opus at dispatch
+            # time — the "stuck on opus" report behind kaart 1782fa43…. Reject the
+            # mismatch with 422 so the inconsistency can't land (kaart 1782fa43…
+            # follow-up). Validation is skipped when either side is null (the
+            # dispatch chain re-validates the resolved combo at spawn time) or when
+            # the provider has no model-options cache (e.g. bedrock).
+            if "default_provider" in patch or "default_model" in patch:
+                existing = await service.get_column(s, column_id)
+                if existing is None:
+                    raise HTTPException(404, "column not found")
+                new_provider = patch.get("default_provider", existing.default_provider)
+                new_model = patch.get("default_model", existing.default_model)
+                if new_provider and new_model:
+                    allowed = await _allowed_models_for_provider(s, new_provider)
+                    if allowed is not None and new_model not in allowed:
+                        raise ValueError(
+                            f"model {new_model!r} is not valid for provider "
+                            f"{new_provider!r}; known options: {allowed}"
+                        )
+            # kaart 293d1faa…: same fail-fast as ``create_column`` — an unknown
+            # provider in a PATCH body raises ValueError → 422 via the helper.
             col = await service.update_column(s, column_id, **patch)
-        except ValueError as e:
-            # kaart 293d1faa…: same fail-fast as ``create_column`` — an
-            # unknown provider in a PATCH body is rejected with 422.
-            raise HTTPException(422, str(e))
-        if col is None:
-            raise HTTPException(404, "column not found")
+            if col is None:
+                raise HTTPException(404, "column not found")
         await s.commit()
         return ColumnResponse.model_validate(col)
 

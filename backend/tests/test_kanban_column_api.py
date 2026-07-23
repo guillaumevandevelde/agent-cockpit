@@ -377,3 +377,40 @@ async def test_patch_column_accepts_bedrock_with_any_model():
             "default_model": "anthropic.claude-3-sonnet-20240229-v1:0",
         })
         assert r.status_code == 200, r.text
+
+
+# --- shared ValueError → 422 helper (kaart cc113dbc…) ----------------------
+#
+# The three near-identical ``ValueError → HTTPException(422)`` sites in the
+# column API (create_column, update_column, the (provider, model)
+# co-validation) were centralised behind ``_column_validation_errors``. This
+# test mounts a service call that raises an arbitrary ValueError and asserts
+# it is surfaced as a 422 with the original message — one test covering the
+# shared conversion for all three sites, independent of any specific
+# validation rule.
+
+
+@pytest.mark.asyncio
+async def test_column_op_valueerror_becomes_422(monkeypatch):
+    """Any ValueError from a column storage op becomes a 422 via the helper."""
+    from app.kanban import service as kanban_service
+
+    sentinel = "storage layer rejected this column (helper sentinel)"
+
+    async def _boom(*args, **kwargs):
+        raise ValueError(sentinel)
+
+    # router.py does ``from app.kanban import service`` and calls
+    # ``service.create_column`` by attribute — patching the module attribute
+    # reaches that binding (test-doubles convention rule 2).
+    monkeypatch.setattr(kanban_service, "create_column", _boom)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+        })
+    # The 422 + the sentinel message together prove the double fired and its
+    # ValueError flowed through the shared conversion.
+    assert r.status_code == 422, r.text
+    assert sentinel in r.text
