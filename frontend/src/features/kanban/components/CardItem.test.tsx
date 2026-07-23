@@ -319,7 +319,7 @@ describe("CardItem ReadyStateBadge", () => {
   it("renders a 'Gated' badge whose tooltip echoes the gated_on trigger string", () => {
     // kanban-pro-analyse.md §4.1 AC3: surface the operator's trigger reason
     // via the existing `title` attribute so the operator can see WHAT the
-    // card is waiting on, not just that it is. The amber tier signals
+    // card is waiting on, not just that it is. The red tier signals
     // "permanent / human-actionable" — same severity as missing_dep.
     render(
       <CardItem
