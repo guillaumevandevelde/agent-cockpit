@@ -157,16 +157,11 @@ wordt **niet** met terugwerkende kracht omgezet — stap 1 van de
    `work_type="analysis"` — dat is een bestaande `WORK_TYPES`-waarde
    (`schemas.py:35`), geen nieuw veld. **Geen** `card.agent` instellen:
    skills zijn geen personas, en `product-analysis` is geen rol. De
-   `analyst`-persona in modus 2 pikt de kaart op aan de hand van
-   `work_type="analysis"` + de titel + de `product-analysis`-skill-verwijzing
-   in de beschrijving.
-2. **De `product-analysis`-skill is de executor** — de beschrijving noemt
-   de skill expliciet zodat het matching-pad in
-   [`.claude/agents/analyst.md`](../../../.claude/agents/analyst.md) (modus
-   2, *"Vraagt de kaart om één specifieke externe applicatie/repo/product te
-   analyseren"*) hem herkent. Geen `plan`/`spec`-deliverable, geen
-   `add_plan_attachment` — dat zijn kind-kaart-families, niet van toepassing
-   op een kale analyse-kaart.
+   `analyst`-persona modus 2 pikt de kaart op aan de hand van
+   `work_type="analysis"` + de titel `Product analyse - …`.
+2. **De `product-analysis`-skill is de executor** — geen `plan`/`spec`-deliverable,
+   geen `add_plan_attachment`. Dat zijn kind-kaart-families, niet van
+   toepassing op een kale analyse-kaart.
 3. **`resolve_project_key` gebruiken**, geen gok — net als stap 4 hierboven.
    Een verkeerd getypt project-key maakt een onzichtbare bucket.
 
@@ -218,18 +213,20 @@ card = create_card(
         "URL/product: <URL of productnaam>\n"
         "Premisse/aanleiding: <...>\n"
         "Focusvragen: <focusvragen | geen — gebruik de standaard>\n"
-        "Diepgang: <learning analysis | go/no-go (adopt/integrate)>\n\n"
-        "Executor: de product-analysis skill (.claude/skills/product-analysis)."
+        "Diepgang: <learning analysis | go/no-go (adopt/integrate)>\n"
     ),
     work_type="analysis",
 )
 ```
 
-Stop hier. De kaart staat op `Backlog` van het opgegeven project, met de
-juiste `work_type` en een verwijzing naar de skill in de beschrijving. De
-dispatcher pakt 'm van `Backlog` op en routeert 'm naar de `analyst`-persona
-in modus 2 (zie `analyst.md`); de analyst gebruikt de
-`product-analysis`-skill voor de feitelijke analyse.
+De vier `Label:`-regels hierboven zijn letterlijk wat de
+`product-analysis`-skill leest (stap 1); niets meer, niets minder. **De
+executor is de `product-analysis`-skill** (`.claude/skills/product-analysis`)
+— niet als een vijfde `Label:`-veld maar als een platte aanwijzing in de
+kaart-tekst: de `analyst`-persona modus 2 herkent 'm aan de combinatie
+`work_type="analysis"` + de titel `Product analyse - …` + de
+skill-verwijzing. Stop hier: de kaart staat op `Backlog` van het
+opgegeven project met de juiste `work_type`.
 
 ### Veelgemaakte fouten
 
