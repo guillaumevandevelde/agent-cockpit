@@ -119,4 +119,22 @@ describe('useCommandPaletteData', () => {
 
     expect(result.current.items.map((i) => i.title)).not.toContain('Ship command palette')
   })
+
+  // kanban-pro-analyse.md §4.4: the palette used to find the kanban card in
+  // the "Kanban" group, then throw the id away by navigating to a bare
+  // `/kanban`. The board already implements a `?card=<id>` deep-link
+  // (KanbanPage.tsx:118), so the palette only has to land on that URL — the
+  // drawer then opens against the same card.
+  it('navigates to the kanban deep link carrying the card id on select', async () => {
+    const { result } = renderHook(() => useCommandPaletteData('claude-code', null, { id: 1, path: '/repo' } as never))
+
+    act(() => result.current.load())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    const card = result.current.items.find((i) => i.title === 'Ship command palette')
+    expect(card).toBeDefined()
+    card!.onSelect()
+
+    expect(navigate).toHaveBeenCalledWith('/kanban?card=card-1')
+  })
 })

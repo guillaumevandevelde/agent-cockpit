@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import type { ReactElement } from "react";
 import type { Card } from "./types";
 
 vi.mock("sonner", () => ({
@@ -109,14 +110,36 @@ function LocationDisplay() {
   return <div data-testid="location">{location.pathname + location.search}</div>;
 }
 
-function renderAt(initialEntry: string) {
+// Programmatic navigate trigger. Used by tests below to simulate the
+// already-mounted case where the command palette (or any other consumer)
+// navigates to `/kanban?card=<id>` while the KanbanPage is already mounted.
+// Renders a clickable button so the test fires the navigation inside
+// `act()` and observes the resulting state change.
+function NavigateOnClick({ to, testId }: { to: string; testId: string }) {
+  const navigate = useNavigate();
+  return (
+    <button data-testid={testId} onClick={() => navigate(to)}>
+      navigate
+    </button>
+  );
+}
+
+function renderAt(initialEntry: string, extra?: ReactElement) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <LocationDisplay />
       <Routes>
-        <Route path="/kanban" element={<KanbanPage />} />
+        <Route
+          path="/kanban"
+          element={
+            <>
+              <KanbanPage />
+              {extra}
+            </>
+          }
+        />
       </Routes>
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
@@ -455,5 +478,159 @@ describe("KanbanPage ready-state precedence", () => {
     await waitFor(() => expect(stateOf("gated-and-missing")).toBe("gated"));
     expect(stateOf("gated-child-no-plan")).toBe("gated");
     expect(stateOf("gated-and-dependent")).toBe("gated");
+  });
+});
+
+// kanban-pro-analyse.md §4.4 — problem 1: the palette finds a card but
+// can't open it. Acceptance criterion 1 demands the drawer's existing
+// `useEffect` on `searchParams` reacts to a *programmatic* navigation that
+// happens while the board is already mounted, so the same navigate call
+// works from any other tab.
+describe("KanbanPage already-mounted ?card= deep link", () => {
+  it("opens the drawer for a card already on the board after a same-mount navigate", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [makeCard()],
+    });
+
+    const { getByTestId } = renderAt(
+      "/kanban",
+      <NavigateOnClick to="/kanban?card=card-1" testId="navigate-trigger" />,
+    );
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(getByTestId("navigate-trigger"));
+    });
+
+    expect(await screen.findByTestId("card-id-chip")).toBeInTheDocument();
+    expect(kanbanApi.getCard).not.toHaveBeenCalled();
+    expect(getByTestId("location").textContent).toBe("/kanban?card=card-1");
+  });
+});
+
+// kanban-pro-analyse.md §4.4 — problem 2: the board had no filter at all.
+// The input sits above the board, does not push to the URL, and silently
+// leaves columns in place when filtered down to zero.
+describe("KanbanPage board filter", () => {
+  const DOING_COLUMN: import("./types").KanbanColumn = {
+    ...BACKLOG_COLUMN,
+    id: "col-doing",
+    name: "Doing",
+  };
+
+  const visibleCardIds = () =>
+    Array.from(document.querySelectorAll("[data-card-id]")).map(
+      (el) => el.getAttribute("data-card-id") ?? "",
+    );
+
+  const columnHeaderTexts = () =>
+    Array.from(document.querySelectorAll("div"))
+      .filter((el) => /BACKLOG|DOING|IMPARTMENT|DONE|TODO/i.test(el.textContent ?? ""))
+      .map((el) => el.textContent ?? "")
+      .filter((t) => /^\s*[A-Z][a-z]+/i.test(t));
+
+  it("reduces visible cards to title matches (case-insensitive substring)", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN, DOING_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({ id: "card-zenith", title: "Zenith rollout", column: "Backlog" }),
+        makeCard({ id: "card-other", title: "Other thing", column: "Backlog" }),
+        makeCard({ id: "card-doing", title: "Doomed effort", column: "Doing" }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    // Baseline: every card is rendered.
+    expect(visibleCardIds().sort()).toEqual([
+      "card-doing",
+      "card-other",
+      "card-zenith",
+    ]);
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("board-filter"), {
+        target: { value: "zen" },
+      });
+    });
+
+    // Only card-zenith matches "zen" (case-insensitive on title). The other
+    // two are filtered out but the columns themselves stay rendered.
+    expect(visibleCardIds().sort()).toEqual(["card-zenith"]);
+    expect(screen.getByTestId("board-filter")).toBeInTheDocument();
+  });
+
+  it("reduces visible cards when the query matches a label but not the title", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({
+          id: "card-with-label",
+          title: "Plain title",
+          column: "Backlog",
+          labels: ["db-migration", "ops"],
+        }),
+        makeCard({
+          id: "card-other-label",
+          title: "Different title",
+          column: "Backlog",
+          labels: ["frontend"],
+        }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("board-filter"), {
+        target: { value: "db-mig" },
+      });
+    });
+
+    expect(visibleCardIds().sort()).toEqual(["card-with-label"]);
+  });
+
+  it("leaves all columns rendered (with zero visible cards) when the filter matches nothing", async () => {
+    // Columns must NOT disappear — the board keeps its layout so the
+    // structure doesn't jump while the operator types. Empty queries
+    // show everything (existing behaviour).
+    const columns = [
+      BACKLOG_COLUMN,
+      { ...BACKLOG_COLUMN, id: "col-doing", name: "Doing" },
+      { ...BACKLOG_COLUMN, id: "col-done", name: "Done" },
+    ];
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns,
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [makeCard({ id: "card-1", title: "Real card" })],
+    });
+
+    const { getByTestId } = renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("board-filter"), {
+        target: { value: "zzz-no-match" },
+      });
+    });
+
+    expect(visibleCardIds()).toEqual([]);
+    // Column headers persist (Backlog, Doing, Done all rendered) — order
+    // independent and whitespace-tolerant.
+    const headers = columnHeaderTexts().join("|");
+    expect(headers).toContain("Backlog");
+    expect(headers).toContain("Doing");
+    expect(headers).toContain("Done");
+    expect(getByTestId("location").textContent).toBe("/kanban");
   });
 });

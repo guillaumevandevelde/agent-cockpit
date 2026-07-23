@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Board } from "./components/Board";
 import type { CardMeta } from "./components/Column";
 import { CardDrawer } from "./components/CardDrawer";
@@ -44,6 +45,13 @@ export default function KanbanPage() {
   // selected for promotion. Set by `onPromote` (passed down to CardItem
   // via Board → Column); the dialog reads it and renders a confirmation.
   const [promotingCard, setPromotingCard] = useState<Card | null>(null);
+  // kanban-pro-analyse.md §4.4 (problem 2): a client-side filter input
+  // over the already-loaded `cards`. Matches title and label substrings
+  // case-insensitively; empty query = current behaviour. The filter lives
+  // only in component state — not in the URL — so it doesn't collide with
+  // the existing `?card=<id>` deep-link param or create shareable URLs for
+  // what is fundamentally an at-the-keyboard utility.
+  const [filter, setFilter] = useState("");
   const draggingRef = useRef(false);
   const mutatingRef = useRef(0);
 
@@ -342,6 +350,22 @@ export default function KanbanPage() {
     return counts;
   }, [cards]);
 
+  // kanban-pro-analyse.md §4.4 (problem 2): client-side title + label
+  // filter. Empty query short-circuits to the original array reference so
+  // the empty-filter render path is identical to the previous behaviour.
+  // Columns themselves are NOT derived from `filter` (see the render —
+  // `columns` is rendered as-is), so the board layout stays put while the
+  // operator types even when every column is filtered to zero cards.
+  const filteredCards = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return cards;
+    return cards.filter(
+      (c) =>
+        c.title.toLowerCase().includes(q) ||
+        (c.labels ?? []).some((l) => l.toLowerCase().includes(q)),
+    );
+  }, [cards, filter]);
+
   const clearDoneColumn = async () => {
     try {
       const r = await kanbanApi.clearColumn(projectKey, "Done");
@@ -496,9 +520,27 @@ export default function KanbanPage() {
         </div>
       </div>
 
+      <div className="flex-shrink-0">
+        {/* kanban-pro-analyse.md §4.4 (problem 2): lightweight filter over
+            title + labels. Empty query is a no-op; the underlying `cards`
+            reference is reused so the empty-filter render path is
+            bit-identical to the previous behaviour. Intentionally not in
+            the URL — a per-keystroke URL is noise, and the existing
+            `?card=` deep-link keeps working undisturbed. */}
+        <Input
+          data-testid="board-filter"
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter cards by title or label"
+          aria-label="Filter cards by title or label"
+          className="max-w-sm"
+        />
+      </div>
+
       <Board
         columns={columns}
-        cards={cards}
+        cards={filteredCards}
         cardMeta={cardMeta}
         subtaskCounts={subtaskCounts}
         onOpen={openCard}
