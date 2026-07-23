@@ -6,6 +6,11 @@ status: decided
 
 # Per-kaart run-ledger — scope & ontwerp — beslissing
 
+**Datum:** 2026-07-17
+**Status:** besloten
+**Kaart:** `4ce329cd…`
+**Uitkomst:** ✅ **Bouwen, als aggregatie in een `CardDrawer`-tab.** Nieuw top-level-scherm afgewezen (dupliceert kaart-navigatie) → `Ledger`-tab naast Deliverables/Activity/Plan/Tokens/Run. `structured_events` als primaire bron **NO-GO nu** — dubbel geblokkeerd: headless is niet default (`DEFAULT_TRANSPORT="worktree"`) én `headless_runner._on_event` gooit events weg (geen store).
+
 > Kanban-kaart: **`[observability] Per-kaart run-ledger: stitch prompt → files →
 > tests → outcome → model`** (`work_type=analysis`, leaf design-deliverable).
 > Volgt op [`orchestration-flow-analysis.md`](./orchestration-flow-analysis.md)
