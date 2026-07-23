@@ -40,6 +40,12 @@ Dat de gebruiker het niet ziet werken, is dus terecht: **er is geen zichtbare ko
 en de onzichtbare koppeling die er wél is (pool overrulet kolom-defaults) is nergens in de
 UI aangegeven.**
 
+> ✅ **Beslist (kaart `2688bf80…`, 2026-07-23):** dit raakvlak is opnieuw geverifieerd op
+> `master` — de claim klopt (`dispatch.py:1233` haalt de pool project-breed op, `:1240`
+> staat boven `:1242`) — en wordt **omgedraaid**: de pool wordt een spillover-*keten* met
+> `column.default_provider` als impliciete eerste entry, niet langer een routing-*pin*.
+> Zie [`spillover-per-kolom-decision.md`](./spillover-per-kolom-decision.md).
+
 **Vraag 2 — "te groot element op het board"**
 
 Terecht, en sterker dan de gebruiker vermoedt. De pool is de enige bord-brede

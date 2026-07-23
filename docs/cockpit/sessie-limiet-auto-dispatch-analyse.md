@@ -354,6 +354,14 @@ fungeren. Welke van de twee, is een scope-vraag met genoeg eigen gewicht om als
 Tot dat opgelost is blijft "wachten tot reset" het gedrag, en is snelle, betrouwbare
 detectie + automatisch hervatten (§5) de volledige winst.
 
+> ✅ **Beslist (kaart `2688bf80…`, 2026-07-23):** de override-claim hierboven is bevestigd
+> op de huidige code (`dispatch.py:1233/1240/1242`), en de scope-vraag is beslecht op
+> **de kolom-default als impliciete eerste pool-entry**, later uitgebreid met een
+> per-kolom staart. De pool wordt daarmee een spillover-*keten* in plaats van een
+> routing-*pin*. Zie [`spillover-per-kolom-decision.md`](./spillover-per-kolom-decision.md)
+> voor de afweging, de twee latente defects die pas bijten zodra je de pool aanzet, en de
+> vervolgkaarten.
+
 ---
 
 ## 5. Aanbevolen richting
