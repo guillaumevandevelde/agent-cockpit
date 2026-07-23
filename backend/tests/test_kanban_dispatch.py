@@ -1,6 +1,7 @@
 # backend/tests/test_kanban_dispatch.py
 import os
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -2348,6 +2349,161 @@ def test_worktree_transport_creates_from_origin_master(monkeypatch, tmp_path):
     assert opts.repo_path == str(tmp_path)
     assert opts.worktree_path == opts.directory
     assert res["session_name"] == "k-proj-abcd"
+
+
+def test_copy_repo_mcp_json_to_worktree_copies_when_repo_has_and_worktree_lacks(tmp_path):
+    """A fresh worktree created via ``git worktree add origin/master`` only
+    carries tracked files. For an external product-project the
+    ``.mcp.json`` written by ``POST /enable`` is untracked (gitignored),
+    so the worktree starts without it — and the dispatched agent runs
+    with ``--strict-mcp-config`` + zero MCPs (kaart ``3672c073…``).
+
+    The fix: copy the repo-root ``.mcp.json`` into the worktree when
+    the repo-root has it and the worktree doesn't. The worktree is
+    materially a clone of origin/master plus this one carried-over
+    file; the agent then sees the same MCP config as a session
+    started in the repo-root directly.
+    """
+    from app.kanban.dispatch import _copy_repo_mcp_json_to_worktree
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    mcp_payload = (
+        '{"mcpServers": {"cockpit-kanban": {"type": "sse", '
+        '"url": "http://localhost:8000/kanban-mcp/sse"}}}'
+    )
+    (repo / ".mcp.json").write_text(mcp_payload, encoding="utf-8")
+
+    _copy_repo_mcp_json_to_worktree(str(repo), str(wt))
+
+    assert (wt / ".mcp.json").read_text(encoding="utf-8") == mcp_payload
+
+
+def test_copy_repo_mcp_json_to_worktree_preserves_tracked_copy(tmp_path):
+    """When the worktree already has ``.mcp.json`` (cockpit repo itself,
+    where it's tracked — see ``git ls-files .mcp.json``) the dispatcher
+    must NOT clobber it. The worktree's tracked copy is canonical."""
+    from app.kanban.dispatch import _copy_repo_mcp_json_to_worktree
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (repo / ".mcp.json").write_text('{"mcpServers": {"REPO": {}}}', encoding="utf-8")
+    worktree_payload = '{"mcpServers": {"WORKTREE": {}}}'
+    (wt / ".mcp.json").write_text(worktree_payload, encoding="utf-8")
+
+    _copy_repo_mcp_json_to_worktree(str(repo), str(wt))
+
+    assert (wt / ".mcp.json").read_text(encoding="utf-8") == worktree_payload
+
+
+def test_copy_repo_mcp_json_to_worktree_no_op_when_repo_lacks(tmp_path):
+    """Brand-new product-project: no ``.mcp.json`` anywhere. The helper
+    must not invent one — that's ``POST /enable``'s job."""
+    from app.kanban.dispatch import _copy_repo_mcp_json_to_worktree
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+
+    _copy_repo_mcp_json_to_worktree(str(repo), str(wt))
+
+    assert not (wt / ".mcp.json").exists()
+
+
+def test_copy_repo_mcp_json_to_worktree_swallows_read_failure(tmp_path, monkeypatch, caplog):
+    """Fail-safe contract: the helper must NEVER raise — a project
+    owner can hand-craft any bytes via ``POST /enable``, including
+    non-UTF-8 payloads (which raises ``UnicodeDecodeError`` from
+    ``read_text(encoding="utf-8")`` — NOT an ``OSError``), or any
+    other filesystem oddity. If the read or write fails the
+    dispatch must continue; the agent then runs without MCP, just
+    like before the fix (kaart ``3672c073…``).
+    """
+    import logging
+
+    from app.kanban.dispatch import _copy_repo_mcp_json_to_worktree
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (repo / ".mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+
+    # Simulate a read failure that OSError alone wouldn't catch (a
+    # ``UnicodeDecodeError`` from non-UTF-8 bytes was the original
+    # real-world failure mode the FCR flagged). The helper must log
+    # and return without raising.
+    def boom(self, *a, **k):
+        raise ValueError("simulated decode failure")
+
+    monkeypatch.setattr(Path, "read_bytes", boom)
+
+    with caplog.at_level(logging.WARNING, logger="app.kanban.dispatch"):
+        # Must not raise.
+        _copy_repo_mcp_json_to_worktree(str(repo), str(wt))
+
+    assert not (wt / ".mcp.json").exists(), (
+        "failed copy must not leave a partial file in the worktree"
+    )
+    assert any("could not copy" in rec.message for rec in caplog.records), (
+        f"copy failure must be logged at WARNING; got {[r.message for r in caplog.records]}"
+    )
+
+
+def test_worktree_transport_copies_mcp_json_into_worktree(monkeypatch, tmp_path):
+    """End-to-end: after ``worktree_transport`` runs, the worktree at
+    ``<repo>/.claude/worktrees/<session>`` contains the same
+    ``.mcp.json`` as the repo-root, even when the file is untracked in
+    the repo (the external product-project case). The fake ``git`` only
+    records the commands; we materialise the worktree directory
+    ourselves so the copy step has somewhere to land.
+    """
+    import os
+    ran = []
+
+    def fake_run(cmd, *a, **k):
+        ran.append(cmd)
+        # Materialise the worktree directory the real git worktree add
+        # would have created. The copy step runs against this path.
+        if "worktree" in cmd and "add" in cmd:
+            # cmd shape: ["git", "-C", repo, "worktree", "add", "-b",
+            # session_name, worktree_path, "origin/master"]
+            wt_path = cmd[cmd.index("add") + 3]
+            os.makedirs(wt_path, exist_ok=True)
+        class R:
+            returncode = 0
+            stderr = ""
+        return R()
+
+    def fake_spawn(cli_id, options, session_name=None, **kwargs):
+        return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
+
+    import app.kanban.dispatch as d
+    monkeypatch.setattr(d.subprocess, "run", fake_run)
+    monkeypatch.setattr("app.services.runs.spawn.spawn_session", fake_spawn)
+
+    # Repo-root has an untracked .mcp.json (the canonical external-project
+    # state after POST /enable).
+    mcp_payload = (
+        '{"mcpServers": {"cockpit-kanban": {"type": "sse", '
+        '"url": "http://localhost:8000/kanban-mcp/sse"}}}'
+    )
+    (tmp_path / ".mcp.json").write_text(mcp_payload, encoding="utf-8")
+
+    d.worktree_transport(
+        directory=str(tmp_path), prompt="hi", session_name="k-proj-abcd")
+
+    # The dispatch added a worktree at <tmp_path>/.claude/worktrees/<name>;
+    # that directory now owns a copy of the repo's .mcp.json.
+    adds = [c for c in ran if "worktree" in c and "add" in c]
+    assert adds, "expected a git worktree add call"
+    wt_path = adds[0][adds[0].index("add") + 3]
+    assert (Path(wt_path) / ".mcp.json").read_text(encoding="utf-8") == mcp_payload
 
 
 def test_worktree_transport_removes_worktree_when_spawn_fails(monkeypatch, tmp_path):
