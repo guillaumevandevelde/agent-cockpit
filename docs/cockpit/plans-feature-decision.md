@@ -6,10 +6,10 @@ status: proposed
 
 # Plans-feature — analyse & richting (leaf spike)
 
-**Datum:** 2026-07-14
-**Status:** voorgesteld
+**Datum:** 2026-07-17
+**Status:** besloten
 **Kaart:** `45ac606e…` (review: `a70a9272…`)
-**Uitkomst:** ✅ **BESLIST 2026-07-17 — Optie B (herbestemmen).** De gebruiker gaf go op Optie B: herbestem Plans tot read-only mensvenster op de spec-/plan-laag (B = kaart-plan-attachments + C = `docs/cockpit/`-docs), faseer `kanban_plans` uit. **Randvoorwaarde van de gebruiker:** de B↔C-join via `spec_doc` is GEEN gratis stap (0× gepopuleerd, zie §8.2) — **lever B en C eerst náást elkaar**; de join is uitgesteld werk. Gedecomponeerd in 4 vervolgkaarten (zie §10). Alternatieven A (volledig uitfaseren) en C (writer aanhaken) zijn hiermee afgewezen.
+**Uitkomst:** ✅ **Optie B — herbestemmen.** Plans wordt read-only mensvenster op de spec-/plan-laag (B = kaart-plan-attachments + C = `docs/cockpit/`-docs); `kanban_plans` wordt uitgefaseerd.
 
 _Historische noot: tot 2026-07-15 stond deze regel ten onrechte als genomen beslissing (backfill-fout, commit `4101d56`); de review 2026-07-15 corrigeerde 'm naar "nog niet beslist". De go hierboven is de eerste échte menselijke beslissing._
 

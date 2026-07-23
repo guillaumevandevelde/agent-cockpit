@@ -6,12 +6,12 @@ status: decided
 
 # Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)
 
-**Datum:** 2026-07-10 (iteratie 1 + 2), **2026-07-18 (iteratie 3 — gebouwd)**
-**Status:** herzien² — **beide lagen bestaan nu naast elkaar**
-**Kaart:** `b493d3eb172945cf99a3dd4468103e6b` (iteratie 3); 2026-07-10 zonder hex-id vastgelegd
-**Uitkomst (2026-07-18, autoritatief):** **Wél bouwen — de zwaardere vorm, bovenóp de FCR.** Een onafhankelijke `reviewer`-persona + een bord-afgedwongen review-kolom-gate waar **álle** kaarten (m.u.v. analyse en de reviewer zelf) langs moeten vóór Done. De 2026-07-10-uitkomst hieronder (lichte in-sessie FCR) blijft staan en actief; deze iteratie voegt de onafhankelijke gate eróver toe. Zie **§ Iteratie 3** onderaan.
+**Datum:** 2026-07-18
+**Status:** herzien
+**Kaart:** `b493d3eb…`
+**Uitkomst:** ✅ **GO — optie A, bouwen (mens-beslist, doorvoerkost geaccepteerd).** De 2026-07-10-FCR blijft, maar mist wat de gebruiker expliciet wil: een **onafhankelijke** gate die de engineer niet kan overslaan (de FCR is dezelfde sessie die het werk bouwde). Afgedwongen op het **agent-pad** (`mcp_server.move_card`), net als de bestaande outcome-gate/parent-parking/summary-verplichting; de dunne REST/UI-move blijft — conform diezelfde conventie — een bewust menselijk override-oppervlak.
 
-**Uitkomst (2026-07-10):** **Wél bouwen, in lichtere vorm**: feature-compliance-review als subagent-call binnen dezelfde engineer-sessie vóór `move_card Done`. Geen aparte persona, geen Review-kolom.
+**Uitkomst (2026-07-10, herzien):** **Wél bouwen, in lichtere vorm**: feature-compliance-review als subagent-call binnen dezelfde engineer-sessie vóór `move_card Done`. Geen aparte persona, geen Review-kolom.
 
 > Kanban-kaart: "Onderzoek: reviewer-agent + review-kolom — is dit wenselijk?"
 > Eerste iteratie van dit document concludeerde "niet bouwen". Deze revisie
