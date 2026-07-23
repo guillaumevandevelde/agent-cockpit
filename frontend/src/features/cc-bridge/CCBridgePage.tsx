@@ -60,15 +60,15 @@ export function CCBridgePage() {
   )
   const visibleSessions = providerFilter === 'all'
     ? sessions
-    : sessions.filter((session) => session.provider === providerFilter)
+    : sessions.filter((session) => session.cli === providerFilter)
 
   const visibleTeams = providerFilter === 'all'
     ? teams
-    : teams.filter((team) => team.provider === providerFilter)
+    : teams.filter((team) => team.cli === providerFilter)
 
   const visibleUngrouped = providerFilter === 'all'
     ? ungrouped
-    : ungrouped.filter((s) => s.provider === providerFilter)
+    : ungrouped.filter((s) => s.cli === providerFilter)
 
   const providersById = providers.reduce<Partial<Record<AgenticCliId, AgenticCliStatus>>>((acc, provider) => {
     acc[provider.id] = provider
@@ -97,11 +97,11 @@ export function CCBridgePage() {
 
   const filterCounts: Record<ProviderFilter, number> = {
     all: sessions.length,
-    'claude-code': sessions.filter((session) => session.provider === 'claude-code').length,
-    'codex-cli': sessions.filter((session) => session.provider === 'codex-cli').length,
-    'copilot-cli': sessions.filter((session) => session.provider === 'copilot-cli').length,
-    'mimo-code': sessions.filter((session) => session.provider === 'mimo-code').length,
-    'open-code': sessions.filter((session) => session.provider === 'open-code').length,
+    'claude-code': sessions.filter((session) => session.cli === 'claude-code').length,
+    'codex-cli': sessions.filter((session) => session.cli === 'codex-cli').length,
+    'copilot-cli': sessions.filter((session) => session.cli === 'copilot-cli').length,
+    'mimo-code': sessions.filter((session) => session.cli === 'mimo-code').length,
+    'open-code': sessions.filter((session) => session.cli === 'open-code').length,
   }
 
   const initialDialogProvider = providerFilter === 'all' ? selectedProviderId : providerFilter

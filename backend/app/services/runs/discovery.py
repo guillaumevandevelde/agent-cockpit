@@ -8,6 +8,7 @@ from typing import Any
 from app.models.constants import SessionStatus
 from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 from app.services.agentic_cli.base import AgenticCli
+from app.services.agentic_cli.provider_detect import detect_session_provider
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,18 @@ def _build_session_info_from_parts(
     pid: str,
     cli: AgenticCli,
 ) -> dict[str, Any]:
+    # Vendor detection is best-effort: a session whose /proc we can't read
+    # falls back to the CLI's own identity (Codex → "Codex", etc.) rather
+    # than a fabricated "Anthropic" — so this never lies about the
+    # subscription the user actually has running.
+    provider_id, provider_display_name = detect_session_provider(
+        pid, cli_id=cli.id, cli_display_name=cli.display_name
+    )
     return {
         "cli": cli.id,
         "cli_display_name": cli.display_name,
+        "provider": provider_id,
+        "provider_display_name": provider_display_name,
         "tmux_target": target,
         "session_name": session_name,
         "window_name": window_name,

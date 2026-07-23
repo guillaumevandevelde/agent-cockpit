@@ -74,7 +74,7 @@ export function KillSessionDialog({
           <DialogDescription>
             This will terminate tmux target <strong>{session?.tmux_target}</strong>
             {instance ? ` on hostname ${instance.hostname}` : ''} and stop the{' '}
-            {session?.provider_display_name ?? 'agent'} process.
+            {session?.cli_display_name ?? 'agent'} process.
           </DialogDescription>
         </DialogHeader>
 

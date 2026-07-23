@@ -37,9 +37,9 @@ async function sessionItems(navigate: (path: string) => void): Promise<PaletteIt
     id: `session:${session.pane_id}`,
     group: 'Sessions',
     title: session.session_name || session.window_name,
-    subtitle: `${session.provider_display_name} · ${session.cwd}`,
+    subtitle: `${session.cli_display_name}${session.provider !== session.cli ? ` · ${session.provider_display_name}` : ''} · ${session.cwd}`,
     icon: MessageSquare,
-    keywords: [session.cwd, session.status, session.provider_display_name],
+    keywords: [session.cwd, session.status, session.cli_display_name, session.provider_display_name],
     onSelect: () => navigate(`/cc-bridge?attach=${encodeURIComponent(session.pane_id)}`),
   }))
 }
