@@ -75,7 +75,7 @@ cd frontend && npm run build     # Same as above
 > acceptable, document the carve-out at the assertion site, not in the grep
 > itself.
 bash backend/test_commands_api.sh                         # Curl-based API tests
-# Bash harnesses for scripts/test_*.sh — volledige lijst: `ls scripts/test_*.sh` (zie CLAUDE.md gotcha over check-test-harness-coverage)
+> **Bash harnesses for scripts/test_*.sh** — volledige lijst: `ls scripts/test_*.sh` (zie CLAUDE.md gotcha over check-test-harness-coverage)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
