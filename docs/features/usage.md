@@ -48,7 +48,7 @@ Usage data is read-only. Claude Code stores usage records in:
 ~/.claude/projects/{project-folder}/usage/*.jsonl
 ```
 
-Claude Cockpit caches parsed usage data in localStorage with a 5-minute TTL for instant page loads on return visits.
+Agent Cockpit caches parsed usage data in localStorage with a 5-minute TTL for instant page loads on return visits.
 
 ## Tips
 

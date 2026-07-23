@@ -2,7 +2,7 @@
 
 ## Docker (Recommended)
 
-The fastest way to run Claude Cockpit:
+The fastest way to run Agent Cockpit:
 
 ```bash
 git clone https://github.com/adrirubio/claude-deck.git
@@ -10,7 +10,7 @@ cd claude-deck
 docker compose up
 ```
 
-This builds and starts Claude Cockpit at `http://localhost:8000`, mounting your `~/.claude` and `~/.claude.json` configuration files.
+This builds and starts Agent Cockpit at `http://localhost:8000`, mounting your `~/.claude` and `~/.claude.json` configuration files.
 
 ::: tip
 The container mounts your home directory's Claude Code configuration. The container runs as root to access these files; adjust permissions if running as a non-root user.
@@ -57,11 +57,11 @@ This script:
 
 ## Configuration
 
-Claude Cockpit requires no configuration files — all settings have sensible defaults defined in `backend/app/config.py`. The SQLite database is created automatically on first run at `backend/claude_registry.db`.
+Agent Cockpit requires no configuration files — all settings have sensible defaults defined in `backend/app/config.py`. The SQLite database is created automatically on first run at `backend/claude_registry.db`.
 
 ## What Gets Read
 
-Claude Cockpit reads these Claude Code configuration files:
+Agent Cockpit reads these Claude Code configuration files:
 
 | File/Directory | Scope | Description |
 |----------------|-------|-------------|
