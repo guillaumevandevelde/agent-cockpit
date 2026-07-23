@@ -173,6 +173,10 @@ leeg; wél allebei een `plan_ref` via de plan-attachment).
    (`openhands-analyse.md` §2, `lemma-platform-analyse.md` §1/§3,
    `9router-integratie-analyse.md` §4). Eén onderhouden basislijndoc maakt die stap
    goedkoper en houdt de uitspraken over ons eigen product consistent tussen analyses.
+   ✅ Geïmplementeerd (kaart `d5072884…`):
+   [`cockpit-capability-baseline.md`](./cockpit-capability-baseline.md) — 8
+   capability-gebieden met `file:line` per claim, meetdatum + commit-sha bovenaan;
+   stap 3 van de skill wijst er nu naar als startpunt-met-herverificatieplicht.
 
 ## 8. Bronnen
 
