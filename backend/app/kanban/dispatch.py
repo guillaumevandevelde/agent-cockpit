@@ -1706,6 +1706,43 @@ async def _resolve_revisit(session, card) -> tuple[str | None, dict | None]:
     }
 
 
+async def _resolve_impediment(session, card) -> tuple[str | None, str | None]:
+    """Look up the latest ``**Impediment:**`` question and the latest
+    ``**Resolution:**`` answer on a card's activity feed.
+
+    Returns ``(question, answer)``; both are None when the card has no such
+    comments (the common case — only cards that went through the
+    resolve-impediment flow carry these). Mirrors ``_resolve_revisit`` in
+    shape and intent: cheap (one short scan of an already-materialised op-log)
+    and only contributes to the prompt when the comments actually exist, so
+    ordinary cards see no IMPEDIMENT section.
+
+    Plumbed through ``dispatch_project`` (auto-tick) so a card that just
+    landed in Backlog via ``dispatch_impediment_card`` (kaart af951ad70...
+    — Resolve impediment moet eerst naar Backlog, niet meteen naar engineer
+    kolom) still gets the human's question + authoritative decision in the
+    next spawned session's prompt. Without this, dropping the card in
+    Backlog would silently lose the impediment context.
+    """
+    from app.kanban import service as svc
+
+    activity = await svc.card_activity(session, card.id)
+    # Walk newest-first; the latest Resolution wins on re-resolve (matches
+    # router.resolve_impediment's priority rules). The Impediment question
+    # itself doesn't change across resolve rounds, but walking in the same
+    # direction keeps the two extractors symmetric.
+    answer = extract_impediment_answer(activity)
+    question = None
+    for op in reversed(list(activity)):
+        if op.op_type != "comment":
+            continue
+        text = (op.payload.get("text") or "")
+        if text.startswith(svc._IMPEDIMENT_QUESTION_PREFIX):
+            question = text[len(svc._IMPEDIMENT_QUESTION_PREFIX):]
+            break
+    return question, answer
+
+
 async def _stamp_resume_target(session, *, card, project_key: str,
                                project_path: str) -> None:
     """Best-effort resume: if the previous agent claim points at a session
@@ -4180,6 +4217,16 @@ async def dispatch_project(
             session, card,
         )
 
+        # Impediment context: a card that came in via resolve-impediment lands
+        # in Backlog with `**Impediment:**` + `**Resolution:**` comments on its
+        # activity feed. Extract both so the spawned session's prompt renders
+        # the `## IMPEDIMENT` section with the human's question + authoritative
+        # answer. See kaart af951ad70... (resolve-impediment → Backlog, not
+        # Doing) and `_resolve_impediment`'s docstring for the contract.
+        impediment_question, impediment_answer = await _resolve_impediment(
+            session, card,
+        )
+
         # Best-effort resume stamp: when the prior session's worktree +
         # transcript are still on disk, persist `resume_session_id` /
         # `resume_project_folder` so the spawn below picks the resume
@@ -4209,6 +4256,8 @@ async def dispatch_project(
                 phase="analyst",
                 revisit_question=revisit_question,
                 revisit_prior_decision=revisit_prior_decision,
+                impediment_question=impediment_question,
+                impediment_answer=impediment_answer,
                 live_sessions=live_sessions,
                 auto_dispatch=True,
             )
@@ -4237,6 +4286,8 @@ async def dispatch_project(
             phase="executor",
             revisit_question=revisit_question,
             revisit_prior_decision=revisit_prior_decision,
+            impediment_question=impediment_question,
+            impediment_answer=impediment_answer,
             live_sessions=live_sessions,
             auto_dispatch=True,
         )
@@ -4292,45 +4343,92 @@ async def dispatch_impediment_card(
     impediment_answer: str | None = None,
     transport: SpawnTransport | None = None,
 ) -> dict | None:
-    """Dispatch an impediment card to a specific agent for resolution.
+    """Resolve an impediment by parking the card on **Backlog** for the
+    auto-dispatch tick to pick up — *not* by spawning a fresh session
+    synchronously.
+
+    Kaart af951ad70... ("Resolve impediment moet niet meteen naar engineer
+    kolom maar eerst naar backlog"): when a human resolves an impediment, the
+    previous behaviour moved the card straight to the engineer Doing column
+    and immediately spawned a session, which flooded the dispatcher when the
+    operator cleared a batch of impediments in one go. The fix routes the
+    resolved card through the same Backlog queue ordinary cards use, so:
+
+    1. The next auto-tick (``dispatch_project``) picks the card up at its
+       own pace, applying the same per-column caps and depends_on gates as
+       any other Backlog card.
+    2. The human's question + answer reach the spawned session via
+       ``_resolve_impediment`` (auto-tick reads the latest `**Impediment:**`
+       and `**Resolution:**` comments from the activity feed and threads
+       them into ``_run_card``'s ``impediment_question`` / ``impediment_answer``
+       kwargs). ``build_card_prompt`` then renders the `## IMPEDIMENT`
+       section so the resumed agent sees the human's decision as
+       authoritative.
+
+    The legacy arguments ``impediment_question`` / ``impediment_answer`` /
+    ``target_agent`` / ``transport`` are kept on the signature (rather than
+    removed) so the existing router contract — including its 409-Conflict on
+    a None return — keeps working unchanged. They are no longer used to
+    drive a synchronous spawn; the auto-tick reads the same information back
+    from the activity feed on the next pass.
 
     Args:
         card_id: The ID of the impediment card
-        project_path: Path to the project
-        target_agent: The agent to dispatch to (analyst, engineer)
-        impediment_question: The question that needs to be answered
-        impediment_answer: A human's answer/decision on the blocker, injected
-            into the `## IMPEDIMENT` section so the resumed session acts on it
-        transport: The spawn transport to use (auto-selects based on card if None)
+        project_path: Path to the project (kept for backwards compat with the
+            router; the auto-tick that actually spawns reads it back from the
+            card row / project config).
+        target_agent: The agent that should pick up the card (analyst,
+            engineer). Kept on the signature for the router contract but no
+            longer drives a synchronous spawn.
+        impediment_question: The question that needs to be answered. Kept on
+            the signature for the router contract; the auto-tick re-reads it
+            from the activity feed via ``_resolve_impediment``.
+        impediment_answer: A human's answer/decision on the blocker. Same
+            shape as ``impediment_question`` — preserved for the router
+            contract; the auto-tick re-reads it from the feed.
+        transport: The spawn transport to use (kept for backwards compat).
 
     Returns:
-        Result dict or None if dispatch failed
+        ``{"session_name": None}`` on success — the resolved card is on
+        Backlog and the next auto-tick owns the spawn. ``None`` when the
+        card is missing or no longer in Impediment (the router turns this
+        into a 409 Conflict).
     """
     card = await get_card(session, card_id)
     if card is None:
         return None
-    
+
     if card.column != "Impediment":
         logger.warning("Card %s is not in Impediment column, cannot dispatch as impediment", card_id)
         return None
-    
-    # Move card to Doing for the target agent
+
+    # Park the card on Backlog so the auto-dispatch tick picks it up at its
+    # own pace (per-column cap, depends_on gate, single-card-per-tick loop).
+    # Previously this was a hard `column="Doing"` move followed by an
+    # immediate `_run_card`, which bypassed every admission-control layer
+    # and started a fresh session per resolved card — see the kaart's
+    # "te veel sessies naast mekaar" complaint.
+    #
+    # `claimed_by` is intentionally NOT touched here: a card on Backlog that
+    # already carries an `agent:` claim is invisible to `_next_card` (it
+    # filters `not c.claimed_by`) and would silently never get dispatched.
+    # `report_impediment` already released the claim before parking the card
+    # on Impediment (see mcp_server.report_impediment), so this branch
+    # never has a stale claim to clear. If a future caller invokes this
+    # function with a still-claimed card, the upstream 409 / reaper path
+    # owns the cleanup — not this helper.
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=card.project_key,
-        entity_id=card.id, payload={"column": "Doing"},
+        entity_id=card.id, payload={"column": "Backlog"},
     )
-    
-    # Auto-select transport if not provided
-    if transport is None:
-        transport = await get_transport_for_project(project_path)
-    transport = get_transport_for_card(card, transport)
-    
-    return await _run_card(
-        session, card=card, project_key=card.project_key,
-        project_path=project_path, transport=transport,
-        impediment_question=impediment_question,
-        impediment_answer=impediment_answer,
-    )
+
+    # Suppress the unused-argument linter: these are part of the router
+    # contract and stay on the signature even though the auto-tick owns the
+    # actual spawn. Without this assignment the linter would flag the
+    # `impediment_*` / `target_agent` / `transport` parameters as unused.
+    _ = (target_agent, impediment_question, impediment_answer, transport, project_path)
+
+    return {"session_name": None}
 
 
 async def redispatch_card(

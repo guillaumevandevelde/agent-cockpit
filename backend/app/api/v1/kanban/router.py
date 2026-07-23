@@ -1657,10 +1657,23 @@ async def clear_column(payload: ColumnClearRequest):
 
 @router.post("/cards/{cid}/resolve-impediment", response_model=CardResponse)
 async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
-    """Resolve an impediment by dispatching to a specific agent.
+    """Resolve an impediment by parking the card on **Backlog** for the
+    auto-dispatch tick to pick up — *not* by spawning a fresh session
+    synchronously.
+
+    Kaart af951ad70... ("Resolve impediment moet niet meteen naar engineer
+    kolom maar eerst naar backlog"): the previous behaviour moved the card
+    straight to the engineer Doing column and immediately spawned a session,
+    which flooded the dispatcher when the operator cleared a batch of
+    impediments in one go. The fix routes the resolved card through the same
+    Backlog queue ordinary cards use; the next auto-tick picks it up at its
+    own pace (per-column cap, depends_on gate, single-card-per-tick loop).
 
     Composes the resumed session's `## IMPEDIMENT` prompt section from up to
-    three sources, in the order they appear in `build_card_prompt`:
+    three sources, in the order they appear in `build_card_prompt`. All three
+    land on the activity feed as durable comments; the auto-tick re-reads
+    them via ``dispatch._resolve_impediment`` and threads them into
+    ``_run_card`` when it spawns the resumed session.
 
     1. The most recent `**Impediment:**` comment (set by `report_impediment`).
     2. If the card has an answered KanbanGate (the human picked one of the
@@ -1742,5 +1755,5 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
 
     if res is None:
         raise HTTPException(status.HTTP_409_CONFLICT,
-            "could not dispatch impediment (card missing or already claimed)")
+            "could not resolve impediment (card missing or no longer in Impediment)")
     return await _reload(s, cid)

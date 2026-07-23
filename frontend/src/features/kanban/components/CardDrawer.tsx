@@ -685,7 +685,10 @@ function ResolveImpedimentControl({
         projectPath,
         answer.trim() || undefined,
       );
-      toast.success("Impediment resolved — card re-dispatched");
+      // The card lands on Backlog; auto-dispatch picks it up next tick. The
+      // message reflects that so the operator doesn't think a session is
+      // already running. See kaart af951ad70... (resolve-impediment → Backlog).
+      toast.success("Impediment resolved — card moved to Backlog; auto-dispatch will pick it up");
       setAnswer("");
       onChanged();
     } catch {
@@ -1176,7 +1179,11 @@ export function CardDrawer({
   const resolveImpediment = async () => {
     try {
       await kanbanApi.resolveImpediment(card.id, projectPath);
-      toast.success("Impediment resolved — fresh session dispatched");
+      // The card lands on Backlog; auto-dispatch picks it up next tick. See
+      // kaart af951ad70... (resolve-impediment → Backlog) — surfacing this in
+      // the toast prevents the operator from thinking a session is already
+      // running when the board hasn't moved yet.
+      toast.success("Impediment resolved — card moved to Backlog; auto-dispatch will pick it up");
       onChanged();
     } catch {
       toast.error("Resolve failed — card may have changed; reloading");
