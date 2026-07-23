@@ -31,6 +31,14 @@
 #      paragraph (not any free-floating `bc6b266c` mention elsewhere in the
 #      doc), analogous to item 2's existing `✅ Geïmplementeerd (kaart
 #      d5072884…)` marker.
+#   9. The intake-authoring frontmatter `description:` lists both the new-app
+#      inceptie trigger AND the product-analysis authoring trigger, so a fresh
+#      skill-routing decision can discover the product-analysis path. The
+#      description stays when-to-use only (no workflow summary).
+#  10. A top-level `## When to use` bullet points to the alternative
+#      product-analysis form / external-product comparison trigger. The
+#      `## When NOT to use` "small change" bullet is narrowly clarified so it
+#      does not appear to exclude product-analysis authoring.
 
 set -u
 
@@ -202,6 +210,61 @@ if [ "$TOTAL" -le 3 ] && [ "$IN_PARA" -ge 1 ]; then
 else
   bad "decision doc has unexpected bc6b266c mentions (total: $TOTAL, in-para: $IN_PARA)"
 fi
+
+# ----------------------------------------------------------------------------
+echo "Task 9: frontmatter description is discoverable for both triggers"
+# Extract the YAML frontmatter (the block between the first two `---` lines)
+# and assert it lists BOTH triggers. Section-scoped, not whole-file.
+FRONTMATTER="$TMP/frontmatter.txt"
+awk 'BEGIN{n=0} /^---$/{n++; if(n==1) next; if(n==2) exit} n==1{print}' "$INTAKE" > "$FRONTMATTER"
+check "frontmatter extracted" "description:" "$FRONTMATTER"
+# Existing new-app / inceptie trigger must remain.
+check "frontmatter keeps the inceptie / new-app trigger" \
+  "inceptie|new app|app-idea" "$FRONTMATTER"
+# New product-analysis trigger must be discoverable.
+check "frontmatter mentions product-analysis authoring trigger" \
+  "product-analysis" "$FRONTMATTER"
+check "frontmatter mentions Backlog / external product trigger" \
+  "Backlog|external product|external application" "$FRONTMATTER"
+# Description stays when-to-use only (no workflow summary).
+check "frontmatter description is when-to-use style (no workflow step-list)" \
+  "Use when" "$FRONTMATTER"
+# Negative: frontmatter must NOT be a workflow summary like "Steps: ...".
+if grep -qE "^description: .*[Ss]tep [0-9]:" "$FRONTMATTER"; then
+  bad "frontmatter description looks like a workflow summary"
+else
+  ok "frontmatter description is not a workflow summary"
+fi
+
+# ----------------------------------------------------------------------------
+echo "Task 10: top-level 'When to use' bullet points to product-analysis form"
+# Section-scoped extraction: from `^## When to use` up to (but not
+# including) the next `^## ` heading.
+WHEN_USE="$TMP/when_use.txt"
+WHEN_NOT_USE="$TMP/when_not_use.txt"
+awk '
+  /^## When to use$/ { in_para=1; next }
+  in_para && /^## / { in_para=0 }
+  in_para { print }
+' "$INTAKE" > "$WHEN_USE"
+awk '
+  /^## When NOT to use$/ { in_para=1; next }
+  in_para && /^## / { in_para=0 }
+  in_para { print }
+' "$INTAKE" > "$WHEN_NOT_USE"
+check "## When to use section extracted" "A human says" "$WHEN_USE"
+# Top-level bullet pointing to the product-analysis form / external-product
+# comparison trigger. Use a forgiving regex covering the trigger phrases.
+check "## When to use contains a product-analysis bullet" \
+  "external product|vergelijk|Product analyse|product-analysis" "$WHEN_USE"
+# Existing inceptie bullet must remain (no broad rewrite).
+check "## When to use keeps the inceptie bullet" \
+  "new app" "$WHEN_USE"
+# The "small change" `When NOT to use` bullet must be narrowly clarified so
+# it does not appear to exclude product-analysis authoring. The clarification
+# we add is in parentheses; assert the parenthetical exists.
+check "## When NOT to use 'small change' bullet has a clarification" \
+  "does not exclude|scoped analysis-kaart|not .small change" "$WHEN_NOT_USE"
 
 # ----------------------------------------------------------------------------
 echo ""

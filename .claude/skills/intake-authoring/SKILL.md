@@ -1,6 +1,6 @@
 ---
 name: intake-authoring
-description: Use when a human wants to author a new app-idea or inceptie-kaart — turns a free conversation with the user into a promotable intake-column kanban card carrying a design-doc (kind=spec) and a TDD plan (kind=plan). Runs interactively outside the autonomous dispatcher.
+description: Use when a human wants to author a new app-idea or inceptie-kaart (free conversation → promotable intake-column kaart met spec+plan), OR a product-analysis Backlog kaart voor één externe product/repo/URL ("Product analyse - <naam of URL>" → Backlog-kaart met vier vaste velden, work_type=analysis, executor=product-analysis skill). Runs interactively outside the autonomous dispatcher.
 ---
 
 # intake-authoring
@@ -24,12 +24,20 @@ This skill is the **voordeur** of the inceptie-pipeline (gat A in
   survives past the session.
 - The output target is **the meta-project's intake column** (not a new
   project — that doesn't exist yet, by design).
+- A human points at one external product / repo / URL and asks *"vergelijk
+  deze toepassing met de onze"*, *"wat kunnen we leren van X"*, or says
+  *"Product analyse - <url>"* — the alternative form below produces a
+  normal Backlog card with four fixed description fields, `work_type=
+  analysis`, and the `product-analysis` skill as executor (no promote-flow).
 
 ## When NOT to use
 
 - The human wants to capture a small change inside an existing project —
   that's `flag-problem` (for problems) or a normal Backlog card via the
-  dispatcher. Don't route ordinary bug-fix ideation through here.
+  dispatcher. Don't route ordinary bug-fix ideation through here. *(This
+  does not exclude the product-analysis form above: comparing one external
+  product to ours is a deliberate, scoped analysis-kaart, not "a small
+  change".)*
 - The idea already has a repo. Use `superpowers:brainstorming` + `writing-plans`
   directly, land the plan in the existing repo's `docs/plans/`, then file a
   normal Backlog card.
