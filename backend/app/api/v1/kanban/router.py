@@ -25,6 +25,7 @@ from app.kanban.schemas import (
     AgentStatsResponse,
     AttachRequest,
     AutodispatchRequest,
+    BoardExportResponse,
     CardCreate,
     CardResponse,
     CardSummaryResponse,
@@ -465,6 +466,34 @@ async def po_wachtrij(project_key: str = Query(...)):
         total=len(rows),
         items=[WachtrijItem(**row) for row in rows],
     )
+
+
+@router.get("/export", response_model=BoardExportResponse)
+async def export_board(project_key: str = Query(...)):
+    """Lossless JSON export of one project board.
+
+    Returns every card with all its columns, every deliverable, every
+    attachment, every comment op from the op-log, and every column. The
+    response envelope carries a ``format_version`` so a future re-import
+    path can detect the wire shape without guessing.
+
+    Powers the "borddata overleeft de applicatie" property called out in
+    kanban-pro analyse §4.2 (kanban card 39d2d54a…): the institutional
+    memory of a project should not hang on a single SQLite file, and
+    markdown-per-card would lose `depends_on`, the per-card dispatch
+    breadcrumbs, and the `**Summary:**` / `**Impediment:**` /
+    `**Resolution:**` comment chain. JSON is the lossless substrate for
+    a future restore; the restore flow itself is out of scope by design
+    (card acceptance criterion #5).
+
+    The same `unknown_project_key` 404 guard as the rest of the
+    user-facing endpoints applies — a typo'd key returns 404 instead of
+    a silent empty board (kaart 91c85199 / `_assert_project_key_known`).
+    """
+    async with KanbanSessionLocal() as s:
+        await _assert_project_key_known(s, project_key, for_create=False)
+        payload = await service.export_board(s, project_key)
+    return BoardExportResponse.model_validate(payload)
 
 
 @router.get("/cards")

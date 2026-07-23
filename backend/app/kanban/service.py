@@ -1430,3 +1430,135 @@ async def po_wachtrij(session, project_key: str) -> list[dict]:
     # Oldest-first so the longest-waiting item is on top.
     items.sort(key=lambda x: x["wait_seconds"], reverse=True)
     return items
+
+
+async def export_board(session, project_key: str) -> dict:
+    """Lossless export of one project board.
+
+    Returns a JSON-ready dict shaped by ``BoardExportResponse``: every
+    card with all its columns, every deliverable, every attachment, every
+    comment op from the op-log, and every column. The shape is stable
+    (``format_version=1``) so a future re-import path can detect it
+    without guessing.
+
+    Powers ``GET /api/v1/kanban/export`` — the durable side of the
+    "borddata overleeft de applicatie" property kanban-pro analyse §4.2.
+    Import/restore is intentionally out of scope (kanban card
+    39d2d54a… acceptance criterion #5), but lossless JSON is the safe
+    substrate to build one on later.
+
+    Comment ops are pulled from the op-log (`entity_id ∈ card_ids` AND
+    `op_type == "comment"`) because the materialized card has no comment
+    relationship — comments live exclusively as ``comment`` ops. Sorting
+    by HLC keeps the export chronologically ordered across the whole
+    board (HLC is globally unique per device, so it's the right ordering
+    key for cross-card replay).
+    """
+    from app.kanban.schemas import (
+        BoardExportAttachment,
+        BoardExportCard,
+        BoardExportComment,
+        BoardExportDeliverable,
+        BoardExportResponse,
+        ColumnResponse,
+    )
+
+    cards = await list_cards(session, project_key)
+    columns = await list_columns(session, project_key)
+
+    # Bulk-fetch every comment op for the project's cards in one query —
+    # the per-card ``card_activity`` helper would issue N+1 queries and
+    # is only appropriate for the single-card activity panel.
+    card_ids = [c.id for c in cards]
+    comment_ops: list[KanbanOp] = []
+    if card_ids:
+        stmt = (
+            select(KanbanOp)
+            .where(KanbanOp.entity_id.in_(card_ids))
+            .where(KanbanOp.op_type == "comment")
+            .order_by(KanbanOp.hlc.asc())
+        )
+        comment_ops = list((await session.execute(stmt)).scalars().all())
+
+    comments_by_card: dict[str, list[KanbanOp]] = {cid: [] for cid in card_ids}
+    for op in comment_ops:
+        text = op.payload.get("text") if op.payload else None
+        if not text:
+            # Skip empty/missing-payload comment ops — they would render
+            # as empty text in the export and serve no audit purpose.
+            continue
+        comments_by_card.setdefault(op.entity_id, []).append(op)
+
+    exported_cards: list[BoardExportCard] = []
+    for card in cards:
+        # ``description`` etc. are pulled via the ORM-configured Pydantic
+        # model (``from_attributes=True``); the per-card relationship
+        # collections (deliverables / attachments) are eager-loaded by
+        # ``list_cards`` and serialize via the same model_config.
+        # Comments are not a relationship — we attach them by hand.
+        exported_cards.append(
+            BoardExportCard(
+                id=card.id,
+                project_key=card.project_key,
+                title=card.title,
+                description=card.description,
+                column=card.column,
+                rank=card.rank,
+                priority=card.priority,
+                labels=card.labels,
+                work_type=card.work_type,
+                agent=card.agent,
+                model=card.model,
+                column_overrides=card.column_overrides,
+                transport=card.transport,
+                resume_session_id=card.resume_session_id,
+                resume_project_folder=card.resume_project_folder,
+                scheduled_at=card.scheduled_at,
+                dispatch_started_at=card.dispatch_started_at,
+                dispatch_session_id=card.dispatch_session_id,
+                dispatch_project_folder=card.dispatch_project_folder,
+                dispatch_model=card.dispatch_model,
+                dispatch_provider=card.dispatch_provider,
+                dispatch_failures=card.dispatch_failures,
+                release_without_terminal_move=card.release_without_terminal_move,
+                claimed_by=card.claimed_by,
+                claimed_at=card.claimed_at,
+                created_at=card.created_at,
+                updated_at=card.updated_at,
+                analyst_agent_id=card.analyst_agent_id,
+                executor_agent_id=card.executor_agent_id,
+                parent_card_id=card.parent_card_id,
+                analyst_run_id=card.analyst_run_id,
+                depends_on=card.depends_on,
+                metadata=card.meta,
+                deliverables=[
+                    BoardExportDeliverable.model_validate(d)
+                    for d in card.deliverables
+                ],
+                attachments=[
+                    BoardExportAttachment.model_validate(a)
+                    for a in card.attachments
+                ],
+                comments=[
+                    BoardExportComment(
+                        op_id=op.op_id,
+                        hlc=op.hlc,
+                        text=op.payload.get("text", ""),
+                        created_at=op.created_at,
+                    )
+                    for op in comments_by_card.get(card.id, [])
+                ],
+            )
+        )
+
+    response = BoardExportResponse(
+        project_key=project_key,
+        format_version=1,
+        exported_at=datetime.now(UTC),
+        columns=[ColumnResponse.model_validate(c) for c in columns],
+        cards=exported_cards,
+    )
+    # ``model_dump(mode="json")`` so datetimes serialize as ISO-8601
+    # strings (the JSON column expectation); the underlying ``model_validate``
+    # still works on dict-shaped data when the field is a ``datetime``.
+    return response.model_dump(mode="json")

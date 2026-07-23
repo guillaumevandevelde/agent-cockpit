@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.database import Backup
 from app.models.schemas import (
     BackupManifest,
@@ -64,6 +66,24 @@ SENSITIVE_TOML_ASSIGNMENT_PATTERN = re.compile(
     r"(?P<value>.+?)"
     r"(?P<suffix>\s*(?:#.*)?)$"
 )
+
+
+def kanban_db_path() -> Path | None:
+    """Filesystem path of the kanban SQLite DB, parsed from the live
+    ``settings.kanban_database_url`` setting.
+
+    Returns ``None`` for non-sqlite URLs (a future Postgres-backed kanban
+    store wouldn't have a single file to ship) and for in-memory sqlite
+    URLs (``":memory:"``). The caller is expected to skip the inclusion
+    when ``None`` — the backup is still valid, just without the board.
+    """
+    url = settings.kanban_database_url
+    if not isinstance(url, str) or not url.startswith("sqlite"):
+        return None
+    db = make_url(url).database
+    if not db or db == ":memory:":
+        return None
+    return Path(db)
 
 
 class BackupService:
@@ -125,6 +145,25 @@ class BackupService:
             paths.append(claude_md)
 
         return paths
+
+    def _get_kanban_db_path(self) -> Path | None:
+        """Path of the kanban SQLite file if it exists on disk.
+
+        The kanban DB is a one-per-machine store (see kanban-pro analyse
+        §4.2 / kanban card 39d2d54a…), so it doesn't naturally fit under
+        a project_path. We include it in the project + full backup set so
+        a project (or whole box) can be restored without losing the
+        board's institutional memory — every `**Summary:**` /
+        ``**Impediment:**`` / Done summary, every deliverable, every
+        dependency graph. Returns ``None`` when the file doesn't exist
+        (the kanban DB may be on a different machine in a Docker deploy)
+        so the backup picks up the rest of the project config without
+        erroring.
+        """
+        path = kanban_db_path()
+        if path is None or not path.is_file():
+            return None
+        return path
 
     def _get_codex_config_paths(self) -> list[Path]:
         """Get safe Codex configuration files for export-only backups."""
@@ -538,6 +577,19 @@ class BackupService:
 
         if scope in ["full", "project"] and project_path:
             paths.extend(self._get_project_config_paths(project_path))
+
+        # The kanban DB is a global store but ticket 39d2d54a… requires
+        # it to ride along in any project / full backup so a board can
+        # be restored after a schema-rot wrecks the live DB. Skipped
+        # silently when the file doesn't exist (the DB may live on a
+        # different volume in a Docker deploy); the helper returns None
+        # in that case. For ``project`` scope it is only included when a
+        # ``project_path`` was supplied — the historical contract that
+        # empty project-scope backups must raise is preserved.
+        if scope == "full" or (scope == "project" and project_path):
+            kanban_path = self._get_kanban_db_path()
+            if kanban_path is not None:
+                paths.append(kanban_path)
 
         if scope == "codex":
             paths.extend(self._get_codex_config_paths())
