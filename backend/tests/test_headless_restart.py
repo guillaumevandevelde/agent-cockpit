@@ -39,19 +39,10 @@ import subprocess
 import sys as stdlib_sys
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 
 import app.kanban.headless_runner as hr
-from app.kanban.dispatch import (
-    TRANSPORTS,
-    reap_stale_claims,
-    _live_headless_sessions,
-)
-from app.kanban.db import KanbanSessionLocal
-from app.services.scheduling.session_registry import session_registry
-
 
 # ---- AC 1: subprocess runs in its own process group ------------------------
 
@@ -204,7 +195,7 @@ async def test_run_headless_removes_pidfile_after_clean_exit(monkeypatch, tmp_pa
 # worktree path the pidfile records.
 
 
-def _spawn_long_sleeper(cwd: str) -> "subprocess.Popen[bytes]":
+def _spawn_long_sleeper(cwd: str) -> subprocess.Popen[bytes]:
     """Spawn a long-sleeping Python subprocess whose cwd is ``cwd``.
 
     Returns a Popen handle; caller is responsible for terminating it. The
@@ -221,7 +212,7 @@ def _spawn_long_sleeper(cwd: str) -> "subprocess.Popen[bytes]":
     )
 
 
-def _wait_for_ready(proc: "subprocess.Popen[bytes]", deadline_s: float = 5.0) -> None:
+def _wait_for_ready(proc: subprocess.Popen[bytes], deadline_s: float = 5.0) -> None:
     deadline = time.time() + deadline_s
     while time.time() < deadline:
         if proc.stdout is None:
@@ -234,7 +225,7 @@ def _wait_for_ready(proc: "subprocess.Popen[bytes]", deadline_s: float = 5.0) ->
     raise RuntimeError("subprocess never signalled READY")
 
 
-def _terminate_proc(proc: "subprocess.Popen[bytes]") -> None:
+def _terminate_proc(proc: subprocess.Popen[bytes]) -> None:
     if proc.poll() is not None:
         return
     try:
@@ -510,7 +501,7 @@ def test_event_log_truncates_at_cap_from_head(tmp_path):
     assert 1 < len(lines) < 30
     # Verify head truncation, not tail truncation: the retained lines are
     # the *highest* indices.
-    indices = [json.loads(l)["i"] for l in lines]
+    indices = [json.loads(line)["i"] for line in lines]
     assert indices == sorted(indices), "lines must be in append order"
     assert indices[0] > 0, "head must have been truncated (oldest indices dropped)"
 

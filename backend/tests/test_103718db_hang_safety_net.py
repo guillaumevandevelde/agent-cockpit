@@ -27,12 +27,10 @@ Expected behaviour:
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 
 import pytest
-
 
 _RUN_HANG_VERIFICATION = os.environ.get("RUN_HANG_VERIFICATION") == "1"
 

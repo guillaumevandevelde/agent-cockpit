@@ -2,6 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
+
 # Schema + per-test reset handled by conftest fixtures. The
 # ``_patch_app_database`` fixture now patches ``AsyncSessionLocal`` on
 # ``app.database`` itself (and every module that imported it) so even
