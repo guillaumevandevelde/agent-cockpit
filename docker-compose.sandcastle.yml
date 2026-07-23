@@ -2,7 +2,7 @@
 # Gebruik: docker compose -f docker-compose.sandcastle.yml up -d
 
 services:
-  # Hoofd applicatie (Claude Cockpit)
+  # Hoofd applicatie (Agent Cockpit)
   claude-cockpit:
     build: .
     ports:

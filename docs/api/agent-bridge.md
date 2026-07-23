@@ -57,7 +57,7 @@ WS /api/v1/agent-bridge/sessions/{target}/terminal?token={token}&mode={mode}
 
 ### Image Attachments
 
-Use image attachments to upload a screenshot or mockup to the Claude Cockpit host, then paste a file-path prompt into a live tmux session.
+Use image attachments to upload a screenshot or mockup to the Agent Cockpit host, then paste a file-path prompt into a live tmux session.
 
 All attachment endpoints require a fresh token from `GET /api/v1/agent-bridge/token` in the `X-Claude-Cockpit-Terminal-Token` header.
 
@@ -106,7 +106,7 @@ GET /api/v1/agent-bridge/sessions/{target}/attachments
 DELETE /api/v1/agent-bridge/sessions/{target}/attachments/{attachment_id}
 ```
 
-Attachments are stored by default under `~/.claude-registry/bridge-attachments`. In remote deployments, this path is on the Claude Cockpit host and must be readable by the tmux agent process.
+Attachments are stored by default under `~/.claude-registry/bridge-attachments`. In remote deployments, this path is on the Agent Cockpit host and must be readable by the tmux agent process.
 
 Configuration:
 

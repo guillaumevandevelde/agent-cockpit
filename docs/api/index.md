@@ -1,6 +1,6 @@
 # API Overview
 
-Claude Cockpit exposes a RESTful API under `/api/v1/`. The frontend communicates with the backend entirely through this API.
+Agent Cockpit exposes a RESTful API under `/api/v1/`. The frontend communicates with the backend entirely through this API.
 
 ## Base URL
 
@@ -12,7 +12,7 @@ In development, the Vite dev server proxies `/api` requests from port 5173 to th
 
 ## Authentication
 
-None. Claude Cockpit is a local-only application — no authentication is required.
+None. Agent Cockpit is a local-only application — no authentication is required.
 
 ## Request/Response Format
 

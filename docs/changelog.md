@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Claude Cockpit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to Agent Cockpit are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## 1.3.0 — 2026-06-08
 
