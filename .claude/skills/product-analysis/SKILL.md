@@ -99,6 +99,17 @@ file reference (`backend/app/kanban/dispatch.py:1187`) or a doc reference
 (`docs/cockpit/<x>.md §N`). If you cannot point at where it lives, you don't
 know that it exists.
 
+**Start from `docs/cockpit/cockpit-capability-baseline.md`** — one screen per
+capability area (dispatch, worktrees + ship, multi-agent DAG, agent mail,
+providers/pool, board + Done gates, session lifecycle, observability), each
+claim already carrying a `file:line`. It saves you re-deriving our own side
+from scratch, which the first three analyses each did independently.
+
+It is a **starting point, not evidence**: it carries a measurement date and a
+commit sha at the top, and line numbers drift. Anything you lift from it into
+your analysis you re-verify against the current code first — and if you find
+it stale, fix the baseline in the same session.
+
 Check `docs/cockpit/decisions.md` before you recommend anything: a
 neighbouring decision may already have settled the exact fork you're about
 to reopen (the 9Router run had to defend against reopening three of them).

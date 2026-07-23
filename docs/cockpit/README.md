@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 101 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 102 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -96,7 +96,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [`docs/cockpit/` — de canonieke spec-boom (index)](./README.md) | 🟢 active |
 | [Beslis-register — alle genomen productbeslissingen (index)](./decisions.md) | 🟢 active |
 
-### Reference (24)
+### Reference (25)
 
 | Document | Status |
 |---|---|
@@ -107,6 +107,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [ProjectBootstrapPolicy — de \"cockpit-defaults\" van repo-bootstrap](./bootstrap-policy.md) | 🟢 active |
 | [Brainstorm-to-impediment-bridge — van real-time dialogue naar `report_impediment`-flows](./brainstorm-to-impediment-bridge.md) | 🟢 active |
 | [CITemplateService — drie GitHub-Actions-templates voor pasgeboren projecten](./ci-templates.md) | 🟢 active |
+| [Cockpit capability-baseline](./cockpit-capability-baseline.md) | 🟢 active |
 | [Fase 1 — Validatiechecklist (werkt claude-deck onder WSL?)](./fase-1-validation.md) | 🟢 active |
 | [Isolated component preview (light + dark screenshot)](./isolated-component-preview.md) | 🟢 active |
 | [Kanban-DB conventions](./kanban-conventions.md) | 🟢 active |
