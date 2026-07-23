@@ -75,7 +75,7 @@ export function TeamCard({
           <div className="border-t">
             <div className="py-1 px-2 bg-muted/20">
               <span className="text-[11px] text-muted-foreground/70 uppercase tracking-wider">
-                {team.provider_display_name || team.provider}
+                {team.cli_display_name || team.cli}
               </span>
             </div>
             <div className="divide-y">

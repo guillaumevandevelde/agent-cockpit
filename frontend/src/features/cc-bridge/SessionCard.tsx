@@ -154,9 +154,20 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
         {error && (
           <p className="text-xs text-destructive mt-1">{error}</p>
         )}
-        <Badge variant="outline" className="mt-2 max-w-full truncate">
-          {session.provider_display_name}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-1 mt-2">
+          <Badge variant="outline" className="max-w-full truncate">
+            {session.cli_display_name}
+          </Badge>
+          {session.provider !== session.cli && (
+            <Badge
+              variant="secondary"
+              className="max-w-full truncate"
+              title={`Subscription: ${session.provider_display_name}`}
+            >
+              {session.provider_display_name}
+            </Badge>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground truncate mt-1" title={session.cwd}>
           {projectName}
         </p>

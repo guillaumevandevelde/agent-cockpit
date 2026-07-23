@@ -1,7 +1,13 @@
 import type { AgenticCliId } from '@/types/providers'
 
 export interface AgentSession {
-  provider: AgenticCliId
+  /** CLI tool running the session (claude-code, codex-cli, …). */
+  cli: AgenticCliId
+  /** Human-readable CLI label (e.g. "Claude Code", "Codex"). */
+  cli_display_name: string
+  /** Vendor / subscription the session was started with (anthropic, minimax, …). */
+  provider: string
+  /** Human-readable vendor label (e.g. "Anthropic", "MiniMax"). */
   provider_display_name: string
   tmux_target: string
   session_name: string
@@ -197,7 +203,11 @@ export interface RunGroupMember {
 export interface RunGroup {
   team_id: string
   name: string
-  provider: string
+  cli: string
+  cli_display_name?: string
+  /** Vendor / subscription inherited from the group's lead session. */
+  provider?: string
+  /** Human-readable vendor label inherited from the lead. */
   provider_display_name?: string
   cwd: string
   is_auto_detected: boolean
@@ -214,7 +224,7 @@ export interface RunGroupsResponse {
 
 export interface CreateGroupRequest {
   name: string
-  provider?: string
+  cli?: string
   cwd?: string
   lead_session_name?: string | null
   members: { session_name: string; pane_id?: string | null; tmux_target: string }[]
@@ -223,7 +233,7 @@ export interface CreateGroupRequest {
 export interface CreateGroupResponse {
   team_id: string
   name: string
-  provider: string
+  cli: string
   cwd: string
   is_auto_detected: boolean
   members: RunGroupMember[]
