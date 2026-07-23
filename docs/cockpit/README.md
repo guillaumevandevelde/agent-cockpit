@@ -179,7 +179,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Sync + HLC-laag: bevriezen vs. snoeien — trade-off + beslissing](./sync-hlc-freeze-vs-prune.md) | 🔵 decided |
 | [Synchrone sub-agent-delegatie vs. async kanban-decompositie — beslisdocument](./sync-vs-async-delegation-decision.md) | 🔵 decided |
 | [Token-saving mechanismen (RTK / Headroom / Caveman / Ponytail) — analyse & beslissing](./token-saver-mechanismen-decision.md) | 🔵 decided |
-| [Token-saver meet-harnas — ontwerp, proxy, en eerste meting](./token-saver-meet-harnas.md) | 🔵 decided |
+| [Token-saver meet-harnas — ontwerp, proxy, en eerste counterbalanced meting](./token-saver-meet-harnas.md) | 🔵 decided |
 | ['Updates' (self-update) feature — past die nog bij Cockpit's missie?](./updates-feature-decision.md) | 🔵 decided |
 | [Upstream Agentic Agent Teams — adopt or not? Trade-off + beslissing](./upstream-agent-teams-decision.md) | 🔵 decided |
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
