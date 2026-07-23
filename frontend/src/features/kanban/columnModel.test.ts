@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { modelForProviderChange } from "./columnModel";
+import {
+  hasClosedModelSet,
+  modelForProviderChange,
+  modelForProviderLoad,
+} from "./columnModel";
 
 const ANTHROPIC_OPTIONS = ["sonnet", "opus", "haiku"];
 const MINIMAX_OPTIONS = ["MiniMax-M3", "MiniMax-M2.7"];
@@ -71,5 +75,81 @@ describe("modelForProviderChange", () => {
     expect(
       modelForProviderChange("opus", null, "minimax", MINIMAX_OPTIONS),
     ).toBe("");
+  });
+});
+
+// --- load path (the gap that let the "minimax shows no models" bug survive) --
+//
+// `modelForProviderChange` only fires from the provider Select's
+// onValueChange — i.e. only when the user ACTIVELY switches provider. A
+// column already persisted as (provider=minimax, model=opus) loads straight
+// into the edit row with model="opus" and is never sanitised. That stale
+// value then filters the datalist to zero matches ("no minimax models are
+// shown") and makes Save fail with the backend's 422. These cover the load
+// path so an invalid stored combo can't reach the form.
+
+describe("hasClosedModelSet", () => {
+  it("is true for providers the backend validates against a fixed list", () => {
+    // Mirrors _allowed_models_for_provider in
+    // backend/app/api/v1/kanban/router.py — these two return a list, so an
+    // unknown model is a 422 and the UI must offer a closed picker.
+    expect(hasClosedModelSet("minimax")).toBe(true);
+    expect(hasClosedModelSet("anthropic")).toBe(true);
+  });
+
+  it("is false for bedrock", () => {
+    // Bedrock has no model-options cache: AWS model ids are ARN-shaped
+    // ("anthropic.claude-3-sonnet-20240229-v1:0"), never the bare aliases
+    // the cli returns. The backend accepts any string, so the UI must keep
+    // free-text entry — a closed dropdown would make bedrock unusable.
+    expect(hasClosedModelSet("bedrock")).toBe(false);
+  });
+
+  it("is false when no provider is set", () => {
+    // The "Default" sentinel: the dispatch chain picks the provider later,
+    // so no closed set applies yet.
+    expect(hasClosedModelSet(null)).toBe(false);
+  });
+});
+
+describe("modelForProviderLoad", () => {
+  it("clears a stored model that does not fit its own stored provider", () => {
+    // THE BUG: this is the exact row found in the live DB —
+    // ('engineer', 'minimax', 'opus'). It must not reach the form as "opus".
+    expect(modelForProviderLoad("opus", "minimax", ["MiniMax-M3"])).toBe("");
+  });
+
+  it("keeps a stored model that fits its provider", () => {
+    expect(modelForProviderLoad("MiniMax-M3", "minimax", ["MiniMax-M3"])).toBe(
+      "MiniMax-M3",
+    );
+  });
+
+  it("keeps a free-form model on a provider without a closed set", () => {
+    // Bedrock ARNs are never in an options list but are perfectly valid;
+    // clearing them here would silently wipe a working column's config.
+    expect(
+      modelForProviderLoad(
+        "anthropic.claude-3-sonnet-20240229-v1:0",
+        "bedrock",
+        [],
+      ),
+    ).toBe("anthropic.claude-3-sonnet-20240229-v1:0");
+  });
+
+  it("keeps a stored model when the column pins no provider", () => {
+    expect(modelForProviderLoad("opus", null, ["MiniMax-M3"])).toBe("opus");
+  });
+
+  it("maps a null stored model to the empty string", () => {
+    // Columns store NULL for "unset"; the form field is a string.
+    expect(modelForProviderLoad(null, "minimax", ["MiniMax-M3"])).toBe("");
+  });
+
+  it("clears rather than keeps when the options list has not loaded yet", () => {
+    // Defensive: if the minimax fetch failed the list is the seed, not [].
+    // But if it ever is empty, an unvalidatable model must not be presented
+    // as valid — Save would 422 on it.
+    expect(modelForProviderLoad("opus", "minimax", [])).toBe("");
   });
 });

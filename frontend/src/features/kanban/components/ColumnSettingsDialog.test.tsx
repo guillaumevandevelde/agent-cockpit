@@ -22,6 +22,12 @@ const { getModelOptions, refreshModelOptions, updateColumn, getMinimaxModelOptio
   })),
 }));
 
+// The dialog reports failures through sonner; spy on it so the tests can
+// assert WHICH message reaches the user (a generic "Failed to update
+// column" hides the backend's 422 explanation — see the toast test below).
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
+
 vi.mock("../api", () => ({
   kanbanApi: {
     agents: vi.fn(async () => ({ agents: ["engineer", "analyst"] })),
@@ -41,6 +47,27 @@ const COLUMN = {
   default_agent: "engineer", default_provider: null, default_model: null,
   max_sessions: null, created_at: "", updated_at: "",
 };
+
+/**
+ * The model values on offer for the column currently in edit mode,
+ * whichever control renders them: providers with a backend-enforced closed
+ * set get a <select> (options are its children), the rest get an
+ * <input list> + <datalist>. Reading both keeps these assertions about WHAT
+ * is offered rather than which widget happens to offer it.
+ *
+ * The empty "Default" entry (= no column default) is filtered out so
+ * toContain/not.toContain read as assertions about real models.
+ */
+function offeredModelValues(): string[] {
+  const field = screen.getByLabelText(/default model/i);
+  const source =
+    field.tagName === "SELECT"
+      ? field
+      : document.getElementById(field.getAttribute("list")!)!;
+  return Array.from(source.querySelectorAll("option"))
+    .map((o) => (o as HTMLOptionElement).value)
+    .filter((v) => v !== "");
+}
 
 afterEach(() => {
   cleanup();
@@ -134,15 +161,9 @@ describe("ColumnSettingsDialog model field", () => {
     await waitFor(() => expect(getMinimaxModelOptions).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: /edit/i }));
-    const modelInput = screen.getByLabelText(/default model/i) as HTMLInputElement;
-    const listId = modelInput.getAttribute("list")!;
-    const datalist = document.getElementById(listId)!;
-    const values = Array.from(datalist.querySelectorAll("option")).map(
-      (o) => (o as HTMLOptionElement).value,
-    );
     // The discovered list ("MiniMax-M3", "MiniMax-M2.7") wins over the
     // seed constant — so M2.7 must appear in the picker.
-    expect(values).toContain("MiniMax-M2.7");
+    expect(offeredModelValues()).toContain("MiniMax-M2.7");
   });
 
   // Kaart 1782fa43…: a board-wide subscription-override (or pool choice)
@@ -230,28 +251,18 @@ describe("ColumnSettingsDialog model field", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /edit/i }));
 
-    // shadcn Select renders options into a portal; pull trigger text + open
-    // the provider dropdown via clicking its trigger. We assert on the
-    // rendered datalist directly since that's what the user actually sees
-    // when typing into the model input.
-    // The dialog renders one datalist per column keyed by column id, so the
-    // engineer column's `default-model-${id}` input has its own datalist.
-    const modelInput = screen.getByLabelText(/default model/i) as HTMLInputElement;
-    const listId = modelInput.getAttribute("list")!;
-    const beforeValues = Array.from(
-      document.getElementById(listId)!.querySelectorAll("option"),
-    ).map((o) => (o as HTMLOptionElement).value);
-    // Pre-condition: with the default (Anthropic) provider selected the
-    // datalist falls back to the loaded model-options — sonnet/opus/haiku.
+    // We assert on the options actually offered, since that's what the user
+    // can reach. With no provider pinned the field is still free-text (no
+    // closed set applies) and falls back to the loaded claude-code
+    // model-options — sonnet/opus/haiku.
+    const beforeValues = offeredModelValues();
     expect(beforeValues).toContain("opus");
     expect(beforeValues).not.toContain("MiniMax-M3");
 
     // Switch the provider dropdown to MiniMax. Radix Select needs a real
-    // pointer event sequence for the dropdown to open; a direct value change
-    // via fireEvent re-uses the existing select and just swaps its value.
-    // We re-render with a fresh column that already has provider=minimax to
-    // assert the same datalist cleanly, since opening the Radix dropdown in
-    // jsdom is fragile.
+    // pointer event sequence for the dropdown to open, which is fragile in
+    // jsdom, so we re-render with a fresh column already on provider=minimax
+    // and assert the offered options there instead.
     cleanup();
     render(
       <ColumnSettingsDialog
@@ -264,11 +275,7 @@ describe("ColumnSettingsDialog model field", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /edit/i }));
-    const minimaxInput = screen.getByLabelText(/default model/i) as HTMLInputElement;
-    const minimaxListId = minimaxInput.getAttribute("list")!;
-    const minimaxValues = Array.from(
-      document.getElementById(minimaxListId)!.querySelectorAll("option"),
-    ).map((o) => (o as HTMLOptionElement).value);
+    const minimaxValues = offeredModelValues();
     expect(minimaxValues).toContain("MiniMax-M3");
     // The bracketed `[1m]` form is invalid on MiniMax's API and must never
     // be offered as a picker suggestion — this is the regression guard.
@@ -358,5 +365,126 @@ describe("ColumnSettingsDialog session limit (pause)", () => {
       "c1",
       expect.objectContaining({ max_sessions: 0 }),
     ));
+  });
+});
+
+// --- stale (provider, model) combos already in the database ----------------
+//
+// The co-validation fix guarded new WRITES but never migrated rows written
+// before it landed. The live DB still held ('engineer', 'minimax', 'opus'),
+// which reproduced the original report in full: the model field loaded as
+// "opus", the datalist filtered its MiniMax options down to zero matches,
+// and Save came back 422 — the column could not be repaired through the UI.
+//
+// Note the pre-existing suite only ever exercised (minimax, MiniMax-M3), a
+// VALID pair, which is exactly why it stayed green through the bug.
+
+const MINIMAX_STALE = {
+  ...COLUMN,
+  default_provider: "minimax",
+  default_model: "opus",
+};
+
+describe("ColumnSettingsDialog with a stale provider/model combo", () => {
+  it("does not load an invalid stored model into the model field", async () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[MINIMAX_STALE]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    // Wait for the minimax option list to arrive — the sanitising decision
+    // needs it, so asserting before it lands would test the wrong state.
+    await waitFor(() => expect(getMinimaxModelOptions).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+
+    // "opus" is not a MiniMax model; it must not be presented as the
+    // column's current value. Empty means "let the dispatch chain choose",
+    // which for minimax resolves to MINIMAX_DEFAULT_MODEL.
+    await waitFor(() => {
+      const field = screen.getByLabelText(/default model/i) as HTMLInputElement;
+      expect(field.value).not.toBe("opus");
+    });
+  });
+
+  it("offers the minimax models as selectable options, not filtered-away text", async () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[MINIMAX_STALE]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await waitFor(() => expect(getMinimaxModelOptions).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+
+    // The heart of the report: the MiniMax models must be reachable. A
+    // native <select> keeps every option in the DOM regardless of the
+    // current value, so no stale value can filter them out of existence.
+    await waitFor(() => {
+      const values = Array.from(
+        document.querySelectorAll("#default-model-c1 option"),
+      ).map((o) => (o as HTMLOptionElement).value);
+      expect(values).toContain("MiniMax-M3");
+      expect(values).toContain("MiniMax-M2.7");
+      expect(values).not.toContain("opus");
+    });
+  });
+
+  it("keeps free-text entry for bedrock, which has no closed model set", async () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[{
+          ...COLUMN,
+          default_provider: "bedrock",
+          default_model: "anthropic.claude-3-sonnet-20240229-v1:0",
+        }]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    // An ARN-shaped id is in no options list but is perfectly valid; a
+    // dropdown here would make bedrock columns unconfigurable.
+    const field = screen.getByLabelText(/default model/i) as HTMLInputElement;
+    expect(field.tagName).toBe("INPUT");
+    expect(field.value).toBe("anthropic.claude-3-sonnet-20240229-v1:0");
+  });
+
+  it("surfaces the backend's rejection reason instead of a generic failure", async () => {
+    // The bare `catch { toast.error("Failed to update column") }` threw away
+    // the one message that explained the whole bug. apiClient already
+    // rethrows the 422 detail as error.message — just don't discard it.
+    updateColumn.mockRejectedValueOnce(
+      new Error("model 'opus' is not valid for provider 'minimax'; known options: ['MiniMax-M3']"),
+    );
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[COLUMN]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        expect.stringContaining("not valid for provider 'minimax'"),
+      ),
+    );
   });
 });

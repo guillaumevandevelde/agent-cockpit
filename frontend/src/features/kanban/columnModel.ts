@@ -43,3 +43,62 @@ export function modelForProviderChange(
   if (newProviderSuggestions.includes(currentModel)) return currentModel;
   return "";
 }
+
+/**
+ * Providers whose model list the backend enforces as a CLOSED set — an
+ * unknown model is rejected with 422 on save.
+ *
+ * Mirrors ``_allowed_models_for_provider`` in
+ * ``backend/app/api/v1/kanban/router.py``: it returns a list for these two
+ * and ``None`` (= accept anything) for every other provider. Keep the two
+ * in sync — if the backend starts validating a third provider, add it here
+ * so the UI offers a picker instead of a free-text field that can only
+ * produce a 422.
+ */
+export const CLOSED_MODEL_SET_PROVIDERS = ["anthropic", "minimax"] as const;
+
+/**
+ * Whether the model field for this provider should be a closed picker
+ * (dropdown) rather than free text.
+ *
+ * ``false`` for bedrock — AWS model ids are ARN-shaped
+ * ("anthropic.claude-3-sonnet-20240229-v1:0"), never the bare aliases the
+ * cli returns, so there is no list to pick from and the backend accepts
+ * any string. ``false`` for an unset provider: the dispatch chain resolves
+ * the provider later, so no constraint applies yet.
+ */
+export function hasClosedModelSet(provider: string | null | undefined): boolean {
+  return (
+    !!provider &&
+    (CLOSED_MODEL_SET_PROVIDERS as readonly string[]).includes(provider)
+  );
+}
+
+/**
+ * Sanitise a column's STORED model when loading it into the edit form.
+ *
+ * ``modelForProviderChange`` only runs from the provider Select's
+ * ``onValueChange``, so it never sees a column that was already persisted
+ * in an invalid state. That gap is what kept the "minimax column shows no
+ * models" bug alive after the co-validation fix: the live ``engineer``
+ * column was stored as ``(minimax, opus)``, loaded into the form as
+ * "opus", and because the model field is an ``<input list>`` whose
+ * datalist is filtered by the current value, "opus" matched none of the
+ * MiniMax options and the suggestion list rendered EMPTY. Saving then
+ * failed with the backend's 422, so the column could not even be repaired
+ * through the UI.
+ *
+ * Dropping an invalid value is safe: a null/empty model means "let the
+ * dispatch chain choose", and for minimax that resolves to
+ * ``MINIMAX_DEFAULT_MODEL`` (provider_env.py). Losing an unusable value
+ * beats presenting it as valid.
+ */
+export function modelForProviderLoad(
+  storedModel: string | null | undefined,
+  provider: string | null | undefined,
+  providerOptions: readonly string[],
+): string {
+  if (!storedModel) return "";
+  if (!hasClosedModelSet(provider)) return storedModel;
+  return providerOptions.includes(storedModel) ? storedModel : "";
+}

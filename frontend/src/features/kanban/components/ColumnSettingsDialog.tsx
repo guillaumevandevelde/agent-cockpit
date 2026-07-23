@@ -20,7 +20,11 @@ import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
 import { PROVIDERS, PROVIDER_LABELS, DEFAULT_MODEL_SUGGESTIONS, MINIMAX_MODEL_SUGGESTIONS, modelSuggestionsForProvider } from "../types";
 import type { KanbanColumn } from "../types";
-import { modelForProviderChange } from "../columnModel";
+import {
+  hasClosedModelSet,
+  modelForProviderChange,
+  modelForProviderLoad,
+} from "../columnModel";
 
 const BACKLOG_COLUMN = "Backlog";
 const DEFAULT_PROVIDER_SENTINEL = "__default__";
@@ -164,8 +168,13 @@ export function ColumnSettingsDialog({
       setItems((prev) => prev.map((c) => (c.id === id ? col : c)));
       setEditingId(null);
       onChanged();
-    } catch {
-      toast.error("Failed to update column");
+    } catch (e) {
+      // Surface the backend's reason. The co-validation guard returns a 422
+      // that names the offending pair ("model 'opus' is not valid for
+      // provider 'minimax'; known options: [...]") and apiClient rethrows it
+      // as error.message — swallowing that behind a generic string is what
+      // left the stale-column failure undiagnosable.
+      toast.error(e instanceof Error ? e.message : "Failed to update column");
     }
   };
 
@@ -185,6 +194,15 @@ export function ColumnSettingsDialog({
 
   const isBacklog = (name: string) => name === BACKLOG_COLUMN;
   const usedAgents = items.map((c) => c.default_agent).filter(Boolean);
+
+  // Only one column is in edit mode at a time (`editingId`), so the edit
+  // row's provider/model derivation is component-level, not per-column.
+  const editProviderResolved =
+    editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider;
+  const editModelOptions =
+    editProviderResolved === "minimax"
+      ? minimaxOptions
+      : modelSuggestionsForProvider(editProviderResolved, modelOptions);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -263,25 +281,59 @@ export function ColumnSettingsDialog({
                     <label htmlFor={`default-model-${col.id}`} className="sr-only">
                       Default model
                     </label>
-                    <input
-                      id={`default-model-${col.id}`}
-                      list={`model-suggestions-${col.id}`}
-                      className="h-8 w-32 rounded border bg-background px-2 text-sm"
-                      placeholder="Default model"
-                      value={editModel}
-                      onChange={(e) => setEditModel(e.target.value)}
-                    />
-                    <datalist id={`model-suggestions-${col.id}`}>
-                      {((editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider) === "minimax"
-                        ? minimaxOptions
-                        : modelSuggestionsForProvider(
-                            editProvider === DEFAULT_PROVIDER_SENTINEL ? null : editProvider,
-                            modelOptions,
-                          )
-                      ).map((m) => (
-                        <option key={m} value={m} />
-                      ))}
-                    </datalist>
+                    {/*
+                      Providers whose model set the backend enforces (422 on
+                      an unknown model) get a real dropdown; the rest keep
+                      free text.
+
+                      Why not a datalist for both: an `<input list>` filters
+                      its suggestions by what is already in the field, so a
+                      column stored as (minimax, opus) showed ZERO MiniMax
+                      options — the models were present in the DOM but
+                      unreachable. That was the "minimax shows no models"
+                      report. A <select> always renders every option, so no
+                      field value can filter the list out of existence.
+
+                      Native <select> rather than the Radix Select used for
+                      agent/provider above: Radix only mounts its items while
+                      open, which is both untestable in jsdom (see the note
+                      around the datalist test) and needless here — this is a
+                      plain one-of-N choice with no custom item rendering.
+                    */}
+                    {hasClosedModelSet(editProviderResolved) ? (
+                      <select
+                        id={`default-model-${col.id}`}
+                        className="h-8 w-32 rounded border bg-background px-2 text-sm"
+                        value={editModel}
+                        onChange={(e) => setEditModel(e.target.value)}
+                      >
+                        {/* Empty = "no column default"; the dispatch chain
+                            picks the model (for minimax that resolves to
+                            MINIMAX_DEFAULT_MODEL). */}
+                        <option value="">Default</option>
+                        {editModelOptions.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <>
+                        <input
+                          id={`default-model-${col.id}`}
+                          list={`model-suggestions-${col.id}`}
+                          className="h-8 w-32 rounded border bg-background px-2 text-sm"
+                          placeholder="Default model"
+                          value={editModel}
+                          onChange={(e) => setEditModel(e.target.value)}
+                        />
+                        <datalist id={`model-suggestions-${col.id}`}>
+                          {editModelOptions.map((m) => (
+                            <option key={m} value={m} />
+                          ))}
+                        </datalist>
+                      </>
+                    )}
                     <button
                       type="button"
                       className="text-[10px] text-muted-foreground hover:text-foreground text-left"
@@ -377,7 +429,20 @@ export function ColumnSettingsDialog({
                           setEditingId(col.id);
                           setEditAgent(col.default_agent ?? "");
                           setEditProvider(col.default_provider ?? DEFAULT_PROVIDER_SENTINEL);
-                          setEditModel(col.default_model ?? "");
+                          // Rows persisted before the (provider, model)
+                          // co-validation landed can hold an invalid pair —
+                          // the live board had (minimax, opus). Loading that
+                          // verbatim put the form in a state the backend
+                          // refuses to save, so the column could not be
+                          // repaired through the UI. Drop the unusable value
+                          // instead of presenting it as the current setting.
+                          setEditModel(modelForProviderLoad(
+                            col.default_model,
+                            col.default_provider,
+                            col.default_provider === "minimax"
+                              ? minimaxOptions
+                              : modelSuggestionsForProvider(col.default_provider, modelOptions),
+                          ));
                           setEditMaxSessions(col.max_sessions);
                         }}
                       >
