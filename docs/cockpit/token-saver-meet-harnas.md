@@ -139,7 +139,7 @@ zich kan vergissen).
 
 ```bash
 cd /home/vdvgu/claude-cockpit
-bash scripts/test_measure_token_saver.sh   # 30/30 unit-asserts, exit 0
+bash scripts/test_measure_token_saver.sh   # 34/34 unit-asserts, exit 0
 
 # Vier-run counterbalanced compare, ~6–12 minuten wall-clock
 CLAUDE_MODEL=sonnet \
