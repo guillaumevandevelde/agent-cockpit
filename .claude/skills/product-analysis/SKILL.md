@@ -51,22 +51,36 @@ sentence is the analysis — see `9router-integratie-analyse.md` §4.
 
 ## Step 1 — pin the scope from the card
 
-Read the card and write down, before fetching anything:
+Read the card and write down, before fetching anything. The card carries
+its scope in up to four fixed fields in the description — the
+`intake-authoring`-skill publishes the same labels so the contract is
+defined exactly once:
 
-- **The URL / product** and what kind of thing it is.
-- **The user's premise, verbatim** (quote it in the doc — it becomes the
-  `Trigger:` block).
-- **The focus questions**, if the card names any ("kijk vooral naar hoe zij
-  X doen"). If the card names none, default to: what do they have that we
-  lack, and what do we do that they don't.
-- **The depth**: is this a *learning* analysis (`type: analysis`) or a
+- **`URL/product`** — the URL or product name, and what kind of thing it is.
+- **`Premisse/aanleiding`** — the user's premise, **verbatim** (quote it in
+  the doc — it becomes the `Trigger:` block). This is the field that the
+  *twee regels die het meest wegen* (top of this skill) will test against
+  measured facts.
+- **`Focusvragen`** — the focus questions, if any ("kijk vooral naar hoe
+  zij X doen"). Field value is the literal string **`geen — gebruik de
+  standaard`** when the user has no specific question; treat that as
+  *default focus: what do they have that we lack, and what do we do that
+  they don't*.
+- **`Diepgang`** — is this a *learning* analysis (`type: analysis`) or a
   *go/no-go on adopting/integrating* (`type: decision` + a row in
   `decisions.md`)? A card that asks "moeten we dit integreren?" is a
   decision doc; "wat kunnen we leren van X?" is an analysis doc.
 
-If the card is a bare title with a URL and no premise at all, do **not**
-`report_impediment` for that alone — default to the generic focus above and
-say so in the doc. Escalate only on a real product fork (see Step 7).
+The labels are fixed strings (`URL/product`, `Premisse/aanleiding`,
+`Focusvragen`, `Diepgang`) because the `intake-authoring`-skill emits
+exactly those — keep them in sync if either side evolves.
+
+**Legacy bare-title cards.** If the card is a bare title with a URL and no
+premise at all (the existing-kaart form, e.g. `87b99d2d…`), do **not**
+`report_impediment` for that alone — default to the generic focus above
+and say so in the doc. The four fixed-field contract is the *forward-
+looking* form; legacy cards stay on the legacy default. Escalate only on
+a real product fork (see Step 7).
 
 ## Step 2 — ground *their* facts (with a date and a commit)
 
