@@ -111,6 +111,7 @@
 - [Analyse — Volgbaarheid van het project voor de product owner](./product-owner-volgbaarheid-analyse.md): type=analysis status=active
 - [Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel](./recurring-cadence-proposal.md): type=analysis status=proposed
 - [Analyse — Run vasthouden + gebufferde events over een transport-onderbreking](./run-hold-buffered-events-analyse.md): type=analysis status=decided
+- [Analyse — waarom sessies op hun abonnementslimiet blijven hangen (en de auto-dispatcher ze niet terugpakt)](./sessie-limiet-auto-dispatch-analyse.md): type=analysis status=active
 - [Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse](./spawn-test-bridge-sessions-analyse.md): type=analysis status=active
 - [Spec-driven development als single source of truth — analyse](./spec-driven-development-analysis.md): type=analysis status=active
 - [Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor](./spike-same-vendor-multi-account-isolation.md): type=analysis status=decided
