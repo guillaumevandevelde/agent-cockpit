@@ -268,6 +268,8 @@ moet **kaarttekst = prompt = uitvoerbare instructie** daar kunnen vinden, niet o
 
 **Kost:** één documentwijziging, nul code. Hoogste ratio van deze analyse.
 
+✅ **Geïmplementeerd (kaart 985311943f3044bab9b5b914a7629c7f)** — `SECURITY.md` is uitgebreid met de vier secties die §4.3.1–§4.3.4 noemen: een **Trust Model** (trusted = lokaal user-OS-account + zelfgeschreven config; untrusted = kaarttekst, plan/spec-attachments, geïmporteerde `CLAUDE.md`/`AGENTS.md`, transcript-content, MCP-registry/skills.sh-installs); **By Design (Not a Defect)** (skip-permissions-dispatch, agent's shell-and-fs-toegang, plaintext config, no-human-in-the-loop auto-dispatch, sandbox alleen voor `product-*`/`untrusted`); **Honest Note on Controls We Do Not Yet Have** (in-plaats: worktree-isolatie, `ProjectSecurityProfile`, `check-kanban-meta-security-conflicts.sh`, gitleaks/Semgrep, local-only; not-in-place: risk-class als advisory-only default, geen OS-keychain, geen Workspace-Trust-gate, geen prompt-injection-scan); **In-Scope vs. Out-of-Scope** voor rapporteurs. Elke feitelijke claim in de doc is geverifieerd tegen de code; de verificatie-trail staat in de commit-message, niet in de doc zelf (zo blijft het leesbaar als security-prose, niet als verification-log). Geen codewijziging in deze kaart, zoals §4.3 beloofde.
+
 ### 4.4 Kleinere leerpunten (noteren, niet nu bouwen)
 
 - **⌘K vindt maar opent niet.** `useCommandPaletteData.ts:58` gooit de kaart-id weg terwijl
