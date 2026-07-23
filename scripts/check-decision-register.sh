@@ -76,20 +76,30 @@ register_uitkomst_for() {
   awk -v target="$1" '
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     {
-      # Find the markdown link reference `./<name>)` in the row. Anchoring
-      # on the closing form of the doc-link cell keeps us robust against
-      # `|` characters inside the Uitkomst cell.
+      # Find the markdown link reference `./<name>)` in the row. We anchor on
+      # the link so a Uitkomst cell containing its own `|` is not truncated
+      # by an over-eager split (kaart 225a77e8…).
       link = "(./" target ")"
       i = index($0, link)
       if (i == 0) next
-      # substr stops BEFORE the closing `])` of the markdown link — i-3 skips
-      # the `](` between the doc-link cell and our Uitkomst slice.
+      # substr ends 3 chars before `(` — for a `*.md`-named doc that lands on
+      # the last `d` of `a-decision.md` (i.e., still inside the link text),
+      # so the substring includes the cell prefix `[\`a-decision.md` and the
+      # trailing `\`](` is cut. We drop that cell prefix as parts[n] in the
+      # join loop below; the offset is therefore not "lands on the cell
+      # boundary" but "leaves the cell prefix as a discardable fragment".
       uitkomst = substr($0, 1, i - 3)
-      # Drop leading "| Datum | Vraag | " — parts[1] is empty (pre-`|`),
-      # parts[2..4] are Datum/Vraag/Uitkomst. We want parts[4].
+      # Split on `|` to find cell boundaries. parts[1] is empty (pre-`|`);
+      # parts[2..3] are Datum/Vraag; parts[4..n-1] are Uitkomst (rejoined with
+      # `|` so an internal `|` survives); parts[n] is the partial doc-link
+      # cell start, which we drop. This used to take only parts[4], silently
+      # truncating any Uitkomst containing `|` (kaart 225a77e8…).
       n = split(uitkomst, parts, "|")
       if (n < 4) next
       cell = parts[4]
+      for (k = 5; k < n; k++) {
+        cell = cell "|" parts[k]
+      }
       print trim(cell)
     }
   ' "$REGISTER"
@@ -157,7 +167,11 @@ while IFS= read -r -d '' f; do
       if [ -z "$val" ]; then
         problems+=("$field")
       fi
-      eval "val_${field}='$val'"
+      # Quote-safe assignment. Previously `eval "val_${field}='$val'"` parsed the
+      # value through a single-quoted shell string, which silently dropped any
+      # `'` characters from values like `work_type='analysis'`. printf -v writes
+      # the value verbatim (kaart 225a77e8…).
+      printf -v "val_${field}" '%s' "$val"
     done
 
     # Datum must look like YYYY-MM-DD when present

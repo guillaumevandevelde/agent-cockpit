@@ -196,6 +196,45 @@ check "multi → does NOT report 6" '! echo "$out" | grep -qE "WARNING: 6 decisi
 check "multi → exactly 3 list lines" '[ "$(echo "$out" | grep -cE "^  - .+-decision\.md  \(")" -eq 3 ]'
 
 # ----------------------------------------------------------------------------
+echo "Task 14: --check-headers does NOT drift when Uitkomst contains a single quote (regression: eval-with-quotes strips ')"
+sq="$TMP/sq"; mkdir -p "$sq"
+# Register row: Uitkomst cell contains the canonical "work_type='analysis'" form
+# (single quotes are routine in code-idiom Uitkomsten in this repo).
+printf "%s\n%s\n%s\n" "# reg" "" "| d | v | work_type='analysis' (single quotes) | [\`a-decision.md\`](./a-decision.md) | x |" > "$sq/decisions.md"
+cat > "$sq/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `abc12345`
+**Uitkomst:** work_type='analysis' (single quotes)
+EOF
+out=$(DECISIONS_DIR="$sq" bash "$SUT" --check-headers 2>&1); rc=$?
+check "sq → exit 0" '[ "$rc" -eq 0 ]'
+# CLAUDE.md gotcha: assert the EXACT clean-state line, not a permissive "^OK:|WARNING:"
+# alternation that passes in both broken and fixed states.
+check "sq → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
+check "sq → NO WARNING line emitted" '! echo "$out" | grep -qE "WARNING:"'
+
+# ----------------------------------------------------------------------------
+echo "Task 15: --check-headers does NOT drift when Uitkomst contains a pipe (regression: split-on-| truncates cell)"
+pipedir="$TMP/pipe"; mkdir -p "$pipedir"
+# Register row: Uitkomst cell literally contains "analysis|feature|bug|chore" — the WORK_TYPES
+# enum. The doc carries the same cell verbatim. The anchor-on-doc-link strategy is
+# supposed to make this robust against internal `|`, but the awk still splits on `|`.
+printf "%s\n%s\n%s\n" "# reg" "" "| d | v | analysis|feature|bug|chore (enum) | [\`a-decision.md\`](./a-decision.md) | x |" > "$pipedir/decisions.md"
+cat > "$pipedir/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `abc12345`
+**Uitkomst:** analysis|feature|bug|chore (enum)
+EOF
+out=$(DECISIONS_DIR="$pipedir" bash "$SUT" --check-headers 2>&1); rc=$?
+check "pipe → exit 0" '[ "$rc" -eq 0 ]'
+check "pipe → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
+check "pipe → NO WARNING line emitted" '! echo "$out" | grep -qE "WARNING:"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
