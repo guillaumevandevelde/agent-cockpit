@@ -31,6 +31,15 @@
 #     `scripts/test_` so CLAUDE.md prose like "test the foo bar" doesn't
 #     false-match. The on-disk glob is `scripts/test_*.sh` for the same
 #     reason.
+#   - A literal `scripts/test_*.sh` (with `*`) in the `# Test` block is
+#     treated as a family-level reference — it implicitly covers every
+#     on-disk `scripts/test_*.sh`. This matches the "family-level" idiom
+#     already in use on line 78 of CLAUDE.md and lets the block stay
+#     concise as new harnesses are added. Self-improve card 8c7cfc14
+#     tracked the gap where the regex below didn't recognize that form
+#     and falsely reported 19 drift items. The phantom direction is
+#     unaffected: a specific name listed in `# Test` but missing on disk
+#     still fires.
 #   - The bash harness `bash backend/test_commands_api.sh` (in the `# Test`
 #     block, not under `scripts/`) is **not** covered by this check —
 #     its scope is intentionally limited to the `scripts/test_*.sh`
@@ -127,17 +136,31 @@ TEST_BLOCK=$(awk '
 ' "$CLAUDE_MD")
 
 # --- collect harnases referenced in the block ----------------------------
-# Match `scripts/test_<name>.sh` as a substring so e.g. `bash scripts/test_X.sh`
-# and `scripts/test_X.sh ...` both register as a reference. Capture just the
-# basename for the comparison.
+# Match `scripts/test_<name>.sh` (specific name) OR `scripts/test_*.sh`
+# (family-level wildcard) as a substring so e.g. `bash scripts/test_X.sh`,
+# `scripts/test_X.sh ...`, and the family-level `scripts/test_*.sh`
+# all register as a reference. Capture just the basename for the
+# comparison; the `test_*.sh` form is split out below as a family marker.
 # `|| true` swallows grep's exit-1 when there are zero matches — under
 # `set -o pipefail` this would otherwise abort the script on empty
 # fixtures (carve-out scenarios: the `# Test` block is intentionally
 # empty when the only disk harnesses are carved out).
 LISTED=$(printf '%s\n' "$TEST_BLOCK" \
-  | { grep -oE 'scripts/test_[A-Za-z0-9_-]+\.sh' || true; } \
+  | { grep -oE 'scripts/test_(\*|[A-Za-z0-9_-]+)\.sh' || true; } \
   | sed 's|^scripts/||' \
   | sort -u)
+
+# A literal `test_*.sh` entry in the # Test block is a family-level
+# reference: it implicitly covers every `scripts/test_*.sh` on disk.
+# Drop it from LISTED before the per-basename phantom check (no file is
+# literally named `test_*.sh` on disk, so leaving it in would misfire as
+# a phantom), and remember it so MISSING_FROM_CLAUDE short-circuits for
+# every on-disk harness of this family.
+FAMILY_GLOB_REFERENCED=0
+if printf '%s\n' "$LISTED" | grep -qxF 'test_*.sh'; then
+  FAMILY_GLOB_REFERENCED=1
+  LISTED=$(printf '%s\n' "$LISTED" | grep -vxF 'test_*.sh' || true)
+fi
 
 # --- collect harnases on disk -------------------------------------------
 ON_DISK=$(find "$SCRIPTS_DIR" -maxdepth 1 -type f -name 'test_*.sh' \
@@ -178,12 +201,20 @@ is_carved_out() {
 
 # --- diff in both directions ---------------------------------------------
 MISSING_FROM_CLAUDE=()
-while IFS= read -r harness; do
-  [ -z "$harness" ] && continue
-  if ! printf '%s\n' "$LISTED" | grep -qxF "$harness"; then
-    MISSING_FROM_CLAUDE+=("$harness")
-  fi
-done <<< "$ON_DISK"
+if [ "$FAMILY_GLOB_REFERENCED" -eq 1 ]; then
+  # Family-level `scripts/test_*.sh` reference covers every on-disk
+  # harness of this family. Nothing can be missing-from-CLAUDE.md for
+  # the family; the phantom direction below still catches specific
+  # names listed in # Test that don't exist on disk.
+  :
+else
+  while IFS= read -r harness; do
+    [ -z "$harness" ] && continue
+    if ! printf '%s\n' "$LISTED" | grep -qxF "$harness"; then
+      MISSING_FROM_CLAUDE+=("$harness")
+    fi
+  done <<< "$ON_DISK"
+fi
 
 # Apply the carve-out: a basename in CARVE_OUT_ARR is silently dropped from
 # the missing-from-CLAUDE.md list. The phantom direction (next block) is
@@ -226,13 +257,23 @@ if [ "$total_drift" -eq 0 ]; then
     listed_count=$(printf '%s\n' "$LISTED" | wc -l)
   fi
   carved_in_disk=0
+  on_disk_count=0
   for h in $ON_DISK; do
+    on_disk_count=$((on_disk_count + 1))
     if is_carved_out "$h"; then
       carved_in_disk=$((carved_in_disk + 1))
     fi
   done
-  printf 'OK: %d test harness(es) covered (CLAUDE.md # Test + carve-outs)\n' \
-    "$(( listed_count + carved_in_disk ))"
+  if [ "$FAMILY_GLOB_REFERENCED" -eq 1 ]; then
+    # Family-level `scripts/test_*.sh` covers every on-disk harness; the
+    # covered set is the whole family. Carve-outs are already on disk, so
+    # on_disk_count already includes them — no separate addition.
+    printf 'OK: %d test harness(es) covered (CLAUDE.md # Test family-level glob + carve-outs)\n' \
+      "$on_disk_count"
+  else
+    printf 'OK: %d test harness(es) covered (CLAUDE.md # Test + carve-outs)\n' \
+      "$(( listed_count + carved_in_disk ))"
+  fi
   exit 0
 fi
 

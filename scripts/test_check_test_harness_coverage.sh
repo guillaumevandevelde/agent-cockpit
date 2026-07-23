@@ -29,6 +29,14 @@
 #      so the guard reports OK; --strict exits 0.
 #  14. CARVE_OUTS='' disables the carve-out entirely — operators who want
 #      strict-by-default behavior can opt out via the env var.
+#  15. family-level glob — a literal `scripts/test_*.sh` in the # Test
+#      block covers every on-disk harness of that family (self-improve
+#      card 8c7cfc14; regex previously only matched specific names).
+#  16. glob + missing harness — the family glob still covers harnesses
+#      that are NOT explicitly listed (no false-positive drift).
+#  17. glob + phantom specific — a specific name listed alongside the
+#      glob is still checked against the phantom direction (a typo'd
+#      or stale name fires even when the family is covered).
 
 set -u
 
@@ -331,6 +339,86 @@ out=$(CARVE_OUTS="" \
 check "CARVE_OUTS='' → test_cockpit.sh flagged despite default carve-out" \
   'echo "$out" | grep -qF "test_cockpit.sh"'
 check "CARVE_OUTS='' → exit 0 (advisory)"        '[ "$rc" -eq 0 ]'
+
+# ----------------------------------------------------------------------------
+echo 'Task 15: family-level `scripts/test_*.sh` glob in # Test covers all on-disk'
+# A literal `scripts/test_*.sh` reference in the # Test block is a
+# family-level statement — every on-disk `scripts/test_*.sh` is implicitly
+# covered. Self-improve card 8c7cfc14 documented the previous gap where
+# the regex only matched specific names and the family statement fired
+# 19 false-positive drift items.
+glob_scripts="$TMP/glob-scripts"
+glob_claude="$TMP/glob-claude.md"
+seed_scripts "$glob_scripts" test_glob_a.sh test_glob_b.sh test_glob_c.sh
+write_claude "$glob_claude" \
+  "ls scripts/test_*.sh     # family-level reference — covers all on-disk"
+out=$(SCRIPTS_DIR="$glob_scripts" CLAUDE_MD="$glob_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "glob → exit 0 (advisory)"           '[ "$rc" -eq 0 ]'
+check "glob → no WARNING for any on-disk"  '! echo "$out" | grep -qE "WARNING"'
+check "glob → OK line emitted"             'echo "$out" | grep -qE "^OK:.*covered"'
+check "glob → reports family-level in OK"  'echo "$out" | grep -qE "family-level glob"'
+
+# Glob fixture must work under --strict too (CI-usable).
+out=$(SCRIPTS_DIR="$glob_scripts" CLAUDE_MD="$glob_claude" \
+      bash "$SUT" --strict 2>&1); rc=$?
+check "glob + --strict → exit 0"           '[ "$rc" -eq 0 ]'
+check "glob + --strict → no ERROR"         '! echo "$out" | grep -qE "ERROR:"'
+
+# ----------------------------------------------------------------------------
+echo "Task 16: family glob + unlisted on-disk harness → no false-positive drift"
+# The previous regex bug raised a false positive for every on-disk harness
+# not explicitly listed; the glob must suppress that whole direction while
+# the phantom direction stays unaffected (covered in Task 17).
+glob_miss_scripts="$TMP/glob-miss-scripts"
+glob_miss_claude="$TMP/glob-miss-claude.md"
+seed_scripts "$glob_miss_scripts" test_glob_alpha.sh test_glob_beta.sh test_glob_gamma.sh
+write_claude "$glob_miss_claude" \
+  "ls scripts/test_*.sh     # family reference — alpha/beta/gamma are implicitly covered"
+out=$(SCRIPTS_DIR="$glob_miss_scripts" CLAUDE_MD="$glob_miss_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "glob covers all on-disk → exit 0"    '[ "$rc" -eq 0 ]'
+check "glob covers all on-disk → OK"       'echo "$out" | grep -qE "^OK:"'
+check "glob → does not name test_glob_alpha.sh" \
+  '! echo "$out" | grep -qF "test_glob_alpha.sh"'
+check "glob → does not name test_glob_beta.sh" \
+  '! echo "$out" | grep -qF "test_glob_beta.sh"'
+check "glob → does not name test_glob_gamma.sh" \
+  '! echo "$out" | grep -qF "test_glob_gamma.sh"'
+
+# Sanity: drop the glob and confirm the same fixtures WOULD now flag —
+# proves the test exercises the glob path, not a coincidental OK.
+out=$(SCRIPTS_DIR="$glob_miss_scripts" CLAUDE_MD="$glob_miss_claude" \
+      bash "$SUT" 2>&1 | tr -d '\n')
+# Strip the glob line from a copy of the claude fixture and re-run.
+sed 's|^ls scripts/test_\*\.sh.*$||' "$glob_miss_claude" > "$glob_miss_claude.noglob"
+out=$(SCRIPTS_DIR="$glob_miss_scripts" CLAUDE_MD="$glob_miss_claude.noglob" \
+      bash "$SUT" 2>&1); rc=$?
+check "no-glob → exit 0 (advisory)"        '[ "$rc" -eq 0 ]'
+check "no-glob → names test_glob_alpha.sh" \
+  'echo "$out" | grep -qF "test_glob_alpha.sh"'
+
+# ----------------------------------------------------------------------------
+echo "Task 17: family glob + phantom specific name → phantom direction still fires"
+# The glob covers the family for direction A (missing-from-CLAUDE.md), but
+# a specific name listed alongside it must still be checked against
+# direction B (phantom). A typo'd or stale name fires even when the
+# family reference is otherwise valid.
+glob_phantom_scripts="$TMP/glob-phantom-scripts"
+glob_phantom_claude="$TMP/glob-phantom-claude.md"
+seed_scripts "$glob_phantom_scripts" test_glob_real.sh
+write_claude "$glob_phantom_claude" \
+  "ls scripts/test_*.sh     # family reference" \
+  "bash scripts/test_glob_ghost.sh     # typo'd / stale specific name"
+out=$(SCRIPTS_DIR="$glob_phantom_scripts" CLAUDE_MD="$glob_phantom_claude" \
+      bash "$SUT" 2>&1); rc=$?
+check "glob + phantom → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
+check "glob + phantom → WARNING for phantom" \
+  'echo "$out" | grep -qF "test_glob_ghost.sh"'
+check "glob + phantom → phantom direction label" \
+  'echo "$out" | grep -qE "do not exist on disk"'
+check "glob + phantom → no missing-from-CLAUDE drift for real harness" \
+  '! echo "$out" | grep -qF "test_glob_real.sh"'
 
 # ----------------------------------------------------------------------------
 echo ""
