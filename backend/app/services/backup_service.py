@@ -2,14 +2,17 @@
 import json
 import logging
 import re
+import sqlite3
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.database import Backup
 from app.models.schemas import (
     BackupManifest,
@@ -64,6 +67,24 @@ SENSITIVE_TOML_ASSIGNMENT_PATTERN = re.compile(
     r"(?P<value>.+?)"
     r"(?P<suffix>\s*(?:#.*)?)$"
 )
+
+
+def kanban_db_path() -> Path | None:
+    """Filesystem path of the kanban SQLite DB, parsed from the live
+    ``settings.kanban_database_url`` setting.
+
+    Returns ``None`` for non-sqlite URLs (a future Postgres-backed kanban
+    store wouldn't have a single file to ship) and for in-memory sqlite
+    URLs (``":memory:"``). The caller is expected to skip the inclusion
+    when ``None`` — the backup is still valid, just without the board.
+    """
+    url = settings.kanban_database_url
+    if not isinstance(url, str) or not url.startswith("sqlite"):
+        return None
+    db = make_url(url).database
+    if not db or db == ":memory:":
+        return None
+    return Path(db)
 
 
 class BackupService:
@@ -125,6 +146,65 @@ class BackupService:
             paths.append(claude_md)
 
         return paths
+
+    def _get_kanban_db_path(self) -> Path | None:
+        """Path of the kanban SQLite file if it exists on disk.
+
+        The kanban DB is a one-per-machine store (see kanban-pro analyse
+        §4.2 / kanban card 39d2d54a…), so it doesn't naturally fit under
+        a project_path. We include it in the project + full backup set so
+        a project (or whole box) can be restored without losing the
+        board's institutional memory — every `**Summary:**` /
+        ``**Impediment:**`` / Done summary, every deliverable, every
+        dependency graph. Returns ``None`` when the file doesn't exist
+        (the kanban DB may be on a different machine in a Docker deploy)
+        so the backup picks up the rest of the project config without
+        erroring.
+        """
+        path = kanban_db_path()
+        if path is None or not path.is_file():
+            return None
+        return path
+
+    def _snapshot_kanban_db(self, src: Path) -> Path:
+        """Take a transactionally-consistent snapshot of a WAL-mode SQLite
+        DB. Returns the path of the snapshot file (caller is responsible
+        for cleanup).
+
+        The kanban engine runs in WAL mode
+        (``backend/app/kanban/db.py:34-42``); copying ``src`` directly
+        with ``ZipFile.write`` silently misses any frames still in the
+        ``src-wal`` sidecar, which can leave the ZIP holding a board
+        that is hours behind the live one. ``sqlite3.Connection.backup``
+        walks the source through the WAL and writes a fresh
+        non-WAL-mode file, so the resulting snapshot contains every
+        committed frame. This is the same pattern ``app/kanban/db.py``
+        already uses for the legacy-file migration.
+
+        The snapshot lands in the same directory as ``src`` so its
+        ``relative_to(home)`` arcname is the canonical
+        ``<home>/.claude-registry/kanban.db`` form a future restore
+        expects. The ``-wal`` / ``-shm`` sidecars from the snapshot
+        itself are not part of the backup — the snapshot is a fresh,
+        non-WAL-mode file.
+        """
+        # Generate a unique sibling path so concurrent backups don't
+        # race on the same file.
+        suffix = f".snap-{datetime.now().timestamp():.0f}-{id(self)}.db"
+        tmp = src.with_name(src.name + suffix)
+        # The source connection must be opened in the default mode (NOT
+        # read-only) so it sees the WAL frames. The backup API only
+        # reads.
+        src_conn = sqlite3.connect(str(src))
+        try:
+            dst_conn = sqlite3.connect(str(tmp))
+            try:
+                src_conn.backup(dst_conn)
+            finally:
+                dst_conn.close()
+        finally:
+            src_conn.close()
+        return tmp
 
     def _get_codex_config_paths(self) -> list[Path]:
         """Get safe Codex configuration files for export-only backups."""
@@ -457,6 +537,7 @@ class BackupService:
         extra_files: dict[str, str] | None = None,
         file_overrides: dict[Path, str] | None = None,
         provider_inventory: dict[str, Any] | None = None,
+        path_renames: dict[Path, str] | None = None,
     ) -> tuple[Path, int, BackupManifest]:
         """
         Create a zip archive from the given paths.
@@ -466,6 +547,15 @@ class BackupService:
             paths: List of file paths to include
             scope: Backup scope
             base_path: Base path for relative paths in archive
+            extra_files: Synthetic files to include (arcname → content)
+            file_overrides: Map input ``Path`` → replacement content
+                string. Used by the codex branch to inline redacted
+                text. Distinct from ``path_renames`` which only changes
+                the arcname.
+            path_renames: Map input ``Path`` → final arcname string.
+                Used by the kanban snapshot path so the WAL-safe
+                snapshot lands in the ZIP as the canonical
+                ``kanban.db`` rather than ``kanban.db.snap-…db``.
 
         Returns:
             Tuple of (archive_path, size_bytes, manifest)
@@ -496,6 +586,8 @@ class BackupService:
                     except ValueError:
                         arcname = str(file_path)
 
+                if path_renames and file_path in path_renames:
+                    arcname = path_renames[file_path]
                 if file_overrides and file_path in file_overrides:
                     zf.writestr(arcname, file_overrides[file_path])
                 else:
@@ -531,13 +623,54 @@ class BackupService:
         paths = []
         extra_files: dict[str, str] = {}
         file_overrides: dict[Path, str] = {}
+        path_renames: dict[Path, str] = {}
         provider_inventory: dict[str, Any] | None = None
+        # Snapshots to clean up after the zip is written — see kanban
+        # card 39d2d54a…. We don't append the live WAL-mode DB directly
+        # because the ZIP would silently miss any un-checkpointed frames.
+        _kanban_snapshots: list[Path] = []
 
         if scope in ["full", "user"]:
             paths.extend(self._get_user_config_paths())
 
         if scope in ["full", "project"] and project_path:
             paths.extend(self._get_project_config_paths(project_path))
+
+        # The kanban DB is a global store but ticket 39d2d54a… requires
+        # it to ride along in any project / full backup so a board can
+        # be restored after a schema-rot wrecks the live DB. Skipped
+        # silently when the file doesn't exist (the DB may live on a
+        # different volume in a Docker deploy); the helper returns None
+        # in that case. For ``project`` scope it is only included when a
+        # ``project_path`` was supplied — the historical contract that
+        # empty project-scope backups must raise is preserved.
+        #
+        # We do NOT pass the live file to ``paths``: the kanban engine
+        # runs in WAL mode (``backend/app/kanban/db.py:34-42``), and a
+        # plain ``ZipFile.write(kanban.db)`` would silently omit any
+        # frames still resident in ``kanban.db-wal``. Instead, snapshot
+        # the DB through SQLite's online backup API into a temp file
+        # sitting next to the live DB; the snapshot's path is therefore
+        # ``<...>/kanban.db.snap-*.db``. We then rename the arcname
+        # (via ``path_renames``) so the ZIP entry is the canonical
+        # ``<home>/.claude-registry/kanban.db`` a future restore
+        # expects. ``file_overrides`` is wrong here — that map is for
+        # inlining redacted file content (the codex branch).
+        if scope == "full" or (scope == "project" and project_path):
+            kanban_path = self._get_kanban_db_path()
+            if kanban_path is not None:
+                snap = self._snapshot_kanban_db(kanban_path)
+                _kanban_snapshots.append(snap)
+                # Restore-side expects a file named exactly ``kanban.db``
+                # at the canonical location, so the arcname is the
+                # home-relative path of the *live* DB — not the snapshot.
+                home = get_user_home()
+                try:
+                    canonical_arcname = str(kanban_path.relative_to(home))
+                except ValueError:
+                    canonical_arcname = str(kanban_path)
+                path_renames[snap] = canonical_arcname
+                paths.append(snap)
 
         if scope == "codex":
             paths.extend(self._get_codex_config_paths())
@@ -573,7 +706,21 @@ class BackupService:
             extra_files=extra_files,
             file_overrides=file_overrides,
             provider_inventory=provider_inventory,
+            path_renames=path_renames or None,
         )
+
+        # The snapshot is now safely inside the zip — drop the temp
+        # file. Best-effort: a leftover snapshot is recoverable (next
+        # run will overwrite), so a transient cleanup failure must not
+        # fail the backup.
+        for snap in _kanban_snapshots:
+            try:
+                snap.unlink()
+            except OSError as exc:
+                logger.warning(
+                    "Failed to remove kanban snapshot %s: %s",
+                    snap, exc,
+                )
 
         backup = Backup(
             name=name,

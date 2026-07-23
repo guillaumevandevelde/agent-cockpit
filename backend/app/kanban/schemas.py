@@ -743,3 +743,103 @@ class WachtrijResponse(BaseModel):
     project_key: str
     total: int
     items: list[WachtrijItem]
+
+
+# Board export — the durably-serializable envelope that lets the project
+# out-live the SQLite file itself (kanban card 39d2d54a… / kanban-pro
+# analyse §4.2). JSON by design: lossy markdown would lose ``depends_on``,
+# the per-card dispatch breadcrumbs, and the op-log-derived state; a
+# re-import path is intentionally out of scope (see acceptance criterion
+# #5 of the card), but lossless JSON is the safe substrate to build one on.
+
+class BoardExportComment(BaseModel):
+    """One comment op harvested from the op-log. Kept minimal — just the
+    surfaced text + the audit fields (``op_id`` / ``hlc`` / ``created_at``)
+    so a re-import can rebroadcast the op."""
+    model_config = ConfigDict(from_attributes=True)
+    op_id: str
+    hlc: str | None = None
+    text: str
+    created_at: datetime
+
+
+class BoardExportDeliverable(BaseModel):
+    """Deliverable row — same shape as ``DeliverableResponse`` plus a
+    stable id so the rows are identifiable across cards in the export."""
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    kind: str
+    ref: str
+    created_at: datetime
+
+
+class BoardExportAttachment(BaseModel):
+    """Attachment metadata only. The binary lives on disk and is *not*
+    included in the JSON blob — callers that need the file should rely on
+    the regular backup zip (which now also includes the kanban DB)."""
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    storage_path: str
+    created_at: datetime
+
+
+class BoardExportCard(BaseModel):
+    """One card, fully flattened. Every persisted column is surfaced so
+    the JSON is a true snapshot of the board at ``exported_at``. The
+    ``metadata`` field uses the same alias dance as ``CardResponse`` so
+    the SQLAlchemy attribute (``meta``) and the JSON key (``metadata``)
+    stay aligned."""
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_key: str
+    title: str
+    description: str
+    column: str
+    rank: str
+    priority: str | None = None
+    labels: list | None = None
+    work_type: str | None = None
+    agent: str | None = None
+    model: str | None = None
+    column_overrides: dict | None = None
+    transport: str | None = None
+    resume_session_id: str | None = None
+    resume_project_folder: str | None = None
+    scheduled_at: str | None = None
+    dispatch_started_at: str | None = None
+    dispatch_session_id: str | None = None
+    dispatch_project_folder: str | None = None
+    dispatch_model: str | None = None
+    dispatch_provider: str | None = None
+    dispatch_failures: int = 0
+    release_without_terminal_move: int = 0
+    claimed_by: str | None = None
+    claimed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    analyst_agent_id: str | None = None
+    executor_agent_id: str | None = None
+    parent_card_id: str | None = None
+    analyst_run_id: str | None = None
+    depends_on: list[str] | None = None
+    metadata: dict | None = Field(
+        default=None, validation_alias=AliasChoices("meta", "metadata"),
+    )
+    deliverables: list[BoardExportDeliverable] = []
+    attachments: list[BoardExportAttachment] = []
+    comments: list[BoardExportComment] = []
+
+
+class BoardExportResponse(BaseModel):
+    """Envelope for ``GET /api/v1/kanban/export``.
+
+    ``format_version`` lets future re-import paths detect the wire shape
+    instead of guessing. Bump it when fields are renamed/added/removed."""
+    project_key: str
+    format_version: int = 1
+    exported_at: datetime
+    columns: list[ColumnResponse]
+    cards: list[BoardExportCard]

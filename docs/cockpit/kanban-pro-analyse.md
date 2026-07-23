@@ -228,6 +228,11 @@ smalle overname is een export + backup-dekking, niet een opslagmigratie.
 **Kost:** een serializer over het bestaande `service.get_card`-oppervlak en een pad-toevoeging
 in `backup_service.py`. **Ongemeten schatting** van de omvang; niet gemeten binnen deze spike.
 
+✅ **Geïmplementeerd (kaart 39d2d54adb574c218c077d1d0d884442)** — `GET /api/v1/kanban/export`
+serialiseert kaarten + kolommen + deliverables + comments + attachments verliesvrij in JSON
+(`format_version=1`); `backup_service.create_backup` neemt de kanban-DB mee voor project- en
+full-scope backups. Import/restore-flow blijft buiten scope (kaart-acceptance #5).
+
 ### 4.3 ⭐ Hun `SECURITY.md` is een dreigingsmodel — de onze is een meldadres
 
 Dit is de vondst die het meest reist, juist omdat het het enige inhoudelijke document in
