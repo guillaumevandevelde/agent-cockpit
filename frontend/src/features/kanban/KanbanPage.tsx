@@ -210,16 +210,24 @@ export default function KanbanPage() {
   );
 
   // Per-card operational state for the ReadyStateBadge. Mirrors the backend
-  // `meets_dep_prerequisites` semantic so the UI badge and the dispatcher's
-  // own dep check agree: a card is "ready" iff every entry in `depends_on`
-  // is present and Done. Precedence, highest first: completed (column ===
-  // "Done") → impeded (column === "Impediment") → dependent (parked in
-  // "Awaiting Subtasks", waiting on its own children) → in_progress
-  // (claimed_by starts with "agent:") → missing_dep (depends_on a deleted
-  // card — permanent block) → dependent (open depends_on on a live card) →
-  // ready. The column-based terminal/parked states win over the claim so a
-  // card with a stale claim sitting in Done/Impediment/Awaiting Subtasks
-  // doesn't show as in_progress (analyse-levenscyclus-decision.md §3/§5).
+  // dispatcher filters (`_is_due`, `_awaiting_plan_ref`, `_is_gated`,
+  // `meets_dep_prerequisites`) so the UI badge and what the dispatcher will
+  // actually pick up stay in sync. Precedence, highest first: completed
+  // (column === "Done") → impeded (column === "Impediment") → dependent
+  // (parked in "Awaiting Subtasks", waiting on its own children) →
+  // in_progress (claimed_by starts with "agent:") → gated
+  // (metadata.gated_on non-empty — permanent, human-actionable) →
+  // missing_dep (depends_on a deleted card — permanent, human-actionable) →
+  // awaiting_plan_ref (child card without a plan_ref deliverable yet —
+  // temporary, self-resolves once the analyst's `add_plan_attachment`
+  // runs) → dependent (open depends_on on a live card — temporary,
+  // self-resolves when the sibling moves to Done) → ready. The
+  // column-based terminal/parked states win over the claim so a card with
+  // a stale claim sitting in Done/Impediment/Awaiting Subtasks doesn't
+  // show as in_progress (analyse-levenscyclus-decision.md §3/§5).
+  // kanban-pro-analyse.md §4.1 motivated the two new tiers — a child
+  // card without plan_ref and a gated card used to read as green "Ready"
+  // while the dispatcher silently skipped them.
   const cardMeta = useMemo(() => {
     const cardsById = new Map(cards.map((c) => [c.id, c]));
     const meta = new Map<string, CardMeta>();
@@ -249,6 +257,20 @@ export default function KanbanPage() {
         meta.set(card.id, { readyState: "in_progress", blockerTitles: [] });
         continue;
       }
+      // Operator-set business gate. Mirrors backend `_is_gated`:
+      // `bool(card.metadata["gated_on"])` — empty string and missing key
+      // both mean "no gate" (fail open). Wins over missing_dep /
+      // awaiting_plan_ref / dependent because the operator set it
+      // deliberately and a human must clear it.
+      const gatedOn = card.metadata?.gated_on;
+      if (typeof gatedOn === "string" && gatedOn.length > 0) {
+        meta.set(card.id, {
+          readyState: "gated",
+          blockerTitles: [],
+          gatedOn,
+        });
+        continue;
+      }
       const deps = card.depends_on ?? [];
       const blockerTitles: string[] = [];
       const missingDepIds: string[] = [];
@@ -266,14 +288,40 @@ export default function KanbanPage() {
         }
       }
       // A missing dep is the more severe, human-actionable signal, so it wins
-      // over a live dependent state.
-      const readyState =
-        missingDepIds.length > 0
-          ? "missing_dep"
-          : blockerTitles.length > 0
-            ? "dependent"
-            : "ready";
-      meta.set(card.id, { readyState, blockerTitles, missingDepIds });
+      // over a live dependent state or an await-plan_ref wait.
+      if (missingDepIds.length > 0) {
+        meta.set(card.id, {
+          readyState: "missing_dep",
+          blockerTitles: [],
+          missingDepIds,
+        });
+        continue;
+      }
+      // Child card (has parent_card_id) whose analyst has not yet attached
+      // the `plan_ref` deliverable. Mirrors backend `_awaiting_plan_ref`.
+      // Wins over a live `dependent` wait because it's the *real* blocker
+      // for this card — once the analyst attaches the plan, the card is
+      // dispatchable regardless of its `depends_on` state.
+      if (card.parent_card_id) {
+        const hasPlanRef = (card.deliverables ?? []).some(
+          (d) => d.kind === "plan_ref",
+        );
+        if (!hasPlanRef) {
+          meta.set(card.id, {
+            readyState: "awaiting_plan_ref",
+            blockerTitles: [],
+          });
+          continue;
+        }
+      }
+      if (blockerTitles.length > 0) {
+        meta.set(card.id, {
+          readyState: "dependent",
+          blockerTitles,
+        });
+        continue;
+      }
+      meta.set(card.id, { readyState: "ready", blockerTitles: [] });
     }
     return meta;
   }, [cards]);

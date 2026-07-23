@@ -9,6 +9,10 @@ export interface CardMeta {
   // Dangling `depends_on` ids (deps whose card no longer exists). Populated
   // only for `readyState === "missing_dep"`; drives the badge tooltip.
   missingDepIds?: string[];
+  // Operator-set `metadata.gated_on` string. Populated only for
+  // `readyState === "gated"`; drives the badge tooltip so the operator can
+  // see WHAT the card is waiting on, not just that it is.
+  gatedOn?: string;
 }
 
 // Per-parent subtask rollup (done/total counts among cards whose
@@ -118,6 +122,7 @@ export function Column({
                 readyState={meta?.readyState}
                 blockerTitles={meta?.blockerTitles}
                 missingDepIds={meta?.missingDepIds}
+                gatedOn={meta?.gatedOn}
                 subtasks={subtaskCounts?.get(c.id)}
                 projectPath={projectPath}
                 onPromote={onPromote}

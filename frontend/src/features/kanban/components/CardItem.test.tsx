@@ -293,6 +293,67 @@ describe("CardItem ReadyStateBadge", () => {
     expect(screen.queryByText("Impeded")).toBeNull();
     expect(screen.queryByText("Completed")).toBeNull();
   });
+
+  it("renders an 'Awaiting plan' badge when readyState='awaiting_plan_ref' is supplied", () => {
+    // Child card waiting for the analyst's plan_ref deliverable (race fix
+    // described in dispatch._awaiting_plan_ref). The badge must read
+    // distinctly from "Dependent" so the operator can tell at a glance that
+    // this card is dispatchable as soon as the analyst's
+    // `add_plan_attachment` lands — not when a sibling moves to Done.
+    render(
+      <CardItem
+        card={{ ...baseCard, parent_card_id: "parent-card" }}
+        readyState="awaiting_plan_ref"
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByText("Awaiting plan");
+    expect(badge).not.toBeNull();
+    expect(badge.getAttribute("data-ready-state")).toBe("awaiting_plan_ref");
+    expect(badge.getAttribute("title")).toBe(
+      "Waiting on the analyst's plan_ref deliverable — will resolve once add_plan_attachment runs.",
+    );
+    expect(screen.queryByText("Dependent")).toBeNull();
+  });
+
+  it("renders a 'Gated' badge whose tooltip echoes the gated_on trigger string", () => {
+    // kanban-pro-analyse.md §4.1 AC3: surface the operator's trigger reason
+    // via the existing `title` attribute so the operator can see WHAT the
+    // card is waiting on, not just that it is. The amber tier signals
+    // "permanent / human-actionable" — same severity as missing_dep.
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          metadata: { gated_on: "second-executor-provider-onboarded" },
+        }}
+        readyState="gated"
+        gatedOn="second-executor-provider-onboarded"
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByText("Gated");
+    expect(badge).not.toBeNull();
+    expect(badge.getAttribute("data-ready-state")).toBe("gated");
+    expect(badge.getAttribute("title")).toContain(
+      "second-executor-provider-onboarded",
+    );
+    expect(screen.queryByText("Ready")).toBeNull();
+  });
+
+  it("renders a 'Gated' badge without a tooltipless fallback when gatedOn is omitted", () => {
+    // Defensive: callers must pass the gated_on value through to get the
+    // tooltip — if they don't, the badge still renders (the card is still
+    // gated) but the tooltip degrades to the generic reason.
+    render(
+      <CardItem card={baseCard} readyState="gated" onOpen={() => {}} />,
+    );
+    const badge = screen.getByText("Gated");
+    expect(badge).not.toBeNull();
+    expect(badge.getAttribute("title")).toBe(
+      "Card is gated by a business trigger — clear metadata.gated_on to dispatch.",
+    );
+  });
 });
 
 // kanban card 81797046: a parent card with ≥1 child (`parent_card_id`) shows

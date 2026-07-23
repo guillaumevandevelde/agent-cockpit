@@ -287,4 +287,173 @@ describe("KanbanPage ready-state precedence", () => {
     expect(stateOf("card-dependent")).toBe("dependent");
     expect(stateOf("card-ready")).toBe("ready");
   });
+
+  // kanban-pro-analyse.md §4.1: the dispatcher holds two additional filters
+  // the UI didn't mirror — child cards awaiting the analyst's plan_ref
+  // delivery, and operator-set `metadata.gated_on` business gates. Both used
+  // to read as green "Ready" while the dispatcher silently skipped them.
+  it("flags a child card without a plan_ref deliverable as 'awaiting_plan_ref'", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({ id: "parent-card", column: "Backlog" }),
+        makeCard({
+          id: "child-without-plan",
+          parent_card_id: "parent-card",
+          deliverables: [],
+        }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() =>
+      expect(stateOf("child-without-plan")).toBe("awaiting_plan_ref"),
+    );
+  });
+
+  it("does NOT flag a child card that already has a plan_ref deliverable", async () => {
+    // Negative case: a child with its plan_ref attached is dispatch-eligible
+    // and must read as "ready" — pinning this guards against a regression
+    // where the UI blanket-blocks every child card.
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({
+          id: "child-with-plan",
+          parent_card_id: "parent-card",
+          deliverables: [
+            {
+              id: "deliv-1",
+              kind: "plan_ref",
+              ref: "plan-deliverable-id",
+              created_at: "2026-07-16T00:00:00Z",
+            },
+          ],
+        }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() => expect(stateOf("child-with-plan")).toBe("ready"));
+  });
+
+  it("flags a card with a non-empty metadata.gated_on as 'gated'", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({
+          id: "gated-card",
+          metadata: { gated_on: "second-executor-provider-onboarded" },
+        }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() => expect(stateOf("gated-card")).toBe("gated"));
+  });
+
+  it("does NOT flag a card with an empty metadata.gated_on as gated", async () => {
+    // Gated state mirrors the backend's `bool(gated_on)` semantics — empty
+    // string and missing key both mean "no gate", so the UI must NOT show
+    // "Gated" by accident (otherwise the user setting ``gated_on: ""`` to
+    // clear the gate would still flag the card as blocked).
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({ id: "empty-gate", metadata: { gated_on: "" } }),
+        makeCard({ id: "no-metadata" }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() => expect(stateOf("empty-gate")).toBe("ready"));
+    expect(stateOf("no-metadata")).toBe("ready");
+  });
+
+  it("precedence: gated > missing_dep > awaiting_plan_ref > dependent > ready", async () => {
+    // Same tier as missing_dep: a permanent, human-actionable block. Mirrors
+    // the dispatcher's own filter ordering (gated is checked alongside
+    // meets_dep_prerequisites in _next_card).
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        // gated AND missing_dep — gated wins (explicit human signal beats
+        // accidental dangling-dep).
+        makeCard({
+          id: "gated-and-missing",
+          depends_on: ["deleted-parent"],
+          metadata: { gated_on: "trigger-x" },
+        }),
+        // gated AND awaiting_plan_ref — gated wins.
+        makeCard({
+          id: "gated-child-no-plan",
+          parent_card_id: "parent-card",
+          deliverables: [],
+          metadata: { gated_on: "trigger-x" },
+        }),
+        // gated AND live-dep — gated wins.
+        makeCard({
+          id: "gated-and-dependent",
+          depends_on: ["card-live-parent"],
+          metadata: { gated_on: "trigger-x" },
+        }),
+        makeCard({ id: "card-live-parent", column: "Backlog" }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() => expect(stateOf("gated-and-missing")).toBe("gated"));
+    expect(stateOf("gated-child-no-plan")).toBe("gated");
+    expect(stateOf("gated-and-dependent")).toBe("gated");
+  });
 });

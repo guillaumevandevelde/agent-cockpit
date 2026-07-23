@@ -111,6 +111,7 @@ export function CardItem({
   readyState,
   blockerTitles,
   missingDepIds,
+  gatedOn,
   subtasks,
   projectPath,
   onPromote,
@@ -120,6 +121,10 @@ export function CardItem({
   readyState?: ReadyState;
   blockerTitles?: string[];
   missingDepIds?: string[];
+  // Operator-set `metadata.gated_on` string. Populated only for
+  // `readyState === "gated"`; surfaces the trigger in the badge tooltip
+  // (kanban-pro-analyse.md §4.1 AC3).
+  gatedOn?: string;
   // Subtask rollup counts (done/total among cards whose parent_card_id
   // points at this card) — drives the compact "N/M subtasks" counter so
   // the operator can scan progress without opening the drawer.
@@ -228,6 +233,7 @@ export function CardItem({
             state={readyState}
             blockerTitles={blockerTitles}
             missingDepIds={missingDepIds}
+            gatedOn={gatedOn}
           />
         )}
         {subtasks && subtasks.total > 0 && (
