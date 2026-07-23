@@ -604,3 +604,209 @@ async def test_delete_dispatch_pause_clears_only_per_provider_when_no_legacy():
 
     async with KanbanSessionLocal() as s:
         assert await list_paused_providers(s) == []
+
+
+# ---- manual per-subscription pause (kaart f056b2888a…) --------------------
+#
+# The endpoint shape mirrors the global /dispatch-pause route (GET reports
+# the state, DELETE/clear is the bulk wipe) but adds a per-provider PUT that
+# toggles one subscription's manual pause at a time. The PUT body is
+# ``{paused: bool}`` so the UI can ship one toggle without first having to
+# read the current value.
+
+
+@pytest.mark.asyncio
+async def test_get_dispatch_pause_includes_manually_paused_providers_field():
+    """GET /dispatch-pause must surface `manually_paused_providers` (empty list
+    by default) so the frontend banner can show the operator toggle state
+    distinctly from the auto-tripped time-based pause. Field always present,
+    even when nothing is paused -- mirroring the `paused_providers` field's
+    always-present contract."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["paused"] is False
+        assert body["paused_until"] is None
+        assert body["manually_paused_providers"] == []
+
+
+@pytest.mark.asyncio
+async def test_put_subscription_pause_turns_a_provider_on():
+    """PUT /dispatch-pause/subscription/{provider} with {paused: true} adds
+    the provider to the manual-pause set, visible on GET and to the
+    dispatcher via is_manually_paused."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.put(
+            "/api/v1/kanban/dispatch-pause/subscription/anthropic",
+            json={"paused": True},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["provider"] == "anthropic"
+        assert body["paused"] is True
+        assert "anthropic" in body["manually_paused_providers"]
+
+        # GET reflects it.
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        assert "anthropic" in r.json()["manually_paused_providers"]
+
+
+@pytest.mark.asyncio
+async def test_put_subscription_pause_can_be_toggled_off():
+    """PUT {paused: false} clears the manual pause for that provider only --
+    the operator can flip the toggle back on without a separate DELETE."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import is_manually_paused
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.put(
+            "/api/v1/kanban/dispatch-pause/subscription/bedrock",
+            json={"paused": True},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["paused"] is True
+
+        r = await ac.put(
+            "/api/v1/kanban/dispatch-pause/subscription/bedrock",
+            json={"paused": False},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["paused"] is False
+        assert "bedrock" not in r.json()["manually_paused_providers"]
+
+    async with KanbanSessionLocal() as s:
+        assert await is_manually_paused(s, "bedrock") is False
+
+
+@pytest.mark.asyncio
+async def test_put_subscription_pause_rejects_unknown_provider():
+    """An unknown provider in the path must surface as 422 — not silently
+    land — so the operator sees the rejection at toggle time and the dispatch
+    gate never queries an unknown subscription."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.put(
+            "/api/v1/kanban/dispatch-pause/subscription/not-a-real-provider",
+            json={"paused": True},
+        )
+        assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+async def test_put_subscription_pause_does_not_touch_other_providers():
+    """Toggling one provider on/off must not affect the manual state of the
+    other providers — independent slots, just like the time-based slots."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        for provider in ("anthropic", "bedrock", "minimax"):
+            r = await ac.put(
+                f"/api/v1/kanban/dispatch-pause/subscription/{provider}",
+                json={"paused": True},
+            )
+            assert r.status_code == 200, r.text
+
+        # All three show as paused on GET.
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        paused = set(r.json()["manually_paused_providers"])
+        assert paused == {"anthropic", "bedrock", "minimax"}
+
+        # Toggle anthropic off — the others stay paused.
+        r = await ac.put(
+            "/api/v1/kanban/dispatch-pause/subscription/anthropic",
+            json={"paused": False},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["manually_paused_providers"] == ["bedrock", "minimax"]
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_pause_clears_manual_pauses_too():
+    """The bulk-clear DELETE /dispatch-pause must wipe manual pauses along
+    with the time-based ones — a single 'Resume auto-dispatch now' click
+    un-freezes everything, regardless of how the freeze started."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import (
+        is_manually_paused,
+        set_paused_until,
+    )
+    from datetime import UTC, datetime, timedelta
+
+    future = datetime.now(UTC) + timedelta(minutes=10)
+
+    async with KanbanSessionLocal() as s:
+        await set_paused_until(s, future, provider="minimax")  # time-based
+        await s.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        # Add a manual pause alongside the time-based one.
+        r = await ac.put(
+            "/api/v1/kanban/dispatch-pause/subscription/anthropic",
+            json={"paused": True},
+        )
+        assert r.status_code == 200, r.text
+        assert "anthropic" in r.json()["manually_paused_providers"]
+
+        # The bulk clear wipes both kinds.
+        r = await ac.delete("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+
+        r = await ac.get("/api/v1/kanban/dispatch-pause")
+        body = r.json()
+        assert body["manually_paused_providers"] == []
+        assert body["paused_providers"] == []
+
+    async with KanbanSessionLocal() as s:
+        assert await is_manually_paused(s, "anthropic") is False
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_pause_reports_cleared_true_for_manual_only():
+    """DELETE /dispatch-pause must report `cleared=true` whenever ANY pause
+    kind was active (manual + time-based + global). FCR-blokkade: the
+    previous implementation mirrored `cleared` off the legacy global slot
+    only, so a manual-only pause was silently wiped but the response said
+    `cleared=false` — the banner treated that as a failure and displayed a
+    false error toast. The operator never saw the resume take effect."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import (
+        is_manually_paused,
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        # Set ONLY a manual pause (no global, no time-based).
+        r = await ac.put(
+            "/api/v1/kanban/dispatch-pause/subscription/anthropic",
+            json={"paused": True},
+        )
+        assert r.status_code == 200, r.text
+
+        # The bulk clear must report cleared=true so the banner refreshes
+        # and the operator sees the resume actually happened.
+        r = await ac.delete("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        assert r.json()["cleared"] is True, (
+            "manual-only pause should still report cleared=true — the "
+            "response must reflect that something was wiped, regardless "
+            "of which kind"
+        )
+
+    async with KanbanSessionLocal() as s:
+        assert await is_manually_paused(s, "anthropic") is False
+
+
+@pytest.mark.asyncio
+async def test_delete_dispatch_pause_reports_cleared_false_when_nothing_was_paused():
+    """Inverse of the above: when no pause of any kind is set, the bulk
+    clear must report `cleared=false` (nothing to do) so the banner can
+    skip the refresh and the operator doesn't see a misleading success."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.delete("/api/v1/kanban/dispatch-pause")
+        assert r.status_code == 200, r.text
+        assert r.json()["cleared"] is False

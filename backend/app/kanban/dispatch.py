@@ -919,6 +919,15 @@ async def _pick_pool_choice(
     cannot block dispatch.
     """
     paused = await _paused_providers_for_pool(session)
+    # Kaart f056b2888a…: merge in the operator's manual pause list. The pool
+    # router treats ``paused_providers`` as a hard skip set; if we don't add
+    # the manual slots here, a pool that contains only manually-paused
+    # entries can still pick one and route the spawn through it — bypassing
+    # the operator toggle. FCR-blokkade: paused = time-based only.
+    from app.kanban.dispatch_pause import list_manually_paused_providers
+    manually_paused = await list_manually_paused_providers(session)
+    if manually_paused:
+        paused = sorted(set(paused) | set(manually_paused))
     try:
         snapshots = await _gather_pool_usage_snapshots(entries)
     except Exception:
@@ -3801,6 +3810,71 @@ async def _provider_for_card(
     )
 
 
+async def _effective_provider_for_pause_gate(
+    session, *, project_key: str, project_path: str, card, target_column: str,
+) -> str | None:
+    """Resolve the provider the manual-pause gate should check against (kaart
+    f056b2888a…).
+
+    Walks the same precedence chain ``_run_card`` actually uses to pick a
+    spawn provider — global override → pool choice → per-card column
+    override → column default — so pausing the subscription the operator
+    *thinks* this card routes to is the subscription the dispatcher skips.
+    The earlier ``_provider_for_card`` helper only checked the last two
+    layers and missed any board-wide override or pool choice, which meant
+    pausing "anthropic" silently held back cards the pool was actually
+    routing to bedrock, and vice versa.
+    """
+    if card is None or not target_column:
+        return None
+    card_overrides = (getattr(card, "column_overrides", None) or {}).get(target_column) or None
+    card_model = getattr(card, "model", None)
+    # ``_phase_cli_id`` is the sync resolver the spawn path uses to map a
+    # card's agent to its CLI id; the pool picker needs this so a manually
+    # paused entry on the wrong CLI doesn't accidentally gate a card that
+    # would have routed to a different CLI. Pass ``known_clis`` so a legacy
+    # ``card.agent`` like ``"engineer"`` (a persona/column name, not a CLI
+    # id) does NOT leak into the pool router — without that filter, the
+    # pool would see no candidates and fall through to the column default,
+    # silently bypassing the operator's pause. FCR-follow-up: this is the
+    # same known_clis plumbing ``_run_card`` uses at line 3345.
+    known_clis = _known_cli_ids()
+    cli_id = _phase_cli_id(card, phase="executor", known_clis=known_clis)
+    async def _gate_pool_picker(entries: list[PoolEntry]) -> PoolEntry | None:
+        return await _pick_pool_choice(
+            session, entries, project_key=project_key, cli_id=cli_id,
+        )
+    resolved = await resolve_effective_provider_and_model(
+        session,
+        project_key=project_key,
+        target_agent=target_column,
+        project_path=project_path,
+        pick_pool=_gate_pool_picker,
+        card_overrides=card_overrides,
+        card_model=card_model,
+    )
+    return resolved["provider"]
+
+
+async def _card_is_manually_paused(
+    session, *, project_key: str, project_path: str, card, target_column: str,
+) -> bool:
+    """True iff the card's *effective* provider is on the operator's manual
+    pause list (kaart f056b2888a…). All dispatch-path gates — auto-tick,
+    dispatch-all, memory retry, bulk orphan redispatch — go through here so
+    they all honour the same precedence (``global override → pool → column
+    override → default``). Returns ``False`` when the chain can't resolve,
+    so a missing-card edge case never wedges a tick."""
+    from app.kanban.dispatch_pause import is_manually_paused
+    provider = await _effective_provider_for_pause_gate(
+        session, project_key=project_key, project_path=project_path,
+        card=card, target_column=target_column,
+    )
+    if provider is None:
+        return False
+    return await is_manually_paused(session, provider)
+
+
 async def _provider_for_cwd(cwd: str) -> str | None:
     """Resolve the provider for a card running in `cwd`, for callers that have
     only a cwd (the Notification hook path). Looks up the card the same way as
@@ -4527,6 +4601,33 @@ async def dispatch_project(
                 cards = [c for c in cards if c.id != card.id]
                 continue
 
+        # Manual per-subscription pause (kaart f056b2888a…): the operator can
+        # toggle a provider off in the toolbar, which must hold back every
+        # card that would have spawned against that subscription — without
+        # claiming or moving the card, so the resume path picks it up unchanged
+        # once the operator toggles it back on. Resolved via the same
+        # precedence the spawn actually uses (global override → pool choice →
+        # per-card override → column default), so pausing "anthropic" holds
+        # back cards the board is actually routing to anthropic — including
+        # cards whose pool-choice falls through to anthropic. FCR-blokkade:
+        # the previous _provider_for_card helper skipped the global-override
+        # and pool layers and could gate against the wrong provider.
+        if await _card_is_manually_paused(
+            session, project_key=project_key, project_path=project_path,
+            card=card, target_column=target_column,
+        ):
+            card_provider = await _effective_provider_for_pause_gate(
+                session, project_key=project_key, project_path=project_path,
+                card=card, target_column=target_column,
+            )
+            logger.info(
+                "dispatch_project: skipping card %s (target_column=%s, "
+                "provider=%s) — manually paused by operator",
+                card.id, target_column, card_provider,
+            )
+            cards = [c for c in cards if c.id != card.id]
+            continue
+
         # Skip child cards whose parents aren't Done yet — _next_card is rank/
         # priority-aware but doesn't know about depends_on, so the dep filter
         # is the dispatcher's responsibility (see app.kanban.dep_resolver).
@@ -4950,6 +5051,26 @@ async def dispatch_all_pending(
             col_counts = _active_session_count_by_column(cards)
             if col_counts.get(target_column, 0) >= col_cap:
                 continue
+        # Manual per-subscription pause (kaart f056b2888a…): the "Dispatch all"
+        # button must not bypass the operator-toggle either, otherwise the
+        # operator would toggle a provider off and see it immediately
+        # re-engaged by the bulk path. Same effective-provider precedence as
+        # the auto-tick gate above (global override → pool → per-card override
+        # → column default).
+        if await _card_is_manually_paused(
+            session, project_key=project_key, project_path=project_path,
+            card=card, target_column=target_column,
+        ):
+            card_provider = await _effective_provider_for_pause_gate(
+                session, project_key=project_key, project_path=project_path,
+                card=card, target_column=target_column,
+            )
+            logger.info(
+                "dispatch_all_pending: skipping card %s "
+                "(target_column=%s, provider=%s) — manually paused",
+                card.id, target_column, card_provider,
+            )
+            continue
         try:
             card_transport = get_transport_for_card(card, transport)
             res = await _run_card(
@@ -4999,6 +5120,33 @@ async def redispatch_all_orphans(
             logger.info(
                 "redispatch_all_orphans: skipping gated orphan %s (gated_on=%r)",
                 card.id, (card.meta or {}).get("gated_on"),
+            )
+            continue
+        # Manual per-subscription pause (kaart f056b2888a…): a bulk
+        # "Redispatch all" must not bypass the operator's subscription
+        # toggle — there's no per-card operator intent in the bulk path.
+        # FCR-blokkade: the previous path skipped this check and let
+        # ``redispatch_card`` spawn paused-subscription cards. The
+        # single-card ``redispatch_card`` path (Card drawer) is an explicit
+        # per-card override and stays unguarded; the bulk path doesn't
+        # qualify, so it gets the gate. ``_resolve_target_column`` already
+        # handles the work_type fallback to "analyst" so we use the same
+        # column resolution as the auto-tick.
+        redispatch_target = await _resolve_target_column(
+            session, card, project_path=project_path, project_key=project_key,
+        )
+        if await _card_is_manually_paused(
+            session, project_key=project_key, project_path=project_path,
+            card=card, target_column=redispatch_target,
+        ):
+            paused_provider = await _effective_provider_for_pause_gate(
+                session, project_key=project_key, project_path=project_path,
+                card=card, target_column=redispatch_target,
+            )
+            logger.info(
+                "redispatch_all_orphans: skipping orphan %s "
+                "(target_column=%s, provider=%s) — manually paused",
+                card.id, redispatch_target, paused_provider,
             )
             continue
         try:
@@ -5344,6 +5492,38 @@ async def _retry_queued_cards(transport: SpawnTransport) -> None:
                                 f"at per-column cap ({col_cap})"
                             )
                             continue
+                else:
+                    # When the project has no per-column caps, we still need a
+                    # target column for the manual-pause gate below. Resolve
+                    # it unconditionally; the cost is one DB lookup and
+                    # matches the auto-tick path.
+                    target_column = await _resolve_target_column(
+                        ks, card_data, project_path=card.project_path,
+                        project_key=card.project_key,
+                        agent_override=card.agent_override,
+                    )
+
+                # Manual per-subscription pause (kaart f056b2888a…): queued
+                # memory retries must honour the operator toggle too, otherwise
+                # a card that was queued before the operator paused Anthropic
+                # would spawn against Anthropic on the next memory-available
+                # tick. FCR-blokkade: the previous path only checked column
+                # caps here and let the card straight through to _run_card.
+                if await _card_is_manually_paused(
+                    ks, project_key=card.project_key,
+                    project_path=card.project_path,
+                    card=card_data, target_column=target_column,
+                ):
+                    paused_provider = await _effective_provider_for_pause_gate(
+                        ks, project_key=card.project_key,
+                        project_path=card.project_path,
+                        card=card_data, target_column=target_column,
+                    )
+                    logger.info(
+                        f"Card {card.card_id} held back: subscription "
+                        f"'{paused_provider}' manually paused by operator"
+                    )
+                    continue
 
                 result = await _run_card(
                     ks, card=card_data, project_key=card.project_key,

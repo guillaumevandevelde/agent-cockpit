@@ -12,6 +12,8 @@ vi.mock("../api", () => ({
     setSubscriptionPool: vi.fn(),
     getActiveSubscriptionOverride: vi.fn(),
     setActiveSubscriptionOverride: vi.fn(),
+    dispatchPause: vi.fn(),
+    setSubscriptionPause: vi.fn(),
   },
 }));
 
@@ -38,6 +40,15 @@ function mockUnsetPoolAndOverride() {
     .mockResolvedValue({ project_key: PK, pool: null });
   (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
     .mockResolvedValue({ project_key: PK, override: null });
+  // Kaart f056b2888a…: dialog also reads dispatch-pause to seed the manual
+  // pause toggle state. Default = no manual pauses so the existing tests
+  // keep showing the un-paused state.
+  (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+    paused: false,
+    paused_until: null,
+    paused_providers: [],
+    manually_paused_providers: [],
+  });
 }
 
 describe("SubscriptionPoolDialog — precedence header", () => {
@@ -342,5 +353,120 @@ describe("SubscriptionPoolDialog — close", () => {
     // DialogFooter.
     fireEvent.click(screen.getByTestId("close-dialog"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("SubscriptionPoolDialog — manual subscription pause (kaart f056b2888a…)", () => {
+  it("renders one Pause button per provider, all in the un-paused state by default", async () => {
+    mockUnsetPoolAndOverride();
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await flushLoads();
+    // Wait for the pause section's GET to land.
+    await waitFor(() =>
+      expect(kanbanApi.dispatchPause).toHaveBeenCalled()
+    );
+    // One Pause button per provider.
+    for (const label of ["Anthropic", "Bedrock", "MiniMax"]) {
+      expect(
+        screen.getByRole("button", { name: `Pause dispatch on ${label}` })
+      ).toBeTruthy();
+    }
+    // And no Resume buttons yet — nothing is paused.
+    expect(screen.queryByRole("button", { name: /Resume dispatch on/i })).toBeNull();
+  });
+
+  it("shows the Resume button for a provider the operator has already paused", async () => {
+    mockUnsetPoolAndOverride();
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: null,
+      paused_providers: [],
+      manually_paused_providers: ["anthropic"],
+    });
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await flushLoads();
+    expect(
+      await screen.findByRole("button", { name: "Resume dispatch on Anthropic" })
+    ).toBeTruthy();
+    // Other providers still show Pause (only the toggled-on one is paused).
+    expect(
+      screen.getByRole("button", { name: "Pause dispatch on Bedrock" })
+    ).toBeTruthy();
+  });
+
+  it("clicking Pause calls setSubscriptionPause(paused=true) and toasts on success", async () => {
+    mockUnsetPoolAndOverride();
+    (kanbanApi.setSubscriptionPause as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({
+        provider: "anthropic",
+        paused: true,
+        manually_paused_providers: ["anthropic"],
+      });
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={vi.fn()}
+      />,
+    );
+    await flushLoads();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Pause dispatch on Anthropic" })
+    );
+
+    await waitFor(() =>
+      expect(kanbanApi.setSubscriptionPause).toHaveBeenCalledWith("anthropic", true)
+    );
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+  });
+
+  it("rolls back the optimistic toggle when setSubscriptionPause fails", async () => {
+    mockUnsetPoolAndOverride();
+    (kanbanApi.setSubscriptionPause as ReturnType<typeof vi.fn>)
+      .mockRejectedValue(new Error("nope"));
+    const onChanged = vi.fn();
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+    await flushLoads();
+
+    // Click Pause -> the button should briefly flip to Resume (optimistic),
+    // then flip back after the error.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Pause dispatch on Anthropic" })
+    );
+    await waitFor(() =>
+      expect(kanbanApi.setSubscriptionPause).toHaveBeenCalled()
+    );
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    // The Anthropic row is back to the un-paused state with a Pause button.
+    expect(
+      screen.getByRole("button", { name: "Pause dispatch on Anthropic" })
+    ).toBeTruthy();
+    // The error path must NOT signal the parent's onChanged (no false-positive
+    // reload trigger on a failure).
+    expect(onChanged).not.toHaveBeenCalled();
   });
 });

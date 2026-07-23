@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, GripVertical } from "lucide-react";
+import { Plus, Trash2, GripVertical, Pause, Play } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -68,6 +68,18 @@ export function SubscriptionPoolDialog({
   const [override, setOverride] = useState<
     { provider: string; model: string | null } | null | undefined
   >(undefined);
+  // Per-provider manual pause state — driven by GET /dispatch-pause, toggled
+  // via PUT /dispatch-pause/subscription/{provider}. Independent from both
+  // pool and override: turning anthropic off holds every card that would have
+  // spawned against anthropic (regardless of column) until the operator
+  // toggles it back on.
+  const [manuallyPaused, setManuallyPaused] = useState<Set<string>>(
+    new Set(),
+  );
+  // Track which providers have an in-flight toggle so each row's button can
+  // show a spinner / disabled state instead of letting the operator double-
+  // click and fire two competing PUTs.
+  const [toggling, setToggling] = useState<Set<string>>(new Set());
 
   const reload = useCallback(async () => {
     if (!projectKey) return;
@@ -82,6 +94,12 @@ export function SubscriptionPoolDialog({
       setOverride(r.override);
     } catch {
       setOverride(null);
+    }
+    try {
+      const r = await kanbanApi.dispatchPause();
+      setManuallyPaused(new Set(r.manually_paused_providers ?? []));
+    } catch {
+      setManuallyPaused(new Set());
     }
   }, [projectKey]);
 
@@ -200,6 +218,47 @@ export function SubscriptionPoolDialog({
     } catch {
       setOverride(prev);
       toast.error("Failed to clear override");
+    }
+  };
+
+  // -------- Manual per-subscription pause (kaart f056b2888a…) -------
+
+  const toggleManualPause = async (provider: string, next: boolean) => {
+    // Optimistic toggle with rollback on failure — the dispatcher-side gate
+    // honours the value within one tick, so a stale UI can dispatch a card
+    // we'd told the operator was paused. Rollback keeps the visual state
+    // consistent with what's actually enforced server-side.
+    const prev = new Set(manuallyPaused);
+    const optimistic = new Set(manuallyPaused);
+    if (next) {
+      optimistic.add(provider);
+    } else {
+      optimistic.delete(provider);
+    }
+    setManuallyPaused(optimistic);
+    setToggling((s) => new Set(s).add(provider));
+    try {
+      const r = await kanbanApi.setSubscriptionPause(provider, next);
+      setManuallyPaused(new Set(r.manually_paused_providers));
+      toast.success(
+        next
+          ? `Paused dispatch on ${PROVIDER_LABELS[provider] ?? provider}`
+          : `Resumed dispatch on ${PROVIDER_LABELS[provider] ?? provider}`,
+      );
+      onChanged();
+    } catch (err) {
+      setManuallyPaused(prev);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : `Failed to ${next ? "pause" : "resume"} ${provider}`,
+      );
+    } finally {
+      setToggling((s) => {
+        const next_set = new Set(s);
+        next_set.delete(provider);
+        return next_set;
+      });
     }
   };
 
@@ -479,6 +538,87 @@ export function SubscriptionPoolDialog({
                 </div>
               </>
             )}
+          </div>
+        </section>
+
+        {/* -------------------- Manual subscription pause -------------------- */}
+        <section
+          aria-labelledby="subscription-pause-heading"
+          className="space-y-2 border-t pt-3"
+          data-testid="subscription-pause-section"
+        >
+          <div className="flex items-center justify-between">
+            <h3
+              id="subscription-pause-heading"
+              className="text-sm font-semibold"
+            >
+              Pause dispatch per subscription
+            </h3>
+            <span className="text-xs text-muted-foreground">
+              Holds every card routed to that subscription until you turn it
+              back on — independent of column pauses.
+            </span>
+          </div>
+          <div className="space-y-1">
+            {PROVIDERS.map((provider) => {
+              const isPaused = manuallyPaused.has(provider);
+              const isToggling = toggling.has(provider);
+              const label = PROVIDER_LABELS[provider] ?? provider;
+              return (
+                <div
+                  key={provider}
+                  className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                >
+                  <div className="flex flex-col">
+                    <span
+                      className={
+                        "text-sm font-medium " +
+                        (isPaused
+                          ? "text-amber-700 dark:text-amber-400"
+                          : "")
+                      }
+                    >
+                      {label}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {isPaused
+                        ? `Dispatch paused on ${label} — toggle to resume.`
+                        : `Dispatch is flowing on ${label}.`}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={isPaused ? "default" : "outline"}
+                    onClick={() => toggleManualPause(provider, !isPaused)}
+                    disabled={isToggling}
+                    aria-label={
+                      isPaused
+                        ? `Resume dispatch on ${label}`
+                        : `Pause dispatch on ${label}`
+                    }
+                    title={
+                      isPaused
+                        ? `Resume dispatch on ${label}`
+                        : `Pause dispatch on ${label}`
+                    }
+                  >
+                    {isToggling ? (
+                      "…"
+                    ) : isPaused ? (
+                      <>
+                        <Play className="h-3 w-3 mr-1" />
+                        Resume
+                      </>
+                    ) : (
+                      <>
+                        <Pause className="h-3 w-3 mr-1" />
+                        Pause
+                      </>
+                    )}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
         </section>
 

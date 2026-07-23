@@ -1150,6 +1150,441 @@ async def test_zero_column_cap_does_not_block_other_columns(project_with_agents)
     assert (review.claimed_by or "").startswith("agent:")
 
 
+# ---- manual per-subscription pause (kaart f056b2888a…) --------------------
+#
+# Column pause is per-column; manual subscription pause is per-provider.
+# When the operator toggles a provider off, every card whose resolved provider
+# matches must stay in Backlog for that tick -- regardless of which column it
+# would have targeted. A card on a different provider must still dispatch.
+
+
+@pytest.mark.asyncio
+async def test_manual_subscription_pause_blocks_dispatch(project_with_agents):
+    """A manually-paused provider holds its cards back: the dispatcher skips
+    them without claiming or moving them, while cards on other providers
+    dispatch normally in the same tick."""
+    from app.kanban import dispatch_pause
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        # Two columns, each pinned to a different provider via default_provider.
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        await service.create_column(
+            s, project_key=PK, name="review", default_agent="review",
+            default_provider="bedrock",
+        )
+        paused_id = await _make_card(s, title="paused-anthropic", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=paused_id, payload={"agent": "engineer"},
+        )
+        review_id = await _make_card(s, title="bedrock-card", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=review_id, payload={"agent": "review"},
+        )
+        # Pause anthropic manually.
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        paused = await get_card(s, paused_id)
+        review = await get_card(s, review_id)
+
+    assert result is not None
+    # Only the bedrock card was dispatched; the anthropic card stayed put.
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "bedrock"
+    assert paused.column == "Backlog"
+    assert paused.claimed_by is None
+    assert review.column == "review"
+    assert (review.claimed_by or "").startswith("agent:")
+
+
+@pytest.mark.asyncio
+async def test_manual_subscription_pause_respects_column_override_provider(project_with_agents):
+    """The gate uses the resolved provider (per-card column override > column
+    default > PROVIDER_ANTHROPIC), not just the column default. A card whose
+    column is 'engineer' (default anthropic) but whose column_overrides pin
+    provider=bedrock must dispatch when anthropic is paused."""
+    from app.kanban import dispatch_pause
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        # Card with a per-card override routing it to bedrock despite the
+        # column's anthropic default.
+        cid = await _make_card(s, title="overridden", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid,
+            payload={
+                "agent": "engineer",
+                "column_overrides": {"engineer": {"provider": "bedrock"}},
+            },
+        )
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        dispatched = await get_card(s, cid)
+
+    assert result is not None
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "bedrock"
+    assert dispatched.column == "engineer"
+
+
+@pytest.mark.asyncio
+async def test_unpausing_manual_subscription_resumes_dispatch(project_with_agents):
+    """After the operator toggles the manual pause off, dispatch resumes for
+    that provider's cards in the next tick."""
+    from app.kanban import dispatch_pause
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(s, title="anthropic-card", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "engineer"},
+        )
+        # Pause, then immediately unpause -- the row should be cleared.
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await dispatch_pause.set_manual_pause(s, "anthropic", False)
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        dispatched = await get_card(s, cid)
+
+    assert result is not None
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "anthropic"
+    assert dispatched.column == "engineer"
+
+
+# ---- manual subscription pause: precedence chain (FCR follow-up) -----------
+#
+# The operator's mental model is "pause everything on subscription X" — and
+# the dispatcher should honour that against the provider the card will
+# *actually* spawn against. The card's actual provider is determined by
+# the full chain (global override → pool choice → per-card column
+# override → column default → PROVIDER_ANTHROPIC). These tests pin the
+# gate to that chain; the previous helper only walked the last two
+# layers and broke the subscription-level semantics (FCR kaart
+# f056b2888a…).
+
+@pytest.mark.asyncio
+async def test_manual_pause_respects_global_subscription_override(project_with_agents):
+    """A board-wide subscription override pins the spawn to provider X.
+    Pausing X (and not the column default) must hold the card back, even
+    though the column default is a different provider.
+
+    Pre-fix the gate used ``_provider_for_card`` which only consulted the
+    column override/default, so a board pinned to MiniMax with an
+    anthropic column default would have wrongly held the card on an
+    anthropic pause (and missed the real minimax pause)."""
+    from app.kanban import dispatch_pause
+    from app.kanban.dispatch import set_active_subscription_override
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(s, title="override-routed", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "engineer"},
+        )
+        # Board pins every spawn to MiniMax; column default would route to
+        # anthropic without the override.
+        await set_active_subscription_override(
+            s, PK, {"provider": "minimax", "model": None},
+        )
+        # Pause minimax — the gate must respect the override.
+        await dispatch_pause.set_manual_pause(s, "minimax", True)
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        held_back = await get_card(s, cid)
+
+    # `dispatch_project` returns the last spawn's result dict; when no card
+    # was dispatched (gate held the only one back) it returns None.
+    # The card stayed put — the gate caught the override-routed spawn.
+    assert transport.calls == []
+    assert held_back.column == "Backlog"
+    assert held_back.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_manual_pause_respects_subscription_pool_choice(project_with_agents):
+    """A subscription pool entry that picks a different provider than the
+    column default must drive the gate. Pausing the pool-chosen provider
+    holds the card; pausing the column default does NOT.
+
+    Pre-fix the gate used ``_provider_for_card`` (column-only), so
+    pausing the column default would have wrongly held back a card the
+    pool was about to route to a different provider."""
+    from app.kanban import dispatch_pause
+    from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
+
+    # Pool snapshots are no-ops in this test environment; the pool router
+    # falls through to "first entry of cli_id wins" when no signal is
+    # available, which is enough to drive the precedence chain.
+    import app.kanban.db as kdb
+    async def _no_snapshots(entries):
+        return {}
+    dispatch._gather_pool_usage_snapshots = _no_snapshots
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(s, title="pool-routed", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "engineer"},
+        )
+        # Pool contains ONLY bedrock. With no usage signal, the pool router
+        # returns bedrock (it's the only entry of cli_id, no above-threshold
+        # candidates, so it becomes the "last-resort fallback" pick — see
+        # ``pick_subscription_for_cli``'s laatste-val-terug branch). The
+        # card would therefore dispatch against bedrock, not the column
+        # default anthropic.
+        await set_subscription_pool(s, PK, [
+            PoolEntry(provider="bedrock", model=None, drempel=0.9),
+        ])
+        # Pause bedrock — the gate must respect the pool's actual pick.
+        await dispatch_pause.set_manual_pause(s, "bedrock", True)
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        held_back = await get_card(s, cid)
+
+    # Card held back because the pool's only entry (bedrock) is paused.
+    assert transport.calls == [], (
+        f"expected no spawns (gate should have held card back), "
+        f"got: {[(c.get('session_name'), c.get('provider')) for c in transport.calls]}"
+    )
+    assert held_back.column == "Backlog"
+    assert held_back.claimed_by is None
+
+    # Now unpause bedrock. Pool returns bedrock, gate doesn't block —
+    # the card dispatches against the pool's choice, NOT the column
+    # default. The gate honoured the pool, even though "anthropic" (the
+    # column default) was never paused.
+    dispatch._gather_pool_usage_snapshots = _no_snapshots
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await dispatch_pause.set_manual_pause(s, "bedrock", False)
+        await s.commit()
+
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        dispatched = await get_card(s, cid)
+
+    # Pool picks bedrock, not the column-default anthropic — card dispatches.
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "bedrock"
+    assert dispatched.column == "engineer"
+
+
+@pytest.mark.asyncio
+async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_agents):
+    """The pool router (``_pick_pool_choice``) must merge the operator's
+    manual pause list with the time-based one before consulting the pool,
+    so the picker knows the operator's subscription is off-limits. The
+    picker itself may still return a paused entry as the
+    "laatste-val-terug" fallback (that branch's contract is documented in
+    ``pick_subscription_for_cli``); the dispatch gate is what actually
+    blocks the spawn. End-to-end: a pool whose only entry is manually
+    paused must NOT spawn a card even though the picker returns it."""
+    from app.kanban import dispatch_pause
+    from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
+
+    import app.kanban.db as kdb
+    async def _no_snapshots(entries):
+        return {}
+    dispatch._gather_pool_usage_snapshots = _no_snapshots
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(s, title="pool-paused", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "engineer"},
+        )
+        # Pool: only bedrock.
+        await set_subscription_pool(s, PK, [
+            PoolEntry(provider="bedrock", model=None, drempel=0.9),
+        ])
+        await dispatch_pause.set_manual_pause(s, "bedrock", True)
+        await s.commit()
+
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        held_back = await get_card(s, cid)
+
+    # End-to-end: even though the pool picker returns bedrock as its
+    # last-resort fallback, the dispatch gate (which now uses the same
+    # resolver chain + the manual-pause set) blocks the spawn. This
+    # is the FCR follow-up: previously the pool picker routed the spawn
+    # to a paused subscription and the gate didn't catch it because the
+    # gate only looked at the column default.
+    assert transport.calls == []
+    assert held_back.column == "Backlog"
+    assert held_back.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_manual_pause_holds_back_queued_memory_retry(project_with_agents):
+    """A card that was queued before the operator paused a subscription
+    must NOT spawn on the next memory-available retry tick. FCR-blokkade:
+    the previous ``_retry_queued_cards`` only checked column caps before
+    calling ``_run_card`` and let queued cards through."""
+    from app.kanban import dispatch_pause
+    from app.services.scheduling.pending_queue import pending_queue
+
+    # Pool snapshots are no-ops; the pool router falls through to the
+    # "first entry" branch — sufficient to drive the precedence chain.
+    import app.kanban.db as kdb
+    async def _no_snapshots(entries):
+        return {}
+    dispatch._gather_pool_usage_snapshots = _no_snapshots
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(s, title="queued-card", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"agent": "engineer"},
+        )
+        # Queue the card via the in-memory pending_queue (singleton).
+        pending_queue.enqueue(
+            card_id=cid, project_key=PK,
+            project_path=project_with_agents,
+        )
+        # Pause anthropic AFTER the card was queued.
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await s.commit()
+
+        # Force the queue to consider it retryable (the singleton has
+        # its own retry_interval; bypass via the deque path).
+        pending_queue.dequeue(cid)
+        pending_queue.enqueue(
+            card_id=cid, project_key=PK,
+            project_path=project_with_agents,
+        )
+        # Patch get_retryable_cards to ignore retry_interval.
+        import unittest.mock as mock
+        real_get_retryable = pending_queue.get_retryable_cards
+
+        def _force_retryable():
+            return list(pending_queue._queue.values())
+
+        with mock.patch.object(
+            pending_queue, "get_retryable_cards", _force_retryable,
+        ), mock.patch.object(
+            dispatch, "get_memory_status_cached",
+            return_value=SimpleNamespace(
+                is_critical=False, usage_percent=0.4,
+            ),
+        ):
+            await dispatch._retry_queued_cards(transport)
+        await s.commit()
+        retried = await get_card(s, cid)
+
+    assert transport.calls == [], (
+        "queued card must not spawn while its effective provider is "
+        "manually paused"
+    )
+    assert retried.column == "Backlog"
+    assert retried.claimed_by is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_orphan_redispatch_respects_manual_pause(project_with_agents):
+    """The bulk 'Redispatch all' path must honour the operator's
+    subscription pause. Bulk = no per-card operator intent, so the gate
+    is consistent with the auto-tick + dispatch_all + memory-retry
+    paths. The single-card ``redispatch_card`` (Card drawer) is an
+    explicit per-card action and stays unguarded by design."""
+    from app.kanban import dispatch_pause
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        # Orphan: unclaimed card on an agent column.
+        orphan_id = await _make_card(s, title="orphaned", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=orphan_id, payload={"agent": "engineer"},
+        )
+        await dispatch_pause.set_manual_pause(s, "anthropic", True)
+        await s.commit()
+
+        results = await dispatch.redispatch_all_orphans(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        not_retried = await get_card(s, orphan_id)
+
+    assert results == []
+    assert transport.calls == []
+    assert not_retried.claimed_by is None
+
+
 @pytest.fixture
 def project_with_analyst(tmp_path):
     """Project with engineer + analyst persona files, mirroring the real repo

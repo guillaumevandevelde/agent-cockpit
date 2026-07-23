@@ -47,11 +47,16 @@ export function DispatchPauseBanner() {
     };
   }, []);
 
-  // Older responses omit paused_providers; treat undefined as the empty list
-  // so a per-provider-only pause (no global pause yet, or vice-versa) still
-  // surfaces the banner instead of being silently dropped.
+  // Older responses omit paused_providers / manually_paused_providers; treat
+  // undefined as the empty list so a per-provider-only pause (no global pause
+  // yet, or vice-versa) still surfaces the banner instead of being silently
+  // dropped.
   const pausedProviders = status?.paused_providers ?? [];
-  const showBanner = !!status?.paused || pausedProviders.length > 0;
+  const manuallyPausedProviders = status?.manually_paused_providers ?? [];
+  const showBanner =
+    !!status?.paused ||
+    pausedProviders.length > 0 ||
+    manuallyPausedProviders.length > 0;
   if (!showBanner) return null;
 
   const until = formatTimeOfDay(status?.paused_until);
@@ -98,6 +103,30 @@ export function DispatchPauseBanner() {
             >
               Auto-dispatch paused for {PROVIDER_LABELS[provider] ?? provider}
               {until ? ` until ${until}` : ""}.
+            </div>
+          );
+        })}
+        {manuallyPausedProviders.map((provider, idx) => {
+          // Manual pause lines always render after the time-based lines (if
+          // any). First manual row needs a separator when anything above it
+          // (global + time-based list) is rendering; later rows always get
+          // one. Distinct message so the operator can tell "auto-tripped" from
+          // "I turned this off myself" without consulting the toolbar dialog.
+          const aboveLines =
+            (status?.paused ? 1 : 0) +
+            pausedProviders.length +
+            (idx > 0 ? idx : 0);
+          const needsSeparator = aboveLines > 0;
+          return (
+            <div
+              key={`manual-${provider}`}
+              className={needsSeparator ? "border-t border-amber-500/30 pt-1 mt-1" : undefined}
+            >
+              <span className="font-medium">
+                {PROVIDER_LABELS[provider] ?? provider}
+              </span>{" "}
+              dispatch paused by you — toggle off in the Subscriptions
+              dialog to resume.
             </div>
           );
         })}

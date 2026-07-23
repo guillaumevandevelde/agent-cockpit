@@ -162,4 +162,75 @@ describe("DispatchPauseBanner", () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
   });
+
+  // ---- manual per-subscription pause (kaart f056b2888a…) ----------------
+  //
+  // Operator-toggled pause has no deadline and is independent from the
+  // auto-tripped time-based slots. Banner must surface it with distinct
+  // wording so the operator can tell "Claude usage-limit hit" from "I turned
+  // this off myself in the Subscriptions dialog".
+
+  it("surfaces a manually-paused provider with the distinct 'paused by you' wording", async () => {
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: null,
+      paused_providers: [],
+      manually_paused_providers: ["anthropic"],
+    });
+
+    render(<DispatchPauseBanner />);
+
+    // Distinct wording from the auto-paused / time-based message.
+    // The provider label is wrapped in its own <span>, so the full sentence
+    // spans multiple text nodes — match the static part that the operator
+    // would actually see in the banner.
+    expect(
+      await screen.findByText(/dispatch paused by you/i)
+    ).toBeTruthy();
+    // The provider label is present in the same banner block (matched as a
+    // function so the inner <span> wrapping doesn't trip the matcher).
+    expect(
+      await screen.findByText((_, node) => {
+        if (!node) return false;
+        return (
+          node.textContent === "Anthropic" &&
+          node.tagName.toLowerCase() === "span"
+        );
+      })
+    ).toBeTruthy();
+    // No time suffix for a manual pause (no deadline).
+    expect(screen.queryByText(/paused by you.*until/i)).toBeNull();
+  });
+
+  it("treats a missing manually_paused_providers field as empty (backward-compat)", async () => {
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: null,
+      paused_providers: [],
+      // manually_paused_providers intentionally omitted.
+    });
+
+    const { container } = render(<DispatchPauseBanner />);
+    await waitFor(() => expect(kanbanApi.dispatchPause).toHaveBeenCalled());
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("renders manual-pause lines alongside the time-based ones when both are active", async () => {
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: "2026-07-12T17:00:00+00:00",
+      paused_providers: ["minimax"],
+      manually_paused_providers: ["bedrock"],
+    });
+
+    render(<DispatchPauseBanner />);
+
+    // Time-based line keeps the auto-paused wording.
+    expect(
+      await screen.findByText(/auto-dispatch paused for minimax until /i)
+    ).toBeTruthy();
+    // Manual line uses the operator-pause wording (text is split across
+    // nested spans, so match the static suffix only).
+    expect(screen.getByText(/dispatch paused by you/i)).toBeTruthy();
+  });
 });
