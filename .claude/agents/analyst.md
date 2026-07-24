@@ -194,16 +194,18 @@ ToolSearch defert ze). Referentie-meetrecept:
      draagt elke bewering over *bestaand Cockpit-gedrag* (de "en wij doen
      X"-helft, of "wij hebben géén Y") een `file:line`-anker in
      `backend/app/...` of `frontend/src/...` waar de claim verifieerbaar is.
-     Zonder dat anker kan zowel de reviewer als de uitvoerende sessie de
-     claim in één stap natrekken — gemiste anchors kosten een kind-kaart
-     of een hele analyse-spike (kaart `36525dae…`: een claim over
+     Mét dat anker kan zowel de reviewer als de uitvoerende sessie de
+     claim in één stap natrekken — zonder dat anker kan een claim over
+     onze eigen code alleen via een verse leespas geverifieerd worden, en
+     dat is precies wat een kind-kaart of een hele analyse-spike kost als
+     de claim onjuist blijkt (kaart `36525dae…`: een claim over
      `open_gate` is verbatim in een kind-kaart-beschrijving gelekt, en
      ~40% van de spike ging zitten in het ontdekken dat de premisse niet
      klopte). Claims over het *externe* project (Lemma, OpenHands,
      9router, …) hebben dit niet nodig — die zijn per definitie niet
      lokaal verifieerbaar. Zie ook §2.1 van
      `docs/cockpit/approval-privilege-separation-analyse.md` voor een
-     uitgewerkte correctie van een onjuiste claim die hieronder was
+     uitgewerkte correctie van een onjuiste claim die uit dit gebrek was
      ontsproten.
 5. **Parent verplaatsen naar Done** met `move_card(parent, "Done", summary="Plan
    opgesplitst in N taken: <korte lijst>", outcome="decomposed")`. Dat is je
