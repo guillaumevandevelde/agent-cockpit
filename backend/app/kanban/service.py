@@ -44,6 +44,19 @@ def _validate_default_provider(value: str | None) -> None:
     known-provider list, surfacing a ``ValueError`` the API layer maps to
     a 422. ``None`` is allowed — it explicitly clears the column's pin
     and falls through to the dispatcher's own defaults.
+
+    kaart 27317b4871… (FCR gap 4): ``anthropic-compatible`` is on the
+    allow-list today but every column spawn with ``PROVIDER_COMPATIBLE``
+    silently failed at dispatch (``build_provider_env`` raised a 3-retry
+    ``ValueError`` because the column has no ``default_endpoint_name``
+    column on the ORM yet — see
+    ``docs/cockpit/dispatch-vendor-koppeling-analyse.md`` §4). Until
+    the ``KanbanColumn`` table grows a ``default_endpoint_name`` field
+    we can't honour the combination at the column level, so reject
+    it here with the explicit migration note the operator needs.
+    Per-card / per-pool / per-override ``PROVIDER_COMPATIBLE`` is
+    unaffected — those already carry an ``endpoint_name`` carrier and
+    are validated by their respective fail-fast paths.
     """
     if value is None:
         return
@@ -51,6 +64,15 @@ def _validate_default_provider(value: str | None) -> None:
         raise ValueError(
             f"unknown default_provider: {value!r}; "
             f"expected one of {list(ALLOWED_COLUMN_PROVIDERS)}",
+        )
+    if value == PROVIDER_COMPATIBLE:
+        raise ValueError(
+            f"column default_provider={value!r} is not supported yet: "
+            f"KanbanColumn has no default_endpoint_name column. Migrate "
+            f"the column to carry a default_endpoint_name alongside "
+            f"default_provider before re-applying this value, or use a "
+            f"non-compatible provider at the column level and pin the "
+            f"endpoint per-card / per-pool / per-override instead.",
         )
 
 

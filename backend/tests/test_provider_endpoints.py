@@ -96,6 +96,36 @@ def test_deserialize_tolerates_unknown_keys():
     assert ep.name == "x"
 
 
+# kaart 27317b4871… (FCR gap 6): the deserialiser used to type-check
+# ``name`` / ``base_url`` / ``model`` but accept an empty string, so a
+# hand-edited DB row could land ``base_url=""`` and crash dispatch 3
+# retries later. Pin the empty-value rejection here so the
+# defence-in-depth contract holds across refactors.
+
+
+def test_deserialize_rejects_empty_base_url():
+    raw = json.dumps({"name": "x", "base_url": "", "model": "m"})
+    assert deserialize_endpoint(raw) is None
+
+
+def test_deserialize_rejects_whitespace_only_base_url():
+    raw = json.dumps({"name": "x", "base_url": "   \n", "model": "m"})
+    assert deserialize_endpoint(raw) is None
+
+
+def test_deserialize_rejects_empty_model():
+    raw = json.dumps({"name": "x", "base_url": "https://api.example.com", "model": ""})
+    assert deserialize_endpoint(raw) is None
+
+
+def test_deserialize_rejects_empty_credential_name():
+    raw = json.dumps({
+        "name": "x", "base_url": "https://api.example.com", "model": "m",
+        "credential_name": "   ",
+    })
+    assert deserialize_endpoint(raw) is None
+
+
 # ---- DB-backed ------------------------------------------------------------
 
 
@@ -182,6 +212,108 @@ async def test_delete_endpoint_is_idempotent():
         # Missing row: no-op, no exception.
         await delete_endpoint(s, "proj-a", "absent")
         await s.commit()
+
+
+# kaart 27317b4871… (FCR gap 5): when an endpoint is registered with
+# ``credential_name='minimax'`` but ``settings.minimax_api_key`` is
+# empty, ``resolve_compatible_endpoint`` must raise a clear ValueError
+# naming the missing key instead of silently returning
+# ``auth_token=None`` (which used to leak through to a 3-retry
+# ``build_provider_env`` failure). Pin both the failure mode and the
+# positive token-propagation case so a regression that drops the key
+# between resolve and env-merge is caught here.
+
+
+async def test_resolve_compatible_minimax_raises_when_api_key_missing(monkeypatch):
+    from app.services.agentic_cli import endpoints as ep_mod
+    from app.services.agentic_cli.endpoints import (
+        resolve_compatible_endpoint,
+        upsert_endpoint,
+    )
+    async with _session() as s:
+        await upsert_endpoint(s, "proj-mx", Endpoint(
+            name="router-mx", base_url="https://router-mx.example/v1",
+            model="claude-sonnet-4-6", credential_name="minimax",
+        ))
+        await s.commit()
+    # Force the configured key to None/empty without touching the
+    # real Settings singleton — the resolve helper reads it lazily
+    # on every call so we patch the attribute the resolver actually
+    # reads (``app.config.settings``).
+    from app import config as cfg_mod
+    monkeypatch.setattr(cfg_mod.settings, "minimax_api_key", None)
+    async with _session() as s:
+        with pytest.raises(ValueError, match="minimax"):
+            await resolve_compatible_endpoint(s, "proj-mx", "router-mx")
+
+
+async def test_resolve_compatible_minimax_propagates_api_key(monkeypatch):
+    """Positive: ``credential_name='minimax'`` with the key set →
+    ``resolve_compatible_endpoint`` returns the exact auth_token in the
+    resolver dict so ``build_provider_env`` can stamp it on
+    ``ANTHROPIC_AUTH_TOKEN``. This is the regression guard for "the
+    resolver drops the key between resolve and env-merge"."""
+    from app import config as cfg_mod
+    from app.services.agentic_cli.endpoints import (
+        resolve_compatible_endpoint,
+        upsert_endpoint,
+    )
+    async with _session() as s:
+        await upsert_endpoint(s, "proj-mx", Endpoint(
+            name="router-mx", base_url="https://router-mx.example/v1",
+            model="claude-sonnet-4-6", credential_name="minimax",
+        ))
+        await s.commit()
+    monkeypatch.setattr(cfg_mod.settings, "minimax_api_key", "sk-minimax-test")
+    async with _session() as s:
+        resolved = await resolve_compatible_endpoint(s, "proj-mx", "router-mx")
+    assert resolved == {
+        "name": "router-mx",
+        "base_url": "https://router-mx.example/v1",
+        "auth_token": "sk-minimax-test",
+        "model": "claude-sonnet-4-6",
+    }
+
+
+async def test_resolve_compatible_ambient_credential_returns_none_token():
+    """``credential_name=None`` (ambient) → ``auth_token`` is None so
+    ``build_provider_env`` knows to skip setting
+    ``ANTHROPIC_AUTH_TOKEN`` and let the host-env credential (if any)
+    be picked up by the spawned CLI."""
+    from app.services.agentic_cli.endpoints import (
+        resolve_compatible_endpoint,
+        upsert_endpoint,
+    )
+    async with _session() as s:
+        await upsert_endpoint(s, "proj-amb", Endpoint(
+            name="router-amb", base_url="https://router-amb.example/v1",
+            model="claude-sonnet-4-6", credential_name=None,
+        ))
+        await s.commit()
+    async with _session() as s:
+        resolved = await resolve_compatible_endpoint(s, "proj-amb", "router-amb")
+    assert resolved["auth_token"] is None
+    assert resolved["base_url"] == "https://router-amb.example/v1"
+
+
+async def test_resolve_compatible_unknown_credential_name_raises():
+    """A ``credential_name`` the resolver doesn't recognise (anything
+    other than ``None`` / ``'minimax'`` today) raises ValueError so the
+    caller surfaces the misconfiguration as a clean 422 instead of
+    letting the spawn loop through with an undefined auth_token."""
+    from app.services.agentic_cli.endpoints import (
+        resolve_compatible_endpoint,
+        upsert_endpoint,
+    )
+    async with _session() as s:
+        await upsert_endpoint(s, "proj-unknown", Endpoint(
+            name="router-unknown", base_url="https://x.example/v1",
+            model="m", credential_name="some-future-secret",
+        ))
+        await s.commit()
+    async with _session() as s:
+        with pytest.raises(ValueError, match="some-future-secret"):
+            await resolve_compatible_endpoint(s, "proj-unknown", "router-unknown")
     ep = Endpoint(name="x", base_url="https://x.example.com", model="m")
     async with _session() as s:
         await upsert_endpoint(s, "proj-a", ep)

@@ -131,6 +131,27 @@ def deserialize_endpoint(value: str) -> Endpoint | None:
         return None
     if credential_name is not None and not isinstance(credential_name, str):
         return None
+    # kaart 27317b4871… (FCR gap 6): a manual SQL edit / corrupt write
+    # could leave an empty / whitespace-only base_url or model that
+    # slips past the type check at line 130. ``build_provider_env``
+    # would then raise a 3-retry ValueError at dispatch time. The
+    # write-path validators (``_validate_nonempty``) catch this on
+    # insert, but a hand-edited DB row needs the same defence in the
+    # deserialiser — log + return None so the dispatcher falls through
+    # to the project-key None path instead of crashing mid-spawn.
+    if not name.strip() or not base_url.strip() or not model.strip():
+        logger.warning(
+            "endpoint row has empty name/base_url/model; ignoring "
+            "(name=%r base_url=%r model=%r)",
+            name, base_url, model,
+        )
+        return None
+    if credential_name is not None and not credential_name.strip():
+        logger.warning(
+            "endpoint row has empty credential_name; ignoring (name=%r)",
+            name,
+        )
+        return None
     # Surface invalid stored values as None so a corrupt row never breaks
     # the dispatcher; validation on write prevents new corruption.
     try:
@@ -259,6 +280,21 @@ async def resolve_compatible_endpoint(
         # from ``provider_env.py``).
         from app.config import settings
         auth_token = settings.minimax_api_key
+        # kaart 27317b4871… (FCR gap 5): without this check the dispatch
+        # path would silently spawn with ``ANTHROPIC_AUTH_TOKEN`` unset
+        # and bill ambient-host credentials (or fall through to a 401
+        # three retries later). The endpoint was deliberately registered
+        # with ``credential_name='minimax'`` — that signal is lost if
+        # the matching key is absent, so fail-fast at resolution time
+        # with the exact remediation the operator can act on.
+        if not auth_token:
+            raise ValueError(
+                f"endpoint {endpoint_name!r} requires credential "
+                f"'minimax' but settings.minimax_api_key is not configured; "
+                f"set MINIMAX_API_KEY in the backend environment or "
+                f"re-register the endpoint with credential_name=None to "
+                f"use the ambient-host credential instead.",
+            )
     else:
         # A named credential the backend can't currently resolve:
         # surface a clean refusal so the caller sees the exact

@@ -117,17 +117,36 @@ async def test_patch_column_can_clear_default_model_with_null():
 
 
 @pytest.mark.asyncio
-async def test_post_column_accepts_known_default_provider():
-    """Known providers all pass."""
+async def test_post_column_accepts_known_non_compatible_default_provider():
+    """Known non-compatible providers all pass — anthropic / bedrock /
+    minimax still validate and persist."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/columns", json={
+            "project_key": "PROJ", "name": "engineer",
+            "default_provider": "minimax",
+        })
+    # POST /columns is registered with status_code=201 — the column was created.
+    assert r.status_code == 201, r.text
+    assert r.json()["default_provider"] == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_post_column_rejects_anthropic_compatible_default_provider():
+    """kaart 27317b4871… (FCR gap 4): ``default_provider='anthropic-compatible'``
+    is rejected at save time because the ``KanbanColumn`` model has no
+    ``default_endpoint_name`` column yet. The operator gets a 422 with
+    the migration note instead of a column that fails at dispatch.
+    Per-card / per-pool / per-override ``anthropic-compatible`` is
+    unaffected (those already carry the endpoint_name carrier)."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/api/v1/kanban/columns", json={
             "project_key": "PROJ", "name": "engineer",
             "default_provider": "anthropic-compatible",
         })
-    # POST /columns is registered with status_code=201 — the column was created.
-    assert r.status_code == 201, r.text
-    assert r.json()["default_provider"] == "anthropic-compatible"
+    assert r.status_code == 422, r.text
+    assert "default_endpoint_name" in r.text
 
 
 @pytest.mark.asyncio

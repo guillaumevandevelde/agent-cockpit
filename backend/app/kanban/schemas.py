@@ -1,7 +1,66 @@
 """Pydantic schemas + the fixed column set."""
 from datetime import datetime
+from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+
+# kaart 27317b4871… (FCR gap 3): the per-agent ``column_overrides`` map
+# carries ``{"model": str|null, "provider": str|null, "endpoint_name":
+# str|null}``. When ``provider == "anthropic-compatible"`` the
+# ``endpoint_name`` is load-bearing — the dispatch path resolves it
+# against the project's endpoint registry and feeds the result into
+# ``build_provider_env``. A missing / empty value at save time used to
+# silently land and only surface as a 3-retry ``ValueError`` at
+# dispatch; both REST POST/PATCH surface and the planning-pipeline
+# path (``operations._materialize``) now reject the combo with a 422
+# pointing the operator at the missing endpoint. The validator runs
+# on every schema that exposes ``column_overrides`` (CardCreate,
+# CardUpdate), so a UI typo can't sneak a partial carrier in.
+_COMPATIBLE_PROVIDER = "anthropic-compatible"
+
+
+def _validate_column_overrides_value(value: Any) -> Any:
+    """Reject ``column_overrides[col]`` with ``provider=anthropic-compatible``
+    but no resolvable ``endpoint_name``. Returns the original value
+    unchanged when the validator passes; raises ``ValueError`` (which
+    pydantic maps to a 422 at the API boundary) otherwise."""
+    if value is None:
+        return value
+    if not isinstance(value, dict):
+        raise ValueError(
+            "column_overrides must be an object mapping column-name to "
+            f"override dict; got {type(value).__name__}",
+        )
+    for column, override in value.items():
+        if not isinstance(override, dict):
+            raise ValueError(
+                f"column_overrides[{column!r}] must be an object; "
+                f"got {type(override).__name__}",
+            )
+        provider = override.get("provider")
+        if provider is None:
+            continue
+        if not isinstance(provider, str):
+            raise ValueError(
+                f"column_overrides[{column!r}].provider must be a string "
+                f"or null; got {type(provider).__name__}",
+            )
+        endpoint_name = override.get("endpoint_name")
+        if endpoint_name is not None and not isinstance(endpoint_name, str):
+            raise ValueError(
+                f"column_overrides[{column!r}].endpoint_name must be a "
+                f"string or null; got {type(endpoint_name).__name__}",
+            )
+        if provider == _COMPATIBLE_PROVIDER and not (
+            isinstance(endpoint_name, str) and endpoint_name.strip()
+        ):
+            raise ValueError(
+                f"column_overrides[{column!r}] uses provider "
+                f"anthropic-compatible; a non-empty endpoint_name is "
+                f"required. Register the endpoint via "
+                f"/api/v1/agent-bridge/platforms/endpoints first.",
+            )
+    return value
 
 # Fixed kanban columns. Cards on a fixed column are never auto-dispatched
 # (dispatch pulls from `_DISPATCH_COLUMNS` in dispatch.py, which is the
@@ -290,6 +349,11 @@ class CardCreate(BaseModel):
     analyst_agent_id: str | None = None
     executor_agent_id: str | None = None
     parent_card_id: str | None = None
+
+    @field_validator("column_overrides")
+    @classmethod
+    def _check_column_overrides(cls, v):
+        return _validate_column_overrides_value(v)
     depends_on: list[str] | None = None
     metadata: dict | None = None
     # Explicit opt-in for the first card of a brand-new project. The REST
@@ -325,6 +389,11 @@ class CardUpdate(BaseModel):
     analyst_run_id: str | None = None
     depends_on: list[str] | None = None
     metadata: dict | None = None
+
+    @field_validator("column_overrides")
+    @classmethod
+    def _check_column_overrides(cls, v):
+        return _validate_column_overrides_value(v)
     # Per-dispatch telemetry breadcrumbs (kanban card 8a2ad986). In
     # practice these are set by dispatch.py, not via PATCH; exposing them
     # so the schema matches the underlying row shape.
@@ -487,6 +556,16 @@ class SubscriptionPoolEntry(BaseModel):
     which the router considers this entry "full" and spills to the
     next entry.
 
+    ``endpoint_name`` is required when ``provider`` is
+    ``"anthropic-compatible"`` and ignored otherwise — kaart
+    27317b4871… (FCR gap 2) closes the REST-carrier drift that
+    previously dropped this field on the way to ``PoolEntry``, so a
+    compatible pool save via ``POST /api/v1/kanban/subscription-pool``
+    couldn't persist the endpoint slug. Now the field round-trips
+    through the schema → entries → PoolEntry and the
+    ``set_subscription_pool`` fail-fast check (existence + credential
+    resolution) catches misconfiguration at save time.
+
     Legacy payloads that omit ``cli`` are accepted by the deserialiser
     shim — the field is back-filled with ``DEFAULT_POOL_CLI`` on read
     so a row written by a pre-kaart-8f40d443 build still loads."""
@@ -494,6 +573,7 @@ class SubscriptionPoolEntry(BaseModel):
     provider: str
     model: str | None = None
     drempel: float
+    endpoint_name: str | None = None
 
 
 class SubscriptionPoolRequest(BaseModel):
@@ -519,6 +599,7 @@ class SubscriptionPoolRequest(BaseModel):
             PoolEntry(
                 cli=e.cli, provider=e.provider,
                 model=e.model, drempel=e.drempel,
+                endpoint_name=e.endpoint_name,
             )
             for e in self.pool
         ]
