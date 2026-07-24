@@ -15,6 +15,7 @@ from app.services.agentic_cli import get_agentic_cli
 from app.services.agentic_cli.base import SpawnCommandOptions
 from app.services.agentic_cli.claude_code import ClaudeCodeCli
 from app.services.agentic_cli.provider_env import (
+    PROVIDER_BEDROCK,
     _record_audit,
     build_provider_env,
     build_spawn_env,
@@ -213,7 +214,16 @@ def spawn_session(
         options.provider,
         region=options.aws_region,
         aws_profile=options.aws_profile,
-        model=options.bedrock_model,
+        # Bedrock carries its model in ``options.bedrock_model`` (the
+        # ``bedrock:``-prefixed ARN-shaped id that AWS expects, distinct
+        # from the universal ``options.model`` field). Every other provider
+        # — including ``anthropic-compatible`` — gets the model from
+        # ``options.model``. Routing through ``options.bedrock_model``
+        # unconditionally causes ``build_provider_env`` to raise
+        # ``ValueError: anthropic-compatible provider requires a non-empty
+        # model`` for any dispatched compatible card whose dispatch
+        # transport only sets ``options.model`` (kaart 293d1faa… blocker 1).
+        model=options.bedrock_model if options.provider == PROVIDER_BEDROCK else options.model,
         minimax_api_key=settings.minimax_api_key,
         minimax_base_url=options.minimax_base_url or settings.minimax_base_url,
         cli_id=cli.id,

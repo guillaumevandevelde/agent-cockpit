@@ -409,3 +409,84 @@ def test_spawn_session_explicit_session_name_overrides(monkeypatch, tmp_path):
     )
 
     assert result["session_name"] == "custom-name"
+
+
+def test_anthropic_compatible_dispatch_sets_anthropic_model_on_process_env(monkeypatch, tmp_path):
+    """AC1 (kaart 293d1faa…): a dispatched `anthropic-compatible` card must
+    spawn a process whose environment contains ANTHROPIC_MODEL alongside
+    ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN. The dispatch transport
+    (kanban/dispatch.py) populates ``options.model`` and ``options.endpoint_*``;
+    ``options.bedrock_model`` stays None. The spawn layer must forward
+    ``options.model`` into ``build_provider_env`` for non-Bedrock providers
+    so the CLI receives the model via its env. Asserts on the tmux argv
+    (the env vars the spawned process actually sees), not on intermediate
+    transport kwargs.
+    """
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(
+            directory=str(tmp_path),
+            mode="plain",
+            provider="anthropic-compatible",
+            model="claude-opus-4-8",
+            endpoint_base_url="https://example.com/anthropic",
+            endpoint_auth_token="sk-test-token",
+        ),
+    )
+
+    argv = calls[0]
+    assert "ANTHROPIC_BASE_URL=https://example.com/anthropic" in argv
+    assert "ANTHROPIC_AUTH_TOKEN=sk-test-token" in argv
+    assert "ANTHROPIC_MODEL=claude-opus-4-8" in argv
+    assert spawn.get_spawned_sessions()["repo-abcd"]["provider"] == "anthropic-compatible"
+
+
+def test_bedrock_dispatch_uses_bedrock_model_not_options_model(monkeypatch, tmp_path):
+    """Bedrock-codepath preservation: when provider=bedrock and a
+    ``bedrock_model`` is set, that field (not ``model``) is forwarded
+    into ``build_provider_env`` so the ANTHROPIC_MODEL env var reflects
+    the Bedrock-specific model id. Without this branch, Bedrock dispatch
+    would silently drop the model.
+    """
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
+
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "repo-abcd")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    spawn.spawn_session(
+        "claude-code",
+        SpawnCommandOptions(
+            directory=str(tmp_path),
+            mode="plain",
+            provider="bedrock",
+            aws_region="us-east-1",
+            aws_profile="bedrock-prod",
+            bedrock_model="openai.gpt-5.5",
+        ),
+    )
+
+    argv = calls[0]
+    assert "ANTHROPIC_MODEL=openai.gpt-5.5" in argv
+    assert "CLAUDE_CODE_USE_BEDROCK=1" in argv
+    assert "AWS_REGION=us-east-1" in argv
