@@ -1,7 +1,7 @@
 ---
 title: "Plans-feature — analyse & richting (leaf spike)"
 type: decision
-status: proposed
+status: decided
 ---
 
 # Plans-feature — analyse & richting (leaf spike)
