@@ -20,6 +20,18 @@ from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 SessionLocal = TestSessionLocal()
 
 
+def _real_session():
+    """Open a fresh DB session backed by the test DB.
+
+    The endpoint-resolution tests use ``_session()`` (also bound to
+    ``TestSessionLocal``) to seed rows; the spawn tests below need a
+    *real* async session to hand to the FastAPI handler — FastAPI
+    dependencies resolve ``db=object()`` to a bare ``object`` which
+    has no ``.get()`` / ``.execute()`` surface.
+    """
+    return TestSessionLocal()()
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _tables():
     await reset_test_tables()
@@ -330,3 +342,165 @@ async def test_resolve_compatible_unknown_credential_name_raises():
 async def test_get_endpoint_returns_none_when_absent():
     async with _session() as s:
         assert await get_endpoint(s, "proj-a", "nope") is None
+
+
+# kaart 333af652… — non-MiniMax ``credential_name`` resolves via the
+# project's SecretStore (not a hardcoded MiniMax-only branch). The
+# earlier implementation raised ValueError unconditionally for any
+# credential_name != "minimax", so a groq/9router/litellm endpoint
+# with its own SecretStore row could never be spawned. Wire the
+# resolver through ``AGESecretStore.get(project_key, name)`` and
+# keep the MiniMax legacy fallback so the existing MiniMax flow
+# is untouched.
+
+
+class _FakeSecretStore:
+    """Minimal SecretStore stub for endpoint-resolver tests.
+
+    Mirrors the ``get(project_key, name) -> str | None`` contract from
+    ``app/services/secrets_store.py``: returns the value when present,
+    ``None`` when the file exists but the name is absent. Tests inject
+    this via ``monkeypatch.setattr`` on the resolver's private factory
+    so the resolver never touches the real on-disk AGE file.
+    """
+
+    def __init__(self, mapping: dict[tuple[str, str], str | None]):
+        self._mapping = mapping
+        self.calls: list[tuple[str, str]] = []
+
+    def get(self, project_key: str, name: str) -> str | None:
+        self.calls.append((project_key, name))
+        return self._mapping.get((project_key, name))
+
+
+async def test_resolve_compatible_secret_store_credential_returns_token(monkeypatch):
+    """A ``credential_name`` that's in the project's SecretStore resolves
+    to the stored value: ``auth_token`` is the SecretStore payload, not
+    ``None``. This is the "groq/9router/litellm work out of the box"
+    acceptance criterion from kaart 333af652 — the resolver must not
+    hardcode ``'minimax'`` as the only recognised credential name."""
+    from app.services.agentic_cli import endpoints as ep_mod
+    from app.services.agentic_cli.endpoints import (
+        resolve_compatible_endpoint,
+        upsert_endpoint,
+    )
+    fake = _FakeSecretStore({("proj-groq", "groq-key"): "gsk-groq-test"})
+    monkeypatch.setattr(ep_mod, "_secret_store", lambda: fake)
+    async with _session() as s:
+        await upsert_endpoint(s, "proj-groq", Endpoint(
+            name="router-groq", base_url="https://api.groq.com/anthropic",
+            model="llama-3.3-70b", credential_name="groq-key",
+        ))
+        await s.commit()
+    async with _session() as s:
+        resolved = await resolve_compatible_endpoint(s, "proj-groq", "router-groq")
+    assert resolved["auth_token"] == "gsk-groq-test"
+    assert resolved["base_url"] == "https://api.groq.com/anthropic"
+    assert resolved["model"] == "llama-3.3-70b"
+    assert fake.calls == [("proj-groq", "groq-key")]
+
+
+async def test_resolve_compatible_secret_store_credential_not_present_raises(monkeypatch):
+    """A ``credential_name`` that has no row in the project's SecretStore
+    still raises ValueError — the resolver must not silently fall back
+    to ``auth_token=None`` (which would spawn the CLI anonymously and
+    401 three retries later). The error message names the missing
+    credential so the operator knows exactly what to configure."""
+    from app.services.agentic_cli import endpoints as ep_mod
+    from app.services.agentic_cli.endpoints import (
+        resolve_compatible_endpoint,
+        upsert_endpoint,
+    )
+    fake = _FakeSecretStore({})  # SecretStore exists, but no rows match
+    monkeypatch.setattr(ep_mod, "_secret_store", lambda: fake)
+    async with _session() as s:
+        await upsert_endpoint(s, "proj-missing", Endpoint(
+            name="router-missing", base_url="https://router-missing.example/v1",
+            model="m", credential_name="missing-key",
+        ))
+        await s.commit()
+    async with _session() as s:
+        with pytest.raises(ValueError, match="missing-key"):
+            await resolve_compatible_endpoint(s, "proj-missing", "router-missing")
+
+
+# kaart 333af652… — the spawn REST handler used to resolve the
+# endpoint against the shared ``_default`` bucket regardless of where
+# the row was registered. An endpoint created via
+# ``POST /platforms/endpoints?project_key=myproject`` appeared in
+# ``GET /platforms/endpoints?project_key=myproject`` but 404'd at
+# spawn time. Honour the same ``project_key`` query parameter on
+# ``POST /sessions`` so the three endpoints stay symmetric.
+
+
+@pytest.mark.asyncio
+async def test_spawn_resolves_endpoint_under_project_key_query_param(
+    monkeypatch, tmp_path,
+):
+    from app.api.v1.runs import router as agent_bridge_api
+    from app.services.agentic_cli import endpoints as ep_mod
+    from app.services.agentic_cli.endpoints import upsert_endpoint
+
+    fake = _FakeSecretStore({("myproject", "groq-key"): "gsk-spawn-test"})
+    monkeypatch.setattr(ep_mod, "_secret_store", lambda: fake)
+    monkeypatch.setattr(agent_bridge_api, "spawn_session", lambda *a, **k: {"cli": "claude-code"})
+
+    async with _session() as s:
+        await upsert_endpoint(s, "myproject", Endpoint(
+            name="groq",
+            base_url="https://api.groq.com/anthropic",
+            model="llama-3.3-70b",
+            credential_name="groq-key",
+        ))
+        await s.commit()
+
+    response = await agent_bridge_api.spawn_session_endpoint(
+        agent_bridge_api.SpawnRequest(
+            cli="claude-code",
+            directory=str(tmp_path),
+            provider="anthropic-compatible",
+            endpoint_name="groq",
+        ),
+        project_key="myproject",
+        db=_real_session(),
+    )
+    assert response["cli"] == "claude-code"
+
+
+@pytest.mark.asyncio
+async def test_spawn_falls_back_to_default_bucket_when_no_project_key(
+    monkeypatch, tmp_path,
+):
+    """No ``project_key`` on the spawn → default bucket. Preserves the
+    pre-existing behaviour for the NewSessionDialog that resolves
+    endpoints from the shared default row."""
+    from app.api.v1.runs import router as agent_bridge_api
+    from app.services.agentic_cli.endpoints import upsert_endpoint
+
+    monkeypatch.setattr(agent_bridge_api, "spawn_session", lambda *a, **k: {"cli": "claude-code"})
+
+    async with _session() as s:
+        await upsert_endpoint(s, "_default", Endpoint(
+            name="shared-groq",
+            base_url="https://api.groq.com/anthropic",
+            model="llama-3.3-70b",
+        ))
+        await s.commit()
+
+    # ``project_key`` omitted entirely → handler must default to
+    # ``_default`` (matches list/upsert/delete's ``project_key or
+    # DEFAULT_PROJECT_KEY`` pattern).
+    response = await agent_bridge_api.spawn_session_endpoint(
+        agent_bridge_api.SpawnRequest(
+            cli="claude-code",
+            directory=str(tmp_path),
+            provider="anthropic-compatible",
+            endpoint_name="shared-groq",
+        ),
+        project_key=None,  # FastAPI's Query(default=None) is the Query
+        # object itself when the function is called directly without the
+        # dependency-injection machinery; pass None explicitly so the
+        # `or DEFAULT_PROJECT_KEY` fallback actually fires.
+        db=_real_session(),
+    )
+    assert response["cli"] == "claude-code"

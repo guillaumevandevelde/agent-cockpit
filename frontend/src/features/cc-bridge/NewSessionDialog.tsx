@@ -957,11 +957,17 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
             <div className="space-y-3 rounded-md border border-border p-3">
               {endpoints.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  No endpoints configured. Add one on the{' '}
-                  <Link to="/subscriptions" className="underline hover:text-foreground">
-                    Subscriptions page
-                  </Link>
-                  .
+                  No endpoints configured. Create one via{' '}
+                  <code className="rounded bg-muted px-1">POST /api/v1/agent-bridge/platforms/endpoints</code>{' '}
+                  (a full endpoint-management UI is a follow-up card; the
+                  curl shape is the same as{' '}
+                  <a
+                    href="/docs/cockpit/9router-integratie-analyse.md"
+                    className="underline hover:text-foreground"
+                  >
+                    the 9router analysis §6
+                  </a>
+                  ).
                 </p>
               ) : (
                 <>
@@ -990,11 +996,12 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
                     if (!selected.credential_name) return null
                     return (
                       <p className="text-xs text-muted-foreground">
-                        Credential <code>{selected.credential_name}</code> is not configured.{' '}
-                        <Link to="/subscriptions" className="underline hover:text-foreground">
-                          Set it up on the Subscriptions page
-                        </Link>
-                        .
+                        Credential <code>{selected.credential_name}</code> is not configured
+                        in the project's SecretStore. Set it via{' '}
+                        <code className="rounded bg-muted px-1">POST /api/v1/secrets</code>{' '}
+                        (project-scoped key-value store — the Subscriptions
+                        page does not host endpoint credentials; that
+                        surface is a follow-up card).
                       </p>
                     )
                   })()}
