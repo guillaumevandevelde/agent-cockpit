@@ -16,7 +16,7 @@ import shlex
 import subprocess
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -3351,10 +3351,345 @@ def _tail_rate_limit_message(path: Path) -> str | None:
     return None
 
 
+# Pane-resume: when a rate-limited session's tmux pane is still alive, defer
+# the kill+To Resume reaction and try to nudge the same session back to life
+# at the parsed reset time via the existing tmux_inject helpers. See
+# docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5 (R2) for the
+# motivation; this constant block sets the timing knobs.
+#
+# Margin: how long after the parsed reset time the *first* nudge fires, in
+# seconds. Tiny on purpose — we want to resume the moment the limit resets,
+# not minutes later. 60 s absorbs clock skew + the time the Claude CLI takes
+# to render the post-reset prompt frame.
+PANE_RESUME_MARGIN_S = 60
+# Backoff: how much *additional* delay each subsequent nudge adds when a
+# previous nudge re-hit the limit. Linear in `attempts` — `reset + margin*attempts`
+# — so attempts 1/2/3 fire at reset+60s/+120s/+180s. Small enough that even
+# the third try lands inside the same wall-clock window, large enough that
+# we don't burn scheduler slots on a stuck limit.
+PANE_RESUME_BACKOFF_S = 60
+# Max attempts before falling back to the existing kill+To Resume reaction.
+# 3 follows the standard retry-with-fallback shape (initial + 2 retries) and
+# keeps total wall-clock under ~3 minutes so the operator doesn't sit on a
+# stalled session for long.
+PANE_RESUME_MAX_ATTEMPTS = 3
+
+
+async def _read_pane_resume_state(cwd: str) -> dict | None:
+    """Read the pane-resume metadata for the card claimed by `cwd`'s session.
+
+    Returns ``{"attempts": int, "reset_at": iso}`` when a previous nudge is
+    pending, ``None`` otherwise. Reads via `_resume_target_from_cwd` +
+    `list_cards` so it follows the same "kanban card claimed by this session
+    on a non-fixed column" predicate as `move_limited_session_to_resume`.
+    """
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return None
+    project_path, session_name = target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return None
+
+    claimant = CLAIMANT_PREFIX + session_name
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+    card = next(
+        (c for c in cards
+         if c.column not in ("Done", "To Resume")
+         and c.claimed_by == claimant),
+        None,
+    )
+    if card is None:
+        return None
+    meta = card.meta or {}
+    if not meta.get("pane_resume_pending"):
+        return None
+    return {
+        "attempts": int(meta.get("pane_resume_attempts", 0)),
+        "reset_at": meta.get("pane_resume_reset_at"),
+    }
+
+
+async def _clear_pane_resume_state(cwd: str) -> None:
+    """Strip the pane-resume metadata keys from the card claimed by `cwd`'s
+    session. Idempotent — a no-op when there's no card or no pending state.
+    Used at fallback time so a later sweep doesn't try to nudge a card that's
+    already been moved to "To Resume"."""
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return
+    project_path, session_name = target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return
+    claimant = CLAIMANT_PREFIX + session_name
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return
+        meta = dict(card.meta or {})
+        if not meta:
+            return
+        meta.pop("pane_resume_pending", None)
+        meta.pop("pane_resume_attempts", None)
+        meta.pop("pane_resume_reset_at", None)
+        await apply_operation(
+            ks, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"metadata": meta},
+        )
+        await ks.commit()
+
+
+async def _clear_pane_resume_metadata_for_card(card, project_path: str) -> None:
+    """Strip pane-resume metadata from a card we already have in hand.
+
+    Used by the detection sweep when the transcript no longer shows an active
+    limit (i.e. the previous nudge did land and the session recovered) — keeps
+    the attempt counter fresh for the next genuine limit cycle. No-op when
+    the card has no pending state. Card stays in place; only the metadata
+    keys change.
+    """
+    meta = dict(card.meta or {})
+    if not meta.get("pane_resume_pending"):
+        return
+    meta.pop("pane_resume_pending", None)
+    meta.pop("pane_resume_attempts", None)
+    meta.pop("pane_resume_reset_at", None)
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        await apply_operation(
+            ks, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"metadata": meta},
+        )
+        await ks.commit()
+    logger.info(
+        "pane-resume pending cleared on card %s (transcript shows recovery)",
+        card.id,
+    )
+
+
+async def _do_move_to_resume(cwd: str, pause_until) -> bool:
+    """The existing kill+To Resume reaction (sibling helper so `handle_rate_limit_signal`
+    stays a single composition). Mirrors the original exception-swallow so the
+    caller doesn't have to."""
+    try:
+        return await move_limited_session_to_resume(
+            cwd, scheduled_at=pause_until.isoformat(),
+        )
+    except Exception:
+        logger.exception("failed to move kanban card to To Resume for %s", cwd)
+        return False
+
+
+async def try_pane_resume(
+    cwd: str, reset_time, message: str, *, attempts: int = 1,
+) -> bool:
+    """Try to keep a rate-limited session alive by injecting a continuation
+    nudge into its still-alive tmux pane at reset_time + margin*attempts.
+
+    The Claude Code CLI doesn't exit on a rate limit — it prints the notice
+    and returns to its prompt — so the tmux pane is usually still alive at
+    detection time. Killing it loses the entire session context; nudging the
+    same pane at the reset time recovers without losing anything. Reuses the
+    existing `tmux_inject` + `auto_resume_service.schedule_resume` machinery
+    so the keystroke delivery path is identical to the manual scheduled-
+    message flow that's been in production.
+
+    Returns True when a nudge is scheduled and the card metadata reflects the
+    pending state; False when the pane is gone (the caller should fall back to
+    `move_limited_session_to_resume`). A no-card-found case is also False —
+    for non-kanban sessions (human-started, sandcastle) there's nothing to
+    update on the board anyway.
+    """
+    from apscheduler.triggers.date import DateTrigger
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.services.scheduling.scheduler import scheduler_service
+    from app.services.scheduling.session_resolver import resolve_target
+
+    target = resolve_target(cwd)
+    if target is None:
+        return False  # pane gone — caller falls back
+
+    fire_at = reset_time + timedelta(
+        seconds=PANE_RESUME_MARGIN_S + PANE_RESUME_BACKOFF_S * (attempts - 1),
+    )
+
+    # Schedule the nudge via the scheduler directly so we can call our own
+    # `_execute_pane_resume` (the standard auto_resume_service._execute_resume
+    # doesn't include the wait_for_pane_ready guard the acceptance criteria
+    # ask for).
+    job_id = f"pane-resume-{hash(cwd) % 100000}"
+    try:
+        scheduler_service._sched.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler_service._sched.add_job(
+        _execute_pane_resume,
+        trigger=DateTrigger(run_date=fire_at),
+        args=[cwd, message],
+        id=job_id,
+        replace_existing=True,
+        misfire_grace_time=300,
+        coalesce=True,
+    )
+
+    # Persist the pending state on the card so the next dispatch tick knows
+    # this nudge is in flight and can back off / fall back when (if) another
+    # limit is detected.
+    resume_target = _resume_target_from_cwd(cwd)
+    if resume_target is None:
+        return False
+    project_path, session_name = resume_target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return False
+    claimant = CLAIMANT_PREFIX + session_name
+
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return False
+        meta = dict(card.meta or {})
+        meta["pane_resume_pending"] = True
+        meta["pane_resume_attempts"] = attempts
+        meta["pane_resume_reset_at"] = reset_time.isoformat()
+        await apply_operation(
+            ks, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"metadata": meta},
+        )
+        await _post_rate_limit_activity_comment(
+            ks, card=card, project_key=project_key,
+            text=(
+                f"⏰ Rate-limit gedetecteerd op live pane — nudge #{attempts} "
+                f"gepland om {fire_at.isoformat()} (reset {reset_time.isoformat()}). "
+                f"Kaart blijft geclaimd; pane blijft leven."
+            ),
+        )
+        await ks.commit()
+
+    logger.info(
+        "pane-resume scheduled (cwd=%s attempts=%s fire_at=%s)",
+        cwd, attempts, fire_at.isoformat(),
+    )
+    return True
+
+
+async def _execute_pane_resume(cwd: str, message: str) -> bool:
+    """Scheduler-fired executor for a pending pane-resume.
+
+    Resolves the live tmux pane, waits for it to be ready (so a stuck or
+    unrendered pane doesn't silently swallow the keystroke), and sends the
+    continuation message via the existing `tmux_inject.send_text` helper.
+    Any failure (pane gone, never ready, send_text returned False) falls
+    back to the existing kill+To Resume reaction so the card doesn't sit
+    claimed indefinitely while the session is actually dead.
+    """
+    from app.services.scheduling.session_resolver import resolve_target
+    from app.services.scheduling.tmux_inject import send_text, wait_for_pane_ready
+
+    target = resolve_target(cwd)
+    if target is None:
+        logger.warning("pane-resume: pane gone for %s; falling back", cwd)
+        await _pane_resume_fallback_to_kill(cwd)
+        return False
+
+    ready = await wait_for_pane_ready(target, timeout_s=30.0)
+    if not ready:
+        logger.warning(
+            "pane-resume: pane %s never became ready; falling back", target,
+        )
+        await _pane_resume_fallback_to_kill(cwd)
+        return False
+
+    ok = send_text(target, message)
+    if not ok:
+        logger.warning(
+            "pane-resume: send_text failed for %s; falling back", target,
+        )
+        await _pane_resume_fallback_to_kill(cwd)
+        return False
+
+    logger.info("pane-resume: nudge sent to %s", target)
+    return True
+
+
+async def _pane_resume_fallback_to_kill(cwd: str) -> None:
+    """When the scheduled nudge can't be delivered (pane gone / not ready /
+    send_keys failed), strip the pending metadata and run the standard
+    kill+To Resume reaction so the card moves into the existing
+    auto-resume-rebuild path. Reads the parsed reset time back from the
+    card metadata so the reaction schedules a resume at the same wall-clock
+    moment the (failed) nudge was aiming at."""
+    resume_target = _resume_target_from_cwd(cwd)
+    if resume_target is None:
+        return
+    project_path, session_name = resume_target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return
+    claimant = CLAIMANT_PREFIX + session_name
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is not None:
+            meta = dict(card.meta or {})
+            reset_at = meta.get("pane_resume_reset_at")
+            meta.pop("pane_resume_pending", None)
+            meta.pop("pane_resume_attempts", None)
+            meta.pop("pane_resume_reset_at", None)
+            await apply_operation(
+                ks, op_type="update", entity_type="card", project_key=project_key,
+                entity_id=card.id, payload={"metadata": meta},
+            )
+            await ks.commit()
+        else:
+            reset_at = None
+
+    scheduled_at = None
+    if reset_at:
+        try:
+            scheduled_at = datetime.fromisoformat(reset_at)
+        except ValueError:
+            scheduled_at = None
+
+    try:
+        await move_limited_session_to_resume(cwd, scheduled_at=scheduled_at)
+    except Exception:
+        logger.exception(
+            "pane-resume fallback: move_limited_session_to_resume failed for %s", cwd,
+        )
+
+
 async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bool:
     """Apply the standard rate-limit reaction for a kanban-dispatched session:
     record the structured signal, resolve/parse the reset time, pause the
-    affected provider, and move the card to "To Resume" via
+    affected provider, and either nudge the still-alive tmux pane (pane-resume)
+    or fall back to moving the card to "To Resume" via
     `move_limited_session_to_resume`.
 
     Shared by the Notification-hook handler
@@ -3372,6 +3707,7 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.dispatch_pause import set_paused_until
     from app.services.scheduling.auto_resume import (
+        DEFAULT_RESUME_MESSAGE,
         FALLBACK_PAUSE_HOURS,
         auto_resume_service,
     )
@@ -3407,13 +3743,24 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
     except Exception:
         logger.exception("failed to set dispatch pause for %s", cwd)
 
-    try:
-        moved = await move_limited_session_to_resume(
-            cwd, scheduled_at=pause_until.isoformat(),
+    # Pane-resume branch: prefer nudging the still-alive tmux pane at reset+margin
+    # over the existing kill+To Resume reaction. Falls back to the latter when
+    # (a) the pane is gone, (b) a previous nudge already maxed out attempts, or
+    # (c) we hit the max-attempts cap this round (subsequent re-limits).
+    pending = await _read_pane_resume_state(cwd)
+    if pending is not None and pending["attempts"] >= PANE_RESUME_MAX_ATTEMPTS:
+        await _clear_pane_resume_state(cwd)
+        moved = await _do_move_to_resume(cwd, pause_until)
+    else:
+        next_attempts = (pending["attempts"] + 1) if pending else 1
+        scheduled = await try_pane_resume(
+            cwd, pause_until, DEFAULT_RESUME_MESSAGE,
+            attempts=next_attempts,
         )
-    except Exception:
-        logger.exception("failed to move kanban card to To Resume for %s", cwd)
-        moved = False
+        if scheduled:
+            moved = False
+        else:
+            moved = await _do_move_to_resume(cwd, pause_until)
 
     logger.info(
         "rate-limit signal handled (source=%s cwd=%s moved=%s pause_until=%s)",
@@ -3466,6 +3813,13 @@ async def detect_transcript_rate_limits(
             continue
         message = _tail_rate_limit_message(transcript)
         if message is None:
+            # No active limit. If the card still carries pane-resume pending
+            # metadata from a previous nudge that DID land (the session
+            # recovered on its own), strip it so the next genuine limit cycle
+            # starts with a fresh attempt counter instead of inheriting a
+            # stale one from a limit that's already in the past.
+            if (card.meta or {}).get("pane_resume_pending"):
+                await _clear_pane_resume_metadata_for_card(card, project_path)
             continue
         cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
         moved = await handle_rate_limit_signal(cwd, message, source="transcript")
