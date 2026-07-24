@@ -415,3 +415,76 @@ def test_unknown_cli_id_compatible_raises_explicitly_not_silently():
             model="m",
             cli_id="some-future-cli",
         )
+
+
+# ---------------------------------------------------------------------------
+# kaart 27317b4871… (FCR gap 8): pin the final ANTHROPIC_* env dict for
+# PROVIDER_COMPATIBLE on Claude-Code, the canonical "happy path" the
+# dispatcher sends every anthropic-compatible card through. A regression
+# that drops ``ANTHROPIC_AUTH_TOKEN`` between resolve and env-merge
+# would not be caught by transport-recording tests (they capture kwargs,
+# not the env dict), so we pin the env directly here.
+# ---------------------------------------------------------------------------
+
+
+def test_claude_code_compatible_pins_full_anthropic_env_dict():
+    """Positive: all three carriers (base_url, model, auth_token) set →
+    the canonical Claude-Code Anthropic-compatible env contract."""
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="https://router.example.com/v1",
+        model="claude-sonnet-4-6",
+        auth_token="sk-test-secret",
+        cli_id="claude-code",
+    )
+    assert env == {
+        "ANTHROPIC_BASE_URL": "https://router.example.com/v1",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+        "ANTHROPIC_AUTH_TOKEN": "sk-test-secret",
+    }
+
+
+def test_claude_code_compatible_without_auth_token_omits_token():
+    """Ambient-credential pattern: ``credential_name=None`` → caller is
+    expected to find the credential in its own environment, and the
+    explicit ``ANTHROPIC_AUTH_TOKEN`` key is omitted so a stale ambient
+    one can't be silently clobbered (or vice-versa)."""
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="https://router.example.com/v1",
+        model="claude-sonnet-4-6",
+        cli_id="claude-code",
+    )
+    assert env == {
+        "ANTHROPIC_BASE_URL": "https://router.example.com/v1",
+        "ANTHROPIC_MODEL": "claude-sonnet-4-6",
+    }
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+
+def test_claude_code_compatible_strips_whitespace_only_credentials():
+    """A whitespace-only auth_token must be treated the same as None —
+    otherwise the dispatched CLI would inherit the host's ambient
+    ANTHROPIC_AUTH_TOKEN (potentially the production Anthropic key)
+    instead of the named endpoint's credential. ``build_provider_env``
+    calls ``_clean`` which strips; the test pins that discipline."""
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url="https://router.example.com/v1",
+        model="claude-sonnet-4-6",
+        auth_token="   ",
+        cli_id="claude-code",
+    )
+    assert "ANTHROPIC_AUTH_TOKEN" not in env

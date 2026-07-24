@@ -21,8 +21,13 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 
 from app.kanban import dispatch, subscription_pool
+from app.kanban.schemas import (
+    SubscriptionPoolEntry,
+    SubscriptionPoolRequest,
+)
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
@@ -53,6 +58,60 @@ def _valid_pool():
             drempel=0.95,
         ),
     ]
+
+
+# ---- REST carrier (SubscriptionPoolEntry schema) ----------------------------
+#
+# kaart 27317b4871… (FCR gap 2): the REST schema used to drop the
+# ``endpoint_name`` field on the way to ``PoolEntry`` — a compatible
+# pool save via ``POST /api/v1/kanban/subscription-pool`` therefore
+# silently lost the endpoint slug, forcing the operator to bypass the
+# REST surface and write the row directly. Pin the field is
+# present + round-trips through ``SubscriptionPoolRequest.entries``.
+
+
+def test_pool_entry_schema_accepts_endpoint_name():
+    """The REST entry schema exposes ``endpoint_name`` so a UI/curl
+    save can persist a compatible pool pin."""
+    entry = SubscriptionPoolEntry(
+        provider="anthropic-compatible",
+        model="claude-test",
+        drempel=0.9,
+        endpoint_name="router-rest",
+    )
+    assert entry.endpoint_name == "router-rest"
+
+
+def test_pool_request_entries_round_trip_endpoint_name():
+    """``SubscriptionPoolRequest.entries`` materialises the validated
+    entries into ``PoolEntry`` carrying the endpoint slug — the
+    carrier the storage layer and dispatch resolver consume."""
+    req = SubscriptionPoolRequest(
+        project_key=PK,
+        pool=[SubscriptionPoolEntry(
+            provider="anthropic-compatible",
+            model="claude-test",
+            drempel=0.9,
+            endpoint_name="router-rest",
+        )],
+    )
+    pool_entries = req.entries
+    assert pool_entries is not None
+    assert len(pool_entries) == 1
+    assert pool_entries[0].endpoint_name == "router-rest"
+    assert pool_entries[0].provider == "anthropic-compatible"
+
+
+def test_pool_entry_endpoint_name_defaults_to_none():
+    """Legacy POSTs without ``endpoint_name`` still validate — keeps
+    the back-compat window for non-compatible entries (and for
+    pre-card clients that haven't been updated)."""
+    entry = SubscriptionPoolEntry(
+        provider="anthropic",
+        model="m",
+        drempel=0.9,
+    )
+    assert entry.endpoint_name is None
 
 
 # ---- storage layer ----------------------------------------------------------

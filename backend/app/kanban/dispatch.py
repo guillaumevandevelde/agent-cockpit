@@ -804,6 +804,9 @@ async def set_active_subscription_override(
         from app.services.agentic_cli.endpoints import (
             get_endpoint as _get_endpoint,
         )
+        from app.services.agentic_cli.endpoints import (
+            resolve_compatible_endpoint as _resolve_compatible_endpoint,
+        )
         endpoint = await _get_endpoint(session, project_key, endpoint_name)
         if endpoint is None:
             raise ValueError(
@@ -811,6 +814,18 @@ async def set_active_subscription_override(
                 f"{project_key!r}; configure it via "
                 f"/api/v1/agent-bridge/platforms/endpoints",
             )
+        # kaart 27317b4871… (FCR gap 5): a registered endpoint can
+        # still fail to resolve at dispatch time when its
+        # ``credential_name`` points at a missing key
+        # (``settings.minimax_api_key`` empty). The earlier endpoint-
+        # existence check above only confirms the row is there; the
+        # resolver also runs the credential-resolution path so this
+        # override save surfaces the missing-key message immediately
+        # instead of letting it leak into the dispatch loop's
+        # ``MAX_DISPATCH_FAILURES`` cycle.
+        await _resolve_compatible_endpoint(
+            session, project_key, endpoint_name,
+        )
     value = json.dumps({
         "provider": provider,
         "model": model if model else None,
@@ -2704,7 +2719,10 @@ def _build_reviewer_session_end_instructions() -> str:
 class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str,
                  cli_id: str = "claude-code", provider: str = "anthropic",
-                 model: str | None = None) -> dict: ...
+                 model: str | None = None,
+                 endpoint_name: str | None = None,
+                 endpoint_base_url: str | None = None,
+                 endpoint_auth_token: str | None = None) -> dict: ...
 
 
 def _known_cli_ids() -> set[str]:
@@ -2902,12 +2920,19 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
                          endpoint_auth_token: str | None = None) -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
 
-    `cli_id`, `provider`, `model`, and the `endpoint_*` carrier are accepted
-    for transport-signature parity but ignored: sandcastle runs use the
-    per-project sandcastle config's `agent_provider`, not the card's,
-    column's, or persona's. kaart 293d1faa…: future sandcastle work will
-    forward the endpoint_* fields; until then, accepting them keeps the
-    transport callable from the same dispatcher code path without branching.
+    `cli_id`, `provider`, `model` are accepted for transport-signature parity
+    but the actual sandbox run uses the per-project sandcastle config's
+    `agent_provider`, not the card's, column's, or persona's.
+
+    kaart 27317b4871… (FCR gap 1): when the dispatcher forwards the
+    ``endpoint_*`` carrier at this transport the sandbox would silently
+    use its own provider/model instead of the named endpoint — the
+    worst kind of failure because the spawned session would bill the
+    wrong upstream with no visible signal. Reject the call upfront with
+    a clear ``ValueError`` so the operator can either switch the card
+    to ``transport='worktree'`` (where the endpoint kwargs reach
+    ``build_provider_env`` as designed) or drop the ``endpoint_name``
+    on the card / pool / override.
 
     Runs the agent in a Docker/Podman container. The actual run is kicked off
     asynchronously; this function returns immediately after scheduling it.
@@ -2917,11 +2942,36 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
     rather than blocking. `session_name` is stored as the run's branch so the reaper
     can recognise the live sandcastle session and not release its claim.
 
-    Raises MemoryLimitExceeded if hardware memory limits are reached.
+    Raises MemoryLimitExceeded if hardware memory limits are reached, or
+    ValueError when a non-compatible transport is asked to honour an
+    anthropic-compatible configuration.
     """
     import asyncio
 
     from app.services.scheduling.session_registry import session_registry
+
+    # kaart 27317b4871… (FCR gap 1): reject the
+    # anthropic-compatible + endpoint-* combo so it can't silently
+    # bill the wrong upstream inside the sandbox. The dispatch path
+    # used to forward these kwargs through, and the sandbox ignored
+    # them — the spawned session would still run with the per-project
+    # sandcastle config's ``agent_provider`` (Anthropic by default),
+    # NOT the named endpoint. That's a worse failure than "dispatch
+    # refused" because the operator sees a green spawn + a successful
+    # upstream call, but to a different vendor than they configured.
+    # Raise early so the caller can either fall back to the worktree
+    # transport (set ``card.transport='worktree'``) or pick a
+    # non-compatible provider at the column / card level.
+    if provider == PROVIDER_COMPATIBLE and (
+        endpoint_name or endpoint_base_url or endpoint_auth_token
+    ):
+        raise ValueError(
+            "sandcastle transport does not support anthropic-compatible "
+            "provider: endpoint_name/endpoint_base_url/endpoint_auth_token "
+            "are not forwarded into the sandbox. Set "
+            "card.transport='worktree' for this card, or use a "
+            "non-compatible provider at the column/card level.",
+        )
 
     # Check memory limits before spawning
     if not session_registry.can_add_session():
@@ -6616,10 +6666,23 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
     Unlike the worktree transport, this does NOT create a new git worktree.
     The ClaudeCodeCli resolves the working directory from the session's
     recorded cwd (via project_folder), and spawns with ``--resume session_id``.
+
+    kaart 27317b4871… (FCR gap 7): ``_run_card`` forwards the
+    anthropic-compatible ``endpoint_*`` kwargs to every ``SpawnTransport``
+    the dispatcher dispatches against; the resume transport was
+    the hold-out and the previous signature dropped them on the
+    floor, leading to a ``TypeError`` at every compatible resume
+    dispatch. Mirror the SpawnTransport protocol here and thread
+    the carrier through ``SpawnCommandOptions`` so
+    ``spawn_session`` builds the same env the worktree / headless
+    paths produce.
     """
     def _transport(*, directory: str, prompt: str, session_name: str,
                    cli_id: str = "claude-code", provider: str = "anthropic",
-                   model: str | None = None) -> dict:
+                   model: str | None = None,
+                   endpoint_name: str | None = None,
+                   endpoint_base_url: str | None = None,
+                   endpoint_auth_token: str | None = None) -> dict:
         from app.services.agentic_cli.base import SpawnCommandOptions
         from app.services.runs.spawn import spawn_session
         from app.services.scheduling.session_registry import session_registry
@@ -6640,6 +6703,9 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             skip_permissions=skip_permissions,
             provider=provider,
             model=model,
+            endpoint_name=endpoint_name,
+            endpoint_base_url=endpoint_base_url,
+            endpoint_auth_token=endpoint_auth_token,
         )
         # Resolve project_key for the audit log when the directory is a
         # registered project root. Falls back to None on failure so the
