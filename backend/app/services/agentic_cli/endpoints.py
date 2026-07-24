@@ -213,11 +213,21 @@ async def get_endpoint(session, project_key: str, name: str) -> Endpoint | None:
 # to avoid an import cycle (``provider_env`` has no DB deps and is imported
 # very early in the app bootstrap).
 
-# Credential resolution is intentionally narrow: only the hard-coded
-# MiniMax key from ``Settings`` is recognised today. ``SecretStore``-
-# driven lookup arrives with the next card (see
-# ``subscription-pool-dispatch-analyse.md``); the helper signature is
-# fixed so that swap is a one-place change.
+
+def _secret_store():
+    """Factory for the project-scoped ``SecretStore`` used by
+    ``resolve_compatible_endpoint`` to look up non-MiniMax endpoint
+    credentials. Kept as a module-level factory so tests can monkeypatch
+    it (same pattern as ``backend/app/kanban/dispatch.py:_secret_store``).
+
+    Lazy import keeps ``endpoints`` import-time free of the secrets_store
+    module — the secret store is only needed for the non-MiniMax path
+    anyway, and the import path would otherwise need to outlive the
+    age / keyring transitive dependencies in some minimal test setups.
+    """
+    from app.services.secrets_store import AGESecretStore
+
+    return AGESecretStore()
 
 async def resolve_compatible_endpoint(
     session,
@@ -296,13 +306,33 @@ async def resolve_compatible_endpoint(
                 f"use the ambient-host credential instead.",
             )
     else:
-        # A named credential the backend can't currently resolve:
-        # surface a clean refusal so the caller sees the exact
-        # problem rather than a silent 401 on the first request.
-        raise ValueError(
-            f"endpoint {endpoint_name!r} requires credential "
-            f"{endpoint.credential_name!r}, which is not configured",
-        )
+        # kaart 333af652… — non-MiniMax credentials resolve via the
+        # project's SecretStore. ``settings.minimax_api_key`` is a
+        # legacy escape hatch for the only historically-recognised
+        # key; every other provider (groq/9router/litellm/OpenRouter
+        # free tier …) is expected to land a key in the project's
+        # SecretStore via the per-project REST CRUD. A missing
+        # SecretStore file (the project never set up a store) and a
+        # SecretStore without that name both surface as ``None`` /
+        # ``SecretNotFound`` here — we treat them the same way: the
+        # credential is "not configured" and the caller gets a clear
+        # 400 / dispatch-fail message naming the missing key.
+        from app.services.secrets_store import SecretNotFound
+
+        try:
+            stored = _secret_store().get(project_key, endpoint.credential_name)
+        except SecretNotFound:
+            stored = None
+        if stored:
+            auth_token = stored
+        else:
+            raise ValueError(
+                f"endpoint {endpoint_name!r} requires credential "
+                f"{endpoint.credential_name!r}, which is not configured "
+                f"in the project's SecretStore (or for legacy MiniMax "
+                f"keys, settings.minimax_api_key is empty); set it via "
+                f"POST /api/v1/secrets",
+            )
     model = requested_model or endpoint.model
     return {
         "name": endpoint.name,

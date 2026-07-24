@@ -477,7 +477,11 @@ async def delete_session_attachment(
 
 
 @router.post("/sessions")
-async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depends(get_db)):
+async def spawn_session_endpoint(
+    request: SpawnRequest,
+    project_key: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     try:
         get_agentic_cli(request.cli)
 
@@ -493,6 +497,14 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
         # the request handler. The same helper serves the auto-
         # dispatch path so both surfaces share their error messages
         # and validation — kaart 293d1faa…
+        #
+        # ``project_key`` honours the same query parameter as
+        # ``GET/POST/DELETE /platforms/endpoints`` so an endpoint
+        # registered under a project resolves in the same bucket
+        # (kaart 333af652… blocker: the spawn path used to always
+        # read the shared ``_default`` bucket, so project-scoped
+        # rows 404'd at spawn time even though list/upsert could
+        # see them).
         endpoint_base_url: str | None = None
         endpoint_auth_token: str | None = None
         endpoint_name = request.endpoint_name
@@ -513,7 +525,7 @@ async def spawn_session_endpoint(request: SpawnRequest, db: AsyncSession = Depen
             )
             try:
                 resolved = await _resolve_compatible(
-                    db, DEFAULT_PROJECT_KEY, endpoint_name,
+                    db, project_key or DEFAULT_PROJECT_KEY, endpoint_name,
                     requested_model=request.model,
                 )
             except ValueError as exc:

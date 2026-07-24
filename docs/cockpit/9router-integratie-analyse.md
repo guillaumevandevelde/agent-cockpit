@@ -330,7 +330,7 @@ Vijf kind-kaarten, gefaseerd zodat het meetwerk vóór het bouwwerk komt.
 |---|---|---|
 | K1 | Meet de RTK/token-saver-claim met een reproduceerbaar recept | ✅ Geïmplementeerd (kaart `6b67df66…` — zie [`token-saver-meet-harnas.md`](./token-saver-meet-harnas.md) + raw artifacts in [`measure-evidence/2026-07-21-counterbalanced/`](./measure-evidence/2026-07-21-counterbalanced/)) |
 | K2 | Vergelijk 9router vs. LiteLLM voor de API-key-tier (spike, kiest de backend) | hangt af van K1 |
-| K3 | Generieke `ninerouter`-provider-entry in `provider_env.py` + pool-allowlist | hangt af van K2 |
+| K3 | Generieke `ninerouter`-provider-entry in `provider_env.py` + pool-allowlist | ✅ Geïmplementeerd (kaart `333af652…` — endpoint-agnostische `anthropic-compatible` provider; data-driven via `endpoints.py` + project-scoped SecretStore lookup) |
 | K4 | Hardening-checklist + doctor-check (savers uit, cloud-sync uit, loopback-only) | hangt af van K3 |
 | K5 | Usage-attributie: eerlijk `betrouwbaarheid="onbekend"` voor router-verkeer | hangt af van K3 |
 
@@ -342,6 +342,27 @@ het saver-effect) — de oorspronkelijke −42,4% `cache_read`-headline was
 order-confounded en is **ongeldig** verklaard. Volledige tabel, ruwe artifacts,
 en onzekerheids-markers rond `cache_read` vs abonnementsquotum in
 [`token-saver-meet-harnas.md`](./token-saver-meet-harnas.md).
+
+**K3 resultaat (kaart `333af652…`):** Een nieuwe provider toevoegen is een
+configuratie-rij, geen code-edit. `endpoints.py` (KanbanMeta-backed) houdt
+`{name, base_url, model, credential_name?}` per project, met
+`_validate_name`/`_validate_base_url`/`_validate_model` op de
+serialisatie-grens. `provider_env.build_provider_env` heeft een
+`PROVIDER_COMPATIBLE`-tak die `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` /
+`ANTHROPIC_AUTH_TOKEN` altijd-explicit zet (geen conditioneel lek vanuit
+ambient env). `resolve_compatible_endpoint` (gedeeld door REST-spawn én
+auto-dispatch) resolvet de credential uit de **project-scoped SecretStore**
+(legacy MiniMax-key uit `Settings` blijft als escape-hatch); een niet-
+geconfigureerde credential geeft een schone `ValueError` die de REST
+handler naar 400 vertaalt en de dispatcher door
+`MAX_DISPATCH_FAILURES` loodst. `_ALLOWED_POOL_PROVIDERS` accepteert de
+nieuwe provider. De frontend `NewSessionDialog` leest endpoints uit
+`GET /platforms/endpoints` i.p.v. het hardcoded union-type. Per-project
+resolutie op `POST /sessions` honoreert dezelfde `project_key`-query-param
+als de list/upsert/delete-endpoints (kaart `333af652…` blocker 2). De
+credential-setup-link in de dialoog is vervangen door een accurate
+verwijzing naar `POST /api/v1/secrets` (de Subscriptions-pagina heeft
+geen endpoint-UI; een dedicated UI is een vervolgkaart).
 
 K2 hangt aan K1 omdat de meetuitslag de vergelijking voedt. K3 hangt aan K2 omdat
 de spike bepaalt *welk* endpoint de entry krijgt. K4 en K5 hangen beide aan K3
