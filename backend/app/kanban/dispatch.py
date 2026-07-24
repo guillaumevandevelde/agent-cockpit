@@ -3195,18 +3195,139 @@ def _capture_pane_content(session_name: str, *, lines: int = 20) -> str | None:
     return result.stdout
 
 
-def _is_rate_limited_session(pane_content: str) -> bool:
-    """True if tmux pane content shows a 429 / rate-limit indicator.
+# ---- pane-scan rate-limit needles ------------------------------------------
+#
+# The pane substring-scan is a fallback for the 429-on-first-spawn case
+# where `claude` printed the error and died before initialising hooks (so
+# the transcript detector never sees it). It runs on raw terminal output,
+# which means an agent doing curl/HTTP tests or reading third-party API
+# error logs can leave benign '429' / 'api error' substrings in pane
+# history. The 2026-07-22 incident (card 3a8f27a4…,
+# logs/backend/run-20260722-095619-2861-0.log:947) killed a healthy session
+# over a '429' from a curl probe — the cost of one false positive was
+# higher than the cost of a missed detection (dispatch paused 5h, card
+# dispatched to Impediment), so these needles are tighter than the
+# Notification classifier's. The classifier still consumes its existing
+# loose needles via `is_limit_notification`; this is the pane-specific
+# set.
+#
+# Single-phrase matches: vendor-specific phrasings that are very unlikely
+# to appear outside a real limit notification.
+_PANE_RATE_LIMIT_PHRASES: tuple[str, ...] = (
+    "hit your session limit",
+    "hit your weekly limit",
+    "token plan",
+)
 
-    Matches a small set of well-known substrings (case-insensitive), reusing
-    the canonical detector on AutoResumeService so the hook-event path and
-    the reaper's pane scan stay in sync — a 429 detected via either source
-    triggers the same dispatch pause, and we never risk the two drifting
-    apart."""
+# Combination matches: the generic HTTP-error phrases ("api error", "429",
+# "request rejected") are too loose on their own — agents that probe
+# third-party APIs routinely print one or the other. A match requires the
+# co-occurrence of an error/status phrase AND a rate-limit context phrase.
+# The two-token combos below are still safe because a curl probe prints
+# "HTTP/2 429" (no "api error") and a bare rejection prints "Request
+# rejected: invalid API key" (no "429") — neither trips.
+_PANE_RATE_LIMIT_COMBOS: tuple[frozenset[str], ...] = (
+    frozenset({"api error", "429"}),
+    frozenset({"api error", "429", "rate"}),
+    frozenset({"api error", "429", "too many"}),
+    frozenset({"api error", "429", "limit"}),
+    frozenset({"request rejected", "429"}),
+)
+
+
+def _find_rate_limit_match(pane_content: str) -> str | None:
+    """Return the specific needle/phrase that classifies `pane_content` as
+    a Claude/MiniMax rate-limit hit, or None when no match.
+
+    The string returned is the literal matched needle (single phrase) or
+    the combo name (e.g. ``"api error+429+too many"``); the caller uses it
+    to log *why* the reaper acted, which the old boolean-only
+    `_is_rate_limited_session` couldn't surface. Tightened per card
+    3a8f27a4… — bare ``"429"`` or ``"api error"`` alone is no longer
+    sufficient."""
     if not pane_content:
+        return None
+    text = pane_content.lower()
+    for needle in _PANE_RATE_LIMIT_PHRASES:
+        if needle in text:
+            return needle
+    # Combo matches: require every phrase in the combo to appear in the
+    # text (substring, so 'API Error:' still satisfies 'api error'). This
+    # catches the canonical MiniMax reject format ('API Error: Request
+    # rejected (429) · Token Plan usage limit reached') and the standard
+    # HTTP 429 wording ('API Error: 429 Too Many Requests') without
+    # false-positiving on bare 'HTTP/2 429' from a curl probe.
+    for combo in _PANE_RATE_LIMIT_COMBOS:
+        if all(piece in text for piece in combo):
+            return "+".join(sorted(combo))
+    return None
+
+
+def _session_has_transcript(project_path: str | None, session_name: str) -> bool:
+    """True if the worktree for `session_name` has a Claude transcript file
+    on disk with content.
+
+    Used by the reaper's pane-scan branch (card 3a8f27a4…): the pane
+    substring-scan should only fire when no transcript exists yet, since a
+    session with a productive transcript is the transcript-tail
+    detector's territory. Any unreadable / missing transcript counts as
+    'no transcript' so the scan still fires for the classic 429-on-first-
+    spawn case (`claude` died before writing anything)."""
+    if not project_path:
         return False
-    from app.services.scheduling.auto_resume import auto_resume_service
-    return auto_resume_service.is_limit_notification(pane_content)
+    try:
+        from app.kanban.session_recovery import _resolve_transcript_file
+        path = _resolve_transcript_file(project_path, session_name)
+    except Exception:
+        # Fail open: a transient resolver hiccup must never block the
+        # pane scan. Better to risk one false positive than to silently
+        # strand a true 429-on-first-spawn.
+        return False
+    if path is None:
+        return False
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _matching_pane_line(pane_content: str, needle: str) -> str:
+    """Return the first line of `pane_content` that contains any of the
+    tokens in `needle` (split on '+'), stripped, truncated to 300 chars.
+
+    Used by the reaper's structured log so an operator chasing a (real or
+    false) cleanup can see the matching line instead of the truncated
+    200-char pane prefix the old `_cleanup_stuck_session` log emitted —
+    that prefix often hid the actual match because the offending substring
+    sat further down in the 20-line capture."""
+    if not pane_content or not needle:
+        return ""
+    tokens = [t for t in needle.split("+") if t]
+    if not tokens:
+        return ""
+    for line in pane_content.splitlines():
+        low = line.lower()
+        if any(tok in low for tok in tokens):
+            return line.strip()[:300]
+    return ""
+
+
+def _is_rate_limited_session(pane_content: str) -> bool:
+    """True if `pane_content` (the last 20 lines of a tmux pane capture)
+    shows a Claude/MiniMax rate-limit indicator.
+
+    Backward-compatible boolean wrapper around `_find_rate_limit_match` —
+    callers that only need the yes/no answer (existing tests, the reaper's
+    fallback branch) keep working without change; callers that need to
+    log *which* needle matched (the reaper itself) call
+    `_find_rate_limit_match` directly.
+
+    Tighter than `auto_resume_service.is_limit_notification`: that
+    classifier consumes Notification-hook payloads which are structured
+    messages from Claude Code itself, while the pane scan runs on raw
+    terminal output where any '429' substring is suspect. See card
+    3a8f27a4… for the incident that drove the split."""
+    return _find_rate_limit_match(pane_content) is not None
 
 
 def _structured_rate_limit_signal(session_name: str) -> bool:
@@ -3834,6 +3955,7 @@ async def detect_transcript_rate_limits(
 
 async def _cleanup_stuck_session(
     session, *, card, project_key: str, session_name: str, pane_content: str,
+    matched_needle: str | None = None,
 ) -> None:
     """Clean up a stuck tmux session that hit a rate limit.
 
@@ -3847,18 +3969,37 @@ async def _cleanup_stuck_session(
     STUCK_SESSION_TIMEOUT_S) but counting it as a failure is still right:
     a 429 is an infrastructure wall that will hit the same dispatch
     target on the next attempt, so we want MAX_DISPATCH_FAILURES to
-    eventually move the card to Impediment instead of looping forever."""
+    eventually move the card to Impediment instead of looping forever.
+
+    `matched_needle` is the specific needle/phrase from the pane-scan
+    matcher (when this branch was reached via the pane fallback). The
+    structured-signal path leaves it None — that branch already knows
+    the limit message verbatim, and the needle is implicit. Logging the
+    matched needle alongside the matched pane line (instead of the old
+    truncated 200-char pane prefix) was the observability gap card
+    3a8f27a4… called out — see the 2026-07-22 incident where a healthy
+    session was killed and the truncated log hid which needle had
+    actually fired."""
     from datetime import UTC, datetime, timedelta
 
     from app.kanban.dispatch_pause import set_paused_until
     from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
 
-    logger.warning(
-        "stuck session %s hit a rate limit (pane: %r); pausing dispatch for %sh, "
-        "killing tmux, releasing claim",
-        session_name, (pane_content or "")[:200].replace("\n", " "),
-        FALLBACK_PAUSE_HOURS,
-    )
+    if matched_needle is not None:
+        matched_line = _matching_pane_line(pane_content, matched_needle)
+        logger.warning(
+            "stuck session %s hit a rate limit (needle=%r line=%r); "
+            "pausing dispatch for %sh, killing tmux, releasing claim",
+            session_name, matched_needle, matched_line,
+            FALLBACK_PAUSE_HOURS,
+        )
+    else:
+        logger.warning(
+            "stuck session %s hit a rate limit (pane: %r); pausing dispatch for %sh, "
+            "killing tmux, releasing claim",
+            session_name, (pane_content or "")[:200].replace("\n", " "),
+            FALLBACK_PAUSE_HOURS,
+        )
 
     # Conservative fallback duration; the hook-event path has the parsed
     # reset time, but the reaper only sees tmux pane content.
@@ -4972,6 +5113,16 @@ async def reap_stale_claims(
         # shows ordinary work or we couldn't capture it, do nothing — the
         # session is just slow, and falling through to the alive-skip
         # branch keeps the existing reaper semantics.
+        #
+        # The pane substring-scan only fires when no usable transcript
+        # exists yet — once the session has produced one (i.e. it's been
+        # productive for long enough that `_read_transcript_tail_entries`
+        # would have seen the limit), the transcript-tail detector
+        # (`detect_transcript_rate_limits`) is the authoritative source.
+        # Without this guard an agent whose history contains a benign
+        # '429' / 'api error' substring from a curl probe gets killed by a
+        # false positive — that's the 2026-07-22 incident that drove card
+        # 3a8f27a4… (logs/backend/run-20260722-095619-2861-0.log:947).
         if name in stuck_names:
             if _structured_rate_limit_signal(name):
                 # Use the canonical CC notification message when the typed
@@ -4990,12 +5141,25 @@ async def reap_stale_claims(
                 continue
             pane = _capture_pane_content(name)
             if pane is not None and _is_rate_limited_session(pane):
-                await _cleanup_stuck_session(
-                    session, card=card, project_key=project_key,
-                    session_name=name, pane_content=pane,
-                )
-                reaped += 1
-                continue
+                # Pre-transcript-only contract: only run the pane scan if
+                # there is no transcript to take precedence. If a
+                # transcript exists (and has content) the transcript-tail
+                # detector owns mid-session limit handling; running the
+                # pane scan on top of it is the false-positive path.
+                if _session_has_transcript(project_path, name):
+                    # Drop through to the alive-skip branch — the session
+                    # is just slow (or its limit, if any, will be caught
+                    # by `detect_transcript_rate_limits` on the next tick).
+                    pass
+                else:
+                    needle = _find_rate_limit_match(pane) or "?"
+                    await _cleanup_stuck_session(
+                        session, card=card, project_key=project_key,
+                        session_name=name, pane_content=pane,
+                        matched_needle=needle,
+                    )
+                    reaped += 1
+                    continue
 
         if name in live_sessions or name in sandcastle_live or name in headless_live:
             continue
