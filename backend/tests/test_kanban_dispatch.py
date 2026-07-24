@@ -6796,21 +6796,241 @@ def test_capture_pane_content_returns_none_on_failure(monkeypatch):
 
 
 def test_is_rate_limited_session_matches_known_patterns():
-    """_is_rate_limited_session must recognise the same set of substrings
-    that the hook-event path uses (so a 429 detected via either source
-    triggers the same dispatch-pause), but not match ordinary progress
-    output that just happens to mention numbers or 'plan'."""
+    """_is_rate_limited_session must recognise real Claude/MiniMax limit
+    messages, but not raw pane text that just happens to mention '429',
+    'api error', or 'request rejected' in unrelated HTTP/test output — see
+    kanban card 3a8f27a4… which traced the 2026-07-22 false-positive on a
+    healthy session (an agent doing curl/HTTP tests left a '429' in pane
+    history) back to those loose single-token needles.
+
+    The pane-scan gets raw terminal output (curl results, error logs from
+    any third-party API the agent is testing), so its needles are tighter
+    than the Notification classifier's — a Notification payload is
+    structured and comes from Claude Code itself, but a pane capture is
+    whatever the terminal happened to render. Bare '429' or 'api error'
+    alone is no longer enough; combinations are required for the generic
+    HTTP-error phrases."""
     import app.kanban.dispatch as d
+    # Canonical Anthropic messages — single exact phrase matches.
+    assert d._is_rate_limited_session(
+        "You've hit your session limit · resets 11:10pm (Europe/Brussels)"
+    ) is True
+    assert d._is_rate_limited_session(
+        "You've hit your weekly limit · resets 9pm (Europe/Brussels)"
+    ) is True
+    # Canonical MiniMax messages — 'token plan' alone is specific enough.
+    assert d._is_rate_limited_session(
+        "API Error: Request rejected (429) · Token Plan usage limit reached"
+    ) is True
+    # Generic HTTP 429 — needs both 'api error' and '429' AND a rate/toomany
+    # context word to disambiguate from a healthy agent doing HTTP tests.
     assert d._is_rate_limited_session("API Error: 429 Too Many Requests") is True
-    assert d._is_rate_limited_session("Token Plan limit reached") is True
-    assert d._is_rate_limited_session("Hit your usage limit for the day") is True
-    assert d._is_rate_limited_session("Request rejected: rate limit") is True
-    assert d._is_rate_limited_session("api error (429)") is True
-    # Negative cases — these must NOT trip the detector.
+    # Negative cases — these must NOT trip the detector (the regression cases
+    # from the 2026-07-22 false-positive incident).
+    assert d._is_rate_limited_session(
+        "$ curl -i https://api.example.com/v1/usage\nHTTP/2 429\n"
+    ) is False
+    assert d._is_rate_limited_session(
+        "Some API error: invalid request format"
+    ) is False
+    assert d._is_rate_limited_session(
+        "Request rejected: invalid API key"
+    ) is False
+    # The literal pane content from the bug report — an in-flight session
+    # displaying a PLAN CONTEXT block + plan-deliverable id + parent-card id
+    # + 'Two findings already. Let me fix the endpoint path...'.
+    assert d._is_rate_limited_session(
+        "❯ PLAN CONTEXT — read this first Plan deliverable: "
+        "27033503b1ad43d49ddca47548dacfce\n"
+        " Parent card: 38d32e94c0484d7ca0a4b09dccc22e42 "
+        "● Two findings already. Let me fix the\n"
+        " endpoint path and register the "
+    ) is False
+    # Existing negative cases — must still NOT match.
     assert d._is_rate_limited_session("Working on tests...") is False
     assert d._is_rate_limited_session("Planning the next refactor") is False
     assert d._is_rate_limited_session("") is False
     assert d._is_rate_limited_session("Compaction 1/2 complete") is False
+
+
+def test_find_rate_limit_match_returns_matched_phrase():
+    """_find_rate_limit_match returns the specific needle/phrase that
+    classified a hit, so the reaper can log *why* it acted. Without this
+    an operator chasing a false-positive has only the truncated 200-char
+    pane prefix to work with, which is exactly the observability gap the
+    card called out ('which needle matched is not to find out')."""
+    import app.kanban.dispatch as d
+    # Canonical single-phrase matches.
+    assert d._find_rate_limit_match(
+        "You've hit your session limit · resets 11pm"
+    ) == "hit your session limit"
+    assert d._find_rate_limit_match(
+        "You've hit your weekly limit · resets 9pm"
+    ) == "hit your weekly limit"
+    assert d._find_rate_limit_match(
+        "API Error: Request rejected (429) · Token Plan usage limit reached"
+    ) == "token plan"
+    # Combo match — 'api error + 429' is the tightest combo that catches
+    # the canonical MiniMax reject format. Tokens are joined in sorted
+    # order so the returned phrase is stable for log assertions.
+    assert d._find_rate_limit_match(
+        "API Error: 429 Too Many Requests"
+    ) == "429+api error"
+    # Combo match — 'request rejected + 429' (no 'rate' / 'limit' word
+    # needed; the 429 status itself is the disambiguator).
+    assert d._find_rate_limit_match(
+        "Request rejected (429) — try again later"
+    ) == "429+request rejected"
+    # Non-matches — must return None, not a guessed phrase.
+    assert d._find_rate_limit_match(
+        "$ curl -i https://api.example.com/v1/usage\nHTTP/2 429\n"
+    ) is None
+    assert d._find_rate_limit_match(
+        "Request rejected: invalid API key"
+    ) is None
+    assert d._find_rate_limit_match("") is None
+    # Case insensitivity — capture-pane text is whatever the terminal
+    # rendered, including any ANSI colour escapes; the matcher must work
+    # without us stripping case.
+    assert d._find_rate_limit_match(
+        "YOU'VE HIT YOUR SESSION LIMIT · resets 11pm"
+    ) == "hit your session limit"
+
+
+# ---- pane-scan scoped to pre-transcript case (card 3a8f27a4… R4) ------------
+#
+# Once the transcript-tail detector (`detect_transcript_rate_limits`) is the
+# authoritative mid-session source (R1 / `c8ad1ea8…`), the pane substring
+# scan should only fire when there is no usable transcript yet — the case
+# it was originally built for (a `claude` process that printed a 429 and
+# died before its hooks ever fired). When a transcript exists, the
+# transcript detector is leading; running the pane scan on top of it is
+# what killed the healthy k-spike-meet-wa-d450 session on 2026-07-22.
+
+
+@pytest.mark.asyncio
+async def test_reaper_pane_scan_skipped_when_transcript_exists(monkeypatch, tmp_path):
+    """When a stuck session's transcript file already exists with content,
+    the reaper must NOT run the pane substring-scan fallback: that path is
+    the mid-session detector's job. Without this guard, an agent running
+    curl/HTTP tests whose history happens to mention '429' gets killed by
+    a false positive even though its transcript is the authoritative source.
+
+    Reproduces the 2026-07-22 false-positive incident (card 3a8f27a4…,
+    logs/backend/run-20260722-095619-2861-0.log:947): the session was
+    actively working ('Two findings already. Let me fix the endpoint
+    path…') when the pane substring-scan flagged it for cleanup."""
+    import app.kanban.dispatch as d
+    from app.kanban import session_recovery as srec
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-spike-meet-wa-d450")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    # Pane content contains only the literal text from the bug report's
+    # log line — no 429/api error context at all. Even if it did, the
+    # transcript detector is the leading source for this session.
+    pane_with_false_positive_risk = (
+        "❯ PLAN CONTEXT — read this first Plan deliverable: "
+        "27033503b1ad43d49ddca47548dacfce\n"
+        " Parent card: 38d32e94c0484d7ca0a4b09dccc22e42 "
+        "● Two findings already. Let me fix the\n"
+        " endpoint path and register the "
+    )
+    monkeypatch.setattr(
+        d, "_capture_pane_content",
+        lambda name, *, lines=20: pane_with_false_positive_risk,
+    )
+
+    # Pretend the session has an existing transcript — i.e. it's been
+    # productive for a while and the transcript detector would have seen
+    # any actual limit. The reaper must skip the pane scan entirely.
+    fake_transcript = tmp_path / "transcript.jsonl"
+    fake_transcript.write_text(
+        '{"type":"assistant","message":{"content":[{"type":"text",'
+        '"text":"ordinary work, no limit"}]}}\n'
+    )
+
+    monkeypatch.setattr(
+        srec, "_resolve_transcript_file", lambda project_path, session_name, **kw: fake_transcript,
+    )
+
+    # Even if the matcher would say "limit", we should NOT kill — transcript
+    # is the source of truth for mid-session limits.
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="transcript-exists", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-spike-meet-wa-d450"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-spike-meet-wa-d450"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 0
+    assert killed == []
+    assert card.claimed_by == "agent:k-spike-meet-wa-d450"
+
+
+@pytest.mark.asyncio
+async def test_reaper_pane_scan_still_fires_for_fresh_429_when_no_transcript(monkeypatch, tmp_path):
+    """The pane-scan still catches the classic 429-on-first-spawn case
+    (R4's pre-transcript-only contract): `claude` prints the error and
+    dies before hooks fire, so the transcript file doesn't exist yet.
+    The tight needles recognise the canonical MiniMax error and trigger
+    cleanup."""
+    import app.kanban.dispatch as d
+    from app.kanban import session_recovery as srec
+    from app.services.scheduling import session_registry as sreg
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(sreg.time, "monotonic", clock)
+    reg = sreg.SessionRegistry()
+    reg.mark_spawned("k-fresh-429-001")
+    clock.advance(200)
+    monkeypatch.setattr(d, "session_registry", reg)
+
+    pane = "API Error: Request rejected (429) · Token Plan usage limit reached"
+    monkeypatch.setattr(d, "_capture_pane_content", lambda name, *, lines=20: pane)
+
+    # Transcript file does NOT exist — fresh spawn died before any
+    # transcript was written.
+    monkeypatch.setattr(
+        srec, "_resolve_transcript_file",
+        lambda project_path, session_name, **kw: None,
+    )
+
+    killed = []
+    monkeypatch.setattr(d, "_kill_agent_session", lambda name: killed.append(name))
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="fresh-429", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-fresh-429-001"},
+        )
+        await s.commit()
+        reaped = await dispatch.reap_stale_claims(
+            s, project_key=PK, cards=await list_cards(s, PK),
+            live_sessions={"k-fresh-429-001"}, project_path="/p",
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert killed == ["k-fresh-429-001"]
+    assert card.claimed_by is None
 
 
 # ---- structured-signal fast path (acp-transport-decision.md §6 kaart 2) -----

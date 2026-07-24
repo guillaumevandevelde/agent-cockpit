@@ -382,6 +382,15 @@ Belangrijk contract: alleen reageren wanneer de api-error het **laatste betekeni
 event** is. Staat er daarna gewone assistant/user-activiteit, dan is de sessie zelf al
 hersteld en mag er niets gebeuren.
 
+> ✅ **Geïmplementeerd (kaart `c8ad1ea8…`).** `detect_transcript_rate_limits`
+> (`backend/app/kanban/dispatch.py`) draait elke dispatch-tick per project, leest per
+> geclaimde kaart alleen de staart van het transcript (`_read_transcript_tail_entries`,
+> 64 KiB), en meldt een limiet zodra de laatste conversationele entry een
+> `isApiErrorMessage: true` is die als limiet classificeert (`_tail_rate_limit_message`).
+> De reactie is uitgetrokken uit de Notification-hook naar een gedeelde
+> `handle_rate_limit_signal` (per-provider `set_paused_until` + `move_limited_session_to_resume`),
+> zodat beide kanalen exact hetzelfde afhandelpad delen — geen tweede reactiepad.
+
 ### R2 — Hervat in de bestaande pane in plaats van kill + respawn (kaart C3)
 
 Vandaag is de reactie op een limiet: tmux killen, kaart naar `To Resume`, later
@@ -411,12 +420,29 @@ Dat vangt de limiet-case, maar ook alles wat we niet opgesomd hebben: een crash-
 wachtende permission-prompt, een sessie die op een netwerk-timeout hangt. Het verandert het
 systeem van "zelfherstellend voor bekende fouten" naar "zelfherstellend, punt".
 
+✅ Geïmplementeerd (kaart f0953a11…): `check_progress_liveness` in `app/kanban/dispatch.py`
+draait elke tick ná `detect_transcript_rate_limits`, vergelijkt het transcript-mtime van
+elke `agent:`-claimed kaart met de vorige observatie, post één "stilstaand"-comment bij
+`PROGRESS_LIVENESS_SIGNAL_SECONDS=30min` en released via `_move_to_resume` bij
+`PROGRESS_LIVENESS_ACTION_SECONDS=60min`. Sandcastle / headless transports behouden hun
+eigen liveness-bron (carve-out in de skip-set).
+
 ### R4 — Maak de pane-detector veilig (kaart C5)
 
 Zodra R1 er is, hoeft de pane-substring-scan alleen nog het geval te dekken waarvoor hij
 gebouwd is: een sessie die crasht vóór er een transcript is. Beperk hem daartoe, en log
 welke needle matchte plus het volledige matchvenster — een detector die een gezonde sessie
 kan killen en niet vertelt waarom, hoort niet in de reaper.
+
+> ✅ **Geïmplementeerd (kaart `3a8f27a4…`).** De pane-scan is nu pre-transcript-only via
+> `_session_has_transcript`: zodra de sessie een transcript met inhoud heeft, is de
+> transcript-tail detector (`detect_transcript_rate_limits`) leidend en doet de pane-scan
+> niets. De needles zijn strenger: losse `"429"` of `"api error"` zijn niet meer voldoende;
+> alleen single-phrase matches (`hit your session limit`, `hit your weekly limit`,
+> `token plan`) of co-occurring combo's (`api error`+`429`, `request rejected`+`429`)
+> triggeren. Bij een match logt `_cleanup_stuck_session` nu `needle=…` + de bijbehorende
+> pane-regel in plaats van de afgekapte 200-char prefix. Bare `HTTP/2 429` uit een curl
+> faalt niet langer op een gezonde sessie (de false positive van 2026-07-22).
 
 ### R5 — Herken alle limiet-vormen (kaart C2)
 

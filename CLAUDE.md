@@ -83,7 +83,7 @@ cd frontend && npm run build     # Same as above
 > acceptable, document the carve-out at the assertion site, not in the grep
 > itself.
 bash backend/test_commands_api.sh                         # Curl-based API tests
-> **Bash harnesses for scripts/test_*.sh** — volledige lijst: `ls scripts/test_*.sh` (zie CLAUDE.md gotcha over check-test-harness-coverage)
+ls scripts/test_*.sh     # family-level reference — check-test-harness-coverage.sh (kaart 5e988e4e, glob-form uit 8c7cfc14) dekt het hele scripts/test_*.sh spectrum
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
@@ -103,6 +103,9 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 
 # Kanban-meta vs. security-profile conflict check (zichtbaarheid voor load-bearing overrides — kaart d5642a57…)
 ./scripts/check-kanban-meta-security-conflicts.sh   # Flag KanbanMeta skip_permissions/transport overrides die het project_security_profiles-risicoprofiel tegenspreken (advisory; --strict = exit 1)
+
+# Dispatch resolver-usage self-check (gate dat ad-hoc provider/model lookups in dispatch.py flagt — kaart 931855b0…)
+./scripts/check-dispatch-resolver-usage.sh          # Flag ad-hoc provider/model lookups in backend/app/kanban/dispatch.py die de canonieke resolve_effective_provider_and_model omzeilen (advisory; --strict = exit 1)
 
 # Dangling-dep sweepers (vangnet voor verweesde kanban-references — advisory; --strict = exit 1; JSON op stdout)
 ./scripts/sweep_dangling_depends_on.py        # Flag niet-Done kaarten waarvan een depends_on-id naar een niet-bestaande kaart verwijst

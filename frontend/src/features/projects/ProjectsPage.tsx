@@ -18,8 +18,13 @@ import { RefreshButton } from '@/components/shared/RefreshButton';
 // surfaced here so a user landing on this page knows there are TWO ways to
 // get a project into the list: "birth" (spec-driven intake → Promote) versus
 // "track" (Add Folder for an existing directory).
+// Read the full flow button. Keep the URL on `claude-cockpit` (not
+// `agent-cockpit`) until the upstream GitHub repo is actually renamed:
+// rebrand commit 60a097d swept this string with the brand sweep, but the
+// `agent-cockpit` repo 404s and every other doc URL in the repo still
+// points at `claude-cockpit`. See rebrand-decision §2.1 and §7.
 const SPEC_DRIVEN_FLOW_DOC_URL =
-  'https://github.com/guillaumevandevelde/agent-cockpit/blob/master/docs/cockpit/new-project-startup-flow.md';
+  'https://github.com/guillaumevandevelde/claude-cockpit/blob/master/docs/cockpit/new-project-startup-flow.md';
 
 export function ProjectsPage() {
   const { projects, loading, error, fetchProjects } = useProjectContext();

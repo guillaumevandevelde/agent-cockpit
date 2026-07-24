@@ -420,13 +420,49 @@ async def test_dispatch_raises_when_endpoint_name_unknown():
     assert transport.calls == []
 
 
+async def test_set_pool_rejects_unresolvable_credential_at_save_time():
+    """Gap 5 (kaart 27317b4871…): pool save with an endpoint whose
+    ``credential_name`` is something the backend cannot resolve is
+    rejected at save time by ``set_subscription_pool`` calling
+    ``resolve_compatible_endpoint`` itself — the operator sees the
+    exact error at the REST boundary instead of waiting for the
+    dispatch loop to fail through ``MAX_DISPATCH_FAILURES``.
+
+    Companion to ``test_dispatch_raises_when_credential_unresolvable``,
+    which pins the defence-in-depth path that still rejects a row
+    that bypassed the storage validation (legacy / manual KanbanMeta
+    edit). Both are required: save-time rejection is the happy path,
+    defence-in-depth catches the corruption-bypass case.
+    """
+    from app.services.agentic_cli.endpoints import upsert_endpoint
+    from app.services.agentic_cli.endpoints import Endpoint
+    async with KanbanSessionLocal() as s:
+        await upsert_endpoint(
+            s, PK, Endpoint(
+                name="router-5", base_url="https://router-5.example/v1",
+                model="m", credential_name="missing-secret-name",
+            ),
+        )
+        await s.commit()
+    with pytest.raises(ValueError, match="missing-secret-name"):
+        async with KanbanSessionLocal() as s:
+            await subscription_pool.set_subscription_pool(
+                s, PK, [subscription_pool.PoolEntry(
+                    provider="anthropic-compatible", model=None,
+                    drempel=0.9, endpoint_name="router-5",
+                )],
+            )
+
+
 async def test_dispatch_raises_when_credential_unresolvable():
-    """Pool pin to an endpoint whose ``credential_name`` is something the
-    backend cannot resolve. ``resolve_compatible_endpoint`` raises
-    ``ValueError`` with a concrete error message; the dispatch path
-    surfaces that failure to the caller instead of letting the spawn
-    loop through ``MAX_DISPATCH_FAILURES`` before the card lands in
-    Impediment (the symptom this card closes).
+    """Defence-in-depth: a row referencing a credential that the
+    backend can't resolve still raises at dispatch time when the
+    storage validation was bypassed (legacy row written by hand,
+    schema downgrade, manual KanbanMeta edit, …). The companion
+    test ``test_set_pool_rejects_unresolvable_credential_at_save_time``
+    pins the storage-side rejection — this one pins the dispatch
+    layer doesn't silently fall through when a corruption-bypass
+    row sneaks in.
     """
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -434,12 +470,10 @@ async def test_dispatch_raises_when_credential_unresolvable():
             s, "router-5", base_url="https://router-5.example/v1",
             credential_name="missing-secret-name",
         )
-        await subscription_pool.set_subscription_pool(
-            s, PK, [subscription_pool.PoolEntry(
-                provider="anthropic-compatible", model=None,
-                drempel=0.9, endpoint_name="router-5",
-            )],
-        )
+        # Bypass the storage validator (which now rejects the bad
+        # carrier at save time) — write the pool row directly to
+        # KanbanMeta so the dispatch path still has to defend.
+        _seed_corrupt_pool_row(s, endpoint_name="router-5")
         await _make_column(s, default_provider="anthropic")
         cid = await _make_card(s)
         await s.commit()
@@ -479,3 +513,148 @@ async def test_dispatch_keeps_anthropic_default_when_no_compatible_pin():
     assert call["endpoint_name"] is None
     assert call["endpoint_base_url"] is None
     assert call["endpoint_auth_token"] is None
+
+
+# ---- kaart 27317b4871… FCR-gap regression pins ------------------------------
+#
+# The original card's acceptance criteria called out three concrete
+# regression surfaces whose regression tests were either missing or
+# only captured transport kwargs without verifying the env dict they
+# ultimately produced. Pin them here so a future refactor can't drop
+# the carrier without breaking a test.
+
+
+async def test_sandcastle_rejects_anthropic_compatible_with_endpoint_kwargs():
+    """Gap 1: the sandcastle transport refuses an
+    ``anthropic-compatible`` + endpoint_* combo with a clear
+    ``ValueError`` instead of silently billing the wrong upstream.
+    Surface this at the dispatch boundary so the caller can either
+    fall back to the worktree transport or strip the endpoint_name
+    on the card / pool / override."""
+    from app.kanban.dispatch import sandcastle_transport
+    with pytest.raises(ValueError, match="sandcastle"):
+        sandcastle_transport(
+            directory="/p", prompt="x", session_name="s",
+            provider="anthropic-compatible",
+            endpoint_name="router-x",
+            endpoint_base_url="https://router-x.example/v1",
+            endpoint_auth_token="sk-test",
+        )
+
+
+def test_sandcastle_accepts_anthropic_compatible_without_endpoint_kwargs():
+    """The sandcastle reject only fires when ``endpoint_*`` kwargs are
+    set; passing ``provider='anthropic-compatible'`` alone is still
+    accepted (the sandcastle config's ``agent_provider`` is then
+    used — same as today). The actual sandbox-scheduling path is
+    covered by other sandcastle tests in the suite; here we only
+    prove the rejection branch isn't taken for the
+    no-endpoint-kwargs case.
+    """
+    from app.kanban.dispatch import (
+        PROVIDER_COMPATIBLE, sandcastle_transport,
+    )
+    assert PROVIDER_COMPATIBLE == "anthropic-compatible"
+    with pytest.raises(ValueError) as exc_info:
+        sandcastle_transport(
+            directory="/p", prompt="x", session_name="s",
+            provider=PROVIDER_COMPATIBLE,
+        )
+    # The endpoint-kwarg reject message names "sandcastle" + "endpoint_*";
+    # a different ValueError (e.g. the sandbox scheduler complaining
+    # about a missing sandcastle config in /p) means the endpoint-kwarg
+    # reject branch was correctly skipped.
+    assert "endpoint_name" not in str(exc_info.value)
+    assert "endpoint_base_url" not in str(exc_info.value)
+    assert "endpoint_auth_token" not in str(exc_info.value)
+
+
+def test_card_create_rejects_anthropic_compatible_column_override_without_endpoint():
+    """Gap 3: ``CardCreate`` validates ``column_overrides[col]`` and
+    rejects ``provider='anthropic-compatible'`` without a non-empty
+    ``endpoint_name`` so a UI typo can't sneak a partial carrier in."""
+    from app.kanban.schemas import CardCreate
+    with pytest.raises(Exception, match="endpoint_name"):
+        CardCreate(
+            project_key=PK,
+            title="x",
+            column_overrides={
+                "Backlog": {"provider": "anthropic-compatible"},
+            },
+        )
+
+
+def test_card_update_rejects_anthropic_compatible_column_override_without_endpoint():
+    """Gap 3: the same validator runs on the PATCH path."""
+    from app.kanban.schemas import CardUpdate
+    with pytest.raises(Exception, match="endpoint_name"):
+        CardUpdate(
+            column_overrides={
+                "Backlog": {"provider": "anthropic-compatible"},
+            },
+        )
+
+
+def test_card_create_accepts_anthropic_compatible_with_endpoint_name():
+    """Happy path: the validator only fires on the missing endpoint_name
+    case; a complete carrier passes through unchanged."""
+    from app.kanban.schemas import CardCreate
+    payload = CardCreate(
+        project_key=PK,
+        title="x",
+        column_overrides={
+            "Backlog": {
+                "provider": "anthropic-compatible",
+                "endpoint_name": "router-y",
+            },
+        },
+    )
+    assert payload.column_overrides["Backlog"]["endpoint_name"] == "router-y"
+
+
+def test_validate_default_provider_rejects_anthropic_compatible():
+    """Gap 4: ``_validate_default_provider`` rejects
+    ``PROVIDER_COMPATIBLE`` at the column level until
+    ``KanbanColumn.default_endpoint_name`` lands (the column model has
+    no migration path today, so the combo is un-dispatchable)."""
+    from app.kanban import service
+    with pytest.raises(ValueError, match="default_endpoint_name"):
+        service._validate_default_provider("anthropic-compatible")
+
+
+def test_validate_default_provider_accepts_known_non_compatible():
+    """Companion to the reject test: the other allow-list providers
+    still pass."""
+    from app.kanban import service
+    # None clears the pin — explicit escape hatch.
+    service._validate_default_provider(None)
+    # Non-compatible values still validate.
+    service._validate_default_provider("anthropic")
+    service._validate_default_provider("bedrock")
+    service._validate_default_provider("minimax")
+
+
+async def test_apply_operation_rejects_anthropic_compatible_column_override_without_endpoint():
+    """Gap 3: the planning-pipeline ``apply_operation`` path that
+    bypasses the ``CardCreate`` validator still rejects the bad
+    carrier — pin that the in-process emitter path doesn't drift."""
+    from app.kanban.models import KanbanCard
+    from app.kanban.operations import apply_operation
+    card_id = "card-1"
+    async with KanbanSessionLocal() as s:
+        s.add(KanbanCard(
+            id=card_id, project_key=PK, title="x", column="Backlog",
+            rank="r", title_hlc="r", description_hlc="r",
+            column_hlc="r", rank_hlc="r",
+        ))
+        await s.commit()
+    with pytest.raises(ValueError, match="endpoint_name"):
+        async with KanbanSessionLocal() as s:
+            await apply_operation(
+                s,
+                op_type="update", entity_type="card", project_key=PK,
+                entity_id=card_id,
+                payload={"column_overrides": {
+                    "Backlog": {"provider": "anthropic-compatible"},
+                }},
+            )

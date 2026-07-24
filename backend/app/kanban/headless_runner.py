@@ -561,7 +561,10 @@ def resolve_cli_executable(cli_id: str) -> str:
 
 def headless_transport(*, directory: str, prompt: str, session_name: str,
                        cli_id: str = "claude-code", provider: str = "anthropic",
-                       model: str | None = None) -> dict:
+                       model: str | None = None,
+                       endpoint_name: str | None = None,
+                       endpoint_base_url: str | None = None,
+                       endpoint_auth_token: str | None = None) -> dict:
     """SpawnTransport sibling for headless ``stream-json`` runs.
 
     Mirrors :func:`app.kanban.dispatch.make_worktree_transport`'s signature so
@@ -569,6 +572,17 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
     the canonical three identity facets (claim, branch, worktree-dir — see
     spike §5.1); only the liveness-orakel changes, which is what
     :func:`live_headless_sessions` is for.
+
+    kaart 27317b4871… (FCR gap 7): the dispatcher forwards
+    ``endpoint_name`` / ``endpoint_base_url`` / ``endpoint_auth_token``
+    through the SpawnTransport protocol whenever ``provider ==
+    PROVIDER_COMPATIBLE`` (so the same code path serves worktree,
+    sandcastle, headless, and resume). The previous signature dropped
+    them on the floor — headless compatible dispatches ended in a
+    ``TypeError`` because the protocol expanded but the implementation
+    didn't. The kwargs are threaded into ``SpawnCommandOptions`` so
+    ``run_headless``'s downstream ``build_provider_env`` sees the
+    endpoint config the same way the worktree path does.
 
     Runs the agent as a subprocess via :func:`run_headless`; the caller
     (the dispatch loop) is async, so we schedule as a tracked task and return
@@ -633,6 +647,9 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
                 skip_permissions=skip_permissions,
                 provider=provider,
                 model=model,
+                endpoint_name=endpoint_name,
+                endpoint_base_url=endpoint_base_url,
+                endpoint_auth_token=endpoint_auth_token,
                 project_key=project_key,
             )
         )
@@ -656,7 +673,11 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
         run_headless(
             cli_id=cli_id, directory=worktree_path, prompt=prompt,
             session_name=session_name, skip_permissions=skip_permissions,
-            provider=provider, model=model, project_key=project_key,
+            provider=provider, model=model,
+            endpoint_name=endpoint_name,
+            endpoint_base_url=endpoint_base_url,
+            endpoint_auth_token=endpoint_auth_token,
+            project_key=project_key,
         )
     )
 
@@ -692,6 +713,9 @@ def _headless_task_done_callback(task: asyncio.Task) -> None:
 async def run_headless(
     cli_id: str, *, directory: str, prompt: str, session_name: str,
     skip_permissions: bool, provider: str, model: str | None,
+    endpoint_name: str | None = None,
+    endpoint_base_url: str | None = None,
+    endpoint_auth_token: str | None = None,
     project_key: str | None = None,
 ) -> dict:
     """Spawn the headless subprocess and consume its event stream.
@@ -726,7 +750,11 @@ async def run_headless(
         resolve_cli_executable(cli_id), prompt, skip_permissions=skip_permissions,
     )
 
-    env = _build_env(provider=provider, model=model, project_key=project_key)
+    env = _build_env(
+        provider=provider, model=model, project_key=project_key,
+        endpoint_base_url=endpoint_base_url,
+        endpoint_auth_token=endpoint_auth_token,
+    )
 
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -839,17 +867,31 @@ def _build_argv(executable: str, prompt: str, *, skip_permissions: bool) -> list
 
 
 def _build_env(*, provider: str, model: str | None,
-               project_key: str | None) -> dict[str, str] | None:
+               project_key: str | None,
+               endpoint_base_url: str | None = None,
+               endpoint_auth_token: str | None = None) -> dict[str, str] | None:
     """Build the explicit env for the subprocess.
 
     Mirrors the env-injection pattern in ``runs.spawn.spawn_session``: never
     merge ``os.environ``, only inject what the agent needs (provider creds +
     the COCKPIT_* bookkeeping vars). Returns None to let the child inherit
     the parent env when there's no provider/project context to inject.
+
+    kaart 27317b4871… (FCR gap 7): when ``provider == PROVIDER_COMPATIBLE``
+    the dispatcher forwards the resolved endpoint's ``base_url`` +
+    ``auth_token`` through the SpawnTransport contract. ``build_provider_env``
+    reads them under the canonical ``base_url`` / ``auth_token`` kwargs
+    (not the dispatcher-side ``endpoint_*`` names); pass them through here
+    so the headless subprocess gets the same env the worktree transport
+    produces for the same card.
     """
     from app.services.agentic_cli.provider_env import build_provider_env, build_spawn_env
 
-    provider_env = build_provider_env(provider, model=model, cli_id="claude-code")
+    provider_env = build_provider_env(
+        provider, model=model, cli_id="claude-code",
+        base_url=endpoint_base_url,
+        auth_token=endpoint_auth_token,
+    )
     spawn_env = build_spawn_env(
         provider_env=provider_env, extra_env=None,
         project_key=project_key, runtime="headless",

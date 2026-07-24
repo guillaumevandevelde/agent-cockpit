@@ -242,6 +242,21 @@ async def _materialize(session, *, op_type, entity_type, project_key,
     if entity_type == "card" and op_type == "create":
         existing = await session.get(KanbanCard, entity_id)
         if existing is None:  # idempotent: re-applying create is a no-op
+            # kaart 27317b4871… (FCR gap 3): the planning pipeline
+            # (analyst → executor split) emits ``column_overrides``
+            # payloads that don't pass through the ``CardCreate``
+            # pydantic validator. Validate here so a misconfigured
+            # override can't sneak through the planning side after the
+            # REST surface is closed. ``_validate_column_overrides_value``
+            # raises ``ValueError`` which the caller surfaces as the
+            # same 422-style failure the REST path produces.
+            column_overrides_raw = payload.get("column_overrides")
+            from app.kanban.schemas import (
+                _validate_column_overrides_value,
+            )
+            column_overrides = _validate_column_overrides_value(
+                column_overrides_raw,
+            )
             session.add(KanbanCard(
                 id=entity_id, project_key=project_key,
                 title=payload.get("title", ""),
@@ -252,7 +267,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 work_type=payload.get("work_type"),
                 agent=payload.get("agent"),
                 model=payload.get("model"),
-                column_overrides=payload.get("column_overrides"),
+                column_overrides=column_overrides,
                 transport=payload.get("transport"),
                 resume_session_id=payload.get("resume_session_id"),
                 resume_project_folder=payload.get("resume_project_folder"),
@@ -321,7 +336,7 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                 if f in payload and payload[f] is not None:
                     _lww_set(card, f, payload[f], hlc)
             for f in ("priority", "labels", "work_type", "agent", "model",
-                      "column_overrides", "transport",
+                      "transport",
                       "resume_session_id", "resume_project_folder", "scheduled_at",
                       "dispatch_failures",
                       "dispatch_started_at", "dispatch_session_id",
@@ -331,6 +346,20 @@ async def _materialize(session, *, op_type, entity_type, project_key,
                       "analyst_run_id", "depends_on"):
                 if f in payload:
                     setattr(card, f, payload[f])
+            # kaart 27317b4871… (FCR gap 3): validate
+            # ``column_overrides`` on the op-log update path too, so
+            # the planning pipeline + the LWW op-log replay both reject
+            # anthropic-compatible carriers that lack ``endpoint_name``
+            # (the REST surface already enforces this through the
+            # ``CardUpdate`` pydantic validator; this is the parallel
+            # defence for the in-process emitter).
+            if "column_overrides" in payload:
+                from app.kanban.schemas import (
+                    _validate_column_overrides_value,
+                )
+                card.column_overrides = _validate_column_overrides_value(
+                    payload["column_overrides"],
+                )
             # ORM attribute is `meta` (not `metadata` — reserved by SQLAlchemy's
             # Declarative base). The op-log and API payload both carry the
             # `metadata` key; this mapping is the one place that translates.

@@ -14,6 +14,11 @@ from app.services.agentic_cli.base import (
     argv0_name,
     has_binary_descendant,
 )
+from app.services.agentic_cli.provider_env import (
+    OPEN_CODE_ENDPOINT_PROVIDER_ID,
+    PROVIDER_COMPATIBLE,
+    PROVIDER_MINIMAX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +134,21 @@ class OpenCodeCli(AgenticCli):
             raise ValueError(f"Unsupported OpenCode mode: {options.mode}")
 
         if options.model:
-            command += ["--model", options.model]
+            # A custom Anthropic-compatible endpoint (MiniMax or the
+            # data-driven ``anthropic-compatible`` provider) is injected via
+            # ``OPENCODE_CONFIG_CONTENT`` under the fixed
+            # ``OPEN_CODE_ENDPOINT_PROVIDER_ID`` (see
+            # ``provider_env._build_opencode_endpoint_env``). OpenCode's own
+            # ``--model`` flag requires the ``provider/model`` form — a bare
+            # model id raises ``ProviderModelNotFoundError`` — so the
+            # provider segment must be prefixed here to match what was
+            # injected. For the plain ``anthropic`` provider (OpenCode's own
+            # auth/config), ``options.model`` is expected to already be in
+            # ``provider/model`` form and is passed through unchanged.
+            if options.provider in (PROVIDER_MINIMAX, PROVIDER_COMPATIBLE):
+                command += ["--model", f"{OPEN_CODE_ENDPOINT_PROVIDER_ID}/{options.model}"]
+            else:
+                command += ["--model", options.model]
         if options.prompt:
             command += ["--prompt", options.prompt]
         return command

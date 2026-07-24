@@ -488,6 +488,9 @@ async def set_subscription_pool(
             from app.services.agentic_cli.endpoints import (
                 get_endpoint as _get_endpoint,
             )
+            from app.services.agentic_cli.endpoints import (
+                resolve_compatible_endpoint as _resolve_compatible_endpoint,
+            )
             endpoint = await _get_endpoint(
                 session, project_key, entry.endpoint_name,
             )
@@ -497,6 +500,16 @@ async def set_subscription_pool(
                     f"for project {project_key!r}; configure it via "
                     f"/api/v1/agent-bridge/platforms/endpoints",
                 )
+            # kaart 27317b4871… (FCR gap 5): also exercise the
+            # credential-resolution path so a registered endpoint whose
+            # ``credential_name='minimax'`` lacks the matching API key
+            # surfaces the error at save time, not after three retries
+            # of the dispatch loop. Mirrors the
+            # ``set_active_subscription_override`` change so both
+            # save-carriers fail-fast through the same resolver.
+            await _resolve_compatible_endpoint(
+                session, project_key, entry.endpoint_name,
+            )
     value = _serialize_entries(entries)
     row = await session.get(KanbanMeta, key)
     if row is None:

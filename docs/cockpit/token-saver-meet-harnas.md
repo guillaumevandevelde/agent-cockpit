@@ -35,8 +35,14 @@ een echte saver dat ook (en waarschijnlijk vaker).
 - **`cache_creation_input_tokens = 0`** in alle runs (zie §5.2).
 - **`pass_diff=1` in 3 van 4 runs**, `pass_diff=0` in trial 2 with-saver
   (de agent loste het op een andere manier op die `score_golden` niet herkent).
-- **`pass_tests=0`** in alle runs — worktree-venv ontbreekt; dit is een
-  **scoring-infra-failure**, geen kwaliteits-signaal (zie §5.2).
+- **`pass_tests=0`** in alle runs — pytest scoorde zonder file-scope,
+  waardoor twee ongerelateerde modules (`test_response_model_validation.py`
+  + `test_sync_handlers_are_async.py`) de collectie braken
+  (`Interrupted: 2 errors during collection`) nog vóór de
+  zero_column_cap-selector. Dit is een **scoring-infra-failure**, geen
+  kwaliteits-signaal; sinds kaart `6b67df66…` is de pytest-invoer
+  gescoped op `tests/test_kanban_dispatch.py` en rapporteert
+  `pass_tests=1` zodra de fix daadwerkelijk landt (zie §5.2).
 
 **Eerdere headline (−42,4% `cache_read`) is ongeldig** — die kwam uit één
 enkele trial met order-confound (saver na baseline, dus
@@ -206,13 +212,25 @@ getallen per run), vier `*.score`.)
   oplossen. Het huidige cijfer is een **observatie**, geen bewijs dat
   savers `cache_read` verhogen of verlagen.
 - **`pass_tests=0` is GEEN saver-induced regressie.** Het is een
-  scoring-infra-failure: de scratch worktree heeft geen `backend/venv/`
-  (worktrees delen die niet), en `command -v pytest` valt door op een
-  system-pytest die de `aiosqlite`-plugin mist. K3 staat gepland om de
-  venv-bootstrap in de worktree te repareren (`pip install -e .` of een
-  shared-venv-symlink) zodat `pass_tests` ook eerlijk wordt — niet omdat
-  with-saver ineens beter scoort, maar omdat het oordeel nu structureel
-  onmogelijk is.
+  scoring-infra-failure: `score_golden` riep `pytest -k zero_column_cap`
+  zonder scoping, wat de **hele** suite collecteerde. Twee niet-gerelateerde
+  test-modules (`test_response_model_validation.py` +
+  `test_sync_handlers_are_async.py`) importeren `app.api.v1.agent_activity`
+  dat op master niet bestaat — pytest breekt af met `Interrupted: 2
+  errors during collection` nog vóór de selector-filter, dus de
+  exit-code is non-zero ook waar de relevante tests prima slagen.
+  De diagnose in de eerdere run ("worktree-venv ontbreekt") was onjuist:
+  `resolve_pytest_cmd` valt door op de gedeelde `/home/vdvgu/claude-cockpit/backend/venv/bin/pytest`
+  (pytest 9.1.1 met aiosqlite-plugin) zodra de worktree-venv ontbreekt,
+  die is de hele tijd werkend geweest. ✅ **Gescoped (kaart `6b67df66…`)**:
+  `score_golden` in `scripts/lib/measure_token_saver_lib.sh` roept nu
+  `pytest tests/test_kanban_dispatch.py -k zero_column_cap` aan in plaats
+  van de kale `-k zero_column_cap`; de irrelevant-modules-fout kan niet
+  meer trippen. Verificatie: 36/36 unit-asserts in
+  `scripts/test_measure_token_saver.sh` + een end-to-end smoke tegen
+  `origin/master` (broken slate → pass_tests=0 pass_diff=0, fixed slate
+  → pass_tests=1 pass_diff=1). K3-venv-bootstrap blijft een open
+  follow-up voor andere harnassen die de hele suite willen draaien.
 - **`cache_creation_input_tokens = 0`** in alle vier de runs is geen
   bug, maar een gevolg van Anthropic's bucket-stale reporting op deze
   single-turn prompts waar het `system`+`tools`-blok al op master
@@ -261,8 +279,15 @@ getallen per run), vier `*.score`.)
   afsnoept (wat gunstig zou zijn voor productie-default), maar dit
   moet niet op een vermoeden worden aangenomen.
 - **`pass_tests=0` wordt structureel veroorzaakt door worktree-venv** →
-  fix K3 vereist `pip install -e .` of een shared-venv-symlink
-  vóór `score_golden` draait.
+  **deze hypothese is verworpen** (kaart `6b67df66…`): de gedeelde
+  main-checkout-venv werkt prima (pytest 9.1.1 + aiosqlite-plugin). De
+  échte oorzaak was een ongescopedte pytest-invoer die de hele suite
+  collecteerde (`Interrupted: 2 errors during collection` op
+  `test_response_model_validation.py` + `test_sync_handlers_are_async.py`
+  die `app.api.v1.agent_activity` importeren). Fix toegepast in
+  `score_golden`. K3-venv-bootstrap blijft een **andere** open
+  follow-up (handig voor harnassen die de hele suite willen draaien),
+  niet langer een blokkade voor `pass_tests`-geldigheid.
 - **`score_golden` herkent geen alternatieve geldige oplossingen**
   (`pass_diff=0` in trial 2 with-saver) → verbeter de
   regex-substring-check naar een **equivalente-gedrag-check** (bijv.
@@ -281,4 +306,4 @@ eerdere (afgewezen) meting
 | confounder `cache_read` sessie-warmte | ernstig (saver altijd 2e)               | aanwezig maar zichtbaar in trial-volgorde-correlatie |
 | resultaat-archief                   | anonieme `mktemp -d` (EXIT-trap clobbert) | `$MEASURE_RESULT_DIR` (caller-visible, persistent)  |
 | `cache_read`-headline               | −42,4% (ongeldig — order-confound)       | "volgorde-effect domineert; saver-effect onbeslist op N=2" |
-| `pass_tests` infrastructure         | gebroken                                  | gebroken — K3 verhelpt                            |
+| `pass_tests` infrastructure         | gebroken                                  | **gefixed (kaart `6b67df66…`)** — pytest gescoped op `tests/test_kanban_dispatch.py`; 36/36 unit-asserts groen; end-to-end smoke geverifieerd (broken→0,0 / fixed→1,1) |

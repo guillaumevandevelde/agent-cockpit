@@ -14,9 +14,11 @@ import logging
 import re
 import shlex
 import subprocess
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -802,6 +804,9 @@ async def set_active_subscription_override(
         from app.services.agentic_cli.endpoints import (
             get_endpoint as _get_endpoint,
         )
+        from app.services.agentic_cli.endpoints import (
+            resolve_compatible_endpoint as _resolve_compatible_endpoint,
+        )
         endpoint = await _get_endpoint(session, project_key, endpoint_name)
         if endpoint is None:
             raise ValueError(
@@ -809,6 +814,18 @@ async def set_active_subscription_override(
                 f"{project_key!r}; configure it via "
                 f"/api/v1/agent-bridge/platforms/endpoints",
             )
+        # kaart 27317b4871… (FCR gap 5): a registered endpoint can
+        # still fail to resolve at dispatch time when its
+        # ``credential_name`` points at a missing key
+        # (``settings.minimax_api_key`` empty). The earlier endpoint-
+        # existence check above only confirms the row is there; the
+        # resolver also runs the credential-resolution path so this
+        # override save surfaces the missing-key message immediately
+        # instead of letting it leak into the dispatch loop's
+        # ``MAX_DISPATCH_FAILURES`` cycle.
+        await _resolve_compatible_endpoint(
+            session, project_key, endpoint_name,
+        )
     value = json.dumps({
         "provider": provider,
         "model": model if model else None,
@@ -1188,7 +1205,33 @@ async def resolve_effective_provider_and_model(
     card_overrides: dict | None = None,
     card_model: str | None = None,
 ) -> dict:
-    """Walk the kanban model-precedence chain once and return the resolved
+    """**CANONICAL**: "what provider/model would this card spawn on?"
+
+    **Always call this function** — never re-walk the 5-layer chain ad-hoc
+    — from any new dispatch-side gate, pool helper, per-card spawn
+    decision, quota-accounting step, or cost-attribution hook. Re-walking
+    even a *subset* of the chain is the bug class the manual-pause gate
+    shipped with (kaart f056b2888a…, fix commit ``77f5c8c``): the early
+    ``_provider_for_card`` helper only walked the last two layers and
+    silently gated against the wrong provider. A new gate writer landing
+    here should be able to spot this and the self-check in
+    ``scripts/check-dispatch-resolver-usage.sh`` in ≤1 grep.
+
+    The self-check greps ``backend/app/kanban/dispatch.py`` for direct
+    reads of ``column_override[.get("provider"/.get("model")]``,
+    direct calls of the column-default helpers (``get_column_default_provider``,
+    ``get_column_default_model``), direct attribute access of the form
+    ``column.default_provider`` / ``column.default_model``, and direct
+    reads of the per-card ``model`` field (via ``getattr(card, "model"``)
+    outside this function and outside any line annotated with a
+    ``# resolver-bypass: <reason>`` justification — the bare sentinel
+    with no reason text does NOT exempt a line. New ad-hoc lookups get
+    flagged at PR time; the exemption is reserved for the handful of
+    helpers that intentionally narrow the chain (e.g.
+    ``_provider_for_card`` walking only the last two layers for the
+    rate-limit/spillover path).
+
+    Walk the kanban model-precedence chain once and return the resolved
     provider/model plus the precedence level each field came from.
 
     Single source of truth for the chain previously duplicated between
@@ -1209,6 +1252,16 @@ async def resolve_effective_provider_and_model(
                                  unless the explicit overrides name a
                                  provider-native model)
       → ``PROVIDER_ANTHROPIC`` / ``None`` as the chain-end default.
+
+    Spec: this precedence chain is the canonical reference for the
+    model-routing decision. The board-wide pin + pool layer are
+    documented in ``docs/cockpit/subscription-flexibiliteit-analyse.md``
+    and the per-card-overrides layer in
+    ``docs/cockpit/kanban-model-override.md``; the column/persona
+    fallback layers are codified in this function (and the
+    ``_effective_model`` helper it calls). Any new dispatch-side gate
+    that needs to know "what subscription would this card land on"
+    must read the result of this function — not a partial re-derivation.
 
     Args:
       - ``pick_pool``: caller-supplied async pool picker. ``dispatch``
@@ -2666,7 +2719,10 @@ def _build_reviewer_session_end_instructions() -> str:
 class SpawnTransport(Protocol):
     def __call__(self, *, directory: str, prompt: str, session_name: str,
                  cli_id: str = "claude-code", provider: str = "anthropic",
-                 model: str | None = None) -> dict: ...
+                 model: str | None = None,
+                 endpoint_name: str | None = None,
+                 endpoint_base_url: str | None = None,
+                 endpoint_auth_token: str | None = None) -> dict: ...
 
 
 def _known_cli_ids() -> set[str]:
@@ -2864,12 +2920,19 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
                          endpoint_auth_token: str | None = None) -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
 
-    `cli_id`, `provider`, `model`, and the `endpoint_*` carrier are accepted
-    for transport-signature parity but ignored: sandcastle runs use the
-    per-project sandcastle config's `agent_provider`, not the card's,
-    column's, or persona's. kaart 293d1faa…: future sandcastle work will
-    forward the endpoint_* fields; until then, accepting them keeps the
-    transport callable from the same dispatcher code path without branching.
+    `cli_id`, `provider`, `model` are accepted for transport-signature parity
+    but the actual sandbox run uses the per-project sandcastle config's
+    `agent_provider`, not the card's, column's, or persona's.
+
+    kaart 27317b4871… (FCR gap 1): when the dispatcher forwards the
+    ``endpoint_*`` carrier at this transport the sandbox would silently
+    use its own provider/model instead of the named endpoint — the
+    worst kind of failure because the spawned session would bill the
+    wrong upstream with no visible signal. Reject the call upfront with
+    a clear ``ValueError`` so the operator can either switch the card
+    to ``transport='worktree'`` (where the endpoint kwargs reach
+    ``build_provider_env`` as designed) or drop the ``endpoint_name``
+    on the card / pool / override.
 
     Runs the agent in a Docker/Podman container. The actual run is kicked off
     asynchronously; this function returns immediately after scheduling it.
@@ -2879,11 +2942,36 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
     rather than blocking. `session_name` is stored as the run's branch so the reaper
     can recognise the live sandcastle session and not release its claim.
 
-    Raises MemoryLimitExceeded if hardware memory limits are reached.
+    Raises MemoryLimitExceeded if hardware memory limits are reached, or
+    ValueError when a non-compatible transport is asked to honour an
+    anthropic-compatible configuration.
     """
     import asyncio
 
     from app.services.scheduling.session_registry import session_registry
+
+    # kaart 27317b4871… (FCR gap 1): reject the
+    # anthropic-compatible + endpoint-* combo so it can't silently
+    # bill the wrong upstream inside the sandbox. The dispatch path
+    # used to forward these kwargs through, and the sandbox ignored
+    # them — the spawned session would still run with the per-project
+    # sandcastle config's ``agent_provider`` (Anthropic by default),
+    # NOT the named endpoint. That's a worse failure than "dispatch
+    # refused" because the operator sees a green spawn + a successful
+    # upstream call, but to a different vendor than they configured.
+    # Raise early so the caller can either fall back to the worktree
+    # transport (set ``card.transport='worktree'``) or pick a
+    # non-compatible provider at the column / card level.
+    if provider == PROVIDER_COMPATIBLE and (
+        endpoint_name or endpoint_base_url or endpoint_auth_token
+    ):
+        raise ValueError(
+            "sandcastle transport does not support anthropic-compatible "
+            "provider: endpoint_name/endpoint_base_url/endpoint_auth_token "
+            "are not forwarded into the sandbox. Set "
+            "card.transport='worktree' for this card, or use a "
+            "non-compatible provider at the column/card level.",
+        )
 
     # Check memory limits before spawning
     if not session_registry.can_add_session():
@@ -3137,6 +3225,61 @@ def _claimant_session(card: KanbanCard) -> str | None:
 # default in SessionRegistry.get_stuck_sessions().
 STUCK_SESSION_TIMEOUT_S = 120
 
+# ---- progress-liveness (kaart f0953a11…) -----------------------------------
+#
+# ``reap_stale_claims`` checks whether the tmux pane still exists, which a
+# session that hit its subscription limit (or crashed in a loop, or is parked
+# on a permission prompt, or is hung on a network timeout) keeps — so the
+# claim stays claimed forever. Progress-liveness adds a *second* criterion:
+# the transcript must keep growing. If the transcript of an ``agent:``-claimed
+# session stops advancing for ``PROGRESS_LIVENESS_SIGNAL_SECONDS``, the card
+# gets a "stilstaand" activity comment so an operator can see the stall on the
+# board; after ``PROGRESS_LIVENESS_ACTION_SECONDS`` the claim is released via
+# the existing ``_move_to_resume`` path. See
+# docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5 R3.
+#
+# The defaults are deliberately roomy: a productive Claude session writes to
+# its transcript every few seconds, but a long file-edit + verify + commit
+# stretch can run several minutes between writes. 30 min silence is already a
+# strong signal; 60 min crosses from "agent is doing something" into
+# "operator should know about this". Both are overridable via the
+# ``signal_seconds`` / ``action_seconds`` kwargs of ``check_progress_liveness``
+# (mainly for tests).
+PROGRESS_LIVENESS_SIGNAL_SECONDS = 30 * 60
+PROGRESS_LIVENESS_ACTION_SECONDS = 60 * 60
+
+# Process-local state for progress-liveness. Keyed by ``card.id`` (not by
+# session name) so a reaped+re-dispatched session that happens to mint the
+# same name doesn't inherit the prior session's stall baseline. Holds a
+# small snapshot per card: the wall-clock time at which we last *saw* the
+# session (so stall is measured against our observation cadence, not
+# against the file's mtime directly), the mtime we observed it at (so the
+# next tick can detect growth), and a one-shot flag so the "stilstaand"
+# comment is posted at most once per stall window. Entries are pruned when
+# the card is no longer claimed by an agent session; a backend restart
+# wipes the dict — same in-memory-by-design pattern as
+# ``SessionRegistry._spawn_times``.
+@dataclass
+class _ProgressSnapshot:
+    observation_time: float
+    observed_mtime: float
+    signal_posted: bool = False
+
+
+_progress_liveness_state: dict[str, _ProgressSnapshot] = {}
+
+# Activity-comment copy. Format kwargs: ``minutes`` (rounded stall duration),
+# ``name`` (session name), ``action_minutes`` (configured action threshold).
+# Mirrors the Dutch-with-emoji convention used by the rate-limit / spillover
+# / pane-detector comments elsewhere in this file — see ``_post_rate_limit_activity_comment``,
+# ``_cleanup_stuck_session``, and the spillover branch of ``move_limited_session_to_resume``.
+_STILLESTAAND_COMMENT_TEMPLATE = (
+    "⏸️ Geen transcript-activiteit voor ~{minutes} min in sessie {name} — "
+    "mogelijk stilstaand (abonnementslimiet, crash-loop, wachtende prompt "
+    "of netwerk-timeout). Wordt automatisch vrijgegeven rond {action_minutes} "
+    "min stilstand; reageer in de pane als de sessie nog productief is."
+)
+
 
 def _capture_pane_content(session_name: str, *, lines: int = 20) -> str | None:
     """Capture the last `lines` of tmux pane content for `session_name`.
@@ -3159,18 +3302,139 @@ def _capture_pane_content(session_name: str, *, lines: int = 20) -> str | None:
     return result.stdout
 
 
-def _is_rate_limited_session(pane_content: str) -> bool:
-    """True if tmux pane content shows a 429 / rate-limit indicator.
+# ---- pane-scan rate-limit needles ------------------------------------------
+#
+# The pane substring-scan is a fallback for the 429-on-first-spawn case
+# where `claude` printed the error and died before initialising hooks (so
+# the transcript detector never sees it). It runs on raw terminal output,
+# which means an agent doing curl/HTTP tests or reading third-party API
+# error logs can leave benign '429' / 'api error' substrings in pane
+# history. The 2026-07-22 incident (card 3a8f27a4…,
+# logs/backend/run-20260722-095619-2861-0.log:947) killed a healthy session
+# over a '429' from a curl probe — the cost of one false positive was
+# higher than the cost of a missed detection (dispatch paused 5h, card
+# dispatched to Impediment), so these needles are tighter than the
+# Notification classifier's. The classifier still consumes its existing
+# loose needles via `is_limit_notification`; this is the pane-specific
+# set.
+#
+# Single-phrase matches: vendor-specific phrasings that are very unlikely
+# to appear outside a real limit notification.
+_PANE_RATE_LIMIT_PHRASES: tuple[str, ...] = (
+    "hit your session limit",
+    "hit your weekly limit",
+    "token plan",
+)
 
-    Matches a small set of well-known substrings (case-insensitive), reusing
-    the canonical detector on AutoResumeService so the hook-event path and
-    the reaper's pane scan stay in sync — a 429 detected via either source
-    triggers the same dispatch pause, and we never risk the two drifting
-    apart."""
+# Combination matches: the generic HTTP-error phrases ("api error", "429",
+# "request rejected") are too loose on their own — agents that probe
+# third-party APIs routinely print one or the other. A match requires the
+# co-occurrence of an error/status phrase AND a rate-limit context phrase.
+# The two-token combos below are still safe because a curl probe prints
+# "HTTP/2 429" (no "api error") and a bare rejection prints "Request
+# rejected: invalid API key" (no "429") — neither trips.
+_PANE_RATE_LIMIT_COMBOS: tuple[frozenset[str], ...] = (
+    frozenset({"api error", "429"}),
+    frozenset({"api error", "429", "rate"}),
+    frozenset({"api error", "429", "too many"}),
+    frozenset({"api error", "429", "limit"}),
+    frozenset({"request rejected", "429"}),
+)
+
+
+def _find_rate_limit_match(pane_content: str) -> str | None:
+    """Return the specific needle/phrase that classifies `pane_content` as
+    a Claude/MiniMax rate-limit hit, or None when no match.
+
+    The string returned is the literal matched needle (single phrase) or
+    the combo name (e.g. ``"api error+429+too many"``); the caller uses it
+    to log *why* the reaper acted, which the old boolean-only
+    `_is_rate_limited_session` couldn't surface. Tightened per card
+    3a8f27a4… — bare ``"429"`` or ``"api error"`` alone is no longer
+    sufficient."""
     if not pane_content:
+        return None
+    text = pane_content.lower()
+    for needle in _PANE_RATE_LIMIT_PHRASES:
+        if needle in text:
+            return needle
+    # Combo matches: require every phrase in the combo to appear in the
+    # text (substring, so 'API Error:' still satisfies 'api error'). This
+    # catches the canonical MiniMax reject format ('API Error: Request
+    # rejected (429) · Token Plan usage limit reached') and the standard
+    # HTTP 429 wording ('API Error: 429 Too Many Requests') without
+    # false-positiving on bare 'HTTP/2 429' from a curl probe.
+    for combo in _PANE_RATE_LIMIT_COMBOS:
+        if all(piece in text for piece in combo):
+            return "+".join(sorted(combo))
+    return None
+
+
+def _session_has_transcript(project_path: str | None, session_name: str) -> bool:
+    """True if the worktree for `session_name` has a Claude transcript file
+    on disk with content.
+
+    Used by the reaper's pane-scan branch (card 3a8f27a4…): the pane
+    substring-scan should only fire when no transcript exists yet, since a
+    session with a productive transcript is the transcript-tail
+    detector's territory. Any unreadable / missing transcript counts as
+    'no transcript' so the scan still fires for the classic 429-on-first-
+    spawn case (`claude` died before writing anything)."""
+    if not project_path:
         return False
-    from app.services.scheduling.auto_resume import auto_resume_service
-    return auto_resume_service.is_limit_notification(pane_content)
+    try:
+        from app.kanban.session_recovery import _resolve_transcript_file
+        path = _resolve_transcript_file(project_path, session_name)
+    except Exception:
+        # Fail open: a transient resolver hiccup must never block the
+        # pane scan. Better to risk one false positive than to silently
+        # strand a true 429-on-first-spawn.
+        return False
+    if path is None:
+        return False
+    try:
+        return path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def _matching_pane_line(pane_content: str, needle: str) -> str:
+    """Return the first line of `pane_content` that contains any of the
+    tokens in `needle` (split on '+'), stripped, truncated to 300 chars.
+
+    Used by the reaper's structured log so an operator chasing a (real or
+    false) cleanup can see the matching line instead of the truncated
+    200-char pane prefix the old `_cleanup_stuck_session` log emitted —
+    that prefix often hid the actual match because the offending substring
+    sat further down in the 20-line capture."""
+    if not pane_content or not needle:
+        return ""
+    tokens = [t for t in needle.split("+") if t]
+    if not tokens:
+        return ""
+    for line in pane_content.splitlines():
+        low = line.lower()
+        if any(tok in low for tok in tokens):
+            return line.strip()[:300]
+    return ""
+
+
+def _is_rate_limited_session(pane_content: str) -> bool:
+    """True if `pane_content` (the last 20 lines of a tmux pane capture)
+    shows a Claude/MiniMax rate-limit indicator.
+
+    Backward-compatible boolean wrapper around `_find_rate_limit_match` —
+    callers that only need the yes/no answer (existing tests, the reaper's
+    fallback branch) keep working without change; callers that need to
+    log *which* needle matched (the reaper itself) call
+    `_find_rate_limit_match` directly.
+
+    Tighter than `auto_resume_service.is_limit_notification`: that
+    classifier consumes Notification-hook payloads which are structured
+    messages from Claude Code itself, while the pane scan runs on raw
+    terminal output where any '429' substring is suspect. See card
+    3a8f27a4… for the incident that drove the split."""
+    return _find_rate_limit_match(pane_content) is not None
 
 
 def _structured_rate_limit_signal(session_name: str) -> bool:
@@ -3201,8 +3465,604 @@ def _structured_rate_limit_signal(session_name: str) -> bool:
     return session_signals.is_rate_limited(session_name)
 
 
+# ---- transcript-tail rate-limit detection ----------------------------------
+#
+# The Notification hook never carries a usage-limit message (§2.1 of
+# docs/cockpit/sessie-limiet-auto-dispatch-analyse.md): a rate limit shows up
+# in the transcript as a plain assistant message with `isApiErrorMessage:
+# true`, not as a Notification event. The reaper's stuck-session pane scan
+# above only inspects sessions that never sent a single hook event within
+# STUCK_SESSION_TIMEOUT_S (§2.2) -- once a session has been productive for a
+# while, a mid-session limit is invisible to both existing detectors, and the
+# session stays open on the limit screen forever (the CLI never exits). These
+# helpers close that gap by reading the tail of the transcript itself, which
+# always carries the limit for both vendors, whether it happens at spawn or
+# hours in.
+
+# Bytes read from the tail of a transcript when scanning for an unresolved
+# rate limit. Transcripts grow to tens of MB over a long session; we only
+# ever need the last few conversational turns to decide whether the session
+# is currently stuck, so a full-file parse on every dispatch tick would be
+# wasteful for no benefit.
+_TRANSCRIPT_TAIL_BYTES = 65536
+
+
+def _transcript_entry_text(entry: dict) -> str:
+    """Flatten an assistant/user transcript entry's message content to plain
+    text for substring classification -- mirrors the reproduction script in
+    docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §1.1."""
+    message = entry.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") for block in content if isinstance(block, dict)
+        )
+    return ""
+
+
+def _is_conversational_transcript_entry(entry: dict) -> bool:
+    """True for a real assistant/user turn, as opposed to session bookkeeping
+    entries (system/summary/last-prompt/file-history-snapshot/attachment/...)
+    that Claude Code interleaves into the same JSONL file but that carry no
+    "the agent did something" signal. Only conversational entries count
+    towards "is there activity after the limit" in `_tail_rate_limit_message`
+    -- a bookkeeping entry recorded right after the api-error must not be
+    mistaken for the session having recovered on its own."""
+    return entry.get("type") in ("assistant", "user") and isinstance(entry.get("message"), dict)
+
+
+def _read_transcript_tail_entries(
+    path: Path, *, max_bytes: int = _TRANSCRIPT_TAIL_BYTES,
+) -> list[dict]:
+    """Parse the last `max_bytes` of a transcript JSONL file into entry dicts.
+
+    Reads only the tail via a seek — transcripts run to tens of MB over a long
+    session. The first line after a non-zero seek is dropped since it's
+    likely truncated mid-line; malformed lines are skipped rather than
+    raising, since a truncated JSON line at the chunk boundary is expected,
+    not an error. Returns `[]` on any read failure (missing file, permission
+    error, ...) -- fail open, same contract as `_capture_pane_content`."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    start = max(0, size - max_bytes)
+    try:
+        with path.open("rb") as f:
+            f.seek(start)
+            raw = f.read()
+    except OSError:
+        return []
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.split("\n")
+    if start > 0:
+        lines = lines[1:]
+    entries = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except (TypeError, ValueError):
+            continue
+    return entries
+
+
+def _tail_rate_limit_message(path: Path) -> str | None:
+    """Return the api-error text if the transcript's tail shows an
+    *unresolved* rate-limit hit, else None.
+
+    "Unresolved" means: scanning from the end, the most recent conversational
+    (assistant/user) entry is an `isApiErrorMessage: true` entry whose text
+    classifies as a limit via `auto_resume_service.is_limit_notification`. If
+    ordinary assistant/user activity follows the error instead, the session
+    already recovered on its own and nothing should happen — this is the R1
+    contract from docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5:
+    "alleen reageren wanneer de api-error het laatste betekenisvolle event
+    is"."""
+    from app.services.scheduling.auto_resume import auto_resume_service
+
+    for entry in reversed(_read_transcript_tail_entries(path)):
+        if not _is_conversational_transcript_entry(entry):
+            continue
+        if entry.get("isApiErrorMessage"):
+            text = _transcript_entry_text(entry)
+            if auto_resume_service.is_limit_notification(text):
+                return text
+            return None
+        return None  # most recent conversational turn is ordinary activity
+    return None
+
+
+# Pane-resume: when a rate-limited session's tmux pane is still alive, defer
+# the kill+To Resume reaction and try to nudge the same session back to life
+# at the parsed reset time via the existing tmux_inject helpers. See
+# docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5 (R2) for the
+# motivation; this constant block sets the timing knobs.
+#
+# Margin: how long after the parsed reset time the *first* nudge fires, in
+# seconds. Tiny on purpose — we want to resume the moment the limit resets,
+# not minutes later. 60 s absorbs clock skew + the time the Claude CLI takes
+# to render the post-reset prompt frame.
+PANE_RESUME_MARGIN_S = 60
+# Backoff: how much *additional* delay each subsequent nudge adds when a
+# previous nudge re-hit the limit. Linear in `attempts` — `reset + margin*attempts`
+# — so attempts 1/2/3 fire at reset+60s/+120s/+180s. Small enough that even
+# the third try lands inside the same wall-clock window, large enough that
+# we don't burn scheduler slots on a stuck limit.
+PANE_RESUME_BACKOFF_S = 60
+# Max attempts before falling back to the existing kill+To Resume reaction.
+# 3 follows the standard retry-with-fallback shape (initial + 2 retries) and
+# keeps total wall-clock under ~3 minutes so the operator doesn't sit on a
+# stalled session for long.
+PANE_RESUME_MAX_ATTEMPTS = 3
+
+
+async def _read_pane_resume_state(cwd: str) -> dict | None:
+    """Read the pane-resume metadata for the card claimed by `cwd`'s session.
+
+    Returns ``{"attempts": int, "reset_at": iso}`` when a previous nudge is
+    pending, ``None`` otherwise. Reads via `_resume_target_from_cwd` +
+    `list_cards` so it follows the same "kanban card claimed by this session
+    on a non-fixed column" predicate as `move_limited_session_to_resume`.
+    """
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return None
+    project_path, session_name = target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return None
+
+    claimant = CLAIMANT_PREFIX + session_name
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+    card = next(
+        (c for c in cards
+         if c.column not in ("Done", "To Resume")
+         and c.claimed_by == claimant),
+        None,
+    )
+    if card is None:
+        return None
+    meta = card.meta or {}
+    if not meta.get("pane_resume_pending"):
+        return None
+    return {
+        "attempts": int(meta.get("pane_resume_attempts", 0)),
+        "reset_at": meta.get("pane_resume_reset_at"),
+    }
+
+
+async def _clear_pane_resume_state(cwd: str) -> None:
+    """Strip the pane-resume metadata keys from the card claimed by `cwd`'s
+    session. Idempotent — a no-op when there's no card or no pending state.
+    Used at fallback time so a later sweep doesn't try to nudge a card that's
+    already been moved to "To Resume"."""
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return
+    project_path, session_name = target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return
+    claimant = CLAIMANT_PREFIX + session_name
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return
+        meta = dict(card.meta or {})
+        if not meta:
+            return
+        meta.pop("pane_resume_pending", None)
+        meta.pop("pane_resume_attempts", None)
+        meta.pop("pane_resume_reset_at", None)
+        await apply_operation(
+            ks, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"metadata": meta},
+        )
+        await ks.commit()
+
+
+async def _clear_pane_resume_metadata_for_card(card, project_path: str) -> None:
+    """Strip pane-resume metadata from a card we already have in hand.
+
+    Used by the detection sweep when the transcript no longer shows an active
+    limit (i.e. the previous nudge did land and the session recovered) — keeps
+    the attempt counter fresh for the next genuine limit cycle. No-op when
+    the card has no pending state. Card stays in place; only the metadata
+    keys change.
+    """
+    meta = dict(card.meta or {})
+    if not meta.get("pane_resume_pending"):
+        return
+    meta.pop("pane_resume_pending", None)
+    meta.pop("pane_resume_attempts", None)
+    meta.pop("pane_resume_reset_at", None)
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        await apply_operation(
+            ks, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"metadata": meta},
+        )
+        await ks.commit()
+    logger.info(
+        "pane-resume pending cleared on card %s (transcript shows recovery)",
+        card.id,
+    )
+
+
+async def _do_move_to_resume(cwd: str, pause_until) -> bool:
+    """The existing kill+To Resume reaction (sibling helper so `handle_rate_limit_signal`
+    stays a single composition). Mirrors the original exception-swallow so the
+    caller doesn't have to."""
+    try:
+        return await move_limited_session_to_resume(
+            cwd, scheduled_at=pause_until.isoformat(),
+        )
+    except Exception:
+        logger.exception("failed to move kanban card to To Resume for %s", cwd)
+        return False
+
+
+async def try_pane_resume(
+    cwd: str, reset_time, message: str, *, attempts: int = 1,
+) -> bool:
+    """Try to keep a rate-limited session alive by injecting a continuation
+    nudge into its still-alive tmux pane at reset_time + margin*attempts.
+
+    The Claude Code CLI doesn't exit on a rate limit — it prints the notice
+    and returns to its prompt — so the tmux pane is usually still alive at
+    detection time. Killing it loses the entire session context; nudging the
+    same pane at the reset time recovers without losing anything. Reuses the
+    existing `tmux_inject` + `auto_resume_service.schedule_resume` machinery
+    so the keystroke delivery path is identical to the manual scheduled-
+    message flow that's been in production.
+
+    Returns True when a nudge is scheduled and the card metadata reflects the
+    pending state; False when the pane is gone (the caller should fall back to
+    `move_limited_session_to_resume`). A no-card-found case is also False —
+    for non-kanban sessions (human-started, sandcastle) there's nothing to
+    update on the board anyway.
+    """
+    from apscheduler.triggers.date import DateTrigger
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.services.scheduling.scheduler import scheduler_service
+    from app.services.scheduling.session_resolver import resolve_target
+
+    target = resolve_target(cwd)
+    if target is None:
+        return False  # pane gone — caller falls back
+
+    fire_at = reset_time + timedelta(
+        seconds=PANE_RESUME_MARGIN_S + PANE_RESUME_BACKOFF_S * (attempts - 1),
+    )
+
+    # Schedule the nudge via the scheduler directly so we can call our own
+    # `_execute_pane_resume` (the standard auto_resume_service._execute_resume
+    # doesn't include the wait_for_pane_ready guard the acceptance criteria
+    # ask for).
+    job_id = f"pane-resume-{hash(cwd) % 100000}"
+    try:
+        scheduler_service._sched.remove_job(job_id)
+    except Exception:
+        pass
+    scheduler_service._sched.add_job(
+        _execute_pane_resume,
+        trigger=DateTrigger(run_date=fire_at),
+        args=[cwd, message],
+        id=job_id,
+        replace_existing=True,
+        misfire_grace_time=300,
+        coalesce=True,
+    )
+
+    # Persist the pending state on the card so the next dispatch tick knows
+    # this nudge is in flight and can back off / fall back when (if) another
+    # limit is detected.
+    resume_target = _resume_target_from_cwd(cwd)
+    if resume_target is None:
+        return False
+    project_path, session_name = resume_target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return False
+    claimant = CLAIMANT_PREFIX + session_name
+
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return False
+        meta = dict(card.meta or {})
+        meta["pane_resume_pending"] = True
+        meta["pane_resume_attempts"] = attempts
+        meta["pane_resume_reset_at"] = reset_time.isoformat()
+        await apply_operation(
+            ks, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"metadata": meta},
+        )
+        await _post_rate_limit_activity_comment(
+            ks, card=card, project_key=project_key,
+            text=(
+                f"⏰ Rate-limit gedetecteerd op live pane — nudge #{attempts} "
+                f"gepland om {fire_at.isoformat()} (reset {reset_time.isoformat()}). "
+                f"Kaart blijft geclaimd; pane blijft leven."
+            ),
+        )
+        await ks.commit()
+
+    logger.info(
+        "pane-resume scheduled (cwd=%s attempts=%s fire_at=%s)",
+        cwd, attempts, fire_at.isoformat(),
+    )
+    return True
+
+
+async def _execute_pane_resume(cwd: str, message: str) -> bool:
+    """Scheduler-fired executor for a pending pane-resume.
+
+    Resolves the live tmux pane, waits for it to be ready (so a stuck or
+    unrendered pane doesn't silently swallow the keystroke), and sends the
+    continuation message via the existing `tmux_inject.send_text` helper.
+    Any failure (pane gone, never ready, send_text returned False) falls
+    back to the existing kill+To Resume reaction so the card doesn't sit
+    claimed indefinitely while the session is actually dead.
+    """
+    from app.services.scheduling.session_resolver import resolve_target
+    from app.services.scheduling.tmux_inject import send_text, wait_for_pane_ready
+
+    target = resolve_target(cwd)
+    if target is None:
+        logger.warning("pane-resume: pane gone for %s; falling back", cwd)
+        await _pane_resume_fallback_to_kill(cwd)
+        return False
+
+    ready = await wait_for_pane_ready(target, timeout_s=30.0)
+    if not ready:
+        logger.warning(
+            "pane-resume: pane %s never became ready; falling back", target,
+        )
+        await _pane_resume_fallback_to_kill(cwd)
+        return False
+
+    ok = send_text(target, message)
+    if not ok:
+        logger.warning(
+            "pane-resume: send_text failed for %s; falling back", target,
+        )
+        await _pane_resume_fallback_to_kill(cwd)
+        return False
+
+    logger.info("pane-resume: nudge sent to %s", target)
+    return True
+
+
+async def _pane_resume_fallback_to_kill(cwd: str) -> None:
+    """When the scheduled nudge can't be delivered (pane gone / not ready /
+    send_keys failed), strip the pending metadata and run the standard
+    kill+To Resume reaction so the card moves into the existing
+    auto-resume-rebuild path. Reads the parsed reset time back from the
+    card metadata so the reaction schedules a resume at the same wall-clock
+    moment the (failed) nudge was aiming at."""
+    resume_target = _resume_target_from_cwd(cwd)
+    if resume_target is None:
+        return
+    project_path, session_name = resume_target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return
+    claimant = CLAIMANT_PREFIX + session_name
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is not None:
+            meta = dict(card.meta or {})
+            reset_at = meta.get("pane_resume_reset_at")
+            meta.pop("pane_resume_pending", None)
+            meta.pop("pane_resume_attempts", None)
+            meta.pop("pane_resume_reset_at", None)
+            await apply_operation(
+                ks, op_type="update", entity_type="card", project_key=project_key,
+                entity_id=card.id, payload={"metadata": meta},
+            )
+            await ks.commit()
+        else:
+            reset_at = None
+
+    scheduled_at = None
+    if reset_at:
+        try:
+            scheduled_at = datetime.fromisoformat(reset_at)
+        except ValueError:
+            scheduled_at = None
+
+    try:
+        await move_limited_session_to_resume(cwd, scheduled_at=scheduled_at)
+    except Exception:
+        logger.exception(
+            "pane-resume fallback: move_limited_session_to_resume failed for %s", cwd,
+        )
+
+
+async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bool:
+    """Apply the standard rate-limit reaction for a kanban-dispatched session:
+    record the structured signal, resolve/parse the reset time, pause the
+    affected provider, and either nudge the still-alive tmux pane (pane-resume)
+    or fall back to moving the card to "To Resume" via
+    `move_limited_session_to_resume`.
+
+    Shared by the Notification-hook handler
+    (`scheduled_messages.router.hook_event`) and the transcript-tail sweep
+    (`detect_transcript_rate_limits`) so a rate limit reaches exactly the same
+    reaction regardless of which channel noticed it first -- no second,
+    parallel reaction path. `source` is only used for logging/observability
+    (e.g. "hook" vs "transcript"), so a later "why did this pause happen" read
+    of the logs can tell the two channels apart.
+
+    Returns True iff a kanban card was found and moved to "To Resume".
+    """
+    from datetime import timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import set_paused_until
+    from app.services.scheduling.auto_resume import (
+        DEFAULT_RESUME_MESSAGE,
+        FALLBACK_PAUSE_HOURS,
+        auto_resume_service,
+    )
+    from app.services.scheduling.session_signals import session_signals
+
+    session_signals.record_limit(cwd, message=message or "")
+    parsed = auto_resume_service.parse_reset_time(message)
+    if parsed:
+        pause_until, _tz_name = parsed
+    else:
+        # Recognized as a limit hit but the reset time didn't match the known
+        # clock-time format (e.g. a weekly/model cap with different
+        # wording). Fall back to a conservative fixed pause instead of
+        # skipping it -- skipping just re-triggers the same spin-and-burn
+        # loop the pause exists to prevent.
+        pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+        logger.warning(
+            "unrecognized usage-limit message format for %s (source=%s), falling "
+            "back to a %sh dispatch pause: %r",
+            cwd, source, FALLBACK_PAUSE_HOURS, message,
+        )
+
+    try:
+        provider = await _provider_for_cwd(cwd)
+    except Exception:
+        logger.exception("failed to resolve provider for %s", cwd)
+        provider = None
+
+    try:
+        async with KanbanSessionLocal() as ks:
+            await set_paused_until(ks, pause_until, provider=provider)
+            await ks.commit()
+    except Exception:
+        logger.exception("failed to set dispatch pause for %s", cwd)
+
+    # Pane-resume branch: prefer nudging the still-alive tmux pane at reset+margin
+    # over the existing kill+To Resume reaction. Falls back to the latter when
+    # (a) the pane is gone, (b) a previous nudge already maxed out attempts, or
+    # (c) we hit the max-attempts cap this round (subsequent re-limits).
+    pending = await _read_pane_resume_state(cwd)
+    if pending is not None and pending["attempts"] >= PANE_RESUME_MAX_ATTEMPTS:
+        await _clear_pane_resume_state(cwd)
+        moved = await _do_move_to_resume(cwd, pause_until)
+    else:
+        next_attempts = (pending["attempts"] + 1) if pending else 1
+        scheduled = await try_pane_resume(
+            cwd, pause_until, DEFAULT_RESUME_MESSAGE,
+            attempts=next_attempts,
+        )
+        if scheduled:
+            moved = False
+        else:
+            moved = await _do_move_to_resume(cwd, pause_until)
+
+    logger.info(
+        "rate-limit signal handled (source=%s cwd=%s moved=%s pause_until=%s)",
+        source, cwd, moved, pause_until.isoformat(),
+    )
+    return moved
+
+
+async def detect_transcript_rate_limits(
+    *, cards: Iterable[KanbanCard], project_path: str,
+) -> int:
+    """Sweep every agent-claimed card for an unresolved rate-limit hit visible
+    only in its Claude Code transcript tail.
+
+    Closes the mid-session detection gap: a session that's been productive
+    for a while before hitting its limit stays alive in tmux (the CLI never
+    exits on a 429/session-limit — it prints the error and returns to its
+    prompt) and has long since sent its first hook event, so it is invisible
+    to both the Notification-hook path (§2.1: the hook never carries the
+    limit message) and the reaper's stuck-session pane scan (§2.2: it only
+    inspects sessions that never sent a hook). The transcript is the one
+    channel that always carries the limit, for both vendors, whether it
+    happens at spawn or hours in — see
+    docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5 R1.
+
+    Runs independently of tmux liveness — deliberately not folded into
+    `reap_stale_claims`'s live/stuck/dead branching, since the transcript
+    signal applies regardless of which of those buckets a session is
+    currently in. Skips cards on fixed columns (Backlog/Impediment/Done/To
+    Resume) and cards with no `agent:` claim, same as `reap_stale_claims`.
+
+    Reuses `handle_rate_limit_signal` for the reaction (per-provider pause +
+    `move_limited_session_to_resume`) so a limit reaches exactly the same
+    outcome regardless of which channel noticed it first — no second,
+    parallel reaction path. Returns the number of cards for which a limit was
+    detected and handled.
+    """
+    from app.kanban.schemas import COLUMNS
+    from app.kanban.session_recovery import _resolve_transcript_file
+
+    handled = 0
+    for card in cards:
+        if card.column in COLUMNS:
+            continue
+        name = _claimant_session(card)
+        if name is None:
+            continue
+        transcript = _resolve_transcript_file(project_path, name)
+        if transcript is None:
+            continue
+        message = _tail_rate_limit_message(transcript)
+        if message is None:
+            # No active limit. If the card still carries pane-resume pending
+            # metadata from a previous nudge that DID land (the session
+            # recovered on its own), strip it so the next genuine limit cycle
+            # starts with a fresh attempt counter instead of inheriting a
+            # stale one from a limit that's already in the past.
+            if (card.meta or {}).get("pane_resume_pending"):
+                await _clear_pane_resume_metadata_for_card(card, project_path)
+            continue
+        cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
+        moved = await handle_rate_limit_signal(cwd, message, source="transcript")
+        logger.info(
+            "transcript-tail rate limit detected: session=%s card=%s "
+            "transcript=%s classification=limit moved=%s",
+            name, card.id, transcript, moved,
+        )
+        handled += 1
+    return handled
+
+
 async def _cleanup_stuck_session(
     session, *, card, project_key: str, session_name: str, pane_content: str,
+    matched_needle: str | None = None,
 ) -> None:
     """Clean up a stuck tmux session that hit a rate limit.
 
@@ -3216,18 +4076,37 @@ async def _cleanup_stuck_session(
     STUCK_SESSION_TIMEOUT_S) but counting it as a failure is still right:
     a 429 is an infrastructure wall that will hit the same dispatch
     target on the next attempt, so we want MAX_DISPATCH_FAILURES to
-    eventually move the card to Impediment instead of looping forever."""
+    eventually move the card to Impediment instead of looping forever.
+
+    `matched_needle` is the specific needle/phrase from the pane-scan
+    matcher (when this branch was reached via the pane fallback). The
+    structured-signal path leaves it None — that branch already knows
+    the limit message verbatim, and the needle is implicit. Logging the
+    matched needle alongside the matched pane line (instead of the old
+    truncated 200-char pane prefix) was the observability gap card
+    3a8f27a4… called out — see the 2026-07-22 incident where a healthy
+    session was killed and the truncated log hid which needle had
+    actually fired."""
     from datetime import UTC, datetime, timedelta
 
     from app.kanban.dispatch_pause import set_paused_until
     from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
 
-    logger.warning(
-        "stuck session %s hit a rate limit (pane: %r); pausing dispatch for %sh, "
-        "killing tmux, releasing claim",
-        session_name, (pane_content or "")[:200].replace("\n", " "),
-        FALLBACK_PAUSE_HOURS,
-    )
+    if matched_needle is not None:
+        matched_line = _matching_pane_line(pane_content, matched_needle)
+        logger.warning(
+            "stuck session %s hit a rate limit (needle=%r line=%r); "
+            "pausing dispatch for %sh, killing tmux, releasing claim",
+            session_name, matched_needle, matched_line,
+            FALLBACK_PAUSE_HOURS,
+        )
+    else:
+        logger.warning(
+            "stuck session %s hit a rate limit (pane: %r); pausing dispatch for %sh, "
+            "killing tmux, releasing claim",
+            session_name, (pane_content or "")[:200].replace("\n", " "),
+            FALLBACK_PAUSE_HOURS,
+        )
 
     # Conservative fallback duration; the hook-event path has the parsed
     # reset time, but the reaper only sees tmux pane content.
@@ -3476,7 +4355,14 @@ async def _run_card(
     in the past, was held out of dispatch by `_is_due`) from a manual
     force-dispatch via the UI. When set AND the card had `scheduled_at`,
     post an `Auto-resuming (scheduled_at was <iso>)` activity comment so the
-    activity feed shows the tick didn't force-dispatch early."""
+    activity feed shows the tick didn't force-dispatch early.
+
+    **Provider routing:** the spawn-side provider/model pick below delegates
+    to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). Any new "what subscription would this
+    card land on" decision in this path MUST go through the resolver rather
+    than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk."""
     # Re-read the card from the DB before claiming. The auto-tick's cached
     # `cards` list reflects state from `list_cards` at the top of the tick;
     # a `set_resume` MCP call (or any other concurrent update) that commits
@@ -3903,10 +4789,10 @@ async def _provider_for_card(
     if card is None or not agent_column:
         return None
     column_override = (getattr(card, "column_overrides", None) or {}).get(agent_column) or {}
-    override_provider = column_override.get("provider") or None
+    override_provider = column_override.get("provider") or None  # resolver-bypass: intentional narrow helper (last two layers only) for the rate-limit / spillover path
     return (
         override_provider
-        or await get_column_default_provider(session, project_key, agent_column)
+        or await get_column_default_provider(session, project_key, agent_column)  # resolver-bypass: paired with the line above; see comment on `_provider_for_card`
         or PROVIDER_ANTHROPIC
     )
 
@@ -3929,7 +4815,7 @@ async def _effective_provider_for_pause_gate(
     if card is None or not target_column:
         return None
     card_overrides = (getattr(card, "column_overrides", None) or {}).get(target_column) or None
-    card_model = getattr(card, "model", None)
+    card_model = getattr(card, "model", None)  # resolver-bypass: passthrough only — these args are fed straight into `resolve_effective_provider_and_model` below
     # ``_phase_cli_id`` is the sync resolver the spawn path uses to map a
     # card's agent to its CLI id; the pool picker needs this so a manually
     # paused entry on the wrong CLI doesn't accidentally gate a card that
@@ -4262,6 +5148,201 @@ async def _post_rate_limit_activity_comment(
         return False
 
 
+async def check_progress_liveness(
+    session, *, project_key: str, cards: Iterable[KanbanCard],
+    project_path: str | None = None,
+    live_sessions: set[str] | None = None,
+    sandcastle_live: set[str] | None = None,
+    headless_live: set[str] | None = None,
+    now: float | None = None,
+    signal_seconds: int | None = None,
+    action_seconds: int | None = None,
+) -> set[str]:
+    """Signal/release cards whose agent session has stopped making transcript
+    progress (kaart f0953a11…).
+
+    A second liveness source sitting alongside ``reap_stale_claims``'s
+    pane-exists check. The pane check alone misses a session that hit its
+    subscription limit, crashed in a loop, parked on a permission prompt, or
+    is hung on a network timeout — the pane (and the claim) stays alive
+    forever. The transcript is a better signal: a productive Claude session
+    writes to its transcript every few seconds, so sustained silence is
+    always wrong.
+
+    For each ``agent:``-claimed card whose session is *not* in
+    ``live_sessions`` / ``sandcastle_live`` / ``headless_live`` (those
+    transports own their own liveness — never override them) and whose
+    transcript is resolvable:
+
+      - First observation: record the snapshot but do nothing — we don't
+        know whether the agent is productive yet, so the first tick always
+        has ``stalled_seconds == 0``.
+      - mtime has advanced since the last observation: update the snapshot
+        and clear the signal-posted flag. A productive session resets both
+        counters every tick.
+      - mtime unchanged and ``now - last_observation_time`` ≥ ``signal_seconds``
+        and < ``action_seconds``: post a one-shot "stilstaand" activity
+        comment so the stall is visible on the card (re-using
+        ``_post_rate_limit_activity_comment``, the shared audit-comment
+        helper). Subsequent ticks within the same stall window do NOT
+        re-post — only the fresh stall after the next growth window re-arms.
+      - mtime unchanged and ``now - last_observation_time`` ≥ ``action_seconds``:
+        move the card to ``To Resume`` via the existing ``_move_to_resume``
+        path (which kills the tmux session, releases the claim, and persists
+        the resume pointer so the next dispatch tick resumes the conversation
+        in place).
+
+    Failure-open semantics: any IO/permission problem resolving the transcript
+    (missing worktree, no jsonl, stat error) is treated as "we don't know"
+    and the card is left alone. A false-positive signal here costs the user
+    their session; a missing signal costs at most the next dispatch tick.
+
+    ``now``, ``signal_seconds``, and ``action_seconds`` are injectable for
+    deterministic tests; production callers pass none and read the module
+    defaults ``PROGRESS_LIVENESS_SIGNAL_SECONDS`` / ``PROGRESS_LIVENESS_ACTION_SECONDS``.
+
+    Returns the set of ``session_name``s that had any action this tick
+    (signal comment posted, or claim released). Empty when nothing crossed
+    a threshold — the caller uses it as a truthy "did anything happen" gate
+    to decide whether to refetch the cards list.
+    """
+    from app.kanban.schemas import COLUMNS
+    from app.kanban.session_recovery import _resolve_transcript_file
+
+    if project_path is None:
+        return set()
+    if now is None:
+        now = time.time()
+    if signal_seconds is None:
+        signal_seconds = PROGRESS_LIVENESS_SIGNAL_SECONDS
+    if action_seconds is None:
+        action_seconds = PROGRESS_LIVENESS_ACTION_SECONDS
+
+    # Snapshot to a list — same defence-in-depth as `reap_stale_claims`:
+    # `cards` is documented as Iterable, and a future refactor that turns it
+    # into a streaming generator would otherwise be silently consumed.
+    cards = list(cards)
+
+    # Prune state for cards that no longer have an `agent:` claim (released,
+    # moved to Done, operator redispatched under a fresh worktree, ...). Done
+    # at function entry so the dict can't grow unbounded across long-running
+    # backends. Scoped to cards iterated THIS tick — sessions on other
+    # projects are handled by their own dispatch_project call.
+    active_card_ids = {c.id for c in cards}
+    for stale_id in [cid for cid in _progress_liveness_state if cid not in active_card_ids]:
+        _progress_liveness_state.pop(stale_id, None)
+
+    acted: set[str] = set()
+
+    for card in cards:
+        if card.column in COLUMNS:
+            continue
+        name = _claimant_session(card)
+        if name is None:
+            continue
+        if name in live_sessions or name in sandcastle_live or name in headless_live:
+            # Those transports own liveness — see reap_stale_claims for the
+            # same carve-out. Skipping is correct even if the transcript
+            # happens to exist for a sandcastle/headless session (it won't
+            # normally — different cwd — but the carve-out is on the
+            # transport, not on the transcript).
+            continue
+
+        transcript = _resolve_transcript_file(project_path, name)
+        if transcript is None:
+            # Fail-open: no resolvable transcript = no signal. Either the
+            # worktree was GC'd, the session never wrote anything, or the
+            # projects-dir layout is wrong — in all cases acting on missing
+            # data is worse than not acting.
+            continue
+
+        try:
+            current_mtime = transcript.stat().st_mtime
+        except OSError:
+            # File vanished between resolve and stat (worktree GC, race).
+            # Same fail-open reasoning.
+            continue
+
+        snapshot = _progress_liveness_state.get(card.id)
+        if snapshot is None:
+            # First observation — record the baseline (our observation time
+            # + the mtime we observed it at) but don't act yet. A signal at
+            # the very first tick would be a "stalled since spawn" assertion
+            # with no information about whether the agent was ever productive.
+            _progress_liveness_state[card.id] = _ProgressSnapshot(
+                observation_time=now, observed_mtime=current_mtime,
+            )
+            continue
+
+        if current_mtime > snapshot.observed_mtime:
+            # Transcript grew — reset the snapshot and clear the one-shot
+            # signal flag. The new observation time becomes the stall
+            # baseline for any future silence.
+            _progress_liveness_state[card.id] = _ProgressSnapshot(
+                observation_time=now, observed_mtime=current_mtime,
+            )
+            continue
+
+        # current_mtime <= snapshot.observed_mtime: no growth since the last
+        # observation. Stall is measured against our own observation cadence
+        # so a session that wrote once at spawn and then went silent doesn't
+        # get pre-charged with the time-since-spawn.
+        stalled_seconds = now - snapshot.observation_time
+
+        if stalled_seconds >= action_seconds:
+            logger.warning(
+                "progress-liveness: card %s session %s stalled ~%.0fs (action "
+                "threshold %.0fs) — moving to To Resume via _move_to_resume",
+                card.id, name, stalled_seconds, action_seconds,
+            )
+            moved = await _move_to_resume(
+                session, card=card, project_key=project_key,
+                project_path=project_path,
+            )
+            if not moved:
+                # _move_to_resume refuses on Done / To Resume / fixed columns
+                # (already enforced above by the COLUMNS check) or when the
+                # worktree no longer has a resolvable transcript — shouldn't
+                # happen since we just resolved it, but fall back to a plain
+                # release rather than leaving the card claimed forever.
+                await _release_dead_claim(
+                    session, card=card, project_key=project_key,
+                    session_name=name,
+                )
+            # Drop state for this card — claim is gone, no further observation
+            # is possible until a new claim attaches.
+            _progress_liveness_state.pop(card.id, None)
+            acted.add(name)
+            continue
+
+        if stalled_seconds >= signal_seconds:
+            if snapshot.signal_posted:
+                # Already posted for this stall window — don't spam.
+                continue
+            _progress_liveness_state[card.id] = _ProgressSnapshot(
+                observation_time=snapshot.observation_time,
+                observed_mtime=snapshot.observed_mtime,
+                signal_posted=True,
+            )
+            minutes = int(stalled_seconds // 60)
+            text = _STILLESTAAND_COMMENT_TEMPLATE.format(
+                minutes=minutes, name=name,
+                action_minutes=action_seconds // 60,
+            )
+            posted = await _post_rate_limit_activity_comment(
+                session, card=card, project_key=project_key, text=text,
+            )
+            if posted:
+                logger.info(
+                    "progress-liveness: card %s session %s stalled ~%.0fs — "
+                    "posted stilstaand comment (signal threshold %.0fs)",
+                    card.id, name, stalled_seconds, signal_seconds,
+                )
+                acted.add(name)
+
+    return acted
+
+
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
     sandcastle_live: set[str] | None = None,
@@ -4334,6 +5415,16 @@ async def reap_stale_claims(
         # shows ordinary work or we couldn't capture it, do nothing — the
         # session is just slow, and falling through to the alive-skip
         # branch keeps the existing reaper semantics.
+        #
+        # The pane substring-scan only fires when no usable transcript
+        # exists yet — once the session has produced one (i.e. it's been
+        # productive for long enough that `_read_transcript_tail_entries`
+        # would have seen the limit), the transcript-tail detector
+        # (`detect_transcript_rate_limits`) is the authoritative source.
+        # Without this guard an agent whose history contains a benign
+        # '429' / 'api error' substring from a curl probe gets killed by a
+        # false positive — that's the 2026-07-22 incident that drove card
+        # 3a8f27a4… (logs/backend/run-20260722-095619-2861-0.log:947).
         if name in stuck_names:
             if _structured_rate_limit_signal(name):
                 # Use the canonical CC notification message when the typed
@@ -4352,12 +5443,25 @@ async def reap_stale_claims(
                 continue
             pane = _capture_pane_content(name)
             if pane is not None and _is_rate_limited_session(pane):
-                await _cleanup_stuck_session(
-                    session, card=card, project_key=project_key,
-                    session_name=name, pane_content=pane,
-                )
-                reaped += 1
-                continue
+                # Pre-transcript-only contract: only run the pane scan if
+                # there is no transcript to take precedence. If a
+                # transcript exists (and has content) the transcript-tail
+                # detector owns mid-session limit handling; running the
+                # pane scan on top of it is the false-positive path.
+                if _session_has_transcript(project_path, name):
+                    # Drop through to the alive-skip branch — the session
+                    # is just slow (or its limit, if any, will be caught
+                    # by `detect_transcript_rate_limits` on the next tick).
+                    pass
+                else:
+                    needle = _find_rate_limit_match(pane) or "?"
+                    await _cleanup_stuck_session(
+                        session, card=card, project_key=project_key,
+                        session_name=name, pane_content=pane,
+                        matched_needle=needle,
+                    )
+                    reaped += 1
+                    continue
 
         if name in live_sessions or name in sandcastle_live or name in headless_live:
             continue
@@ -4656,13 +5760,50 @@ async def dispatch_project(
     exercise the cap directly).
 
     If transport is None, the appropriate transport is automatically selected based
-    on the project's sandcastle configuration."""
+    on the project's sandcastle configuration.
+
+    **Provider routing:** any "what subscription would this card land on" decision
+    in this path MUST go through
+    ``resolve_effective_provider_and_model`` (the canonical 5-layer resolver —
+    see its docstring) — including the manual-pause gate below, which routes
+    through ``_card_is_manually_paused`` →
+    ``_effective_provider_for_pause_gate``. Ad-hoc re-walks of even a subset
+    of the chain slipped the original pause-gate through with the wrong
+    provider (kaart f056b2888a…, fix commit ``77f5c8c``); the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new such walk."""
     cards = await list_cards(session, project_key)
     if live_sessions is not None:
         if await reap_stale_claims(
             session, project_key=project_key, cards=cards, live_sessions=live_sessions,
             sandcastle_live=sandcastle_live, headless_live=headless_live,
             project_path=project_path,
+        ):
+            cards = await list_cards(session, project_key)
+
+    # Transcript-tail sweep for mid-session rate limits: runs independently of
+    # tmux liveness, so it catches the sessions reap_stale_claims's live/stuck
+    # branching structurally cannot (see detect_transcript_rate_limits
+    # docstring). Needs project_path to resolve a worktree's transcript file.
+    if project_path is not None:
+        if await detect_transcript_rate_limits(cards=cards, project_path=project_path):
+            cards = await list_cards(session, project_key)
+
+    # Progress-liveness sweep: second liveness source for cards whose tmux
+    # pane still exists but whose transcript has stopped growing (kaart
+    # f0953a11…). Runs independently of tmux liveness for the same reason as
+    # the rate-limit sweep above — it must catch sessions whose pane is
+    # alive but the agent itself is stuck (limit hit, crash loop, permission
+    # prompt, network timeout). Idempotent with reap_stale_claims: a session
+    # whose tmux pane is already gone was handled by the reaper above; this
+    # sweep handles the inverse case (pane alive, agent not). Needs
+    # project_path to resolve a worktree's transcript file.
+    if project_path is not None and live_sessions is not None:
+        if await check_progress_liveness(
+            session, project_key=project_key, cards=cards,
+            project_path=project_path,
+            live_sessions=live_sessions,
+            sandcastle_live=sandcastle_live,
+            headless_live=headless_live,
         ):
             cards = await list_cards(session, project_key)
 
@@ -5169,6 +6310,14 @@ async def dispatch_all_pending(
     board. The per-card ``dispatch_card`` / ``redispatch_card`` calls bypass
     this gate by design — those are explicit human overrides from the
     CardDrawer.
+
+    **Provider routing:** the manual-pause gate below routes through
+    ``_card_is_manually_paused`` → ``_effective_provider_for_pause_gate``, which
+    delegates to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). New "what subscription would each of these
+    cards land on" decisions in this path MUST go through the resolver rather
+    than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk.
     """
     if transport is None:
         transport = await get_transport_for_project(project_path)
@@ -5259,6 +6408,15 @@ async def redispatch_all_orphans(
 
     When transport is None, each card's transport is auto-selected.
     Returns a list of result dicts for each successfully dispatched card.
+
+    **Provider routing:** the manual-pause gate below routes through
+    ``_card_is_manually_paused`` → ``_effective_provider_for_pause_gate``, which
+    delegates to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). The single-card ``redispatch_card`` path
+    (Card drawer) is an explicit per-card human override and stays unguarded,
+    but any new bulk-path pause / quota / cost decision MUST go through the
+    resolver rather than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk.
     """
     from app.kanban.service import list_orphaned_cards
     orphans = await list_orphaned_cards(session, project_key)
@@ -5508,10 +6666,23 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
     Unlike the worktree transport, this does NOT create a new git worktree.
     The ClaudeCodeCli resolves the working directory from the session's
     recorded cwd (via project_folder), and spawns with ``--resume session_id``.
+
+    kaart 27317b4871… (FCR gap 7): ``_run_card`` forwards the
+    anthropic-compatible ``endpoint_*`` kwargs to every ``SpawnTransport``
+    the dispatcher dispatches against; the resume transport was
+    the hold-out and the previous signature dropped them on the
+    floor, leading to a ``TypeError`` at every compatible resume
+    dispatch. Mirror the SpawnTransport protocol here and thread
+    the carrier through ``SpawnCommandOptions`` so
+    ``spawn_session`` builds the same env the worktree / headless
+    paths produce.
     """
     def _transport(*, directory: str, prompt: str, session_name: str,
                    cli_id: str = "claude-code", provider: str = "anthropic",
-                   model: str | None = None) -> dict:
+                   model: str | None = None,
+                   endpoint_name: str | None = None,
+                   endpoint_base_url: str | None = None,
+                   endpoint_auth_token: str | None = None) -> dict:
         from app.services.agentic_cli.base import SpawnCommandOptions
         from app.services.runs.spawn import spawn_session
         from app.services.scheduling.session_registry import session_registry
@@ -5532,6 +6703,9 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             skip_permissions=skip_permissions,
             provider=provider,
             model=model,
+            endpoint_name=endpoint_name,
+            endpoint_base_url=endpoint_base_url,
+            endpoint_auth_token=endpoint_auth_token,
         )
         # Resolve project_key for the audit log when the directory is a
         # registered project root. Falls back to None on failure so the
@@ -5592,7 +6766,16 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
 
 
 async def _retry_queued_cards(transport: SpawnTransport) -> None:
-    """Attempt to dispatch queued cards when memory is available."""
+    """Attempt to dispatch queued cards when memory is available.
+
+    **Provider routing:** the manual-pause gate below routes through
+    ``_card_is_manually_paused`` → ``_effective_provider_for_pause_gate``, which
+    delegates to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). New "what subscription would each queued
+    card land on" decisions in this path MUST go through the resolver rather
+    than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk.
+    """
     from app.kanban.db import KanbanSessionLocal
     from app.services.scheduling.pending_queue import pending_queue
 

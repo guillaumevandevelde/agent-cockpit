@@ -697,7 +697,7 @@ empirical herkalibratie van het baseline-getal.
 | `## Key Decisions` (5 bullets) | redundant met `docs/cockpit/decisions.md` | 0 | ~100 |
 | `## CI/CD` (4 workflow-namen) | referentie; `ls .github/workflows` is actueler | 0 | ~100 |
 | Fork-notice "Tasks 1–11 implemented" | stale snapshot van `fase-2-plan.md`-status, verandert per week | 0 | ~95 |
-| Bash-test-lijst onder `# Test` (19 regels) | verwijst naar `scripts/test_*.sh` die `check-test-harness-coverage.sh` al afdwingt | 0 (zelfde coverage, korter) | ~215 |
+| Bash-test-lijst onder `# Test` (19 regels) | family-level `ls scripts/test_*.sh` ipv per-harness; `check-test-harness-coverage.sh` dekt het hele spectrum (kaart `5e988e4e` + glob-form uit kaart `8c7cfc14`) | 0 (zelfde coverage, korter — vereist de glob-herkenning in kaart `8c7cfc14`) | ~215 |
 | **Totaal** | | | **~1.300 tokens / ~5.171 bytes (-21%)** |
 
 **Vóór/na, gemeten (cold-call, vaste methode):**
