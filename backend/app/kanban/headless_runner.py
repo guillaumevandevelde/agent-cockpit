@@ -132,21 +132,32 @@ def _remember_project_root(project_root: str) -> None:
     _known_project_roots.add(str(project_root))
 
 
-@dataclass(frozen=True)
+@dataclass
 class HeadlessRunRecord:
     """Durable identity of a single headless run.
 
     Holds just enough to (a) check liveness via the OS, (b) signal the
-    process group for human-takeover / final cleanup, and (c) locate the
-    on-disk event log. The Process object itself lives in the asyncio
-    loop that spawned it; this record survives a backend restart because
-    it's also persisted to the pidfile and re-derived at adoption time.
+    process group for human-takeover / final cleanup, (c) locate the
+    on-disk event log, and (d) track how far the tailer has read so the
+    next backend can resume from that offset.
+
+    The Process object itself lives in the asyncio loop that spawned it;
+    this record survives a backend restart because it's also persisted to
+    the pidfile and re-derived at adoption time.
+
+    ``last_read_offset`` is the byte offset into ``log_path`` the tailer
+    has already dispatched. After ``adopt_headless_runs`` opens the
+    log file it seeks to this offset and reads forward — if the file
+    was truncated from the head (cap exceeded), the offset is reset to 0
+    on the read side. Persisted to the pidfile on every dispatch so a
+    restart can't lose more than one event's worth of progress.
     """
     session_name: str
     pid: int
     worktree_path: str
     log_path: Path
     started_at: float  # unix epoch
+    last_read_offset: int = 0
 
 
 def _os_pid_alive(pid: int, expected_cwd: str) -> bool:
@@ -194,6 +205,10 @@ def _read_pidfile(pidfile: Path) -> HeadlessRunRecord | None:
     Defensive: malformed files are treated as "not a live run" and removed
     by the caller, so a half-written pidfile (e.g. crashed backend mid-
     write) doesn't wedge the liveness source.
+
+    ``last_read_offset`` is optional in the payload — pidfiles written by
+    older versions don't carry it, and we fall back to 0 (the tailer
+    will re-read from the start; events are idempotent).
     """
     try:
         data = json.loads(pidfile.read_text(encoding="utf-8"))
@@ -203,6 +218,7 @@ def _read_pidfile(pidfile: Path) -> HeadlessRunRecord | None:
             worktree_path=data["worktree_path"],
             log_path=Path(data["log_path"]),
             started_at=float(data["started_at"]),
+            last_read_offset=int(data.get("last_read_offset", 0)),
         )
     except (OSError, KeyError, ValueError, json.JSONDecodeError):
         return None
@@ -355,13 +371,32 @@ def kill_headless_session(session_name: str) -> bool:
 class EventLogWriter:
     """Append-only JSONL event log with head-truncating size cap.
 
-    Appends land as a single line (``str + "\\n"``). When the file would
-    exceed ``cap_bytes``, the writer truncates the oldest bytes (preserving
-    line boundaries — the first byte kept is the byte AFTER the first
-    newline in the truncated window). The cap exists to bound pathological
-    loops; analyse §5.3 shows 16 MB is ~2× the largest run ever observed
-    in 998 dispatched transcripts and ~14× p90, so the truncation path
-    should almost never fire in normal traffic.
+    Two double duties after the restart-survival fix (kaart ``a450df1a…``):
+
+    1. Owns the file descriptor for the child subprocess's stdout.
+       ``asyncio.create_subprocess_exec(..., stdout=log_writer.fileno())``
+       hands the fd to the child; the child writes raw JSONL to the log
+       file directly. That ownership transfer is what makes a backend
+       exit (uvicorn crash, ``cockpit.sh restart``) survivable: the
+       parent's pipe going away is no longer the child's problem, AND the
+       log file keeps accumulating events even when the parent is gone.
+
+    2. Bounded by ``cap_bytes`` with head-truncation. Appends land as a
+       single line (``str + "\\n"``). When the file would exceed
+       ``cap_bytes``, the writer truncates the oldest bytes (preserving
+       line boundaries — the first byte kept is the byte AFTER the first
+       newline in the truncated window). The cap exists to bound
+       pathological loops; analyse §5.3 shows 16 MB is ~2× the largest
+       run ever observed in 998 dispatched transcripts and ~14× p90, so
+       the truncation path should almost never fire in normal traffic.
+
+    After the restart-survival fix, ``append`` is advisory-only: the
+    child writes through the inherited fd, and the tailer reads from
+    the same file. ``append`` is preserved for the parent-side path
+    (e.g. tests that hand-write events to the log) and for the
+    truncation-trigger path. Truncation can also be invoked directly via
+    :meth:`truncate_head` (the tailer does this when the file size
+    crosses ``cap_bytes`` from the read side).
     """
 
     def __init__(self, path: Path, cap_bytes: int = _DEFAULT_LOG_CAP_BYTES):
@@ -370,6 +405,17 @@ class EventLogWriter:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._size = self.path.stat().st_size if self.path.exists() else 0
         self._f = self.path.open("a", encoding="utf-8", buffering=1)
+
+    def fileno(self) -> int:
+        """Underlying file descriptor for the child to inherit as stdout.
+
+        The fd is opened in append mode, so the child always writes at
+        the current end-of-file (and the parent's reads via a separate
+        fd see every byte). The parent's fd is closed by :meth:`close`
+        but the child's copy survives exec — so when the parent exits
+        the child keeps writing to the same file on disk.
+        """
+        return self._f.fileno()
 
     def append(self, line: str) -> None:
         if not line.endswith("\n"):
@@ -385,6 +431,16 @@ class EventLogWriter:
             self._f.close()
         except Exception:
             pass
+
+    def truncate_head(self) -> None:
+        """Drop the oldest bytes so the file fits under ``cap_bytes``.
+
+        Public entry point for the tailer (which tracks the file size on
+        the read side and triggers truncation when growth goes past the
+        cap). Closes+reopens the append-mode fd so subsequent writes
+        from the child land at the new end of file.
+        """
+        self._truncate_head()
 
     def _truncate_head(self) -> None:
         self._f.close()
@@ -422,6 +478,11 @@ def _write_pidfile(record: HeadlessRunRecord) -> None:
     the backend crashes between spawn and the ``run_headless`` finally
     block, the next backend startup reads it via :func:`adopt_headless_runs`
     and recovers the run instead of treating it as dead and re-dispatching.
+
+    ``last_read_offset`` is updated on every dispatched event so a
+    crash-orphaned reader doesn't re-process events the new tailer can
+    see still in the log (events are idempotent, but skipping them
+    saves the work).
     """
     pidfile = _pidfile_path(record.worktree_path)
     payload = {
@@ -430,6 +491,7 @@ def _write_pidfile(record: HeadlessRunRecord) -> None:
         "worktree_path": record.worktree_path,
         "log_path": str(record.log_path),
         "started_at": record.started_at,
+        "last_read_offset": record.last_read_offset,
     }
     try:
         pidfile.write_text(json.dumps(payload), encoding="utf-8")
@@ -468,7 +530,7 @@ def _remove_pidfile(worktree_path: str, expected_pid: int) -> None:
         logger.exception("could not remove headless pidfile %s", pidfile)
 
 
-def adopt_headless_runs(project_paths: list[str]) -> int:
+def adopt_headless_runs(project_paths: list[str]) -> list[HeadlessRunRecord]:
     """Re-attach still-alive headless runs from durable pidfiles.
 
     Called once at backend startup, BEFORE the dispatch scheduler and reaper
@@ -495,9 +557,14 @@ def adopt_headless_runs(project_paths: list[str]) -> int:
     next ``live_headless_sessions()`` call) so the reaper doesn't see a
     dead session's pidfile at all on its first tick.
 
-    Returns the number of runs adopted (for tests + an info log).
+    Returns the list of adopted records so the caller (the lifespan
+    startup hook) can spawn a tailer task for each one — the tailer
+    reads the on-disk event log from the persisted
+    ``last_read_offset``, dispatches events, and persists new offsets
+    back to the pidfile. Without the tailer, the on-disk log would
+    keep growing but no consumer would be reading it.
     """
-    adopted = 0
+    adopted: list[HeadlessRunRecord] = []
     for project_path in project_paths:
         project_root = str(project_path)
         # Always remember the project root, even if no pidfile exists
@@ -535,10 +602,12 @@ def adopt_headless_runs(project_paths: list[str]) -> int:
                     pass
                 continue
             _headless_processes[rec.session_name] = rec
-            adopted += 1
+            adopted.append(rec)
             logger.info(
-                "headless adopt: adopted session %s (pid %d, worktree %s)",
+                "headless adopt: adopted session %s (pid %d, worktree %s, "
+                "resuming at offset %d)",
                 rec.session_name, rec.pid, rec.worktree_path,
+                rec.last_read_offset,
             )
             # Re-reserve the slot in the session registry so the post-restart
             # ``can_add_session`` count is honest. The pre-restart backend
@@ -710,6 +779,52 @@ def _headless_task_done_callback(task: asyncio.Task) -> None:
         )
 
 
+def start_headless_tailer(record: HeadlessRunRecord) -> asyncio.Task | None:
+    """Spawn a tailer task that consumes an adopted run's on-disk event log.
+
+    Called by the lifespan startup hook for each record returned by
+    :func:`adopt_headless_runs`. The tailer reads the on-disk JSONL log
+    from ``record.last_read_offset`` (the offset the previous parent
+    had reached), dispatches each event via ``_on_event``, and persists
+    new offsets back to the pidfile. The task self-terminates when the
+    subprocess is dead (per :func:`_os_pid_alive`) and the log is fully
+    drained.
+
+    Returns the spawned task so the caller can hold a strong reference
+    (``_headless_start_tasks`` keeps one for GC safety). Returns None
+    if the event loop is not running (sync context); the caller is
+    expected to be async.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    log_writer = EventLogWriter(record.log_path)
+    stop_event = asyncio.Event()
+    task = loop.create_task(
+        _consume_log_file(
+            proc=None,
+            log_path=record.log_path,
+            session_name=record.session_name,
+            # Adopted runs use a generic provider here; the record
+            # doesn't carry one and the rate-limit handler resolves
+            # the provider from the dispatch side when a rate-limit
+            # event lands. ``"anthropic"`` matches the most common
+            # case; a non-anthropic provider's events still parse
+            # (the rate_limit handler is provider-agnostic on the
+            # set_paused_until side).
+            provider="anthropic",
+            record=record,
+            log_writer=log_writer,
+            stop_event=stop_event,
+        ),
+        name=f"headless-tail-adopted-{record.session_name}",
+    )
+    _headless_start_tasks.add(task)
+    task.add_done_callback(_headless_task_done_callback)
+    return task
+
+
 async def run_headless(
     cli_id: str, *, directory: str, prompt: str, session_name: str,
     skip_permissions: bool, provider: str, model: str | None,
@@ -757,19 +872,36 @@ async def run_headless(
         endpoint_auth_token=endpoint_auth_token,
     )
 
+    # Ensure the worktree + on-disk log file exist before spawn so the
+    # child has somewhere to write immediately. Opening the log writer
+    # creates the file; the child's stdout-fd will append to it.
+    log_path = _log_path(directory)
+    log_writer = EventLogWriter(log_path)
+
+    # AC 1 (kaart a450df1a…): the child's stdout is a *file* (durable
+    # on disk), not a parent-owned pipe. ``start_new_session=True`` on
+    # its own only covers the signal half — a uvicorn crash closes the
+    # stdout pipe, the child's next write gets EPIPE/SIGPIPE, and the
+    # subprocess dies. Routing stdout through the log file means the
+    # child holds a separate fd pointing at the same on-disk file; the
+    # parent's pipe dying is irrelevant. Stderr is sent to DEVNULL for
+    # the same reason — we lose Claude's diagnostic stderr output
+    # (the application's ``logger.warning`` calls inside the consumer
+    # are preserved) but a parent-owned stderr pipe would re-introduce
+    # the same EPIPE-on-restart problem.
     proc = await asyncio.create_subprocess_exec(
         *argv,
         cwd=directory,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stdout=log_writer.fileno(),
+        stderr=asyncio.subprocess.DEVNULL,
         env=env,
-        start_new_session=True,  # kaart a450df1a… AC 1
+        start_new_session=True,  # kaart a450df1a… AC 1 (signal half)
     )
     record = HeadlessRunRecord(
         session_name=session_name,
         pid=proc.pid,
         worktree_path=directory,
-        log_path=_log_path(directory),
+        log_path=log_path,
         started_at=time.time(),
     )
     # Project root is two parents up from the worktree:
@@ -779,11 +911,80 @@ async def run_headless(
     _remember_project_root(Path(directory).parent.parent.parent)
     _headless_processes[session_name] = record
     _write_pidfile(record)  # durable; survives backend restart
-    log_writer = EventLogWriter(record.log_path)
+    stop_event = asyncio.Event()
+    tailer_task = asyncio.create_task(
+        _consume_log_file(
+            proc=proc,
+            log_path=log_path,
+            session_name=session_name,
+            provider=provider,
+            record=record,
+            log_writer=log_writer,
+            stop_event=stop_event,
+        ),
+        name=f"headless-tail-{session_name}",
+    )
     try:
-        returncode = await _consume_stream(
-            proc, session_name, provider=provider, log_writer=log_writer,
-        )
+        # Race the tailer against proc.wait(). Whichever finishes first
+        # determines the next step:
+        #  - tailer fails (e.g. _on_event raises) → kill the subprocess,
+        #    propagate the exception so the caller handles the failure.
+        #  - proc exits (normal or abnormal code) → signal the tailer to
+        #    drain, wait for it, return the exit code.
+        # Pre-refactor this code did ``await proc.wait()`` first, which
+        # blocked forever when the tailer raised on a still-running
+        # subprocess (kaart a450df1a… regression test fixture uses a
+        # SIGTERM-ignoring child; the runner must not wait 120s for the
+        # SIGKILL fallback).
+        proc_wait_task = asyncio.create_task(proc.wait())
+        try:
+            done, pending = await asyncio.wait(
+                {proc_wait_task, tailer_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except BaseException:
+            # Defensive: on cancellation/await escape, both tasks are
+            # best-effort cancelled. The ``finally`` below still reaps
+            # the subprocess.
+            proc_wait_task.cancel()
+            tailer_task.cancel()
+            raise
+        if tailer_task in done:
+            # Tailer raised or completed before the subprocess. Whatever
+            # the cause, we need to terminate the subprocess — the tailer
+            # only self-completes cleanly when the child wrote an EOF, so
+            # a tailer-finished state here means the tailer raised.
+            for t in pending:
+                t.cancel()
+            tailer_exc = tailer_task.exception()
+            if tailer_exc is not None:
+                # Surface the original exception via the finally's kill
+                # path. Re-raise below so the caller sees the real cause.
+                raise tailer_exc
+            # No exception but tailer finished first — pathological
+            # (e.g. process group lost), handle in the finally.
+        # Subprocess exited (or tailer failed and we cancelled the wait).
+        # The wait task is either done or cancelled; grab its returncode.
+        if proc_wait_task.done() and not proc_wait_task.cancelled():
+            returncode = proc_wait_task.result()
+        else:
+            returncode = await proc.wait()
+        # Subprocess is dead; signal the tailer to stop (it'll do one
+        # final pass to drain any in-flight writes the child buffered
+        # before exit) and wait for it.
+        stop_event.set()
+        try:
+            await asyncio.wait_for(tailer_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            tailer_task.cancel()
+            try:
+                await tailer_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            logger.warning(
+                "headless %s: tailer did not stop within 2s of subprocess exit",
+                session_name,
+            )
         return {
             "session_name": session_name,
             "transport": "headless",
@@ -791,14 +992,11 @@ async def run_headless(
         }
     finally:
         # AC 1 (kaart d373be64…): every exit path must leave the
-        # subprocess gone — ``_consume_stream``'s own finally already
-        # terminates the child on the unexpected-exception path, but
-        # there's a narrow window where a buggy code path inside
-        # _consume_stream might return without finishing the cleanup
-        # (e.g. a CancelledError injected from outside the try block).
-        # This block is the safety net: signal anything still alive, then
-        # wait for the actual reap. Cleanup errors are caught and logged
-        # so they don't replace the original exception propagating up.
+        # subprocess gone. ``proc.wait()`` above already returned, so
+        # normally the subprocess is reaped — but a path that bypasses
+        # the wait (e.g. an exception during spawn) still needs the
+        # safety net. Cleanup errors are caught and logged so they
+        # don't replace the original exception propagating up.
         try:
             if proc.returncode is None:
                 try:
@@ -825,6 +1023,16 @@ async def run_headless(
             logger.exception(
                 "headless %s: error during subprocess cleanup", session_name,
             )
+        # Stop the tailer if it's still running (the wait above timed
+        # out, or the early-exit path skipped the wait). After this
+        # point the child is reaped, so the tailer's pid-based liveness
+        # check will return False on the next iteration and it'll exit.
+        if not tailer_task.done():
+            stop_event.set()
+            try:
+                await asyncio.wait_for(tailer_task, timeout=1.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                tailer_task.cancel()
         # Close the event-log writer BEFORE the registry/pidfile cleanup
         # so the log is flushed to disk in case adopt reads it.
         try:
@@ -920,132 +1128,177 @@ def _build_env(*, cli_id: str, provider: str, model: str | None,
     return dict(spawn_env.env)
 
 
-async def _consume_stream(proc: asyncio.subprocess.Process, session_name: str,
-                          *, provider: str,
-                          log_writer: EventLogWriter | None = None) -> int:
-    """Drain the subprocess's stdout, parse each JSON line, dispatch via _on_event.
+async def _consume_log_file(
+    proc: asyncio.subprocess.Process | None,
+    log_path: Path,
+    session_name: str,
+    *,
+    provider: str,
+    record: HeadlessRunRecord,
+    log_writer: EventLogWriter,
+    stop_event: asyncio.Event,
+) -> int:
+    """Tail the on-disk event log, parse each line, dispatch via ``_on_event``.
 
-    Reads until EOF; collects stderr in parallel so a hang in the parser
-    doesn't leak a child. The first ``readline`` after EOF returns ``b""`` so
-    the loop terminates naturally.
+    AC 1 + AC 4 (kaart a450df1a…): the child's stdout is the on-disk log
+    file (not a parent-owned pipe), so the child survives a backend
+    exit. This function is the read side of that contract: it tails the
+    log file from ``record.last_read_offset`` and dispatches each line
+    as a structured event. The offset advances on every line and is
+    persisted to the pidfile so a backend restart can pick up from
+    where the previous parent left off instead of re-processing the
+    full log (events are idempotent, but skipping the redundant work
+    matters when the log has thousands of events).
 
-    Each parsed event is also written verbatim to ``log_writer`` (when
-    supplied) so a backend restart can inspect what happened via the
-    durable on-disk log. Events that fail to map/parse are NOT written
-    to the log — they were already logged with the payload for debugging,
-    and adding a parallel "raw" log would double-write without adding
-    information (analyse §6.2 AC 4 — the log is for visible events, not
-    for the noise we already dropped).
+    The function is used in two contexts:
 
-    A single unmapped/parse-error event is logged and skipped (same shape as
-    the non-JSON-line tolerance a few lines above) — a Claude-side
-    vocabulary we don't yet know about must not kill the run and orphan the
-    subprocess. ``map_stream_event`` deliberately passes unknown types
-    through so the schema's ``ValidationError`` carries the original event
-    verbatim; we catch that here and log the payload for debugging.
+    - **Fresh run** (``run_headless``): ``proc`` is the
+      ``asyncio.subprocess.Process`` for the just-spawned child; the
+      task is awaited after ``proc.wait()`` returns. The stop_event
+      signals the tailer to drain remaining content and exit.
+
+    - **Adopted run** (``adopt_headless_runs`` → lifespan): ``proc`` is
+      ``None`` (we only have a pid + worktree path, not a live Process
+      object). The tailer self-terminates when the recorded pid is
+      dead (per :func:`_os_pid_alive`) AND the log is fully drained.
+      The lifespan keeps a strong reference to the task so it isn't
+      GC'd.
+
+    Liveness is always checked via ``_os_pid_alive(record.pid,
+    record.worktree_path)`` — the same predicate the reaper uses —
+    so the tailer agrees with the reaper on what "alive" means, and
+    a process that has been killed via the cleanup path is detected
+    the same way a process that died of its own accord is.
+
+    Cap handling: when the log exceeds ``log_writer.cap_bytes`` on the
+    read side, the tailer triggers :meth:`EventLogWriter.truncate_head`
+    and resets its offset to the new file size (the truncated bytes
+    are the oldest content, which the tailer has already read and
+    dispatched — events are idempotent so no re-processing is needed).
     """
-    assert proc.stdout is not None
-    async def _read_stderr() -> bytes:
-        assert proc.stderr is not None
-        return await proc.stderr.read()
-
-    stderr_task = asyncio.create_task(_read_stderr())
+    offset = record.last_read_offset
+    f = open(log_path, "rb")
     try:
         while True:
-            line = await proc.stdout.readline()
-            if not line:
+            # If the parent signalled a stop, exit. The fresh-run path
+            # signals after ``proc.wait()`` so the tailer still does a
+            # final drain pass; we check liveness + drain below.
+            if stop_event.is_set():
+                # One last drain pass so any in-flight writes the child
+                # buffered before exit land before we leave.
+                f.seek(0, 2)
+                size = f.tell()
+                if size < offset:
+                    offset = 0
+                f.seek(offset)
+                line = f.readline()
+                while line:
+                    offset = f.tell()
+                    text = line.decode("utf-8", errors="replace").strip()
+                    if text:
+                        await _dispatch_log_line(text, session_name, provider)
+                    line = f.readline()
+                record.last_read_offset = offset
+                _write_pidfile(record)
                 break
-            text = line.decode("utf-8", errors="replace").strip()
-            if not text:
-                continue
-            try:
-                payload = json.loads(text)
-            except json.JSONDecodeError:
-                logger.warning(
-                    "headless %s: dropping non-JSON line: %r",
-                    session_name, text[:200],
-                )
-                continue
-            # Tolerate a single unmapped/parse-error event — same shape as
-            # the non-JSON-line tolerance above. The exception types here
-            # are the realistic ones for a malformed Claude payload:
-            # pydantic.ValidationError from parse_structured_event, plus
-            # KeyError/TypeError/AttributeError/ValueError from
-            # map_stream_event when ``payload["session_id"]`` is missing,
-            # ``block`` is the wrong shape, etc. We deliberately do NOT
-            # catch these around ``_on_event`` — a real bug there must
-            # still kill the run, exactly as the card-eis asks (AC 2:
-            # "een enkel onparseerbaar of ongemapt event doodt de run
-            # niet" — i.e. parse-side, not handler-side).
-            try:
-                structured = parse_structured_event(map_stream_event(payload))
-            except (
-                pydantic.ValidationError, KeyError, TypeError,
-                AttributeError, ValueError,
-            ) as exc:
-                logger.warning(
-                    "headless %s: dropping event that failed to map/parse: %r (%s: %s)",
-                    session_name, payload, type(exc).__name__, exc,
-                )
-                continue
-            # Persist the raw event line to the on-disk log BEFORE
-            # dispatching, so even if _on_event raises unexpectedly the
-            # event is on disk for post-mortem inspection. ``line`` is the
-            # already-stripped raw JSON the subprocess emitted; writing
-            # the raw line keeps the log shape identical to what a
-            # postmortem reader would replay.
-            if log_writer is not None:
-                try:
-                    log_writer.append(line)
-                except Exception:
-                    logger.exception(
-                        "headless %s: could not append event to log",
-                        session_name,
-                    )
-            await _on_event(structured, session_name=session_name, provider=provider)
-        returncode = await proc.wait()
-    finally:
-        # AC 1 (kanban card d373be64…): every exit path must leave the
-        # subprocess reaped — both a normal EOF (proc has already exited)
-        # and an unexpected exception (proc might still be alive). We
-        # terminate + wait + kill-with-fallback BEFORE draining stderr so
-        # a SIGTERM-ignoring child can't keep the stderr pipe open and
-        # hang the drain below. Cleanup errors are caught and logged so
-        # they don't replace the original exception propagating up.
-        # Signals the process group (subprocess is its own session
-        # leader via start_new_session=True) so any grandchildren also
-        # get terminated — same pattern as
-        # ``app.services.sandcastle_service._signal_process_group``.
-        try:
-            if proc.returncode is None:
-                try:
-                    os.killpg(proc.pid, signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    pass
-            if proc.returncode is None:
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=2.0)
-                except TimeoutError:
-                    logger.warning(
-                        "headless %s: SIGTERM did not stop process, killing",
-                        session_name,
-                    )
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        pass
-                    await proc.wait()
-        except Exception:
-            logger.exception(
-                "headless %s: error during subprocess cleanup", session_name,
-            )
-        stderr = await stderr_task
-        if stderr:
-            logger.warning(
-                "headless %s: stderr:\n%s", session_name, stderr.decode(errors="replace"),
-            )
 
-    return returncode
+            # OS-level liveness check — same predicate the reaper uses.
+            proc_alive = _os_pid_alive(record.pid, record.worktree_path)
+
+            # Read new lines from the log file.
+            f.seek(0, 2)
+            size = f.tell()
+            if size < offset:
+                # File shrank (external truncation, e.g. someone ran
+                # ``truncate`` on it). Reset to start; events are
+                # idempotent so re-reading is fine.
+                offset = 0
+            f.seek(offset)
+            line = f.readline()
+            while line:
+                offset = f.tell()
+                text = line.decode("utf-8", errors="replace").strip()
+                if text:
+                    await _dispatch_log_line(text, session_name, provider)
+                line = f.readline()
+
+            # Persist the new offset so a crash here doesn't lose
+            # progress — the next adopt reads ``last_read_offset``
+            # and seeks to it.
+            if offset != record.last_read_offset:
+                record.last_read_offset = offset
+                _write_pidfile(record)
+
+            # Cap enforcement on the read side: the child writes to
+            # the log via its own fd, so we can't append-truncate from
+            # here without racing the child. Instead, when the file
+            # size crosses the cap, the tailer triggers
+            # :meth:`EventLogWriter.truncate_head` and resets its
+            # offset to the new EOF.
+            if size > log_writer.cap_bytes:
+                log_writer.truncate_head()
+                f.seek(0, 2)
+                new_size = f.tell()
+                # Reset offset to the new EOF. We've already read
+                # everything up to ``offset``; the bytes the
+                # truncator dropped were the oldest ones we'd
+                # already dispatched.
+                offset = new_size
+                record.last_read_offset = offset
+                _write_pidfile(record)
+
+            # Done condition: subprocess is dead AND we've consumed
+            # everything in the log. ``proc_alive`` is the same
+            # predicate ``live_headless_sessions`` uses, so the
+            # tailer's view agrees with the reaper's.
+            if not proc_alive and offset >= size:
+                break
+
+            await asyncio.sleep(0.05)
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+    return proc.returncode if proc is not None else 0
+
+
+async def _dispatch_log_line(text: str, session_name: str, provider: str) -> None:
+    """Parse one log-file line and dispatch the resulting event.
+
+    Async so the tailer awaits ``_on_event`` per line — keeps the
+    ordering the old ``_consume_stream`` had (read line, await
+    dispatch, read next line). A rate-limit event that takes a moment
+    to land in the DB pauses the *next* dispatch correctly, instead
+    of racing with it.
+
+    Tolerates non-JSON lines and unparseable / unmapped payloads by
+    logging and skipping — same shape as the parse-error tolerance
+    the old ``_consume_stream`` had, so a single malformed event
+    never kills the run.
+    """
+    if not text:
+        return
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning(
+            "headless %s: dropping non-JSON line: %r",
+            session_name, text[:200],
+        )
+        return
+    try:
+        structured = parse_structured_event(map_stream_event(payload))
+    except (
+        pydantic.ValidationError, KeyError, TypeError,
+        AttributeError, ValueError,
+    ) as exc:
+        logger.warning(
+            "headless %s: dropping event that failed to map/parse: %r (%s: %s)",
+            session_name, payload, type(exc).__name__, exc,
+        )
+        return
+    await _on_event(structured, session_name=session_name, provider=provider)
 
 
 async def _on_event(event: StructuredEvent, *, session_name: str, provider: str) -> None:
