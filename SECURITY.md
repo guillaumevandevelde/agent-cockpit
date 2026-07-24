@@ -48,7 +48,7 @@ Treat all of the following as **untrusted input** — i.e. data you would not le
 - **Plan and spec attachments** (everything attached under the analyst- or designer-led `plan` / `spec` / `plan_ref` deliverable kinds). Same status: they are injected into the dispatched session.
 - **`CLAUDE.md` / `AGENTS.md` / `.claude/` and `.mcp.json` files inside a project you didn't author.** Cockpit reads them and exposes them in the editor UI; their *contents* become part of the agent context the next time that project is dispatched.
 - **Output and tool-call payloads from other agent sessions visible in [Session Transcripts](./README.md#features).** If you paste transcript content back into another card or project, you've carried the trust boundary with it — don't.
-- **Anything fetched from the [MCP Registry](https://registry.modelcontext.io) or [skills.sh](https://skills.sh).** Browsing is read-only, but installing is privileged — same posture as `apt install` from an unverified PPA.
+- **Anything fetched from the [MCP Registry](https://registry.modelcontextprotocol.io) or [skills.sh](https://skills.sh).** Browsing is read-only, but installing is privileged — same posture as `apt install` from an unverified PPA.
 
 ### What a dispatched session is
 
@@ -58,7 +58,7 @@ A dispatched session is a child process of the same user account that started th
 - Execute any binary on `PATH` (including `bash`, `git`, `curl`, `ssh`).
 - Open outbound network connections (subject to transport-level constraints described below).
 
-It is **not** sandboxed by default for the `meta` risk class — see [By Design (Not a Defect)](#by-design-not-a-defect) for why, and [Honest Note on Controls We Do Not Yet Have](#honest-note-on-controls-we-do-not-yet-have) for the levels where the dispatcher does isolate it.
+It is **not sandboxed when no security-profile row exists or when the project uses the `meta` risk class**. In both cases the dispatcher falls back to host-worktree transport with permission skipping enabled. A newly registered project remains in that permissive fallback until its profile is materialised (for example by opening the security-profile UI or REST endpoint) or explicit per-project overrides are set. See [By Design (Not a Defect)](#by-design-not-a-defect) and [Honest Note on Controls We Do Not Yet Have](#honest-note-on-controls-we-do-not-yet-have).
 
 ## By Design (Not a Defect)
 
@@ -68,7 +68,7 @@ These are deliberate, load-bearing design choices. Reporting one of them as a vu
 - **Spawned agent's shell and filesystem access.** A dispatched session can run `bash`, `git`, read your `~/.ssh`, write to your home directory, and `curl` outbound. That is the point: it's the same shell you would open yourself. Agent Cockpit is the *operator* of that process, not an isolation layer between you and it.
 - **Plaintext configuration on disk.** Claude Code / Codex CLI store their configuration as JSON / TOML files on disk. Agent Cockpit reads and writes those files directly. Anyone who can read your user account can read those files; if that bothers you, restrict the user account, not the app.
 - **No human-in-the-loop on auto-dispatch.** The kanban dispatcher claims and spawns cards on its own when auto-dispatch is enabled for a project. This is the feature; the human-in-the-loop escape hatches are [Impediment](./docs/cockpit/kanban-conventions.md) (a reporter pauses auto-dispatch on a per-card basis) and the per-project `KanbanMeta: autodispatch:<project_key>` row, which removes the project from the auto-dispatch set when set to `"0"` (`backend/app/kanban/dispatch.py`). There is no global kill switch on this branch; the closest is the per-card `MAX_DISPATCH_FAILURES` retry-circuit-breaker in the same file, which marks a repeatedly-failing card `Impediment` automatically.
-- **Sandbox / container isolation only when the project's risk class asks for it.** For projects classified `product-staging`, `product-prod`, or `untrusted` in `ProjectSecurityProfile` (`risk_class` defaults to `product-staging` for a fresh project, with `default_transport='sandcastle'`), the dispatcher routes the session through the [Sandcastle](./README.md#features) container transport, which provides filesystem, network, and process isolation at the Docker/Podman layer. For the `meta` class (Agent Cockpit's own repo, and any project you classify the same way), the session runs directly on the host in a git worktree. This is by design and is what lets the agent reach the rest of your machine for trusted work. Mis-classification is a configuration bug, not a vulnerability.
+- **Sandbox / container isolation only when a persisted security profile asks for it.** When a persisted `ProjectSecurityProfile` classifies a project as `product-staging`, `product-prod`, or `untrusted`, the dispatcher derives the Sandcastle container transport and enforced permissions from that `risk_class`, unless explicit `KanbanMeta` overrides win. A persisted `meta` profile runs directly on the host in a git worktree. **A registered project with no profile row also follows that permissive host-worktree + skip-permissions fallback**; the model defaults do not protect it until the REST/UI path has materialised a profile row. Host execution for an explicit `meta` profile is by design; the missing-profile fallback is a known gap listed below.
 
 ## Honest Note on Controls We Do Not Yet Have
 
@@ -77,17 +77,18 @@ Reporting a "missing" feature below will be closed unless the report includes a 
 ### In place
 
 - **Worktree isolation** (`backend/app/kanban/dispatch.py` + `git worktree`): dispatched sessions for the default `worktree` transport each get their own git worktree on the host, so concurrent cards do not stomp on each other's branches.
-- **`ProjectSecurityProfile` table** (`backend/app/models/security_profile.py`): per-project `risk_class`, `default_transport`, `default_skip_permissions`, `network_policy`, `resource_quota`. Surface to read these rows exists; the REST + UI editor is documented in [`docs/cockpit/platform-als-app-factory.md`](./docs/cockpit/platform-als-app-factory.md) §D.
+- **`ProjectSecurityProfile` table** (`backend/app/models/security_profile.py`): per-project `risk_class`, `default_transport`, `default_skip_permissions`, `network_policy`, `resource_quota`. The REST + UI editor that reads and materialises these rows is documented in [`docs/cockpit/platform-als-app-factory.md`](./docs/cockpit/platform-als-app-factory.md) facet D.
 - **Skip-permissions vs. profile audit** ([`scripts/check-kanban-meta-security-conflicts.sh`](./scripts/check-kanban-meta-security-conflicts.sh)): flags any `KanbanMeta` row (`skip_permissions:<project_key>` or `transport:<project_key>`) whose value disagrees with the `risk_class`-derived default for the same project. Read-only; does not auto-reclassify.
 - **`gitleaks` + `Semgrep` CI** (see [Automated Scanning](#automated-scanning)) catches leaked secrets and a class of static-analysis issues on every push.
 - **Local-only: no telemetry, no cloud backend, no account.** The README [Trust Model](./README.md#trust-model) section's four points are accurate as written.
 
 ### Not in place (yet)
 
+- **No safe default before a security-profile row exists.** The dispatcher reads profiles without creating them. If a registered project has no persisted `ProjectSecurityProfile` row, risk-class resolution returns no profile and deliberately keeps the historical host-worktree transport with permission skipping enabled. The model's `product-staging` / Sandcastle defaults apply only after the REST/UI profile path has materialised a row. Check a newly registered project's security profile before its first dispatch.
 - **Risk-class-driven dispatch defaults are advisory only.** The `_skip_permissions_for_risk_class` / `_transport_for_risk_class` defaults exist in `backend/app/kanban/dispatch.py` and are honoured only when no `KanbanMeta` override is present for the project. A `KanbanMeta: skip_permissions:<project_key>=1` row overrides the profile regardless of `risk_class`; the audit script (above) surfaces the disagreement but does not correct it. This is documented as SecurityProfileService follow-up #12 — out of scope for this document.
 - **No OS-keychain storage for secrets.** Agent-coded secrets live in config files; rotate and back them up like the rest of your filesystem.
 - **No agent-side approval prompt before each tool call.** That is what skip-permissions turns off (above). Re-enabling it is per-project and is the documented way to make a single project more cautious.
-- **No "Workspace Trust" gate.** Agent Cockpit does not require a project to be marked "trusted" before the first dispatch; the per-project toggle is the equivalent and is the thing you should check before creating cards on a freshly registered project.
+- **No "Workspace Trust" gate.** Agent Cockpit does not require a project to be marked "trusted" before the first dispatch. A persisted security profile and explicit per-project overrides can constrain later dispatches, but neither is guaranteed to exist for a freshly registered project.
 - **No automatic prompt-injection scanning of card text.** Card text is treated as instructions, not as data, throughout the dispatcher. If you want defensive scanning, it is your responsibility today.
 
 ## In-Scope vs. Out-of-Scope for Reports
