@@ -14,8 +14,10 @@ import logging
 import re
 import shlex
 import subprocess
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
@@ -3173,6 +3175,61 @@ def _claimant_session(card: KanbanCard) -> str | None:
 # default in SessionRegistry.get_stuck_sessions().
 STUCK_SESSION_TIMEOUT_S = 120
 
+# ---- progress-liveness (kaart f0953a11…) -----------------------------------
+#
+# ``reap_stale_claims`` checks whether the tmux pane still exists, which a
+# session that hit its subscription limit (or crashed in a loop, or is parked
+# on a permission prompt, or is hung on a network timeout) keeps — so the
+# claim stays claimed forever. Progress-liveness adds a *second* criterion:
+# the transcript must keep growing. If the transcript of an ``agent:``-claimed
+# session stops advancing for ``PROGRESS_LIVENESS_SIGNAL_SECONDS``, the card
+# gets a "stilstaand" activity comment so an operator can see the stall on the
+# board; after ``PROGRESS_LIVENESS_ACTION_SECONDS`` the claim is released via
+# the existing ``_move_to_resume`` path. See
+# docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5 R3.
+#
+# The defaults are deliberately roomy: a productive Claude session writes to
+# its transcript every few seconds, but a long file-edit + verify + commit
+# stretch can run several minutes between writes. 30 min silence is already a
+# strong signal; 60 min crosses from "agent is doing something" into
+# "operator should know about this". Both are overridable via the
+# ``signal_seconds`` / ``action_seconds`` kwargs of ``check_progress_liveness``
+# (mainly for tests).
+PROGRESS_LIVENESS_SIGNAL_SECONDS = 30 * 60
+PROGRESS_LIVENESS_ACTION_SECONDS = 60 * 60
+
+# Process-local state for progress-liveness. Keyed by ``card.id`` (not by
+# session name) so a reaped+re-dispatched session that happens to mint the
+# same name doesn't inherit the prior session's stall baseline. Holds a
+# small snapshot per card: the wall-clock time at which we last *saw* the
+# session (so stall is measured against our observation cadence, not
+# against the file's mtime directly), the mtime we observed it at (so the
+# next tick can detect growth), and a one-shot flag so the "stilstaand"
+# comment is posted at most once per stall window. Entries are pruned when
+# the card is no longer claimed by an agent session; a backend restart
+# wipes the dict — same in-memory-by-design pattern as
+# ``SessionRegistry._spawn_times``.
+@dataclass
+class _ProgressSnapshot:
+    observation_time: float
+    observed_mtime: float
+    signal_posted: bool = False
+
+
+_progress_liveness_state: dict[str, _ProgressSnapshot] = {}
+
+# Activity-comment copy. Format kwargs: ``minutes`` (rounded stall duration),
+# ``name`` (session name), ``action_minutes`` (configured action threshold).
+# Mirrors the Dutch-with-emoji convention used by the rate-limit / spillover
+# / pane-detector comments elsewhere in this file — see ``_post_rate_limit_activity_comment``,
+# ``_cleanup_stuck_session``, and the spillover branch of ``move_limited_session_to_resume``.
+_STILLESTAAND_COMMENT_TEMPLATE = (
+    "⏸️ Geen transcript-activiteit voor ~{minutes} min in sessie {name} — "
+    "mogelijk stilstaand (abonnementslimiet, crash-loop, wachtende prompt "
+    "of netwerk-timeout). Wordt automatisch vrijgegeven rond {action_minutes} "
+    "min stilstand; reageer in de pane als de sessie nog productief is."
+)
+
 
 def _capture_pane_content(session_name: str, *, lines: int = 20) -> str | None:
     """Capture the last `lines` of tmux pane content for `session_name`.
@@ -5041,6 +5098,201 @@ async def _post_rate_limit_activity_comment(
         return False
 
 
+async def check_progress_liveness(
+    session, *, project_key: str, cards: Iterable[KanbanCard],
+    project_path: str | None = None,
+    live_sessions: set[str] | None = None,
+    sandcastle_live: set[str] | None = None,
+    headless_live: set[str] | None = None,
+    now: float | None = None,
+    signal_seconds: int | None = None,
+    action_seconds: int | None = None,
+) -> set[str]:
+    """Signal/release cards whose agent session has stopped making transcript
+    progress (kaart f0953a11…).
+
+    A second liveness source sitting alongside ``reap_stale_claims``'s
+    pane-exists check. The pane check alone misses a session that hit its
+    subscription limit, crashed in a loop, parked on a permission prompt, or
+    is hung on a network timeout — the pane (and the claim) stays alive
+    forever. The transcript is a better signal: a productive Claude session
+    writes to its transcript every few seconds, so sustained silence is
+    always wrong.
+
+    For each ``agent:``-claimed card whose session is *not* in
+    ``live_sessions`` / ``sandcastle_live`` / ``headless_live`` (those
+    transports own their own liveness — never override them) and whose
+    transcript is resolvable:
+
+      - First observation: record the snapshot but do nothing — we don't
+        know whether the agent is productive yet, so the first tick always
+        has ``stalled_seconds == 0``.
+      - mtime has advanced since the last observation: update the snapshot
+        and clear the signal-posted flag. A productive session resets both
+        counters every tick.
+      - mtime unchanged and ``now - last_observation_time`` ≥ ``signal_seconds``
+        and < ``action_seconds``: post a one-shot "stilstaand" activity
+        comment so the stall is visible on the card (re-using
+        ``_post_rate_limit_activity_comment``, the shared audit-comment
+        helper). Subsequent ticks within the same stall window do NOT
+        re-post — only the fresh stall after the next growth window re-arms.
+      - mtime unchanged and ``now - last_observation_time`` ≥ ``action_seconds``:
+        move the card to ``To Resume`` via the existing ``_move_to_resume``
+        path (which kills the tmux session, releases the claim, and persists
+        the resume pointer so the next dispatch tick resumes the conversation
+        in place).
+
+    Failure-open semantics: any IO/permission problem resolving the transcript
+    (missing worktree, no jsonl, stat error) is treated as "we don't know"
+    and the card is left alone. A false-positive signal here costs the user
+    their session; a missing signal costs at most the next dispatch tick.
+
+    ``now``, ``signal_seconds``, and ``action_seconds`` are injectable for
+    deterministic tests; production callers pass none and read the module
+    defaults ``PROGRESS_LIVENESS_SIGNAL_SECONDS`` / ``PROGRESS_LIVENESS_ACTION_SECONDS``.
+
+    Returns the set of ``session_name``s that had any action this tick
+    (signal comment posted, or claim released). Empty when nothing crossed
+    a threshold — the caller uses it as a truthy "did anything happen" gate
+    to decide whether to refetch the cards list.
+    """
+    from app.kanban.schemas import COLUMNS
+    from app.kanban.session_recovery import _resolve_transcript_file
+
+    if project_path is None:
+        return set()
+    if now is None:
+        now = time.time()
+    if signal_seconds is None:
+        signal_seconds = PROGRESS_LIVENESS_SIGNAL_SECONDS
+    if action_seconds is None:
+        action_seconds = PROGRESS_LIVENESS_ACTION_SECONDS
+
+    # Snapshot to a list — same defence-in-depth as `reap_stale_claims`:
+    # `cards` is documented as Iterable, and a future refactor that turns it
+    # into a streaming generator would otherwise be silently consumed.
+    cards = list(cards)
+
+    # Prune state for cards that no longer have an `agent:` claim (released,
+    # moved to Done, operator redispatched under a fresh worktree, ...). Done
+    # at function entry so the dict can't grow unbounded across long-running
+    # backends. Scoped to cards iterated THIS tick — sessions on other
+    # projects are handled by their own dispatch_project call.
+    active_card_ids = {c.id for c in cards}
+    for stale_id in [cid for cid in _progress_liveness_state if cid not in active_card_ids]:
+        _progress_liveness_state.pop(stale_id, None)
+
+    acted: set[str] = set()
+
+    for card in cards:
+        if card.column in COLUMNS:
+            continue
+        name = _claimant_session(card)
+        if name is None:
+            continue
+        if name in live_sessions or name in sandcastle_live or name in headless_live:
+            # Those transports own liveness — see reap_stale_claims for the
+            # same carve-out. Skipping is correct even if the transcript
+            # happens to exist for a sandcastle/headless session (it won't
+            # normally — different cwd — but the carve-out is on the
+            # transport, not on the transcript).
+            continue
+
+        transcript = _resolve_transcript_file(project_path, name)
+        if transcript is None:
+            # Fail-open: no resolvable transcript = no signal. Either the
+            # worktree was GC'd, the session never wrote anything, or the
+            # projects-dir layout is wrong — in all cases acting on missing
+            # data is worse than not acting.
+            continue
+
+        try:
+            current_mtime = transcript.stat().st_mtime
+        except OSError:
+            # File vanished between resolve and stat (worktree GC, race).
+            # Same fail-open reasoning.
+            continue
+
+        snapshot = _progress_liveness_state.get(card.id)
+        if snapshot is None:
+            # First observation — record the baseline (our observation time
+            # + the mtime we observed it at) but don't act yet. A signal at
+            # the very first tick would be a "stalled since spawn" assertion
+            # with no information about whether the agent was ever productive.
+            _progress_liveness_state[card.id] = _ProgressSnapshot(
+                observation_time=now, observed_mtime=current_mtime,
+            )
+            continue
+
+        if current_mtime > snapshot.observed_mtime:
+            # Transcript grew — reset the snapshot and clear the one-shot
+            # signal flag. The new observation time becomes the stall
+            # baseline for any future silence.
+            _progress_liveness_state[card.id] = _ProgressSnapshot(
+                observation_time=now, observed_mtime=current_mtime,
+            )
+            continue
+
+        # current_mtime <= snapshot.observed_mtime: no growth since the last
+        # observation. Stall is measured against our own observation cadence
+        # so a session that wrote once at spawn and then went silent doesn't
+        # get pre-charged with the time-since-spawn.
+        stalled_seconds = now - snapshot.observation_time
+
+        if stalled_seconds >= action_seconds:
+            logger.warning(
+                "progress-liveness: card %s session %s stalled ~%.0fs (action "
+                "threshold %.0fs) — moving to To Resume via _move_to_resume",
+                card.id, name, stalled_seconds, action_seconds,
+            )
+            moved = await _move_to_resume(
+                session, card=card, project_key=project_key,
+                project_path=project_path,
+            )
+            if not moved:
+                # _move_to_resume refuses on Done / To Resume / fixed columns
+                # (already enforced above by the COLUMNS check) or when the
+                # worktree no longer has a resolvable transcript — shouldn't
+                # happen since we just resolved it, but fall back to a plain
+                # release rather than leaving the card claimed forever.
+                await _release_dead_claim(
+                    session, card=card, project_key=project_key,
+                    session_name=name,
+                )
+            # Drop state for this card — claim is gone, no further observation
+            # is possible until a new claim attaches.
+            _progress_liveness_state.pop(card.id, None)
+            acted.add(name)
+            continue
+
+        if stalled_seconds >= signal_seconds:
+            if snapshot.signal_posted:
+                # Already posted for this stall window — don't spam.
+                continue
+            _progress_liveness_state[card.id] = _ProgressSnapshot(
+                observation_time=snapshot.observation_time,
+                observed_mtime=snapshot.observed_mtime,
+                signal_posted=True,
+            )
+            minutes = int(stalled_seconds // 60)
+            text = _STILLESTAAND_COMMENT_TEMPLATE.format(
+                minutes=minutes, name=name,
+                action_minutes=action_seconds // 60,
+            )
+            posted = await _post_rate_limit_activity_comment(
+                session, card=card, project_key=project_key, text=text,
+            )
+            if posted:
+                logger.info(
+                    "progress-liveness: card %s session %s stalled ~%.0fs — "
+                    "posted stilstaand comment (signal threshold %.0fs)",
+                    card.id, name, stalled_seconds, signal_seconds,
+                )
+                acted.add(name)
+
+    return acted
+
+
 async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
     sandcastle_live: set[str] | None = None,
@@ -5484,6 +5736,25 @@ async def dispatch_project(
     # docstring). Needs project_path to resolve a worktree's transcript file.
     if project_path is not None:
         if await detect_transcript_rate_limits(cards=cards, project_path=project_path):
+            cards = await list_cards(session, project_key)
+
+    # Progress-liveness sweep: second liveness source for cards whose tmux
+    # pane still exists but whose transcript has stopped growing (kaart
+    # f0953a11…). Runs independently of tmux liveness for the same reason as
+    # the rate-limit sweep above — it must catch sessions whose pane is
+    # alive but the agent itself is stuck (limit hit, crash loop, permission
+    # prompt, network timeout). Idempotent with reap_stale_claims: a session
+    # whose tmux pane is already gone was handled by the reaper above; this
+    # sweep handles the inverse case (pane alive, agent not). Needs
+    # project_path to resolve a worktree's transcript file.
+    if project_path is not None and live_sessions is not None:
+        if await check_progress_liveness(
+            session, project_key=project_key, cards=cards,
+            project_path=project_path,
+            live_sessions=live_sessions,
+            sandcastle_live=sandcastle_live,
+            headless_live=headless_live,
+        ):
             cards = await list_cards(session, project_key)
 
     column_caps = await _column_max_sessions(session, project_key)

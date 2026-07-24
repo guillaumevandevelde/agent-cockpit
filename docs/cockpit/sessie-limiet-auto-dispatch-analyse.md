@@ -420,6 +420,13 @@ Dat vangt de limiet-case, maar ook alles wat we niet opgesomd hebben: een crash-
 wachtende permission-prompt, een sessie die op een netwerk-timeout hangt. Het verandert het
 systeem van "zelfherstellend voor bekende fouten" naar "zelfherstellend, punt".
 
+✅ Geïmplementeerd (kaart f0953a11…): `check_progress_liveness` in `app/kanban/dispatch.py`
+draait elke tick ná `detect_transcript_rate_limits`, vergelijkt het transcript-mtime van
+elke `agent:`-claimed kaart met de vorige observatie, post één "stilstaand"-comment bij
+`PROGRESS_LIVENESS_SIGNAL_SECONDS=30min` en released via `_move_to_resume` bij
+`PROGRESS_LIVENESS_ACTION_SECONDS=60min`. Sandcastle / headless transports behouden hun
+eigen liveness-bron (carve-out in de skip-set).
+
 ### R4 — Maak de pane-detector veilig (kaart C5)
 
 Zodra R1 er is, hoeft de pane-substring-scan alleen nog het geval te dekken waarvoor hij
