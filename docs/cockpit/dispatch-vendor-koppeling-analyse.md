@@ -138,6 +138,8 @@ bord leegwerken.
 
 ✅ **Geïmplementeerd (kaart 293d1faa…):** dispatch roept nu dezelfde `resolve_compatible_endpoint`-helper aan als REST (`endpoints.py:201`), zodat de twee paden niet meer kunnen driften. De `SpawnCommandOptions` worden voorzien van `endpoint_name` / `endpoint_base_url` / `endpoint_auth_token`, en het `provider_env`-pad ontvangt een geldige `base_url`. Dekking: `tests/test_dispatch_compatible_endpoint.py`.
 
+> **FCR-fix (kaart 293d1faa… → naïve-heropen 2026-07-24):** `services/runs/spawn.py:212-227` brancht nu `model=options.bedrock_model if options.provider == PROVIDER_BEDROCK else options.model`, zodat het dispatch-pad (dat universeel `options.model` zet) eindelijk een niet-lege `model` aan `build_provider_env` levert voor `anthropic-compatible`. Voorheen werd `options.bedrock_model` (altijd `None` vanuit dispatch) gelezen → `ValueError: anthropic-compatible provider requires a non-empty model` → spawn-fail. Nieuwe failing-tests-then-fix-cyclus pinnen `ANTHROPIC_MODEL` + `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` op de tmux-argv (het process-boundary), niet de transport-kwargs.
+
 ### G2 — de pool accepteert een provider die dispatch niet kan uitvoeren
 
 `subscription_pool.py:73-77` laat `anthropic-compatible` toe als pool-provider:
