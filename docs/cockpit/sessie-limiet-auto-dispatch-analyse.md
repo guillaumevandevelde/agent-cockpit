@@ -427,6 +427,16 @@ gebouwd is: een sessie die crasht vóór er een transcript is. Beperk hem daarto
 welke needle matchte plus het volledige matchvenster — een detector die een gezonde sessie
 kan killen en niet vertelt waarom, hoort niet in de reaper.
 
+> ✅ **Geïmplementeerd (kaart `3a8f27a4…`).** De pane-scan is nu pre-transcript-only via
+> `_session_has_transcript`: zodra de sessie een transcript met inhoud heeft, is de
+> transcript-tail detector (`detect_transcript_rate_limits`) leidend en doet de pane-scan
+> niets. De needles zijn strenger: losse `"429"` of `"api error"` zijn niet meer voldoende;
+> alleen single-phrase matches (`hit your session limit`, `hit your weekly limit`,
+> `token plan`) of co-occurring combo's (`api error`+`429`, `request rejected`+`429`)
+> triggeren. Bij een match logt `_cleanup_stuck_session` nu `needle=…` + de bijbehorende
+> pane-regel in plaats van de afgekapte 200-char prefix. Bare `HTTP/2 429` uit een curl
+> faalt niet langer op een gezonde sessie (de false positive van 2026-07-22).
+
 ### R5 — Herken alle limiet-vormen (kaart C2)
 
 Klein, geïsoleerd, meetbaar: `hit your weekly limit` toevoegen, `resets 9pm` (zonder
