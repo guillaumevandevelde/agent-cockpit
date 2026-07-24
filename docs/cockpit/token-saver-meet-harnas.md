@@ -41,7 +41,7 @@ een echte saver dat ook (en waarschijnlijk vaker).
   (`Interrupted: 2 errors during collection`) nog vóór de
   zero_column_cap-selector. Dit is een **scoring-infra-failure**, geen
   kwaliteits-signaal; sinds kaart `6b67df66…` is de pytest-invoer
-  gescopedte op `tests/test_kanban_dispatch.py` en rapporteert
+  gescoped op `tests/test_kanban_dispatch.py` en rapporteert
   `pass_tests=1` zodra de fix daadwerkelijk landt (zie §5.2).
 
 **Eerdere headline (−42,4% `cache_read`) is ongeldig** — die kwam uit één
@@ -306,4 +306,4 @@ eerdere (afgewezen) meting
 | confounder `cache_read` sessie-warmte | ernstig (saver altijd 2e)               | aanwezig maar zichtbaar in trial-volgorde-correlatie |
 | resultaat-archief                   | anonieme `mktemp -d` (EXIT-trap clobbert) | `$MEASURE_RESULT_DIR` (caller-visible, persistent)  |
 | `cache_read`-headline               | −42,4% (ongeldig — order-confound)       | "volgorde-effect domineert; saver-effect onbeslist op N=2" |
-| `pass_tests` infrastructure         | gebroken                                  | **gefixed (kaart `6b67df66…`)** — pytest gescopedte op `tests/test_kanban_dispatch.py`; 36/36 unit-asserts groen; end-to-end smoke geverifieerd (broken→0,0 / fixed→1,1) |
+| `pass_tests` infrastructure         | gebroken                                  | **gefixed (kaart `6b67df66…`)** — pytest gescoped op `tests/test_kanban_dispatch.py`; 36/36 unit-asserts groen; end-to-end smoke geverifieerd (broken→0,0 / fixed→1,1) |
