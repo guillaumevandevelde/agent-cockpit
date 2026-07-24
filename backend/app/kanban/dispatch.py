@@ -3026,7 +3026,33 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         session_registry.mark_spawned(session_name)
         return result
 
+    # Tag the closure with an explicit transport kind so callers can detect a
+    # worktree transport by *label*, not by object identity. Every call to
+    # this factory (the module singleton below AND the fresh
+    # ``make_worktree_transport(skip_permissions=skip)`` closure the normal
+    # route builds in ``get_transport_for_project``) carries the same kind —
+    # an ``is`` check against the singleton would miss the fresh closure and
+    # mislabel every ordinary dispatch as "not a worktree" (kaart a962b209…).
+    _transport.transport_kind = "worktree"
     return _transport
+
+
+def _transport_is_worktree(transport: SpawnTransport) -> bool:
+    """True when ``transport`` creates a fresh host-side git worktree.
+
+    Detects the worktree transport by the ``transport_kind`` label set in
+    ``make_worktree_transport`` rather than object identity against the
+    module-level ``worktree_transport`` singleton. The normal dispatch route
+    (``card.transport is None``) resolves its transport through
+    ``get_transport_for_project`` → ``make_worktree_transport(skip_permissions=skip)``,
+    which returns a *distinct* closure; an ``is worktree_transport`` check
+    returned False for it and left every ordinary dispatched agent — which
+    really is in a fresh worktree — without its real write-address in the
+    worktree-safety callout (kaart a962b209…). Resume / sandcastle / headless
+    transports are unlabeled (or labeled otherwise) and correctly return
+    False, matching their "no fresh host worktree" semantics.
+    """
+    return getattr(transport, "transport_kind", None) == "worktree"
 
 
 # Default transport keeps existing behaviour (permissions bypassed)
@@ -4662,9 +4688,15 @@ async def _run_card(
     #   sets up cwd differently.
     # An earlier version of this predicate used ``!= sandcastle_transport``
     # which incorrectly classified the headless transport as a worktree
-    # creator; use an explicit identity check against ``worktree_transport``
-    # instead (FCR blocker B, kaart a962b209…).
-    is_fresh_worktree = card_transport is worktree_transport
+    # creator; a later version used ``is worktree_transport`` which broke the
+    # *normal* route: ``card.transport is None`` resolves to a *fresh*
+    # ``make_worktree_transport(skip_permissions=skip)`` closure (via
+    # ``get_transport_for_project``) that is not identical to the module
+    # singleton, so the identity check returned False and every ordinary
+    # dispatched agent lost its real worktree write-address. Detect by the
+    # transport *kind* label instead, which every worktree-factory instance
+    # carries (kaart a962b209…).
+    is_fresh_worktree = _transport_is_worktree(card_transport)
     worktree_path = (
         str(Path(project_path) / ".claude" / "worktrees" / name)
         if is_fresh_worktree else None

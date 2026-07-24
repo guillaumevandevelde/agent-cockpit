@@ -464,6 +464,76 @@ def test_card_prompt_callout_omits_worktree_path_for_resume_session():
     assert "/scratch/somewhere" in prompt
 
 
+def test_worktree_transport_detected_regardless_of_factory_instance():
+    """AC2 runtime regression (kaart a962b209…): the ``_run_card`` predicate
+    that decides whether to interpolate a real worktree path must recognise
+    the worktree transport *regardless of which factory instance produced
+    it*.
+
+    The bug: the old predicate was ``card_transport is worktree_transport``
+    — an object-identity check against the module-level singleton. But on
+    the normal route (``card.transport is None``), the dispatcher resolves
+    the transport via ``get_transport_for_project`` →
+    ``make_worktree_transport(skip_permissions=skip)``, which returns a
+    *fresh* closure that is NOT identical to the singleton. So identity
+    returned False, ``worktree_path`` became None, and every ordinary
+    dispatched agent — which really IS in a fresh worktree — read the
+    neutral resume/sandcastle/headless framing instead of its real
+    write-address. The 7 earlier tests only called ``build_card_prompt``
+    with explicit args, so they never touched this predicate.
+    """
+    # The module singleton (only used when card.transport == "worktree")
+    assert dispatch._transport_is_worktree(dispatch.worktree_transport)
+    # A FRESH closure — exactly what the normal route hands to _run_card.
+    # This is the case the old ``is`` check missed.
+    fresh = dispatch.make_worktree_transport(skip_permissions=False)
+    assert fresh is not dispatch.worktree_transport
+    assert dispatch._transport_is_worktree(fresh)
+    # Non-worktree transports must NOT be misclassified as fresh worktrees.
+    assert not dispatch._transport_is_worktree(dispatch.sandcastle_transport)
+    assert not dispatch._transport_is_worktree(
+        dispatch.make_resume_transport("sid-123", "some-folder")
+    )
+
+
+def test_normal_route_transport_resolution_yields_worktree_path():
+    """AC2 (kaart a962b209…) via the transport-resolution path, not direct
+    ``build_card_prompt`` args: a card with ``transport=None`` resolved the
+    way ``_run_card`` resolves it (``get_transport_for_card(card, default)``
+    where ``default`` is a fresh worktree closure from
+    ``get_transport_for_project``) must be recognised as a fresh-worktree
+    transport, so the callout names the real worktree path.
+    """
+    card = SimpleNamespace(transport=None, resume_session_id=None,
+                           resume_project_folder=None)
+    # What get_transport_for_project returns on the normal route: a fresh
+    # closure, NOT the module singleton.
+    default = dispatch.make_worktree_transport(skip_permissions=False)
+    card_transport = dispatch.get_transport_for_card(card, default)
+    is_fresh_worktree = dispatch._transport_is_worktree(card_transport)
+    assert is_fresh_worktree, (
+        "normal-route (transport=None) card must resolve to a worktree "
+        "transport recognised by the callout predicate"
+    )
+
+    # And the prompt built from the path this predicate unlocks names the
+    # real worktree, not the neutral resume/sandcastle/headless framing.
+    project_path = "/scratch/scratchpad/product-x"
+    name = "k-normal-route-1234"
+    worktree_path = (
+        str(Path(project_path) / ".claude" / "worktrees" / name)
+        if is_fresh_worktree else None
+    )
+    prompt = dispatch.build_card_prompt(
+        SimpleNamespace(title="T", description=""),
+        persona=None, ship_mode="direct",
+        project_path=project_path, worktree_path=worktree_path,
+    )
+    assert worktree_path in prompt
+    assert "You were spawned in a git worktree at" in prompt
+    assert "it is **not** a freshly-minted git worktree" not in prompt
+
+
 def test_direct_ship_recipe_has_uncommitted_changes_preflight():
     """Direct-mode ship recipe must guard against the silent no-op where the
     detached worktree only sees COMMITTED state: uncommitted/untracked changes
