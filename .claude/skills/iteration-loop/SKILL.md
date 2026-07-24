@@ -226,10 +226,7 @@ particular `investigate` → `flag-cycle` is a common two-pass.
   failure. The attribution output is what the engineer triages; the
   loop emits `<loop-blocked>` and the engineer fixes the named
   harnesses.
-- **Caveat — when NOT to use:** this preset does not run pytest and does
-  not replace `verify` for the standard end-of-card gate. The two
-  presets are orthogonal: `pytest-attr` for backend,
-  `bash-test-attr` for the bash-test suite.
+- **Caveat — when NOT to use:** this preset does not run pytest. For a scripts-only card, it **is** the standard end-of-card attribution gate: run it after targeted bash tests to distinguish pre-existing failures from regressions. For a card that also touches backend code, use `pytest-attr` for pytest attribution; for a card that touches frontend code, use `verify` for frontend lint/build. These checks are complementary when a card spans multiple surfaces.
 - **Default iteration cap:** 3 — usually one pass is enough; the
   baseline is cached, so re-running is cheap.
 
@@ -301,15 +298,15 @@ After `<loop-complete>` or `<loop-blocked>`:
 
 | You want to… | Preset |
 |---|---|
-| Run the standard end-of-card gate (lint + build, frontend) | `verify` |
+| Run the standard end-of-card gate for a scripts-only card (`scripts/` or `scripts/test_*.sh`) | `bash-test-attr` |
+| Run the standard end-of-card gate for a card that touches frontend code | `verify` |
 | Drain a batch of `code-review` findings on a small diff | `simplify` |
 | Sweep for one specific pattern across the worktree without changing anything | `investigate` |
 | Work through `[problem]` cards that match this card's scope | `flag-cycle` |
 | Attribute pytest failures to "yours" vs "pre-existing on master" | `pytest-attr` |
 | Attribute bash-test failures (`scripts/test_*.sh`) to "yours" vs "pre-existing on master" | `bash-test-attr` |
 
-If you're not sure, **start with `verify`** — it's the cheapest and the
-most universally applicable.
+If you're not sure, choose by the files touched: use `bash-test-attr` when the card is scripts-only, `verify` when it touches frontend code, and add `pytest-attr` only when explicitly debugging backend pytest failures.
 
 ## Common mistakes
 
