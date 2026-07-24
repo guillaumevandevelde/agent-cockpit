@@ -118,12 +118,36 @@ async def lifespan(app: FastAPI):
     # the dispatcher would re-spawn into the same worktree (the same ordering
     # session_recovery above uses, applied to the third liveness source).
     from app.kanban.dispatch import _registered_project_paths
-    from app.kanban.headless_runner import adopt_headless_runs
+    from app.kanban.headless_runner import (
+        adopt_headless_runs, start_headless_tailer,
+    )
     try:
         paths = await _registered_project_paths()
-        adopted = adopt_headless_runs(list(paths.values()))
-        if adopted:
-            logger.info("adopted %d live headless run(s) after restart", adopted)
+        # BUG FIX (kaart a450df1a…, sigh): ``_registered_project_paths``
+        # returns ``list[str]`` (it does ``return list(rows)`` over a
+        # scalar column), so ``paths.values()`` raised ``AttributeError`` and
+        # the bare ``except Exception`` swallowed it — every backend start
+        # adopted zero runs, the reaper's first tick then released every
+        # live headless claim, and the dispatcher re-spawned into the same
+        # worktree (the three-bullet failure mode the impediment review
+        # called out). The function already iterates ``project_paths``
+        # directly, so we just pass the list through.
+        adopted_records = adopt_headless_runs(paths)
+        if adopted_records:
+            logger.info(
+                "adopted %d live headless run(s) after restart",
+                len(adopted_records),
+            )
+            # Spawn a tailer task per adopted record. The tailer reads
+            # the on-disk JSONL log from the persisted last_read_offset
+            # so events that arrived between the previous parent's death
+            # and this restart land in the dispatch state machine
+            # (rate_limit → set_paused_until especially — see the
+            # parent-card analysis for why losing those pauses was
+            # a real failure mode). The task holds a strong reference
+            # via ``_headless_start_tasks`` so it can't be GC'd.
+            for rec in adopted_records:
+                start_headless_tailer(rec)
     except Exception:
         logger.exception("headless adoption failed at startup")
     # Install the Notification/Stop/UserPromptSubmit/SessionStart hooks that feed
