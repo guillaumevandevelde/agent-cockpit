@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 103 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 104 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -185,7 +185,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
 | [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
 
-### Analysis (32)
+### Analysis (33)
 
 | Document | Status |
 |---|---|
@@ -203,6 +203,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Analyse — Kanban Pro (donkruger/Kanban): wat kunnen we overnemen of leren?](./kanban-pro-analyse.md) | 🟢 active |
 | [Kennisopbouw & navigatie — hoe structureren we de docs-berg](./knowledge-structure-navigation-analysis.md) | 🟡 proposed |
 | [Analyse — Lemma Platform: wat kunnen we overnemen of leren?](./lemma-platform-analyse.md) | 🟢 active |
+| [Analyse — MCP-disconnect vs. claim-release + her-dispatch (kaart 4ed4edb9)](./mcp-disconnect-claim-release-analyse.md) | 🟢 active |
 | [Nieuw project spec-driven starten — is dit al ondersteund?](./new-project-startup-flow.md) | 🟢 active |
 | [Analyse — OpenHands: wat kunnen we overnemen of leren?](./openhands-analyse.md) | 🟢 active |
 | [Orchestration-flow — is onze flow robuust genoeg? — analyse](./orchestration-flow-analysis.md) | 🟢 active |

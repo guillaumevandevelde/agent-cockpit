@@ -6181,14 +6181,19 @@ async def redispatch_card(
 ) -> dict | None:
     """Release a stuck card, optionally kill its session, and re-dispatch.
 
-    This is the human override for cards that are stuck on agent columns —
-    most commonly a session that hit its usage limit and never exited, so the
-    dead-session reaper never noticed it. Before killing the existing tmux
-    session, we check whether its worktree holds a resumable Claude transcript
-    (same lookup the auto-recovery reaper uses). If one is found, the card is
-    tagged with `resume_session_id`/`resume_project_folder` so the re-dispatch
-    below picks the resume transport (`claude --resume`, same worktree) instead
-    of discarding the conversation and starting a brand new session.
+    Primarily the human override for cards stuck on agent columns — most
+    commonly a session that hit its usage limit and never exited, so the
+    dead-session reaper never noticed it. But this is also the shared
+    re-dispatch path used by *automatic* startup session-recovery
+    (`recover_interrupted_sessions`), so its callers range from a deliberate
+    operator click to a fully automatic restart-recovery pass — see
+    `caller_source`, and never assume "an operator did this". Before killing
+    the existing tmux session, we check whether its worktree holds a resumable
+    Claude transcript (same lookup the auto-recovery reaper uses). If one is
+    found, the card is tagged with `resume_session_id`/`resume_project_folder`
+    so the re-dispatch below picks the resume transport (`claude --resume`,
+    same worktree) instead of discarding the conversation and starting a brand
+    new session.
 
     Like ``dispatch_card``, deliberately does NOT enforce the depends_on gate
     the bulk paths / auto-dispatch tick use — redispatch from the CardDrawer is
@@ -6268,19 +6273,39 @@ async def redispatch_card(
         # observed on b00f3705…, 2026-07-21T19:17:22, Lemma-analyse).
         live = _live_sessions()
         if live is not None and session_name in live:
+            # The audit text must not misattribute the restart. An operator- or
+            # MCP-triggered redispatch (`ui` / `mcp:*` / `bulk_orphans`) is a
+            # deliberate human/explicit choice. Automatic startup recovery
+            # (`recover_interrupted_sessions`) chose nothing: it acts on a tmux
+            # snapshot taken moments earlier that considered the session dead,
+            # so seeing it live now means that snapshot went stale (a startup
+            # race) — not that anyone decided to restart. Naming the wrong actor
+            # ("the operator chose to restart") is exactly the documentation
+            # defect that reopened kaart 4ed4edb9.
+            if caller_source == "recover_interrupted_sessions":
+                reason = (
+                    "automatic startup session-recovery resumed it in place "
+                    "because the recovery snapshot considered it dead; a fresh "
+                    "tmux query now shows it live (a startup-race stale "
+                    "snapshot). No operator chose to restart."
+                )
+            else:
+                reason = (
+                    "an operator or an explicit redispatch call "
+                    f"(`{caller_source}`) chose to restart it — a common "
+                    "trigger is the session's MCP-server connection briefly "
+                    "dropping, which the reaper correctly ignores (MCP state "
+                    "is not a liveness source)."
+                )
             await apply_operation(
                 session, op_type="comment", entity_type="comment",
                 project_key=card.project_key, entity_id=card.id,
                 payload={
                     "text": (
                         f"**Note:** Redispatching over live session "
-                        f"`{session_name}` — the tmux session was still "
-                        f"alive when redispatch was invoked. Common cause: "
-                        f"the session's MCP-server connection briefly "
-                        f"dropped (the reaper correctly skips live claims, "
-                        f"MCP state is not a liveness source), but the "
-                        f"operator / an explicit redispatch call chose to "
-                        f"restart anyway. The kill below is intentional."
+                        f"`{session_name}` — the tmux session was still alive "
+                        f"when redispatch was invoked: {reason} The kill below "
+                        f"is intentional."
                     ),
                 },
             )

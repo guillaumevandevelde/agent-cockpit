@@ -331,3 +331,41 @@ async def test_recover_project_survives_redispatch_failure():
         await s.commit()
 
     assert recovered == []
+
+
+@pytest.mark.asyncio
+async def test_recover_project_retains_claim_for_live_session_despite_mcp_disconnect():
+    """AC4 regression for [self-improve] 4ed4edb9 (MCP-disconnect → claim-release).
+
+    The b00f3705… incident's real trigger was startup session-recovery, not the
+    MCP disconnect (see docs/cockpit/mcp-disconnect-claim-release-analyse.md).
+    This locks the invariant that closes AC2/AC4 for the recovery path: a session
+    still LIVE in the tmux snapshot must never be resumed, regardless of its
+    MCP-server connection state — a transient MCP disconnect does not remove the
+    session from `_live_sessions()`, so liveness hangs on the process (via its
+    tmux session), never on the MCP link. The claim must be retained: no kill, no
+    resume, no new claimant. A resolvable transcript is offered on purpose to
+    prove the skip is driven by liveness, not by a missing transcript.
+    """
+    called = []
+
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
+        called.append(card_id)
+        return {"card_id": card_id}
+
+    async with KanbanSessionLocal() as s:
+        live = await _make_card(s, title="mcp-disconnected but alive", column="engineer")
+        await _claim(s, live, "agent:k-product-analy-312c")
+        await s.commit()
+        recovered = await recovery.recover_project(
+            s, project_key=PK, project_path="/p",
+            live_sessions={"k-product-analy-312c"},
+            resolve=lambda p, n: ("sess", "folder"), redispatch=fake_redispatch,
+        )
+        await s.commit()
+        card = await get_card(s, live)
+
+    assert recovered == []
+    assert called == [], "recovery must not redispatch a session that is live in tmux"
+    assert card.claimed_by == "agent:k-product-analy-312c", "the live claim must be retained"
+    assert card.resume_session_id is None
