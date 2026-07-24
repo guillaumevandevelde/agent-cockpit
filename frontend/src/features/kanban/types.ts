@@ -130,6 +130,10 @@ export interface KanbanColumn {
   default_provider: string | null;
   default_model: string | null;
   max_sessions: number | null;
+  // Per-lane RTK (token-saver) opt-in flag (kaart c31333bf…,
+  // docs/superpowers/specs/2026-07-24-token-saver-integration-design.md).
+  // Surfaced as a bool on the API; the SQLite column stores 0/1.
+  token_saver_enabled: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -71,6 +71,8 @@ class RecordingTransport:
         endpoint_name=None,
         endpoint_base_url=None,
         endpoint_auth_token=None,
+        card_id=None,
+        column_name=None,
     ):
         self.calls.append({
             "directory": directory,
@@ -81,6 +83,8 @@ class RecordingTransport:
             "endpoint_name": endpoint_name,
             "endpoint_base_url": endpoint_base_url,
             "endpoint_auth_token": endpoint_auth_token,
+            "card_id": card_id,
+            "column_name": column_name,
         })
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 

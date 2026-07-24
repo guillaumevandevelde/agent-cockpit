@@ -178,6 +178,64 @@ prepare_golden_revert() {
     sed -i "s/$fixed/$broken/" "$dispatch_py"
 }
 
+# --- apply_real_saver ----------------------------------------------------
+# Install the RTK token-saver hook into a scratch worktree. Reuses the
+# exact same JSON-merge code path the dispatch helper uses, so the
+# measurement covers the production code path. Refuses to fall back to
+# a prompt-mutation proxy: a real-saver run that can't install RTK
+# fails closed and the result is reported as missing rather than as
+# a quiet proxy measurement.
+#
+# Resolution order for the RTK binary (mirrors the dispatch helper):
+#   1. $COCKPIT_RTK_BIN env override (operator ad-hoc testing)
+#   2. The cache directory under COCKPIT_RTK_CACHE_ROOT (default
+#      $HOME/.local/share/cockpit/rtk/<version>/bin/rtk)
+#   3. PATH (shutil.which("rtk"))
+# Emits the absolute RTK binary path on stdout, or returns non-zero
+# when no binary resolves. The exit code carries the missing-binary
+# reason so the harness can write it into the result row.
+apply_real_saver() {
+    local wt="$1"
+    local version="${RTK_PINNED_VERSION:-0.43.0}"
+    local cache_root="${COCKPIT_RTK_CACHE_ROOT:-$HOME/.local/share/cockpit/rtk}"
+    local binary
+
+    if [ -n "${COCKPIT_RTK_BIN:-}" ] && [ -x "$COCKPIT_RTK_BIN" ]; then
+        binary="$COCKPIT_RTK_BIN"
+    elif [ -x "$cache_root/$version/bin/rtk" ]; then
+        binary="$cache_root/$version/bin/rtk"
+    elif command -v rtk >/dev/null 2>&1; then
+        binary="$(command -v rtk)"
+    else
+        echo "error: rtk binary not found (COCKPIT_RTK_BIN, cache, and PATH all empty)" >&2
+        return 11
+    fi
+
+    # Refuse if the binary is the wrong version — "no silent fallback"
+    # contract (token-saver-mechanismen-decision.md §8). Anything other
+    # than "<version>[.x]" → refuse.
+    local reported
+    reported="$("$binary" --version 2>/dev/null | head -n1 || true)"
+    if ! printf '%s' "$reported" | grep -Eq "^rtk ${version}(\\.[0-9]+)?$"; then
+        echo "error: rtk version mismatch (got '$reported', need ${version}.x)" >&2
+        return 12
+    fi
+
+    # Delegate the JSON-merge + wrapper install to the dispatch helper
+    # itself. ``-c`` runs the same code path ``make_worktree_transport``
+    # runs on every spawn (kaart c31333bf…). This is the explicit
+    # lockstep the design spec §8.4 calls for.
+    PYTHONPATH="${PYTHONPATH:-}:$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd)" \
+    python3 - "$wt" "$binary" <<'PY'
+import sys
+sys.path.insert(0, "backend")
+from app.kanban.token_saver import write_rtk_settings_into_worktree
+write_rtk_settings_into_worktree(sys.argv[1], sys.argv[2])
+print(sys.argv[2])
+PY
+}
+
+
 # --- make_worktree -------------------------------------------------------
 # Create a detached scratch worktree. Tries origin/master first, then
 # master, then HEAD. Echoes the new worktree path on stdout. Returns

@@ -212,6 +212,14 @@ class KanbanColumn(KanbanBase):
     # project-level max_sessions cap. Set to e.g. 1 so only one card at a time
     # dispatches into this column.
     max_sessions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Per-lane RTK (token-saver) opt-in flag (kaart c31333bf…,
+    # docs/superpowers/specs/2026-07-24-token-saver-integration-design.md §3.1).
+    # Stored as INTEGER 0/1 (SQLite has no native bool). Default 0 = off —
+    # acceptance criterion is "never on by default". Read by the dispatch hot
+    # path on every spawn; the helper fail-opens to no-op when this is off.
+    token_saver_enabled: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

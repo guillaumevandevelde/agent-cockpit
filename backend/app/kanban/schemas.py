@@ -658,6 +658,9 @@ class ColumnResponse(BaseModel):
     default_provider: str | None = None
     default_model: str | None = None
     max_sessions: int | None = None
+    # Per-lane token-saver (RTK) opt-in flag. SQLite 0/1 surfaced as bool;
+    # see docs/superpowers/specs/2026-07-24-token-saver-integration-design.md.
+    token_saver_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -670,6 +673,7 @@ class ColumnCreate(BaseModel):
     default_provider: str | None = None
     default_model: str | None = None
     max_sessions: int | None = None
+    token_saver_enabled: bool | None = None
 
 
 class ColumnUpdate(BaseModel):
@@ -679,6 +683,17 @@ class ColumnUpdate(BaseModel):
     default_provider: str | None = None
     default_model: str | None = None
     max_sessions: int | None = None
+    token_saver_enabled: bool | None = None
+
+
+# Project-scoped runtime kill-switch for the per-lane token-saver. Mirrors
+# the shape of SkipPermissionsRequest / AutodispatchRequest — the toggle is
+# read on every dispatch tick so an operator can flip it off mid-run without
+# a backend restart. See
+# docs/superpowers/specs/2026-07-24-token-saver-integration-design.md §7.2.
+class TokenSaverRequest(BaseModel):
+    project_key: str
+    enabled: bool
 
 
 class ColumnClearRequest(BaseModel):

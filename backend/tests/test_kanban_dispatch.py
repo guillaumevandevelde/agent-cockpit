@@ -47,10 +47,14 @@ class RecordingTransport:
         self.fail = fail
 
     def __call__(self, *, directory, prompt, session_name, cli_id="claude-code",
-                 provider="anthropic", model=None):
+                 provider="anthropic", model=None,
+                 endpoint_name=None, endpoint_base_url=None,
+                 endpoint_auth_token=None,
+                 card_id=None, column_name=None):
         self.calls.append({"directory": directory, "prompt": prompt,
                            "session_name": session_name, "cli_id": cli_id,
-                           "provider": provider, "model": model})
+                           "provider": provider, "model": model,
+                           "card_id": card_id, "column_name": column_name})
         if self.fail:
             raise RuntimeError("tmux exploded")
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
@@ -2697,7 +2701,7 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None, **kwargs):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -3386,7 +3390,7 @@ async def test_dispatch_all_pending_resumes_to_resume_cards():
 
     resume_calls = []
 
-    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None, **kwargs):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -4072,7 +4076,7 @@ async def test_card_transport_sandcastle_uses_sandcastle_transport():
     worktree = RecordingTransport()
     sc_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
+    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None, **kwargs):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
@@ -4103,11 +4107,11 @@ async def test_card_transport_worktree_overrides_sandcastle_project_default():
     sc_calls = []
     wt_calls = []
 
-    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
+    def fake_sandcastle(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None, **kwargs):
         sc_calls.append(session_name)
         return {"session_name": session_name, "transport": "sandcastle", "status": "started"}
 
-    def fake_worktree(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
+    def fake_worktree(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None, **kwargs):
         wt_calls.append(session_name)
         return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
 
@@ -4464,7 +4468,7 @@ async def test_redispatch_with_resume_session_id_uses_resume_transport():
     """When card has resume_session_id, redispatch calls resume transport, not worktree."""
     calls = []
 
-    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None):
+    def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None, **kwargs):
         calls.append({"mode": "resume", "session_name": session_name})
         return {"session_name": session_name}
 
@@ -8039,12 +8043,12 @@ async def test_run_card_re_reads_to_pick_up_concurrent_set_resume():
     worktree_calls: list[str] = []
 
     def resume_transport(*, directory, prompt, session_name, cli_id="claude-code",
-                         provider="anthropic", model=None):
+                         provider="anthropic", model=None, **kwargs):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
     def worktree_transport(*, directory, prompt, session_name, cli_id="claude-code",
-                            provider="anthropic", model=None):
+                            provider="anthropic", model=None, **kwargs):
         worktree_calls.append(session_name)
         return {"session_name": session_name}
 
@@ -8222,12 +8226,12 @@ async def test_set_resume_then_immediate_dispatch_defers_to_next_tick():
     worktree_calls: list[str] = []
 
     def resume_transport(*, directory, prompt, session_name, cli_id="claude-code",
-                         provider="anthropic", model=None):
+                         provider="anthropic", model=None, **kwargs):
         resume_calls.append(session_name)
         return {"session_name": session_name}
 
     def worktree_transport(*, directory, prompt, session_name, cli_id="claude-code",
-                            provider="anthropic", model=None):
+                            provider="anthropic", model=None, **kwargs):
         worktree_calls.append(session_name)
         return {"session_name": session_name}
 

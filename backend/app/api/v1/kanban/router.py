@@ -54,6 +54,7 @@ from app.kanban.schemas import (
     SetGateRequest,
     ShipModeRequest,
     SkipPermissionsRequest,
+    TokenSaverRequest,
     SubscriptionPoolRequest,
     TakeOverRequest,
     UpdatePlanAttachmentRequest,
@@ -1560,6 +1561,40 @@ async def set_transport(payload: DefaultTransportRequest):
             raise HTTPException(422, str(e))
         await s.commit()
     return {"project_key": payload.project_key, "transport": payload.transport}
+
+
+@router.get("/token-saver")
+async def get_token_saver(project_key: str = Query(...)):
+    """Read the per-project token-saver kill-switch (kaart c31333bf…).
+
+    Returns the current state of the ``token_saver:<project_key>``
+    row in ``KanbanMeta``. The dispatcher reads this on every spawn
+    tick so toggling off via this endpoint takes effect on the next
+    dispatch without a backend restart.
+    """
+    from app.kanban import token_saver
+    async with KanbanSessionLocal() as s:
+        return {"project_key": project_key,
+                "enabled": await token_saver.is_board_enabled(s, project_key)}
+
+
+@router.post("/token-saver")
+async def set_token_saver(payload: TokenSaverRequest):
+    """Persist the per-project token-saver kill-switch.
+
+    Idempotent. Writes ``"1"`` for enabled, ``"0"`` for disabled —
+    matches the convention used by ``set_autodispatch`` and
+    ``set_skip_permissions``. The kill-switch is the operator-facing
+    override that lets the team turn RTK off project-wide without
+    touching the per-lane column flags.
+    """
+    from app.kanban import token_saver
+    async with KanbanSessionLocal() as s:
+        await token_saver.set_board_enabled(
+            s, payload.project_key, payload.enabled,
+        )
+        await s.commit()
+    return {"project_key": payload.project_key, "enabled": payload.enabled}
 
 
 @router.get("/subscription-override")

@@ -2760,7 +2760,9 @@ class SpawnTransport(Protocol):
                  model: str | None = None,
                  endpoint_name: str | None = None,
                  endpoint_base_url: str | None = None,
-                 endpoint_auth_token: str | None = None) -> dict: ...
+                 endpoint_auth_token: str | None = None,
+                 card_id: str | None = None,
+                 column_name: str | None = None) -> dict: ...
 
 
 def _known_cli_ids() -> set[str]:
@@ -2845,6 +2847,62 @@ def _copy_repo_mcp_json_to_worktree(repo: str, worktree_path: str) -> None:
             repo_mcp, worktree_path, e)
 
 
+def _install_rtk_for_dispatch(
+    *, card_id: str, project_key: str, column_name: str,
+    worktree_path: str, repo_path: str,
+) -> str:
+    """Sync bridge to :func:`app.kanban.token_saver.maybe_install`.
+
+    The worktree transport is a sync callable (the ``SpawnTransport``
+    protocol), but the token-saver helper is async because it talks to
+    the kanban DB. Spin a *private* event loop AND a *private* engine
+    per call so the connection pool never outlives the call. Never
+    raises — any exception is logged and downgraded to ``"failed"`` so
+    the spawn continues unchanged.
+
+    Why a private engine: the module-level kanban engine is bound to
+    whatever loop happens to be running at import time. Reusing it
+    from a fresh loop creates a stale connection pool that crashes
+    the next test with ``RuntimeError: Event loop is closed``. A
+    dedicated engine per call is cheap (one connection) and the
+    helper's call site is on the cold path of a dispatch, not the
+    hot path.
+    """
+    import asyncio
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.config import settings
+    from app.kanban import token_saver
+
+    async def _run() -> tuple[str, str]:
+        engine = create_async_engine(
+            settings.kanban_database_url, future=True,
+        )
+        try:
+            Session = async_sessionmaker(
+                engine, expire_on_commit=False,
+            )
+            async with Session() as session:
+                return await token_saver.maybe_install(
+                    session,
+                    card_id=card_id,
+                    project_key=project_key,
+                    column_name=column_name,
+                    worktree_path=worktree_path,
+                    repo_path=repo_path,
+                )
+        finally:
+            await engine.dispose()
+
+    try:
+        return asyncio.run(_run())[0]
+    except Exception as exc:
+        logger.warning(
+            "token-saver install failed for card %s (column=%s): %s",
+            card_id, column_name, exc,
+        )
+        return "failed"
+
+
 def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
     """Factory that returns a worktree transport with configurable permission bypass."""
     def _transport(*, directory: str, prompt: str, session_name: str,
@@ -2852,7 +2910,9 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
                    model: str | None = None,
                    endpoint_name: str | None = None,
                    endpoint_base_url: str | None = None,
-                   endpoint_auth_token: str | None = None) -> dict:
+                   endpoint_auth_token: str | None = None,
+                   card_id: str | None = None,
+                   column_name: str | None = None) -> dict:
         """Create a worktree off origin/master, then spawn a `cli_id` session in it,
         against the given `provider` subscription
         (anthropic | bedrock | minimax | anthropic-compatible).
@@ -2863,6 +2923,12 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         (kaart 293d1faa…). They are accepted for every other provider so
         the dispatch helper never has to branch on provider; non-compatible
         providers simply ignore them.
+
+        ``card_id`` and ``column_name`` are optional. When both are
+        provided, the dispatcher invoked the per-lane RTK (token-saver)
+        installer so the spawned session reduces ``Bash`` tool output
+        mechanically (kaart ``c31333bf…``). The helper is fail-open —
+        install errors never break the spawn.
 
         Raises MemoryLimitExceeded if hardware memory limits are reached.
         """
@@ -2905,9 +2971,32 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
         # without a `COCKPIT_PROJECT_KEY` to audit against.
         project_key = safe_resolve_project_key(repo)
 
+        # Per-lane RTK (token-saver) install — opt-in, fail-open, kill-switchable.
+        # Only runs when both card_id and column_name are set (the dispatcher
+        # knows the target column at this point). The helper never raises; a
+        # "failed" or "inactive" status means the spawn continues unchanged.
+        # When "active", we add RTK_TELEMETRY=off to the spawn env so the
+        # spawned session does not phone home.
+        #
+        # The transport is a sync callable (the SpawnTransport protocol) so
+        # we have to bridge to the async helper here. The helper does not
+        # touch the surrounding asyncio loop — it opens its own session
+        # inside the new loop and the loop exits before the spawn below.
+        token_saver_status = "inactive"
+        if card_id and column_name:
+            token_saver_status = _install_rtk_for_dispatch(
+                card_id=card_id,
+                project_key=project_key or "",
+                column_name=column_name,
+                worktree_path=worktree_path,
+                repo_path=repo,
+            )
+
         # Project-scoped secrets become the spawn's explicit env (never the
         # backend's os.environ). Best-effort: no store / no passphrase -> {}.
         extra_env = _resolve_project_secrets(project_key)
+        if token_saver_status == "active":
+            extra_env = {**extra_env, "RTK_TELEMETRY": "off"}
 
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
@@ -4652,6 +4741,13 @@ async def _run_card(
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
                                  cli_id=cli_id, provider=provider, model=effective_model,
+                                 # Token-saver (RTK) per-lane opt-in seam (kaart
+                                 # c31333bf…). The worktree transport installs
+                                 # the hook when the column flag is on and
+                                 # the board kill-switch is enabled. Passing
+                                 # these is a no-op for transports that don't
+                                 # use them (resume, sandcastle, headless).
+                                 card_id=card.id, column_name=target_agent,
                                  **endpoint_kwargs)
     except Exception as exc:
         await apply_operation(

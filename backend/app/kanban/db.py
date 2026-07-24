@@ -213,6 +213,16 @@ async def _ensure_column_table(conn) -> None:
         await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN max_sessions INTEGER")
     if "default_model" not in cols:
         await conn.exec_driver_sql("ALTER TABLE kanban_columns ADD COLUMN default_model VARCHAR(64)")
+    # Per-lane token-saver opt-in (kaart c31333bf…). SQLite has no native
+    # bool; stored as INTEGER 0/1. Default 0 = off (never on by default —
+    # the acceptance criterion for §1 of
+    # docs/superpowers/specs/2026-07-24-token-saver-integration-design.md).
+    # Existing rows round-trip as 0 without a backfill script.
+    if "token_saver_enabled" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_columns ADD COLUMN "
+            "token_saver_enabled INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 async def _ensure_work_type_mapping_table(conn) -> None:

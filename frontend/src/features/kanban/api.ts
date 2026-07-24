@@ -353,6 +353,22 @@ export const kanbanApi = {
       body: JSON.stringify({ project_key: projectKey, enabled }),
     }),
 
+  // Per-lane RTK (token-saver) opt-in (kaart c31333bf…).
+  // Board kill-switch: read on every dispatch tick so toggling off
+  // via this endpoint takes effect on the next spawn without a
+  // backend restart. The per-lane column flag (Column.token_saver_enabled)
+  // is orthogonal and is sent via the column update endpoint.
+  getTokenSaver: (projectKey: string): Promise<{ enabled: boolean }> =>
+    apiClient<{ enabled: boolean }>(
+      `${BASE}/token-saver?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
+  setTokenSaver: (projectKey: string, enabled: boolean): Promise<{ enabled: boolean }> =>
+    apiClient<{ enabled: boolean }>(`${BASE}/token-saver`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, enabled }),
+    }),
+
   clearColumn: (projectKey: string, column: string): Promise<{ cleared: number }> =>
     apiClient<{ cleared: number }>(`${BASE}/clear-column`, {
       method: "POST",

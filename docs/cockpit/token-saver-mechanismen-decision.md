@@ -569,6 +569,85 @@ alsnog een apart proxy-proces zijn, niet een import in onze backend.
 
 ## 8. Beslissing per mechanisme
 
+### ✅ Geïmplementeerd (kaart `c31333bf…`, 2026-07-24) — RTK per-lane opt-in
+
+**Scope van de implementatie** (kaart `c31333bf…`,
+[`docs/superpowers/specs/2026-07-24-token-saver-integration-design.md`](../superpowers/specs/2026-07-24-token-saver-integration-design.md)):
+
+- **Per-lane opt-in**, board-wide runtime kill-switch. Default **uit**
+  (board-wide én per-lane); de operator moet beide aanzetten om RTK te
+  installeren op een dispatch. Geen mutatie van persona-prompt,
+  `CLAUDE.md`, kaarttekst, plan-attachment of ship-recipe.
+- **Fail-open** op élke stap: ontbrekende kolom, ontbrekende binary,
+  crash in de wrapper-installatie, of een commando dat RTK niet snapt
+  → dispatcher valt terug op de kale `Bash`-call zonder hook. Geen
+  retry, geen alarm — de activity-feed krijgt precies één
+  `**Note:** Token saver activated: RTK 0.43.0` of één
+  `**Note:** Token saver fail-open: <reden>` comment (dedup binnen
+  60 s).
+- **Cache-veilig by construction.** De hook leeft in
+  `.claude/settings.json`, niet in het prompt-array. Anthropic's
+  sessie-warme prefix-cache blijft onaangeraakt; er is geen
+  token-stroom bij het prompt-pad zelf.
+- **RTK 0.43.0 versie-pin**, repo `rtk-ai/rtk` default branch
+  `develop`. Cache-pad `~/.local/share/cockpit/rtk/0.43.0/bin/rtk`,
+  overschrijfbaar via `COCKPIT_RTK_BIN`.
+- **`RTK_TELEMETRY=off`** expliciet in de spawn-env, ook al is dat de
+  default — belt-and-braces voor de card-eis.
+- **Caveman en Ponytail** zijn expliciet uit scope; TODO-comment in
+  `token_saver.py` wijst naar follow-up-kaart `d0446fd8…`.
+
+**Aangeraakte oppervlakken (lockstep, geen drift):**
+
+- Backend: `models.py` (`KanbanColumn.token_saver_enabled`),
+  `db.py` (additieve `ALTER TABLE` in `_ensure_column_table`,
+  fail-safe met `try/except`), `schemas.py` (Pydantic-velden +
+  `TokenSaverRequest`), nieuw `token_saver.py` (publieke surface
+  `maybe_install` / `is_board_enabled` / `set_board_enabled` /
+  `post_note` / `write_rtk_settings_into_worktree`),
+  `dispatch.py` (sync bridge naar `maybe_install` vanuit de
+  worktree-transport; `card_id` + `column_name` doorgegeven),
+  `api/v1/kanban/router.py` (GET/POST `/api/v1/kanban/token-saver`).
+- Frontend: `types.ts` (`token_saver_enabled: boolean`),
+  `api.ts` (`getTokenSaver` / `setTokenSaver`),
+  `ColumnSettingsDialog.tsx` (toggle, badge in read-only view,
+  init op Edit).
+- Harness: `scripts/measure-token-saver.sh` heeft een nieuwe
+  `real-saver`-subcommand die via `apply_real_saver` de
+  dispatch-helper zelf aanroept — geen tweede JSON-merge-pad. De
+  bestaande `compare`-tabel heeft nu ook `real-saver`-rijen
+  per trial; `with-saver` blijft staan als de gedocumenteerde
+  prompt-mutatie-proxy ondergrens.
+
+**Acceptance-criteria check:**
+
+- ✅ Per-lane via worktree-lokale `.claude/settings.json`,
+  nooit `~/.claude/`
+- ✅ `grep` carve-out actief (RTK omzeilt de ugrep-shim; in deze
+  kaart niet opgelost, wel uitgezonderd door de wrapper-config)
+- ✅ `git diff`-truncatie expliciet uitgezet voor ship-lanes
+  (wrapper bypass-list bevat `git diff`); analyse-lanes mogen
+  hem aanhouden
+- ✅ Versie-pin 0.43.0, default repo-branch `develop`
+- ✅ Telemetrie expliciet uit in de spawn-env
+- ✅ Activity-feed observability via `post_note` met 60-s-dedup
+- ✅ Board-wide runtime kill-switch via `KanbanMeta` row
+  `token_saver:<project_key>` (Pydantic-validated;
+  `set_board_enabled` schrijft `"1"` / `"0"` naar de
+  bestaande kolom)
+- ✅ Tests: 16 unit-tests (`test_token_saver.py`) + 4
+  kolom-migratie-tests (`test_token_saver_column.py`) + 4
+  API-tests (`test_token_saver_api.py`), groen
+- ✅ `compare`-harness uitgebreid met `real-saver`-variant in
+  lockstep met de dispatch-helper
+
+**Gemeten effect** (uit `decisions.md` rij van 2026-07-24, c31333bf…,
+verplicht veld vóór Done): **TBD — `scripts/measure-token-saver.sh
+compare` run na merge vult dit veld**. Als de meting nul of
+negatief uitvalt, blijft de feature opt-in zoals de card-eis al
+voorschreef; de `default off` acceptance-criterion staat en de
+integratiekaart sluit zonder promotion.
+
 | Mechanisme | Besluit | Winst A / B | Kern |
 |---|---|---|---|
 | **RTK** | ✅ **GO, conditioneel** | **7,4% / 1,6%** | Cache-veilig by construction, fail-open geverifieerd, geen ToS-oppervlak, per-lane installeerbaar via worktree-settings |
