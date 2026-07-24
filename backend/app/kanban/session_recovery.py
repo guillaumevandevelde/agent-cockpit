@@ -49,15 +49,15 @@ def _recoverable(card, live_sessions: set[str]) -> bool:
     return name not in live_sessions
 
 
-def _resolve_resume_target(
+def _resolve_transcript_file(
     project_path: str, session_name: str, *, projects_dir: Path | None = None,
-) -> tuple[str, str] | None:
-    """Find the Claude session to resume for a dead agent session.
+) -> Path | None:
+    """Find the most recently modified Claude transcript for an agent session.
 
     A dispatched session runs in ``<project_path>/.claude/worktrees/<session_name>``
     and writes its transcript to ``~/.claude/projects/<encoded-worktree>/<uuid>.jsonl``.
-    Returns ``(session_id, project_folder)`` for the most recently modified transcript,
-    or None when the worktree or a transcript is missing (nothing to resume).
+    Returns the transcript path, or None when the worktree or a transcript is
+    missing.
     """
     worktree = Path(project_path) / ".claude" / "worktrees" / session_name
     if not worktree.exists():
@@ -74,7 +74,22 @@ def _resolve_resume_target(
     )
     if not transcripts:
         return None
-    return transcripts[0].stem, folder
+    return transcripts[0]
+
+
+def _resolve_resume_target(
+    project_path: str, session_name: str, *, projects_dir: Path | None = None,
+) -> tuple[str, str] | None:
+    """Find the Claude session to resume for a dead agent session.
+
+    Returns ``(session_id, project_folder)`` for the most recently modified
+    transcript (see ``_resolve_transcript_file``), or None when the worktree
+    or a transcript is missing (nothing to resume).
+    """
+    path = _resolve_transcript_file(project_path, session_name, projects_dir=projects_dir)
+    if path is None:
+        return None
+    return path.stem, path.parent.name
 
 
 async def recover_project(

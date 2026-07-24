@@ -62,6 +62,41 @@ def test_recoverable_predicate(card, expected):
     assert recovery._recoverable(card, {"k-alive-1"}) is expected
 
 
+# ---- _resolve_transcript_file ---------------------------------------------
+
+def test_resolve_transcript_file_picks_most_recent_transcript(tmp_path):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "k-x-0001"
+    worktree.mkdir(parents=True)
+    folder = convert_path_to_folder_name(str(worktree))
+    folder_dir = tmp_path / "projects" / folder
+    folder_dir.mkdir(parents=True)
+    old = folder_dir / "1111.jsonl"
+    new = folder_dir / "2222.jsonl"
+    old.write_text("{}")
+    new.write_text("{}")
+    os.utime(old, (1000, 1000))
+    os.utime(new, (2000, 2000))
+
+    result = recovery._resolve_transcript_file(
+        str(repo), "k-x-0001", projects_dir=tmp_path / "projects")
+    assert result == new
+
+
+def test_resolve_transcript_file_none_without_worktree(tmp_path):
+    result = recovery._resolve_transcript_file(
+        str(tmp_path / "repo"), "k-missing", projects_dir=tmp_path / "projects")
+    assert result is None
+
+
+def test_resolve_transcript_file_none_without_transcript(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".claude" / "worktrees" / "k-y-0002").mkdir(parents=True)
+    result = recovery._resolve_transcript_file(
+        str(repo), "k-y-0002", projects_dir=tmp_path / "projects")
+    assert result is None
+
+
 # ---- _resolve_resume_target ----------------------------------------------
 
 def test_resolve_resume_target_picks_most_recent_transcript(tmp_path):

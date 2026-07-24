@@ -3237,6 +3237,247 @@ def _structured_rate_limit_signal(session_name: str) -> bool:
     return session_signals.is_rate_limited(session_name)
 
 
+# ---- transcript-tail rate-limit detection ----------------------------------
+#
+# The Notification hook never carries a usage-limit message (§2.1 of
+# docs/cockpit/sessie-limiet-auto-dispatch-analyse.md): a rate limit shows up
+# in the transcript as a plain assistant message with `isApiErrorMessage:
+# true`, not as a Notification event. The reaper's stuck-session pane scan
+# above only inspects sessions that never sent a single hook event within
+# STUCK_SESSION_TIMEOUT_S (§2.2) -- once a session has been productive for a
+# while, a mid-session limit is invisible to both existing detectors, and the
+# session stays open on the limit screen forever (the CLI never exits). These
+# helpers close that gap by reading the tail of the transcript itself, which
+# always carries the limit for both vendors, whether it happens at spawn or
+# hours in.
+
+# Bytes read from the tail of a transcript when scanning for an unresolved
+# rate limit. Transcripts grow to tens of MB over a long session; we only
+# ever need the last few conversational turns to decide whether the session
+# is currently stuck, so a full-file parse on every dispatch tick would be
+# wasteful for no benefit.
+_TRANSCRIPT_TAIL_BYTES = 65536
+
+
+def _transcript_entry_text(entry: dict) -> str:
+    """Flatten an assistant/user transcript entry's message content to plain
+    text for substring classification -- mirrors the reproduction script in
+    docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §1.1."""
+    message = entry.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") for block in content if isinstance(block, dict)
+        )
+    return ""
+
+
+def _is_conversational_transcript_entry(entry: dict) -> bool:
+    """True for a real assistant/user turn, as opposed to session bookkeeping
+    entries (system/summary/last-prompt/file-history-snapshot/attachment/...)
+    that Claude Code interleaves into the same JSONL file but that carry no
+    "the agent did something" signal. Only conversational entries count
+    towards "is there activity after the limit" in `_tail_rate_limit_message`
+    -- a bookkeeping entry recorded right after the api-error must not be
+    mistaken for the session having recovered on its own."""
+    return entry.get("type") in ("assistant", "user") and isinstance(entry.get("message"), dict)
+
+
+def _read_transcript_tail_entries(
+    path: Path, *, max_bytes: int = _TRANSCRIPT_TAIL_BYTES,
+) -> list[dict]:
+    """Parse the last `max_bytes` of a transcript JSONL file into entry dicts.
+
+    Reads only the tail via a seek — transcripts run to tens of MB over a long
+    session. The first line after a non-zero seek is dropped since it's
+    likely truncated mid-line; malformed lines are skipped rather than
+    raising, since a truncated JSON line at the chunk boundary is expected,
+    not an error. Returns `[]` on any read failure (missing file, permission
+    error, ...) -- fail open, same contract as `_capture_pane_content`."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    start = max(0, size - max_bytes)
+    try:
+        with path.open("rb") as f:
+            f.seek(start)
+            raw = f.read()
+    except OSError:
+        return []
+    text = raw.decode("utf-8", errors="replace")
+    lines = text.split("\n")
+    if start > 0:
+        lines = lines[1:]
+    entries = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except (TypeError, ValueError):
+            continue
+    return entries
+
+
+def _tail_rate_limit_message(path: Path) -> str | None:
+    """Return the api-error text if the transcript's tail shows an
+    *unresolved* rate-limit hit, else None.
+
+    "Unresolved" means: scanning from the end, the most recent conversational
+    (assistant/user) entry is an `isApiErrorMessage: true` entry whose text
+    classifies as a limit via `auto_resume_service.is_limit_notification`. If
+    ordinary assistant/user activity follows the error instead, the session
+    already recovered on its own and nothing should happen — this is the R1
+    contract from docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5:
+    "alleen reageren wanneer de api-error het laatste betekenisvolle event
+    is"."""
+    from app.services.scheduling.auto_resume import auto_resume_service
+
+    for entry in reversed(_read_transcript_tail_entries(path)):
+        if not _is_conversational_transcript_entry(entry):
+            continue
+        if entry.get("isApiErrorMessage"):
+            text = _transcript_entry_text(entry)
+            if auto_resume_service.is_limit_notification(text):
+                return text
+            return None
+        return None  # most recent conversational turn is ordinary activity
+    return None
+
+
+async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bool:
+    """Apply the standard rate-limit reaction for a kanban-dispatched session:
+    record the structured signal, resolve/parse the reset time, pause the
+    affected provider, and move the card to "To Resume" via
+    `move_limited_session_to_resume`.
+
+    Shared by the Notification-hook handler
+    (`scheduled_messages.router.hook_event`) and the transcript-tail sweep
+    (`detect_transcript_rate_limits`) so a rate limit reaches exactly the same
+    reaction regardless of which channel noticed it first -- no second,
+    parallel reaction path. `source` is only used for logging/observability
+    (e.g. "hook" vs "transcript"), so a later "why did this pause happen" read
+    of the logs can tell the two channels apart.
+
+    Returns True iff a kanban card was found and moved to "To Resume".
+    """
+    from datetime import timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dispatch_pause import set_paused_until
+    from app.services.scheduling.auto_resume import (
+        FALLBACK_PAUSE_HOURS,
+        auto_resume_service,
+    )
+    from app.services.scheduling.session_signals import session_signals
+
+    session_signals.record_limit(cwd, message=message or "")
+    parsed = auto_resume_service.parse_reset_time(message)
+    if parsed:
+        pause_until, _tz_name = parsed
+    else:
+        # Recognized as a limit hit but the reset time didn't match the known
+        # clock-time format (e.g. a weekly/model cap with different
+        # wording). Fall back to a conservative fixed pause instead of
+        # skipping it -- skipping just re-triggers the same spin-and-burn
+        # loop the pause exists to prevent.
+        pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+        logger.warning(
+            "unrecognized usage-limit message format for %s (source=%s), falling "
+            "back to a %sh dispatch pause: %r",
+            cwd, source, FALLBACK_PAUSE_HOURS, message,
+        )
+
+    try:
+        provider = await _provider_for_cwd(cwd)
+    except Exception:
+        logger.exception("failed to resolve provider for %s", cwd)
+        provider = None
+
+    try:
+        async with KanbanSessionLocal() as ks:
+            await set_paused_until(ks, pause_until, provider=provider)
+            await ks.commit()
+    except Exception:
+        logger.exception("failed to set dispatch pause for %s", cwd)
+
+    try:
+        moved = await move_limited_session_to_resume(
+            cwd, scheduled_at=pause_until.isoformat(),
+        )
+    except Exception:
+        logger.exception("failed to move kanban card to To Resume for %s", cwd)
+        moved = False
+
+    logger.info(
+        "rate-limit signal handled (source=%s cwd=%s moved=%s pause_until=%s)",
+        source, cwd, moved, pause_until.isoformat(),
+    )
+    return moved
+
+
+async def detect_transcript_rate_limits(
+    *, cards: Iterable[KanbanCard], project_path: str,
+) -> int:
+    """Sweep every agent-claimed card for an unresolved rate-limit hit visible
+    only in its Claude Code transcript tail.
+
+    Closes the mid-session detection gap: a session that's been productive
+    for a while before hitting its limit stays alive in tmux (the CLI never
+    exits on a 429/session-limit — it prints the error and returns to its
+    prompt) and has long since sent its first hook event, so it is invisible
+    to both the Notification-hook path (§2.1: the hook never carries the
+    limit message) and the reaper's stuck-session pane scan (§2.2: it only
+    inspects sessions that never sent a hook). The transcript is the one
+    channel that always carries the limit, for both vendors, whether it
+    happens at spawn or hours in — see
+    docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5 R1.
+
+    Runs independently of tmux liveness — deliberately not folded into
+    `reap_stale_claims`'s live/stuck/dead branching, since the transcript
+    signal applies regardless of which of those buckets a session is
+    currently in. Skips cards on fixed columns (Backlog/Impediment/Done/To
+    Resume) and cards with no `agent:` claim, same as `reap_stale_claims`.
+
+    Reuses `handle_rate_limit_signal` for the reaction (per-provider pause +
+    `move_limited_session_to_resume`) so a limit reaches exactly the same
+    outcome regardless of which channel noticed it first — no second,
+    parallel reaction path. Returns the number of cards for which a limit was
+    detected and handled.
+    """
+    from app.kanban.schemas import COLUMNS
+    from app.kanban.session_recovery import _resolve_transcript_file
+
+    handled = 0
+    for card in cards:
+        if card.column in COLUMNS:
+            continue
+        name = _claimant_session(card)
+        if name is None:
+            continue
+        transcript = _resolve_transcript_file(project_path, name)
+        if transcript is None:
+            continue
+        message = _tail_rate_limit_message(transcript)
+        if message is None:
+            continue
+        cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
+        moved = await handle_rate_limit_signal(cwd, message, source="transcript")
+        logger.info(
+            "transcript-tail rate limit detected: session=%s card=%s "
+            "transcript=%s classification=limit moved=%s",
+            name, card.id, transcript, moved,
+        )
+        handled += 1
+    return handled
+
+
 async def _cleanup_stuck_session(
     session, *, card, project_key: str, session_name: str, pane_content: str,
 ) -> None:
@@ -4717,6 +4958,14 @@ async def dispatch_project(
             sandcastle_live=sandcastle_live, headless_live=headless_live,
             project_path=project_path,
         ):
+            cards = await list_cards(session, project_key)
+
+    # Transcript-tail sweep for mid-session rate limits: runs independently of
+    # tmux liveness, so it catches the sessions reap_stale_claims's live/stuck
+    # branching structurally cannot (see detect_transcript_rate_limits
+    # docstring). Needs project_path to resolve a worktree's transcript file.
+    if project_path is not None:
+        if await detect_transcript_rate_limits(cards=cards, project_path=project_path):
             cards = await list_cards(session, project_key)
 
     column_caps = await _column_max_sessions(session, project_key)

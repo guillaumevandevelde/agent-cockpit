@@ -15,7 +15,7 @@ from app.models.scheduled_message_schemas import (
     ScheduledMessageResponse,
     ScheduledMessageUpdate,
 )
-from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS, auto_resume_service
+from app.services.scheduling.auto_resume import auto_resume_service
 from app.services.scheduling.hook_installer import get_hooks_status, install_missing_hooks
 from app.services.scheduling.idle_state import idle_state
 from app.services.scheduling.scheduler import scheduler_service
@@ -196,76 +196,22 @@ async def hook_event(ev: HookEvent):
         )
 
         if kind == "limit":
-            session_signals.record_limit(ev.cwd, message=ev.message or "")
-            parsed = auto_resume_service.parse_reset_time(ev.message)
-
-            # The usage limit is account-wide: every session hits the same wall for
-            # the rest of the reset window. Pause the whole auto-dispatch tick (every
-            # project on this device) until then, so it doesn't keep respawning "To
-            # Resume" cards every ~10s only to immediately re-hit the same limit.
-            if parsed:
-                pause_until, _tz_name = parsed
-            else:
-                # Recognized as a limit hit but the reset time didn't match the known
-                # clock-time format (e.g. a weekly/model cap with different wording).
-                # Fall back to a conservative fixed pause instead of skipping it --
-                # skipping just re-triggers the same spin-and-burn loop the pause
-                # exists to prevent.
-                from datetime import UTC, datetime, timedelta
-                pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
-                logger.warning(
-                    "unrecognized usage-limit message format for %s, falling back to a "
-                    "%sh dispatch pause: %r",
-                    ev.cwd, FALLBACK_PAUSE_HOURS, ev.message,
-                )
-
-            # Kanban-dispatched session hit its usage limit and is stuck open: move its
-            # card to "To Resume" and kill the tmux session now, rather than leaving it
-            # dangling until a human notices. Carries the same reset time as the global
-            # pause below, so the card's own scheduled_at makes it dispatch-eligible
-            # again as soon as the limit actually resets -- not only once the (broader,
-            # account-wide) global pause happens to expire. No-op for non-kanban sessions.
-            from app.kanban.dispatch import (
-                _provider_for_cwd,
-                move_limited_session_to_resume,
-            )
+            # Kanban-dispatched session hit its usage limit and is stuck open: pause
+            # the affected provider and move its card to "To Resume", killing the
+            # tmux session now rather than leaving it dangling until a human
+            # notices. Shared with the transcript-tail sweep
+            # (`detect_transcript_rate_limits`) so a limit reaches the exact same
+            # reaction regardless of which channel noticed it first -- see
+            # `handle_rate_limit_signal`'s docstring.
+            from app.kanban.dispatch import handle_rate_limit_signal
             try:
-                # Resolve provider BEFORE the move: move_limited_session_to_resume
-                # shifts the card to "To Resume", and the per-provider lookup wants
-                # the column the card sat in while the session was running (its
-                # agent column, not the post-move "To Resume"). None when no card
-                # is matched -- the move below also no-ops then, so a global
-                # pause is the right fallback.
-                provider = await _provider_for_cwd(ev.cwd)
+                await handle_rate_limit_signal(ev.cwd, ev.message or "", source="hook")
             except Exception:
-                logger.exception("failed to resolve provider for %s", ev.cwd)
-                provider = None
-
-            # Set the per-provider pause BEFORE the move. Fase 2 spillover
-            # (`move_limited_session_to_resume`) may make the card immediately
-            # dispatch-eligible (scheduled_at=None) so the next tick re-routes
-            # it onto another subscription; pausing the just-limited provider
-            # first guarantees that re-dispatch skips it (pick_subscription
-            # consults the per-provider pause) instead of racing back onto the
-            # same wall.
-            from app.kanban.db import KanbanSessionLocal
-            from app.kanban.dispatch_pause import set_paused_until
-            try:
-                async with KanbanSessionLocal() as ks:
-                    await set_paused_until(ks, pause_until, provider=provider)
-                    await ks.commit()
-            except Exception:
-                logger.exception("failed to set dispatch pause for %s", ev.cwd)
-
-            try:
-                await move_limited_session_to_resume(
-                    ev.cwd, scheduled_at=pause_until.isoformat(),
-                )
-            except Exception:
-                logger.exception("failed to move kanban card to To Resume for %s", ev.cwd)
+                logger.exception("failed to handle rate-limit signal for %s", ev.cwd)
 
             # Auto-resume: schedule a resume job for the scheduled-messages feature,
             # for projects that opted in explicitly (independent of the kanban path).
+            parsed = auto_resume_service.parse_reset_time(ev.message)
             if parsed and auto_resume_service.is_enabled(ev.cwd):
                 reset_time, tz_name = parsed
                 auto_resume_service.schedule_resume(
