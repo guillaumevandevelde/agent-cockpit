@@ -26,7 +26,7 @@ _spawned_sessions: dict[str, dict] = {}
 _DEFAULT_RUNTIME = "worktree"
 
 
-def _project_mcp_config_args(directory: str) -> list[str]:
+def _project_mcp_config_args(directory: str, repo_path: str | None = None) -> list[str]:
     """Return the MCP-isolation flags for ``directory``.
 
     Always emits ``--strict-mcp-config`` so a host-user's global
@@ -34,12 +34,30 @@ def _project_mcp_config_args(directory: str) -> list[str]:
     leak into dispatched sessions. See kanban card ``00fa8325`` /
     ``docs/cockpit/token-optimization-analysis.md`` §4 R5.
 
-    Only emits ``--mcp-config`` when the project's ``.mcp.json`` actually
-    exists: a fresh product-project has none, and Claude Code would otherwise
-    exit 1 in ~2s with ``MCP config file not found`` (see kanban card
-    `[problem] Product-project zonder .mcp.json sterft binnen ~2s bij elke
-    dispatch`). When the file is absent, ``--strict-mcp-config`` alone means
-    zero MCPs are loaded — the safest possible default for a brand-new project.
+    Emits ``--mcp-config`` when a project ``.mcp.json`` exists. Resolution
+    order:
+
+    1. ``<directory>/.mcp.json`` — the launch cwd (the worktree for a
+       worktree-transport dispatch). This is the canonical case for cockpit
+       itself, where ``.mcp.json`` is tracked and so present in every fresh
+       worktree.
+    2. ``<repo_path>/.mcp.json`` — the repo-root fallback, when supplied and
+       the launch cwd has none. This covers the **external product-project**
+       case: ``POST /enable`` writes ``.mcp.json`` into the repo-root, but a
+       product-project keeps it untracked (gitignored), so a fresh
+       ``git worktree add origin/master`` worktree never receives it. Pointing
+       ``--mcp-config`` at the repo-root copy gives the dispatched agent its
+       ``cockpit-kanban`` MCP **without** placing an untracked file inside the
+       worktree — the file-copy route left a dirty worktree that broke the
+       ship gate and risked committing Cockpit's ``Authorization: Bearer``
+       token into the customer's git history (kaart ``3672c073…``).
+
+    Only emits ``--mcp-config`` when the resolved file actually exists: a fresh
+    product-project has none, and Claude Code would otherwise exit 1 in ~2s
+    with ``MCP config file not found`` (see kanban card `[problem]
+    Product-project zonder .mcp.json sterft binnen ~2s bij elke dispatch`).
+    When no file is found, ``--strict-mcp-config`` alone means zero MCPs are
+    loaded — the safest possible default for a brand-new project.
 
     Single source of truth: both this legacy bridge and the newer
     ``agentic_cli/claude_code.build_spawn_command`` import the same helper so a
@@ -47,6 +65,10 @@ def _project_mcp_config_args(directory: str) -> list[str]:
     """
     args = ["--strict-mcp-config"]
     mcp_path = Path(directory) / ".mcp.json"
+    if not mcp_path.is_file() and repo_path:
+        repo_mcp = Path(repo_path) / ".mcp.json"
+        if repo_mcp.is_file():
+            mcp_path = repo_mcp
     if mcp_path.is_file():
         args += ["--mcp-config", str(mcp_path)]
     return args
