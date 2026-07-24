@@ -113,6 +113,33 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "generated index strict verification",
         "generate-doc-index.py --check --strict",
     ),
+    # The carve-out must enumerate the conflict set with a machine-checkable
+    # command so the "exclusively in generated artifacts" condition is a
+    # hard predicate, not a judgement call (kanban card efb8187b…).
+    (
+        "conflict-set enumeration",
+        'git -C "$WT" diff --name-only --diff-filter=U',
+    ),
+    # Concrete resolution command for the carved-out conflict files. The
+    # abstract "keep the generated files from the merge result" wording
+    # that this replaced (kanban card efb8187b…) had no operational meaning
+    # — the agent had to improvise a command and got it wrong. `--theirs`
+    # takes the branch-being-merged's regenerated content as a placeholder
+    # that the next `generate-doc-index.py` step overwrites anyway.
+    (
+        "concrete generated-file resolution",
+        'git -C "$WT" checkout --theirs -- docs/cockpit/README.md docs/cockpit/llms.txt',
+    ),
+    # `scripts/generate-doc-index.py:78` derives its repo-root from
+    # `Path(__file__).resolve().parent.parent`, so the script MUST be invoked
+    # via the worktree path. A bare `./scripts/generate-doc-index.py` (or
+    # even `cd $WT && ./scripts/generate-doc-index.py`) regenerates the
+    # calling shell's tree, not the conflicted `$WT` — see kanban card
+    # efb8187b… for the failure mode.
+    (
+        "worktree-path script invocation",
+        '"$WT"/scripts/generate-doc-index.py',
+    ),
 ]
 
 def _dispatch_direct_prompt() -> str:
@@ -223,6 +250,19 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     )
     assert "git diff --quiet HEAD" in commands, (
         "invariants list lost the pre-flight 'git diff --quiet HEAD' guard"
+    )
+    # The carve-out has its own dedicated invariants — pin them too so a
+    # future editor can't soften the carve-out back to prose without
+    # breaking this guard. See kanban card efb8187b… for the failure mode
+    # that motivated each one.
+    assert any("--diff-filter=U" in c for c in commands), (
+        "invariants list lost the conflict-set enumeration command"
+    )
+    assert any("checkout --theirs" in c for c in commands), (
+        "invariants list lost the concrete generated-file resolution command"
+    )
+    assert any('"$WT"/scripts/generate-doc-index.py' == c for c in commands), (
+        "invariants list lost the worktree-path script invocation command"
     )
 
 
