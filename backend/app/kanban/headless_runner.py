@@ -751,6 +751,7 @@ async def run_headless(
     )
 
     env = _build_env(
+        cli_id=cli_id,
         provider=provider, model=model, project_key=project_key,
         endpoint_base_url=endpoint_base_url,
         endpoint_auth_token=endpoint_auth_token,
@@ -866,7 +867,7 @@ def _build_argv(executable: str, prompt: str, *, skip_permissions: bool) -> list
     return argv
 
 
-def _build_env(*, provider: str, model: str | None,
+def _build_env(*, cli_id: str, provider: str, model: str | None,
                project_key: str | None,
                endpoint_base_url: str | None = None,
                endpoint_auth_token: str | None = None) -> dict[str, str] | None:
@@ -884,11 +885,31 @@ def _build_env(*, provider: str, model: str | None,
     (not the dispatcher-side ``endpoint_*`` names); pass them through here
     so the headless subprocess gets the same env the worktree transport
     produces for the same card.
+
+    kaart 88f3c990… (provider-parity with worktree transport): ``cli_id``
+    is the dispatched CLI's id, threaded through from ``run_headless`` —
+    it MUST NOT be hard-coded to ``"claude-code"``, because every CLI has
+    its own endpoint-routing mechanism and Claude-Code-specific env vars
+    (``CLAUDE_CODE_USE_BEDROCK``, ``CLAUDE_CODE_AUTO_COMPACT_WINDOW``,
+    the ``ANTHROPIC_*`` triple) are meaningless (or actively wrong) for
+    Codex, OpenCode, Copilot, MiMo. The worktree transport passes
+    ``cli.id`` to ``build_provider_env``; this function mirrors that.
+    ``minimax_api_key`` and ``minimax_base_url`` come from the backend's
+    Settings — the headless transport has no ``SpawnCommandOptions``
+    carrier to hold them, so it reads settings directly (the worktree
+    path reads ``settings.minimax_api_key`` + ``options.minimax_base_url
+    or settings.minimax_base_url``; headless uses settings for both
+    because the SpawnTransport protocol does not yet expose a
+    per-card ``minimax_base_url`` override).
     """
+    from app.config import settings
     from app.services.agentic_cli.provider_env import build_provider_env, build_spawn_env
 
     provider_env = build_provider_env(
-        provider, model=model, cli_id="claude-code",
+        provider, model=model,
+        cli_id=cli_id,
+        minimax_api_key=settings.minimax_api_key,
+        minimax_base_url=settings.minimax_base_url,
         base_url=endpoint_base_url,
         auth_token=endpoint_auth_token,
     )
