@@ -1188,7 +1188,33 @@ async def resolve_effective_provider_and_model(
     card_overrides: dict | None = None,
     card_model: str | None = None,
 ) -> dict:
-    """Walk the kanban model-precedence chain once and return the resolved
+    """**CANONICAL**: "what provider/model would this card spawn on?"
+
+    **Always call this function** — never re-walk the 5-layer chain ad-hoc
+    — from any new dispatch-side gate, pool helper, per-card spawn
+    decision, quota-accounting step, or cost-attribution hook. Re-walking
+    even a *subset* of the chain is the bug class the manual-pause gate
+    shipped with (kaart f056b2888a…, fix commit ``77f5c8c``): the early
+    ``_provider_for_card`` helper only walked the last two layers and
+    silently gated against the wrong provider. A new gate writer landing
+    here should be able to spot this and the self-check in
+    ``scripts/check-dispatch-resolver-usage.sh`` in ≤1 grep.
+
+    The self-check greps ``backend/app/kanban/dispatch.py`` for direct
+    reads of ``column_override[.get("provider"/.get("model")]``,
+    direct calls of the column-default helpers (``get_column_default_provider``,
+    ``get_column_default_model``), direct attribute access of the form
+    ``column.default_provider`` / ``column.default_model``, and direct
+    reads of the per-card ``model`` field (via ``getattr(card, "model"``)
+    outside this function and outside any line annotated with a
+    ``# resolver-bypass: <reason>`` justification — the bare sentinel
+    with no reason text does NOT exempt a line. New ad-hoc lookups get
+    flagged at PR time; the exemption is reserved for the handful of
+    helpers that intentionally narrow the chain (e.g.
+    ``_provider_for_card`` walking only the last two layers for the
+    rate-limit/spillover path).
+
+    Walk the kanban model-precedence chain once and return the resolved
     provider/model plus the precedence level each field came from.
 
     Single source of truth for the chain previously duplicated between
@@ -1209,6 +1235,16 @@ async def resolve_effective_provider_and_model(
                                  unless the explicit overrides name a
                                  provider-native model)
       → ``PROVIDER_ANTHROPIC`` / ``None`` as the chain-end default.
+
+    Spec: this precedence chain is the canonical reference for the
+    model-routing decision. The board-wide pin + pool layer are
+    documented in ``docs/cockpit/subscription-flexibiliteit-analyse.md``
+    and the per-card-overrides layer in
+    ``docs/cockpit/kanban-model-override.md``; the column/persona
+    fallback layers are codified in this function (and the
+    ``_effective_model`` helper it calls). Any new dispatch-side gate
+    that needs to know "what subscription would this card land on"
+    must read the result of this function — not a partial re-derivation.
 
     Args:
       - ``pick_pool``: caller-supplied async pool picker. ``dispatch``
@@ -3476,7 +3512,14 @@ async def _run_card(
     in the past, was held out of dispatch by `_is_due`) from a manual
     force-dispatch via the UI. When set AND the card had `scheduled_at`,
     post an `Auto-resuming (scheduled_at was <iso>)` activity comment so the
-    activity feed shows the tick didn't force-dispatch early."""
+    activity feed shows the tick didn't force-dispatch early.
+
+    **Provider routing:** the spawn-side provider/model pick below delegates
+    to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). Any new "what subscription would this
+    card land on" decision in this path MUST go through the resolver rather
+    than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk."""
     # Re-read the card from the DB before claiming. The auto-tick's cached
     # `cards` list reflects state from `list_cards` at the top of the tick;
     # a `set_resume` MCP call (or any other concurrent update) that commits
@@ -3903,10 +3946,10 @@ async def _provider_for_card(
     if card is None or not agent_column:
         return None
     column_override = (getattr(card, "column_overrides", None) or {}).get(agent_column) or {}
-    override_provider = column_override.get("provider") or None
+    override_provider = column_override.get("provider") or None  # resolver-bypass: intentional narrow helper (last two layers only) for the rate-limit / spillover path
     return (
         override_provider
-        or await get_column_default_provider(session, project_key, agent_column)
+        or await get_column_default_provider(session, project_key, agent_column)  # resolver-bypass: paired with the line above; see comment on `_provider_for_card`
         or PROVIDER_ANTHROPIC
     )
 
@@ -3929,7 +3972,7 @@ async def _effective_provider_for_pause_gate(
     if card is None or not target_column:
         return None
     card_overrides = (getattr(card, "column_overrides", None) or {}).get(target_column) or None
-    card_model = getattr(card, "model", None)
+    card_model = getattr(card, "model", None)  # resolver-bypass: passthrough only — these args are fed straight into `resolve_effective_provider_and_model` below
     # ``_phase_cli_id`` is the sync resolver the spawn path uses to map a
     # card's agent to its CLI id; the pool picker needs this so a manually
     # paused entry on the wrong CLI doesn't accidentally gate a card that
@@ -4656,7 +4699,17 @@ async def dispatch_project(
     exercise the cap directly).
 
     If transport is None, the appropriate transport is automatically selected based
-    on the project's sandcastle configuration."""
+    on the project's sandcastle configuration.
+
+    **Provider routing:** any "what subscription would this card land on" decision
+    in this path MUST go through
+    ``resolve_effective_provider_and_model`` (the canonical 5-layer resolver —
+    see its docstring) — including the manual-pause gate below, which routes
+    through ``_card_is_manually_paused`` →
+    ``_effective_provider_for_pause_gate``. Ad-hoc re-walks of even a subset
+    of the chain slipped the original pause-gate through with the wrong
+    provider (kaart f056b2888a…, fix commit ``77f5c8c``); the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new such walk."""
     cards = await list_cards(session, project_key)
     if live_sessions is not None:
         if await reap_stale_claims(
@@ -5169,6 +5222,14 @@ async def dispatch_all_pending(
     board. The per-card ``dispatch_card`` / ``redispatch_card`` calls bypass
     this gate by design — those are explicit human overrides from the
     CardDrawer.
+
+    **Provider routing:** the manual-pause gate below routes through
+    ``_card_is_manually_paused`` → ``_effective_provider_for_pause_gate``, which
+    delegates to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). New "what subscription would each of these
+    cards land on" decisions in this path MUST go through the resolver rather
+    than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk.
     """
     if transport is None:
         transport = await get_transport_for_project(project_path)
@@ -5259,6 +5320,15 @@ async def redispatch_all_orphans(
 
     When transport is None, each card's transport is auto-selected.
     Returns a list of result dicts for each successfully dispatched card.
+
+    **Provider routing:** the manual-pause gate below routes through
+    ``_card_is_manually_paused`` → ``_effective_provider_for_pause_gate``, which
+    delegates to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). The single-card ``redispatch_card`` path
+    (Card drawer) is an explicit per-card human override and stays unguarded,
+    but any new bulk-path pause / quota / cost decision MUST go through the
+    resolver rather than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk.
     """
     from app.kanban.service import list_orphaned_cards
     orphans = await list_orphaned_cards(session, project_key)
@@ -5592,7 +5662,16 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
 
 
 async def _retry_queued_cards(transport: SpawnTransport) -> None:
-    """Attempt to dispatch queued cards when memory is available."""
+    """Attempt to dispatch queued cards when memory is available.
+
+    **Provider routing:** the manual-pause gate below routes through
+    ``_card_is_manually_paused`` → ``_effective_provider_for_pause_gate``, which
+    delegates to ``resolve_effective_provider_and_model`` (the canonical 5-layer
+    resolver — see its docstring). New "what subscription would each queued
+    card land on" decisions in this path MUST go through the resolver rather
+    than re-walking the chain ad-hoc — the self-check
+    ``scripts/check-dispatch-resolver-usage.sh`` flags any new ad-hoc walk.
+    """
     from app.kanban.db import KanbanSessionLocal
     from app.services.scheduling.pending_queue import pending_queue
 
