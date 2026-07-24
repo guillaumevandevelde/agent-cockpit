@@ -2897,6 +2897,61 @@ async def test_redispatch_kills_live_session_posts_audit_comment(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_redispatch_over_live_session_audit_names_automatic_recovery_not_operator():
+    """The live-session kill audit comment must not misattribute the restart.
+
+    Regression for the reopened [self-improve] card 4ed4edb9. The prior fix's
+    audit text hardcoded an operator narrative ("the operator / an explicit
+    redispatch call chose to restart anyway"). When the caller is automatic
+    startup session-recovery (`recover_interrupted_sessions`), no operator chose
+    anything — the snapshot the recovery pass acted on simply went stale. If the
+    comment still blames an operator, the activity feed points a future debugger
+    at the wrong actor, which is exactly the documentation defect that reopened
+    this card. Assert the automatic-recovery caller gets an accurate attribution.
+    """
+    import unittest.mock as mock
+
+    from app.kanban import session_recovery
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="still-productive", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-product-analy-312c"},
+        )
+        await s.commit()
+
+    class _R:
+        returncode = 0
+        stdout = "k-product-analy-312c\n"
+        stderr = ""
+    with mock.patch.object(dispatch.subprocess, "run", lambda *a, **k: _R()), \
+         mock.patch.object(session_recovery, "_resolve_resume_target", return_value=None), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        async with KanbanSessionLocal() as s:
+            await dispatch.redispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+                caller_source="recover_interrupted_sessions",
+            )
+            await s.commit()
+            activity = await service.card_activity(s, cid)
+
+    kill_notes = [op for op in activity
+                  if op.op_type == "comment"
+                  and (op.payload or {}).get("text", "").startswith("**Note:**")
+                  and "k-product-analy-312c" in (op.payload or {}).get("text", "")]
+    assert len(kill_notes) == 1, (
+        "redispatch over a live session must post exactly one live-kill Note; "
+        f"got {len(kill_notes)}."
+    )
+    text = kill_notes[0].payload["text"]
+    assert "automatic startup session-recovery" in text
+    assert "No operator chose to restart" in text
+    assert "the operator / an explicit redispatch call chose to restart" not in text
+
+
+@pytest.mark.asyncio
 async def test_redispatch_posts_caller_source_audit_comment():
     """Regression for [self-improve] Redispatch-trigger-bron onzichtbaar in activity-feed.
 
