@@ -62,6 +62,37 @@ class TestParseResetTime:
         assert reset_time.hour == 23
         assert reset_time.minute == 10
 
+    @pytest.mark.parametrize(
+        ("msg", "expected_hour", "expected_minute"),
+        [
+            (
+                "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+                23,
+                10,
+            ),
+            (
+                "You've hit your weekly limit · resets 9pm (Europe/Brussels)",
+                21,
+                0,
+            ),
+            (
+                "You've hit your session limit · resets 8am (Europe/Brussels)",
+                8,
+                0,
+            ),
+        ],
+    )
+    def test_parses_analyzed_reset_time_forms(
+        self, msg, expected_hour, expected_minute
+    ):
+        svc = AutoResumeService()
+        result = svc.parse_reset_time(msg)
+        assert result is not None
+        reset_time, tz_name = result
+        assert tz_name == "Europe/Brussels"
+        assert reset_time.hour == expected_hour
+        assert reset_time.minute == expected_minute
+
     def test_returns_none_for_invalid_message(self):
         svc = AutoResumeService()
         assert svc.parse_reset_time("No limit info here") is None
@@ -141,6 +172,18 @@ class TestClassifyNotification:
         assert svc.classify_notification(
             message="Token Plan limit reached for this account",
         ) == "limit"
+
+    @pytest.mark.parametrize("msg", [
+        "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+        "API Error: Request rejected (429) · Token Plan usage limit reached: …",
+        "You've hit your session limit · resets 11:10am (Europe/Brussels)",
+        "You've hit your session limit · resets 9pm (Europe/Brussels)",
+        "You've hit your session limit · resets 8am (Europe/Brussels)",
+        "You've hit your weekly limit · resets 9pm (Europe/Brussels)",
+    ])
+    def test_detects_literal_analyzed_limit_forms(self, msg):
+        svc = AutoResumeService()
+        assert svc.classify_notification(message=msg) == "limit"
 
     def test_needs_input_via_notification_type(self):
         """When Claude Code 2.1.198+ forwards a structured notification_type,
