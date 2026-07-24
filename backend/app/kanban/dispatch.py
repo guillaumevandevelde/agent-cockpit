@@ -4986,7 +4986,9 @@ async def _card_is_manually_paused(
     they all honour the same precedence (``global override → pool → column
     override → default``). Returns ``False`` when the chain can't resolve,
     so a missing-card edge case never wedges a tick."""
-    from app.kanban.dispatch_pause import is_manually_paused
+    from app.kanban.dispatch_pause import is_manually_paused, list_manually_paused_providers
+    if not await list_manually_paused_providers(session):
+        return False
     provider = await _effective_provider_for_pause_gate(
         session, project_key=project_key, project_path=project_path,
         card=card, target_column=target_column,
