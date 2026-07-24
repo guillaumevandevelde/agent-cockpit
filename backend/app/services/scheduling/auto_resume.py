@@ -14,9 +14,9 @@ from apscheduler.triggers.date import DateTrigger
 
 logger = logging.getLogger(__name__)
 
-# Pattern: "You've hit your session limit · resets 11:10pm (Europe/Brussels)"
+# Pattern: "You've hit your session or weekly limit · resets 11:10pm (Europe/Brussels)"
 _LIMIT_PATTERN = re.compile(
-    r"hit your session limit.*?resets\s+(\d{1,2}:\d{2}(?:am|pm)?)\s*\(([^)]+)\)",
+    r"hit your .*? limit.*?resets\s+(\d{1,2}(?::\d{2})?(?:am|pm)?)\s*\(([^)]+)\)",
     re.IGNORECASE,
 )
 
@@ -52,8 +52,8 @@ class AutoResumeService:
     def is_limit_notification(self, message: str | None) -> bool:
         """Check if a notification message indicates a session rate limit.
 
-        Recognises the canonical "hit your session limit" wording plus
-        provider-specific alternatives: a Minimax subscription can also
+        Recognises the canonical "hit your session limit" and "hit your weekly
+        limit" wording plus provider-specific alternatives: a Minimax subscription can also
         report a 429 / "Token Plan" limit, an "API Error" with "429",
         or a "request rejected" / "usage limit" notice — all of which
         mean the same thing operationally: every session on this device
@@ -104,7 +104,7 @@ class AutoResumeService:
         "Claude needs your input") would be misclassified as needs_input.
         """
         text = (message or "").lower()
-        if "hit your session limit" in text or any(
+        if "hit your session limit" in text or "hit your weekly limit" in text or any(
             needle in text
             for needle in (
                 "api error",
@@ -161,8 +161,9 @@ class AutoResumeService:
         now = datetime.now(tz)
         try:
             if "am" in time_str.lower() or "pm" in time_str.lower():
-                # 12h format: "11:10pm"
-                parsed = datetime.strptime(time_str.lower(), "%I:%M%p")
+                # 12h format: "11:10pm" or "9pm"
+                format_string = "%I:%M%p" if ":" in time_str else "%I%p"
+                parsed = datetime.strptime(time_str.lower(), format_string)
                 reset_time = now.replace(
                     hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0
                 )
