@@ -158,6 +158,29 @@ chmod +x "$TMP/fake_pytest_fail.sh"
 check "failing pytest → pass_tests=0" 'grep -q "^pass_tests=0" "$TMP/score_fail.out"'
 check "pass_diff stays 1 (diff is still right)" 'grep -q "^pass_diff=1" "$TMP/score_fail.out"'
 
+# Verify the pytest invocation is scoped to the canonical test file so the
+# collection errors from unrelated modules (e.g. test_response_model_validation,
+# test_sync_handlers_are_async, which import `app.api.v1.agent_activity` that
+# doesn't exist on master) don't trip -k zero_column_cap to exit non-zero.
+# Without this scope, the harness reports a scoring-infra-failure (pass_tests=0
+# in every run) that has nothing to do with the agent's actual output.
+cat > "$TMP/fake_pytest_argv.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" > "$PYTEST_ARGV_LOG"
+exit 0
+EOF
+chmod +x "$TMP/fake_pytest_argv.sh"
+
+( source "$LIB" 2>/dev/null && \
+  PYTEST_CMD="$TMP/fake_pytest_argv.sh" \
+  PYTEST_ARGV_LOG="$TMP/pytest.argv" \
+  BACKEND_DIR="$TMP/wt/backend" \
+  score_golden "$TMP/wt" > /dev/null )
+check "pytest invocation is scoped to tests/test_kanban_dispatch.py" \
+    'grep -q "tests/test_kanban_dispatch.py" "$TMP/pytest.argv"'
+check "pytest invocation still uses -k zero_column_cap" \
+    'grep -q "\-k zero_column_cap" "$TMP/pytest.argv"'
+
 # ----------------------------------------------------------------------------
 echo "Task 4: resolve_measurement_base_ref + prepare_golden_revert"
 
