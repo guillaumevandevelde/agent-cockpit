@@ -165,7 +165,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md) | 🔵 decided |
 | [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md) | 🔵 decided |
 | [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md) | 🔵 decided |
-| [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md) | 🟡 proposed |
+| [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md) | 🔵 decided |
 | [Product-analyses uniformeren — template, skill of eigen agent?](./product-analyse-methode-decision.md) | 🔵 decided |
 | [Rebrand naar Agent Cockpit — naam, logo en thema](./rebrand-decision.md) | 🔵 decided |
 | [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md) | 🔵 decided |
