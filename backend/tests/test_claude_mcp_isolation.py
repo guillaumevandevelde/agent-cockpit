@@ -219,6 +219,102 @@ def test_project_mcp_config_args_includes_mcp_config_when_present(tmp_path):
     ]
 
 
+def test_project_mcp_config_args_falls_back_to_repo_root(tmp_path):
+    """External product-project (route 2, kaart ``3672c073…``): the launch
+    cwd (a fresh worktree) has no ``.mcp.json``, but the repo-root does (an
+    untracked file written by ``POST /enable``). The helper must point
+    ``--mcp-config`` at the repo-root copy so the agent still gets its
+    ``cockpit-kanban`` MCP — without any file being placed in the worktree.
+    """
+    from app.services.runs.cc_spawn import _project_mcp_config_args
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".mcp.json").write_text('{"mcpServers": {"cockpit-kanban": {}}}', encoding="utf-8")
+
+    args = _project_mcp_config_args(str(worktree), str(repo))
+
+    assert args == [
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(repo / ".mcp.json"),
+    ], f"repo-root fallback should supply --mcp-config; got {args}"
+    assert not (worktree / ".mcp.json").exists(), (
+        "the fallback must NOT create a file in the worktree"
+    )
+
+
+def test_project_mcp_config_args_prefers_worktree_over_repo_root(tmp_path):
+    """When both the launch cwd and the repo-root have ``.mcp.json`` (cockpit
+    itself, where the file is tracked and so present in every worktree), the
+    launch cwd wins — its copy is the canonical origin/master version."""
+    from app.services.runs.cc_spawn import _project_mcp_config_args
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (worktree / ".mcp.json").write_text('{"mcpServers": {"WORKTREE": {}}}', encoding="utf-8")
+    (repo / ".mcp.json").write_text('{"mcpServers": {"REPO": {}}}', encoding="utf-8")
+
+    args = _project_mcp_config_args(str(worktree), str(repo))
+
+    assert args == [
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(worktree / ".mcp.json"),
+    ], f"launch cwd .mcp.json must take precedence; got {args}"
+
+
+def test_project_mcp_config_args_omits_when_neither_present(tmp_path):
+    """Brand-new product-project: no ``.mcp.json`` in the worktree or the
+    repo-root. Emit only ``--strict-mcp-config`` — inventing a path Claude
+    can't open would kill the spawn with exit 1."""
+    from app.services.runs.cc_spawn import _project_mcp_config_args
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    args = _project_mcp_config_args(str(worktree), str(repo))
+    assert args == ["--strict-mcp-config"], (
+        f"no .mcp.json anywhere must drop --mcp-config; got {args}"
+    )
+
+
+def test_claude_build_spawn_command_uses_repo_path_fallback(tmp_path):
+    """End-to-end: ``build_spawn_command`` threads ``repo_path`` so a worktree
+    without its own ``.mcp.json`` still gets ``--mcp-config`` from the
+    repo-root (kaart ``3672c073…``)."""
+    from app.services.agentic_cli import get_agentic_cli
+    from app.services.agentic_cli.base import SpawnCommandOptions
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".mcp.json").write_text('{"mcpServers": {"cockpit-kanban": {}}}', encoding="utf-8")
+
+    provider = get_agentic_cli("claude-code")
+    command = provider.build_spawn_command(
+        SpawnCommandOptions(
+            directory=str(worktree), mode="worktree",
+            worktree_name="k-feature-a1b2", repo_path=str(repo),
+        )
+    )
+
+    assert "--mcp-config" in command, (
+        f"worktree lacking .mcp.json must fall back to repo_path; cmd={command}"
+    )
+    idx = command.index("--mcp-config")
+    assert command[idx + 1] == str(repo / ".mcp.json"), (
+        f"--mcp-config must target the repo-root .mcp.json; got {command[idx + 1]!r}"
+    )
+
+
 def test_claude_build_spawn_command_skips_mcp_config_when_no_mcp_json(tmp_path):
     """End-to-end: ``build_spawn_command`` drops ``--mcp-config`` for fresh projects."""
     from app.services.agentic_cli import get_agentic_cli

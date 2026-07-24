@@ -72,8 +72,12 @@ class ClaudeCodeCli(AgenticCli):
             raise ValueError(f"Unsupported Claude Code mode: {options.mode}")
 
         # Pin MCP servers to the project-`.mcp.json` only — see
-        # `_project_mcp_config_args` for the rationale.
-        command += _project_mcp_config_args(options.directory)
+        # `_project_mcp_config_args` for the rationale. ``repo_path`` is the
+        # repo-root fallback used when the launch cwd (a fresh worktree) has
+        # no ``.mcp.json`` of its own — the external product-project case,
+        # where ``POST /enable`` wrote an untracked ``.mcp.json`` into the
+        # repo-root (kaart ``3672c073…``).
+        command += _project_mcp_config_args(options.directory, options.repo_path)
 
         if options.skip_permissions:
             command.append("--dangerously-skip-permissions")

@@ -349,8 +349,7 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     """Write JSON atomically (tmp + os.replace) so a crash mid-write
     cannot corrupt an existing ``settings.json``.
 
-    Mirrors the pattern in ``api.v1.kanban.router._write_json_atomic``
-    and ``dispatch._copy_repo_mcp_json_to_worktree``.
+    Mirrors the pattern in ``api.v1.kanban.router._write_json_atomic``.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(

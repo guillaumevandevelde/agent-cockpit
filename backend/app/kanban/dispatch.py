@@ -2807,46 +2807,6 @@ def _resolve_project_secrets(project_key: str | None) -> dict[str, str]:
         return {}
 
 
-def _copy_repo_mcp_json_to_worktree(repo: str, worktree_path: str) -> None:
-    """Carry the repo-root ``.mcp.json`` into a freshly-created worktree.
-
-    ``git worktree add origin/master`` only checks out tracked files, so a
-    gitignored ``.mcp.json`` (the external product-project case — Cockpit
-    writes it via ``POST /enable`` and the project is expected to keep it
-    out of version control) is missing in the worktree. The agent would
-    then launch with ``--strict-mcp-config`` + zero MCPs and lose access to
-    ``cockpit-kanban`` (kaart ``3672c073…``).
-
-    Behaviour:
-      - repo has ``.mcp.json``, worktree lacks it → copy file contents.
-      - repo has it, worktree has it (cockpit itself: ``.mcp.json`` is
-        tracked) → leave the worktree copy alone; it's the canonical
-        version from origin/master.
-      - repo lacks it → no-op. ``POST /enable`` will create it later.
-
-    Failures are logged at WARNING and swallowed — a missing or
-    unwritable ``.mcp.json``, or any other read/write fault at this
-    filesystem boundary, must never break a dispatch.
-    """
-    repo_mcp = Path(repo) / ".mcp.json"
-    wt_mcp = Path(worktree_path) / ".mcp.json"
-    if not repo_mcp.is_file() or wt_mcp.exists():
-        return
-    try:
-        # Bytes-only — ``.mcp.json`` is JSON-as-text but we never need to
-        # parse it here, and ``read_text(encoding="utf-8")`` would raise
-        # ``UnicodeDecodeError`` on a non-UTF-8 file (a real risk: the
-        # project owner can hand-craft any bytes via ``POST /enable``).
-        # ``UnicodeDecodeError`` is a ``ValueError``, not an ``OSError``,
-        # so the broader ``except Exception`` is what makes this
-        # boundary truly fail-safe.
-        wt_mcp.write_bytes(repo_mcp.read_bytes())
-    except Exception as e:  # noqa: BLE001 — boundary copy must never break dispatch
-        logger.warning(
-            "could not copy %s into worktree %s: %s",
-            repo_mcp, worktree_path, e)
-
-
 def _install_rtk_for_dispatch(
     *, card_id: str, project_key: str, column_name: str,
     worktree_path: str, repo_path: str,
@@ -2954,16 +2914,20 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
              worktree_path, "origin/master"],
             capture_output=True, text=True, timeout=60, check=True)
 
-        # Carry the repo-root ``.mcp.json`` into the worktree so the
-        # dispatched agent can reach ``cockpit-kanban`` via MCP. A fresh
-        # ``git worktree add origin/master`` only checks out *tracked*
-        # files; for an external product-project the ``.mcp.json`` written
-        # by ``POST /enable`` is gitignored (untracked), so without this
-        # step the worktree starts without one and the agent launches with
-        # ``--strict-mcp-config`` + zero MCPs (kaart ``3672c073…``). The
-        # helper preserves a tracked copy (cockpit itself) and is a no-op
-        # when the repo has no ``.mcp.json``.
-        _copy_repo_mcp_json_to_worktree(repo, worktree_path)
+        # NOTE: we deliberately do NOT copy the repo-root ``.mcp.json`` into
+        # the worktree. A fresh ``git worktree add origin/master`` only checks
+        # out *tracked* files, so for an external product-project the
+        # ``.mcp.json`` written by ``POST /enable`` (untracked/gitignored) is
+        # absent in the worktree. The dispatched agent still needs it to reach
+        # ``cockpit-kanban`` via MCP — but that is handled by pointing
+        # ``--mcp-config`` at the repo-root copy via
+        # ``SpawnCommandOptions.repo_path`` (see ``_project_mcp_config_args``),
+        # NOT by materialising an untracked file inside the worktree. Copying
+        # it in left the worktree permanently dirty: the ship gate refused to
+        # run ("uncommitted/untracked changes") and the prescribed
+        # ``git add -A && git commit`` recovery would have committed Cockpit's
+        # ``Authorization: Bearer`` token into the customer's git history and
+        # pushed it to their remote (kaart ``3672c073…``).
 
         # Resolve project_key for env-injection (card `[security][D]
         # Per-project env-injectie in spawn_session`). Uses the safe
