@@ -103,6 +103,12 @@ EOF
 #
 # Honors PYTEST_CMD (from resolve-pytest-cmd.sh or override) and BACKEND_DIR.
 # pass_tests: PYTEST_CMD exit code 0 on the zero_column_cap selector.
+#             Scoped to tests/test_kanban_dispatch.py because the master
+#             suite has collection errors in unrelated modules that import
+#             `app.api.v1.agent_activity` (which doesn't exist on master);
+#             a bare -k zero_column_cap across the whole suite exits
+#             non-zero on those import errors even when the targeted two
+#             tests pass.
 # pass_diff:  git diff -- backend/app/kanban/dispatch.py matches the canonical
 #             single-line `>` → `>=` revert (line-level substring check).
 score_golden() {
@@ -119,7 +125,7 @@ score_golden() {
     local pass_tests=0 pass_diff=0
 
     if [ -n "$pytest_cmd" ]; then
-        if ( cd "$backend_dir" && "$pytest_cmd" -k zero_column_cap -q >/dev/null 2>&1 ); then
+        if ( cd "$backend_dir" && "$pytest_cmd" tests/test_kanban_dispatch.py -k zero_column_cap -q >/dev/null 2>&1 ); then
             pass_tests=1
         fi
     fi
