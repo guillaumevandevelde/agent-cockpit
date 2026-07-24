@@ -8632,3 +8632,24 @@ class TestResolvePriorBranchWarning:
         prompt = transport.calls[0]["prompt"]
         assert "PRID-BRANCH-WAARSCHUWING" not in prompt
 
+
+
+@pytest.mark.asyncio
+async def test_manual_pause_gate_skips_provider_resolution_when_no_manual_pause(monkeypatch):
+    async with KanbanSessionLocal() as s:
+        card = SimpleNamespace(column_overrides={}, model=None, agent="engineer")
+
+        async def unexpected_resolution(*args, **kwargs):
+            raise AssertionError("provider resolution should be skipped")
+
+        from app.kanban import dispatch_pause
+
+        async def no_manual_pauses(session):
+            return []
+
+        monkeypatch.setattr(dispatch, "_effective_provider_for_pause_gate", unexpected_resolution)
+        monkeypatch.setattr(dispatch_pause, "list_manually_paused_providers", no_manual_pauses)
+        assert await dispatch._card_is_manually_paused(
+            s, project_key=PK, project_path="/tmp/project", card=card,
+            target_column="engineer",
+        ) is False
