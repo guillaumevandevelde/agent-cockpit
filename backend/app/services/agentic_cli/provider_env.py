@@ -47,6 +47,18 @@ OPEN_CODE_CLI_ID = "open-code"
 # tmux's argv.
 _OPENCODE_AUTH_TOKEN_ENV_VAR = "CCK_OPENCODE_AUTH_TOKEN"
 
+# Stable provider id for the injected custom-endpoint entry. OpenCode's own
+# ``--model`` flag requires the ``provider/model`` form (verified against
+# the installed CLI: ``opencode run --model <bare-model>`` raises
+# ``ProviderModelNotFoundError`` — the provider segment is mandatory, never
+# inferred). Using a fixed id here — instead of keying the injected
+# ``provider`` dict by the model string itself — lets ``open_code.py``
+# build that flag value without having to inspect the generated config: it
+# only needs this constant plus ``options.model``. See
+# ``build_spawn_command`` in ``open_code.py`` for the paired half of this
+# contract.
+OPEN_CODE_ENDPOINT_PROVIDER_ID = "cockpit-endpoint"
+
 MINIMAX_BASE_URL_INTERNATIONAL = "https://api.minimax.io/anthropic"
 MINIMAX_BASE_URL_CHINA = "https://api.minimaxi.com/anthropic"
 # MiniMax's Anthropic-compatible API only accepts bare model identifiers
@@ -75,22 +87,26 @@ def _build_opencode_endpoint_env(base_url: str, model: str, auth_token: str | No
 
     Shape follows the documented custom-Anthropic-compatible-provider recipe
     (https://opencode.ai/docs/providers/ — ``npm: "@ai-sdk/anthropic"`` with
-    ``options.baseURL`` + ``options.apiKey``): one inline provider entry
-    keyed by the model id (stable and unique for a single per-spawn config),
-    declaring exactly the one model the endpoint should serve. The apiKey is
-    always the ``{env:VAR}`` substitution form, never a literal, so the
-    secret never has to live twice (once as a JSON string value, once as an
-    env var) — OpenCode resolves it from ``_OPENCODE_AUTH_TOKEN_ENV_VAR`` at
-    startup. When no token is supplied the reference is still emitted (the
-    "ambient credential" pattern MiniMax already uses); the var is just left
-    unset here.
+    ``options.baseURL`` + ``options.apiKey``): one inline provider entry,
+    keyed by the fixed ``OPEN_CODE_ENDPOINT_PROVIDER_ID`` (not the model
+    id — OpenCode's ``--model`` flag needs the ``provider/model`` form, and
+    a caller building that flag only has ``options.model``, not this
+    generated config, so the provider segment must be a constant both sides
+    agree on; see ``open_code.py:build_spawn_command``), declaring exactly
+    the one model the endpoint should serve. The apiKey is always the
+    ``{env:VAR}`` substitution form, never a literal, so the secret never
+    has to live twice (once as a JSON string value, once as an env var) —
+    OpenCode resolves it from ``_OPENCODE_AUTH_TOKEN_ENV_VAR`` at startup.
+    When no token is supplied the reference is still emitted (the "ambient
+    credential" pattern MiniMax already uses); the var is just left unset
+    here.
     """
     env: dict[str, str] = {}
     if auth_token:
         env[_OPENCODE_AUTH_TOKEN_ENV_VAR] = auth_token
     config = {
         "provider": {
-            model: {
+            OPEN_CODE_ENDPOINT_PROVIDER_ID: {
                 "npm": "@ai-sdk/anthropic",
                 "options": {
                     "baseURL": base_url,

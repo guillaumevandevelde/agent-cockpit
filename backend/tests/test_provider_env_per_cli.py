@@ -251,9 +251,12 @@ def test_opencode_compatible_emits_config_content_with_provider_entry():
     # Model is declared with at least one entry referencing the requested model.
     model_ids = list(provider["models"].keys())
     assert model_ids == ["claude-sonnet-4-5"]
-    # Stable provider id (slug is named after the upstream model so the
-    # CLI's own --model flag can resolve it directly).
-    assert provider_id == "claude-sonnet-4-5"
+    # Stable, model-independent provider id: open_code.py's
+    # build_spawn_command needs to construct "--model <id>/<model>" without
+    # inspecting this generated config, so both sides agree on a fixed
+    # constant rather than a value derived from the (variable) model string.
+    from app.services.agentic_cli.provider_env import OPEN_CODE_ENDPOINT_PROVIDER_ID
+    assert provider_id == OPEN_CODE_ENDPOINT_PROVIDER_ID
 
 
 def test_opencode_compatible_without_auth_token_still_emits_config():
@@ -301,6 +304,71 @@ def test_opencode_minimax_translates_via_config_content():
     assert model_ids == [MINIMAX_DEFAULT_MODEL]
     # Claude-Code-specific compact window never leaks to OpenCode.
     assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in env
+
+
+# ---------------------------------------------------------------------------
+# OpenCode CLI --model wiring — the injected config and the spawned CLI
+# argv must agree on the provider id, or the resolved endpoint is
+# unreachable even though the env looks correct.
+# ---------------------------------------------------------------------------
+
+
+def test_opencode_build_spawn_command_prefixes_model_for_compatible_provider():
+    """``build_spawn_command`` must send ``--model <provider_id>/<model>``
+    for the ``anthropic-compatible`` provider — OpenCode's own ``--model``
+    flag requires the ``provider/model`` form (confirmed against the real
+    CLI: a bare model id raises ``ProviderModelNotFoundError``). The
+    provider id must be the same constant ``_build_opencode_endpoint_env``
+    used as the injected config's provider key, or the resolved endpoint is
+    unreachable even though ``OPENCODE_CONFIG_CONTENT`` looks correct.
+    """
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.agentic_cli.open_code import OpenCodeCli
+    from app.services.agentic_cli.provider_env import (
+        OPEN_CODE_ENDPOINT_PROVIDER_ID,
+        PROVIDER_COMPATIBLE,
+    )
+
+    command = OpenCodeCli().build_spawn_command(SpawnCommandOptions(
+        directory="/tmp", mode="plain",
+        provider=PROVIDER_COMPATIBLE, model="claude-sonnet-4-5",
+    ))
+    assert "--model" in command
+    idx = command.index("--model")
+    assert command[idx + 1] == f"{OPEN_CODE_ENDPOINT_PROVIDER_ID}/claude-sonnet-4-5"
+
+
+def test_opencode_build_spawn_command_prefixes_model_for_minimax_provider():
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.agentic_cli.open_code import OpenCodeCli
+    from app.services.agentic_cli.provider_env import (
+        OPEN_CODE_ENDPOINT_PROVIDER_ID,
+        PROVIDER_MINIMAX,
+    )
+
+    command = OpenCodeCli().build_spawn_command(SpawnCommandOptions(
+        directory="/tmp", mode="plain",
+        provider=PROVIDER_MINIMAX, model="MiniMax-M3",
+    ))
+    idx = command.index("--model")
+    assert command[idx + 1] == f"{OPEN_CODE_ENDPOINT_PROVIDER_ID}/MiniMax-M3"
+
+
+def test_opencode_build_spawn_command_does_not_prefix_model_for_native_anthropic():
+    """The default ``anthropic`` provider uses OpenCode's own auth/config;
+    ``options.model`` is expected to already be in ``provider/model`` form
+    (e.g. an OpenCode-native model id) and must pass through unchanged —
+    prefixing it would break normal, non-endpoint model selection.
+    """
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.agentic_cli.open_code import OpenCodeCli
+
+    command = OpenCodeCli().build_spawn_command(SpawnCommandOptions(
+        directory="/tmp", mode="plain",
+        provider="anthropic", model="anthropic/claude-sonnet-4-6",
+    ))
+    idx = command.index("--model")
+    assert command[idx + 1] == "anthropic/claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------
