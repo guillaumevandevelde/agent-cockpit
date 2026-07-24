@@ -7,11 +7,15 @@
 # without a prompt-mutating saver applied.
 #
 # Subcommands:
-#   compare   — default; runs two counterbalanced baseline/saver trials
-#   baseline  — runs only the no-saver variant
-#   with-saver — runs only the saver-mutated variant
+#   compare     — default; runs two counterbalanced trials with three variants
+#   baseline    — runs only the no-saver variant
+#   with-saver  — runs only the prompt-mutated proxy variant
+#   real-saver  — runs only the real-RTK-hook variant (requires RTK on PATH or
+#                 COCKPIT_RTK_BIN; fails closed if no binary resolves)
 #
-# See docs/cockpit/token-saver-meet-harnas.md for the design rationale.
+# See docs/cockpit/token-saver-meet-harnas.md for the design rationale and
+# docs/superpowers/specs/2026-07-24-token-saver-integration-design.md §8.4
+# for the `real-saver` variant's role in lockstep with the dispatch helper.
 
 set -u
 
@@ -23,39 +27,44 @@ source "$SCRIPT_DIR/lib/worktree-trap.sh"
 
 CMD="${1:-compare}"
 case "$CMD" in
-    baseline|with-saver|compare) ;;
+    baseline|with-saver|real-saver|compare) ;;
     -h|--help|help)
         cat <<EOF
-Usage: $0 [baseline|with-saver|compare]
+Usage: $0 [baseline|with-saver|real-saver|compare]
 
 Subcommands:
-  compare     default; runs two isolated trials in counterbalanced order
+  compare     default; runs two isolated trials in counterbalanced order with
+              baseline / with-saver / real-saver variants
   baseline    runs one isolated no-saver variant
-  with-saver  runs one isolated saver-mutated variant
+  with-saver  runs one isolated saver-mutated variant (prompt-mutation proxy)
+  real-saver  runs one isolated variant with the actual RTK hook installed
+              into the scratch worktree's .claude/settings.json. Fails closed
+              if no RTK binary resolves (COCKPIT_RTK_BIN, cache, or PATH).
 
 Output: a Markdown table with one row per trial/variant and separate input,
 cache_creation, cache_read, output, pass_tests, and pass_diff columns.
 
 The harness creates a fresh scratch git worktree and reapplies the
 backend/app/kanban/dispatch.py golden-task revert for every variant. In
-compare mode it runs baseline→with-saver, then with-saver→baseline, so neither
-worktree state nor variant order is a confounder. Scratch worktrees are removed
-on exit.
+compare mode each trial runs baseline / with-saver / real-saver (in that
+order on trial 1, reverse on trial 2) so neither worktree state nor variant
+order is a confounder. Scratch worktrees are removed on exit.
 
 Requires: claude CLI on PATH, git, pytest (via venv or system). Each variant
 runs in its own detached scratch worktree created from the resolved baseline
-ref (origin/master → master → HEAD) of $REPO_ROOT, so no network is required;
+ref (origin/master → master → HEAD) of \$REPO_ROOT, so no network is required;
 the only filesystem footprint between invocations is the result directory
-printed at the end of the run.
+printed at the end of the run. The \`real-saver\` variant additionally requires
+the RTK binary on PATH (or via COCKPIT_RTK_BIN).
 
-Results land in $MEASURE_RESULT_DIR (defaults to
-$REPO_ROOT/.tmp-measure-token-saver/<timestamp>/). Pass an explicit
+Results land in \$MEASURE_RESULT_DIR (defaults to
+\$REPO_ROOT/.tmp-measure-token-saver/<timestamp>/). Pass an explicit
 absolute path to MEASURE_RESULT_DIR to capture artifacts in a known place.
 EOF
         exit 0
         ;;
     *)
-        echo "error: unknown subcommand '$CMD' (expected baseline|with-saver|compare)" >&2
+        echo "error: unknown subcommand '$CMD' (expected baseline|with-saver|real-saver|compare)" >&2
         exit 2
         ;;
 esac
@@ -132,6 +141,19 @@ run_one() {
         local mutated="$prompt_file.mutated"
         apply_saver "$prompt_file" "$mutated"
         raw_prompt="$mutated"
+    elif [ "$variant" = "real-saver" ]; then
+        # Install the RTK hook into the scratch worktree's .claude/settings.json
+        # via the dispatch helper itself. Failure here is "no silent fallback":
+        # write a missing-reason marker into the result row, skip the claude
+        # invocation, and let emit_table show the row as ?/?/—/?/? — the
+        # operator can read <result_prefix>.missing for the reason.
+        if ! apply_real_saver "$wt" > "${result_prefix}.rtk-bin" 2> "${result_prefix}.rtk-err"; then
+            printf 'real-saver install failed (rc=%s): %s\n' "$?" \
+                "$(tr '\n' ' ' < "${result_prefix}.rtk-err")" \
+                > "${result_prefix}.missing"
+            cleanup_scratch_worktree "$REPO_ROOT" "$wt"
+            return 0
+        fi
     fi
 
     (
@@ -199,10 +221,18 @@ emit_table() {
     printf '|--------------------|--------------|------------------|--------------|----------|-------------|------------|\n'
     local trial variant
     for trial in "$@"; do
-        for variant in baseline with-saver; do
+        for variant in baseline with-saver real-saver; do
             if [ -s "$RESULT_DIR/trial-${trial}-${variant}.json" ] \
-                || [ -s "$RESULT_DIR/trial-${trial}-${variant}.score" ]; then
+                || [ -s "$RESULT_DIR/trial-${trial}-${variant}.score" ] \
+                || [ -s "$RESULT_DIR/trial-${trial}-${variant}.missing" ]; then
                 emit_row "trial-${trial}-${variant}"
+                # If the row is missing (real-saver install failed), surface
+                # the reason right under the row so operators don't have to
+                # dig into the artifact directory to understand the "?".
+                local missing_file="$RESULT_DIR/trial-${trial}-${variant}.missing"
+                if [ -s "$missing_file" ]; then
+                    printf '| %-18s | %s\n' "(reason)" "$(cat "$missing_file")"
+                fi
             fi
         done
         if [ "$trial" -gt 0 ]; then
@@ -220,9 +250,15 @@ case "$CMD" in
         run_one 1 with-saver
         emit_table 1
         ;;
+    real-saver)
+        run_one 1 real-saver
+        emit_table 1
+        ;;
     compare)
         run_one 1 baseline
         run_one 1 with-saver
+        run_one 1 real-saver
+        run_one 2 real-saver
         run_one 2 with-saver
         run_one 2 baseline
         emit_table 1 2

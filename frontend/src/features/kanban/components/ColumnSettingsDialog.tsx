@@ -52,6 +52,11 @@ export function ColumnSettingsDialog({
   const [editProvider, setEditProvider] = useState<string>(DEFAULT_PROVIDER_SENTINEL);
   const [editModel, setEditModel] = useState<string>("");
   const [editMaxSessions, setEditMaxSessions] = useState<number | null>(null);
+  // Per-lane RTK opt-in (kaart c31333bf…). Lives next to the project-wide
+  // kill-switch in /api/v1/kanban/token-saver — both must be on for the
+  // hook to land. Default false (empty state) because the button row
+  // shows "Edit" → "Save"; the user opts in explicitly.
+  const [editTokenSaver, setEditTokenSaver] = useState<boolean>(false);
   const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
   const [minimaxOptions, setMinimaxOptions] = useState<string[]>([
     ...MINIMAX_MODEL_SUGGESTIONS,
@@ -164,6 +169,7 @@ export function ColumnSettingsDialog({
         default_provider: provider,
         default_model: model,
         max_sessions: editMaxSessions,
+        token_saver_enabled: editTokenSaver,
       });
       setItems((prev) => prev.map((c) => (c.id === id ? col : c)));
       setEditingId(null);
@@ -372,6 +378,18 @@ export function ColumnSettingsDialog({
                       title="Pause — stops new dispatches into this column; running sessions keep going"
                     >Pause</button>
                   </div>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={editTokenSaver}
+                      onChange={(e) => setEditTokenSaver(e.target.checked)}
+                      data-testid={`token-saver-toggle-${col.id}`}
+                    />
+                    Token saver (RTK)
+                    <span className="text-muted-foreground">
+                      — reduces Bash output
+                    </span>
+                  </label>
                   <Button size="sm" onClick={() => handleUpdate(col.id)}>
                     Save
                   </Button>
@@ -396,6 +414,15 @@ export function ColumnSettingsDialog({
                     {col.default_model && (
                       <div className="text-xs text-muted-foreground">
                         Model: {col.default_model}
+                      </div>
+                    )}
+                    {col.token_saver_enabled && (
+                      <div
+                        className="text-xs text-emerald-600 dark:text-emerald-400"
+                        data-testid={`token-saver-badge-${col.id}`}
+                        title="RTK token-saver hook is installed for dispatches into this column (subject to the project-wide kill-switch)"
+                      >
+                        Token saver: on
                       </div>
                     )}
                     {/* Effective-model precedence line. Only surfaces when an
@@ -444,6 +471,7 @@ export function ColumnSettingsDialog({
                               : modelSuggestionsForProvider(col.default_provider, modelOptions),
                           ));
                           setEditMaxSessions(col.max_sessions);
+                          setEditTokenSaver(col.token_saver_enabled ?? false);
                         }}
                       >
                         Edit
