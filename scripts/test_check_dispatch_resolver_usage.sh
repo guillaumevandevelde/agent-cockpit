@@ -15,12 +15,18 @@
 #   4. clean fixture (no patterns) → exit 0
 #   5. hit detection (column_override.get) → reports + exit 0 in advisory
 #   6. hit detection + --strict → exit 1
-#   7. bypass annotation `# resolver-bypass:` suppresses the hit
+#   7. bypass annotation `# resolver-bypass: <reason>` suppresses the hit
 #   8. resolver function body is excluded (the canonical
 #      `resolve_effective_provider_and_model` reads don't trip the script)
 #   9. docstring lines are excluded (the script's self-documenting
 #      patterns in the leading comment / docstring don't trip)
 #  10. multiple patterns in one fixture aggregate into one warning
+#  11. `column.default_provider` / `column.default_model` — the literal
+#      shape named in the card's suggested-improvement text — is detected
+#  12. a full-line `#` comment mentioning `column.default_provider` in
+#      prose is NOT flagged (comment-only references aren't code)
+#  13. a BARE `# resolver-bypass:` with no reason text does NOT exempt
+#      the line — the sentinel alone is not a justification
 #
 # Self-cleanup: TMP is moved to <TMP>.leftover on EXIT so a failed
 # fixture persists for the operator to inspect — `rm -rf` is
@@ -201,6 +207,53 @@ check "multi: 3 hits reported" \
   'echo "$SERR" | grep -q "dispatch.py:3" && echo "$SERR" | grep -q "dispatch.py:6" && echo "$SERR" | grep -q "dispatch.py:9"'
 check "multi: '3 ad-hoc' summary" \
   'echo "$SERR" | grep -q "3 ad-hoc"'
+
+# 11. `column.default_provider` / `column.default_model` — the literal
+# shape named in the card's suggested-improvement text — is detected.
+mkdir -p "$TMP/literal_shape"
+cat > "$TMP/literal_shape/dispatch.py" <<'EOF'
+async def helper_a():
+    return column.default_provider
+
+async def helper_b():
+    return column.default_model
+EOF
+run_sut "" "$TMP/literal_shape/dispatch.py"
+check "literal-shape: both column.default_* hits reported" \
+  'echo "$SERR" | grep -q "dispatch.py:2" && echo "$SERR" | grep -q "dispatch.py:5"'
+check "literal-shape: advisory exit 0" '[ "$SRC" -eq 0 ]'
+
+# 12. a full-line `#` comment mentioning `column.default_provider` in
+# prose is NOT flagged.
+mkdir -p "$TMP/comment_only"
+cat > "$TMP/comment_only/dispatch.py" <<'EOF'
+# Precedence: column.default_provider / column.default_model / card.model
+async def some_helper():
+    return 42
+EOF
+run_sut "" "$TMP/comment_only/dispatch.py"
+check "comment-only: no false-positive on prose column.default_provider" \
+  '[ "$SRC" -eq 0 ]'
+check "comment-only: OK message on stdout" \
+  'echo "$SOUT" | grep -q "^OK:"'
+
+# 13. a BARE `# resolver-bypass:` with no reason text does NOT exempt
+# the line.
+mkdir -p "$TMP/bare_bypass"
+cat > "$TMP/bare_bypass/dispatch.py" <<'EOF'
+async def some_helper():
+    column_override = {"provider": "anthropic"}
+    override_provider = column_override.get("provider") or None  # resolver-bypass:
+    return override_provider
+EOF
+run_sut "" "$TMP/bare_bypass/dispatch.py"
+check "bare-bypass: still flagged (no reason text)" \
+  'echo "$SERR" | grep -q "^WARNING:"'
+check "bare-bypass: advisory exit 0 (not strict)" \
+  '[ "$SRC" -eq 0 ]'
+run_sut "--strict" "$TMP/bare_bypass/dispatch.py"
+check "bare-bypass + --strict: exit 1 (unjustified bypass is a real hit)" \
+  '[ "$SRC" -eq 1 ]'
 
 # ---
 echo

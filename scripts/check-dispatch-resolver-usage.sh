@@ -19,9 +19,11 @@
 #   backend/app/kanban/dispatch.py for direct reads of
 #     column_override.get("provider"/"model")
 #     get_column_default_provider( / get_column_default_model(
+#     column.default_provider / column.default_model
 #     getattr(card, "model"
 #   that are NOT inside the resolver function body and NOT annotated
-#   with a `# resolver-bypass:` justification.
+#   with a `# resolver-bypass: <reason>` justification — the sentinel
+#   alone (no reason text after the colon) does NOT exempt a line.
 #
 # Strategy: a Python helper walks the file line-by-line while tracking
 #   (a) whether we're inside a triple-quoted docstring (skip those lines),
@@ -36,8 +38,14 @@
 # single source of truth, and the 5-layer chain is dispatch-specific.
 #
 # Advisory by default (mirrors check-decision-register.sh,
-# check-kanban-meta-security-conflicts.sh, check-schema-rename-coverage.sh):
-# prints hits but exits 0. Pass --strict to flip to blocking.
+# check-kanban-meta-security-conflicts.sh, check-schema-rename-coverage.sh,
+# check-doc-frontmatter.sh, check-doc-links.sh, check-test-harness-coverage.sh,
+# check-analysis-outcomes.sh — every check-*.sh in this repo): prints hits
+# but exits 0. Pass --strict to flip to blocking. This is a deliberate,
+# repo-wide convention (see each script's own header + CLAUDE.md's
+# "(advisory; --strict = exit 1)" annotation on every one of them), not an
+# oversight — a brand-new advisory sweeper landing in CI as a hard failure
+# on day one would block unrelated PRs on a pattern nobody has triaged yet.
 #
 # Usage:
 #   scripts/check-dispatch-resolver-usage.sh [--strict] [--file PATH]
@@ -100,16 +108,20 @@ path = sys.argv[1]
 
 # Patterns that pick a provider/model outside the resolver. Each is a
 # standalone regex (no alternation) so the printed hit text shows which
-# pattern matched. The card's suggested patterns
-# (`column.default_provider` / `getattr(card, "model"…`) are the user-
-# facing shapes; the actual codebase uses the helper-function form
-# (`get_column_default_provider(...)`) and the per-card-override dict
-# form (`column_override.get("provider"/"model")`) for the same effect,
-# so we scan for those.
+# pattern matched. The card's suggested-improvement text names two
+# literal example shapes — `column.default_provider` and
+# `getattr(card, "model", ...)` — which we match directly (even though
+# the current codebase has no raw `column.default_provider` attribute
+# access; the helper-function form `get_column_default_provider(...)`
+# is what's actually used today for the same effect). We scan for BOTH
+# the literal card-text shapes and the actual codebase shapes so a
+# future caller using either form gets caught.
 PATTERNS = [
     re.compile(r'column_override\.get\(\s*"(?:provider|model)"'),
     re.compile(r'\bget_column_default_provider\s*\('),
     re.compile(r'\bget_column_default_model\s*\('),
+    re.compile(r'\bcolumn\.default_provider\b'),
+    re.compile(r'\bcolumn\.default_model\b'),
     re.compile(r'getattr\(\s*card\s*,\s*"model"'),
 ]
 
@@ -206,6 +218,14 @@ for idx, raw in enumerate(lines, start=1):
         if rs <= idx <= re_end:
             continue
 
+    # Skip full-line `#` comments — a prose reference to
+    # `column.default_provider` etc. in an explanatory comment is not
+    # code that bypasses the resolver. Trailing comments on a code line
+    # (e.g. `x = foo()  # note`) still scan the code portion normally;
+    # only a line whose FIRST non-whitespace character is `#` is skipped.
+    if line.lstrip().startswith('#'):
+        continue
+
     # Hit detection. Stop at the first matching pattern per line so the
     # printed hit text is unambiguous.
     matched = None
@@ -216,10 +236,15 @@ for idx, raw in enumerate(lines, start=1):
     if matched is None:
         continue
 
-    # Exemption: `# resolver-bypass:` justification on the same line.
-    # The trailing colon is part of the sentinel so a comment like
-    # `# resolver bypass` (no colon) doesn't accidentally exempt a line.
-    if '# resolver-bypass:' in line:
+    # Exemption: `# resolver-bypass:` JUSTIFICATION on the same line —
+    # the sentinel alone is not enough, there must be non-whitespace
+    # reason text after the colon. A bare `# resolver-bypass:` (no
+    # reason) is exactly the kind of unexplained bypass this script
+    # exists to catch, so it does NOT exempt the line. The trailing
+    # colon is part of the sentinel so a comment like `# resolver
+    # bypass` (no colon) doesn't accidentally exempt a line either.
+    bypass_match = re.search(r'#\s*resolver-bypass:(.*)$', line)
+    if bypass_match and bypass_match.group(1).strip():
         continue
 
     # Flatten tabs/newlines so the bash awk below stays column-anchored.

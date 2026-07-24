@@ -1203,11 +1203,14 @@ async def resolve_effective_provider_and_model(
     The self-check greps ``backend/app/kanban/dispatch.py`` for direct
     reads of ``column_override[.get("provider"/.get("model")]``,
     direct calls of the column-default helpers (``get_column_default_provider``,
-    ``get_column_default_model``), and direct reads of the per-card
-    ``model`` field (via ``getattr(card, "model"``) outside this function
-    and outside any line annotated with a ``# resolver-bypass:`` justification.
-    New ad-hoc lookups get flagged at PR time; the exemption is reserved for
-    the handful of helpers that intentionally narrow the chain (e.g.
+    ``get_column_default_model``), direct attribute access of the form
+    ``column.default_provider`` / ``column.default_model``, and direct
+    reads of the per-card ``model`` field (via ``getattr(card, "model"``)
+    outside this function and outside any line annotated with a
+    ``# resolver-bypass: <reason>`` justification — the bare sentinel
+    with no reason text does NOT exempt a line. New ad-hoc lookups get
+    flagged at PR time; the exemption is reserved for the handful of
+    helpers that intentionally narrow the chain (e.g.
     ``_provider_for_card`` walking only the last two layers for the
     rate-limit/spillover path).
 
