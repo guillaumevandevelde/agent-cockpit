@@ -20,6 +20,7 @@ build_spawn_env()`` follow-up.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import NamedTuple
 
@@ -30,6 +31,33 @@ PROVIDER_MINIMAX = "minimax"
 PROVIDER_COMPATIBLE = "anthropic-compatible"
 
 CLAUDE_CODE_CLI_ID = "claude-code"
+CODEX_CLI_ID = "codex-cli"
+OPEN_CODE_CLI_ID = "open-code"
+
+# ``OPENCODE_CONFIG_CONTENT`` is OpenCode's own inline-config env var (see
+# https://opencode.ai/docs/config — "allowing runtime overrides without
+# modifying config files"). This is the *only* mechanism the endpoint
+# translation below can rely on: unlike Claude-Code's ANTHROPIC_BASE_URL,
+# OpenCode has no top-level "point at a different endpoint" env var — a
+# custom endpoint is a full provider entry (npm package + baseURL + apiKey
+# + model list), which only exists as JSON, either on disk or via this
+# env var. The credential is referenced as ``{env:VAR}`` (OpenCode's own
+# variable-substitution syntax) rather than embedded as a literal, so the
+# secret never has to be duplicated inside the JSON string that lands in
+# tmux's argv.
+_OPENCODE_AUTH_TOKEN_ENV_VAR = "CCK_OPENCODE_AUTH_TOKEN"
+
+# Stable provider id for the injected custom-endpoint entry. OpenCode's own
+# ``--model`` flag requires the ``provider/model`` form (verified against
+# the installed CLI: ``opencode run --model <bare-model>`` raises
+# ``ProviderModelNotFoundError`` — the provider segment is mandatory, never
+# inferred). Using a fixed id here — instead of keying the injected
+# ``provider`` dict by the model string itself — lets ``open_code.py``
+# build that flag value without having to inspect the generated config: it
+# only needs this constant plus ``options.model``. See
+# ``build_spawn_command`` in ``open_code.py`` for the paired half of this
+# contract.
+OPEN_CODE_ENDPOINT_PROVIDER_ID = "cockpit-endpoint"
 
 MINIMAX_BASE_URL_INTERNATIONAL = "https://api.minimax.io/anthropic"
 MINIMAX_BASE_URL_CHINA = "https://api.minimaxi.com/anthropic"
@@ -52,6 +80,87 @@ def _clean(value: str | None) -> str | None:
     if "\n" in stripped or "\r" in stripped or "\x00" in stripped:
         raise ValueError("Environment value must not contain newlines or null bytes")
     return stripped
+
+
+def _build_opencode_endpoint_env(base_url: str, model: str, auth_token: str | None) -> dict[str, str]:
+    """Translate a resolved endpoint into OpenCode's ``OPENCODE_CONFIG_CONTENT``.
+
+    Shape follows the documented custom-Anthropic-compatible-provider recipe
+    (https://opencode.ai/docs/providers/ — ``npm: "@ai-sdk/anthropic"`` with
+    ``options.baseURL`` + ``options.apiKey``): one inline provider entry,
+    keyed by the fixed ``OPEN_CODE_ENDPOINT_PROVIDER_ID`` (not the model
+    id — OpenCode's ``--model`` flag needs the ``provider/model`` form, and
+    a caller building that flag only has ``options.model``, not this
+    generated config, so the provider segment must be a constant both sides
+    agree on; see ``open_code.py:build_spawn_command``), declaring exactly
+    the one model the endpoint should serve. The apiKey is always the
+    ``{env:VAR}`` substitution form, never a literal, so the secret never
+    has to live twice (once as a JSON string value, once as an env var) —
+    OpenCode resolves it from ``_OPENCODE_AUTH_TOKEN_ENV_VAR`` at startup.
+    When no token is supplied the reference is still emitted (the "ambient
+    credential" pattern MiniMax already uses); the var is just left unset
+    here.
+    """
+    env: dict[str, str] = {}
+    if auth_token:
+        env[_OPENCODE_AUTH_TOKEN_ENV_VAR] = auth_token
+    config = {
+        "provider": {
+            OPEN_CODE_ENDPOINT_PROVIDER_ID: {
+                "npm": "@ai-sdk/anthropic",
+                "options": {
+                    "baseURL": base_url,
+                    "apiKey": f"{{env:{_OPENCODE_AUTH_TOKEN_ENV_VAR}}}",
+                },
+                "models": {model: {}},
+            },
+        },
+    }
+    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(config)
+    return env
+
+
+def _build_endpoint_env(
+    cli_id: str,
+    base_url: str,
+    model: str,
+    auth_token: str | None,
+    *,
+    extra_claude_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Translate a resolved ``(base_url, model, auth_token)`` endpoint into
+    the spawned CLI's own env/config contract.
+
+    Each CLI has its own answer to "how do I point at a different
+    inference endpoint" — this is the per-CLI translation table the card
+    asks for, replacing the single Claude-shaped branch with an
+    early-return. A CLI with no such mechanism raises explicitly rather
+    than silently doing nothing (the exact bug this card fixes: silence
+    here previously meant "looks configured, does nothing").
+    """
+    if cli_id == CLAUDE_CODE_CLI_ID:
+        env = {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_MODEL": model}
+        if auth_token:
+            env["ANTHROPIC_AUTH_TOKEN"] = auth_token
+        if extra_claude_env:
+            env.update(extra_claude_env)
+        return env
+
+    if cli_id == OPEN_CODE_CLI_ID:
+        return _build_opencode_endpoint_env(base_url, model, auth_token)
+
+    if cli_id == CODEX_CLI_ID:
+        raise ValueError(
+            f"{cli_id} does not support routing to a custom Anthropic-compatible "
+            "endpoint via environment variables — Codex selects its provider "
+            "through its own config.toml (model_provider=…), not "
+            "ANTHROPIC_BASE_URL; see codex_cli.py",
+        )
+
+    raise ValueError(
+        f"{cli_id} does not support routing to a custom endpoint "
+        "(no ANTHROPIC_BASE_URL-equivalent mechanism is wired for this CLI)",
+    )
 
 
 def build_provider_env(
@@ -77,6 +186,13 @@ def build_provider_env(
     (Codex CLI, which selects Bedrock via its own ``--config model_provider=``
     flag — see ``codex_cli.py`` — plus OpenCode/Copilot/MiniMax) only gets the
     shared, non-secret AWS_REGION/AWS_PROFILE env.
+
+    For endpoint-setting providers (MiniMax, ``anthropic-compatible``), the
+    resolved ``(base_url, model, auth_token)`` triple is handed to
+    ``_build_endpoint_env``, which is the per-CLI translation table: each
+    CLI decides for itself how (or whether) it can be pointed at a custom
+    endpoint, instead of one Claude-shaped branch with an early-return for
+    everyone else.
     """
     if provider == PROVIDER_BEDROCK:
         env: dict[str, str] = {}
@@ -97,19 +213,17 @@ def build_provider_env(
         return env
 
     if provider == PROVIDER_MINIMAX:
-        # Always set base URL/model explicitly (never conditionally) so a
-        # stale ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN inherited from the
+        # Always resolve base URL/model explicitly (never conditionally) so
+        # a stale ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN inherited from the
         # session's ambient environment can't leak through from a previous
         # provider choice, per MiniMax's own docs warning about conflicts.
-        env = {
-            "ANTHROPIC_BASE_URL": _clean(minimax_base_url) or MINIMAX_BASE_URL_INTERNATIONAL,
-            "ANTHROPIC_MODEL": _clean(model) or MINIMAX_DEFAULT_MODEL,
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": MINIMAX_AUTO_COMPACT_WINDOW,
-        }
-        cleaned_key = _clean(minimax_api_key)
-        if cleaned_key:
-            env["ANTHROPIC_AUTH_TOKEN"] = cleaned_key
-        return env
+        resolved_base_url = _clean(minimax_base_url) or MINIMAX_BASE_URL_INTERNATIONAL
+        resolved_model = _clean(model) or MINIMAX_DEFAULT_MODEL
+        resolved_token = _clean(minimax_api_key)
+        return _build_endpoint_env(
+            cli_id, resolved_base_url, resolved_model, resolved_token,
+            extra_claude_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": MINIMAX_AUTO_COMPACT_WINDOW},
+        )
 
     if provider == PROVIDER_COMPATIBLE:
         # Data-driven branch: ``base_url`` and ``model`` come from caller-
@@ -131,14 +245,8 @@ def build_provider_env(
             raise ValueError(
                 "anthropic-compatible provider requires a non-empty model",
             )
-        env = {
-            "ANTHROPIC_BASE_URL": cleaned_base_url,
-            "ANTHROPIC_MODEL": cleaned_model,
-        }
         cleaned_token = _clean(auth_token)
-        if cleaned_token:
-            env["ANTHROPIC_AUTH_TOKEN"] = cleaned_token
-        return env
+        return _build_endpoint_env(cli_id, cleaned_base_url, cleaned_model, cleaned_token)
 
     return {}
 
