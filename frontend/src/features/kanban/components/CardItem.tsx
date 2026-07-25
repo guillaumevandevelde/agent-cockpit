@@ -24,8 +24,65 @@ const PRIORITY_VARIANT: Record<string, BadgeProps["variant"]> = {
   high: "destructive",
 };
 
+// Per-deliverable-kind glyph for the Done-column card view. Instead of one
+// generic 📎 count, a finished card shows one "{icon} {count}" chip per kind so
+// an operator can see at a glance what shipped (a branch, a PR, N commits …).
+// Keep the keys in sync with the Deliverable["kind"] union in types.ts; any
+// kind absent here falls back to the generic 📦 in `deliverablesByKind`.
+const DELIVERABLE_KIND_ICONS: Record<string, string> = {
+  pr: "🔗",
+  branch: "🔀",
+  commit: "💻",
+  link: "🔗",
+  note: "📝",
+  plan: "📋",
+  plan_ref: "📋",
+  spec: "📄",
+};
+
+const DONE_SUMMARY_MAX = 80;
+
 function isFutureSchedule(scheduledAt: string | null): boolean {
   return !!scheduledAt && new Date(scheduledAt).getTime() > Date.now();
+}
+
+// Compact completion date for a Done card. "vandaag"/"gisteren" for the two most
+// recent calendar days (the common case an operator scans), otherwise a short
+// locale date like "10 Jul". The impure `new Date()` lives inside the helper —
+// calling it directly in the component render body trips the react-compiler
+// ESLint rule (see the note in CLAUDE.md / `isFutureSchedule`).
+function formatCompletedDate(completedAt: string): string {
+  const then = new Date(completedAt);
+  const now = new Date();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startOfDay = (d: Date) =>
+    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(then)) / dayMs);
+  if (dayDiff === 0) return "vandaag";
+  if (dayDiff === 1) return "gisteren";
+  return then.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+// Group a card's deliverables by kind, preserving first-seen order, so the
+// Done-column view can render one "{icon} {count}" chip per kind instead of a
+// single generic 📎 count. A kind with no specific glyph falls back to 📦.
+function deliverablesByKind(
+  deliverables: Card["deliverables"],
+): { kind: string; icon: string; count: number }[] {
+  const order: string[] = [];
+  const counts: Record<string, number> = {};
+  for (const d of deliverables) {
+    if (!(d.kind in counts)) {
+      counts[d.kind] = 0;
+      order.push(d.kind);
+    }
+    counts[d.kind] += 1;
+  }
+  return order.map((kind) => ({
+    kind,
+    icon: DELIVERABLE_KIND_ICONS[kind] ?? "📦",
+    count: counts[kind],
+  }));
 }
 
 // Formats the "To Resume" auto-resume badge text. Deliberately a compact
@@ -157,6 +214,22 @@ export function CardItem({
   const canRedispatch =
     impedimentStatus === "dispatch_failed" && !!projectPath;
 
+  // Done-column completion summary (kanban card e46f8d12). A finished card
+  // shows a ✅ Done badge + short completion date, a truncated summary snippet,
+  // and per-kind deliverable icons — so the Done column reads as "what shipped"
+  // at a glance instead of a wall of bare titles. All gated on `isDone`; no
+  // other column's rendering changes.
+  const isDone = card.column === "Done";
+  const completedLabel = card.completed_at
+    ? formatCompletedDate(card.completed_at)
+    : null;
+  const doneSummary = card.done_summary?.trim() || null;
+  const doneSummarySnippet = doneSummary
+    ? doneSummary.slice(0, DONE_SUMMARY_MAX) +
+      (doneSummary.length > DONE_SUMMARY_MAX ? "…" : "")
+    : null;
+  const deliverableChips = isDone ? deliverablesByKind(card.deliverables) : [];
+
   // Inceptie-pipeline entry point (kanban card c33b2f14 / facet A). Intake
   // cards are human-only — they never auto-dispatch — but the human can
   // promote them to a brand-new project via the Promote-to-project action.
@@ -205,6 +278,20 @@ export function CardItem({
       <div className="flex items-start justify-between gap-2">
         <div className="font-medium text-sm">{card.title}</div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+          {isDone && (
+            <Badge
+              variant="secondary"
+              className="text-[10px] font-normal"
+              data-testid="done-badge"
+              title={
+                card.completed_at
+                  ? `Voltooid: ${new Date(card.completed_at).toLocaleString()}`
+                  : "Voltooid"
+              }
+            >
+              &#9989; Done{completedLabel ? ` ${completedLabel}` : ""}
+            </Badge>
+          )}
           {isToResume && (
             <Badge
               variant="outline"
@@ -229,6 +316,15 @@ export function CardItem({
           )}
         </div>
       </div>
+      {isDone && doneSummarySnippet && (
+        <div
+          className="mt-1 truncate text-xs text-muted-foreground"
+          data-testid="done-summary-snippet"
+          title={doneSummary ?? undefined}
+        >
+          {doneSummarySnippet}
+        </div>
+      )}
       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {readyState && (
           <ReadyStateBadge
@@ -299,9 +395,21 @@ export function CardItem({
         {card.claimed_by && !readyState && (
           <span>&#128100; {card.claimed_by}</span>
         )}
-        {card.deliverables.length > 0 && (
-          <span>&#128206; {card.deliverables.length}</span>
-        )}
+        {card.deliverables.length > 0 &&
+          (isDone ? (
+            <span
+              className="inline-flex items-center gap-1.5"
+              data-testid="done-deliverable-icons"
+            >
+              {deliverableChips.map((c) => (
+                <span key={c.kind} title={`${c.count} ${c.kind}`}>
+                  {c.icon} {c.count}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span>&#128206; {card.deliverables.length}</span>
+          ))}
         {canRedispatch && (
           <Button
             size="sm"
