@@ -4515,6 +4515,12 @@ async def _persist_holds(session, cards, live_ids: set[str] | None = None) -> No
     Deliberately not routed through ``apply_operation``: hold state is derived
     and recomputed every tick, not an authored change, and it must not turn the
     card's activity feed into a poll log.
+
+    Flushes but does not commit. Opening a transaction boundary of its own
+    mid-tick broke test isolation (a committed-then-reused session left the
+    process-global HLC lock bound to a dead event loop), and it buys nothing:
+    the tick's caller commits, and a hold that misses one write is recomputed
+    on the next tick anyway.
     """
     from app.kanban.schemas import COLUMNS
 
@@ -4544,7 +4550,7 @@ async def _persist_holds(session, cards, live_ids: set[str] | None = None) -> No
         changed = True
 
     if changed:
-        await session.commit()
+        await session.flush()
 
 
 def _next_card(
