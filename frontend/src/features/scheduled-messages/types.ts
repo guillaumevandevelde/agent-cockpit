@@ -81,7 +81,10 @@ export interface AutoResumeStatus {
   enabled: boolean
 }
 
+export type HookEventStatus = 'missing' | 'stale' | 'installed'
+
 export interface HooksStatus {
-  events: Record<string, boolean>
+  events: Record<string, HookEventStatus>
+  stale: string[]
   installed: boolean
 }

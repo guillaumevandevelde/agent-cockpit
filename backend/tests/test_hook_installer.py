@@ -175,3 +175,33 @@ def test_status_reports_missing_when_event_has_no_entry(tmp_path, monkeypatch):
     status = hook_installer.get_hooks_status()
 
     assert status == {event: "missing" for event in ALL_EVENTS}
+
+
+def test_install_returns_actual_post_install_status(tmp_path, monkeypatch):
+    """install_missing_hooks must report the *current* disk state, not
+    unconditionally claim every event is installed: a stale entry is not
+    refreshed by this call, so the returned status for that event stays
+    ``stale``. The router reads this status to drive its aggregate
+    ``installed`` flag — lying here would surface a false success in the
+    UI and hide the warning."""
+    settings_file = tmp_path / "settings.json"
+    # Seed every event with a divergent (stale) command.
+    settings_file.write_text(json.dumps({
+        "hooks": {
+            event: [{"hooks": [{
+                "type": "command",
+                "command": "curl -s -X POST http://localhost:8000/api/v1/scheduled-messages/hook-event",
+            }]}]
+            for event in ALL_EVENTS
+        }
+    }))
+    _patch_settings_file(monkeypatch, settings_file)
+
+    status = hook_installer.install_missing_hooks()
+
+    # Nothing changed on disk: every event is still stale.
+    assert all(value == "stale" for value in status.values())
+    written = json.loads(settings_file.read_text())
+    for event in ALL_EVENTS:
+        assert len(written["hooks"][event]) == 1
+        assert written["hooks"][event][0]["hooks"][0]["command"].startswith("curl -s -X POST")

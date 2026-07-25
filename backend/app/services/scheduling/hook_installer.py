@@ -98,9 +98,11 @@ def install_missing_hooks(port: int = 8000) -> dict[str, str]:
     """Additively merge any missing scheduling hooks into ~/.claude/settings.json.
 
     Only appends entries for events that don't already have a scheduling hook;
-    never touches unrelated hooks or other settings keys. After a successful
-    install every event is ``installed``; ``install_missing_hooks`` is the
-    canonical way to clear a ``stale`` status from outside the API.
+    never touches unrelated hooks or other settings keys. ``stale`` entries
+    (a hook is present but its command differs from the current renderer) are
+    intentionally left untouched — clearing them is a separate operator step,
+    so the returned status reflects the *actual* post-install state of the
+    file rather than unconditionally claiming every event is ``installed``.
     """
     settings_file = get_claude_user_settings_file()
     settings_file.parent.mkdir(parents=True, exist_ok=True)
@@ -126,4 +128,4 @@ def install_missing_hooks(port: int = 8000) -> dict[str, str]:
     if changed:
         settings_file.write_text(json.dumps(settings, indent=2))
 
-    return {event: _HOOK_STATUS_INSTALLED for event in block}
+    return get_hooks_status(port)
