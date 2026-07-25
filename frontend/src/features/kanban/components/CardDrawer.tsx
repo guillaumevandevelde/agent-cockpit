@@ -643,20 +643,32 @@ function CardPreviewControl({
 // knows what they're answering.
 const IMPEDIMENT_PREFIX = "**Impediment:** ";
 
-// Control shown when a card sits in the Impediment column. An agent that got
-// stuck posted an `**Impediment:**` question and released its claim; this lets
-// a human type an answer/decision and re-dispatch the card. The answer is
-// posted as a durable `**Resolution:**` comment and injected into the resumed
-// session's `## IMPEDIMENT` prompt section (backend /resolve-impediment) — the
-// reliable channel that a plain activity-feed comment never was.
+// Unified control shown when a card sits in the Impediment column. An agent
+// that got stuck posted an `**Impediment:**` question and released its claim;
+// this lets a human resolve the card via either:
+//
+//   1. A previously-answered structured gate (`report_impediment(options=...)`)
+//      — the recorded choice is shown as read-only context, and the textarea
+//      stays so the human can add extra information before clicking Resolve.
+//   2. A free-text answer in the textarea — the answer is posted as a durable
+//      `**Resolution:**` comment and injected into the resumed session's
+//      `## IMPEDIMENT` prompt section (backend /resolve-impediment).
+//
+// Both paths converge on the same `kanbanApi.resolveImpediment` call. The
+// backend prefers the gate answer when both are present; the textarea content
+// still lands on the activity feed as a `**Resolution:**` comment for
+// auditability. This is the consolidated "impediment resolved" + "decision
+// human answered needed" control (kaart 4279448c).
 function ResolveImpedimentControl({
   card,
   activity,
+  latestAnsweredGate,
   projectPath,
   onChanged,
 }: {
   card: Card;
   activity: ActivityEntry[];
+  latestAnsweredGate: Gate | null;
   projectPath: string;
   onChanged: () => void;
 }) {
@@ -698,6 +710,12 @@ function ResolveImpedimentControl({
     }
   };
 
+  // When a gate has been answered, the recorded choice is the primary answer
+  // (the backend forwards it via `latest_gate_answer`); the textarea is then
+  // the operator's "extra info" slot. When no gate exists, the textarea is
+  // the only source of the answer.
+  const hasGateAnswer = latestAnsweredGate != null;
+
   return (
     <div
       className="rounded-md border-2 border-orange-500/40 bg-orange-50 p-3 text-sm space-y-2 dark:bg-orange-950/30"
@@ -711,10 +729,30 @@ function ResolveImpedimentControl({
           {questionText}
         </div>
       )}
+      {hasGateAnswer && (
+        <div
+          className="rounded-md border border-emerald-600/40 bg-emerald-50/60 p-2 dark:bg-emerald-950/20"
+          data-testid="impediment-recorded-choice"
+        >
+          <div className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-400">
+            Choice recorded
+          </div>
+          <div className="text-muted-foreground">The human picked:</div>
+          <div className="mt-1 font-medium">
+            <MarkdownRenderer
+              content={`> ${latestAnsweredGate.answer ?? ""}`}
+            />
+          </div>
+        </div>
+      )}
       <Textarea
         value={answer}
         onChange={(e) => setAnswer(e.target.value)}
-        placeholder="Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
+        placeholder={
+          hasGateAnswer
+            ? "Optional: add extra context for the resumed session."
+            : "Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
+        }
         disabled={submitting}
         data-testid="resolve-impediment-answer"
       />
@@ -725,7 +763,7 @@ function ResolveImpedimentControl({
           disabled={submitting}
           data-testid="resolve-impediment-submit"
         >
-          {submitting ? "Resolving…" : "Answer & re-dispatch"}
+          {submitting ? "Resolving…" : "Resolve impediment"}
         </Button>
       </div>
     </div>
@@ -1175,21 +1213,11 @@ export function CardDrawer({
   // The button is enabled as soon as the card is in Impediment: the legacy
   // free-text path has no gate to wait for, and the structured path is
   // dispatchable the moment the human picks an option (their choice is what
-  // gets forwarded, not the unresolved question).
-  const resolveImpediment = async () => {
-    try {
-      await kanbanApi.resolveImpediment(card.id, projectPath);
-      // The card lands on Backlog; auto-dispatch picks it up next tick. See
-      // kaart af951ad70... (resolve-impediment → Backlog) — surfacing this in
-      // the toast prevents the operator from thinking a session is already
-      // running when the board hasn't moved yet.
-      toast.success("Impediment resolved — card moved to Backlog; auto-dispatch will pick it up");
-      onChanged();
-    } catch {
-      toast.error("Resolve failed — card may have changed; reloading");
-      onChanged();
-    }
-  };
+  // gets forwarded, not the unresolved question). The actual button lives in
+  // <ResolveImpedimentControl> below — it calls `kanbanApi.resolveImpediment`
+  // directly (with the optional textarea answer) so the two paths share one
+  // codepath. (kaart 4279448c: merge the "impediment resolved" + "decision
+  // human answered needed" flows into a single control.)
 
   const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
   const isClaimedByHuman = card.claimed_by && !isClaimedByAgent;
@@ -1272,30 +1300,14 @@ export function CardDrawer({
           </div>
         ))}
 
-        {card.column === IMPEDIMENT_COLUMN && latestAnsweredGate && (
-          <div
-            data-testid="impediment-resolved-pending"
-            className="rounded-md border-2 border-emerald-600/50 bg-emerald-50 dark:bg-emerald-950/30 p-3 text-sm"
-          >
-            <div className="mb-2 text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-400">
-              Choice recorded
-            </div>
-            <div className="text-muted-foreground">The human picked:</div>
-            <div className="mt-1 font-medium">
-              <MarkdownRenderer
-                content={`> ${latestAnsweredGate.answer ?? ""}`}
-              />
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                onClick={resolveImpediment}
-                data-testid="resolve-impediment-button"
-              >
-                Resolve impediment
-              </Button>
-            </div>
-          </div>
+        {card.column === IMPEDIMENT_COLUMN && (
+          <ResolveImpedimentControl
+            card={card}
+            activity={activity}
+            latestAnsweredGate={latestAnsweredGate}
+            projectPath={projectPath}
+            onChanged={onChanged}
+          />
         )}
 
         {card.column === DONE_COLUMN && (
@@ -1305,18 +1317,7 @@ export function CardDrawer({
             <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
             <ReopenControl card={card} onChanged={onChanged} />
           </>
-        )}
-
-        {card.column === IMPEDIMENT_COLUMN && (
-          <ResolveImpedimentControl
-            card={card}
-            activity={activity}
-            projectPath={projectPath}
-            onChanged={onChanged}
-          />
-        )}
-
-        <div className="text-sm">
+        )}        <div className="text-sm">
           <MarkdownRenderer content={card.description || "_No description_"} />
         </div>
 
