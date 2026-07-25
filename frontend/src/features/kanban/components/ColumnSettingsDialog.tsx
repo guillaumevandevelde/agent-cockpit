@@ -212,7 +212,12 @@ export function ColumnSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className={MODAL_SIZES.MD}>
+      {/* LG (max-w-4xl) — the edit row packs agent + provider + model
+          + max-sessions controls + token-saver checkbox + Save/Cancel, which
+          overflows the previous MD width once the token-saver toggle landed
+          (kaart a6316dba…). The added row height stays well within LG's
+          max-h-[90vh]. */}
+      <DialogContent className={MODAL_SIZES.LG}>
         <DialogHeader>
           <DialogTitle>Column Settings</DialogTitle>
           <DialogDescription>
