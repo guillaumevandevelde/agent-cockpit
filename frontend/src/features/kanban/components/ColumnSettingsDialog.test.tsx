@@ -368,6 +368,38 @@ describe("ColumnSettingsDialog session limit (pause)", () => {
   });
 });
 
+// --- modal width ---------------------------------------------------------
+//
+// Regression guard for kanban card a6316dba…: the edit row packs agent +
+// provider + model + max-sessions controls + token-saver checkbox + Save/
+// Cancel, which overflows the previous MD width once the token-saver toggle
+// landed. The dialog now uses LG (max-w-4xl). Pinning the dialog's rendered
+// className catches a future revert back to MD.
+describe("ColumnSettingsDialog modal width", () => {
+  it("renders the dialog content with the LG (max-w-4xl) width", () => {
+    render(
+      <ColumnSettingsDialog
+        open
+        projectKey="P"
+        projectPath="/p"
+        columns={[COLUMN]}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    // Radix DialogContent renders the merged className on a single element
+    // ("fixed left-[50%] … max-w-4xl …"). Find it by concatenating the
+    // rendered classNames across the document — the dialog content is the
+    // only node that exposes MODAL_SIZES.LG's classes.
+    const allClasses = Array.from(document.querySelectorAll("*"))
+      .map((el) => el.className)
+      .filter((c): c is string => typeof c === "string")
+      .join(" ");
+    expect(allClasses).toContain("max-w-4xl");
+    expect(allClasses).not.toContain("max-w-3xl");
+  });
+});
+
 // --- stale (provider, model) combos already in the database ----------------
 //
 // The co-validation fix guarded new WRITES but never migrated rows written
