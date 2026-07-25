@@ -140,7 +140,10 @@ async def test_dispatch_threads_pool_entry_endpoint_through_transport():
     credential in its own ``ANTHROPIC_AUTH_TOKEN`` (caller-resolved
     outside of dispatch). The transport still receives ``endpoint_name``
     for audit logs even when no token is provided.
-    """
+
+    Kaart 0172e94d…: kolom-default is weggelaten zodat de pool-entry
+    de impliciete kop wordt van de spillover-keten (geen synthetische
+    head met drempel=1.0 die de pool zou overrulen)."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await _seed_endpoint(s, "router-1", base_url="https://router-1.example/v1")
@@ -150,7 +153,7 @@ async def test_dispatch_threads_pool_entry_endpoint_through_transport():
                 drempel=0.9, endpoint_name="router-1",
             )],
         )
-        await _make_column(s, default_provider="anthropic")
+        await _make_column(s)  # geen default_provider — pool's head wint
         cid = await _make_card(s)
         await s.commit()
         await dispatch.dispatch_card(
@@ -306,7 +309,14 @@ async def test_dispatch_override_beats_pool_beats_column_override_for_endpoint()
 
 
 async def test_dispatch_pool_beats_column_override_for_endpoint_when_no_override():
-    """Drop the override; the pool takes precedence over the column_override."""
+    """Drop the override; the pool takes precedence over the column_override.
+
+    Kaart 0172e94d…: kolom-default is weggelaten zodat de pool-entry
+    de impliciete kop wordt; de keten wordt dan ``[pool_entry_beta]``
+    en de pool-router levert ``endpoint_name=beta``. De endpoint-
+    precedentie in de resolver (``global_override > pool_choice >
+    column_override > column.default_endpoint_name``) blijft
+    onveranderd: pool_choice's endpoint wint over de column_override."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await _seed_endpoint(s, "beta", base_url="https://beta.example/v1")
@@ -317,7 +327,7 @@ async def test_dispatch_pool_beats_column_override_for_endpoint_when_no_override
                 drempel=0.9, endpoint_name="beta",
             )],
         )
-        await _make_column(s, default_provider="anthropic")
+        await _make_column(s)  # geen default_provider — pool's head wint
         cid = await _make_card(
             s, column_overrides={
                 "engineer": {
@@ -368,7 +378,10 @@ async def test_dispatch_uses_endpoint_model_when_pin_has_no_model():
     for the interactive path. The dispatch path must agree so the spawned
     CLI sees a non-empty ``ANTHROPIC_MODEL`` and ``build_provider_env``
     never raises on an empty model.
-    """
+
+    Kaart 0172e94d…: kolom-default is weggelaten zodat de pool-entry
+    de impliciete kop wordt; anders zou de synthetische anthropic-kop
+    de pool nooit bereiken."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await _seed_endpoint(
@@ -382,7 +395,7 @@ async def test_dispatch_uses_endpoint_model_when_pin_has_no_model():
                 drempel=0.9, endpoint_name="router-4",
             )],
         )
-        await _make_column(s, default_provider="anthropic")
+        await _make_column(s)  # geen default_provider — pool's head wint
         cid = await _make_card(s)
         await s.commit()
         await dispatch.dispatch_card(
@@ -406,13 +419,16 @@ async def test_dispatch_raises_when_endpoint_name_unknown():
     ``test_set_pool_rejects_compatible_with_unknown_endpoint_name``
     pins the storage-side rejection — this one pins the dispatch
     layer doesn't silently fall through.
-    """
+
+    Kaart 0172e94d…: kolom-default is weggelaten zodat de corrupte
+    pool-entry de impliciete kop wordt en de dispatch-path de fout
+    ook daadwerkelijk raakt."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         # Bypass storage validation: write a row directly to KanbanMeta
         # that references an endpoint name NOT in the registry.
         _seed_corrupt_pool_row(s, endpoint_name="nope")
-        await _make_column(s, default_provider="anthropic")
+        await _make_column(s)  # geen default_provider — pool's head
         cid = await _make_card(s)
         await s.commit()
 
@@ -467,7 +483,10 @@ async def test_dispatch_raises_when_credential_unresolvable():
     pins the storage-side rejection — this one pins the dispatch
     layer doesn't silently fall through when a corruption-bypass
     row sneaks in.
-    """
+
+    Kaart 0172e94d…: kolom-default is weggelaten zodat de pool-entry
+    de impliciete kop wordt en de dispatch-path de fout ook daadwerkelijk
+    raakt."""
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await _seed_endpoint(
@@ -478,7 +497,7 @@ async def test_dispatch_raises_when_credential_unresolvable():
         # carrier at save time) — write the pool row directly to
         # KanbanMeta so the dispatch path still has to defend.
         _seed_corrupt_pool_row(s, endpoint_name="router-5")
-        await _make_column(s, default_provider="anthropic")
+        await _make_column(s)  # geen default_provider — pool's head
         cid = await _make_card(s)
         await s.commit()
 

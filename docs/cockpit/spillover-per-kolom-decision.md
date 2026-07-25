@@ -11,6 +11,19 @@ status: decided
 **Kaart:** `2688bf8087e64213ac0dff1af509abad`
 **Uitkomst:** **GO op vorm B, uitgebreid tot per-kolom staarten — de pool wordt een spillover-*keten* in plaats van een routing-*pin*, met `column.default_provider` als impliciete eerste entry.**
 
+✅ **Geïmplementeerd** in 2026-07-25 (kaart `0172e94d…`):
+- `resolve_effective_provider_and_model` bouwt nu `[column.default_provider(K)] ++ [pool-entries minus K's default]`
+  via de nieuwe helper `_build_spillover_candidates` en geeft die aan `pick_pool`.
+- `cli_id` is doorgegeven in de helper, de resolver, de column-settings-wrapper en beide
+  call sites (`_dispatch_pool_picker` + `_gate_pool_picker`) zodat de synthetische kop
+  niet door de cli-filter van de router wordt weggefilterd.
+- `provider_source` is eerlijk: `column_default` wanneer de kop wint, `pool` alleen
+  bij een echte uitwijk.
+- 8 nieuwe tests in `test_subscription_pool_dispatch.py` (waaronder de AC-scenario
+  uit kaart `0172e94d…`); 6 bestaande pin-tests bijgewerkt naar de nieuwe semantiek.
+- UI-tekst in `SubscriptionPoolDialog.tsx` en deze doc bijgewerkt; per-kolom-staart
+  (kaart `b36ca702…`) en UI-spillover-zichtbaarheid (`7411d25e…`) blijven open.
+
 **Trigger:** kanban-kaart `2688bf80…` "[analyse] Spillover vs. per-persona provider — de pool
 overrulet stilzwijgend elke kolom-default", kind van
 [`sessie-limiet-auto-dispatch-analyse.md`](./sessie-limiet-auto-dispatch-analyse.md) §4.

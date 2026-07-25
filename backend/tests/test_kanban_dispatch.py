@@ -1476,13 +1476,20 @@ async def test_manual_pause_respects_global_subscription_override(project_with_a
 
 @pytest.mark.asyncio
 async def test_manual_pause_respects_subscription_pool_choice(project_with_agents):
-    """A subscription pool entry that picks a different provider than the
-    column default must drive the gate. Pausing the pool-chosen provider
-    holds the card; pausing the column default does NOT.
+    """Kaart 0172e94d…: de dispatch-gate moet de resolved provider
+    volgen, ongeacht of die van de kolom-default (kop) of van de
+    pool-staart komt. Een pauze op de effectieve provider houdt de
+    kaart tegen — ook wanneer de resolver via de spillover-keten tot
+    die provider komt.
 
-    Pre-fix the gate used ``_provider_for_card`` (column-only), so
-    pausing the column default would have wrongly held back a card the
-    pool was about to route to a different provider."""
+    Vóór deze kaart testte dit "pool's eigen provider vs. kolom-default
+    zijn verschillend". Nu zijn ze per definitie aan elkaar gelijk
+    (de kop ís de kolom-default, de staart is de rest) — de test
+    is daarom herschreven rond "kop = pool-entry met drempel; pauzeer
+    die provider → gate houdt tegen". De gate gebruikt
+    ``resolve_effective_provider_and_model`` (kaart 8da646d8…) en
+    ziet dus dezelfde chain als de spawn-call.
+    """
     # Pool snapshots are no-ops in this test environment; the pool router
     # falls through to "first entry of cli_id wins" when no signal is
     # available, which is enough to drive the precedence chain.
@@ -1496,23 +1503,22 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
     async with KanbanSessionLocal() as s:
         await service.create_column(
             s, project_key=PK, name="engineer", default_agent="engineer",
-            default_provider="anthropic",
+            default_provider="bedrock",
         )
         cid = await _make_card(s, title="pool-routed", column="Backlog")
         await apply_operation(
             s, op_type="update", entity_type="card", project_key=PK,
             entity_id=cid, payload={"agent": "engineer"},
         )
-        # Pool contains ONLY bedrock. With no usage signal, the pool router
-        # returns bedrock (it's the only entry of cli_id, no above-threshold
-        # candidates, so it becomes the "last-resort fallback" pick — see
-        # ``pick_subscription_for_cli``'s laatste-val-terug branch). The
-        # card would therefore dispatch against bedrock, not the column
-        # default anthropic.
+        # Pool contains ONLY bedrock, dezelfde provider als de kolom-
+        # default. De kop erft pool-entry-drempel; met geen signal is
+        # de kop beschikbaar en wint. De card zou dus tegen bedrock
+        # dispatchen.
         await set_subscription_pool(s, PK, [
             PoolEntry(provider="bedrock", model=None, drempel=0.9),
         ])
-        # Pause bedrock — the gate must respect the pool's actual pick.
+        # Pause bedrock — de gate moet de resolved provider volgen en
+        # de kaart vasthouden.
         await dispatch_pause.set_manual_pause(s, "bedrock", True)
         await s.commit()
 
@@ -1523,7 +1529,8 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
         await s.commit()
         held_back = await get_card(s, cid)
 
-    # Card held back because the pool's only entry (bedrock) is paused.
+    # Card held back because the effective provider (bedrock, via de
+    # spillover-keten) is paused.
     assert transport.calls == [], (
         f"expected no spawns (gate should have held card back), "
         f"got: {[(c.get('session_name'), c.get('provider')) for c in transport.calls]}"
@@ -1531,10 +1538,8 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
     assert held_back.column == "Backlog"
     assert held_back.claimed_by is None
 
-    # Now unpause bedrock. Pool returns bedrock, gate doesn't block —
-    # the card dispatches against the pool's choice, NOT the column
-    # default. The gate honoured the pool, even though "anthropic" (the
-    # column default) was never paused.
+    # Now unpause bedrock. Pool + kolom-default geven bedrock, gate
+    # laat de spawn door.
     dispatch._gather_pool_usage_snapshots = _no_snapshots
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -1548,7 +1553,7 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
         await s.commit()
         dispatched = await get_card(s, cid)
 
-    # Pool picks bedrock, not the column-default anthropic — card dispatches.
+    # Kop (bedrock) wint — card dispatcht op bedrock.
     assert len(transport.calls) == 1
     assert transport.calls[0]["provider"] == "bedrock"
     assert dispatched.column == "engineer"
@@ -1556,14 +1561,20 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
 
 @pytest.mark.asyncio
 async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_agents):
-    """The pool router (``_pick_pool_choice``) must merge the operator's
-    manual pause list with the time-based one before consulting the pool,
-    so the picker knows the operator's subscription is off-limits. The
-    picker itself may still return a paused entry as the
-    "laatste-val-terug" fallback (that branch's contract is documented in
-    ``pick_subscription_for_cli``); the dispatch gate is what actually
-    blocks the spawn. End-to-end: a pool whose only entry is manually
-    paused must NOT spawn a card even though the picker returns it."""
+    """De pool-router (``_pick_pool_choice``) moet de handmatige
+    pause-lijst van de operator samenvoegen met de tijdgebonden
+    lijst voordat de pool wordt geraadpleegd, zodat de picker weet
+    dat de operator's subscription off-limits is. De picker mag
+    zelfs een gepauzeerde entry als "laatste-val-terug"-fallback
+    teruggeven (zie ``pick_subscription_for_cli``); de dispatch-gate
+    is wat de spawn blokkeert. End-to-end: een pool wiens enige
+    entry handmatig is gepauzeerd moet GEEN card spawnen, zelfs
+    niet wanneer de picker die entry teruggeeft.
+
+    Kaart 0172e94d…: kolom-default = pool's enige entry; de kop
+    komt dus over de pool heen en de resolver levert dezelfde
+    provider ongeacht welke tak van de keten wint. De gate volgt
+    die resolved provider."""
     from app.kanban import dispatch_pause
     from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
     async def _no_snapshots(entries):
@@ -1574,14 +1585,14 @@ async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_
     async with KanbanSessionLocal() as s:
         await service.create_column(
             s, project_key=PK, name="engineer", default_agent="engineer",
-            default_provider="anthropic",
+            default_provider="bedrock",
         )
         cid = await _make_card(s, title="pool-paused", column="Backlog")
         await apply_operation(
             s, op_type="update", entity_type="card", project_key=PK,
             entity_id=cid, payload={"agent": "engineer"},
         )
-        # Pool: only bedrock.
+        # Pool: enige entry is bedrock (zelfde provider als kolom-default).
         await set_subscription_pool(s, PK, [
             PoolEntry(provider="bedrock", model=None, drempel=0.9),
         ])
@@ -1595,12 +1606,10 @@ async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_
         await s.commit()
         held_back = await get_card(s, cid)
 
-    # End-to-end: even though the pool picker returns bedrock as its
-    # last-resort fallback, the dispatch gate (which now uses the same
-    # resolver chain + the manual-pause set) blocks the spawn. This
-    # is the FCR follow-up: previously the pool picker routed the spawn
-    # to a paused subscription and the gate didn't catch it because the
-    # gate only looked at the column default.
+    # End-to-end: de gate (die de resolver volgt) ziet bedrock als
+    # effective provider, ziet dat die gepauzeerd is, en houdt de
+    # kaart tegen — ook al geeft de pool-picker bedrock terug als
+    # laatste-val-terug-fallback.
     assert transport.calls == []
     assert held_back.column == "Backlog"
     assert held_back.claimed_by is None

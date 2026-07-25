@@ -127,7 +127,10 @@ async def test_resolve_column_effective_model_global_override_wins():
 
 @pytest.mark.asyncio
 async def test_resolve_column_effective_model_pool_wins():
-    """A subscription pool's first entry wins when no global override is set."""
+    """Kaart 0172e94d…: met de spillover-keten wint de kolom-default
+    (de impliciete kop) over de pool. Een pool-entry ``minimax`` op
+    een kolom met default ``anthropic`` levert dus ``anthropic``,
+    tenzij de anthropic-kop uitvalt — dan pas wordt ``minimax`` geraakt."""
     async with KanbanSessionLocal() as s:
         await create_column(
             s, project_key=PK, name="engineer", default_agent="engineer",
@@ -143,19 +146,19 @@ async def test_resolve_column_effective_model_pool_wins():
         info = await dispatch.resolve_column_effective_model(
             s, project_key=PK, column_name="engineer", project_path="/p",
         )
-    assert info["provider"] == "minimax"
-    assert info["model"] == "MiniMax-M3"
-    assert info["provider_source"] == "pool"
-    # The pool's model lands via the column_override label, not its own
-    # "pool" bucket — the resolver labels model_source only when the model
-    # came from the explicit override chain (column_override), which is
-    # good enough for the UI ("precedence: pool → model M").
-    assert info["model_source"] == "column_override"
+    # Kop = kolom-default; provider_source is eerlijk ``column_default``.
+    assert info["provider"] == "anthropic"
+    assert info["model"] == "sonnet"
+    assert info["provider_source"] == "column_default"
+    assert info["model_source"] == "column_default"
 
 
 @pytest.mark.asyncio
 async def test_resolve_column_effective_model_pool_provider_only():
-    """A pool entry with model=None falls through to column.default_model."""
+    """Kaart 0172e94d…: kolom-default ``minimax`` matcht een pool-entry
+    zonder model; de kop erft drempel, maar ``model=None`` valt door
+    naar ``column.default_model``. provider_source blijft eerlijk
+    ``column_default`` omdat de kop won (niet de pool-pin)."""
     async with KanbanSessionLocal() as s:
         await create_column(
             s, project_key=PK, name="engineer", default_agent="engineer",
@@ -173,7 +176,7 @@ async def test_resolve_column_effective_model_pool_provider_only():
         )
     assert info["provider"] == "minimax"
     assert info["model"] == "MiniMax-M3"
-    assert info["provider_source"] == "pool"
+    assert info["provider_source"] == "column_default"
     assert info["model_source"] == "column_default"
 
 

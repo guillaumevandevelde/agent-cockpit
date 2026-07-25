@@ -156,7 +156,11 @@ def _usage(*, drempel_gebruikt=None, beschikbaar=True, betrouwbaarheid="onbekend
 
 @pytest.mark.asyncio
 async def test_pool_first_entry_chosen_routes_to_its_provider():
-    """The chosen subscription's provider wins over column.default_provider."""
+    """Kaart 0172e94d…: met de spillover-keten wint de kolom-default
+    (de impliciete kop) over de pool — de pool is alleen de
+    uitwijk-staart. Een pool met ``[anthropic, minimax]`` op een kolom
+    met default ``bedrock`` dispatcht dus op ``bedrock`` zolang die
+    provider beschikbaar is."""
     transport = RecordingTransport()
     pool = [_entry(provider="anthropic"), _entry(provider="minimax")]
     snapshots = {
@@ -181,14 +185,15 @@ async def test_pool_first_entry_chosen_routes_to_its_provider():
             await s.commit()
 
     assert len(transport.calls) == 1
-    # Pool's first entry (anthropic) beats the column's default (bedrock).
-    assert transport.calls[0]["provider"] == "anthropic"
+    # Kop (kolom-default = bedrock) wint; de pool-entry's zijn alleen de
+    # staart die geraakt wordt als bedrock uitvalt.
+    assert transport.calls[0]["provider"] == "bedrock"
 
 
 @pytest.mark.asyncio
 async def test_dispatch_persists_provider_telemetry_on_card():
-    """The provider the dispatcher picked is written to card.dispatch_provider
-    so the board can show which provider picked up the card."""
+    """Kaart 0172e94d…: de kolom-default wint over de pool; de
+    geschreven ``dispatch_provider`` is dus de kolom-default-provider."""
     transport = RecordingTransport()
     pool = [_entry(provider="minimax")]
     snapshots = {_entry(provider="minimax"): _usage(drempel_gebruikt=0.1)}
@@ -209,17 +214,19 @@ async def test_dispatch_persists_provider_telemetry_on_card():
             )
             await s.commit()
 
-    # The pool entry (minimax) beats the column default (anthropic) at spawn,
-    # and that same resolved provider lands on the card as telemetry.
-    assert transport.calls[0]["provider"] == "minimax"
+    # De kolom-default (anthropic) wint over de pool; dezelfde
+    # resolved provider landt op de kaart als telemetry.
+    assert transport.calls[0]["provider"] == "anthropic"
     async with KanbanSessionLocal() as s:
         card = await service.get_card(s, cid)
-        assert card.dispatch_provider == "minimax"
+        assert card.dispatch_provider == "anthropic"
 
 
 @pytest.mark.asyncio
 async def test_pool_entry_model_pins_dispatch_model():
-    """When the pool entry sets a model, it overrides column.default_model."""
+    """When the pool's *matching* entry sets a model, the column-default
+    head inherits it via ``_build_spillover_candidates`` and that model
+    wins over ``column.default_model``."""
     transport = RecordingTransport()
     pool = [_entry(provider="anthropic", model="opus")]
     snapshots = {_entry(provider="anthropic", model="opus"): _usage(drempel_gebruikt=0.1)}
@@ -365,9 +372,12 @@ async def test_active_override_beats_pool():
 
 @pytest.mark.asyncio
 async def test_paused_provider_in_pool_falls_through(monkeypatch):
-    """When the pool's first entry's provider is paused, the router
-    picks the next entry's provider. The dispatch uses the picked
-    entry — not the column default."""
+    """Kaart 0172e94d…: wanneer de impliciete kop (kolom-default)
+    dezelfde provider heeft als een gepauzeerde pool-entry, valt de
+    kop af en wint de staart. Vóór deze kaart testte dit "pool's
+    first entry paused → falls through"; nu is dat equivalent aan
+    "head paused → spillover", en de test moet de kolom-default
+    daarom op de gepauzeerde provider zetten."""
     transport = RecordingTransport()
     pool = [_entry(provider="anthropic"), _entry(provider="minimax")]
     snapshots = {
@@ -377,26 +387,32 @@ async def test_paused_provider_in_pool_falls_through(monkeypatch):
     async with KanbanSessionLocal() as s:
         await service.create_column(
             s, project_key=PK, name="engineer",
-            default_agent="engineer", default_provider="bedrock",
+            default_agent="engineer", default_provider="anthropic",
         )
         cid = await _make_card(s)
         await subscription_pool.set_subscription_pool(s, PK, pool)
-        # Pause anthropic until well in the future.
+        # Pause anthropic until well in the future — that's the head
+        # provider; de kop valt af en de router moet doorschuiven naar
+        # de staart.
         future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         from app.kanban.dispatch_pause import set_paused_until
         await set_paused_until(s, datetime.fromisoformat(future), provider="anthropic")
         await s.commit()
 
     import app.kanban.subscription_pool as pool_mod
-    real_pick = pool_mod.pick_subscription
+    real_pick_for_cli = pool_mod.pick_subscription_for_cli
 
-    def paused_pick(entries, usages, *, paused_providers):
+    def paused_pick(entries, usages, *, paused_providers, cli_id):
         # Mirror what the dispatch wiring will pass: the per-provider
         # pause set is gathered from the session, not the snapshot.
-        return real_pick(entries, usages, paused_providers={"anthropic"})
+        return real_pick_for_cli(
+            entries, usages,
+            paused_providers=paused_providers | {"anthropic"},
+            cli_id=cli_id,
+        )
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(pool_mod, "pick_subscription", paused_pick)
+        mp.setattr(pool_mod, "pick_subscription_for_cli", paused_pick)
         _patch_pool_pick(mp, snapshots)
         async with KanbanSessionLocal() as s:
             await dispatch.dispatch_card(
@@ -404,6 +420,7 @@ async def test_paused_provider_in_pool_falls_through(monkeypatch):
             )
             await s.commit()
 
+    # Head (anthropic) viel af door pause → staart (minimax) wint.
     assert transport.calls[0]["provider"] == "minimax"
 
 
@@ -749,7 +766,10 @@ async def test_no_registered_provider_returns_empty_snapshot_dict():
 async def test_dispatch_pool_spills_when_first_entry_above_threshold():
     """D1+D2+D5 end-to-end: with a registered fake provider reporting
     ``drempel_gebruikt=0.95`` for the pool's first entry (above its
-    drempel of 0.9), dispatch routes to the second entry's provider.
+    drempel of 0.9), the *head* (kolom-default die in de pool matcht)
+    valt af en de router levert de tweede entry. Kaart 0172e94d…:
+    de kop erft de drempel van de matchende pool-entry, dus boven-
+    drempel op de head-provider schakelt direct door naar de staart.
 
     This is the integration the original 11-test file never had: the
     existing tests "passed" because ``_gather_pool_usage_snapshots``
@@ -767,19 +787,21 @@ async def test_dispatch_pool_spills_when_first_entry_above_threshold():
     PoolEntry from ``_pick_pool_choice`` (instead of the right one) is
     caught here, not in a wire-mock test."""
     transport = RecordingTransport()
-    pool = [_entry(provider="anthropic"), _entry(provider="minimax")]
+    pool = [_entry(provider="anthropic", drempel=0.9), _entry(provider="minimax")]
     from app.services.subscriptions.unknown import UnknownUsageProvider
 
     with _registry_state() as reg:
-        # Entry #1 (anthropic): above threshold → must be skipped.
+        # Entry #1 / head (anthropic): above threshold → must be skipped.
+        # De kop erft drempel=0.9 van deze matchende pool-entry; de
+        # geregistreerde snapshot van 0.95 valt er dus boven.
         reg.register_provider(_fake_usage_provider(
             subscription_id="claude-code:anthropic",
             subscription_label="fake-anthropic",
             drempel_gebruikt=0.95,
             beschikbaar=False,
         ))
-        # Entry #2 (minimax): no signal (unknown) — router treats as
-        # available per analyse §6.3, so it becomes the pick.
+        # Entry #2 / staart (minimax): no signal (unknown) — router
+        # treats as available per analyse §6.3, so it becomes the pick.
         reg.register_provider(UnknownUsageProvider(
             subscription_id="claude-code:minimax",
             subscription_label="test-minimax",
@@ -788,7 +810,7 @@ async def test_dispatch_pool_spills_when_first_entry_above_threshold():
         async with KanbanSessionLocal() as s:
             await service.create_column(
                 s, project_key=PK, name="engineer",
-                default_agent="engineer", default_provider="bedrock",
+                default_agent="engineer", default_provider="anthropic",
             )
             cid = await _make_card(s)
             await subscription_pool.set_subscription_pool(s, PK, pool)
@@ -801,10 +823,8 @@ async def test_dispatch_pool_spills_when_first_entry_above_threshold():
             await s.commit()
 
     assert len(transport.calls) == 1
-    # The pool's first entry (anthropic) was above its drempel via the
-    # registered fake provider, so the router must spill to entry #2
-    # (minimax) — NOT the column default (bedrock), NOT entry #1
-    # (anthropic).
+    # De kop (anthropic) viel af door boven-drempel via de geregistreerde
+    # fake provider → de staart (minimax) wint.
     assert transport.calls[0]["provider"] == "minimax"
 
 
@@ -1060,3 +1080,391 @@ async def test_dispatch_card_chain_matches_resolver_chain(monkeypatch):
     assert len(transport.calls) == 1
     assert transport.calls[0]["provider"] == "minimax"
 
+
+# ---- spillover-keten (kaart 0172e94d…) -------------------------------------
+#
+# Vorm B uit docs/cockpit/spillover-per-kolom-decision.md: de pool is geen
+# routing-pin meer, maar een spillover-keten met ``column.default_provider``
+# als impliciete kop. De effectieve-kandidatenlijst voor kolom K is
+# ``[K.default_provider] ++ [pool-entries minus K.default_provider]``; de
+# bestaande ``pick_subscription_for_cli`` loopt daar overheen.
+#
+# Belangrijk voor deze tests:
+#   * De kop erft ``drempel`` / ``model`` van een eventuele matchende
+#     pool-entry (en die entry verdwijnt uit de staart — anders dubbel).
+#   * Geen matchende entry → kop met ``drempel=1.0`` (gebruik tot de
+#     per-provider pause hem raakt) en ``model=None``.
+#   * ``provider_source`` is eerlijk: ``column_default`` wanneer de kop
+#     wint, ``pool`` alleen bij een echte uitwijk naar de staart.
+#   * ``global_override`` blijft boven alles.
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_engineer_default_minimax_wins_when_not_in_pool():
+    """``engineer`` met kolom-default ``minimax`` (niet in de pool) start
+    op ``minimax`` met ``drempel=1.0`` op de kop; pool-entry ``anthropic``
+    is de uitwijk-staart maar wordt niet geraakt."""
+    transport = RecordingTransport()
+    pool = [_entry(provider="anthropic"), _entry(provider="bedrock")]
+    snapshots = {
+        _entry(provider="anthropic"): _usage(drempel_gebruikt=0.1),
+        _entry(provider="bedrock"): _usage(drempel_gebruikt=0.1),
+    }
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer",
+            default_provider="minimax",
+            default_model="MiniMax-M3",
+        )
+        cid = await _make_card(s)
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert len(transport.calls) == 1
+    # Kop ``minimax`` wint (geen snapshot in de router → geen drempel-blokkade).
+    assert transport.calls[0]["provider"] == "minimax"
+    assert transport.calls[0]["model"] == "MiniMax-M3"
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_analyst_default_anthropic_inherits_match_drempel():
+    """``analyst`` met kolom-default ``anthropic`` wél in de pool: kop
+    erft ``drempel`` en ``model`` van die matchende pool-entry; die entry
+    verdwijnt uit de staart (dedup) zodat de keten 1 entry kort is."""
+    transport = RecordingTransport()
+    pool = [
+        _entry(provider="anthropic", model="opus", drempel=0.7),
+        _entry(provider="bedrock", model=None, drempel=0.9),
+    ]
+    snapshots = {
+        _entry(provider="anthropic", model="opus"): _usage(drempel_gebruikt=0.1),
+        _entry(provider="bedrock"): _usage(drempel_gebruikt=0.1),
+    }
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst",
+            default_agent="analyst",
+            default_provider="anthropic",
+            default_model="opus",
+        )
+        cid = await _make_card(s)
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            resolved = await dispatch.resolve_effective_provider_and_model(
+                s, project_key=PK, target_agent="analyst",
+                project_path="/p",
+                pick_pool=dispatch._column_settings_pool_picker,
+            )
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    # Kop (anthropic) wint — model komt via de geërfde pool-match (opus).
+    assert resolved["provider"] == "anthropic"
+    assert resolved["model"] == "opus"
+    # provider_source eerlijk: de kop won, niet de pool-pin.
+    assert resolved["provider_source"] == "column_default"
+    # End-to-end: spawn landt op anthropic met het geërfde opus-model.
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "anthropic"
+    assert transport.calls[0]["model"] == "opus"
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_analyst_spills_to_minimax_when_anthropic_paused():
+    """AC: ``analyst`` met kolom-default ``anthropic``; wanneer
+    ``anthropic`` is gepauzeerd valt de kop af en wint de staart
+    (``minimax``). ``provider_source`` wordt eerlijk ``pool`` omdat het
+    een echte uitwijk is."""
+    transport = RecordingTransport()
+    pool = [
+        _entry(provider="anthropic"),
+        _entry(provider="minimax"),
+    ]
+    snapshots = {
+        _entry(provider="anthropic"): _usage(drempel_gebruikt=0.1),
+        _entry(provider="minimax"): _usage(drempel_gebruikt=0.1),
+    }
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst",
+            default_agent="analyst", default_provider="anthropic",
+        )
+        cid = await _make_card(s)
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        # Pauzeer anthropic tot ver in de toekomst.
+        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        from app.kanban.dispatch_pause import set_paused_until
+        await set_paused_until(s, datetime.fromisoformat(future), provider="anthropic")
+        await s.commit()
+
+    import app.kanban.subscription_pool as pool_mod
+    real_pick_for_cli = pool_mod.pick_subscription_for_cli
+
+    def paused_pick(entries, usages, *, paused_providers, cli_id):
+        return real_pick_for_cli(
+            entries, usages,
+            paused_providers=paused_providers | {"anthropic"},
+            cli_id=cli_id,
+        )
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(pool_mod, "pick_subscription_for_cli", paused_pick)
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            resolved = await dispatch.resolve_effective_provider_and_model(
+                s, project_key=PK, target_agent="analyst",
+                project_path="/p",
+                pick_pool=dispatch._column_settings_pool_picker,
+            )
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    # Kop (anthropic) viel af door pause; staart (minimax) wint.
+    assert resolved["provider"] == "minimax"
+    assert resolved["provider_source"] == "pool"
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["provider"] == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_analyst_spills_when_anthropic_above_threshold():
+    """AC: wanneer de kop-provider boven drempel zit (geërfde drempel
+    van de matchende pool-entry), valt hij af en wint de staart."""
+    transport = RecordingTransport()
+    pool = [
+        _entry(provider="anthropic", drempel=0.7),  # drempel wordt geërfd door de kop
+        _entry(provider="minimax"),
+    ]
+    snapshots = {
+        _entry(provider="anthropic"): _usage(drempel_gebruikt=0.95),  # boven 0.7
+        _entry(provider="minimax"): _usage(drempel_gebruikt=0.1),
+    }
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst",
+            default_agent="analyst", default_provider="anthropic",
+        )
+        cid = await _make_card(s)
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            resolved = await dispatch.resolve_effective_provider_and_model(
+                s, project_key=PK, target_agent="analyst",
+                project_path="/p",
+                pick_pool=dispatch._column_settings_pool_picker,
+            )
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert resolved["provider"] == "minimax"
+    assert resolved["provider_source"] == "pool"
+    assert transport.calls[0]["provider"] == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_column_without_default_still_uses_pool_head():
+    """Backward-compat: een kolom zonder ``default_provider`` valt
+    terug op de pure pool-volgorde (het gedrag van vóór deze kaart)."""
+    transport = RecordingTransport()
+    pool = [
+        _entry(provider="minimax"),
+        _entry(provider="bedrock"),
+    ]
+    snapshots = {
+        _entry(provider="minimax"): _usage(drempel_gebruikt=0.1),
+        _entry(provider="bedrock"): _usage(drempel_gebruikt=0.1),
+    }
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="extra",
+            default_agent="extra",
+            # geen default_provider / default_model
+        )
+        cid = await _make_card(s, column="extra")
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await s.commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            resolved = await dispatch.resolve_effective_provider_and_model(
+                s, project_key=PK, target_agent="extra",
+                project_path="/p",
+                pick_pool=dispatch._column_settings_pool_picker,
+            )
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    # Geen kolom-default → de eerste pool-entry is de kop; bron is ``pool``.
+    assert resolved["provider"] == "minimax"
+    assert resolved["provider_source"] == "pool"
+    assert transport.calls[0]["provider"] == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_global_override_beats_chain():
+    """``global_override`` blijft boven de spillover-keten staan."""
+    transport = RecordingTransport()
+    pool = [_entry(provider="minimax"), _entry(provider="bedrock")]
+    snapshots = {
+        _entry(provider="minimax"): _usage(drempel_gebruikt=0.1),
+        _entry(provider="bedrock"): _usage(drempel_gebruikt=0.1),
+    }
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst",
+            default_agent="analyst", default_provider="anthropic",
+        )
+        cid = await _make_card(s)
+        await subscription_pool.set_subscription_pool(s, PK, pool)
+        await dispatch.set_active_subscription_override(
+            s, PK, {"provider": "bedrock", "model": "haiku"},
+        )
+        await s.commit()
+
+    with pytest.MonkeyPatch.context() as mp:
+        _patch_pool_pick(mp, snapshots)
+        async with KanbanSessionLocal() as s:
+            resolved = await dispatch.resolve_effective_provider_and_model(
+                s, project_key=PK, target_agent="analyst",
+                project_path="/p",
+                pick_pool=dispatch._column_settings_pool_picker,
+            )
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert resolved["provider"] == "bedrock"
+    assert resolved["provider_source"] == "global_override"
+    assert resolved["model_source"] == "global_override"
+    assert transport.calls[0]["provider"] == "bedrock"
+    assert transport.calls[0]["model"] == "haiku"
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_no_pool_column_default_wins():
+    """Geen pool geconfigureerd → de kolom-default wint zoals vandaag."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer", default_provider="minimax",
+        )
+        cid = await _make_card(s)
+        await s.commit()
+
+        async with KanbanSessionLocal() as s:
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert transport.calls[0]["provider"] == "minimax"
+
+
+# ---- resolvertest direct op de keten-vorm (wit-box) -----------------------
+#
+# Pinnen op de pure ``_build_spillover_candidates`` helper die de kop +
+# staart construeert — beschermt tegen refactors die de vorm van de
+# keten veranderen zonder dat de end-to-end tests het opmerken.
+
+
+def test_build_spillover_candidates_no_column_default():
+    """Geen kolom-default → kop = eerste pool-entry, staart = rest.
+
+    De head ís de eerste pool-entry (er is geen "impliciete" synthetische
+    head nodig), dus drempel/model komen natuurlijk mee van die entry."""
+    from app.kanban.dispatch import _build_spillover_candidates
+    pool = [
+        _entry(provider="anthropic", drempel=0.9),
+        _entry(provider="minimax", drempel=0.95),
+    ]
+    head, chain = _build_spillover_candidates(
+        column_default_provider=None, pool=pool, cli_id="claude-code",
+    )
+    assert head.provider == "anthropic"
+    # Head is de eerste pool-entry → erft diens drempel en model.
+    assert head.drempel == 0.9
+    assert head.model is None
+    # Chain = head + rest van de pool.
+    assert [e.provider for e in chain] == ["anthropic", "minimax"]
+
+
+def test_build_spillover_candidates_default_not_in_pool():
+    """Kolom-default niet in pool → synthetische kop met drempel=1.0,
+    model=None; hele pool als staart (geen dedup mogelijk)."""
+    from app.kanban.dispatch import _build_spillover_candidates
+    pool = [
+        _entry(provider="anthropic", drempel=0.9),
+        _entry(provider="minimax", drempel=0.95),
+    ]
+    head, chain = _build_spillover_candidates(
+        column_default_provider="bedrock", pool=pool, cli_id="claude-code",
+    )
+    assert head.provider == "bedrock"
+    assert head.drempel == 1.0
+    assert head.model is None
+    # Chain = head + hele pool (bedrock stond niet in de pool).
+    assert [e.provider for e in chain] == ["bedrock", "anthropic", "minimax"]
+
+
+def test_build_spillover_candidates_default_in_pool_dedups():
+    """Kolom-default wél in pool → kop erft drempel/model van die
+    matchende entry; die entry wordt uit de staart gefilterd om
+    duplicaat-pooling te voorkomen."""
+    from app.kanban.dispatch import _build_spillover_candidates
+    pool = [
+        _entry(provider="anthropic", model="opus", drempel=0.7),
+        _entry(provider="minimax", model="MiniMax-M3", drempel=0.95),
+    ]
+    head, chain = _build_spillover_candidates(
+        column_default_provider="anthropic", pool=pool, cli_id="claude-code",
+    )
+    assert head.provider == "anthropic"
+    assert head.drempel == 0.7
+    assert head.model == "opus"
+    # De matchende pool-entry is uit de staart; chain = head + dedupte staart.
+    assert [e.provider for e in chain] == ["anthropic", "minimax"]
+
+
+def test_build_spillover_candidates_cli_mismatch_filters_pool():
+    """Pool met een andere CLI dan ``cli_id`` → geen matchende entry;
+    synthetische kop met drempel=1.0, model=None, en de hele pool
+    ongewijzigd als staart (de router doet zijn eigen cli-filter)."""
+    from app.kanban.dispatch import _build_spillover_candidates
+    pool = [
+        _entry(cli="open-code", provider="anthropic"),
+        _entry(provider="minimax"),
+    ]
+    head, chain = _build_spillover_candidates(
+        column_default_provider="bedrock", pool=pool, cli_id="claude-code",
+    )
+    assert head.provider == "bedrock"
+    assert head.drempel == 1.0
+    # Chain = head + hele pool.
+    assert [e.provider for e in chain] == ["bedrock", "anthropic", "minimax"]

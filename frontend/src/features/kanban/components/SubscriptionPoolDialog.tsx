@@ -274,12 +274,15 @@ export function SubscriptionPoolDialog({
         <DialogHeader>
           <DialogTitle>Subscriptions</DialogTitle>
           <DialogDescription>
-            Two routing layers control where dispatched cards land. Effective
-            precedence (high → low):{" "}
+            Routing layers, high → low:{" "}
             <span className="font-mono">global override</span> &gt;{" "}
-            <span className="font-mono">pool</span> &gt;{" "}
+            <span className="font-mono">pool spillover</span> &gt;{" "}
             <span className="font-mono">per-card column_overrides</span> &gt;{" "}
-            <span className="font-mono">column defaults</span>.
+            <span className="font-mono">column defaults</span>. The pool is a
+            spillover chain:{" "}
+            <span className="font-mono">column.default_provider</span> is the
+            implicit head and only the tail entries act as overflow when the
+            head is paused or above its threshold.
           </DialogDescription>
         </DialogHeader>
 

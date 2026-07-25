@@ -33,8 +33,33 @@ card.model  >  column.default_model  >  persona-frontmatter model:  >  geen --mo
 Pure functie `_effective_model(card, column_default_model, persona_model)` in
 `backend/app/kanban/dispatch.py`; `persona_model` komt uit een nieuwe `_read_persona_model()`
 die de frontmatter **parseert vóór** `_strip_frontmatter` hem weggooit (malformed YAML of
-ontbrekende `model:` → `None`, nooit een raise). Één resolutiepunt dekt analyst- én
+ontbrekende `model:` → `None`, nooit een raise). Één resolverpunt dekt analyst- én
 executor-fase omdat beide door dezelfde spawn-transport funnelen.
+
+## Provider-precedentie (spillover-keten sinds 2026-07-25)
+
+De provider-resolutie loopt via dezelfde canonieke functie:
+`resolve_effective_provider_and_model` in `backend/app/kanban/dispatch.py`. Sinds kaart
+[`0172e94d…`](https://github.com/...) (zie [`spillover-per-kolom-decision.md`](./spillover-per-kolom-decision.md))
+is de pool geen routing-pin meer die élke kolom-default overrulet, maar een
+**spillover-keten** met `column.default_provider` als impliciete eerste entry:
+
+```
+effective_chain(K) = [column.default_provider(K)] ++ [pool-entries minus K's default]
+                                       ↑ impliciete kop      ↑ de staart die de operator instelt
+```
+
+De kop erft `drempel` / `model` van een eventuele matchende pool-entry (en die entry
+verdwijnt uit de staart om duplicaat-pooling te voorkomen); geen matchende entry →
+kop met `drempel=1.0` (gebruik tot de per-provider pause hem raakt) en `model=None`.
+
+`provider_source` is eerlijk: `column_default` wanneer de kop wint, `pool` alleen bij
+een echte uitwijk naar de staart. `global_override` blijft boven alles staan
+(`.provider > pool > column_override > column.default_provider > PROVIDER_ANTHROPIC`).
+
+Een kolom zonder `default_provider` valt terug op de pure pool-volgorde (entry #1 wint);
+de oorspronkelijke "pool als pin"-gedrag blijft voor die kolommen gelden — alleen de
+kolommen mét default zijn beschermd.
 
 ## Datamodel & provider-fix
 

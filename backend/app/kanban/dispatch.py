@@ -1248,6 +1248,7 @@ async def resolve_effective_provider_and_model(
     pick_pool: Callable[[list[PoolEntry]], Awaitable[PoolEntry | None]] | None,
     card_overrides: dict | None = None,
     card_model: str | None = None,
+    cli_id: str = CLAUDE_CODE_CLI_ID,
 ) -> dict:
     """**CANONICAL**: "what provider/model would this card spawn on?"
 
@@ -1288,7 +1289,8 @@ async def resolve_effective_provider_and_model(
 
     Precedence (highest wins; first non-empty value is used):
       1. ``global_override`` (board-wide subscription pin)
-      2. ``pool_choice``     (subscription-pool entry picked by caller)
+      2. ``pool_choice``     (subscription-pool spillover-chain entry
+                                 — see ``_build_spillover_candidates``)
       3. ``column_override`` (per-card override for ``target_agent``)
       4. ``column.default_provider`` / ``column.default_model``
       5. ``persona``         (engineer.md / analyst.md frontmatter
@@ -1296,6 +1298,16 @@ async def resolve_effective_provider_and_model(
                                  unless the explicit overrides name a
                                  provider-native model)
       → ``PROVIDER_ANTHROPIC`` / ``None`` as the chain-end default.
+
+    Spillover-keten (kaart 0172e94d…): sinds deze kaart is de pool geen
+    routing-pin meer die élke kolom-default overruled, maar een
+    spillover-*keten* met ``column.default_provider`` als impliciete
+    eerste entry. De effectieve-kandidatenlijst die naar de router gaat
+    is ``[kolom-default-head] ++ [pool-entries minus de matchende head]``;
+    de head erft ``drempel`` en ``model`` van een eventuele matchende
+    pool-entry (zie ``_build_spillover_candidates``). ``provider_source``
+    is eerlijk: ``column_default`` wanneer de head wint, ``pool`` alleen
+    bij een echte uitwijk naar de staart.
 
     Spec: this precedence chain is the canonical reference for the
     model-routing decision. The board-wide pin + pool layer are
@@ -1322,16 +1334,38 @@ async def resolve_effective_provider_and_model(
         compatibility with the existing column-settings caller.
       - ``card_model``: per-card ``card.model`` — only the dispatch
         path owns this layer; the column-settings UI leaves it None.
+      - ``cli_id``: the CLI this card will spawn under
+        (``CLAUDE_CODE_CLI_ID`` / ``open-code`` / …). Used by
+        ``_build_spillover_candidates`` to keep the synthetic head
+        entry on the same CLI as the spawned session, so the router's
+        cli-filter doesn't accidentally drop it. Must match the CLI
+        the caller's ``pick_pool`` closure consults (the dispatcher
+        threads both from ``_phase_cli_id``); defaults to
+        ``CLAUDE_CODE_CLI_ID`` so direct callers without spawn context
+        (notably column-settings) keep working unchanged.
     """
     column_override = card_overrides or {}
     override_provider = column_override.get("provider") or None
     override_model = column_override.get("model") or None
     global_override = await get_active_subscription_override(session, project_key)
     pool_entries = await get_subscription_pool(session, project_key)
+    column_default_provider = await get_column_default_provider(session, project_key, target_agent)
+    # Spillover-keten (kaart 0172e94d…): ``[kolom-default-head] ++
+    # [pool-entries minus de matchende head]``. Wanneer er geen pool
+    # is, bestaat de keten uit alleen de head; wanneer er geen
+    # kolom-default is bestaat de head uit de eerste pool-entry (en
+    # ``provider_source`` wordt hieronder eerlijk ``pool``).
+    head_entry, chain_candidates = _build_spillover_candidates(
+        column_default_provider=column_default_provider,
+        pool=pool_entries or [],
+        cli_id=cli_id,
+    )
     pool_choice: PoolEntry | None = None
     if pool_entries is not None and not global_override and pick_pool is not None:
-        pool_choice = await pick_pool(pool_entries)
-    column_default_provider = await get_column_default_provider(session, project_key, target_agent)
+        # Geef de bestaande ``pick_pool``-closure dezelfde lijst die de
+        # keten zou zien — de router kiest de head (kolom-default) of de
+        # staart (pool-entry) volgens z'n bestaande drempel/pause-regels.
+        pool_choice = await pick_pool(chain_candidates)
     provider = (
         (global_override or {}).get("provider")
         or (pool_choice.provider if pool_choice else None)
@@ -1375,7 +1409,16 @@ async def resolve_effective_provider_and_model(
     if global_override:
         provider_source = PRECEDENCE_GLOBAL_OVERRIDE
     elif pool_choice:
-        provider_source = PRECEDENCE_POOL
+        # Eerlijk: de head won (kolom-default aanwezig + head is de
+        # impliciete kop) → ``column_default``; de staart won (head viel
+        # af door pause/drempel, of er was geen kolom-default en de head
+        # ís de eerste pool-entry) → ``pool``. Dedup in
+        # ``_build_spillover_candidates`` garandeert dat alleen de head
+        # de kolom-default-provider kan hebben.
+        if column_default_provider and pool_choice.provider == head_entry.provider:
+            provider_source = PRECEDENCE_COLUMN_DEFAULT
+        else:
+            provider_source = PRECEDENCE_POOL
     elif override_provider:
         provider_source = PRECEDENCE_COLUMN_OVERRIDE
     elif column_default_provider:
@@ -1423,6 +1466,70 @@ async def resolve_effective_provider_and_model(
 # shows "would the pool pin me?" via the first entry that matches the
 # claude-code CLI. ``pick_subscription_for_cli`` with empty snapshots
 # + no paused providers falls through to that "first entry" branch.
+def _build_spillover_candidates(
+    column_default_provider: str | None,
+    pool: list["PoolEntry"],
+    *,
+    cli_id: str,
+) -> tuple["PoolEntry", list["PoolEntry"]]:
+    """Bouw de spillover-keten voor een kolom.
+
+    Vorm B uit ``docs/cockpit/spillover-per-kolom-decision.md``: de
+    effectieve-kandidatenlijst voor kolom K is
+    ``[K.default_provider] ++ [pool-entries minus K.default_provider]``.
+    De kop erft ``drempel`` en ``model`` van een matchende pool-entry
+    (en die entry verdwijnt uit de staart — anders dubbel); geen
+    matchende entry → kop met ``drempel=1.0`` (gebruik tot de
+    per-provider pause hem raakt) en ``model=None``. De kop draagt
+    ``cli=cli_id`` zodat de router (``pick_subscription_for_cli``)
+    hem niet wegfiltert.
+
+    Args:
+        column_default_provider: ``column.default_provider`` of None
+            wanneer de kolom geen default heeft.
+        pool: de pool-entries zoals
+            ``get_subscription_pool()`` ze teruggeeft (mogelijk leeg).
+        cli_id: het spawn-CLI waar deze kolom op draait
+            (``claude-code`` / ``open-code`` / …). De kop krijgt deze
+            CLI mee; de router filtert de staart op dezelfde CLI.
+
+    Returns:
+        ``(head, chain)``: ``head`` is de impliciete eerste entry;
+        ``chain`` is de (mogelijk lege) staart die de router achtereenvolgens
+        afloopt. Wanneer de pool leeg is bevat ``chain`` de kop niet;
+        wanneer er geen matchende pool-entry is staat de kop niet in
+        de staart (dedup-contract).
+    """
+    if column_default_provider:
+        # Zoek een pool-entry op provider én cli — een open-code-pool
+        # mag nooit de claude-code-kop voeden. Geen match → standaard
+        # drempel=1.0 / model=None, geen dedup.
+        matched = next(
+            (e for e in pool
+             if e.provider == column_default_provider and e.resolved_cli == cli_id),
+            None,
+        )
+        head = PoolEntry(
+            provider=column_default_provider,
+            model=matched.model if matched else None,
+            drempel=matched.drempel if matched else 1.0,
+            cli=cli_id,
+            endpoint_name=matched.endpoint_name if matched else None,
+        )
+        tail = [e for e in pool if e is not matched]
+    elif pool:
+        head, tail = pool[0], list(pool[1:])
+    else:
+        # Geen kolom-default én geen pool: synthetische kop zodat de
+        # keten altijd non-empty is en de caller nog steeds iets heeft
+        # om op te lossen. Provider blijft None → resolve_effective
+        # valt door naar de chain-end default (PROVIDER_ANTHROPIC).
+        head = PoolEntry(provider="anthropic", model=None, drempel=1.0, cli=cli_id)
+        tail = []
+    chain = [head, *tail]
+    return head, chain
+
+
 async def _column_settings_pool_picker(
     pool_entries: list[PoolEntry],
 ) -> PoolEntry | None:
@@ -1459,6 +1566,7 @@ async def resolve_column_effective_model(
         pick_pool=_column_settings_pool_picker,
         card_overrides=column_override,
         card_model=card_model,
+        cli_id=CLAUDE_CODE_CLI_ID,
     )
 
 
@@ -4898,6 +5006,7 @@ async def _run_card(
         pick_pool=_dispatch_pool_picker,
         card_overrides=(card.column_overrides or {}).get(target_agent),
         card_model=card.model,
+        cli_id=cli_id,
     )
     provider = resolved["provider"]
     effective_model = resolved["model"]
@@ -5319,6 +5428,7 @@ async def _effective_provider_for_pause_gate(
         pick_pool=_gate_pool_picker,
         card_overrides=card_overrides,
         card_model=card_model,
+        cli_id=cli_id,
     )
     return resolved["provider"]
 
