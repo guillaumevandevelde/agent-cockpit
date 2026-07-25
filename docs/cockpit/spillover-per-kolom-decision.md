@@ -201,6 +201,17 @@ naar de provider die *net* de limiet raakte. De schoonste bron is trouwens geen
 her-resolutie maar `card.dispatch_provider` (`models.py:110`, geschreven op
 `dispatch.py:3678` met de daadwerkelijk gekozen provider, en al zichtbaar als 🌐-badge).
 
+✅ Geïmplementeerd (kaart 9ff86416…): nieuwe helper
+`_limited_provider_for_card` in `dispatch.py` prefereert `card.dispatch_provider`
+en valt terug op de volledige precedence-keten via
+`_effective_provider_for_pause_gate` wanneer die `None` is (legacy/nooit-gedispatchte
+rijen). Drie call-sites zijn gemigreerd: `move_limited_session_to_resume`,
+`_provider_for_cwd` (Notification-hook pad), en `_cleanup_stuck_session`
+(reaper-pad; kreeg een optionele `project_path`-parameter om de keten te kunnen
+lopen). De smalle `_provider_for_card` blijft bestaan als laatste-resort
+fallback voor callers zonder `project_path`/`dispatch_provider`-context, en zijn
+docstring waarschuwt nu expliciet dat hij pool-/override-blind is.
+
 ---
 
 ## 4. De opties, gewogen op producteffect
