@@ -2827,40 +2827,79 @@ def _install_rtk_for_dispatch(
     dedicated engine per call is cheap (one connection) and the
     helper's call site is on the cold path of a dispatch, not the
     hot path.
+
+    The actual async body lives in :func:`_install_rtk_for_dispatch_async`
+    so the test suite (which already runs inside an event loop) can await
+    it directly without ``asyncio.run()`` collisions.
     """
     import asyncio
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from app.config import settings
-    from app.kanban import token_saver
-
-    async def _run() -> tuple[str, str]:
-        engine = create_async_engine(
-            settings.kanban_database_url, future=True,
-        )
-        try:
-            Session = async_sessionmaker(
-                engine, expire_on_commit=False,
-            )
-            async with Session() as session:
-                return await token_saver.maybe_install(
-                    session,
-                    card_id=card_id,
-                    project_key=project_key,
-                    column_name=column_name,
-                    worktree_path=worktree_path,
-                    repo_path=repo_path,
-                )
-        finally:
-            await engine.dispose()
-
     try:
-        return asyncio.run(_run())[0]
+        return asyncio.run(_install_rtk_for_dispatch_async(
+            card_id=card_id, project_key=project_key, column_name=column_name,
+            worktree_path=worktree_path, repo_path=repo_path,
+        ))[0]
     except Exception as exc:
         logger.warning(
             "token-saver install failed for card %s (column=%s): %s",
             card_id, column_name, exc,
         )
         return "failed"
+
+
+async def _install_rtk_for_dispatch_async(
+    *, card_id: str, project_key: str, column_name: str,
+    worktree_path: str, repo_path: str,
+) -> tuple[str, str]:
+    """Async core of :func:`_install_rtk_for_dispatch`.
+
+    Opens a private kanban-DB engine on the current loop, calls
+    :func:`token_saver.maybe_install`, then posts the activity-feed
+    note that satisfies the card acceptance criterion ("Zichtbaar in
+    de activity-feed"). Active + failed (fail-open) both post —
+    inactive is silent because the default-off path runs on every
+    Backlog dispatch and would flood the feed.
+
+    Returns ``(status, reason)`` so the activity-feed note and the
+    ``RTK_TELEMETRY=off`` decision in the caller stay in sync. The
+    caller never has to re-derive the reason from the status string.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.config import settings
+    from app.kanban import token_saver
+
+    engine = create_async_engine(
+        settings.kanban_database_url, future=True,
+    )
+    try:
+        Session = async_sessionmaker(
+            engine, expire_on_commit=False,
+        )
+        async with Session() as session:
+            status, reason = await token_saver.maybe_install(
+                session,
+                card_id=card_id,
+                project_key=project_key,
+                column_name=column_name,
+                worktree_path=worktree_path,
+                repo_path=repo_path,
+            )
+            # Activity-feed observability. Only active + failed post;
+            # inactive is the default-off path and would flood the feed.
+            # post_note itself is fail-open (catches its own exceptions
+            # defensively) so this never breaks the spawn.
+            if status == "active":
+                await token_saver.post_note(
+                    session, card_id, f"activated: {reason}",
+                )
+            elif status == "failed":
+                await token_saver.post_note(
+                    session, card_id, f"fail-open: {reason}",
+                )
+            await session.commit()
+            return (status, reason)
+    finally:
+        await engine.dispose()
+
 
 
 def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
