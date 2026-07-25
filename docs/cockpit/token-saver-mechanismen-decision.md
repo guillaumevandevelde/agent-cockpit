@@ -635,30 +635,83 @@ alsnog een apart proxy-proces zijn, niet een import in onze backend.
   `token_saver:<project_key>` (Pydantic-validated;
   `set_board_enabled` schrijft `"1"` / `"0"` naar de
   bestaande kolom)
-- ✅ Tests: 20 unit-tests (`test_token_saver.py`) + 4
+- ✅ Tests: 23 unit-tests (`test_token_saver.py`) + 4
   kolom-migratie-tests (`test_token_saver_column.py`) + 4
-  API-tests (`test_token_saver_api.py`), groen — **de vier extra
-  dispatch-bridge-tests (`test_dispatch_bridge_posts_activated_note_on_active`,
-  `test_dispatch_bridge_posts_fail_open_note_on_missing_binary`,
-  `test_dispatch_bridge_silent_on_inactive_path`,
-  `test_sync_bridge_posts_activated_note_on_real_dispatch`) zijn de
-  activiteit-feed-claim hardop maken: de eerste drie sturen een
-  `_install_rtk_for_dispatch_async`-call en lezen de
-  `**Note:** Token saver …`-rij terug uit de op-log van een
-  aangemaakte card; de vierde draait de sync wrapper (wat
-  `make_worktree_transport` aanroept) in een worker thread en
-  bewijst dat de `asyncio.run`-grens de note niet sluit — precies
-  de test die de FCR-ronder eiste, zie §8-bis hieronder voor de
-  Impediment-ronde die ze hebben afgedwongen
+  API-tests (`test_token_saver_api.py`), groen. Zeven bridge-tests maken de
+  activity-feed-claim hard: drie testen de async kern; één test de directe
+  sync-caller zonder lopende loop; en drie regressietests de werkelijke
+  productievoorwaarden — de sync bridge wordt vanuit een actieve event loop
+  aangeroepen, de open claim/move-transactie wordt vóór de worker-DB-call
+  gecommit, en een exception in de bridge zelf levert alsnog een zichtbare
+  `**Note:** Token saver fail-open: bridge …` op. De productie-test verwacht
+  zowel status `active` als exact
+  `**Note:** Token saver activated: RTK 0.43.0`.
 - ✅ `compare`-harness uitgebreid met `real-saver`-variant in
   lockstep met de dispatch-helper
 
-**Gemeten effect** (uit `decisions.md` rij van 2026-07-24, c31333bf…,
-verplicht veld vóór Done): **TBD — `scripts/measure-token-saver.sh
-compare` run na merge vult dit veld**. Als de meting nul of
-negatief uitvalt, blijft de feature opt-in zoals de card-eis al
-voorschreef; de `default off` acceptance-criterion staat en de
-integratiekaart sluit zonder promotion.
+**Gemeten effect** (lockstep-harness, RTK 0.43.0, `compare`-modus
+op deze feature-worktree, 2026-07-25): twee counterbalanced trials
+met drie varianten (baseline / proxy `with-saver` / echte
+`real-saver`). Resultaten, één tabel per trial:
+
+| Variant | input | cache_creation | cache_read | output | pass_tests | pass_diff |
+|---|---:|---:|---:|---:|:-:|:-:|
+| trial-1 baseline | 43.967 | 0 | 295.731 | 2.390 | 1 | 0 |
+| trial-1 with-saver (proxy) | 45.005 | 0 | 294.272 | 987 | 1 | 0 |
+| trial-1 real-saver (RTK) | 57.446 | 0 | 930.176 | 3.941 | 1 | 0 |
+| **Δ trial-1 (proxy − baseline)** | **+1.038** | **0** | **−1.459** | **−1.403** | — | — |
+| trial-2 baseline | 159.671 | 0 | 779.264 | 3.394 | 1 | 1 |
+| trial-2 with-saver (proxy) | 42.630 | 0 | 356.736 | 2.198 | 1 | 1 |
+| trial-2 real-saver (RTK) | 52.742 | 0 | 385.536 | 1.429 | 1 | 0 |
+| **Δ trial-2 (proxy − baseline)** | **−117.041** | **0** | **−422.528** | **−1.196** | — | — |
+
+**Wat er hard uitkomt, en wat niet.**
+
+- ✅ **Geen kwaliteitsregressie.** `pass_tests=1` in alle zes de runs
+  (agent onder RTK voltooit de golden task correct: de `b30a9bb`-revert
+  op `_column_max_sessions` wordt hersteld). De card-eis "zonder
+  kwaliteitsregressie" staat daarmee.
+- ⚠️ **`pass_diff=0` in de twee `real-saver`-runs.** Dat is **geen**
+  kwaliteitsfalen: de agent lost de `test_zero_column_cap`-tests
+  allebei op (vandaar `pass_tests=1`), maar met een andere
+  diff-shape dan de canonieke `r.max_sessions > 0` → `r.max_sessions
+  >= 0` één-regelige match. Het `score_golden`-criterium telt een
+  letterlijke vervang; meerdere geldige fixes scoren `0`. Onder de
+  proxy-variant scoort `pass_diff=1` in trial 2. Dit verschil hoort
+  bij de scorer, niet bij RTK.
+- ⚠️ **`cache_read` op `real-saver` is op N=2 niet eenduidig.** Trial 1
+  toont `real-saver` 930.176 vs baseline 295.731 — `real-saver`
+  **drie keer** zoveel `cache_read` (cache-creatie is 0 in beide,
+  `cache_creation` als confound-kanaal speelt niet mee). Trial 2
+  toont juist een halvering (385.536 vs 779.264). De variantie is
+  orde-grootte groter dan het proxy-effect en strookt niet met een
+  eenvoudig "X% bespaard"-verhaal. Mogelijke oorzaken die deze
+  single-bron-N niet kan uitsluiten: prefix-cache-hits die sessie-
+  afhankelijk domineren (zie de eerdere tegenstrijdigheid tussen
+  `cache_read` wel/niet meetellen die §2 zelf al
+  gemarkeerd heeft), en de variantie in *welke* commando's de
+  golden-task-agent in welke volgorde uitvoert. **De card-eis "netto-
+  opbrengst" is op N=2 niet hard claim-baar voor `real-saver`; de
+  proxy-ondergrens claimt 'm wél.**
+- ✅ **De proxy (`with-saver`) reproduceert de §8 verwachting.** Beide
+  trials laten output-daling zien (−58,7% en −35,2%) en trial 2 laat
+  een forse input/cache_read-daling zien (−73% / −54%) met
+  `pass_diff=1`. Dat strookt met de eerdere
+  `token-saver-meet-harnas.md`-meting (`6b67df66…`) — de proxy is
+  een ondergrens, niet de `real-saver` zelf.
+
+**Conclusie.** De integratie staat en is mechanisch correct (sync
+bridge → worker-thread event loop; pre-transport commit; activity-feed
+note exact geformatteerd; wrapper-level fail-open). De
+kwaliteits-eis (geen regressie) is hard aangetoond (`pass_tests=1`).
+De netto-opbrengst-eis is op de `real-saver`-meting bij N=2 niet hard
+bewijs-baar; de proxy-ondergrens bevestigt 'm wél. **Geen promotion
+naar default-on**: de kaart-eis was opt-in met `default off`, en de
+`real-saver`-meting levert op deze N geen grond om die voorzichtigheid
+los te laten. De feature blijft opt-in en per-lane; een hogere-N
+vervolgmeting (grotere steekproef, golden tasks die `Read` zwaarder
+belasten om de `Bash`-asymmetrie uit §5.2 te repareren) hoort in een
+eigen kaart thuis, niet in deze.
 
 | Mechanisme | Besluit | Winst A / B | Kern |
 |---|---|---|---|
@@ -695,72 +748,63 @@ wijzigt het meetellen van `cache_read` in abonnementen — dan verschuift het he
 zwaartepunt van §2 —, of (d) de mix uit §5.2 verandert wezenlijk (bv. `Read` daalt
 onder `Bash`).
 
-### ✅ Geïmplementeerd (kaart `c31333bf…`, 2026-07-25) — activity-feed fix na Impediment
+### ✅ Geïmplementeerd (kaart `c31333bf…`, 2026-07-25) — productionele bridge hersteld na tweede Impediment
 
-**Wat er fout ging.** De 2026-07-24-markering claimde "Activity-feed
-observability via `post_note` met 60-s-dedup, dus één `**Note:** Token
-saver activated: RTK 0.43.0` per dispatch", maar `post_note` was
-alleen als helper gedefinieerd en unit-getest — `git grep post_note`
-wees uit dat niemand in de dispatch-keten 'm aanriep. Een reviewer
-flagde dat, de kaart ging weer open, en de claim was gewoon onwaar
-voor de integratie-zijde.
+**Wat de eerste herstelronde nog miste.** De activity-feed-call was wel aan de
+async kern toegevoegd, maar de sync wrapper gebruikte `asyncio.run()` rechtstreeks.
+Dat werkt alleen op een thread zonder lopende loop. Productie doet het omgekeerde:
+async `_run_card` roept `card_transport(...)` inline aan op zijn event-loop-thread.
+De wrapper retourneerde daar dus altijd `failed`, lekte een un-awaited-coroutine
+warning, installeerde geen bruikbare RTK-status en postte geen note. De toenmalige
+worker-thread-test bewees uitsluitend de secundaire sync-caller en was geen simulatie
+van productie.
 
-**Wat er nu staat.** De sync-bridge `_install_rtk_for_dispatch` is
-opgesplitst in een dunne sync wrapper (omhulsel met
-`asyncio.run`, onveranderd voor `make_worktree_transport`) en een
-async kern `_install_rtk_for_dispatch_async` die dezelfde private
-kanban-engine opent en daarin `token_saver.maybe_install` + (voor de
-**active** + **failed** paden) `token_saver.post_note` aanroept, met
-dezelfde sessie en één commit. De **inactive**-pad (per-lane off,
-board-wide off) post géén note — dat is de standaard-uit-route die op
-elke Backlog-dispatch loopt en zou de activity-feed overstromen.
-De helper retourneert nu `(status, reason)` zodat de
-`RTK_TELEMETRY=off`-beslissing en de activity-feed-tekst aan dezelfde
-bron gekoppeld zijn — geen tweede afleiding in de caller.
+De hercontrole bracht een tweede grens aan het licht: alleen `asyncio.run()` naar een
+worker verplaatsen is onvoldoende. `_run_card` had zijn claim+move-transactie nog
+open; de private kanban-engine van de worker botste bij `post_note` op die
+SQLite-write-lock en blokkeerde. De productie-seam heeft dus twee voorwaarden:
+**lopende event loop én een open dispatch-transactie**.
 
-**Vier tests die het hard maken** (`test_token_saver.py`):
+**Wat er nu staat.** `_install_rtk_for_dispatch` detecteert een lopende loop en voert
+de async kern dan synchronisch uit op één private worker-thread met eigen loop. De
+coroutine wordt pas ín die execution context gemaakt, dus ook een executor-/bridge-fout
+lekt geen un-awaited coroutine. Vlak vóór een verse worktree-transport-call commit
+`_run_card` de claim+move; daardoor kan de worker dezelfde DB lezen en zijn note
+schrijven. Een spawn-fout blijft veilig: de bestaande exception-tak schrijft daarna
+release/move-compensaties in een nieuwe transactie. Buiten een lopende loop blijft de
+rechtstreekse `asyncio.run()`-fallback beschikbaar.
 
-- `test_dispatch_bridge_posts_activated_note_on_active` — zet de
-  per-lane vlag + board-wide kill-switch + fake rtk binary, draait
-  de async-bridge, en leest de `**Note:** Token saver activated:
-  …`-rij terug uit `KanbanOp` van een aangemaakte card.
-- `test_dispatch_bridge_posts_fail_open_note_on_missing_binary` —
-  idem maar zonder rtk binary, verwacht `**Note:** Token saver
-  fail-open: rtk binary missing`.
-- `test_dispatch_bridge_silent_on_inactive_path` — per-lane off,
-  verwacht nul notes (geen feed-flood).
-- `test_sync_bridge_posts_activated_note_on_real_dispatch` — draait
-  de **sync wrapper** (`_install_rtk_for_dispatch`, dezelfde die
-  `make_worktree_transport` aanroept) in een worker thread en leest
-  de `**Note:** Token saver activated: …`-rij terug. Bewijst dat
-  de `asyncio.run`-grens de note niet sluit — de test die de FCR-1
-  expliciet eiste.
+Als de bridge zelf crasht — dus vóór de async kern een fail-open-note kon schrijven —
+post `_post_rtk_bridge_failure_async` best-effort
+`**Note:** Token saver fail-open: bridge <ExceptionType>: <reden>`. Ook als dát posten
+faalt, blijft de spawn doorgaan. De normale teksten zijn nu exact (geen dubbele
+`Token saver: activated:`-dubbelepunt meer):
 
-De eerste drie monkeypatchen `settings.kanban_database_url` naar de
-test-DB en roepen de **async kern** direct aan — `asyncio.run` van
-uit een pytest-asyncio test mag niet. De vierde draait de sync
-wrapper in een worker thread om dezelfde reden: een lopende event
-loop in de test zou `asyncio.run` laten falen met
-`asyncio.run() cannot be called from a running event loop`, en dat
-is precies de productie-context (sync caller, verse loop) die de
-sync wrapper belichaamt.
+- `**Note:** Token saver activated: RTK 0.43.0`
+- `**Note:** Token saver fail-open: <reden>`
 
-**Wat er niét veranderde.** Het `maybe_install` / `post_note` /
-`is_board_enabled` / `set_board_enabled` / `write_rtk_settings_into_worktree`
-oppervlak in `token_saver.py`, de per-lane vlag, de board-wide
-kill-switch, de RTK-binary-resolutie, de versie-pin, de
-`RTK_TELEMETRY=off` env, het lockstep-meet-harnas, en de
-done-summary van de 2026-07-24-ronde. Alleen de activity-feed
-zijde van de integratie is deze ronde aangeraakt; de rest stond.
+**Regressiedekking.** `test_token_saver.py` telt nu 23 tests. De drie nieuwe tests
+naast de bestaande async-kern- en sync-fallback-dekking zijn:
 
-**Heropenen** bij: dezelfde voorwaarden als §8 + (e) de post_note
-breekt de dedup onder load (een race tussen twee gelijktijdige
-dispatches op dezelfde card zou dubbele notes kunnen produceren
-als de HLC-tick van `_clock_for` niet strak genoeg serialiseert),
-of (f) een operator wil de note-tekst in de UI terugzien (nu is
-het een kale op-log-rij — de activity-feed component toont 'm
-al, maar geen samenvattende card-rij die de operator op de
-kaart zelf ziet).
+- `test_sync_bridge_works_when_called_inside_running_event_loop` — roept de sync
+  bridge op de pytest-asyncio-loop aan en verwacht `active` + de exacte note;
+- `test_dispatch_commits_claim_before_running_worktree_token_saver` — rijdt via
+  `dispatch_card` met een worktree-transport en bewijst dat de claim/move-lock de
+  worker niet blokkeert;
+- `test_sync_bridge_failure_posts_fail_open_note` — laat de async kern moedwillig
+  crashen en verwacht status `failed`, geen exception naar de spawn, en een zichtbare
+  bridge-fail-open-note.
+
+**Ongewijzigd.** De publieke `token_saver.py`-surface, per-lane vlag, board-wide
+kill-switch, binary-resolutie, versie-pin, `RTK_TELEMETRY=off`, instructie-isolatie en
+het lockstep-meet-harnas blijven gelijk. De wijziging maakt het al besloten mechanisme
+werkelijk bereikbaar in de normale dispatch-context; ze verandert niet wat RTK
+comprimeert of welke lanes opt-in zijn.
+
+**Heropenen** bij: dezelfde voorwaarden als §8 + (e) de post_note-dedup breekt onder
+load, (f) een operator wil de note ook als samenvattende card-rij zien, of (g) de
+pre-spawn-commit veroorzaakt aantoonbaar claim/reaper-gedrag dat de bestaande
+compensatiepad-tests niet afvangen.
 
 ## 9. Reproductie
 

@@ -2830,37 +2830,76 @@ def _install_rtk_for_dispatch(
 ) -> str:
     """Sync bridge to :func:`app.kanban.token_saver.maybe_install`.
 
-    The worktree transport is a sync callable (the ``SpawnTransport``
-    protocol), but the token-saver helper is async because it talks to
-    the kanban DB. Spin a *private* event loop AND a *private* engine
-    per call so the connection pool never outlives the call. Never
-    raises — any exception is logged and downgraded to ``"failed"`` so
-    the spawn continues unchanged.
-
-    Why a private engine: the module-level kanban engine is bound to
-    whatever loop happens to be running at import time. Reusing it
-    from a fresh loop creates a stale connection pool that crashes
-    the next test with ``RuntimeError: Event loop is closed``. A
-    dedicated engine per call is cheap (one connection) and the
-    helper's call site is on the cold path of a dispatch, not the
-    hot path.
-
-    The actual async body lives in :func:`_install_rtk_for_dispatch_async`
-    so the test suite (which already runs inside an event loop) can await
-    it directly without ``asyncio.run()`` collisions.
+    The worktree transport is synchronous, while the normal dispatch caller
+    runs it on the asyncio event-loop thread. Execute the async installer on a
+    private worker thread when a loop is already running; otherwise use the
+    current thread. The coroutine is created inside the execution context so a
+    bridge failure cannot leak an un-awaited coroutine. Never raises — any
+    exception is logged and downgraded to ``"failed"`` so the spawn continues
+    unchanged.
     """
     import asyncio
-    try:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _run_install() -> tuple[str, str]:
         return asyncio.run(_install_rtk_for_dispatch_async(
             card_id=card_id, project_key=project_key, column_name=column_name,
             worktree_path=worktree_path, repo_path=repo_path,
-        ))[0]
+        ))
+
+    def _execute(call: Callable[[], tuple[str, str]]) -> tuple[str, str]:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return call()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(call).result()
+
+    try:
+        return _execute(_run_install)[0]
     except Exception as exc:
+        failure_reason = f"bridge {type(exc).__name__}: {exc}"
         logger.warning(
             "token-saver install failed for card %s (column=%s): %s",
             card_id, column_name, exc,
         )
+
+        def _post_failure() -> tuple[str, str]:
+            return asyncio.run(_post_rtk_bridge_failure_async(
+                card_id=card_id, reason=failure_reason,
+            ))
+
+        try:
+            _execute(_post_failure)
+        except Exception:
+            logger.warning(
+                "token-saver fail-open note failed for card %s",
+                card_id, exc_info=True,
+            )
         return "failed"
+
+
+async def _post_rtk_bridge_failure_async(
+    *, card_id: str, reason: str,
+) -> tuple[str, str]:
+    """Best-effort audit note when the installer bridge itself raises."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.config import settings
+    from app.kanban import token_saver
+
+    engine = create_async_engine(settings.kanban_database_url, future=True)
+    try:
+        Session = async_sessionmaker(engine, expire_on_commit=False)
+        async with Session() as session:
+            await token_saver.post_note(
+                session, card_id,
+                f"**Note:** Token saver fail-open: {reason}",
+            )
+            await session.commit()
+        return ("failed", reason)
+    finally:
+        await engine.dispose()
 
 
 async def _install_rtk_for_dispatch_async(
@@ -2903,15 +2942,17 @@ async def _install_rtk_for_dispatch_async(
             )
             # Activity-feed observability. Only active + failed post;
             # inactive is the default-off path and would flood the feed.
-            # post_note itself is fail-open (catches its own exceptions
-            # defensively) so this never breaks the spawn.
+            # Any exception escapes to the sync bridge, which keeps the spawn
+            # fail-open and makes a best-effort fallback note.
             if status == "active":
                 await token_saver.post_note(
-                    session, card_id, f"activated: {reason}",
+                    session, card_id,
+                    f"**Note:** Token saver activated: {reason}",
                 )
             elif status == "failed":
                 await token_saver.post_note(
-                    session, card_id, f"fail-open: {reason}",
+                    session, card_id,
+                    f"**Note:** Token saver fail-open: {reason}",
                 )
             await session.commit()
             return (status, reason)
@@ -4890,6 +4931,14 @@ async def _run_card(
             "endpoint_base_url": endpoint_resolution["base_url"],
             "endpoint_auth_token": endpoint_resolution["auth_token"],
         }
+    if is_fresh_worktree:
+        # The synchronous worktree transport installs RTK through a private
+        # worker-thread event loop and DB connection. Release this session's
+        # SQLite write lock first; otherwise the worker blocks while posting
+        # its activity note and the token saver silently degrades to failed.
+        # Claim + move are durable before spawn, and the existing exception
+        # path applies and commits compensating release/move operations.
+        await session.commit()
     try:
         spawned = card_transport(directory=project_path, prompt=prompt, session_name=name,
                                  cli_id=cli_id, provider=provider, model=effective_model,
