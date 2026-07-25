@@ -124,7 +124,7 @@ export function CardLedgerTab({
                 <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground">
                   Dispatch prompt (persona omitted)
                 </summary>
-                <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-3 pb-3 text-xs text-muted-foreground">
+                <pre className="whitespace-pre-wrap px-3 pb-3 text-xs text-muted-foreground">
                   {context.prompt}
                 </pre>
               </details>

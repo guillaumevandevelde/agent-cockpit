@@ -3,6 +3,7 @@ import { Loader2, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { appsApi } from "../appsApi";
 import type { RunInstance, RunStatus } from "../types";
 
@@ -22,9 +23,19 @@ const STATUS_VARIANT: Record<RunStatus, BadgeProps["variant"]> = {
 export function PreviewPane({
   instance,
   onStopped,
+  fillArea,
 }: {
   instance: RunInstance;
   onStopped: () => void;
+  /**
+   * Opt-in for the drawer body that already owns scrolling (kanban-kaart
+   * 72476d8e…). Switches the iframe from a fixed viewport height
+   * (`h-[50vh]`) to `flex-1 h-full` so it fills the body and the body
+   * itself stops scrolling. Caller is responsible for giving the iframe
+   * a flex-column parent that has a bounded height (the body in full-area
+   * mode does this).
+   */
+  fillArea?: boolean;
 }) {
   const [stopping, setStopping] = useState(false);
   const stop = async () => {
@@ -109,7 +120,7 @@ export function PreviewPane({
           src={instance.url}
           title={`Preview ${instance.instance_id}`}
           sandbox="allow-scripts allow-same-origin"
-          className="h-[50vh] w-full rounded-md border bg-background"
+          className={cn(fillArea ? "flex-1 min-h-0" : "h-[50vh]", "w-full rounded-md border bg-background")}
           data-testid="preview-pane-iframe"
         />
       )}
