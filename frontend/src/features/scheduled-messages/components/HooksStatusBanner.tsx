@@ -4,17 +4,17 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { getHooksStatus, installHooks } from '../api'
+import type { HooksStatus } from '../types'
 
 export function HooksStatusBanner() {
-  const [installed, setInstalled] = useState<boolean | null>(null)
+  const [status, setStatus] = useState<HooksStatus | null>(null)
   const [installing, setInstalling] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const status = await getHooksStatus()
-      setInstalled(status.installed)
+      setStatus(await getHooksStatus())
     } catch {
-      setInstalled(null)
+      setStatus(null)
     }
   }, [])
 
@@ -23,9 +23,17 @@ export function HooksStatusBanner() {
   const handleInstall = async () => {
     setInstalling(true)
     try {
-      const status = await installHooks()
-      setInstalled(status.installed)
-      toast.success('Scheduling hooks installed in ~/.claude/settings.json')
+      const next = await installHooks()
+      setStatus(next)
+      if (next.installed) {
+        toast.success('Scheduling hooks installed in ~/.claude/settings.json')
+      } else {
+        toast.error(
+          next.stale.length > 0
+            ? `Hooks installed, but these events are stale and need a manual reinstall: ${next.stale.join(', ')}`
+            : 'Scheduling hooks not yet installed',
+        )
+      }
     } catch {
       toast.error('Failed to install scheduling hooks')
     } finally {
@@ -33,18 +41,22 @@ export function HooksStatusBanner() {
     }
   }
 
-  if (installed !== false) return null
+  if (!status || status.installed) return null
+
+  const staleList = status.stale.join(', ')
+  const title = status.stale.length > 0
+    ? `Scheduling hooks stale: ${staleList}`
+    : 'Scheduling hooks not installed'
+  const description = status.stale.length > 0
+    ? `The ${staleList} hook command on disk no longer matches what the app renders — a code change landed without a reinstall. Reinstalling the missing events alone won't clear the stale entries; remove the affected entry from ~/.claude/settings.json and then click Install hooks again.`
+    : `Claude Code's Notification/Stop/UserPromptSubmit/SessionStart hooks aren't wired to this app yet, so session-limit detection and auto-resume can't fire — sessions that hit their limit will stall forever instead of freeing up.`
 
   return (
     <Alert variant="destructive">
       <AlertTriangle className="h-4 w-4" />
-      <AlertTitle>Scheduling hooks not installed</AlertTitle>
+      <AlertTitle>{title}</AlertTitle>
       <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-        <span>
-          Claude Code&apos;s Notification/Stop/UserPromptSubmit/SessionStart hooks aren&apos;t
-          wired to this app yet, so session-limit detection and auto-resume can&apos;t fire —
-          sessions that hit their limit will stall forever instead of freeing up.
-        </span>
+        <span>{description}</span>
         <Button size="sm" variant="outline" onClick={handleInstall} disabled={installing}>
           {installing ? 'Installing…' : 'Install hooks'}
         </Button>
