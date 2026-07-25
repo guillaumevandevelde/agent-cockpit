@@ -718,3 +718,163 @@ describe("CardItem inceptie-pipeline Promote-to-project quick-action", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 });
+
+// kanban card e46f8d12: the Done column previously showed bare titles. A
+// finished card now surfaces a ✅ Done badge + completion date, a truncated
+// summary snippet, and per-kind deliverable icons so the column reads as
+// "what shipped" at a glance. All new rendering is gated on column === "Done";
+// non-Done cards must be byte-for-byte unchanged.
+describe("CardItem Done-column completion display", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const doneCard: Card = {
+    ...baseCard,
+    column: "Done",
+  };
+
+  it("renders a ✅ Done badge on a Done card", () => {
+    render(<CardItem card={doneCard} onOpen={() => {}} />);
+    const badge = screen.getByTestId("done-badge");
+    expect(badge.textContent).toContain("Done");
+    expect(badge.textContent).toContain("✅");
+  });
+
+  it("shows the short completion date next to the Done badge", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T12:00:00Z"));
+    render(
+      <CardItem
+        card={{ ...doneCard, completed_at: "2026-07-10T12:00:00Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    const expected = new Date("2026-07-10T12:00:00Z").toLocaleDateString(
+      undefined,
+      { day: "numeric", month: "short" },
+    );
+    expect(screen.getByTestId("done-badge").textContent).toContain(expected);
+  });
+
+  it("renders 'gisteren' for a completion one calendar day ago", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T12:00:00Z"));
+    render(
+      <CardItem
+        card={{ ...doneCard, completed_at: "2026-07-24T12:00:00Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("done-badge").textContent).toContain("gisteren");
+  });
+
+  it("renders the Done badge without a date when completed_at is unset", () => {
+    render(
+      <CardItem card={{ ...doneCard, completed_at: null }} onOpen={() => {}} />,
+    );
+    const badge = screen.getByTestId("done-badge");
+    expect(badge.textContent?.trim()).toBe("✅ Done");
+  });
+
+  it("shows a summary snippet truncated to 80 chars with an ellipsis", () => {
+    const longSummary = "x".repeat(120);
+    render(
+      <CardItem
+        card={{ ...doneCard, done_summary: longSummary }}
+        onOpen={() => {}}
+      />,
+    );
+    const snippet = screen.getByTestId("done-summary-snippet");
+    expect(snippet.textContent).toBe("x".repeat(80) + "…");
+    // The full summary is preserved in the title tooltip.
+    expect(snippet.getAttribute("title")).toBe(longSummary);
+  });
+
+  it("shows a short summary verbatim without an ellipsis", () => {
+    render(
+      <CardItem
+        card={{ ...doneCard, done_summary: "Fixed JWT expiry" }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("done-summary-snippet").textContent).toBe(
+      "Fixed JWT expiry",
+    );
+  });
+
+  it("renders no summary snippet when done_summary is unset", () => {
+    render(
+      <CardItem card={{ ...doneCard, done_summary: null }} onOpen={() => {}} />,
+    );
+    expect(screen.queryByTestId("done-summary-snippet")).toBeNull();
+  });
+
+  it("renders per-kind deliverable icons instead of the generic count", () => {
+    render(
+      <CardItem
+        card={{
+          ...doneCard,
+          deliverables: [
+            { id: "d1", kind: "pr", ref: "pr-1", created_at: "2026-01-01T00:00:00Z" },
+            { id: "d2", kind: "pr", ref: "pr-2", created_at: "2026-01-01T00:00:00Z" },
+            { id: "d3", kind: "branch", ref: "b-1", created_at: "2026-01-01T00:00:00Z" },
+            { id: "d4", kind: "note", ref: "n-1", created_at: "2026-01-01T00:00:00Z" },
+          ],
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    const icons = screen.getByTestId("done-deliverable-icons");
+    expect(icons.textContent).toContain("🔗 2");
+    expect(icons.textContent).toContain("🔀 1");
+    expect(icons.textContent).toContain("📝 1");
+    // The generic 📎 count is not shown for Done cards.
+    expect(icons.textContent).not.toContain("📎");
+  });
+
+  it("falls back to 📦 for a deliverable kind without a specific icon", () => {
+    render(
+      <CardItem
+        card={{
+          ...doneCard,
+          deliverables: [
+            { id: "d1", kind: "plan_ref", ref: "p-1", created_at: "2026-01-01T00:00:00Z" },
+          ],
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    // plan_ref maps to 📋 (has a specific icon); an unknown kind would be 📦.
+    expect(screen.getByTestId("done-deliverable-icons").textContent).toContain("📋 1");
+  });
+
+  it("stays clickable — clicking a Done card opens the drawer", () => {
+    const onOpen = vi.fn();
+    render(<CardItem card={doneCard} onOpen={onOpen} />);
+    screen.getByRole("button", { name: /test card/i }).click();
+    expect(onOpen).toHaveBeenCalledWith(doneCard);
+  });
+
+  it("leaves non-Done cards unchanged: generic 📎 count, no Done badge/snippet", () => {
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Backlog",
+          completed_at: "2026-07-10T12:00:00Z",
+          done_summary: "should not show on a Backlog card",
+          deliverables: [
+            { id: "d1", kind: "pr", ref: "pr-1", created_at: "2026-01-01T00:00:00Z" },
+          ],
+        }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("done-badge")).toBeNull();
+    expect(screen.queryByTestId("done-summary-snippet")).toBeNull();
+    expect(screen.queryByTestId("done-deliverable-icons")).toBeNull();
+    // The legacy generic deliverable count is still rendered.
+    expect(screen.getByText(/📎 1/)).not.toBeNull();
+  });
+});
