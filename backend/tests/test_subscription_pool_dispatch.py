@@ -828,6 +828,62 @@ async def test_dispatch_pool_spills_when_first_entry_above_threshold():
     assert transport.calls[0]["provider"] == "minimax"
 
 
+@pytest.mark.asyncio
+async def test_dispatch_pool_with_duplicate_provider_reports_pool_source_on_spillover():
+    """FCR-blokker: wanneer de pool een duplicaat-provider heeft
+    (``[anthropic, anthropic, bedrock]``) en de synthetische kop
+    (anthropic) valt af door boven-drempel, kiest de router de
+    tweede anthropic in de staart. :func:`provider_source` moet
+    eerlijk ``pool`` rapporteren — niet ``column_default`` — omdat
+    dit geen kolom-default-routing is, alleen een toevallige
+    gelijknamige staart-entry. Na dedup zou de tweede anthropic
+    uit de staart verwijderd moeten zijn en de eerste staart die
+    wint is bedrock; deze test pinst beide kanten (dedup-gedrag +
+    eerlijke source-claim)."""
+    transport = RecordingTransport()
+    pool = [
+        _entry(provider="anthropic", drempel=0.9),
+        _entry(provider="anthropic", drempel=0.9),
+        _entry(provider="bedrock", drempel=0.95),
+    ]
+    from app.services.subscriptions.unknown import UnknownUsageProvider
+
+    with _registry_state() as reg:
+        # Kop + duplicaat-anthropic: boven-drempel → beide vallen af.
+        reg.register_provider(_fake_usage_provider(
+            subscription_id="claude-code:anthropic",
+            subscription_label="fake-anthropic",
+            drempel_gebruikt=0.95,
+            beschikbaar=False,
+        ))
+        # Bedrock: onbekend → router behandelt als beschikbaar.
+        reg.register_provider(UnknownUsageProvider(
+            subscription_id="claude-code:bedrock",
+            subscription_label="test-bedrock",
+        ))
+
+        async with KanbanSessionLocal() as s:
+            await service.create_column(
+                s, project_key=PK, name="engineer",
+                default_agent="engineer", default_provider="anthropic",
+            )
+            cid = await _make_card(s)
+            await subscription_pool.set_subscription_pool(s, PK, pool)
+            await s.commit()
+
+        async with KanbanSessionLocal() as s:
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+
+    assert len(transport.calls) == 1
+    # Staart bevat geen tweede anthropic (dedup); de router valt
+    # dus door naar bedrock. provider_source is "pool" want dit
+    # is een echte uitwijk, niet de kolom-default-kop.
+    assert transport.calls[0]["provider"] == "bedrock"
+
+
 # ---- CLI-aware dispatch integration (kaart 8f40d443…) ----------------------
 #
 # End-to-end: when the spawned CLI is ``open-code`` (or any non-
@@ -1468,3 +1524,56 @@ def test_build_spillover_candidates_cli_mismatch_filters_pool():
     assert head.drempel == 1.0
     # Chain = head + hele pool.
     assert [e.provider for e in chain] == ["bedrock", "anthropic", "minimax"]
+
+
+def test_build_spillover_candidates_pool_with_duplicate_provider_dedups():
+    """FCR-blokker: pool mag duplicaat-providers hebben (validatie laat
+    het toe), en de staart moet álle entries met dezelfde provider+cli
+    verliezen — niet alleen de exacte match op object-identity. Anders
+    zou de tweede ``column_default_provider``-entry in de staart
+    overleven, en ten onrechte als ``column_default``-routing worden
+    gerapporteerd zodra de synthetische kop wordt overgeslagen.
+    """
+    from app.kanban.dispatch import _build_spillover_candidates
+    pool = [
+        # Twee anthropic-entries (dedup-doel).
+        _entry(provider="anthropic", model="opus", drempel=0.7),
+        _entry(provider="anthropic", model="haiku", drempel=0.5),
+        _entry(provider="bedrock", drempel=0.95),
+    ]
+    head, chain = _build_spillover_candidates(
+        column_default_provider="anthropic", pool=pool, cli_id="claude-code",
+    )
+    assert head.provider == "anthropic"
+    # Kop erft drempel/model van de eerste matchende pool-entry.
+    assert head.drempel == 0.7
+    assert head.model == "opus"
+    # Staart bevat géén tweede anthropic — duplicaat is eraf gehaald.
+    assert [e.provider for e in chain] == ["anthropic", "bedrock"]
+
+
+def test_build_spillover_candidates_duplicate_provider_only_dedups_matching_cli():
+    """FCR-blokker: dedup is op (provider, cli), niet op provider alleen.
+    Een tweede pool-entry met dezelfde provider maar andere CLI moet
+    wél in de staart overleven — die hoort bij een andere router-as."""
+    from app.kanban.dispatch import _build_spillover_candidates
+    pool = [
+        _entry(provider="anthropic", model="opus", drempel=0.7),
+        # open-code-anthropic hoort niet bij de claude-code-kop.
+        _entry(provider="anthropic", cli="open-code", drempel=0.5),
+        _entry(provider="bedrock", drempel=0.95),
+    ]
+    head, chain = _build_spillover_candidates(
+        column_default_provider="anthropic", pool=pool, cli_id="claude-code",
+    )
+    # Staart bevat de open-code-anthropic (andere CLI) en bedrock,
+    # maar niet de tweede claude-code-anthropic. Volgorde: head
+    # (claude-code synthetisch) → open-code-anthropic → bedrock.
+    assert [e.provider for e in chain] == ["anthropic", "anthropic", "bedrock"]
+    assert chain[0] is head
+    # head draagt de spawn-CLI; tweede tail-entry is open-code,
+    # derde is bedrock (claude-code default).
+    assert head.resolved_cli == "claude-code"
+    assert chain[1].resolved_cli == "open-code"
+    assert chain[2].resolved_cli == "claude-code"
+    assert chain[2].provider == "bedrock"

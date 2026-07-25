@@ -1409,13 +1409,15 @@ async def resolve_effective_provider_and_model(
     if global_override:
         provider_source = PRECEDENCE_GLOBAL_OVERRIDE
     elif pool_choice:
-        # Eerlijk: de head won (kolom-default aanwezig + head is de
+        # Eerlijk: de head won (de router koos de door ons gebouwde
         # impliciete kop) → ``column_default``; de staart won (head viel
-        # af door pause/drempel, of er was geen kolom-default en de head
-        # ís de eerste pool-entry) → ``pool``. Dedup in
-        # ``_build_spillover_candidates`` garandeert dat alleen de head
-        # de kolom-default-provider kan hebben.
-        if column_default_provider and pool_choice.provider == head_entry.provider:
+        # af door pause/drempel) → ``pool``. We vergelijken op
+        # head-identity, niet op provider: na dedup staat
+        # ``column_default_provider`` op de kop, maar een tweede
+        # pool-entry met dezelfde provider (bestaand edge-case) zou
+        # anders ten onrechte als kolom-default-routing worden
+        # gerapporteerd.
+        if column_default_provider and pool_choice is head_entry:
             provider_source = PRECEDENCE_COLUMN_DEFAULT
         else:
             provider_source = PRECEDENCE_POOL
@@ -1478,11 +1480,13 @@ def _build_spillover_candidates(
     effectieve-kandidatenlijst voor kolom K is
     ``[K.default_provider] ++ [pool-entries minus K.default_provider]``.
     De kop erft ``drempel`` en ``model`` van een matchende pool-entry
-    (en die entry verdwijnt uit de staart — anders dubbel); geen
-    matchende entry → kop met ``drempel=1.0`` (gebruik tot de
-    per-provider pause hem raakt) en ``model=None``. De kop draagt
-    ``cli=cli_id`` zodat de router (``pick_subscription_for_cli``)
-    hem niet wegfiltert.
+    (en álle entries met dezelfde provider+cli verdwijnen uit de staart
+    — dedup op provider, niet op object-identity, want de pool mag
+    duplicaat-providers bevatten en anders zou de tweede anthropic
+    in de staart terechtkomen); geen matchende entry → kop met
+    ``drempel=1.0`` (gebruik tot de per-provider pause hem raakt) en
+    ``model=None``. De kop draagt ``cli=cli_id`` zodat de router
+    (``pick_subscription_for_cli``) hem niet wegfiltert.
 
     Args:
         column_default_provider: ``column.default_provider`` of None
@@ -1496,14 +1500,18 @@ def _build_spillover_candidates(
     Returns:
         ``(head, chain)``: ``head`` is de impliciete eerste entry;
         ``chain`` is de (mogelijk lege) staart die de router achtereenvolgens
-        afloopt. Wanneer de pool leeg is bevat ``chain`` de kop niet;
-        wanneer er geen matchende pool-entry is staat de kop niet in
-        de staart (dedup-contract).
+        afloopt. De staart bevat géén entries met dezelfde
+        ``(provider, cli)`` als de kop (dedup-contract, ook als de
+        pool meerdere entries met die provider draagt). Wanneer de
+        pool leeg is bevat ``chain`` de kop niet.
     """
     if column_default_provider:
         # Zoek een pool-entry op provider én cli — een open-code-pool
-        # mag nooit de claude-code-kop voeden. Geen match → standaard
-        # drempel=1.0 / model=None, geen dedup.
+        # mag nooit de claude-code-kop voeden. Dedup de staart op
+        # provider+cli (niet op object-identity): de pool staat
+        # duplicaat-providers toe, en anders zou de tweede
+        # ``column_default_provider``-entry in de staart overleven
+        # en ten onrechte als kolom-default-routing worden gerapporteerd.
         matched = next(
             (e for e in pool
              if e.provider == column_default_provider and e.resolved_cli == cli_id),
@@ -1516,7 +1524,10 @@ def _build_spillover_candidates(
             cli=cli_id,
             endpoint_name=matched.endpoint_name if matched else None,
         )
-        tail = [e for e in pool if e is not matched]
+        tail = [
+            e for e in pool
+            if not (e.provider == column_default_provider and e.resolved_cli == cli_id)
+        ]
     elif pool:
         head, tail = pool[0], list(pool[1:])
     else:
