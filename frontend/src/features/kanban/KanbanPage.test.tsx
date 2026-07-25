@@ -101,6 +101,7 @@ const BACKLOG_COLUMN: import("./types").KanbanColumn = {
   default_provider: null,
   default_model: null,
   max_sessions: null,
+  token_saver_enabled: false,
   created_at: "2026-07-16T00:00:00Z",
   updated_at: "2026-07-16T00:00:00Z",
 };

@@ -45,7 +45,7 @@ import { ColumnSettingsDialog } from "./ColumnSettingsDialog";
 const COLUMN = {
   id: "c1", project_key: "P", name: "engineer", rank: "0",
   default_agent: "engineer", default_provider: null, default_model: null,
-  max_sessions: null, created_at: "", updated_at: "",
+  max_sessions: null, token_saver_enabled: false, created_at: "", updated_at: "",
 };
 
 /**

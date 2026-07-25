@@ -43,7 +43,17 @@ export const kanbanApi = {
 
   updateColumn: (
     id: string,
-    body: { name?: string; rank?: string; default_agent?: string | null; default_provider?: string | null; default_model?: string | null; max_sessions?: number | null }
+    body: {
+      name?: string;
+      rank?: string;
+      default_agent?: string | null;
+      default_provider?: string | null;
+      default_model?: string | null;
+      max_sessions?: number | null;
+      // Per-lane RTK (token-saver) opt-in (kaart c31333bf…). Surfaced as
+      // a bool on the API; the SQLite column stores 0/1.
+      token_saver_enabled?: boolean;
+    }
   ): Promise<KanbanColumn> =>
     apiClient<KanbanColumn>(`${BASE}/columns/${id}`, {
       method: "PATCH",
