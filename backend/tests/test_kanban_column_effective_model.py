@@ -56,6 +56,27 @@ def test_resolve_model_source_precedence_labels():
     assert dispatch._resolve_model_source(None, None, None, None) == "none"
 
 
+def test_resolve_model_source_column_default_dropped_on_higher_layer_provider_switch():
+    # Mirrors _effective_model: the column_default label falls through when a
+    # higher layer (global_override/pool) pinned a provider that differs from
+    # column.default_provider, so the UI never reports "column_default" for a
+    # model that was actually dropped.
+    assert dispatch._resolve_model_source(
+        None, None, "opus", None, provider="minimax",
+        column_default_provider="anthropic", provider_pinned_by_higher_layer=True,
+    ) == "none"
+    # Same provider -> label stays column_default.
+    assert dispatch._resolve_model_source(
+        None, None, "MiniMax-M3", None, provider="minimax",
+        column_default_provider="minimax", provider_pinned_by_higher_layer=True,
+    ) == "column_default"
+    # No higher-layer pin -> unchanged.
+    assert dispatch._resolve_model_source(
+        None, None, "opus", None, provider="bedrock",
+        column_default_provider=None, provider_pinned_by_higher_layer=False,
+    ) == "column_default"
+
+
 # ---- resolve_column_effective_model: full chain ----------------------------
 
 
@@ -154,6 +175,67 @@ async def test_resolve_column_effective_model_pool_provider_only():
     assert info["model"] == "MiniMax-M3"
     assert info["provider_source"] == "pool"
     assert info["model_source"] == "column_default"
+
+
+@pytest.mark.asyncio
+async def test_resolve_column_effective_model_global_override_provider_only_drops_column_model():
+    """AC (bug 98064955…): analyst column (anthropic/opus) + a board-wide override
+    of {provider: minimax, model: null} drops the column model alias — it does NOT
+    leak to the MiniMax spawn. The resolver returns model=None; the provider env
+    then fills the MiniMax provider-native default (MiniMax-M3)."""
+    async with KanbanSessionLocal() as s:
+        await create_column(
+            s, project_key=PK, name="analyst", default_agent="analyst",
+            default_provider="anthropic", default_model="opus",
+        )
+        await s.commit()
+    from app.kanban.dispatch import set_active_subscription_override
+    async with KanbanSessionLocal() as s:
+        await set_active_subscription_override(
+            s, project_key=PK, override={"provider": "minimax", "model": None},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="analyst", project_path="/p",
+        )
+    assert info["provider"] == "minimax"
+    assert info["model"] is None            # opus dropped, not leaked
+    assert info["provider_source"] == "global_override"
+    assert info["model_source"] == "none"
+    # The provider-native default (MiniMax-M3) is what actually spawns.
+    from app.services.agentic_cli.provider_env import (
+        MINIMAX_DEFAULT_MODEL,
+        build_provider_env,
+    )
+    env = build_provider_env(provider=info["provider"], model=info["model"])
+    assert env["ANTHROPIC_MODEL"] == MINIMAX_DEFAULT_MODEL == "MiniMax-M3"
+
+
+@pytest.mark.asyncio
+async def test_resolve_column_effective_model_pool_provider_only_drops_column_model():
+    """Same drop via a subscription-pool/spillover choice: a pool entry
+    {provider: minimax, model: None} that switches the provider away from the
+    column default (anthropic/opus) drops the column model alias."""
+    async with KanbanSessionLocal() as s:
+        await create_column(
+            s, project_key=PK, name="analyst", default_agent="analyst",
+            default_provider="anthropic", default_model="opus",
+        )
+        await subscription_pool.set_subscription_pool(
+            s, PK, _make_pool([
+                {"provider": "minimax", "model": None, "drempel": 0.95},
+            ]),
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="analyst", project_path="/p",
+        )
+    assert info["provider"] == "minimax"
+    assert info["model"] is None
+    assert info["provider_source"] == "pool"
+    assert info["model_source"] == "none"
 
 
 @pytest.mark.asyncio

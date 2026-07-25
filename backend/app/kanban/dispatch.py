@@ -1150,7 +1150,9 @@ def _read_persona_model(project_path: str, filename: str) -> str | None:
 def _effective_model(override_model: str | None, card_model: str | None,
                      column_default_model: str | None,
                      persona_model: str | None,
-                     provider: str | None = None) -> str | None:
+                     provider: str | None = None,
+                     column_default_provider: str | None = None,
+                     provider_pinned_by_higher_layer: bool = False) -> str | None:
     """Precedence: per-column override (`card.column_overrides[<target>].model`)
     > card.model > column.default_model > persona frontmatter `model:` > None
     (no --model flag, provider default applies). The per-column override is the
@@ -1158,17 +1160,34 @@ def _effective_model(override_model: str | None, card_model: str | None,
     column, so it wins over the card-global `model`. Empty strings are treated
     as unset, same as None.
 
-    `provider` gates the persona-frontmatter fallback: a persona's `model:` is an
-    Anthropic-subscription alias (e.g. `opus`), written before per-column provider
-    selection existed. When the column routes to a non-Anthropic provider
-    (minimax/bedrock), that alias is meaningless and — passed as `--model` — would
-    override the provider env's native model (`ANTHROPIC_MODEL=MiniMax-M3`),
-    silently running the wrong model against the wrong vendor. So the persona
-    fallback only applies for Anthropic (or when provider is unknown). The explicit
-    override/card/column-default models always win: those are deliberate choices
-    that may legitimately name a provider-native model."""
+    Two of these layers are *provider-gated* — a model alias only carries
+    through when it is native to the provider the spawn will actually run on:
+
+    - **persona frontmatter** (`opus`, …) is an Anthropic-subscription alias
+      written before per-column provider selection existed. It only applies for
+      Anthropic (or when `provider` is unknown/None).
+
+    - **column.default_model** is native to the column's *own* provider
+      (`column_default_provider`, or the Anthropic chain-default when the column
+      names none). When a HIGHER layer — `global_override` or a
+      pool/spillover choice, flagged via `provider_pinned_by_higher_layer` —
+      pins the spawn to a provider that *differs* from `column_default_provider`,
+      the column model alias is meaningless there (it would be passed as
+      `--model opus` / `ANTHROPIC_MODEL=opus` and wrongly override the
+      provider-native default), so it falls through. When provider and model
+      came from the same column layer (no higher-layer pin, or the higher layer
+      pinned the same provider) nothing changes. A per-card `column_override`
+      *provider* does NOT trigger this drop — that path deliberately leaves the
+      column model as a fallthrough.
+
+    The explicit override/card models always win: those are deliberate authoring
+    choices that may legitimately name a provider-native model."""
+    column_fallback = column_default_model
+    if (provider_pinned_by_higher_layer and column_default_model
+            and provider != column_default_provider):
+        column_fallback = None
     persona_fallback = persona_model if provider in (None, PROVIDER_ANTHROPIC) else None
-    return override_model or card_model or column_default_model or persona_fallback or None
+    return override_model or card_model or column_fallback or persona_fallback or None
 
 
 # Precedence sources, in dispatch order. Used to label where a resolved model
@@ -1188,6 +1207,8 @@ def _resolve_model_source(
     column_default_model: str | None,
     persona_model: str | None,
     provider: str | None = None,
+    column_default_provider: str | None = None,
+    provider_pinned_by_higher_layer: bool = False,
 ) -> str | None:
     """Return the precedence-level a resolved model came from.
 
@@ -1196,16 +1217,22 @@ def _resolve_model_source(
     picks one in the column-settings UI but a board-wide override or
     pool choice silently wins (kaart 1782fa43…).
 
-    The provider-gated persona fallback is honored here too: a persona
-    `model:` alias on a non-Anthropic provider is not a real source, the
-    chain falls through past it. When the chain produces nothing this
+    The two provider-gated fallbacks are honored identically to
+    `_effective_model`: a persona `model:` alias on a non-Anthropic
+    provider is not a real source, and a `column.default_model` alias is
+    not a real source when a higher layer (`global_override`/pool) pinned
+    a provider that differs from `column_default_provider` — in both cases
+    the chain falls through past it. When the chain produces nothing this
     returns None (same shape as `_effective_model`).
     """
     if override_model:
         return PRECEDENCE_COLUMN_OVERRIDE
     if card_model:
         return "card_model"
-    if column_default_model:
+    column_dropped = (
+        provider_pinned_by_higher_layer and provider != column_default_provider
+    )
+    if column_default_model and not column_dropped:
         return PRECEDENCE_COLUMN_DEFAULT
     if persona_model and provider in (None, PROVIDER_ANTHROPIC):
         return PRECEDENCE_PERSONA
@@ -1314,6 +1341,15 @@ async def resolve_effective_provider_and_model(
     )
     persona_model = _read_persona_model(project_path, f"{target_agent}.md")
     column_default_model = await get_column_default_model(session, project_key, target_agent)
+    # Did a layer ABOVE the per-card column_override (i.e. global_override or the
+    # subscription pool/spillover) pin the provider? That is the only trigger for
+    # dropping a column.default_model alias that is native to a *different*
+    # provider — a per-card column_override provider deliberately leaves the
+    # column model as a fallthrough (see `_effective_model`).
+    provider_pinned_by_higher_layer = bool(
+        (global_override or {}).get("provider")
+        or (pool_choice.provider if pool_choice else None)
+    )
     effective_model_override = (
         (global_override or {}).get("model")
         or (pool_choice.model if pool_choice else None)
@@ -1322,6 +1358,8 @@ async def resolve_effective_provider_and_model(
     model = _effective_model(
         effective_model_override, card_model, column_default_model, persona_model,
         provider=provider,
+        column_default_provider=column_default_provider,
+        provider_pinned_by_higher_layer=provider_pinned_by_higher_layer,
     )
     if effective_model_override:
         if global_override and (global_override.get("model") == effective_model_override):
@@ -1331,6 +1369,8 @@ async def resolve_effective_provider_and_model(
     else:
         model_source = _resolve_model_source(
             None, card_model, column_default_model, persona_model, provider=provider,
+            column_default_provider=column_default_provider,
+            provider_pinned_by_higher_layer=provider_pinned_by_higher_layer,
         )
     if global_override:
         provider_source = PRECEDENCE_GLOBAL_OVERRIDE

@@ -794,11 +794,53 @@ def test_effective_model_persona_fallback_suppressed_for_non_anthropic():
     # Anthropic (or unknown/None provider) keeps the persona fallback.
     assert dispatch._effective_model(None, None, None, "opus", provider="anthropic") == "opus"
     assert dispatch._effective_model(None, None, None, "opus", provider=None) == "opus"
-    # Explicit column-default / card / override models still win for any provider —
-    # they may deliberately name a provider-native model.
+    # Explicit card / override models still win for any provider — they are a
+    # deliberate authoring choice that may name a provider-native model. The
+    # column-default alias, however, is now provider-gated (see the test below);
+    # here no higher layer pinned the provider, so it is kept.
     assert dispatch._effective_model(None, None, "MiniMax-M3", "opus", provider="minimax") == "MiniMax-M3"
     assert dispatch._effective_model(None, "MiniMax-M3", None, "opus", provider="minimax") == "MiniMax-M3"
     assert dispatch._effective_model("MiniMax-M3", None, None, "opus", provider="minimax") == "MiniMax-M3"
+
+
+def test_effective_model_column_default_dropped_when_higher_layer_switches_provider():
+    # A column-default model alias (e.g. "opus") is native to the column's own
+    # provider. When a HIGHER layer (global_override / pool-spillover) pins the
+    # spawn to a DIFFERENT provider than column.default_provider, that alias is
+    # meaningless there and must fall through to the provider-native default.
+    assert dispatch._effective_model(
+        None, None, "opus", None, provider="minimax",
+        column_default_provider="anthropic", provider_pinned_by_higher_layer=True,
+    ) is None
+    # Column with no default_provider is implicitly Anthropic; a higher-layer
+    # minimax pin still differs from it -> alias dropped.
+    assert dispatch._effective_model(
+        None, None, "opus", None, provider="minimax",
+        column_default_provider=None, provider_pinned_by_higher_layer=True,
+    ) is None
+    # Higher layer pins the SAME provider as the column default -> model kept
+    # (provider and model came from a consistent layer).
+    assert dispatch._effective_model(
+        None, None, "MiniMax-M3", None, provider="minimax",
+        column_default_provider="minimax", provider_pinned_by_higher_layer=True,
+    ) == "MiniMax-M3"
+    # No higher-layer pin (provider from a per-card column_override or the column
+    # default itself) -> model kept. This preserves the provider-only per-card
+    # override fallthrough contract (AC1 scopes the drop to global_override/pool).
+    assert dispatch._effective_model(
+        None, None, "opus", None, provider="bedrock",
+        column_default_provider=None, provider_pinned_by_higher_layer=False,
+    ) == "opus"
+    # Explicit card.model / per-column override model always win, even on a
+    # mismatched higher-layer provider (AC4).
+    assert dispatch._effective_model(
+        "sonnet-5", None, "opus", None, provider="minimax",
+        column_default_provider="anthropic", provider_pinned_by_higher_layer=True,
+    ) == "sonnet-5"
+    assert dispatch._effective_model(
+        None, "sonnet-5", "opus", None, provider="minimax",
+        column_default_provider="anthropic", provider_pinned_by_higher_layer=True,
+    ) == "sonnet-5"
 
 
 # ---- per-card column_overrides: model+provider per target column ----------
