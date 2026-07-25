@@ -179,6 +179,15 @@ Aanbeveling als startpunt voor die kaart: **A** (goedkoper, lost de gemelde
 pijn direct op), met B als vervolg zodra kaart-content verder groeit. De
 kaart beslist definitief.
 
+✅ Beslist (kaart `624f7718…`): **richting A**, vastgelegd in
+[`kaart-modal-leesfirst-decision.md`](./kaart-modal-leesfirst-decision.md).
+De rationale wijkt af van de aanbeveling hierboven: doorslaggevend is niet de
+kostprijs maar dat **B de gemelde klacht niet oplost** — de geneste schuifbalken
+komen uit hoogte-caps op de binnen-content, en die reizen ongewijzigd mee naar een
+pagina die zelf óók scrollt. B adresseert alleen deeloorzaak (2). Het beslisdoc
+enumereert de zeven concrete scroll-bronnen en levert twee vervolgkaarten
+(`72476d8e…` scroll-contract, `c81fb67d…` lees-first herindeling).
+
 ## 4. As C — uniformisering (en wat al gedekt is)
 
 De kaart noemt "uniformisering". Twee lagen:
