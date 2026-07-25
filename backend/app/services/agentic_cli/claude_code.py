@@ -81,6 +81,12 @@ class ClaudeCodeCli(AgenticCli):
 
         if options.skip_permissions:
             command.append("--dangerously-skip-permissions")
+        if options.permission_prompt_tool:
+            # Carries the MCP tool name Claude Code will invoke when an
+            # `ask`-classified permission needs answering. Only set by the
+            # dispatcher when skip_permissions=False (the product lane);
+            # meta keeps the historical bypass and emits no flag here.
+            command += ["--permission-prompt-tool", options.permission_prompt_tool]
         if options.model:
             command += ["--model", options.model]
         if options.prompt:

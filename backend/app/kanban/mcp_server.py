@@ -38,6 +38,24 @@ _NOT_FOUND = "not_found"
 _GATE_POLL_INTERVAL_SECONDS = 2
 _GATE_DEFAULT_TIMEOUT_SECONDS = 1800
 
+# permission_prompt serves Claude Code's ``--permission-prompt-tool`` flag and
+# has a *stricter* timeout contract than open_gate: an unanswered permission
+# prompt holds a worktree + a card claim, and 30 minutes of nothing is not
+# acceptable for a mid-run question. Five minutes is a reasonable starting
+# ceiling — long enough for a human to context-switch, short enough that a
+# forgotten prompt self-resolves to deny before EOD. See
+# ``docs/cockpit/approval-privilege-separation-analyse.md`` §5 path 3.
+_PERMISSION_PROMPT_DEFAULT_TIMEOUT_SECONDS = 300
+
+# The fully-qualified MCP tool name Claude Code will pass back via
+# ``--permission-prompt-tool``. Format is ``mcp__<server>__<tool>``; the server
+# name ``cockpit-kanban`` matches the FastMCP("cockpit-kanban") below and the
+# tool name ``permission_prompt`` matches the function name registered via
+# ``@mcp.tool()`` further down in this file. Centralising it here keeps the
+# dispatch wire-up and the gate producer in lockstep — change one and the
+# other goes out of sync visibly.
+PERMISSION_PROMPT_TOOL_NAME = "mcp__cockpit-kanban__permission_prompt"
+
 
 async def _card_dict(s, card) -> dict:
     """JSON-serialisable dict for a card ORM instance, enriched with the
@@ -890,6 +908,130 @@ async def open_gate(card_id: str, question: str, options: list[str],
 
     logger.info("open_gate: %s timed out after %ss", gate_id, timeout_seconds)
     return {"error": "timeout", "gate_id": gate_id}
+
+
+@mcp.tool()
+async def permission_prompt(card_id: str, tool_name: str,
+                            tool_input: dict,
+                            timeout_seconds: int = _PERMISSION_PROMPT_DEFAULT_TIMEOUT_SECONDS) -> dict:
+    """Open a permission-prompt gate and block until a human approves or denies.
+
+    Producer-side wiring for Claude Code's ``--permission-prompt-tool`` flag
+    (kaart 5278a5bd…). When the dispatch layer spawns a Claude session with
+    ``--permission-prompt-tool mcp__cockpit-kanban__permission_prompt``, every
+    permission decision that requires human input is routed to this tool. We
+    reuse the existing ``KanbanGate`` primitive (no new gate-shaped datamodel)
+    and return Claude Code's expected ``{"behavior": "allow"}`` /
+    ``{"behavior": "deny", "message": "..."}`` shape so the model can react
+    inline — a denial becomes a tool-error in the run, a timeout closes
+    fail-closed to deny, and a successful approval lets Claude Code execute
+    the underlying call on its normal path.
+
+    The four paths from analysis doc §5:
+
+      1. *Allow* — human picks ``allow``: returns ``{"behavior": "allow",
+         "gate_id": ...}``. The originating tool call runs.
+      2. *Deny* — human picks ``deny``: returns ``{"behavior": "deny",
+         "message": ..., "gate_id": ...}``. Claude Code surfaces the message
+         as a tool-error in the run; the agent adapts, picks another route,
+         or escalates via ``report_impediment``. **Run continues; session
+         lives** (analysis §5 path 2).
+      3. *Timeout* — nobody answers within ``timeout_seconds``: returns
+         ``{"behavior": "deny", "message": "no human response within Xs,
+         defaulting to deny", "gate_id": ...}``. **Fail-closed** — a stalled
+         permission prompt holds a worktree + a card claim; an unanswered
+         prompt must self-resolve to deny rather than leave the gate open the
+         way ``open_gate`` does for product decisions. Distinct from
+         ``open_gate``'s timeout-on-purpose (analysis §5 path 3).
+      4. *Approved action fails* — handled by Claude Code itself; this tool
+         only decides *whether* the underlying call runs, not *whether it
+         succeeds*. A failure surfaces as a normal ``tool_result`` error in
+         the run (analysis §3.3 / §5 path 4).
+
+    Invariant (AC4): none of the four paths stalls or kills a session. The
+    session keeps running after the answer is delivered; the claim is not
+    released; the card is not moved. ``report_impediment`` is for product
+    decisions (sessie eindigt); this is for permission decisions (sessie
+    blijft). See analysis doc §4 for the rolverdeling.
+
+    The gate renders in the kanban-UI via ``gate.question`` (Markdown), which
+    carries both the tool name and a JSON dump of the args so a human can
+    see exactly which call they're being asked to approve.
+
+    Args:
+        card_id: The card on whose behalf the prompt is being opened.
+        tool_name: The Claude Code tool name (e.g. ``Write``, ``Bash``).
+        tool_input: The args Claude Code is about to pass to that tool.
+        timeout_seconds: Bound on how long to wait for the human. Default
+            300s (analysis §5 path 3). Distinct from ``open_gate``'s 1800s.
+
+    Returns Claude Code's ``--permission-prompt-tool`` contract shape, never
+    a bare dict with no ``behavior`` key (which Claude Code would treat as
+    a parse error and re-prompt on).
+    """
+    import json as _json
+
+    # Render the gate question so the UI shows tool + args. JSON keeps the
+    # args readable; the tool name gets a fenced code span so it stands out
+    # in the Markdown render. The question stays short enough to fit on one
+    # screen in the CardDrawer.
+    try:
+        args_json = _json.dumps(tool_input, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        args_json = repr(tool_input)
+    question = (
+        f"**Permission requested** — Claude Code wants to call ``{tool_name}``.\n\n"
+        f"```json\n{args_json}\n```"
+    )
+
+    async with KanbanSessionLocal() as s:
+        card = await _require_card(s, card_id)
+        if card is None:
+            logger.debug("permission_prompt: %s not found", card_id)
+            return {"error": _NOT_FOUND, "card_id": card_id}
+        gate = await service.create_gate(s, card_id=card_id,
+            project_key=card.project_key,
+            question=question, options=["allow", "deny"])
+        await apply_operation(s, op_type="comment", entity_type="comment",
+            project_key="", entity_id=card_id,
+            payload={"text": f"**Permission prompt:** `{tool_name}` — awaiting human decision."})
+        await s.commit()
+        gate_id = gate.id
+        logger.info("permission_prompt: %s opened on %s (tool=%s)",
+                    gate_id, card_id, tool_name)
+
+    # Poll for the answer. Same lightweight loop as open_gate (2s normally,
+    # 0.01s in tests via the autouse fixture in test_permission_prompt_tool.py).
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        await asyncio.sleep(_GATE_POLL_INTERVAL_SECONDS)
+        async with KanbanSessionLocal() as s:
+            current = await service.get_gate(s, gate_id)
+            if current is not None and current.status == "answered":
+                answer = current.answer
+                logger.info("permission_prompt: %s answered: %s", gate_id, answer)
+                if answer == "allow":
+                    return {"behavior": "allow", "gate_id": gate_id}
+                # answer == "deny" (options are fixed; answer_gate validates).
+                return {
+                    "behavior": "deny",
+                    "message": "denied by human reviewer",
+                    "gate_id": gate_id,
+                }
+
+    # Path 3 — fail-closed timeout. Deliberate divergence from open_gate's
+    # "stay open" semantics: an unanswered permission prompt must self-resolve
+    # to deny (analysis §5 path 3), or the session stalls permanently.
+    logger.info("permission_prompt: %s timed out after %ss — fail-closed to deny",
+                gate_id, timeout_seconds)
+    return {
+        "behavior": "deny",
+        "message": (
+            f"no human response within {timeout_seconds}s, "
+            "defaulting to deny (fail-closed)"
+        ),
+        "gate_id": gate_id,
+    }
 
 
 @mcp.tool()
