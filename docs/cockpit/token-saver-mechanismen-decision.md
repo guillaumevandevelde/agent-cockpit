@@ -718,7 +718,7 @@ De helper retourneert nu `(status, reason)` zodat de
 `RTK_TELEMETRY=off`-beslissing en de activity-feed-tekst aan dezelfde
 bron gekoppeld zijn — geen tweede afleiding in de caller.
 
-**Drie tests die het hard maken** (`test_token_saver.py`):
+**Vier tests die het hard maken** (`test_token_saver.py`):
 
 - `test_dispatch_bridge_posts_activated_note_on_active` — zet de
   per-lane vlag + board-wide kill-switch + fake rtk binary, draait
@@ -729,13 +729,21 @@ bron gekoppeld zijn — geen tweede afleiding in de caller.
   fail-open: rtk binary missing`.
 - `test_dispatch_bridge_silent_on_inactive_path` — per-lane off,
   verwacht nul notes (geen feed-flood).
+- `test_sync_bridge_posts_activated_note_on_real_dispatch` — draait
+  de **sync wrapper** (`_install_rtk_for_dispatch`, dezelfde die
+  `make_worktree_transport` aanroept) in een worker thread en leest
+  de `**Note:** Token saver activated: …`-rij terug. Bewijst dat
+  de `asyncio.run`-grens de note niet sluit — de test die de FCR-1
+  expliciet eiste.
 
-De tests monkeypatchen `settings.kanban_database_url` naar de
+De eerste drie monkeypatchen `settings.kanban_database_url` naar de
 test-DB en roepen de **async kern** direct aan — `asyncio.run` van
-uit een pytest-asyncio test mag niet. De sync wrapper rond
-`asyncio.run` is precies één regel geworden in de bridge, en de
-test-exercising-het-productie-pad-eis is daarmee vervuld zonder
-proxy.
+uit een pytest-asyncio test mag niet. De vierde draait de sync
+wrapper in een worker thread om dezelfde reden: een lopende event
+loop in de test zou `asyncio.run` laten falen met
+`asyncio.run() cannot be called from a running event loop`, en dat
+is precies de productie-context (sync caller, verse loop) die de
+sync wrapper belichaamt.
 
 **Wat er niét veranderde.** Het `maybe_install` / `post_note` /
 `is_board_enabled` / `set_board_enabled` / `write_rtk_settings_into_worktree`
