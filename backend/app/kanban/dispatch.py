@@ -1562,6 +1562,30 @@ def _build_attachments_section(card) -> str:
     return "\n".join(lines)
 
 
+def _build_spec_doc_line(card) -> str:
+    """Render a single ``**Brondoc (spec_doc):** <pad>`` line when
+    ``card.meta['spec_doc']`` (SPEC_DOC_META_KEY) is a non-empty string. Empty
+    string otherwise.
+
+    The analyst-persona sets this forward *implements*-link on every child
+    card that updates a ``docs/cockpit/*.md`` doc; without this rendering the
+    executor's ship-stap 3 ("voeg een `✅ Geïmplementeerd (kaart <id>)`-regel
+    toe aan het brondoc") is blind to which doc to update and the
+    bijwerk-stap gets skipped or lands on the wrong file (kanban card
+    87ced87b…). Tolerates ``card.meta is None`` / missing key / non-string
+    value (defensive — analysts *should* write a string but dispatch must not
+    500 on a malformed legacy row)."""
+    from app.kanban.schemas import SPEC_DOC_META_KEY
+    meta = getattr(card, "meta", None) or {}
+    raw = meta.get(SPEC_DOC_META_KEY)
+    if not isinstance(raw, str):
+        return ""
+    spec_doc = raw.strip()
+    if not spec_doc:
+        return ""
+    return f"**Brondoc (spec_doc):** `{spec_doc}`\n"
+
+
 def _build_prior_branch_warning(project_path: str, prior_session_name: str | None) -> str:
     """Render a warning block when a prior dispatch left unmerged commits behind.
 
@@ -1779,6 +1803,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         project_path=project_path, worktree_path=worktree_path,
     )
     attachments_section = _build_attachments_section(card)
+    spec_doc_line = _build_spec_doc_line(card)
 
     return (
         f"{preamble}"
@@ -1787,6 +1812,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         f"Host card id: {getattr(card, 'id', '') or ''}\n"
         f"# {card.title}\n"
         f"{getattr(card, 'description', '') or ''}\n"
+        f"{spec_doc_line}"
         f"{attachments_section}"
         f"{prior_branch_warning or ''}\n"
         f"{impediment_section}\n"
@@ -2464,9 +2490,13 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
         "terwijl zijn eigen follow-ups al gemerged zijn (geobserveerd op de "
         "vier facet-docs van synthese-kaart `c980a926…`: 33 van 35 follow-ups "
         "waren al gemerged terwijl 2 van de 4 docs zich nog als pure analyse "
-        "presenteerden). **Geen retroactieve verplichting** — alleen het doc "
-        "dat jouw kaart raakt; raakt je kaart geen analysedoc, sla je deze stap "
-        "over. "
+        "presenteerden). **De bron is `metadata[\"spec_doc\"]`** — als de "
+        "kaart-context boven aan deze prompt een regel `**Brondoc (spec_doc):** "
+        "…` toont, is dat het docpad dat je moet bijwerken. Geen `spec_doc`-regel "
+        "in de prompt én geen analysedoc-verwijzing in beschrijving/facet/"
+        "parent_card? Sla deze stap over. **Geen retroactieve verplichting** — "
+        "alleen het doc dat jouw kaart raakt; raakt je kaart geen analysedoc, "
+        "sla je deze stap over. "
         "make sure every change is committed to the current branch.\n"
     )
 
