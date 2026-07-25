@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, ArrowUpCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { TerminalView } from "@/features/cc-bridge/TerminalView";
 import { useCCSessions } from "@/features/cc-bridge/useCCSessions";
 import { fetchResumableSessions } from "@/features/cc-bridge/api";
@@ -22,10 +23,20 @@ export function CardRunTab({
   cardId,
   sessionName,
   projectPath,
+  fillArea,
 }: {
   cardId: string;
   sessionName: string;
   projectPath: string;
+  /**
+   * Opt-in for the drawer body that already owns scrolling (kanban-kaart
+   * 72476d8e…). Switches the xterm container + transcript wrapper from a
+   * fixed viewport height (`h-[60vh]`) to `flex-1 h-full` so the widget
+   * fills the body and the body itself stops scrolling. Caller is
+   * responsible for giving the widget a flex-column parent that has a
+   * bounded height (the body in full-area mode does this).
+   */
+  fillArea?: boolean;
 }) {
   const { sessions, refresh } = useCCSessions();
   const isLive = useMemo(
@@ -72,7 +83,7 @@ export function CardRunTab({
   const effectiveView = view ?? (isLive ? "live" : "transcript");
 
   return (
-    <div className="space-y-2">
+    <div className={cn(fillArea ? "flex-1 min-h-0 flex flex-col space-y-2" : "space-y-2")}>
       <div className="flex items-center gap-2">
         <Button
           size="sm"
@@ -107,11 +118,11 @@ export function CardRunTab({
       </div>
 
       {effectiveView === "live" ? (
-        <div className="h-[60vh] rounded-md border overflow-hidden">
+        <div className={cn(fillArea ? "flex-1 min-h-0" : "h-[60vh]", "rounded-md border overflow-hidden")}>
           <TerminalView target={liveTarget} />
         </div>
       ) : (
-        <CardTranscript sessionName={sessionName} projectPath={projectPath} />
+        <CardTranscript sessionName={sessionName} projectPath={projectPath} fillArea={fillArea} />
       )}
     </div>
   );
@@ -120,9 +131,11 @@ export function CardRunTab({
 function CardTranscript({
   sessionName,
   projectPath,
+  fillArea,
 }: {
   sessionName: string;
   projectPath: string;
+  fillArea?: boolean;
 }) {
   const { getSessionDetail } = useSessionsApi();
   const [resolved, setResolved] = useState<ResumableSession | null | undefined>(undefined);
@@ -189,7 +202,7 @@ function CardTranscript({
   }
 
   return (
-    <div className="max-h-[60vh] overflow-y-auto pr-1">
+    <div className={cn(fillArea ? "flex-1 min-h-0 overflow-auto pr-1" : "max-h-[60vh] overflow-y-auto pr-1")}>
       {loading && <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>}
       {!loading && detail && <ConversationList conversations={detail.conversations} />}
       {totalPages > 1 && (

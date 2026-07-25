@@ -1658,3 +1658,117 @@ describe("CardDrawer Ledger tab", () => {
     expect(runLink).not.toBeNull();
   });
 });
+
+// --- Scroll contract (kanban-kaart 72476d8e…) -----------------------------
+// The drawer must own exactly one scroll container: the body between a sticky
+// DialogHeader and the modal border. No other element inside the drawer
+// (CardRunTab transcript, CardLedgerTab prompt, MarkdownPreviewToggle preview,
+// CardDrawer's outer modal, etc.) may declare its own height-cap + overflow.
+// The two viewport-bound widgets (xterm in CardRunTab, preview iframe in
+// PreviewPane) flip the body into "full-area mode": overflow-hidden flex-col
+// so the widget fills the body and the body itself doesn't scroll.
+//
+// Test the three required cases: Backlog card (default body scroll), Done
+// card (same), and an agent-claimed card whose active Run tab triggers
+// full-area mode. The selector here matches `overflow-auto`,
+// `overflow-y-auto`, `overflow-x-auto`, `overflow-scroll`,
+// `overflow-y-scroll`, `overflow-x-scroll` — i.e. every Tailwind utility that
+// produces a scrollbar. `overflow-hidden` is intentionally excluded because
+// it clips overflow without scrolling (and is what the outer modal + the
+// xterm container use today).
+
+function scrollableElementsInDialog(): HTMLElement[] {
+  const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement | null;
+  if (!dialog) return [];
+  return Array.from(dialog.querySelectorAll<HTMLElement>("*")).filter((el) => {
+    const cls = el.className;
+    if (typeof cls !== "string") return false;
+    return /\boverflow-(?:[xy]-)?(?:auto|scroll)\b/.test(cls);
+  });
+}
+
+describe("CardDrawer scroll contract — single scrollable body", () => {
+  it("Backlog card: the drawer has exactly one scroll-class element (the body), and the header sits outside it", () => {
+    render(
+      <CardDrawerWithRouter
+        card={baseCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const body = screen.getByTestId("card-drawer-body");
+    // The body itself is the scroll container.
+    expect(body.className).toMatch(/\boverflow-auto\b/);
+
+    const scrollables = scrollableElementsInDialog();
+    expect(scrollables).toHaveLength(1);
+    expect(scrollables[0]).toBe(body);
+
+    // Header (the title) is a sibling of the body, not a descendant.
+    const title = screen.getByRole("heading", { name: "Test card" });
+    expect(body.contains(title)).toBe(false);
+  });
+
+  it("Done card: the same single-scroll-container contract holds", () => {
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      done_summary: "Shipped.",
+      completed_at: "2026-07-10T12:00:00Z",
+    };
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const body = screen.getByTestId("card-drawer-body");
+    expect(body.className).toMatch(/\boverflow-auto\b/);
+
+    const scrollables = scrollableElementsInDialog();
+    expect(scrollables).toHaveLength(1);
+    expect(scrollables[0]).toBe(body);
+
+    const title = screen.getByRole("heading", { name: "Test card" });
+    expect(body.contains(title)).toBe(false);
+  });
+
+  it("Agent-claimed card with the Run tab active: the body switches to full-area mode (overflow-hidden), no scroll-class element exists, and the header is outside the full-area container", () => {
+    // `claimed_by: "agent:<session>"` makes `runSession` truthy, which
+    // defaults `activeTab` to "run" (CardDrawer.tsx initial state).
+    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
+    render(
+      <CardDrawerWithRouter
+        card={agentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The scrolling body must NOT render in full-area mode — the widget
+    // owns the scrollbar (xterm.js / iframe native).
+    expect(screen.queryByTestId("card-drawer-body")).toBeNull();
+
+    const fullArea = screen.getByTestId("card-drawer-full-area");
+    expect(fullArea.className).toMatch(/\boverflow-hidden\b/);
+    // It also lays out its single child as a flex column so the widget's
+    // `flex-1 h-full` actually fills it.
+    expect(fullArea.className).toMatch(/\bflex\b/);
+    expect(fullArea.className).toMatch(/\bflex-col\b/);
+
+    // Zero scroll-class elements in the dialog when the widget owns
+    // scrolling — the body's overflow-hidden, the xterm container's
+    // overflow-hidden, and the xterm.js internal scrollbar all live
+    // outside the `overflow-*-(auto|scroll)` selector.
+    expect(scrollableElementsInDialog()).toHaveLength(0);
+
+    const title = screen.getByRole("heading", { name: "Test card" });
+    expect(fullArea.contains(title)).toBe(false);
+  });
+});

@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 import { MarkdownRenderer } from './MarkdownRenderer'
 
 interface MarkdownPreviewToggleProps {
@@ -8,6 +9,17 @@ interface MarkdownPreviewToggleProps {
   minHeight?: string
   disabled?: boolean
   defaultTab?: 'edit' | 'preview'
+  /**
+   * Opt-in for callers mounted inside a scrollable parent (kanban-kaart
+   * 72476d8e…, e.g. CardDrawer's Plan tab body). Drops the preview pane's
+   * own `overflow-auto` + fixed `minHeight` so the parent does the
+   * scrolling and the preview grows to fit its content. Edit textarea
+   * keeps its `minHeight` so editing stays usable. Default `false` keeps
+   * the original standalone behaviour for the 8 other consumers
+   * (MemoryEditor, AgentEditor, HookEditor, CardEditDialog, ComposeDialog,
+   * ThreadDialog, MemberEditDialog, MarkdownEditor).
+   */
+  flexibleHeight?: boolean
 }
 
 export function MarkdownPreviewToggle({
@@ -17,6 +29,7 @@ export function MarkdownPreviewToggle({
   minHeight = '300px',
   disabled = false,
   defaultTab = 'edit',
+  flexibleHeight = false,
 }: MarkdownPreviewToggleProps) {
   return (
     <Tabs defaultValue={defaultTab} className="w-full">
@@ -36,8 +49,11 @@ export function MarkdownPreviewToggle({
       </TabsContent>
       <TabsContent value="preview" className="mt-2">
         <div
-          className="border rounded-md p-4 overflow-auto bg-muted/30"
-          style={{ minHeight }}
+          className={cn(
+            "border rounded-md p-4 bg-muted/30",
+            !flexibleHeight && "overflow-auto",
+          )}
+          style={flexibleHeight ? undefined : { minHeight }}
         >
           {value ? (
             <MarkdownRenderer content={value} />
