@@ -35,7 +35,7 @@ Click **Restore** on any backup to open the restore wizard:
 Restoring overwrites existing configuration files for the selected components. Make a backup of your current configuration first if needed.
 :::
 
-Codex backups are export-only. The restore plan can show archive contents and explain why automatic restore is refused, but Claude Cockpit does not extract Codex exports back into `CODEX_HOME`.
+Codex backups are export-only. The restore plan can show archive contents and explain why automatic restore is refused, but Agent Cockpit does not extract Codex exports back into `CODEX_HOME`.
 
 ### Managing Backups
 

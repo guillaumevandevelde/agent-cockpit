@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'Claude Cockpit',
-  description: 'Documentation for Claude Cockpit — Web dashboard for local AI coding agents',
+  title: 'Agent Cockpit',
+  description: 'Documentation for Agent Cockpit — Web dashboard for local AI coding agents',
   appearance: 'force-dark',
   base: '/docs/',
   head: [
@@ -17,7 +17,7 @@ export default defineConfig({
 
   themeConfig: {
     logo: '/logo-dark.png',
-    siteTitle: 'Claude Cockpit',
+    siteTitle: 'Agent Cockpit',
 
     nav: [
       { text: 'Guide', link: '/guide/' },
@@ -121,7 +121,7 @@ export default defineConfig({
 
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright © 2026 Claude Cockpit Contributors',
+      copyright: 'Copyright © 2026 Agent Cockpit Contributors',
     },
   },
 })

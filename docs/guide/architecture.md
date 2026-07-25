@@ -1,6 +1,6 @@
 # Architecture
 
-Claude Cockpit is a full-stack application with a Python backend and React frontend.
+Agent Cockpit is a full-stack application with a Python backend and React frontend.
 
 ## Overview
 
@@ -46,7 +46,7 @@ Route modules: `health`, `config`, `codex-config`, `providers`, `projects`, `cli
 
 ### Provider Boundaries
 
-Claude Cockpit keeps shared terminal viewing in Agent Bridge and pushes provider-specific behavior into provider modules, config services, diagnostics, and backup policy. The UI reads provider capabilities before showing controls so Codex users do not land on Claude-only mutation pages.
+Agent Cockpit keeps shared terminal viewing in Agent Bridge and pushes provider-specific behavior into provider modules, config services, diagnostics, and backup policy. The UI reads provider capabilities before showing controls so Codex users do not land on Claude-only mutation pages.
 
 Codex diagnostics are intentionally privacy-conservative. History, model cache, and SQLite files are not product data sources; diagnostics may summarize shape and parse state but must not expose prompt text, raw cache payloads, or SQLite contents.
 

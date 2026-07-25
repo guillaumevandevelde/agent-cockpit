@@ -1,5 +1,5 @@
 /**
- * MiMoCode presence plugin — sends session events to Claude Cockpit's
+ * MiMoCode presence plugin — sends session events to Agent Cockpit's
  * presence API so that the Attention notification system works for MiMoCode.
  *
  * Install:  mimo plugin ./plugins/mimo-presence
