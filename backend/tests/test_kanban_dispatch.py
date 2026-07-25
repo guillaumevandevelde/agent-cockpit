@@ -7880,6 +7880,347 @@ async def test_provider_for_card_returns_none_when_inputs_insufficient():
         assert await dispatch._provider_for_card(s, PK, card, "") is None
 
 
+# ---- _limited_provider_for_card (kaart 9ff86416…) ------------------------
+#
+# The reactive limit path needs "the provider this card was authenticated
+# against" — and ``_provider_for_card`` only walks the last two layers
+# (column override → column default → PROVIDER_ANTHROPIC). When the dispatch
+# resolved a different provider via global_override or a pool entry, that
+# narrow resolver silently gates the wrong subscription. The new helper
+# prefers ``card.dispatch_provider`` (the vendor the dispatcher actually
+# picked at spawn time, kanban-card 8a2ad986…) and only falls back to the
+# narrow resolver when both ``dispatch_provider`` is unset AND ``project_path``
+# isn't available (legacy reaper path with no project_path context).
+
+@pytest.mark.asyncio
+async def test_limited_provider_for_card_prefers_dispatch_provider_when_set():
+    """Card has a column default of anthropic but ``dispatch_provider``
+    says it was actually spawned against minimax (pool/global_override
+    routing). The helper MUST return minimax, not anthropic — otherwise
+    the per-provider pause would gate the wrong subscription."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst", default_agent="analyst",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(s, title="dispatched-on-pool", column="analyst")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"dispatch_provider": "minimax"},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+        resolved = await dispatch._limited_provider_for_card(
+            s, project_key=PK, project_path="/p", card=card,
+            target_column="analyst",
+        )
+
+    assert resolved == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_limited_provider_for_card_falls_back_to_effective_chain_when_no_dispatch_provider():
+    """Legacy / never-dispatched card: ``dispatch_provider`` is None, so the
+    helper walks the full precedence chain via
+    ``_effective_provider_for_pause_gate`` — here a global_override pins to
+    minimax while the column default is anthropic."""
+    from app.kanban.dispatch import set_active_subscription_override
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst", default_agent="analyst",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(s, title="legacy-no-dispatch", column="analyst")
+        # Global override pins every spawn to minimax.
+        await set_active_subscription_override(
+            s, PK, {"provider": "minimax", "model": None},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+        resolved = await dispatch._limited_provider_for_card(
+            s, project_key=PK, project_path="/p", card=card,
+            target_column="analyst",
+        )
+
+    assert resolved == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_limited_provider_for_card_falls_back_to_narrow_when_no_project_path():
+    """Reaper path: a stuck session is cleaned up without project_path
+    context (``reap_stale_claims`` is sometimes called with project_path=None
+    in tests). When dispatch_provider is also None, the helper must NOT
+    raise — it falls back to the narrow ``_provider_for_card`` so a
+    best-effort answer is still available."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="bedrock",
+        )
+        cid = await _make_card(s, title="legacy-no-path", column="engineer")
+        await s.commit()
+        card = await get_card(s, cid)
+
+        resolved = await dispatch._limited_provider_for_card(
+            s, project_key=PK, project_path=None, card=card,
+            target_column="engineer",
+        )
+
+    assert resolved == "bedrock"
+
+
+@pytest.mark.asyncio
+async def test_limited_provider_for_card_returns_none_when_inputs_insufficient():
+    """A bare None card / empty target_column short-circuits — same contract
+    as ``_provider_for_card``. Caller falls back to the legacy global pause."""
+    async with KanbanSessionLocal() as s:
+        assert await dispatch._limited_provider_for_card(
+            s, project_key=PK, project_path="/p", card=None,
+            target_column="engineer",
+        ) is None
+        card = SimpleNamespace(dispatch_provider=None, column_overrides={},
+                               model=None, agent="engineer")
+        assert await dispatch._limited_provider_for_card(
+            s, project_key=PK, project_path="/p", card=card,
+            target_column="",
+        ) is None
+
+
+# ---- move_limited_session_to_resume honours dispatch_provider (kaart 9ff86416…)
+
+@pytest.mark.asyncio
+async def test_move_limited_session_uses_dispatch_provider_for_spillover(monkeypatch):
+    """Card has dispatch_provider='minimax' in the analyst column (default
+    anthropic). When the session hits its limit, the spillover check MUST be
+    called with limited_provider='minimax' — not the column default — so the
+    pool router marks the right subscription unavailable."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery, subscription_pool
+    from app.kanban.subscription_pool import PoolEntry
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    async def _no_snapshots(entries):
+        return {}
+    monkeypatch.setattr(dispatch, "_gather_pool_usage_snapshots", _no_snapshots)
+
+    spillover_calls: list[dict] = []
+
+    async def _fake_spillover(session, *, project_key, limited_provider, cli_id):
+        spillover_calls.append({
+            "project_key": project_key,
+            "limited_provider": limited_provider,
+            "cli_id": cli_id,
+        })
+        return True  # pretend minimax is available so we exercise the spillover path
+
+    monkeypatch.setattr(dispatch, "_pool_spillover_available", _fake_spillover)
+
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst", default_agent="analyst",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(
+            s, title="analyst-pool-429", column="analyst",
+        )
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"dispatch_provider": "minimax"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-ana-0001"},
+        )
+        await subscription_pool.set_subscription_pool(s, PK, [
+            PoolEntry(provider="anthropic", model=None, drempel=0.9),
+            PoolEntry(provider="minimax", model=None, drempel=0.9),
+        ])
+        await s.commit()
+
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-ana", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-ana-0001",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert result is True
+    assert card.column == "To Resume"
+    # Spillover branch fired, scheduled_at dropped for immediate redispatch.
+    assert card.scheduled_at is None
+    # The resolver called the spillover check with the card's actual
+    # dispatch_provider, NOT the column default.
+    assert len(spillover_calls) == 1
+    assert spillover_calls[0]["limited_provider"] == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_legacy_card_keeps_column_default_behaviour(monkeypatch):
+    """Legacy card (dispatch_provider=None) keeps the existing column-default
+    resolution: the spillover check is called with the column's default
+    provider. This pins today's behaviour so the fix doesn't regress legacy
+    rows."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+    from app.kanban import session_recovery, subscription_pool
+    from app.kanban.subscription_pool import PoolEntry
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+    async def _no_snapshots(entries):
+        return {}
+    monkeypatch.setattr(dispatch, "_gather_pool_usage_snapshots", _no_snapshots)
+
+    spillover_calls: list[dict] = []
+
+    async def _fake_spillover(session, *, project_key, limited_provider, cli_id):
+        spillover_calls.append({"limited_provider": limited_provider})
+        return False  # legacy behaviour: stay on reset-time pause
+
+    monkeypatch.setattr(dispatch, "_pool_spillover_available", _fake_spillover)
+
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="bedrock",
+        )
+        cid = await _make_card(
+            s, title="legacy-429", column="engineer",
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-leg-0001"},
+        )
+        await subscription_pool.set_subscription_pool(s, PK, [
+            PoolEntry(provider="bedrock", model=None, drempel=0.9),
+        ])
+        await s.commit()
+
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ), \
+         mock.patch.object(
+             session_recovery, "_resolve_resume_target",
+             return_value=("sess-leg", "proj-folder"),
+         ), \
+         mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        result = await dispatch.move_limited_session_to_resume(
+            "/p/.claude/worktrees/k-leg-0001",
+            scheduled_at="2026-07-11T23:10:00+02:00",
+        )
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+
+    assert result is True
+    assert card.column == "To Resume"
+    assert card.scheduled_at == "2026-07-11T23:10:00+02:00"
+    assert len(spillover_calls) == 1
+    assert spillover_calls[0]["limited_provider"] == "bedrock"
+
+
+@pytest.mark.asyncio
+async def test_provider_for_cwd_honours_dispatch_provider(monkeypatch):
+    """Hook-event path: a Notification hook for a session that was actually
+    running on minimax (dispatch_provider set) must return minimax even when
+    the column default is anthropic. Pre-fix this returned the column default
+    and the per-provider pause would gate anthropic instead of minimax."""
+    import unittest.mock as mock
+
+    import app.kanban.db as kdb
+
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="analyst", default_agent="analyst",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(
+            s, title="hook-minimax", column="analyst",
+        )
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"dispatch_provider": "minimax"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-hook-0001"},
+        )
+        await s.commit()
+
+    with mock.patch(
+        "app.kanban.dispatch.safe_resolve_project_key", return_value=PK
+    ):
+        resolved = await dispatch._provider_for_cwd(
+            "/p/.claude/worktrees/k-hook-0001",
+        )
+
+    assert resolved == "minimax"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stuck_session_pauses_dispatch_provider(monkeypatch):
+    """The reaper path must pause the subscription the session was running
+    against, not the column default. dispatch_provider='minimax' with an
+    anthropic column default MUST pause minimax."""
+    import unittest.mock as mock
+
+    from app.kanban import dispatch_pause
+
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic",
+        )
+        cid = await _make_card(
+            s, title="stuck-dispatch-provider", column="engineer",
+        )
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"dispatch_provider": "minimax"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-stuck-0003"},
+        )
+        await s.commit()
+        card = await get_card(s, cid)
+
+    with mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        async with KanbanSessionLocal() as s:
+            await dispatch._cleanup_stuck_session(
+                s, card=card, project_key=PK,
+                session_name="k-stuck-0003", pane_content="rate limited",
+                project_path="/p",
+            )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        paused_minimax = await dispatch_pause.get_paused_until(
+            s, provider="minimax"
+        )
+        paused_anthropic = await dispatch_pause.get_paused_until(
+            s, provider="anthropic"
+        )
+
+    assert paused_minimax is not None
+    assert paused_anthropic is None
+
+
 @pytest.mark.asyncio
 async def test_provider_for_cwd_returns_column_default_for_matching_session(monkeypatch):
     """Hook-event path: with cwd matching a worktree, _provider_for_cwd

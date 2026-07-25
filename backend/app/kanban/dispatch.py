@@ -4359,6 +4359,7 @@ async def detect_transcript_rate_limits(
 async def _cleanup_stuck_session(
     session, *, card, project_key: str, session_name: str, pane_content: str,
     matched_needle: str | None = None,
+    project_path: str | None = None,
 ) -> None:
     """Clean up a stuck tmux session that hit a rate limit.
 
@@ -4408,11 +4409,20 @@ async def _cleanup_stuck_session(
     # reset time, but the reaper only sees tmux pane content.
     pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
     # Per-provider pause: only the subscription this session was hitting
-    # (column override → column default → Anthropic) gets gated, so a
-    # bedrock outage doesn't freeze anthropic/minimax traffic. provider=None
+    # gets gated, so a bedrock outage doesn't freeze anthropic/minimax
+    # traffic. Kaart 9ff86416…: the reactive limit path now resolves the
+    # provider via ``_limited_provider_for_card`` (which prefers
+    # ``card.dispatch_provider`` and falls back to the full precedence
+    # chain via ``_effective_provider_for_pause_gate``), so a pool-/
+    # override-routed card pauses the right subscription. project_path is
+    # best-effort: when it's None (some reaper invocations lack it), the
+    # helper degrades to the narrow column-only resolver. provider=None
     # only happens when the card/column context is missing -- then the
     # legacy global pause keeps today's behaviour intact.
-    provider = await _provider_for_card(session, project_key, card, card.column)
+    provider = await _limited_provider_for_card(
+        session, project_key=project_key, project_path=project_path,
+        card=card, target_column=card.column,
+    )
     await set_paused_until(session, pause_until, provider=provider)
 
     # _kill_agent_session also calls clear_spawn on the registry, so
@@ -5190,6 +5200,23 @@ async def _provider_for_card(
     targeting anthropic traffic via the hard-coded fallback. The card+column
     path always resolves to a concrete provider, so it never needs to fall
     back to None.
+
+    .. warning::
+
+       **This helper is deliberately pool-/override-blind** (kaart
+       9ff86416…): it walks the last two layers of the dispatch precedence
+       chain (column override → column default → ``PROVIDER_ANTHROPIC``) and
+       **skips** the board-wide ``global_override`` and subscription-pool
+       layers. The reactive limit path used to call this helper, which
+       meant a card routed via global_override or a pool entry to a
+       different vendor than the column default was pausing the wrong
+       subscription. New limit-path code must call
+       ``_limited_provider_for_card`` instead, which prefers
+       ``card.dispatch_provider`` and falls back to the full chain via
+       ``_effective_provider_for_pause_gate``. This narrow helper is
+       retained as a deliberate last-resort fallback for the rare
+       legacy-path caller that has no project_path / dispatch_provider
+       context.
     """
     if card is None or not agent_column:
         return None
@@ -5200,6 +5227,54 @@ async def _provider_for_card(
         or await get_column_default_provider(session, project_key, agent_column)  # resolver-bypass: paired with the line above; see comment on `_provider_for_card`
         or PROVIDER_ANTHROPIC
     )
+
+
+async def _limited_provider_for_card(
+    session, *, project_key: str, project_path: str | None,
+    card, target_column: str,
+) -> str | None:
+    """Resolve the provider a limit-hit card was authenticated against.
+
+    Kaart 9ff86416… — the reactive limit path used to call the narrow
+    ``_provider_for_card`` helper, which walks only the last two layers of
+    the dispatch precedence chain (column override → column default →
+    ``PROVIDER_ANTHROPIC``) and **silently skips** the board-wide
+    ``global_override`` and subscription-pool layers. A card routed to a
+    different vendor via either of those layers would, on a limit hit, have
+    paused the **column-default** subscription rather than the subscription
+    that actually hit the wall — and the pool router would then "spill over"
+    onto the very provider that just hit its limit.
+
+    This helper closes that gap by preferring ``card.dispatch_provider`` —
+    the vendor the dispatcher actually picked at spawn time (kanban-card
+    8a2ad986…, written alongside ``dispatch_model`` on line ~5070) — and
+    falling back to the full precedence chain via
+    ``_effective_provider_for_pause_gate`` for legacy / never-dispatched
+    rows where ``dispatch_provider`` is None. When ``project_path`` is also
+    unavailable (the reaper sometimes calls ``_cleanup_stuck_session``
+    without it), the chain-walk can't run and we degrade to the narrow
+    helper — preserving today's behaviour for the rare unresolvable case
+    rather than raising.
+
+    Returns None ONLY when the caller hands in insufficient info (no card
+    or no target column) — callers must treat that as the legacy
+    ``provider=None`` global-pause case (``set_paused_until(session, when,
+    provider=None)``) rather than guessing a subscription.
+    """
+    if card is None or not target_column:
+        return None
+    pinned = getattr(card, "dispatch_provider", None)
+    if pinned:
+        return pinned
+    if project_path:
+        return await _effective_provider_for_pause_gate(
+            session, project_key=project_key, project_path=project_path,
+            card=card, target_column=target_column,
+        )
+    # Last-resort: no dispatch_provider and no project_path. Fall back to
+    # the narrow column-only resolver so callers without project_path
+    # context (e.g. the reaper path) still get a best-effort answer.
+    return await _provider_for_card(session, project_key, card, target_column)
 
 
 async def _effective_provider_for_pause_gate(
@@ -5299,7 +5374,13 @@ async def _provider_for_cwd(cwd: str) -> str | None:
         )
         if card is None:
             return None
-        return await _provider_for_card(ks, project_key, card, card.column)
+        # Kaart 9ff86416…: prefer the dispatcher's actual pick
+        # (``card.dispatch_provider``) over the narrow column-only resolver,
+        # so a pool-/override-routed card pauses the right subscription.
+        return await _limited_provider_for_card(
+            ks, project_key=project_key, project_path=project_path,
+            card=card, target_column=card.column,
+        )
 
 
 async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None = None) -> bool:
@@ -5373,7 +5454,10 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
         # whose CLI matches the original spawn. An OpenCode-rate-limited
         # card only spills to other OpenCode entries — a Codex entry
         # is not a valid spillover target.
-        limited_provider = await _provider_for_card(ks, project_key, card, card.column)
+        limited_provider = await _limited_provider_for_card(
+            ks, project_key=project_key, project_path=project_path,
+            card=card, target_column=card.column,
+        )
         spillover = False
         if limited_provider is not None:
             spillover = await _pool_spillover_available(
@@ -5845,6 +5929,7 @@ async def reap_stale_claims(
                 await _cleanup_stuck_session(
                     session, card=card, project_key=project_key,
                     session_name=name, pane_content=pane,
+                    project_path=project_path,
                 )
                 reaped += 1
                 continue
@@ -5866,6 +5951,7 @@ async def reap_stale_claims(
                         session, card=card, project_key=project_key,
                         session_name=name, pane_content=pane,
                         matched_needle=needle,
+                        project_path=project_path,
                     )
                     reaped += 1
                     continue
