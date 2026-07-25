@@ -635,17 +635,21 @@ alsnog een apart proxy-proces zijn, niet een import in onze backend.
   `token_saver:<project_key>` (Pydantic-validated;
   `set_board_enabled` schrijft `"1"` / `"0"` naar de
   bestaande kolom)
-- ✅ Tests: 19 unit-tests (`test_token_saver.py`) + 4
+- ✅ Tests: 20 unit-tests (`test_token_saver.py`) + 4
   kolom-migratie-tests (`test_token_saver_column.py`) + 4
-  API-tests (`test_token_saver_api.py`), groen — **de drie extra
+  API-tests (`test_token_saver_api.py`), groen — **de vier extra
   dispatch-bridge-tests (`test_dispatch_bridge_posts_activated_note_on_active`,
   `test_dispatch_bridge_posts_fail_open_note_on_missing_binary`,
-  `test_dispatch_bridge_silent_on_inactive_path`) zijn de
-  activiteit-feed-claim hardop maken: ze sturen een
+  `test_dispatch_bridge_silent_on_inactive_path`,
+  `test_sync_bridge_posts_activated_note_on_real_dispatch`) zijn de
+  activiteit-feed-claim hardop maken: de eerste drie sturen een
   `_install_rtk_for_dispatch_async`-call en lezen de
   `**Note:** Token saver …`-rij terug uit de op-log van een
-  aangemaakte card**, zie §8-bis hieronder voor de Impediment-ronde
-  die ze hebben afgedwongen
+  aangemaakte card; de vierde draait de sync wrapper (wat
+  `make_worktree_transport` aanroept) in een worker thread en
+  bewijst dat de `asyncio.run`-grens de note niet sluit — precies
+  de test die de FCR-ronder eiste, zie §8-bis hieronder voor de
+  Impediment-ronde die ze hebben afgedwongen
 - ✅ `compare`-harness uitgebreid met `real-saver`-variant in
   lockstep met de dispatch-helper
 

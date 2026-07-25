@@ -44,6 +44,15 @@ async def _seed_column(project_key: str, name: str,
     return col.id
 
 
+def _seed_column_sync(project_key: str, name: str,
+                      token_saver_enabled: int = 0) -> str:
+    """Sync wrapper for the sync-bridge test — uses asyncio.run so
+    the test itself stays sync (the autouse async fixture is the only
+    async surface this test touches)."""
+    import asyncio
+    return asyncio.run(_seed_column(project_key, name, token_saver_enabled))
+
+
 async def _seed_kill_switch(project_key: str, enabled: bool) -> None:
     """Insert the per-project kill-switch row in KanbanMeta."""
     async with KanbanSessionLocal() as s:
@@ -52,6 +61,12 @@ async def _seed_kill_switch(project_key: str, enabled: bool) -> None:
             value="1" if enabled else "0",
         ))
         await s.commit()
+
+
+def _seed_kill_switch_sync(project_key: str, enabled: bool) -> None:
+    """Sync wrapper for the sync-bridge test."""
+    import asyncio
+    asyncio.run(_seed_kill_switch(project_key, enabled))
 
 
 def _write_fake_rtk(bin_dir: Path, version: str = "0.43.0") -> Path:
@@ -698,3 +713,135 @@ async def test_dispatch_bridge_silent_on_inactive_path(
         f"inactive path posted {count} note(s); the default-off path must "
         "be silent so the activity feed is not flooded"
     )
+
+
+# --- Sync-bridge: a public-facing "echte dispatch" integration test ---------
+#
+# The async-core tests above prove the helper logic. The
+# ``_install_rtk_for_dispatch`` **sync** wrapper is what
+# ``make_worktree_transport`` (the production caller) actually invokes —
+# so the only way to demonstrate the activity-feed note survives the
+# ``asyncio.run`` boundary is to drive the sync wrapper itself. The
+# sync wrapper uses ``asyncio.run``, which cannot re-enter a running
+# event loop, so we run it in a worker thread. The test is otherwise
+# sync — the autouse ``_tables`` fixture is async, so we drive its
+# state through the kanban-DB directly, set the test-DB URL on
+# ``settings``, and let the worker thread's loop do the rest.
+
+
+def _run_sync_bridge_in_thread(
+    card_id: str, project_key: str, column_name: str,
+    worktree_path: str, repo_path: str, kanban_database_url: str,
+) -> str:
+    """Execute ``_install_rtk_for_dispatch`` in a fresh thread + event loop.
+
+    Returns the status string the sync wrapper gives back. We patch
+    ``settings.kanban_database_url`` *inside* the thread so the worker's
+    private engine (built by the wrapper) opens the test-DB file. The
+    commit happens on the worker's session, which writes through the
+    same on-disk DB the test then reads.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from app.kanban.dispatch import _install_rtk_for_dispatch
+    from app.config import settings
+
+    def _call() -> str:
+        settings.kanban_database_url = kanban_database_url
+        return _install_rtk_for_dispatch(
+            card_id=card_id, project_key=project_key,
+            column_name=column_name,
+            worktree_path=worktree_path, repo_path=repo_path,
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(_call).result()
+
+
+def test_sync_bridge_posts_activated_note_on_real_dispatch(
+    tmp_path, monkeypatch,
+):
+    """Sync wrapper (the ``make_worktree_transport`` seam) lands the
+    ``**Note:** Token saver activated: …`` comment on a real card.
+
+    This is the test the FCR flagged: the async-core tests prove the
+    helper, but the sync wrapper is what production dispatch actually
+    calls. We run it in a worker thread so ``asyncio.run`` (inside the
+    wrapper) can open a fresh loop, and we point ``settings`` at the
+    test-DB so the wrapper's private engine writes through the same
+    file the test reads.
+    """
+    import asyncio
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import apply_operation
+
+    monkeypatch.setattr("app.config.settings.kanban_database_url",
+                        _test_kanban_database_url())
+
+    # Seed the column + kill-switch on the test DB.
+    bin_dir = tmp_path / "bin"
+    _write_fake_rtk(bin_dir)
+    monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
+    monkeypatch.setattr(token_saver.shutil, "which",
+                        lambda _: str(bin_dir / "rtk"))
+    monkeypatch.setattr(token_saver, "_ensure_cache_ready", lambda: None)
+    _seed_kill_switch_sync("PROJ", enabled=True)
+    _seed_column_sync("PROJ", "engineer", token_saver_enabled=1)
+
+    # Create a real card.
+    async def _create() -> str:
+        async with KanbanSessionLocal() as s:
+            cid = await apply_operation(
+                s, op_type="create", entity_type="card",
+                project_key="PROJ", entity_id=None,
+                payload={"title": "sync-bridge test", "column": "Backlog"},
+            )
+            await s.commit()
+            return cid
+
+    cid = asyncio.run(_create())
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+
+    # Now run the SYNC wrapper in a worker thread. The wrapper's
+    # ``asyncio.run`` would fail inside pytest-asyncio's loop, so the
+    # thread is mandatory — and it doubles as a "this is what
+    # make_worktree_transport does" simulation.
+    status = _run_sync_bridge_in_thread(
+        card_id=cid, project_key="PROJ", column_name="engineer",
+        worktree_path=str(worktree), repo_path=str(tmp_path),
+        kanban_database_url=_test_kanban_database_url(),
+    )
+    assert status == "active"
+
+    # Read the note back from the op-log of the same card the wrapper
+    # just touched. The bridge posts to ``card_id``; the test created
+    # the card on the test DB; the bridge ran against the test DB →
+    # the note must be on the test DB.
+    async def _read() -> str | None:
+        async with KanbanSessionLocal() as s:
+            from sqlalchemy import select
+            from app.kanban.models import KanbanOp
+            op = (await s.execute(
+                select(KanbanOp)
+                .where(KanbanOp.entity_id == cid)
+                .where(KanbanOp.op_type == "comment")
+                .where(KanbanOp.payload["text"].as_string().like(
+                    "%Token saver%",
+                ))
+                .order_by(KanbanOp.hlc.asc())
+                .limit(1)
+            )).scalar_one_or_none()
+            return (op.payload or {}).get("text") if op else None
+
+    text = asyncio.run(_read())
+    assert text is not None, (
+        "sync-bridge dispatch did not post a Token saver note on the "
+        "card's activity feed — make_worktree_transport calls this "
+        "wrapper, so a missing note means production dispatches are "
+        "invisible to operators investigating quality complaints (kaart "
+        "c31333bf… acceptance criterion: 'Zichtbaar in de activity-feed')"
+    )
+    assert text.startswith("**Note:** Token saver")
+    assert "activated" in text
+    assert "0.43.0" in text
