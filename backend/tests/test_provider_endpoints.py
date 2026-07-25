@@ -504,3 +504,92 @@ async def test_spawn_falls_back_to_default_bucket_when_no_project_key(
         db=_real_session(),
     )
     assert response["cli"] == "claude-code"
+
+
+# kaart 333af652… — the status endpoint
+# (``GET /platforms/endpoints`` → ``_credential_configured``) used to
+# hardcode ``False`` for every non-MiniMax credential, so the
+# NewSessionDialog kept claiming "Credential X is not configured"
+# even after the operator had stored the key via
+# ``POST /api/v1/secrets``. The spawn path already resolves via
+# the project's SecretStore; the status endpoint must mirror that
+# so the UI's "configured" hint is honest. Pin the four cases that
+# together form the fix: missing name, legacy MiniMax (env-backed),
+# SecretStore hit, SecretStore miss. The MiniMax branch must not
+# regress — the legacy escape-hatch is intentional.
+
+
+class _FakeSecretStoreForStatus:
+    """Strict-shape SecretStore stub for the status-endpoint tests.
+
+    Mirrors the public ``get(project_key, name) -> str | None`` contract
+    from ``app/services/secrets_store.py`` AND raises the same
+    ``SecretNotFound`` when the project has no file at all (the real
+    store's distinction between "file exists, name absent" and
+    "file absent" — both surface as ``not configured`` in the UI,
+    but the underlying store has to handle them differently so the
+    test matches the real contract).
+    """
+
+    def __init__(self, mapping: dict[tuple[str, str], str]):
+        self._mapping = mapping
+        self.calls: list[tuple[str, str]] = []
+
+    def get(self, project_key: str, name: str) -> str | None:
+        from app.services.secrets_store import SecretNotFound
+
+        if (project_key, name) not in self._mapping:
+            raise SecretNotFound(
+                f"no secret {name!r} for project_key={project_key!r}",
+            )
+        self.calls.append((project_key, name))
+        return self._mapping[(project_key, name)]
+
+
+def test_credential_configured_returns_false_for_none_name():
+    from app.api.v1.runs import router as agent_bridge_api
+
+    assert agent_bridge_api._credential_configured(None, "proj-a") is False
+
+
+def test_credential_configured_legacy_minimax_uses_settings(monkeypatch):
+    """``credential_name == 'minimax'`` stays on the legacy
+    ``settings.minimax_api_key`` path — the existing legacy escape
+    hatch must not be broken by the new SecretStore wiring."""
+    from app import config as cfg_mod
+    from app.api.v1.runs import router as agent_bridge_api
+
+    monkeypatch.setattr(cfg_mod.settings, "minimax_api_key", "sk-minimax-legacy")
+    assert agent_bridge_api._credential_configured("minimax", "proj-a") is True
+
+
+def test_credential_configured_legacy_minimax_empty_returns_false(monkeypatch):
+    from app import config as cfg_mod
+    from app.api.v1.runs import router as agent_bridge_api
+
+    monkeypatch.setattr(cfg_mod.settings, "minimax_api_key", None)
+    assert agent_bridge_api._credential_configured("minimax", "proj-a") is False
+
+
+def test_credential_configured_secret_store_hit_returns_true(monkeypatch):
+    """A non-MiniMax ``credential_name`` that has a row in the
+    project's SecretStore returns ``True`` — the status indicator
+    stops lying after the operator PUTs the key via
+    ``POST /api/v1/secrets``."""
+    from app.api.v1.runs import router as agent_bridge_api
+
+    fake = _FakeSecretStoreForStatus({("proj-groq", "groq-key"): "gsk-groq"})
+    monkeypatch.setattr(agent_bridge_api, "_secret_store", lambda: fake)
+    assert agent_bridge_api._credential_configured("groq-key", "proj-groq") is True
+    assert fake.calls == [("proj-groq", "groq-key")]
+
+
+def test_credential_configured_secret_store_miss_returns_false(monkeypatch):
+    """A ``credential_name`` that's not in the SecretStore returns
+    ``False`` (and never raises) — the UI keeps showing
+    "Credential X is not configured" without 500'ing the request."""
+    from app.api.v1.runs import router as agent_bridge_api
+
+    fake = _FakeSecretStoreForStatus({})
+    monkeypatch.setattr(agent_bridge_api, "_secret_store", lambda: fake)
+    assert agent_bridge_api._credential_configured("missing-key", "proj-groq") is False
