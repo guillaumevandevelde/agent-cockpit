@@ -251,18 +251,41 @@ async def hook_event(ev: HookEvent):
 
 @router.get("/hooks-status")
 async def hooks_status():
-    """Whether the four CC hooks that feed this pipeline are installed.
+    """Per-event install status for the CC hooks that feed this pipeline.
 
-    Without them, ``/hook-event`` above is never called, so limit detection
-    and auto-resume are silently dead — see
+    Each event is one of ``missing`` (no entry), ``stale`` (an entry exists
+    but its command differs from what the current renderer emits), or
+    ``installed`` (exact match). Without them, ``/hook-event`` above is never
+    called, so limit detection and auto-resume are silently dead — see
     docs/cockpit/analyse-sessie-limieten-claude-code.md.
+
+    The aggregate ``installed`` flag is only true when every event is
+    ``installed``; ``stale`` events are listed under ``stale`` so the
+    frontend/installer can offer a "reinstall" action.
     """
     events = get_hooks_status()
-    return {"events": events, "installed": all(events.values())}
+    stale = [event for event, status in events.items() if status == "stale"]
+    return {
+        "events": events,
+        "stale": stale,
+        "installed": all(status == "installed" for status in events.values()),
+    }
 
 
 @router.post("/hooks-install")
 async def hooks_install():
-    """Additively install any missing scheduling hooks in ~/.claude/settings.json."""
+    """Additively install any missing scheduling hooks in ~/.claude/settings.json.
+
+    Reinstalling the event for which the entry was ``stale`` is the
+    expected flow: ``install_missing_hooks`` only appends missing events, so
+    to clear a ``stale`` status the client should first drop the affected
+    event from ``~/.claude/settings.json`` (or use the equivalent admin
+    helper) and then call this endpoint.
+    """
     events = install_missing_hooks()
-    return {"events": events, "installed": all(events.values())}
+    stale = [event for event, status in events.items() if status == "stale"]
+    return {
+        "events": events,
+        "stale": stale,
+        "installed": all(status == "installed" for status in events.values()),
+    }

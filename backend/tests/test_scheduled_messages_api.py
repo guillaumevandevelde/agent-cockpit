@@ -659,13 +659,15 @@ async def test_hooks_status_and_install_roundtrip(tmp_path, monkeypatch):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["installed"] is False
-        assert body["events"]["Notification"] is False
+        assert body["events"]["Notification"] == "missing"
+        assert body["stale"] == []
 
         r = await ac.post("/api/v1/scheduled-messages/hooks-install")
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["installed"] is True
-        assert all(body["events"].values())
+        assert all(v == "installed" for v in body["events"].values())
+        assert body["stale"] == []
 
         r = await ac.get("/api/v1/scheduled-messages/hooks-status")
         assert r.json()["installed"] is True
