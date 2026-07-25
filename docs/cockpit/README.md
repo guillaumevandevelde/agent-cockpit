@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 105 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 106 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -126,7 +126,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Test-doubles convention — patch where the consumer looks](./test-doubles-convention.md) | 🟢 active |
 | [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md) | 🟢 active |
 
-### Spec (6)
+### Spec (7)
 
 | Document | Status |
 |---|---|
@@ -135,6 +135,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md) | 🟢 active |
 | [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md) | 🟢 active |
 | [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md) | 🟢 active |
+| [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md) | 🟢 active |
 | [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md) | 🟢 active |
 
 ### Plan (5)

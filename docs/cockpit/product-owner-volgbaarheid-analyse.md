@@ -135,6 +135,11 @@ Het ontbrekende stuk. Twee vormen, samen kaart **A** en **B** in §5:
   `scheduled_at` + auto-dispatch + chain-of-one-shots als de `market-research`-skill (zie
   [`recurring-cadence-proposal.md`](./recurring-cadence-proposal.md)). Dit is een nieuwe
   *skill + trigger-kaart*, geen nieuwe infra.
+  ✅ Ontworpen (kaart `4e69915f`): secties, bronnen, taalregister, cadans en
+  opleverplek staan vast in [`po-digest-design.md`](./po-digest-design.md); twee
+  bouw-kaarten gefiled. Kernbevinding: de `Done`-kolom is géén bruikbare bron — 130
+  kaarten kregen in 7 dagen een Done-summary, 28 daarvan bestaan nog als kaart, dus de
+  digest leest de op-log.
 - **Pull — "wacht op jou"-wachtrij.** Een scherm/sectie die alles aggregeert dat op de mens
   geblokkeerd is: `Impediment`-kaarten met een `question`/`options`, open gates,
   review-verzoeken (`reviewed_card_id`), en `_awaiting_plan_ref`-vastzitters. Zodat de
@@ -186,6 +191,10 @@ agent-facing doc-navigatie, de Dashboard-pagina is config-inventaris.
   ontwerpen (welke vier secties, welke bronnen, welk producttaal-register), dan de skill +
   trigger-kaart. `analysis` omdat de exacte inhoud/bronnen scoping vergen vóór een executor
   'm bouwt.
+  ✅ Ontworpen (kaart `4e69915f`): [`po-digest-design.md`](./po-digest-design.md) — vier
+  secties met bron per sectie, taalregister, `docs/cockpit/po-digest/YYYY-Www.md` als
+  opleverplek, cadans maandag 08:00. Bouw loopt via twee kind-kaarten (collector-script →
+  skill + trigger-kaart).
 - **Kaart B — "Wacht op jou"-PO-wachtrij** (`feature`): backend-aggregatie + frontend-view die
   alle mens-geblokkeerde items op één plek toont.
   ✅ Geïmplementeerd (kaart `c7ea21b0`): `GET /api/v1/kanban/wachtrij?project_key=...`

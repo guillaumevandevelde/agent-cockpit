@@ -42,6 +42,7 @@
 - [Kanban auto-dispatch — spec](./kanban-dispatch-spec.md): type=spec status=active
 - [Kanban — Spec: per-project bord met agent-zelfbediening](./kanban-spec.md): type=spec status=active
 - [Spec — Pane-gerichte attentie: Bridge ↔ Presence exacte koppeling](./pane-attention-spec.md): type=spec status=active
+- [Wekelijkse product-owner-digest — ontwerp (secties, bronnen, register, oplevering)](./po-digest-design.md): type=spec status=active
 - [`spec_doc`-producent + B↔C-join — ontwerp (leaf design-deliverable)](./spec-doc-producer-design.md): type=spec status=active
 
 ## Plan
