@@ -447,11 +447,15 @@ async def test_post_and_get_subscription_pool_endpoint():
     # response mirrors the stored body verbatim (no back-fill there
     # — the server validates and stores what was sent) so the GET
     # round-trip is what we assert against, with back-filled ``cli``.
+    # Kaart 27317b4871… (FCR gap 2): the GET response also carries the
+    # ``endpoint_name`` field so an anthropic-compatible pool keeps
+    # its endpoint binding on a fetch-and-re-save. Non-compatible
+    # entries default to ``None`` here.
     expected = [
         {"cli": "claude-code", "provider": "anthropic",
-         "model": None, "drempel": 0.9},
+         "model": None, "drempel": 0.9, "endpoint_name": None},
         {"cli": "claude-code", "provider": "minimax",
-         "model": "MiniMax-M3[1m]", "drempel": 0.95},
+         "model": "MiniMax-M3[1m]", "drempel": 0.95, "endpoint_name": None},
     ]
     assert r2.json()["pool"] == expected
 
@@ -513,7 +517,7 @@ async def test_post_subscription_pool_preserves_cli_field():
     stored = r2.json()["pool"]
     assert stored == [
         {"cli": "open-code", "provider": "anthropic",
-         "model": None, "drempel": 0.9},
+         "model": None, "drempel": 0.9, "endpoint_name": None},
     ]
 
 
@@ -542,7 +546,58 @@ async def test_post_subscription_pool_with_omitted_cli_defaults_server_side():
     stored = r2.json()["pool"]
     assert stored == [
         {"cli": "claude-code", "provider": "anthropic",
-         "model": None, "drempel": 0.9},
+         "model": None, "drempel": 0.9, "endpoint_name": None},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_subscription_pool_returns_endpoint_name_for_compatible_entry():
+    """Kaart 27317b4871… (FCR gap 2): the GET handler must round-trip
+    ``endpoint_name`` so a compatible pool that the operator saves via
+    the REST surface (or that the UI re-saves after a refetch) keeps
+    its endpoint binding. Previously the GET handler at
+    ``router.py:1663-1670`` dropped the field, so a UI that re-saves
+    the response would silently lose the binding and the card would
+    only fail at dispatch — exactly the "config fails later" class
+    this card exists to eliminate.
+
+    Pins the full POST→GET round-trip via the real REST route: a
+    compatible entry posted with ``endpoint_name`` comes back
+    identical on the GET, ready for a re-save that would still
+    survive the storage fail-fast check."""
+    from app.services.agentic_cli.endpoints import Endpoint, upsert_endpoint
+    async with KanbanSessionLocal() as s:
+        await upsert_endpoint(
+            s, PK, Endpoint(
+                name="router-rest-roundtrip",
+                base_url="https://router-rest-roundtrip.example/v1",
+                model="claude-rest-roundtrip",
+            ),
+        )
+        await s.commit()
+    body = {
+        "project_key": PK,
+        "pool": [
+            {"provider": "anthropic-compatible",
+             "model": "claude-rest-roundtrip",
+             "drempel": 0.9,
+             "endpoint_name": "router-rest-roundtrip"},
+        ],
+    }
+    async with _client() as c:
+        r = await c.post("/api/v1/kanban/subscription-pool", json=body)
+        assert r.status_code == 200
+        r2 = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK},
+        )
+    assert r2.status_code == 200
+    assert r2.json()["pool"] == [
+        {"cli": "claude-code",
+         "provider": "anthropic-compatible",
+         "model": "claude-rest-roundtrip",
+         "drempel": 0.9,
+         "endpoint_name": "router-rest-roundtrip"},
     ]
 
 

@@ -1647,14 +1647,22 @@ async def get_subscription_pool(project_key: str = Query(...)):
     Returns ``{"project_key": ..., "pool": <list[PoolEntry]|None>}``.
     ``None`` means no pool is configured — the dispatcher falls back to
     today's column-default chain exactly as before. Each ``PoolEntry``
-    is shaped as ``{cli, provider, model|null, drempel}`` so the frontend
-    can render it verbatim without per-field reshaping. Kaart 8f40d443…:
-    the per-entry ``cli`` field is again first-class and consumed by
-    the router (it was briefly dropped in kaart 0b3ad6e2… and is now
-    required again to honour the per-CLI quota axis). The default
+    is shaped as ``{cli, provider, model|null, drempel, endpoint_name}``
+    so the frontend can render it verbatim without per-field reshaping.
+    Kaart 8f40d443…: the per-entry ``cli`` field is again first-class and
+    consumed by the router (it was briefly dropped in kaart 0b3ad6e2… and
+    is now required again to honour the per-CLI quota axis). The default
     ``cli`` value (``subscription_pool.DEFAULT_POOL_CLI``,
     ``"claude-code"``) is back-filled on read for rows that omit it,
-    so legacy stored payloads still load."""
+    so legacy stored payloads still load.
+
+    Kaart 27317b4871… (FCR gap 2): the response also carries each
+    entry's ``endpoint_name`` so the POST→GET round-trip is
+    idempotent. Previously the GET handler dropped the field, so a
+    UI that re-saved the response would silently lose the endpoint
+    binding of an ``anthropic-compatible`` entry — the storage
+    fail-fast check would only catch the misconfiguration at the next
+    save, and the dispatch fail-fast only at the next spawn."""
     from app.kanban import subscription_pool as pool_mod
     async with KanbanSessionLocal() as s:
         entries = await pool_mod.get_subscription_pool(s, project_key)
@@ -1664,7 +1672,8 @@ async def get_subscription_pool(project_key: str = Query(...)):
         "project_key": project_key,
         "pool": [
             {"cli": e.cli, "provider": e.provider,
-             "model": e.model, "drempel": e.drempel}
+             "model": e.model, "drempel": e.drempel,
+             "endpoint_name": e.endpoint_name}
             for e in entries
         ],
     }
