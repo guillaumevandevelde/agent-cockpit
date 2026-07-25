@@ -16,7 +16,7 @@ def test_status_all_missing_when_no_settings_file(tmp_path, monkeypatch):
 
     status = hook_installer.get_hooks_status()
 
-    assert status == {event: False for event in ALL_EVENTS}
+    assert status == {event: "missing" for event in ALL_EVENTS}
 
 
 def test_install_writes_all_scheduling_hooks(tmp_path, monkeypatch):
@@ -25,7 +25,7 @@ def test_install_writes_all_scheduling_hooks(tmp_path, monkeypatch):
 
     status = hook_installer.install_missing_hooks()
 
-    assert status == {event: True for event in ALL_EVENTS}
+    assert status == {event: "installed" for event in ALL_EVENTS}
     written = json.loads(settings_file.read_text())
     assert set(written["hooks"]) == ALL_EVENTS
     for event in ALL_EVENTS:
@@ -86,10 +86,10 @@ def test_status_reflects_partial_install(tmp_path, monkeypatch):
 
     status = hook_installer.get_hooks_status()
 
-    assert status["Notification"] is True
-    assert status["Stop"] is False
-    assert status["UserPromptSubmit"] is False
-    assert status["SessionStart"] is False
+    assert status["Notification"] == "stale"
+    assert status["Stop"] == "missing"
+    assert status["UserPromptSubmit"] == "missing"
+    assert status["SessionStart"] == "missing"
 
 
 def test_install_only_adds_missing_events(tmp_path, monkeypatch):
@@ -112,3 +112,66 @@ def test_install_only_adds_missing_events(tmp_path, monkeypatch):
     notification_groups = written["hooks"]["Notification"]
     assert len(notification_groups) == 1
     assert len(notification_groups[0]["hooks"]) == 1
+
+
+def test_status_reports_installed_when_command_matches_renderer(tmp_path, monkeypatch):
+    """Tri-state: the exact rendered command from settings_hooks_block() is
+    reported as ``installed`` — neither ``stale`` (byte-drift from the
+    renderer) nor ``missing`` (no entry at all)."""
+    from app.services.scheduling import hook_script
+
+    settings_file = tmp_path / "settings.json"
+    rendered = hook_script.settings_hooks_block(port=8000)
+    settings_file.write_text(json.dumps({
+        "hooks": {
+            event: groups
+            for event, groups in rendered.items()
+        }
+    }))
+    _patch_settings_file(monkeypatch, settings_file)
+
+    status = hook_installer.get_hooks_status(port=8000)
+
+    assert status == {event: "installed" for event in ALL_EVENTS}
+
+
+def test_status_reports_stale_when_command_diverges_from_renderer(tmp_path, monkeypatch):
+    """Tri-state: a present-but-divergent command is ``stale`` (e.g. the
+    renderer added ``notification_type`` but the on-disk command predates
+    that change)."""
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(json.dumps({
+        "hooks": {
+            "Notification": [
+                {"hooks": [{
+                    "type": "command",
+                    # Pre-CC-2.1.198 shape: no notification_type forward.
+                    "command": (
+                        "jq -c --arg ev Notification "
+                        "'{event:$ev, session_id:.session_id, cwd:.cwd, "
+                        "tmux_pane:env.TMUX_PANE, message:.message}' "
+                        "| curl -s -X POST -H 'Content-Type: application/json' "
+                        "-d @- http://localhost:8000/api/v1/scheduled-messages/hook-event"
+                        " >/dev/null 2>&1 || true"
+                    ),
+                }]}
+            ]
+        }
+    }))
+    _patch_settings_file(monkeypatch, settings_file)
+
+    status = hook_installer.get_hooks_status(port=8000)
+
+    assert status["Notification"] == "stale"
+    # The other events never had any entry at all.
+    assert all(status[event] == "missing" for event in ALL_EVENTS - {"Notification"})
+
+
+def test_status_reports_missing_when_event_has_no_entry(tmp_path, monkeypatch):
+    """Tri-state: an event with no entry in settings.json is ``missing``."""
+    settings_file = tmp_path / "settings.json"
+    _patch_settings_file(monkeypatch, settings_file)
+
+    status = hook_installer.get_hooks_status()
+
+    assert status == {event: "missing" for event in ALL_EVENTS}

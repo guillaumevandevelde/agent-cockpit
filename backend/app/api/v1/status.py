@@ -57,7 +57,7 @@ async def _get_provider_statuses() -> dict[str, Any]:
 
 async def _get_scheduling_hooks_installed() -> bool:
     hooks = await asyncio.to_thread(get_hooks_status)
-    return all(hooks.values())
+    return all(status == "installed" for status in hooks.values())
 
 
 @router.get("/status", response_model=SystemStatusResponse)
