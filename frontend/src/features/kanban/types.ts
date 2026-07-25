@@ -195,6 +195,21 @@ export interface Card {
   parent_card_id?: string | null;
   analyst_run_id?: string | null;
   depends_on?: string[] | null;
+  // Why the dispatcher last passed this card over, written by the dispatch
+  // tick (`dep_resolver.classify_hold`). Null = dispatchable, or not yet
+  // ticked. The board prefers these over re-deriving the dispatcher's filters
+  // locally: the local copy of that logic could only ever agree with the
+  // dispatcher by luck, and reproduced its blind spots faithfully.
+  held_reason?:
+    | "gated"
+    | "dangling_dep"
+    | "missing_parent"
+    | "awaiting_plan_ref"
+    | "dependent"
+    | "scheduled"
+    | null;
+  held_since?: string | null;
+  held_blocker?: string[] | null;
   created_at: string;
   updated_at: string;
   // Derived server-side from the op-log: the most recent **Done:** comment's

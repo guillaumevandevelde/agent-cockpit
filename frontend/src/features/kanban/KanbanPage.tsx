@@ -265,6 +265,40 @@ export default function KanbanPage() {
         meta.set(card.id, { readyState: "in_progress", blockerTitles: [] });
         continue;
       }
+      // Backend-authored hold wins over anything derived here. The dispatcher
+      // records why it passed a card over (`dep_resolver.classify_hold`), so
+      // the badge reports the actual decision instead of a local re-derivation
+      // that agrees with it only by luck — and that reproduced its blind spots
+      // exactly, since it was written by mirroring the same filters.
+      if (card.held_reason) {
+        const blockerTitles = (card.held_blocker ?? [])
+          .map((id) => cardsById.get(id)?.title)
+          .filter((t): t is string => Boolean(t));
+        const missing = (card.held_blocker ?? []).filter(
+          (id) => !cardsById.has(id),
+        );
+        const state =
+          card.held_reason === "dangling_dep"
+            ? "missing_dep"
+            : card.held_reason === "scheduled"
+              ? "ready" // a future schedule is shown by CardItem's own date chip
+              : card.held_reason;
+        meta.set(card.id, {
+          readyState: state,
+          blockerTitles,
+          missingDepIds: missing.length > 0 ? missing : undefined,
+          gatedOn:
+            typeof card.metadata?.gated_on === "string"
+              ? card.metadata.gated_on
+              : undefined,
+          heldSince: card.held_since ?? undefined,
+        });
+        continue;
+      }
+      // Fallback: cards the dispatcher has not ticked since the hold columns
+      // landed (and any project whose tick is paused) still get a best-effort
+      // local answer. Kept deliberately below the backend branch so it can
+      // never override it.
       // Operator-set business gate. Mirrors backend `_is_gated`:
       // `bool(card.metadata["gated_on"])` — empty string and missing key
       // both mean "no gate" (fail open). Wins over missing_dep /

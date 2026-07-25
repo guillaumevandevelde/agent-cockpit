@@ -113,6 +113,18 @@ class KanbanCard(KanbanBase):
     parent_card_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     analyst_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     depends_on: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Why the dispatcher last passed this card over, written by the tick at the
+    # moment it decides (dep_resolver.classify_hold produces the value). Before
+    # these existed, that decision was a discarded boolean and a held card was
+    # indistinguishable from one that was never a candidate — so no watchdog
+    # could see it, because every watchdog keys on `claimed_by` and thus only
+    # supervises work that was *started*. `held_since` is what gives an
+    # unclaimed card a clock at all. NULL = dispatchable (or not yet ticked).
+    # String(40) ISO-8601 to match scheduled_at / dispatch_started_at.
+    held_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    held_since: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Card ids this hold is waiting on (deps, or the parent owing a plan).
+    held_blocker: Mapped[list | None] = mapped_column(JSON, nullable=True)
     # Free-form key/value bag for integration data (external IDs, workflow
     # provenance, sha of last-seen upstream commit, …). Mirrors claude-task-master's
     # task.metadata: callers can attach integration-specific data without a schema

@@ -13,6 +13,10 @@ export interface CardMeta {
   // `readyState === "gated"`; drives the badge tooltip so the operator can
   // see WHAT the card is waiting on, not just that it is.
   gatedOn?: string;
+  // ISO timestamp of when the current hold started (backend `held_since`).
+  // Drives the "(held 5d)" suffix in the badge tooltip — the one signal that
+  // separates a healthy temporary wait from a dead one.
+  heldSince?: string;
 }
 
 // Per-parent subtask rollup (done/total counts among cards whose
@@ -123,6 +127,7 @@ export function Column({
                 blockerTitles={meta?.blockerTitles}
                 missingDepIds={meta?.missingDepIds}
                 gatedOn={meta?.gatedOn}
+                heldSince={meta?.heldSince}
                 subtasks={subtaskCounts?.get(c.id)}
                 projectPath={projectPath}
                 onPromote={onPromote}

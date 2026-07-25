@@ -311,9 +311,60 @@ describe("CardItem ReadyStateBadge", () => {
     expect(badge).not.toBeNull();
     expect(badge.getAttribute("data-ready-state")).toBe("awaiting_plan_ref");
     expect(badge.getAttribute("title")).toBe(
-      "Waiting on the analyst's plan_ref deliverable — will resolve once add_plan_attachment runs.",
+      "Waiting on the analyst's plan_ref deliverable — resolves once add_plan_attachment runs.",
     );
     expect(screen.queryByText("Dependent")).toBeNull();
+  });
+
+  it("names the parent in the 'Awaiting plan' tooltip when it is known", () => {
+    // The gap that made a linked card look like an orphan: the badge said a
+    // card was waiting, but never on whom, so a board full of intact
+    // parent links read as a board full of loose ends.
+    render(
+      <CardItem
+        card={{ ...baseCard, parent_card_id: "parent-card" }}
+        readyState="awaiting_plan_ref"
+        blockerTitles={["Analyse - duidelijkere taal"]}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("Awaiting plan").getAttribute("title")).toBe(
+      'Waiting on the analyst\'s plan_ref deliverable from "Analyse - duidelijkere taal"' +
+        " — resolves once add_plan_attachment runs.",
+    );
+  });
+
+  it("renders an 'Orphaned' badge when the parent card was deleted", () => {
+    // Distinct from 'Awaiting plan' on purpose: no analyst run survives a
+    // deleted parent, so this wait never ends on its own.
+    render(
+      <CardItem
+        card={{ ...baseCard, parent_card_id: "gone" }}
+        readyState="missing_parent"
+        onOpen={() => {}}
+      />,
+    );
+    const badge = screen.getByText("Orphaned");
+    expect(badge.getAttribute("data-ready-state")).toBe("missing_parent");
+    expect(badge.getAttribute("title")).toContain("was deleted");
+  });
+
+  it("appends the hold age to the tooltip when heldSince is supplied", () => {
+    // Age is what separates a healthy temporary wait from a dead one — every
+    // temporary reason claims it resolves on its own; only the clock says
+    // whether it has.
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString();
+    render(
+      <CardItem
+        card={{ ...baseCard, parent_card_id: "parent-card" }}
+        readyState="awaiting_plan_ref"
+        heldSince={fiveDaysAgo}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("Awaiting plan").getAttribute("title")).toContain(
+      "(held 5d)",
+    );
   });
 
   it("renders a 'Gated' badge whose tooltip echoes the gated_on trigger string", () => {

@@ -112,6 +112,7 @@ export function CardItem({
   blockerTitles,
   missingDepIds,
   gatedOn,
+  heldSince,
   subtasks,
   projectPath,
   onPromote,
@@ -125,6 +126,7 @@ export function CardItem({
   // `readyState === "gated"`; surfaces the trigger in the badge tooltip
   // (kanban-pro-analyse.md §4.1 AC3).
   gatedOn?: string;
+  heldSince?: string;
   // Subtask rollup counts (done/total among cards whose parent_card_id
   // points at this card) — drives the compact "N/M subtasks" counter so
   // the operator can scan progress without opening the drawer.
@@ -234,6 +236,7 @@ export function CardItem({
             blockerTitles={blockerTitles}
             missingDepIds={missingDepIds}
             gatedOn={gatedOn}
+            heldSince={heldSince}
           />
         )}
         {subtasks && subtasks.total > 0 && (

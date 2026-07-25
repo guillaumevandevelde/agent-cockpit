@@ -312,6 +312,43 @@ describe("KanbanPage ready-state precedence", () => {
     expect(stateOf("card-ready")).toBe("ready");
   });
 
+  it("prefers the backend's held_reason over the locally derived state", async () => {
+    // The board must report the dispatcher's actual decision, not a local
+    // re-derivation of its filters. The local copy could only ever agree by
+    // luck — and because it was written by mirroring those filters, it
+    // reproduced their blind spots faithfully instead of exposing them.
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        // Locally this looks like a plain "ready" card: no deps, no parent.
+        // The backend says it is orphaned, and the backend decides.
+        makeCard({
+          id: "card-held",
+          column: "Backlog",
+          held_reason: "missing_parent",
+          held_blocker: ["deleted-parent"],
+          held_since: new Date(Date.now() - 3600_000).toISOString(),
+        }),
+        // No held_reason → the local fallback still answers.
+        makeCard({ id: "card-untick", column: "Backlog" }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    const stateOf = (cardId: string) =>
+      document
+        .querySelector(`[data-card-id="${cardId}"]`)
+        ?.querySelector("[data-ready-state]")
+        ?.getAttribute("data-ready-state");
+
+    await waitFor(() => expect(stateOf("card-held")).toBe("missing_parent"));
+    expect(stateOf("card-untick")).toBe("ready");
+  });
+
   // kanban-pro-analyse.md §4.1: the dispatcher holds two additional filters
   // the UI didn't mirror — child cards awaiting the analyst's plan_ref
   // delivery, and operator-set `metadata.gated_on` business gates. Both used

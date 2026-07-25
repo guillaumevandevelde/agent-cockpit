@@ -227,6 +227,8 @@ def _blocking_card_ids(cards: list[KanbanCard]) -> set[str]:
 # `**Resolution:** `, …) so no reader mistakes it for one of those — it is
 # purely documentary for the activity feed, like `**Promoted to project:** `.
 _DEP_REMOVED_PREFIX = "**Dependency removed:** "
+# Same idea for the sibling reference. See orphan_children_on_delete.
+_PARENT_REMOVED_PREFIX = "**Parent removed:** "
 
 
 async def strip_dangling_deps_on_delete(session, card_id: str) -> list[str]:
@@ -271,6 +273,57 @@ async def strip_dangling_deps_on_delete(session, card_id: str) -> list[str]:
             )},
         )
         updated.append(dep.id)
+    return updated
+
+
+async def orphan_children_on_delete(session, card_id: str) -> list[str]:
+    """Sibling of :func:`strip_dangling_deps_on_delete`, for `parent_card_id`.
+
+    Both fields are soft references — a plain string and a JSON list, no foreign
+    key, no cascade — and both fail the same way when their target is deleted.
+    Only `depends_on` ever got the repair, so deleting a parent left its children
+    pointing at nothing, held by the plan-ref gate, waiting for an analyst run
+    that died with the parent. Three cards on this board sat that way for over a
+    week.
+
+    That this is reachable at all on the *happy* path is the sharp edge: with no
+    archive table, finishing work and clearing Done is the routine end-of-life
+    operation for every card — so normal use is what manufactures the orphans.
+
+    Clearing `parent_card_id` (rather than leaving it dangling) mirrors what the
+    dep path does, and returns the child to ordinary dispatch: its own
+    description carries the acceptance criteria, and no plan attachment is ever
+    coming. The audit comment records what was lost.
+    """
+    from app.kanban.operations import apply_operation
+
+    card = await session.get(KanbanCard, card_id)
+    if card is None:
+        return []
+    children = (await session.execute(
+        select(KanbanCard).where(KanbanCard.parent_card_id == card_id)
+    )).scalars().all()
+
+    updated: list[str] = []
+    for child in children:
+        await apply_operation(
+            session, op_type="update", entity_type="card",
+            project_key="", entity_id=child.id,
+            payload={"parent_card_id": None},
+        )
+        await apply_operation(
+            session, op_type="comment", entity_type="comment",
+            project_key="", entity_id=child.id,
+            payload={"text": (
+                f"{_PARENT_REMOVED_PREFIX}parent `{card_id}` "
+                f"({card.title!r}) was deleted from the board, so this card's "
+                f"parent_card_id has been cleared. Any plan attachment it would "
+                f"have provided is gone; leaving the link in place would hold "
+                f"this card out of dispatch forever, waiting on an analyst run "
+                f"that no longer exists."
+            )},
+        )
+        updated.append(child.id)
     return updated
 
 

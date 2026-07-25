@@ -172,6 +172,21 @@ async def _ensure_card_columns(conn) -> None:
         await conn.exec_driver_sql(
             "ALTER TABLE kanban_cards ADD COLUMN dispatch_provider VARCHAR(32)"
         )
+    # Persisted hold state (dep_resolver.classify_hold). Added together for the
+    # same reason as the telemetry trio above: a partial state where
+    # held_reason exists without held_since would give a hold no clock, which
+    # is precisely the failure these columns exist to end. All nullable, so
+    # legacy rows round-trip as "not yet ticked".
+    if "held_reason" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN held_reason VARCHAR(32)"
+        )
+    if "held_since" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_cards ADD COLUMN held_since VARCHAR(40)"
+        )
+    if "held_blocker" not in cols:
+        await conn.exec_driver_sql("ALTER TABLE kanban_cards ADD COLUMN held_blocker JSON")
 
 
 async def _ensure_column_table(conn) -> None:

@@ -303,6 +303,13 @@ class CardResponse(BaseModel):
     parent_card_id: str | None = None
     analyst_run_id: str | None = None
     depends_on: list[str] | None = None
+    # Why the dispatcher last passed this card over, and since when. Written by
+    # the dispatch tick from dep_resolver.classify_hold; null means dispatchable
+    # (or never ticked). The board renders these rather than re-deriving the
+    # dispatcher's filters, so badge and behaviour cannot drift apart.
+    held_reason: str | None = None
+    held_since: str | None = None
+    held_blocker: list[str] | None = None
     # Aliased because the SQLAlchemy ORM attribute is `meta` (Declarative API
     # reserves `metadata` on the base class). Field name in JSON stays
     # `metadata` so the API contract matches the kanban card spec; pydantic
