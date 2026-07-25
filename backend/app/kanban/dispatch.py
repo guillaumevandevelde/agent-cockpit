@@ -30,6 +30,13 @@ from app.kanban import subscription_pool
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
 from app.kanban.dep_resolver import dangling_dep_ids, meets_dep_prerequisites
+
+# PERMISSION_PROMPT_TOOL_NAME is the MCP tool name dispatched sessions get via
+# ``--permission-prompt-tool`` on the product lane (skip_permissions=False).
+# Centralised in ``mcp_server`` so the producer (the ``permission_prompt``
+# tool) and the wire-up (this module) cannot drift apart — kaart 5278a5bd…
+# AC2.
+from app.kanban.mcp_server import PERMISSION_PROMPT_TOOL_NAME
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import (
@@ -2864,6 +2871,7 @@ async def _install_rtk_for_dispatch_async(
     caller never has to re-derive the reason from the status string.
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from app.config import settings
     from app.kanban import token_saver
 
@@ -3003,7 +3011,18 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
 
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
-            skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
+            skip_permissions=skip_permissions,
+            # Wire Claude Code's --permission-prompt-tool only on the product
+            # lane (skip_permissions=False). Meta keeps the historical bypass
+            # and emits no flag here — see analysis doc
+            # ``docs/cockpit/approval-privilege-separation-analyse.md`` §4 and
+            # kanban card 5278a5bd… AC2. The MCP tool name lives in
+            # ``mcp_server.PERMISSION_PROMPT_TOOL_NAME`` so the producer and
+            # the dispatcher stay in lockstep.
+            permission_prompt_tool=(
+                PERMISSION_PROMPT_TOOL_NAME if not skip_permissions else None
+            ),
+            worktree_path=worktree_path, repo_path=repo,
             provider=provider, model=model,
             endpoint_name=endpoint_name,
             endpoint_base_url=endpoint_base_url,
@@ -6897,6 +6916,12 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             project_folder=project_folder,
             prompt=prompt,
             skip_permissions=skip_permissions,
+            # Same product-lane wiring as make_worktree_transport — see the
+            # comment on that factory for the rationale and the analysis
+            # doc reference.
+            permission_prompt_tool=(
+                PERMISSION_PROMPT_TOOL_NAME if not skip_permissions else None
+            ),
             provider=provider,
             model=model,
             endpoint_name=endpoint_name,

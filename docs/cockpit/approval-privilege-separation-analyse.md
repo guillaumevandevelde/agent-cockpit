@@ -430,6 +430,34 @@ De voorgestelde koppeling, in één zin: **wanneer `skip_permissions=False`, dis
 Cockpit met `--permission-prompt-tool` gericht op een MCP-tool die een `KanbanGate`
 opent en op het antwoord wacht.**
 
+✅ **Geïmplementeerd (kaart `5278a5bd…`, 2026-07-25).** Het wiring is opgeleverd in
+deze commit. Concreet:
+
+- **MCP tool** — `permission_prompt` in `backend/app/kanban/mcp_server.py`. Reuses
+  `service.create_gate` (geen nieuw gate-achtig datamodel), wacht op het antwoord,
+  geeft Claude Code's verwachte `{"behavior": "allow"}` /
+  `{"behavior": "deny", "message": "..."}`-vorm terug. Faalt-closed naar deny op
+  timeout (300 s default, korter dan `open_gate`'s 1800 s — analyse §5 path 3).
+  Vraagt de UI naar tool-naam + JSON-args zodat een mens kan zien waar 'ie ja
+  tegen zegt.
+- **Dispatch-wiring** — `SpawnCommandOptions` krijgt een `permission_prompt_tool:
+  str | None` veld; `ClaudeCodeCli.build_spawn_command` emitteert
+  `--permission-prompt-tool <name>` wanneer gezet. `make_worktree_transport` en
+  `make_resume_transport` zetten 'm op `PERMISSION_PROMPT_TOOL_NAME` wanneer
+  `skip_permissions=False`; `meta` (skip_permissions=True) krijgt géén flag — de
+  spawn verandert voor meta niet.
+- **AC5 (UI)** — geen frontend-werk: `KanbanGate.question` is al een vrij
+  Markdown-veld dat door `CardDrawer` gerenderd wordt, en de
+  `permission_prompt`-tool schrijft `**Permission requested** — Claude Code wants
+  to call \`\`Write\`\`. \`\`json … \`\`` in die vraag. Een mens ziet dus tool +
+  args in de UI zoals AC5 eist.
+- **AC6 (afbakening)** — wat deze kaart implementeert: **één gate-producer**
+  (permissiebeslissingen) op de bestaande `KanbanGate`. Wat hij NIET
+  implementeert, en wat dus niet aan deze kaart toebehoort: de statische
+  `deny`/`allow`-regelset per `risk_class`. Dat hoort bij de facet-D-kaarten
+  over `ProjectSecurityPolicy` — anders ontstaan er twee plekken die
+  permissiebeleid definiëren. Zie §7.
+
 Dat is geen nieuw vraagmechanisme — het is een nieuwe *producer* van het bestaande
 `KanbanGate`-primitief. AC2's eis ("geen twee overlappende vraagmechanismen") wordt
 daarmee gehaald, mits de rolverdeling scherp blijft:
@@ -437,7 +465,7 @@ daarmee gehaald, mits de rolverdeling scherp blijft:
 | Mechanisme | Wanneer | Levensduur sessie |
 |---|---|---|
 | `report_impediment` | **Productbeslissing / scope-fork** — wat moeten we bouwen, welke trade-off. De mens beslist op eigen tempo; de kaartcontext is goedkoop te herstellen uit de kaarttekst. | Sessie eindigt, claim vrij |
-| `KanbanGate` via `--permission-prompt-tool` | **Permissiebeslissing** — mag deze ene tool-call nu draaien. Mid-run, warme context, alleen zinvol te beantwoorden mét die context. | Sessie blijft, run gaat door |
+| `KanbanGate` via `--permission-prompt-tool` (`permission_prompt` MCP-tool) | **Permissiebeslissing** — mag deze ene tool-call nu draaien. Mid-run, warme context, alleen zinvol te beantwoorden mét die context. | Sessie blijft, run gaat door |
 | Statische `allow`/`deny`-regels | **Contextvrij oordeel** — `Bash(rm:*)` is altijd fout, ongeacht wanneer. | N.v.t., geen mens in de lus |
 
 De derde rij is belangrijk en is de reden dat dit géén brede goedkeuringsstroom moet
@@ -529,6 +557,11 @@ sandcastle.
 Het antwoordkanaal uit §4: een MCP-tool die een gate opent, wacht, en `allow`/`deny`
 teruggeeft, plus de dispatch-flag die 'm activeert wanneer `skip_permissions=False`.
 Inclusief de vier paden uit §5, met fail-closed timeout. Hangt af van §6.1.
+
+✅ Uitgevoerd (kaart `5278a5bd…`, 2026-07-25). Zie de `✅ Geïmplementeerd`-regel in
+§4 voor de concrete wire-up; de vier paden zijn afgedekt door tests in
+`backend/tests/test_permission_prompt_tool.py` (MCP-tool) en
+`backend/tests/test_permission_prompt_dispatch_wiring.py` (argv-wiring).
 
 ### 6.3 De load-bearing override-rijen zichtbaar maken
 §2.3: deze repo draait permissief dankzij twee `kanban_meta`-rijen die een
