@@ -5882,6 +5882,88 @@ class TestBuildCardPromptHostCardId:
         assert "Host card id: 3ffdc75e" not in prompt
 
 
+class TestBuildCardPromptSpecDoc:
+    """``card.meta['spec_doc']`` (the analyst-set *implements*-link to a
+    ``docs/cockpit/*.md`` design/analysis doc) must reach the dispatch prompt
+    verbatim — otherwise the executor's ship-stap 3 ("voeg een `✅
+    Geïmplementeerd (kaart <id>)`-regel toe aan het brondoc") is blind to
+    which doc to update, and the bijwerk-stap gets skipped or lands on the
+    wrong file (kanban card 87ced87b…)."""
+
+    def test_prompt_renders_brondoc_line_when_spec_doc_present(self):
+        class _C:
+            title = "T"
+            description = ""
+            meta = {"spec_doc": "docs/cockpit/some-decision.md"}
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        assert "**Brondoc (spec_doc):** `docs/cockpit/some-decision.md`" in prompt
+
+    def test_prompt_omits_brondoc_line_when_spec_doc_absent(self):
+        """Legacy cards (and analysis/feature cards without an analyst-set
+        spec_doc) must render unchanged — no rendered `**Brondoc (spec_doc):**
+        …` line in the kaart-context block. The ship-instructions paragraph
+        still MENTIONS the spec_doc marker (it documents the step), so we
+        assert against the rendered line shape, not the bare word."""
+        class _C:
+            title = "T"
+            description = ""
+            meta = None
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        # No rendered brondoc-line between the title/description and the
+        # `Ship mode:` marker (the kaart-context block).
+        import re
+        ship_mode_idx = prompt.index("Ship mode:")
+        kaart_block = prompt[:ship_mode_idx]
+        assert not re.search(r"^\*\*Brondoc \(spec_doc\):\*\*", kaart_block, re.MULTILINE)
+
+    def test_prompt_omits_brondoc_line_when_meta_empty(self):
+        """A card whose meta exists but carries no spec_doc key is also
+        'no brondoc' — render unchanged."""
+        class _C:
+            title = "T"
+            description = ""
+            meta = {"labels": ["x"]}
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        import re
+        ship_mode_idx = prompt.index("Ship mode:")
+        kaart_block = prompt[:ship_mode_idx]
+        assert not re.search(r"^\*\*Brondoc \(spec_doc\):\*\*", kaart_block, re.MULTILINE)
+
+    def test_prompt_tolerates_non_string_spec_doc(self):
+        """Garbage in `meta['spec_doc']` (int / None / list) must NOT crash
+        the renderer — fall back to no-line rather than 500'ing dispatch.
+        Analysts are supposed to write a string, but the helper is defensive."""
+        class _C:
+            title = "T"
+            description = ""
+            meta = {"spec_doc": 12345}
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        import re
+        ship_mode_idx = prompt.index("Ship mode:")
+        kaart_block = prompt[:ship_mode_idx]
+        assert not re.search(r"^\*\*Brondoc \(spec_doc\):\*\*", kaart_block, re.MULTILINE)
+
+    def test_brondoc_line_appears_above_screenshots_section(self):
+        """The spec_doc line must land in the kaart-context block (between
+        description and `Ship mode:`) so the executor sees it BEFORE the
+        ship-instructions paragraph that references it. Anchored against the
+        existing `## Screenshots` heading so a refactor that splits the
+        build into more pieces still keeps the ordering."""
+        class _C:
+            title = "T"
+            description = "do thing"
+            meta = {"spec_doc": "docs/cockpit/x.md"}
+            attachments = []
+        prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+        brondoc_idx = prompt.index("**Brondoc (spec_doc):**")
+        # Ship-instructions always mentions the marker; the *rendered* line
+        # must precede the work-autonomously paragraph.
+        work_idx = prompt.index("Work autonomously")
+        assert brondoc_idx < work_idx, (
+            "brondoc line must appear above the ship-instructions block"
+        )
+
+
 # ---- run_dispatch_tick honours the global usage-limit pause ----------------
 
 @pytest.mark.asyncio

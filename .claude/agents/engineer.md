@@ -110,7 +110,11 @@ altijd door.
    geïmplementeerd, alleen analyse + gefilede gaten" staan terwijl zijn eigen
    follow-ups al gemerged zijn (geobserveerd op de vier facet-docs van
    synthese-kaart `c980a926…`: 33 van 35 follow-ups waren al gemerged terwijl 2
-   van de 4 docs zich nog als pure analyse presenteerden). **Geen retroactieve
+   van de 4 docs zich nog als pure analyse presenteerden). **De bron is
+   `metadata["spec_doc"]`** — als de kaart-context boven aan deze prompt een
+   regel `**Brondoc (spec_doc):** …` toont, is dat het docpad dat je moet
+   bijwerken. Geen `spec_doc`-regel in de prompt én geen analysedoc-verwijzing
+   in beschrijving/facet/parent_card? Sla deze stap over. **Geen retroactieve
    verplichting** — alleen het doc dat jouw kaart raakt; raakt je kaart geen
    analysedoc, sla je deze stap over.
 6. **Zelf-review via `iteration-loop`** — kies de preset op basis van wat
