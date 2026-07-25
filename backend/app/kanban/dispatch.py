@@ -5348,10 +5348,11 @@ async def _provider_for_cwd(cwd: str) -> str | None:
     """Resolve the provider for a card running in `cwd`, for callers that have
     only a cwd (the Notification hook path). Looks up the card the same way as
     `move_limited_session_to_resume` -- claimed by `agent:<session_name>`, on a
-    non-terminal column -- then delegates to `_provider_for_card`. Returns None
-    when no card can be matched, which is also the condition under which
-    `move_limited_session_to_resume` would no-op, so the caller can safely
-    fall back to the global pause.
+    non-terminal column -- then delegates to `_limited_provider_for_card`
+    (kaart 9ff86416…) so a pool-/override-routed card pauses the right
+    subscription. Returns None when no card can be matched, which is also the
+    condition under which `move_limited_session_to_resume` would no-op, so the
+    caller can safely fall back to the global pause.
     """
     from app.kanban.db import KanbanSessionLocal
 
