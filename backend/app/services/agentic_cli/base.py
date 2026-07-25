@@ -29,6 +29,13 @@ class SpawnCommandOptions:
     session_id: str | None = None
     project_folder: str | None = None
     skip_permissions: bool = False
+    # MCP tool name (e.g. ``mcp__cockpit-kanban__permission_prompt``) that
+    # Claude Code should invoke when a permission decision is required. When
+    # set AND ``skip_permissions=False``, the cli-builder emits
+    # ``--permission-prompt-tool <name>`` so Claude Code's permission system
+    # has an answer channel under autonomous dispatch (analysis doc
+    # ``docs/cockpit/approval-privilege-separation-analyse.md`` §4).
+    permission_prompt_tool: str | None = None
     prompt: str | None = None
     model: str | None = None
     profile: str | None = None

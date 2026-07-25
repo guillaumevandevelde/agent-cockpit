@@ -3,6 +3,7 @@
 Patches ``KanbanSessionLocal`` / ``kanban_engine`` and ``AsyncSessionLocal`` /
 ``engine`` in every module so tests never touch the production DB.
 """
+import asyncio
 import os
 import sys
 
@@ -107,6 +108,33 @@ def _reset_singleton_state():
     reset_all_singleton_test_state()
     yield
     reset_all_singleton_test_state()
+
+
+@pytest.fixture(autouse=True)
+def _reset_kanban_clock():
+    """Give each test a fresh HLC clock + lock (``app.kanban.operations``).
+
+    ``_clock_lock`` is a module-global ``asyncio.Lock``, and every
+    ``apply_operation`` acquires it. Such a lock binds itself to the running
+    event loop **only when it is contended** — an uncontended ``acquire()``
+    returns before ``_get_loop()`` is ever called. That is why this leak stayed
+    invisible: with per-test event loops, the lock survived across tests
+    unbound and unnoticed, and only a test that happened to contend it would
+    trip ``RuntimeError: is bound to a different event loop`` — inheriting a
+    *held* lock from a task that outlived its (now closed) loop.
+
+    So the failure surfaced as an unrelated test failing whenever some earlier
+    test left a background task mid-``apply_operation``, and moved around
+    whenever timing shifted. Re-creating both objects per test removes the
+    shared state instead of the symptom.
+    """
+    from app.kanban import operations
+
+    operations._clock = None
+    operations._clock_lock = asyncio.Lock()
+    yield
+    operations._clock = None
+    operations._clock_lock = asyncio.Lock()
 
 
 @pytest.fixture(autouse=True)

@@ -208,24 +208,69 @@ class EndpointUpsertRequest(BaseModel):
     credential_name: str | None = None
 
 
-def _credential_configured(credential_name: str | None) -> bool:
+def _secret_store():
+    """Factory for the project-scoped ``SecretStore`` used by
+    ``_credential_configured`` to look up non-MiniMax endpoint credentials.
+
+    Mirrors the same factory pattern in
+    ``backend/app/services/agentic_cli/endpoints.py`` so tests can
+    monkeypatch a fake implementation by reassigning the module-level
+    attribute. Kept lazy so the router's import-time stays free of the
+    secrets_store module + its scrypt/keyring transitive dependencies
+    (the status endpoint is hit on every dropdown render of the
+    NewSessionDialog vendor-provider select — keep the cold path
+    cheap).
+    """
+    from app.services.secrets_store import AGESecretStore
+
+    return AGESecretStore()
+
+
+def _credential_configured(credential_name: str | None, project_key: str) -> bool:
     """Is the named credential resolvable for this server?
 
-    Mirrors the MiniMax status semantics (``bool(settings.minimax_api_key)``):
-    a non-None credential_name is "configured" only when the secret store
-    (or, for the MiniMax legacy path, ``Settings``) actually has a value.
-    For an MVP the only credential the backend knows about is MiniMax's,
-    so a non-MiniMax endpoint without a value in ``Settings`` is reported
-    as ``credential_configured=False`` even when a SecretStore row exists
-    for it — the SecretStore-backed lookup is wired in a follow-up card
-    so this endpoint stays honest today (no false positives).
+    Mirrors the spawn-path contract in
+    ``backend/app/services/agentic_cli/endpoints.py`` (``resolve_compatible_endpoint``)
+    so the status indicator stays honest:
+
+    - ``credential_name is None`` → ``False`` (ambient-credential
+      endpoints intentionally have no SecretStore row; the UI hides
+      the warning for them).
+    - ``credential_name == "minimax"`` → legacy ``settings.minimax_api_key``
+      escape-hatch. Preserved so the existing MiniMax flow keeps working
+      without forcing every operator to migrate their key into the
+      SecretStore.
+    - Anything else → ``_secret_store().get(project_key, credential_name)``.
+      ``SecretNotFound`` (no file at all) and ``None`` (file exists,
+      name absent) both surface as ``False`` — the UI keeps showing
+      "Credential X is not configured" until the operator PUTs the key
+      via ``POST /api/v1/secrets``.
+
+    Any ``SecretStoreError`` other than ``SecretNotFound`` (e.g.
+    ``AuthenticationError`` from a corrupt file) is swallowed and
+    reported as ``False`` — the status endpoint must never 500 the
+    NewSessionDialog on a secretary-side problem; the spawn path will
+    surface the real error if the operator actually tries to launch.
     """
     if not credential_name:
         return False
     if credential_name == "minimax":
         return bool(settings.minimax_api_key)
-    # Future: SecretStore-backed lookup (kaart follow-up #4).
-    return False
+    # Anything else: project SecretStore. Match the spawn-path lookup
+    # so the UI's "configured" hint is consistent with what
+    # ``resolve_compatible_endpoint`` will actually use at spawn time.
+    from app.services.secrets_store import SecretNotFound, SecretStoreError
+
+    try:
+        stored = _secret_store().get(project_key, credential_name)
+    except SecretNotFound:
+        return False
+    except SecretStoreError:
+        # Defensive: a corrupt / undecryptable file must not 500 the
+        # status endpoint. The spawn path will surface the real error
+        # when the operator actually tries to launch with this row.
+        return False
+    return bool(stored)
 
 
 @router.get("/platforms/endpoints", response_model=EndpointListResponse)
@@ -260,7 +305,7 @@ async def list_endpoints_endpoint(
                 base_url=e.base_url,
                 model=e.model,
                 credential_name=e.credential_name,
-                credential_configured=_credential_configured(e.credential_name),
+                credential_configured=_credential_configured(e.credential_name, key),
             )
             for e in endpoints
         ],
@@ -291,7 +336,8 @@ async def upsert_endpoint_endpoint(
             model=request.model,
             credential_name=request.credential_name,
         )
-        await _upsert(db, project_key or DEFAULT_PROJECT_KEY, ep)
+        key = project_key or DEFAULT_PROJECT_KEY
+        await _upsert(db, key, ep)
         await db.commit()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -300,7 +346,7 @@ async def upsert_endpoint_endpoint(
         base_url=ep.base_url,
         model=ep.model,
         credential_name=ep.credential_name,
-        credential_configured=_credential_configured(ep.credential_name),
+        credential_configured=_credential_configured(ep.credential_name, key),
     )
 
 

@@ -29,7 +29,24 @@ from app.kanban import subscription_pool
 
 # Local import so the dep-filter check inside the dispatch tick stays a pure
 # helper (no DB / session state — see app.kanban.dep_resolver).
-from app.kanban.dep_resolver import dangling_dep_ids, meets_dep_prerequisites
+from app.kanban.dep_resolver import (
+    HOLD_AWAITING_PLAN_REF,
+    HOLD_GATED,
+    HOLD_MISSING_PARENT,
+    HOLD_SCHEDULED,
+    classify_hold,
+    dangling_dep_ids,
+    has_plan_ref,
+    meets_dep_prerequisites,
+)
+from app.kanban.dep_resolver import is_due as dep_is_due
+
+# PERMISSION_PROMPT_TOOL_NAME is the MCP tool name dispatched sessions get via
+# ``--permission-prompt-tool`` on the product lane (skip_permissions=False).
+# Centralised in ``mcp_server`` so the producer (the ``permission_prompt``
+# tool) and the wire-up (this module) cannot drift apart — kaart 5278a5bd…
+# AC2.
+from app.kanban.mcp_server import PERMISSION_PROMPT_TOOL_NAME
 from app.kanban.models import KanbanCard, KanbanMeta
 from app.kanban.operations import ClaimRejected, apply_operation
 from app.kanban.project_key import (
@@ -2827,40 +2844,80 @@ def _install_rtk_for_dispatch(
     dedicated engine per call is cheap (one connection) and the
     helper's call site is on the cold path of a dispatch, not the
     hot path.
+
+    The actual async body lives in :func:`_install_rtk_for_dispatch_async`
+    so the test suite (which already runs inside an event loop) can await
+    it directly without ``asyncio.run()`` collisions.
     """
     import asyncio
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from app.config import settings
-    from app.kanban import token_saver
-
-    async def _run() -> tuple[str, str]:
-        engine = create_async_engine(
-            settings.kanban_database_url, future=True,
-        )
-        try:
-            Session = async_sessionmaker(
-                engine, expire_on_commit=False,
-            )
-            async with Session() as session:
-                return await token_saver.maybe_install(
-                    session,
-                    card_id=card_id,
-                    project_key=project_key,
-                    column_name=column_name,
-                    worktree_path=worktree_path,
-                    repo_path=repo_path,
-                )
-        finally:
-            await engine.dispose()
-
     try:
-        return asyncio.run(_run())[0]
+        return asyncio.run(_install_rtk_for_dispatch_async(
+            card_id=card_id, project_key=project_key, column_name=column_name,
+            worktree_path=worktree_path, repo_path=repo_path,
+        ))[0]
     except Exception as exc:
         logger.warning(
             "token-saver install failed for card %s (column=%s): %s",
             card_id, column_name, exc,
         )
         return "failed"
+
+
+async def _install_rtk_for_dispatch_async(
+    *, card_id: str, project_key: str, column_name: str,
+    worktree_path: str, repo_path: str,
+) -> tuple[str, str]:
+    """Async core of :func:`_install_rtk_for_dispatch`.
+
+    Opens a private kanban-DB engine on the current loop, calls
+    :func:`token_saver.maybe_install`, then posts the activity-feed
+    note that satisfies the card acceptance criterion ("Zichtbaar in
+    de activity-feed"). Active + failed (fail-open) both post —
+    inactive is silent because the default-off path runs on every
+    Backlog dispatch and would flood the feed.
+
+    Returns ``(status, reason)`` so the activity-feed note and the
+    ``RTK_TELEMETRY=off`` decision in the caller stay in sync. The
+    caller never has to re-derive the reason from the status string.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.config import settings
+    from app.kanban import token_saver
+
+    engine = create_async_engine(
+        settings.kanban_database_url, future=True,
+    )
+    try:
+        Session = async_sessionmaker(
+            engine, expire_on_commit=False,
+        )
+        async with Session() as session:
+            status, reason = await token_saver.maybe_install(
+                session,
+                card_id=card_id,
+                project_key=project_key,
+                column_name=column_name,
+                worktree_path=worktree_path,
+                repo_path=repo_path,
+            )
+            # Activity-feed observability. Only active + failed post;
+            # inactive is the default-off path and would flood the feed.
+            # post_note itself is fail-open (catches its own exceptions
+            # defensively) so this never breaks the spawn.
+            if status == "active":
+                await token_saver.post_note(
+                    session, card_id, f"activated: {reason}",
+                )
+            elif status == "failed":
+                await token_saver.post_note(
+                    session, card_id, f"fail-open: {reason}",
+                )
+            await session.commit()
+            return (status, reason)
+    finally:
+        await engine.dispose()
+
 
 
 def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
@@ -2964,7 +3021,18 @@ def make_worktree_transport(skip_permissions: bool = True) -> SpawnTransport:
 
         options = SpawnCommandOptions(
             directory=worktree_path, mode="plain", prompt=prompt,
-            skip_permissions=skip_permissions, worktree_path=worktree_path, repo_path=repo,
+            skip_permissions=skip_permissions,
+            # Wire Claude Code's --permission-prompt-tool only on the product
+            # lane (skip_permissions=False). Meta keeps the historical bypass
+            # and emits no flag here — see analysis doc
+            # ``docs/cockpit/approval-privilege-separation-analyse.md`` §4 and
+            # kanban card 5278a5bd… AC2. The MCP tool name lives in
+            # ``mcp_server.PERMISSION_PROMPT_TOOL_NAME`` so the producer and
+            # the dispatcher stay in lockstep.
+            permission_prompt_tool=(
+                PERMISSION_PROMPT_TOOL_NAME if not skip_permissions else None
+            ),
+            worktree_path=worktree_path, repo_path=repo,
             provider=provider, model=model,
             endpoint_name=endpoint_name,
             endpoint_base_url=endpoint_base_url,
@@ -4336,17 +4404,11 @@ def _priority_key(card) -> int:
 def _is_due(card: KanbanCard) -> bool:
     """True unless `card.scheduled_at` names a not-yet-reached future time.
 
-    A missing or unparseable value is treated as due (fail open) rather than
-    silently hiding a card from auto-dispatch forever over a bad timestamp.
+    Thin alias kept for the existing call sites and tests; the rule itself lives
+    in ``dep_resolver.is_due`` so the dispatcher and ``classify_hold`` cannot
+    drift on what "due" means.
     """
-    scheduled_at = getattr(card, "scheduled_at", None)
-    if not scheduled_at:
-        return True
-    try:
-        fire_at = datetime.fromisoformat(scheduled_at)
-    except ValueError:
-        return True
-    return ensure_aware(fire_at) <= datetime.now(UTC)
+    return dep_is_due(card)
 
 
 def _awaiting_plan_ref(card) -> bool:
@@ -4366,12 +4428,19 @@ def _awaiting_plan_ref(card) -> bool:
 
     A card with no ``parent_card_id`` (an ordinary top-level card) is never
     gated — it never carries a ``plan_ref`` in the first place.
+
+    **Phase-blind on purpose only as a raw predicate.** This answers "does the
+    card lack its plan_ref", nothing more. Whether that *should* hold the card
+    depends on where the card is: in an agent column it has already been
+    dispatched, so the create→attach race cannot apply and the gate must not
+    fire. That scoping lives in ``dep_resolver.classify_hold``
+    (``plan_ref_columns``), which is what the dispatcher actually consults —
+    applying this predicate unscoped is the bug that hid finished-but-unreviewed
+    cards from the reviewer for five days.
     """
     if not getattr(card, "parent_card_id", None):
         return False
-    return not any(
-        d.kind == "plan_ref" for d in getattr(card, "deliverables", []) or []
-    )
+    return not has_plan_ref(card)
 
 
 def _is_gated(card) -> bool:
@@ -4404,15 +4473,107 @@ def _is_gated(card) -> bool:
     return bool(gate)
 
 
-def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
+# Hold reasons that disqualify a card from *selection*. `dependent` and
+# `dangling_dep` are deliberately absent: the tick loop re-checks deps
+# downstream, where it can surface a dangling dep to Impediment instead of
+# skipping it in silence. Filtering them here would swallow that signal — the
+# exact mistake this whole change exists to stop making.
+_SELECTION_HOLDS = frozenset({
+    HOLD_GATED, HOLD_AWAITING_PLAN_REF, HOLD_MISSING_PARENT, HOLD_SCHEDULED,
+})
+
+
+def card_hold(card, cards_by_id: dict, live_ids: set[str] | None = None):
+    """The dispatcher's view of why ``card`` is not dispatchable (or None).
+
+    One-line seam over ``dep_resolver.classify_hold`` that binds the two
+    board-shaped arguments the pure function cannot know: which columns the
+    plan-ref race applies to, and the existence oracle.
+    """
+    from app.kanban.schemas import COLUMNS
+    return classify_hold(
+        card, cards_by_id, live_ids=live_ids, plan_ref_columns=COLUMNS,
+    )
+
+
+async def _persist_holds(session, cards, live_ids: set[str] | None = None) -> None:
+    """Write each card's current hold (``dep_resolver.classify_hold``) onto the
+    card, so "not moving" becomes an inspectable state instead of an absence.
+
+    ``held_since`` is only stamped when the *reason* changes, so it measures how
+    long this particular hold has lasted — the clock an unclaimed card never had.
+    Both existing watchdogs (``reap_stale_claims``,
+    ``check_progress_liveness``) key on ``claimed_by`` and therefore supervise
+    only work that was started; ageing a hold is what finally makes the other
+    half observable.
+
+    Scope: cards in a dispatch column or an agent column — the ones the tick
+    actually considers. A card parked in ``Awaiting Subtasks`` or sitting in
+    ``Done``/``Impediment`` has its status written on its column already; that
+    was never the invisible case, so its hold is cleared rather than invented.
+
+    Deliberately not routed through ``apply_operation``: hold state is derived
+    and recomputed every tick, not an authored change, and it must not turn the
+    card's activity feed into a poll log.
+
+    Flushes but does not commit. Opening a transaction boundary of its own
+    mid-tick broke test isolation (a committed-then-reused session left the
+    process-global HLC lock bound to a dead event loop), and it buys nothing:
+    the tick's caller commits, and a hold that misses one write is recomputed
+    on the next tick anyway.
+    """
+    from app.kanban.schemas import COLUMNS
+
+    cards_by_id = {c.id: c for c in cards}
+    now = datetime.now(UTC).isoformat()
+    changed = False
+
+    for card in cards:
+        tracked = card.column in _DISPATCH_COLUMNS or card.column not in COLUMNS
+        if tracked and not card.claimed_by:
+            hold = card_hold(card, cards_by_id, live_ids)
+        else:
+            hold = None
+
+        reason = hold.reason if hold else None
+        blocker = list(hold.blocker_ids) if hold else None
+
+        if card.held_reason == reason and (card.held_blocker or None) == blocker:
+            continue
+        if card.held_reason != reason or (reason and not card.held_since):
+            # A different reason is a different hold, so it gets its own clock.
+            # A same-reason blocker change (one of three deps went Done) must
+            # *not* reset it, or a long hold would look perpetually fresh.
+            card.held_since = now if reason else None
+        card.held_reason = reason
+        card.held_blocker = blocker
+        changed = True
+
+    if changed:
+        await session.flush()
+
+
+def _next_card(
+    cards: Iterable[KanbanCard], live_ids: set[str] | None = None,
+) -> KanbanCard | None:
+    """Pick the next card to dispatch, or None.
+
+    ``live_ids`` is the board-wide existence oracle; pass it when available so a
+    card whose parent was deleted is recognised as permanently orphaned rather
+    than treated as merely waiting for a plan. Omitting it only costs
+    resolution, never correctness.
+    """
     cards = list(cards)
+    cards_by_id = {c.id: c for c in cards}
+
+    def selectable(c) -> bool:
+        if c.claimed_by:
+            return False
+        hold = card_hold(c, cards_by_id, live_ids)
+        return hold is None or hold.reason not in _SELECTION_HOLDS
+
     for col in _DISPATCH_COLUMNS:
-        col_cards = [
-            c for c in cards
-            if c.column == col and not c.claimed_by and _is_due(c)
-            and not _awaiting_plan_ref(c)
-            and not _is_gated(c)
-        ]
+        col_cards = [c for c in cards if c.column == col and selectable(c)]
         if col_cards:
             # list_cards is ordered by rank; stable-sort by priority on top of that
             # so higher-priority cards jump the queue within the same column.
@@ -4426,12 +4587,7 @@ def _next_card(cards: Iterable[KanbanCard]) -> KanbanCard | None:
     # human notices and hits "redispatch" by hand (see kanban card "auto dispatch
     # nakijken": auto-dispatch looked stuck even though it was enabled).
     from app.kanban.schemas import COLUMNS
-    orphans = [
-        c for c in cards
-        if c.column not in COLUMNS and not c.claimed_by and _is_due(c)
-        and not _awaiting_plan_ref(c)
-        and not _is_gated(c)
-    ]
+    orphans = [c for c in cards if c.column not in COLUMNS and selectable(c)]
     if orphans:
         orphans.sort(key=_priority_key, reverse=True)
         return orphans[0]
@@ -5949,11 +6105,16 @@ async def dispatch_project(
     # working set) so a cross-project dep is never mistaken for dangling.
     board_ids = await all_card_ids(session)
 
+    # Record *why* every non-dispatchable card is sitting still, before we pick
+    # one. This is the tick's only chance to say so: after the filters run, a
+    # held card is indistinguishable from one that was never a candidate.
+    await _persist_holds(session, cards, board_ids)
+
     # Fill every dispatchable card in this tick. The per-column cap (when set)
     # is the only structural limit at this level; the hardware/OS-level cap
     # checked inside the transport enforces the actual memory bound.
     while True:
-        card = _next_card(cards)
+        card = _next_card(cards, board_ids)
         if card is None:
             break
 
@@ -6858,6 +7019,12 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             project_folder=project_folder,
             prompt=prompt,
             skip_permissions=skip_permissions,
+            # Same product-lane wiring as make_worktree_transport — see the
+            # comment on that factory for the rationale and the analysis
+            # doc reference.
+            permission_prompt_tool=(
+                PERMISSION_PROMPT_TOOL_NAME if not skip_permissions else None
+            ),
             provider=provider,
             model=model,
             endpoint_name=endpoint_name,

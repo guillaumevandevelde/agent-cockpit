@@ -635,9 +635,21 @@ alsnog een apart proxy-proces zijn, niet een import in onze backend.
   `token_saver:<project_key>` (Pydantic-validated;
   `set_board_enabled` schrijft `"1"` / `"0"` naar de
   bestaande kolom)
-- ✅ Tests: 16 unit-tests (`test_token_saver.py`) + 4
+- ✅ Tests: 20 unit-tests (`test_token_saver.py`) + 4
   kolom-migratie-tests (`test_token_saver_column.py`) + 4
-  API-tests (`test_token_saver_api.py`), groen
+  API-tests (`test_token_saver_api.py`), groen — **de vier extra
+  dispatch-bridge-tests (`test_dispatch_bridge_posts_activated_note_on_active`,
+  `test_dispatch_bridge_posts_fail_open_note_on_missing_binary`,
+  `test_dispatch_bridge_silent_on_inactive_path`,
+  `test_sync_bridge_posts_activated_note_on_real_dispatch`) zijn de
+  activiteit-feed-claim hardop maken: de eerste drie sturen een
+  `_install_rtk_for_dispatch_async`-call en lezen de
+  `**Note:** Token saver …`-rij terug uit de op-log van een
+  aangemaakte card; de vierde draait de sync wrapper (wat
+  `make_worktree_transport` aanroept) in een worker thread en
+  bewijst dat de `asyncio.run`-grens de note niet sluit — precies
+  de test die de FCR-ronder eiste, zie §8-bis hieronder voor de
+  Impediment-ronde die ze hebben afgedwongen
 - ✅ `compare`-harness uitgebreid met `real-saver`-variant in
   lockstep met de dispatch-helper
 
@@ -682,6 +694,73 @@ krijgt een integratievorm die `ANTHROPIC_BASE_URL` niet aanraakt, (c) Anthropic
 wijzigt het meetellen van `cache_read` in abonnementen — dan verschuift het hele
 zwaartepunt van §2 —, of (d) de mix uit §5.2 verandert wezenlijk (bv. `Read` daalt
 onder `Bash`).
+
+### ✅ Geïmplementeerd (kaart `c31333bf…`, 2026-07-25) — activity-feed fix na Impediment
+
+**Wat er fout ging.** De 2026-07-24-markering claimde "Activity-feed
+observability via `post_note` met 60-s-dedup, dus één `**Note:** Token
+saver activated: RTK 0.43.0` per dispatch", maar `post_note` was
+alleen als helper gedefinieerd en unit-getest — `git grep post_note`
+wees uit dat niemand in de dispatch-keten 'm aanriep. Een reviewer
+flagde dat, de kaart ging weer open, en de claim was gewoon onwaar
+voor de integratie-zijde.
+
+**Wat er nu staat.** De sync-bridge `_install_rtk_for_dispatch` is
+opgesplitst in een dunne sync wrapper (omhulsel met
+`asyncio.run`, onveranderd voor `make_worktree_transport`) en een
+async kern `_install_rtk_for_dispatch_async` die dezelfde private
+kanban-engine opent en daarin `token_saver.maybe_install` + (voor de
+**active** + **failed** paden) `token_saver.post_note` aanroept, met
+dezelfde sessie en één commit. De **inactive**-pad (per-lane off,
+board-wide off) post géén note — dat is de standaard-uit-route die op
+elke Backlog-dispatch loopt en zou de activity-feed overstromen.
+De helper retourneert nu `(status, reason)` zodat de
+`RTK_TELEMETRY=off`-beslissing en de activity-feed-tekst aan dezelfde
+bron gekoppeld zijn — geen tweede afleiding in de caller.
+
+**Vier tests die het hard maken** (`test_token_saver.py`):
+
+- `test_dispatch_bridge_posts_activated_note_on_active` — zet de
+  per-lane vlag + board-wide kill-switch + fake rtk binary, draait
+  de async-bridge, en leest de `**Note:** Token saver activated:
+  …`-rij terug uit `KanbanOp` van een aangemaakte card.
+- `test_dispatch_bridge_posts_fail_open_note_on_missing_binary` —
+  idem maar zonder rtk binary, verwacht `**Note:** Token saver
+  fail-open: rtk binary missing`.
+- `test_dispatch_bridge_silent_on_inactive_path` — per-lane off,
+  verwacht nul notes (geen feed-flood).
+- `test_sync_bridge_posts_activated_note_on_real_dispatch` — draait
+  de **sync wrapper** (`_install_rtk_for_dispatch`, dezelfde die
+  `make_worktree_transport` aanroept) in een worker thread en leest
+  de `**Note:** Token saver activated: …`-rij terug. Bewijst dat
+  de `asyncio.run`-grens de note niet sluit — de test die de FCR-1
+  expliciet eiste.
+
+De eerste drie monkeypatchen `settings.kanban_database_url` naar de
+test-DB en roepen de **async kern** direct aan — `asyncio.run` van
+uit een pytest-asyncio test mag niet. De vierde draait de sync
+wrapper in een worker thread om dezelfde reden: een lopende event
+loop in de test zou `asyncio.run` laten falen met
+`asyncio.run() cannot be called from a running event loop`, en dat
+is precies de productie-context (sync caller, verse loop) die de
+sync wrapper belichaamt.
+
+**Wat er niét veranderde.** Het `maybe_install` / `post_note` /
+`is_board_enabled` / `set_board_enabled` / `write_rtk_settings_into_worktree`
+oppervlak in `token_saver.py`, de per-lane vlag, de board-wide
+kill-switch, de RTK-binary-resolutie, de versie-pin, de
+`RTK_TELEMETRY=off` env, het lockstep-meet-harnas, en de
+done-summary van de 2026-07-24-ronde. Alleen de activity-feed
+zijde van de integratie is deze ronde aangeraakt; de rest stond.
+
+**Heropenen** bij: dezelfde voorwaarden als §8 + (e) de post_note
+breekt de dedup onder load (een race tussen twee gelijktijdige
+dispatches op dezelfde card zou dubbele notes kunnen produceren
+als de HLC-tick van `_clock_for` niet strak genoeg serialiseert),
+of (f) een operator wil de note-tekst in de UI terugzien (nu is
+het een kale op-log-rij — de activity-feed component toont 'm
+al, maar geen samenvattende card-rij die de operator op de
+kaart zelf ziet).
 
 ## 9. Reproductie
 

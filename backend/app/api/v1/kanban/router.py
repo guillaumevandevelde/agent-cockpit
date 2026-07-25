@@ -3,6 +3,7 @@ import json
 import logging
 import subprocess
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
@@ -555,6 +556,65 @@ async def list_cards(
                 "completed_at": completed_at,
                 "impediment_status": impediment_status,
             }))
+        return {"items": items}
+
+
+@router.get("/holds")
+async def list_holds(project_key: str = Query(...)):
+    """Every card the dispatcher is currently holding back, oldest hold first.
+
+    The one query that replaces asking three separate advisory sweepers
+    (`sweep_dangling_depends_on.py`, `sweep_dangling_plan_refs.py`,
+    `check-analysis-outcomes.sh`) what they each independently rediscover from
+    the outside. Those exist because the dispatcher used to skip cards without
+    recording why; now that it does, "what is stuck, for how long, and who can
+    clear it" is a read.
+
+    `held_for_hours` is the actionable column: a hold whose reason is temporary
+    (`dependent`, `awaiting_plan_ref`) but whose age is measured in days is a
+    hold whose producer is gone — the shape that stranded 13 cards.
+    """
+    from app.kanban.dep_resolver import _CLEARED_BY
+
+    async with KanbanSessionLocal() as s:
+        await _assert_project_key_known(s, project_key, for_create=False)
+        rows = await service.list_cards(s, project_key)
+        by_id = {c.id: c for c in rows}
+
+        items = []
+        now = datetime.now(UTC)
+        for c in rows:
+            if not c.held_reason:
+                continue
+            held_for_hours = None
+            if c.held_since:
+                try:
+                    since = datetime.fromisoformat(c.held_since)
+                    if since.tzinfo is None:
+                        since = since.replace(tzinfo=UTC)
+                    held_for_hours = round((now - since).total_seconds() / 3600, 1)
+                except ValueError:
+                    pass
+            items.append({
+                "id": c.id,
+                "title": c.title,
+                "column": c.column,
+                "held_reason": c.held_reason,
+                "held_since": c.held_since,
+                "held_for_hours": held_for_hours,
+                "cleared_by": _CLEARED_BY.get(c.held_reason, "human"),
+                "blockers": [
+                    {
+                        "id": b,
+                        "title": by_id[b].title if b in by_id else None,
+                        "column": by_id[b].column if b in by_id else None,
+                        "exists": b in by_id,
+                    }
+                    for b in (c.held_blocker or [])
+                ],
+            })
+
+        items.sort(key=lambda i: (i["held_for_hours"] is None, -(i["held_for_hours"] or 0)))
         return {"items": items}
 
 
@@ -1647,14 +1707,22 @@ async def get_subscription_pool(project_key: str = Query(...)):
     Returns ``{"project_key": ..., "pool": <list[PoolEntry]|None>}``.
     ``None`` means no pool is configured — the dispatcher falls back to
     today's column-default chain exactly as before. Each ``PoolEntry``
-    is shaped as ``{cli, provider, model|null, drempel}`` so the frontend
-    can render it verbatim without per-field reshaping. Kaart 8f40d443…:
-    the per-entry ``cli`` field is again first-class and consumed by
-    the router (it was briefly dropped in kaart 0b3ad6e2… and is now
-    required again to honour the per-CLI quota axis). The default
+    is shaped as ``{cli, provider, model|null, drempel, endpoint_name}``
+    so the frontend can render it verbatim without per-field reshaping.
+    Kaart 8f40d443…: the per-entry ``cli`` field is again first-class and
+    consumed by the router (it was briefly dropped in kaart 0b3ad6e2… and
+    is now required again to honour the per-CLI quota axis). The default
     ``cli`` value (``subscription_pool.DEFAULT_POOL_CLI``,
     ``"claude-code"``) is back-filled on read for rows that omit it,
-    so legacy stored payloads still load."""
+    so legacy stored payloads still load.
+
+    Kaart 27317b4871… (FCR gap 2): the response also carries each
+    entry's ``endpoint_name`` so the POST→GET round-trip is
+    idempotent. Previously the GET handler dropped the field, so a
+    UI that re-saved the response would silently lose the endpoint
+    binding of an ``anthropic-compatible`` entry — the storage
+    fail-fast check would only catch the misconfiguration at the next
+    save, and the dispatch fail-fast only at the next spawn."""
     from app.kanban import subscription_pool as pool_mod
     async with KanbanSessionLocal() as s:
         entries = await pool_mod.get_subscription_pool(s, project_key)
@@ -1664,7 +1732,8 @@ async def get_subscription_pool(project_key: str = Query(...)):
         "project_key": project_key,
         "pool": [
             {"cli": e.cli, "provider": e.provider,
-             "model": e.model, "drempel": e.drempel}
+             "model": e.model, "drempel": e.drempel,
+             "endpoint_name": e.endpoint_name}
             for e in entries
         ],
     }
@@ -1736,6 +1805,9 @@ async def delete_card(cid: str, force: bool = Query(False)):
         # dependency never silently becomes a permanent fail-closed block. See
         # docs/cockpit/dangling-depends-on-analyse.md §1.2/§4.
         await service.strip_dangling_deps_on_delete(s, cid)
+        # Same repair for the sibling soft reference — see its docstring for why
+        # `parent_card_id` failing the same way went unfixed far longer.
+        await service.orphan_children_on_delete(s, cid)
         await apply_operation(s, op_type="delete", entity_type="card",
             project_key="", entity_id=cid, payload={})
         await s.commit()
@@ -1877,6 +1949,11 @@ async def clear_column(payload: ColumnClearRequest):
             # so "Clear Done" never orphans a satisfied dependency into a
             # permanent fail-closed block. dangling-depends-on-analyse.md §1.2/§4.
             await service.strip_dangling_deps_on_delete(s, card.id)
+            # ...and the parent link, which fails identically. This is the path
+            # that actually produced the orphans on this board: "Clear Done" is
+            # the routine end-of-life sweep, and every analysis parent it removes
+            # used to strand its children permanently.
+            await service.orphan_children_on_delete(s, card.id)
             await apply_operation(s, op_type="delete", entity_type="card",
                 project_key="", entity_id=card.id, payload={})
             count += 1

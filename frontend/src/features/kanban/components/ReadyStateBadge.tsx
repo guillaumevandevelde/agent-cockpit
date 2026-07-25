@@ -17,7 +17,12 @@ export type ReadyState =
   // Card carries a non-empty `metadata.gated_on` business trigger. The
   // dispatcher holds these until a human clears the gate; amber tier
   // signals "permanent, human-actionable" alongside `missing_dep`.
-  | "gated";
+  | "gated"
+  // Child whose `parent_card_id` points at a deleted card. Distinct from
+  // `awaiting_plan_ref` (which it used to masquerade as) because the wait is
+  // permanent: the analyst run that owed this card its plan died with the
+  // parent, so no amount of patience resolves it.
+  | "missing_parent";
 
 const STATE_LABEL: Record<ReadyState, string> = {
   ready: "Ready",
@@ -28,6 +33,7 @@ const STATE_LABEL: Record<ReadyState, string> = {
   completed: "Completed",
   awaiting_plan_ref: "Awaiting plan",
   gated: "Gated",
+  missing_parent: "Orphaned",
 };
 
 const STATE_CLASS: Record<ReadyState, string> = {
@@ -47,7 +53,32 @@ const STATE_CLASS: Record<ReadyState, string> = {
   // "Dependent" wait (amber = will resolve on its own) and from the
   // dangling-dep block (red but ⚠ says "deleted parent").
   gated: "bg-red-100 text-red-800 border-red-200",
+  // Permanent and human-actionable, like `missing_dep` — the parent has to be
+  // restored or the link cleared.
+  missing_parent: "bg-red-100 text-red-800 border-red-200",
 };
+
+/**
+ * How long the current hold has lasted, e.g. "5d" / "3h" / "12m".
+ *
+ * The impure `Date.now()` lives *inside* this helper on purpose: the
+ * react-compiler ESLint rule rejects it in a component's render body,
+ * including as an inline argument expression (see `isFutureSchedule` in
+ * CardItem).
+ *
+ * Age is the signal that separates a healthy wait from a dead one. Every
+ * temporary hold reason claims it will resolve on its own; only the clock
+ * says whether it actually has been.
+ */
+function formatHeldAge(since: string): string | null {
+  const ms = Date.now() - new Date(since).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
 
 /**
  * Per-card operational-state badge. Mirrors the backend's ready/blocking
@@ -74,36 +105,50 @@ export function ReadyStateBadge({
   blockerTitles,
   missingDepIds,
   gatedOn,
+  heldSince,
 }: {
   state: ReadyState;
   blockerTitles?: string[];
   missingDepIds?: string[];
   gatedOn?: string;
+  heldSince?: string | null;
 }) {
   const label = STATE_LABEL[state];
   const variantClass = STATE_CLASS[state];
-  const tooltip =
+  const named =
+    blockerTitles && blockerTitles.length > 0 ? blockerTitles.join(", ") : null;
+  const base =
     state === "missing_dep" && missingDepIds && missingDepIds.length > 0
       ? `Depends on a deleted card (${missingDepIds.join(
           ", ",
         )}) — permanent block; clear the dependency or restore the card.`
-      : state === "dependent" && blockerTitles && blockerTitles.length > 0
-        ? `Waiting on: ${blockerTitles.join(", ")}`
-        : state === "gated"
-          ? gatedOn
-            ? `Gated by business trigger "${gatedOn}" — clear metadata.gated_on to dispatch.`
-            : "Card is gated by a business trigger — clear metadata.gated_on to dispatch."
-          : state === "awaiting_plan_ref"
-            ? "Waiting on the analyst's plan_ref deliverable — will resolve once add_plan_attachment runs."
-            : state === "ready"
-              ? "No open dependencies"
-              : state === "in_progress"
-                ? "Claimed by an agent session"
-                : state === "impeded"
-                  ? "Waiting on a human decision"
-                  : state === "completed"
-                    ? "Work is done"
-                    : undefined;
+      : state === "missing_parent"
+        ? `Parent card${named ? ` "${named}"` : ""} was deleted — no analyst run ` +
+          `survives to attach a plan. Clear the parent link or restore the card.`
+        : state === "dependent" && named
+          ? `Waiting on: ${named}`
+          : state === "gated"
+            ? gatedOn
+              ? `Gated by business trigger "${gatedOn}" — clear metadata.gated_on to dispatch.`
+              : "Card is gated by a business trigger — clear metadata.gated_on to dispatch."
+            : state === "awaiting_plan_ref"
+              ? // Naming the parent is the whole point: without it this badge
+                // says a card is waiting but not on whom, which reads as an
+                // orphan even when the link is perfectly intact.
+                `Waiting on the analyst's plan_ref deliverable${
+                  named ? ` from "${named}"` : ""
+                } — resolves once add_plan_attachment runs.`
+              : state === "ready"
+                ? "No open dependencies"
+                : state === "in_progress"
+                  ? "Claimed by an agent session"
+                  : state === "impeded"
+                    ? "Waiting on a human decision"
+                    : state === "completed"
+                      ? "Work is done"
+                      : undefined;
+  const age = heldSince ? formatHeldAge(heldSince) : null;
+  const tooltip = base && age ? `${base} (held ${age})` : base;
   return (
     <Badge
       variant="outline"
@@ -111,7 +156,9 @@ export function ReadyStateBadge({
       title={tooltip}
       data-ready-state={state}
     >
-      {(state === "missing_dep" || state === "gated") && (
+      {(state === "missing_dep" ||
+        state === "gated" ||
+        state === "missing_parent") && (
         <AlertTriangle className="h-3 w-3 mr-1" aria-hidden="true" />
       )}
       {label}
