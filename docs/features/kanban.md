@@ -4,7 +4,7 @@ Per-project board where agents pick up cards autonomously and attach deliverable
 
 ## Overview
 
-Kanban is Claude Cockpit's primary working surface. Each project has its own board with a fixed column set: **Backlog → Analysis → Todo → Doing → Review → Done** (plus the system columns **Impediment** and **To Resume**). Cards carry a title, description, priority, labels, work-type, and a list of deliverables (PR, branch, commit, link, note, or plan reference).
+Kanban is Agent Cockpit's primary working surface. Each project has its own board with a fixed column set: **Backlog → Analysis → Todo → Doing → Review → Done** (plus the system columns **Impediment** and **To Resume**). Cards carry a title, description, priority, labels, work-type, and a list of deliverables (PR, branch, commit, link, note, or plan reference).
 
 Above the passive board, three active layers make it a real "kanban as hoofdwerking" system:
 

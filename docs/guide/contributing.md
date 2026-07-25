@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in contributing to Claude Cockpit! We welcome pull requests and issues from everyone.
+Thanks for your interest in contributing to Agent Cockpit! We welcome pull requests and issues from everyone.
 
 ## Getting Started
 

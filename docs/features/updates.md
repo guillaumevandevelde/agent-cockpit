@@ -1,6 +1,6 @@
 # Updates
 
-Run and monitor in-place upgrades of Claude Cockpit itself.
+Run and monitor in-place upgrades of Agent Cockpit itself.
 
 ## Overview
 

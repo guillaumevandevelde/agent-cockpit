@@ -1,6 +1,6 @@
 # Quick Start
 
-Get Claude Cockpit running and explore the dashboard in under 5 minutes.
+Get Agent Cockpit running and explore the dashboard in under 5 minutes.
 
 ## Start the Dev Servers
 
@@ -33,7 +33,7 @@ Data is cached between page navigations and updates when you click the refresh b
 
 Use the project selector in the sidebar to switch between projects. Many features show project-scoped data — MCP servers, commands, hooks, and permissions can differ between projects.
 
-Use **Discover Projects** when you want Claude Cockpit to find projects from local agent state, or add a path manually with the directory browser.
+Use **Discover Projects** when you want Agent Cockpit to find projects from local agent state, or add a path manually with the directory browser.
 
 ## Switch Providers
 
@@ -47,7 +47,7 @@ With Codex selected, start with:
 
 ## Identify the Backend Instance
 
-When you run Claude Cockpit on more than one machine, or expose it over a LAN or tailnet, set an instance name so each browser window clearly shows the backend it controls:
+When you run Agent Cockpit on more than one machine, or expose it over a LAN or tailnet, set an instance name so each browser window clearly shows the backend it controls:
 
 ```bash
 CLAUDE_COCKPIT_INSTANCE_NAME="Studio Mac" \
