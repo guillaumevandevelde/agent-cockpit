@@ -52,6 +52,8 @@ from app.services.agentic_cli.provider_env import (
     PROVIDER_BEDROCK,
     PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
+    PROVIDER_OPENCODE_GO,
+    PROVIDER_OPENCODE_ZEN,
 )
 from app.services.subscriptions.base import SubscriptionUsage
 
@@ -73,6 +75,7 @@ DEFAULT_POOL_CLI = "claude-code"
 _ALLOWED_POOL_PROVIDERS = (
     PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX,
     PROVIDER_COMPATIBLE,
+    PROVIDER_OPENCODE_GO, PROVIDER_OPENCODE_ZEN,
 )
 
 

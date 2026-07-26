@@ -30,6 +30,18 @@ PROVIDER_BEDROCK = "bedrock"
 PROVIDER_MINIMAX = "minimax"
 PROVIDER_COMPATIBLE = "anthropic-compatible"
 
+# OpenCode's own hosted-subscription providers — built into the
+# OpenCode CLI's catalog (https://opencode.ai/docs/go, /docs/zen);
+# authenticated via ``~/.local/share/opencode/auth.json`` or
+# ``OPENCODE_API_KEY``. Unlike anthropic/minimax/anthropic-compatible,
+# no env injection here — ``open_code.py:build_spawn_command`` emits
+# ``--model opencode-go/<id>`` (resp. ``opencode/<id>``) and the CLI's
+# catalog resolves the endpoint + npm package itself, so
+# ``build_provider_env`` falls through to the default empty-dict path
+# (same as ``PROVIDER_ANTHROPIC``).
+PROVIDER_OPENCODE_GO = "opencode-go"
+PROVIDER_OPENCODE_ZEN = "opencode"
+
 CLAUDE_CODE_CLI_ID = "claude-code"
 CODEX_CLI_ID = "codex-cli"
 OPEN_CODE_CLI_ID = "open-code"

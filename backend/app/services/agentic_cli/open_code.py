@@ -18,6 +18,8 @@ from app.services.agentic_cli.provider_env import (
     OPEN_CODE_ENDPOINT_PROVIDER_ID,
     PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
+    PROVIDER_OPENCODE_GO,
+    PROVIDER_OPENCODE_ZEN,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,21 +136,30 @@ class OpenCodeCli(AgenticCli):
             raise ValueError(f"Unsupported OpenCode mode: {options.mode}")
 
         if options.model:
-            # A custom Anthropic-compatible endpoint (MiniMax or the
-            # data-driven ``anthropic-compatible`` provider) is injected via
-            # ``OPENCODE_CONFIG_CONTENT`` under the fixed
-            # ``OPEN_CODE_ENDPOINT_PROVIDER_ID`` (see
-            # ``provider_env._build_opencode_endpoint_env``). OpenCode's own
-            # ``--model`` flag requires the ``provider/model`` form — a bare
-            # model id raises ``ProviderModelNotFoundError`` — so the
-            # provider segment must be prefixed here to match what was
-            # injected. For the plain ``anthropic`` provider (OpenCode's own
-            # auth/config), ``options.model`` is expected to already be in
-            # ``provider/model`` form and is passed through unchanged.
+            # ``--model`` always expects ``provider/model`` form in
+            # OpenCode — a bare model id raises
+            # ``ProviderModelNotFoundError``. The provider segment is
+            # the OpenCode CLI catalog id: either the fixed injected
+            # id for ``anthropic-compatible``/``minimax`` endpoints
+            # (see ``provider_env._build_opencode_endpoint_env``) or
+            # the built-in catalog id for the OpenCode-hosted
+            # subscriptions ``opencode-go`` / ``opencode`` (Zen).
+            # When the caller passes ``provider/model`` directly
+            # (e.g. ``zai-coding-plan/glm-5.2`` for OpenCode's other
+            # built-in providers), ``prefix`` stays None and the raw
+            # value flows through unchanged.
             if options.provider in (PROVIDER_MINIMAX, PROVIDER_COMPATIBLE):
-                command += ["--model", f"{OPEN_CODE_ENDPOINT_PROVIDER_ID}/{options.model}"]
+                prefix = OPEN_CODE_ENDPOINT_PROVIDER_ID
+            elif options.provider == PROVIDER_OPENCODE_GO:
+                prefix = PROVIDER_OPENCODE_GO
+            elif options.provider == PROVIDER_OPENCODE_ZEN:
+                prefix = PROVIDER_OPENCODE_ZEN
             else:
+                prefix = None
+            if prefix is None:
                 command += ["--model", options.model]
+            else:
+                command += ["--model", f"{prefix}/{options.model}"]
         if options.prompt:
             command += ["--prompt", options.prompt]
         return command

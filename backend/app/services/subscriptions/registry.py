@@ -16,10 +16,13 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 from app.services.agentic_cli.provider_env import (
+    OPEN_CODE_CLI_ID,
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
     PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
+    PROVIDER_OPENCODE_GO,
+    PROVIDER_OPENCODE_ZEN,
 )
 from app.services.subscriptions.base import SubscriptionUsageProvider
 from app.services.subscriptions.router import RouterUsageProvider
@@ -113,6 +116,22 @@ def register_default_providers() -> None:
         subscription_id=f"claude-code:{PROVIDER_COMPATIBLE}",
         subscription_label="Claude Code (Router — geen quota-bron)",
     ))
+    # OpenCode's own hosted-subscription providers — built into the
+    # OpenCode CLI's catalog. OpenCode publishes no authenticated
+    # "remaining quota" surface for either Go (flat $10/mo budget) or
+    # Zen (pay-as-you-go), so the honest answer for the pool router is
+    # ``UnknownUsageProvider`` ("geen signaal — beschikbaar tot de
+    # per-provider pause toeslaat"). Same discipline as the
+    # ``claude-code:minimax`` stub: a future card with a real billing-API
+    # signal can replace the entry by id without ceremony.
+    for prov, label in (
+        (PROVIDER_OPENCODE_GO, "OpenCode Go"),
+        (PROVIDER_OPENCODE_ZEN, "OpenCode Zen"),
+    ):
+        register_provider(UnknownUsageProvider(
+            subscription_id=f"{OPEN_CODE_CLI_ID}:{prov}",
+            subscription_label=f"{label} (geen signaal-bron)",
+        ))
 
 
 def get_provider_for(
