@@ -112,6 +112,20 @@ The dedupe pass is bound to the `create_card` call, not to session start.
 
 Keep it short — a triage session should be able to act in under a minute.
 
+**Verify your `Where:` paths before you move on.** A pointer that does not
+resolve sends every later reader down a dead trail, and this card gets copied
+as a pattern by the next author. One command, right after `create_card`:
+
+```bash
+scripts/check-card-where-paths.sh --card=<new-card-id>
+```
+
+It strips `:line`, `:line-range`, `::symbol` and `#anchor` suffixes and then
+`test -e`s what remains — so `foo.py:42` is checked as `foo.py`. Fix anything
+it names. Note it is existence-only: a path can exist and still not contain
+what you claim (`CLAUDE.md` does *not* hold the FCR prompt — kaart
+`549ef4d6…`), so a green run is necessary, not sufficient.
+
 ## Don't let this derail your actual task
 
 Filing takes two tool calls once you have the resolved project key. Do it,
