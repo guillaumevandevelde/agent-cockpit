@@ -625,6 +625,25 @@ async def reopen_card(session, card_id: str, note: str):
     if card.column not in ("Done", "Backlog"):
         raise CardNotInDone(card.column)
 
+    # Reviewer-gate return routing: when a reviewer-approved card is
+    # reopened, the dispatcher must re-spawn the persona that produced the
+    # work (engineer), not the reviewer — the reviewer has no Write tools
+    # and a reopened card needs *rework*. Stash the return-agent back onto
+    # `card.agent` and drop it from the metadata bag so the dispatcher
+    # doesn't carry stale state. Mirrors the report_impediment path
+    # (mcp_server.py:820-835); see docs/cockpit/reviewer-agent-decision.md.
+    return_agent = (getattr(card, "meta", None) or {}).get(REVIEW_RETURN_AGENT_KEY)
+    if card.agent == REVIEWER_COLUMN and return_agent:
+        new_meta = {
+            k: v for k, v in (card.meta or {}).items()
+            if k != REVIEW_RETURN_AGENT_KEY
+        }
+        await apply_operation(session, op_type="update", entity_type="card",
+            project_key="", entity_id=card_id,
+            payload={"agent": return_agent, "metadata": new_meta})
+        # Reload so the activity-feed ops below see the restored agent.
+        card = await get_card(session, card_id)
+
     await apply_operation(session, op_type="comment", entity_type="comment",
         project_key="", entity_id=card_id,
         payload={"text": f"{_REVISIT_PREFIX}{note}"})
