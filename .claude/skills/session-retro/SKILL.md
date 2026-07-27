@@ -166,6 +166,20 @@ is not a fix; "prepend `resolve_project_key` to the prompt" is.>
 Keep total session overhead low — the retro runs *after* the actual work
 is done; don't burn 30 turns writing thoughtful descriptions.
 
+**Verify your `Where:` paths before you move on.** A pointer that does not
+resolve sends every later reader down a dead trail, and this card gets copied
+as a pattern by the next author. One command per filed card:
+
+```bash
+scripts/check-card-where-paths.sh --card=<new-card-id>
+```
+
+It strips `:line`, `:line-range`, `::symbol` and `#anchor` suffixes and then
+`test -e`s what remains — so `foo.py:42` is checked as `foo.py`. Fix anything
+it names. Note it is existence-only: a path can exist and still not contain
+what you claim (`CLAUDE.md` does *not* hold the FCR prompt — kaart
+`549ef4d6…`), so a green run is necessary, not sufficient.
+
 ## Step 5 — if zero findings, say so explicitly
 
 Zero findings is a legitimate, **good** outcome. It means the session

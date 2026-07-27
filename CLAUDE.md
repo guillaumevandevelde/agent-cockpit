@@ -106,6 +106,10 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Analysis outcome sweeper (vangnet voor het REST-gat + historische voorraad)
 ./scripts/check-analysis-outcomes.sh          # Flag Done-analyses zonder Outcome-comment/label/kinderen (advisory; --strict = exit 1; --since YYYY-MM-DD voor historic-grens)
 
+# Dead Where:-pointers in kaart-Evidence-blokken (kaart 500d0948…, follow-up op 549ef4d6…)
+./scripts/check-card-where-paths.sh           # Flag open kaarten waarvan een `Where:`-pad niet bestaat; strip `:line`/`::symbol`/`#anchor` (advisory; --strict = exit 1)
+./scripts/check-card-where-paths.sh --card=<id>  # Authoring-time check op één net gefilede kaart (bereikt ook Done-kaarten)
+
 # Kanban-meta vs. security-profile conflict check (zichtbaarheid voor load-bearing overrides — kaart d5642a57…)
 ./scripts/check-kanban-meta-security-conflicts.sh   # Flag KanbanMeta skip_permissions/transport overrides die het project_security_profiles-risicoprofiel tegenspreken (advisory; --strict = exit 1)
 
