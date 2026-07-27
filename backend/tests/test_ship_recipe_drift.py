@@ -261,7 +261,7 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     assert any("checkout --theirs" in c for c in commands), (
         "invariants list lost the concrete generated-file resolution command"
     )
-    assert any('"$WT"/scripts/generate-doc-index.py' == c for c in commands), (
+    assert any(c == '"$WT"/scripts/generate-doc-index.py' for c in commands), (
         "invariants list lost the worktree-path script invocation command"
     )
 

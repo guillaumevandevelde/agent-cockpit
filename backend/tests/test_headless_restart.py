@@ -795,7 +795,7 @@ async def test_run_headless_routes_child_stdout_through_log_file_fd(monkeypatch,
     )
     assert isinstance(captured["stdout"], int), (
         f"stdout must be an int file descriptor (EventLogWriter.fileno()), "
-        f"got {type(captured["stdout"]).__name__}: {captured["stdout"]!r}"
+        f"got {type(captured['stdout']).__name__}: {captured['stdout']!r}"
     )
     assert captured["stderr"] is asyncio.subprocess.DEVNULL, (
         "stderr must be DEVNULL — a parent stderr pipe would re-introduce "

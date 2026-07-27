@@ -119,7 +119,8 @@ async def lifespan(app: FastAPI):
     # session_recovery above uses, applied to the third liveness source).
     from app.kanban.dispatch import _registered_project_paths
     from app.kanban.headless_runner import (
-        adopt_headless_runs, start_headless_tailer,
+        adopt_headless_runs,
+        start_headless_tailer,
     )
     try:
         paths = await _registered_project_paths()

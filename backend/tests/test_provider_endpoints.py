@@ -237,7 +237,6 @@ async def test_delete_endpoint_is_idempotent():
 
 
 async def test_resolve_compatible_minimax_raises_when_api_key_missing(monkeypatch):
-    from app.services.agentic_cli import endpoints as ep_mod
     from app.services.agentic_cli.endpoints import (
         resolve_compatible_endpoint,
         upsert_endpoint,

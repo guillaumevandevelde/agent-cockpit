@@ -1501,10 +1501,10 @@ async def resolve_effective_provider_and_model(
 # + no paused providers falls through to that "first entry" branch.
 def _build_spillover_candidates(
     column_default_provider: str | None,
-    pool: list["PoolEntry"],
+    pool: list[PoolEntry],
     *,
     cli_id: str,
-) -> tuple["PoolEntry", list["PoolEntry"]]:
+) -> tuple[PoolEntry, list[PoolEntry]]:
     """Bouw de spillover-keten voor een kolom.
 
     Vorm B uit ``docs/cockpit/spillover-per-kolom-decision.md``: de
@@ -4987,10 +4987,7 @@ async def _persist_holds(session, cards, live_ids: set[str] | None = None) -> No
 
     for card in cards:
         tracked = card.column in _DISPATCH_COLUMNS or card.column not in COLUMNS
-        if tracked and not card.claimed_by:
-            hold = card_hold(card, cards_by_id, live_ids)
-        else:
-            hold = None
+        hold = card_hold(card, cards_by_id, live_ids) if tracked and not card.claimed_by else None
 
         reason = hold.reason if hold else None
         blocker = list(hold.blocker_ids) if hold else None
