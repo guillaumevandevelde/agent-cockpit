@@ -297,3 +297,12 @@ def test_analyst_md_spec_doc_respects_plan_attachment_exception():
     # the existing Fase-1 exception must survive.
     body_lower = _analyst_md_body().lower()
     assert "plan-attachment" in body_lower or "plan_ref" in body_lower
+
+
+def test_analyst_md_requires_external_credential_preflight_guidance():
+    body_lower = _analyst_md_body().lower()
+    assert "externe credential" in body_lower
+    assert "credential_name" in body_lower
+    assert "minimax_api_key" in body_lower
+    assert "get /api/v1/secrets/?project_key=" in body_lower
+    assert "namen" in body_lower and "waarden" in body_lower

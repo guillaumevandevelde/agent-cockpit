@@ -289,6 +289,27 @@ consistentie-fix.
   MCP als je de workflow-semantiek wilt, REST als je expliciet een
   administratieve correctie doet.
 
+## 3c. Externe credentials: kaart-preconditie en veilige preflight
+
+Een kaart die een externe betaalde of key-gated dienst moet meten, moet de
+verwachte credential expliciet noemen: de env-var of `credential_name`, plus
+het resolutiepad. Een providerlijst zonder die preconditie is niet
+zelfstandig dispatchbaar; markeer de kaart als mens-geblokkeerd wanneer de
+credential niet beschikbaar is in plaats van de sessie account-aanmaak of
+credential-archeologie te laten doen.
+
+Voor de huidige endpoint-resolver is het pad:
+
+- `credential_name='minimax'` → `MINIMAX_API_KEY` via
+  `settings.minimax_api_key`;
+- andere `credential_name`-waarden → de project-SecretStore;
+- `credential_name=None` → de ambient credential van de host.
+
+Een sessie kan de beschikbare SecretStore-credentials veilig controleren met
+`GET /api/v1/secrets/?project_key=<project-key>`. Dit endpoint geeft alleen
+credential-namen terug, nooit waarden. De volledige REST-vorm en het
+threat-model staan in [`docs/features/secrets.md`](../features/secrets.md).
+
 ## 4. MCP-affordances en SUPERSEDED-discipline
 
 ### 4a. MCP-affordances voor `depends_on` (sibling-deps zonder plan-flow)

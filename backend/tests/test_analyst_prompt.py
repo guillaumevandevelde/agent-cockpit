@@ -159,3 +159,12 @@ def test_analyst_prompt_module_docstring_covers_both_modes():
         "doesn't conclude the analyst persona can never execute. "
         f"Got docstring: {doc!r}"
     )
+
+
+def test_prompt_requires_external_credential_preflight_guidance():
+    prompt_lower = ANALYST_PROMPT.lower()
+    assert "externe credential" in prompt_lower
+    assert "credential_name" in ANALYST_PROMPT
+    assert "minimax_api_key" in prompt_lower
+    assert "get /api/v1/secrets/?project_key=" in prompt_lower
+    assert "namen" in prompt_lower and "waarden" in prompt_lower

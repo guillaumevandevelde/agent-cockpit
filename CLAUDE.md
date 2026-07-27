@@ -13,6 +13,11 @@ Dit is een **fork** van claude-deck, hernoemd naar **Agent Cockpit**. Het zwaart
   Lees vóór je een nieuwe vaste kolom introduceert of een Done/Impediment-comment
   post: `docs/cockpit/kanban-conventions.md`. Validatiescript:
   `scripts/check-kanban-conventions.sh`.
+- **Externe credentials voor spikes** — een kaart die een betaalde of key-gated
+  provider meet, noemt de verwachte env-var of `credential_name` én het
+  resolutiepad. Controleer SecretStore-namen read-only met
+  `GET /api/v1/secrets/?project_key=<project-key>`; de response bevat namen,
+  nooit waarden. Zie §3c van `docs/cockpit/kanban-conventions.md`.
 - **Agent Mail** — cross-session berichten tussen willekeurige sessies met durable
   repo-identiteit en inspectable mailbox (`docs/cockpit/agent-mail-spec.md`).
 

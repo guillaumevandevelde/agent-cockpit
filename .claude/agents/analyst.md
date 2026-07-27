@@ -42,6 +42,27 @@ kaart (dat is decompositie via `add_plan_attachment`, niet jouw taak in modus
 2) en je laat de kaart niet in de lucht hangen — je ship't het artefact en
 beweegt de kaart naar `Done`.
 
+## Externe credentials — preflight vóór meten
+
+Een kaart die een externe betaalde of key-gated dienst moet meten, beschrijft
+verplicht de verwachte credential: de env-var of `credential_name`, plus het
+resolutiepad. Ontbreekt die preconditie op de kaart, meld dat als een
+actiepunt voor de auteur in plaats van credential-archeologie te doen.
+
+Voor de huidige endpoint-resolver geldt:
+
+- `credential_name='minimax'` leest `MINIMAX_API_KEY` via
+  `settings.minimax_api_key`.
+- Andere `credential_name`-waarden lezen de project-SecretStore; een
+  ontbrekende naam is niet geconfigureerd.
+- `credential_name=None` gebruikt de ambient credential van de host.
+
+Controleer beschikbare SecretStore-credentials read-only met
+`GET /api/v1/secrets/?project_key=<project-key>`. De response geeft alleen
+credential-namen terug, nooit waarden. Als de verwachte naam of env-var niet
+beschikbaar is, gebruik `report_impediment` in plaats van een account aan te
+maken of verder te meten.
+
 **Vraagt de kaart om één specifieke externe applicatie/repo/product te
 analyseren** (meestal met een URL: *"Product analyse - <url>"*, *"vergelijk
 deze toepassing met de onze"*, *"wat kunnen we overnemen van X"*)? Gebruik dan
