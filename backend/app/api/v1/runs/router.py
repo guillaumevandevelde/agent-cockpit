@@ -370,6 +370,111 @@ async def delete_endpoint_endpoint(
     return {"deleted": True}
 
 
+class CatalogLitellmUpstreamResponse(BaseModel):
+    model: str
+    api_base: str
+    api_key_env: str
+
+
+class CatalogEntryResponse(BaseModel):
+    name: str
+    display_name: str
+    provider: str
+    base_url: str
+    model: str
+    credential_name: str | None
+    free_tier_kind: str
+    free_evidence_url: str
+    free_measured_on: str
+    free_notes: str
+    litellm_upstream: CatalogLitellmUpstreamResponse | None
+
+
+class CatalogListResponse(BaseModel):
+    entries: list[CatalogEntryResponse]
+
+
+@router.get("/platforms/endpoints-catalog", response_model=CatalogListResponse)
+async def list_free_endpoint_catalog():
+    """Return the curated free-tier seed catalog (kaart 8222fee8…).
+
+    The catalog is a repo file (``backend/data/free_endpoint_catalog.toml``)
+    that pairs each Anthropic-format endpoint with a free-tier annotation
+    (``free_evidence_url`` + ``free_measured_on``) so an operator can decide
+    which entries are worth installing into their project's
+    endpoint-registry. No secrets: ``credential_name`` is a SecretStore
+    key name, not the key value.
+    """
+    from app.services.agentic_cli.free_endpoint_catalog import load_catalog
+
+    entries = load_catalog()
+    return CatalogListResponse(
+        entries=[
+            CatalogEntryResponse(
+                name=e.name,
+                display_name=e.display_name,
+                provider=e.provider,
+                base_url=e.base_url,
+                model=e.model,
+                credential_name=e.credential_name,
+                free_tier_kind=e.free_tier_kind,
+                free_evidence_url=e.free_evidence_url,
+                free_measured_on=e.free_measured_on,
+                free_notes=e.free_notes,
+                litellm_upstream=(
+                    CatalogLitellmUpstreamResponse(
+                        model=e.litellm_upstream.model,
+                        api_base=e.litellm_upstream.api_base,
+                        api_key_env=e.litellm_upstream.api_key_env,
+                    )
+                    if e.litellm_upstream is not None
+                    else None
+                ),
+            )
+            for e in entries
+        ],
+    )
+
+
+class SeedCatalogResponse(BaseModel):
+    installed: int
+    skipped: int
+    skipped_names: list[str]
+
+
+@router.post("/platforms/endpoints-catalog/seed", response_model=SeedCatalogResponse)
+async def seed_free_endpoint_catalog(
+    project_key: str | None = Query(default=None),
+    overwrite: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-install the seed catalog into the project's endpoint registry.
+
+    By default, entries that already exist under the same ``name`` are left
+    alone — the operator's runtime-config wins over the catalog. Pass
+    ``?overwrite=true`` to replace existing rows with the catalog values
+    (intended for re-seeding after a catalog bump; it will NOT touch any
+    SecretStore entries, so credentials survive intact).
+    """
+    from app.services.agentic_cli.endpoints import DEFAULT_PROJECT_KEY
+    from app.services.agentic_cli.free_endpoint_catalog import seed_catalog
+
+    try:
+        installed, skipped, skipped_names = await seed_catalog(
+            db,
+            project_key or DEFAULT_PROJECT_KEY,
+            overwrite=overwrite,
+        )
+        await db.commit()
+    except ValueError as exc:
+        # tomllib.TOMLDecodeError subclasses ValueError on every supported
+        # Python build, so a corrupt catalog lands here too.
+        raise HTTPException(status_code=400, detail=str(exc))
+    return SeedCatalogResponse(
+        installed=installed, skipped=skipped, skipped_names=skipped_names,
+    )
+
+
 @router.get("/token")
 async def get_terminal_token():
     now = time.time()

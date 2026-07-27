@@ -1,0 +1,211 @@
+# Endpoint-catalogus — gratis-tier providers (eigen-account-tier, API-key only)
+#
+# Dit is een **gecureerde seed-catalogus** voor het `anthropic-compatible` provider-
+# mechanisme uit `backend/app/services/agentic_cli/endpoints.py` (kaart 333af652…).
+# Elke `[[endpoint]]`-rij is één Anthropic-format endpoint dat de Claude-Code CLI
+# kan aanspreken via `ANTHROPIC_BASE_URL` + `ANTHROPIC_MODEL`. De catalogus is
+# **data, geen code**: een endpoint toevoegen is een `POST /platforms/endpoints`,
+# geen wijziging in deze file (de `seed_catalog.py`-hulp registreert een rij uit
+# deze file in de project-scoped KanbanMeta-tabel).
+#
+# Waarom geen Anthropic-format upstream? Geen van deze zes providers exposeert
+# Anthropic-native `/v1/messages`. Ze zijn allemaal OpenAI-compat. Daarom wijst
+# elke `base_url` hier standaard naar `http://127.0.0.1:4000` — een LiteLLM-proxy
+# die de OpenAI ↔ Anthropic format-translatie doet. Bij elke entry hoort een
+# `litellm_upstream`-blok dat letterlijk in `litellm_config.yaml`/`model_list`
+# kan worden gezet om die proxy te configureren. De format-translatie zelf is
+# gemeten in kaart bbfcb365… (zie `docs/cockpit/litellm-pilot-meting.md`).
+#
+# Vorm van een entry (zie `seed_catalog.CatalogEntry`):
+#   name              — slug (lowercase, `[a-z0-9_-]{1,64}`); wordt `endpoint.name`
+#                       in KanbanMeta. Dient als referentie in pool/CLI-keuze.
+#   display_name      — mens-leesbare naam voor de UI (niet functioneel).
+#   provider          — de upstream (OpenRouter, Groq, …).
+#   base_url          — Anthropic-format URL waar Claude-Code tegenaan praat.
+#                       Vrijwel altijd de LiteLLM-proxy op loopback.
+#   model             — model-alias die de LiteLLM-proxy herkent. Vrijwel altijd
+#                       == `name`.
+#   credential_name   — naam van de sleutel in de project-scoped SecretStore
+#                       (b.v. "groq", "cerebras"). Leeg = ambient-host-credential.
+#   free_tier_kind    — zie enum hieronder; beschrijft WAT er gratis is.
+#   free_evidence_url — link naar de provider-pagina die de claim onderbouwt.
+#   free_measured_on  — YYYY-MM-DD waarop de free-claim is geverifieerd.
+#   free_notes        — korte, eerlijke tekst over wat er gratis is en wat niet.
+#   litellm_upstream  — optioneel blok (model + api_base + api_key_env) dat in de
+#                       LiteLLM `model_list` moet worden gezet om dit endpoint
+#                       werkend te krijgen. `api_key_env` is de **naam** van de
+#                       env-var (niet de key zelf); de proxy leest 'm zelf uit
+#                       `os.environ/<VAR>`.
+#
+# Free-tier-soorten:
+#   "rate_limited_free"  — gratis zonder creditcard; rate limits (en/of daily cap)
+#                          gelden voor het hele account. Voorbeeld: Cerebras free.
+#   "credits_then_paid"  — gratis tegoed bij signup; daarna pay-as-you-go.
+#                          Voorbeeld: DeepSeek, Together.
+#   "free_with_topup"    — gratis variant van een betaalde API-key; de betaalde
+#                          variant heeft dezelfde env-vars. Voorbeeld: OpenRouter.
+#   "dev_tier_only"      — gratis "dev tier" van een betaalde provider; aparte
+#                          aanmaakpad (developer console). Voorbeeld: Groq.
+#
+# Onderhoud:
+#   - Vernieuw `free_measured_on` als je de free-claim opnieuw controleert.
+#   - Voeg nieuwe entries toe voor nieuwe providers (zelfde vorm).
+#   - Verwijder entries waarvan de upstream is opgehouden — liever één eerlijke
+#     rij dan tien met "werkt misschien nog".
+
+version = 1
+
+# ---------------------------------------------------------------------------
+# 1. OpenRouter — gratis :free-modellen naast de betaalde modellen
+# ---------------------------------------------------------------------------
+# Bron: https://openrouter.ai/docs/api-reference/limits (gemeten 2026-07-27).
+# Free-herkenning: model-id eindigt op `:free` (provider-conventie). Het totaal-
+# aantal gratis requests wordt niet per key geteld maar globaal; één extra key
+# aanmaken verhoogt je rate limit niet.
+[[endpoint]]
+name = "openrouter-free-llama"
+display_name = "OpenRouter — Llama 3.3 70B (free)"
+provider = "OpenRouter"
+base_url = "http://127.0.0.1:4000"
+model = "openrouter-free-llama"
+credential_name = "openrouter"
+free_tier_kind = "free_with_topup"
+free_evidence_url = "https://openrouter.ai/docs/api-reference/limits"
+free_measured_on = "2026-07-27"
+free_notes = """
+Free-variant: model-id eindigt op :free. Zonder credits-history: 20 req/min,
+50 req/dag. Met ≥10 credits ooit gekocht: 20 req/min, 1000 req/dag. Geen
+apart 'free-API-key' — dezelfde OpenRouter-key werkt voor betaalde én
+`:free`-modellen. Kies bij aanmaak van een key "Free models only" om per
+ongeluk betalen uit te sluiten.
+"""
+litellm_upstream = { model = "openrouter/meta-llama/llama-3.3-70b-instruct:free", api_base = "https://openrouter.ai/api/v1", api_key_env = "OPENROUTER_API_KEY" }
+
+# ---------------------------------------------------------------------------
+# 2. Groq — GroqCloud dev tier (gratis na signup, geen creditcard)
+# ---------------------------------------------------------------------------
+# Bron: https://console.groq.com/docs/rate-limits (gemeten 2026-07-27).
+# Free-herkenning: account is aangemaakt op console.groq.com zonder betaalgegevens.
+# Dev-tier deelt 30 req/min + 7000 tokens/min over ALLE modellen in het account,
+# dus niet per model — kies één model of houd rekening met de cap.
+[[endpoint]]
+name = "groq-llama-33-70b"
+display_name = "Groq — Llama 3.3 70B Versatile (free dev tier)"
+provider = "Groq"
+base_url = "http://127.0.0.1:4000"
+model = "groq-llama-33-70b"
+credential_name = "groq"
+free_tier_kind = "dev_tier_only"
+free_evidence_url = "https://console.groq.com/docs/rate-limits"
+free_measured_on = "2026-07-27"
+free_notes = """
+GroqCloud dev-tier (gratis, geen creditcard). 30 req/min en 7000 tokens/min
+gedeeld over alle modellen in het account — niet per model. Llama 3.3 70B
+Versatile is de canonical free-tier pick. Hogere modellen (Compound, GPT-oss
+120B) zitten ook op dev-tier maar snoepen sneller door de cap.
+"""
+litellm_upstream = { model = "groq/llama-3.3-70b-versatile", api_base = "https://api.groq.com/openai/v1", api_key_env = "GROQ_API_KEY" }
+
+# ---------------------------------------------------------------------------
+# 3. Cerebras — 1M tokens/dag gratis (geen creditcard)
+# ---------------------------------------------------------------------------
+# Bron: https://inference-docs.cerebras.ai/support/rate-limits (gemeten 2026-07-27).
+# Free-herkenning: account aangemaakt op cloud.cerebras.ai zonder betaalgegevens.
+# Dagelijkse tok-quota (1M/dag) is ruim; per-minuut cap (5 req/min, 30k tok/min)
+# knelt sneller — korte bursts, niet geschikt voor parallel-agents.
+[[endpoint]]
+name = "cerebras-gpt-oss-120b"
+display_name = "Cerebras — GPT-OSS 120B (free tier)"
+provider = "Cerebras"
+base_url = "http://127.0.0.1:4000"
+model = "cerebras-gpt-oss-120b"
+credential_name = "cerebras"
+free_tier_kind = "rate_limited_free"
+free_evidence_url = "https://inference-docs.cerebras.ai/support/rate-limits"
+free_measured_on = "2026-07-27"
+free_notes = """
+Gratis tier zonder creditcard. 5 req/min, 30k tok/min, 1M tok/dag, 8k
+context-cap op de gratis modellen. Sterk geschikt voor korte, snelle
+agentsessies; NIET voor parallel-dispatch (de 5 rpm knelt binnen enkele
+seconden). Beschikbare gratis modellen: gpt-oss-120b, zai-glm-4.7,
+gemma-4-31b. Llama-3.1-70B is niet meer op de gratis lijst (gemeten
+2026-07-27).
+"""
+litellm_upstream = { model = "cerebras/gpt-oss-120b", api_base = "https://api.cerebras.ai/v1", api_key_env = "CEREBRAS_API_KEY" }
+
+# ---------------------------------------------------------------------------
+# 4. NVIDIA NIM — 1000 gratis API-requests (lifetime credit)
+# ---------------------------------------------------------------------------
+# Bron: https://docs.api.nvidia.com/ en https://developer.nvidia.com/blog/nim-free-tier
+# (gemeten 2026-07-27). De 1000 requests zijn een LIFETIME credit — niet per
+# maand, niet per dag. Op = op; daarna pay-as-you-go via dezelfde key.
+[[endpoint]]
+name = "nvidia-llama-31-70b"
+display_name = "NVIDIA NIM — Llama 3.1 70B Instruct (1000 free requests)"
+provider = "NVIDIA NIM"
+base_url = "http://127.0.0.1:4000"
+model = "nvidia-llama-31-70b"
+credential_name = "nvidia"
+free_tier_kind = "rate_limited_free"
+free_evidence_url = "https://docs.api.nvidia.com/"
+free_measured_on = "2026-07-27"
+free_notes = """
+1000 gratis API-requests bij signup — een LIFETIME tegoed, geen
+periodieke reset. Daarna pay-as-you-go op dezelfde key. Bekende gratis
+modellen (verify per aanvraag): meta/llama-3.1-70b-instruct,
+meta/llama-3.1-8b-instruct, mistralai/mistral-7b-instruct-v0.3, en
+grotere Nemotron/NeMo-varianten. Let op: model-catalogus wisselt vaker
+dan de andere providers — check de docs-pagina voor de actuele gratis
+lijst.
+"""
+litellm_upstream = { model = "nvidia/meta/llama-3.1-70b-instruct", api_base = "https://integrate.api.nvidia.com/v1", api_key_env = "NVIDIA_API_KEY" }
+
+# ---------------------------------------------------------------------------
+# 5. DeepSeek — gratis tegoed bij signup, daarna pay-as-you-go
+# ---------------------------------------------------------------------------
+# Bron: https://api-docs.deepseek.com (gemeten 2026-07-27). De exacte hoeveelheid
+# gratis tegoed wisselt per promotie en regio; behandel het als "een credit,
+# niet veel" en check je dashboard. R1 (deepseek-reasoner) ondersteunt geen
+# function-calling — niet geschikt voor Claude-Code-sessies met tool-use.
+[[endpoint]]
+name = "deepseek-chat"
+display_name = "DeepSeek — DeepSeek-V3 (chat, met tool-use)"
+provider = "DeepSeek"
+base_url = "http://127.0.0.1:4000"
+model = "deepseek-chat"
+credential_name = "deepseek"
+free_tier_kind = "credits_then_paid"
+free_evidence_url = "https://api-docs.deepseek.com/quick_start/pricing"
+free_measured_on = "2026-07-27"
+free_notes = """
+Gratis tegoed bij signup (actuele hoogte wisselt per promotie — check
+het account-dashboard). Daarna pay-as-you-go via dezelfde key. Kies
+deepseek-chat (= V3) voor sessies met tool-use; deepseek-reasoner
+(= R1) ondersteunt geen function-calling en breekt Claude-Code-sessies
+op de eerste tool-call.
+"""
+litellm_upstream = { model = "deepseek/deepseek-chat", api_base = "https://api.deepseek.com", api_key_env = "DEEPSEEK_API_KEY" }
+
+# ---------------------------------------------------------------------------
+# 6. Together AI — $5 starter-credit (geen creditcard nodig)
+# ---------------------------------------------------------------------------
+# Bron: https://docs.together.ai (gemeten 2026-07-27). De $5 is eenmalig; na
+# verbruik schakelt het account automatisch over op pay-as-you-go tegen de
+# standaardtarieven. Geen aparte "free key" — dezelfde key werkt voor beide.
+[[endpoint]]
+name = "together-llama-31-70b"
+display_name = "Together AI — Llama 3.1 70B Turbo ($5 starter credit)"
+provider = "Together AI"
+base_url = "http://127.0.0.1:4000"
+model = "together-llama-31-70b"
+credential_name = "together"
+free_tier_kind = "credits_then_paid"
+free_evidence_url = "https://docs.together.ai/billing/credits"
+free_measured_on = "2026-07-27"
+free_notes = """
+$5 eenmalig starter-tegoed bij signup, geen creditcard nodig. Na
+verbruik pay-as-you-go op dezelfde key. Rate limits hangen af van het
+model: 8B-varianten ~60 rpm, 70B ~20 rpm. Streaming wordt aanbevolen
+om binnen de per-minute TPM-cap te blijven.
+"""
+litellm_upstream = { model = "together/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", api_base = "https://api.together.xyz/v1", api_key_env = "TOGETHER_API_KEY" }
