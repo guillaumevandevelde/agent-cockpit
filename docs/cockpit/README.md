@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 107 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 108 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -96,7 +96,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [`docs/cockpit/` — de canonieke spec-boom (index)](./README.md) | 🟢 active |
 | [Beslis-register — alle genomen productbeslissingen (index)](./decisions.md) | 🟢 active |
 
-### Reference (25)
+### Reference (26)
 
 | Document | Status |
 |---|---|
@@ -116,6 +116,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Multi-agent kanban — smoke-test cookbook](./multi-agent-kanban.md) | 🟢 active |
 | [Portfolio-cap policy: waarde, scope, failure-mode](./portfolio-policy.md) | 🟢 active |
 | [Product-inceptie: van gesprek naar spec + plan die een project seedt](./product-inceptie-pipeline.md) | 🟢 active |
+| [Recipe-writing conventions — auto-recovery hoort in dezelfde if-tak](./recipe-writing-conventions.md) | 🟢 active |
 | [Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo](./repo-provisioning-bootstrap.md) | 🟢 active |
 | [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md) | 🟢 active |
 | [Sandcastle Integration](./sandcastle.md) | 🟢 active |
