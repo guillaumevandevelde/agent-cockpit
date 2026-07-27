@@ -68,10 +68,13 @@ from app.kanban.subscription_pool import (
 )
 from app.services.agentic_cli.provider_env import (
     CLAUDE_CODE_CLI_ID,
+    OPEN_CODE_CLI_ID,
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
     PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
+    PROVIDER_OPENCODE_GO,
+    PROVIDER_OPENCODE_ZEN,
 )
 from app.services.memory_monitor import get_memory_status_cached
 from app.services.scheduling.session_registry import session_registry
@@ -138,6 +141,34 @@ async def _record_audit(
             kind,
             project_key,
         )
+
+def _cli_id_for_opencode_provider(
+    cli_id: str,
+    provider: str | None,
+    explicit_cli_chosen: bool,
+) -> str:
+    """Switch the spawn transport to OpenCode when the precedence chain
+    picked an OpenCode-host subscription and no explicit per-card CLI
+    pin overrules it.
+
+    claude-code's ``build_provider_env`` returns ``{}`` for opencode-go
+    and opencode/Zen — a claude-code spawn for these providers silently
+    runs without ``--model opencode-go/<id>`` (only OpenCode's
+    ``build_spawn_command`` emits that flag form). Without this switch
+    an opencode-go column would spawn via claude-code and do nothing.
+
+    Respect an explicit per-card CLI pin: a user who set
+    ``executor_agent_id="claude-code"`` on an opencode-go column meant
+    that CLI, not "let the column decide".
+    """
+    if cli_id != CLAUDE_CODE_CLI_ID:
+        return cli_id
+    if explicit_cli_chosen:
+        return cli_id
+    if provider in (PROVIDER_OPENCODE_GO, PROVIDER_OPENCODE_ZEN):
+        return OPEN_CODE_CLI_ID
+    return cli_id
+
 
 # Known CLI IDs are registered in app.services.agentic_cli; re-derived here
 # so the phase router doesn't depend on that module being imported at typing time.
@@ -5021,6 +5052,21 @@ async def _run_card(
     )
     provider = resolved["provider"]
     effective_model = resolved["model"]
+    # Switch the spawn transport to OpenCode when the precedence chain
+    # picked an opencode-go/opencode subscription, unless an explicit
+    # per-card CLI pin overrules it. Pool picker used the original
+    # cli_id, so OpenCode pool entries weren't considered this round —
+    # closing that gap is a follow-up (thread column_default_provider
+    # into ``_phase_cli_id`` so the pool picker sees open-code up front).
+    explicit_cli_overrides = [
+        agent_override,
+        getattr(card, "analyst_agent_id" if phase == "analyst" else "executor_agent_id", None),
+        getattr(card, "agent", None),
+    ]
+    explicit_cli_chosen = any(v for v in explicit_cli_overrides if v in known_clis)
+    cli_id = _cli_id_for_opencode_provider(
+        cli_id, provider, explicit_cli_chosen=explicit_cli_chosen,
+    )
     # Re-dispatch safety net (kaart ff2d03fce…): when this card was previously
     # claimed by a session whose branch has unmerged commits, inject a
     # warning block so the new agent sees the existing branch and can

@@ -49,23 +49,28 @@ export function modelForProviderChange(
  * unknown model is rejected with 422 on save.
  *
  * Mirrors ``_allowed_models_for_provider`` in
- * ``backend/app/api/v1/kanban/router.py``: it returns a list for these two
- * and ``None`` (= accept anything) for every other provider. Keep the two
- * in sync — if the backend starts validating a third provider, add it here
- * so the UI offers a picker instead of a free-text field that can only
- * produce a 422.
+ * ``backend/app/api/v1/kanban/router.py``: it returns a list for these
+ * providers and ``None`` (= accept anything) for every other one. Keep
+ * the two in sync — if the backend starts validating a fourth provider,
+ * add it here so the UI offers a picker instead of a free-text field that
+ * can only produce a 422.
  */
-export const CLOSED_MODEL_SET_PROVIDERS = ["anthropic", "minimax"] as const;
+export const CLOSED_MODEL_SET_PROVIDERS = [
+  "anthropic",
+  "minimax",
+  "opencode-go",
+  "opencode",
+] as const;
 
 /**
  * Whether the model field for this provider should be a closed picker
  * (dropdown) rather than free text.
  *
  * ``false`` for bedrock — AWS model ids are ARN-shaped
- * ("anthropic.claude-3-sonnet-20240229-v1:0"), never the bare aliases the
- * cli returns, so there is no list to pick from and the backend accepts
- * any string. ``false`` for an unset provider: the dispatch chain resolves
- * the provider later, so no constraint applies yet.
+ * ("anthropic.claude-3-sonnet-20240229-v1:0"), never the bare aliases
+ * the cli returns, so there is no list to pick from and the backend
+ * accepts any string. ``false`` for an unset provider: the dispatch
+ * chain resolves the provider later, so no constraint applies yet.
  */
 export function hasClosedModelSet(provider: string | null | undefined): boolean {
   return (

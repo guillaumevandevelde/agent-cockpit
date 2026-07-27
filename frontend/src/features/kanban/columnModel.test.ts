@@ -8,6 +8,8 @@ import {
 
 const ANTHROPIC_OPTIONS = ["sonnet", "opus", "haiku"];
 const MINIMAX_OPTIONS = ["MiniMax-M3", "MiniMax-M2.7"];
+const OPENCODE_GO_OPTIONS = ["glm-5.2", "kimi-k3", "qwen3.7-max"];
+const OPENCODE_ZEN_OPTIONS = ["glm-5.1", "glm-5.2"];
 
 describe("modelForProviderChange", () => {
   it("clears the model when switching from anthropic to minimax with opus", () => {
@@ -76,6 +78,63 @@ describe("modelForProviderChange", () => {
       modelForProviderChange("opus", null, "minimax", MINIMAX_OPTIONS),
     ).toBe("");
   });
+
+  it("clears the model when switching from anthropic to opencode-go with opus", () => {
+    // opus is a claude alias, not in the OpenCode Go catalog. Save
+    // would 422 on the mismatch; the helper clears it proactively so
+    // the user re-picks a fitting model.
+    expect(
+      modelForProviderChange("opus", "anthropic", "opencode-go", OPENCODE_GO_OPTIONS),
+    ).toBe("");
+  });
+
+  it("keeps the model when switching to opencode-go that contains it", () => {
+    expect(
+      modelForProviderChange(
+        "glm-5.2",
+        "anthropic",
+        "opencode-go",
+        OPENCODE_GO_OPTIONS,
+      ),
+    ).toBe("glm-5.2");
+  });
+
+  it("clears the model when switching between opencode-go and opencode-zen with a go-only id", () => {
+    // Zen seed is a subset of the Go catalog; a Go-only id (kimi-k3)
+    // has no Zen twin — switching provider from go to zen must clear
+    // it so Save doesn't 422.
+    expect(
+      modelForProviderChange(
+        "kimi-k3",
+        "opencode-go",
+        "opencode",
+        OPENCODE_ZEN_OPTIONS,
+      ),
+    ).toBe("");
+  });
+
+  it("keeps a model that exists in both opencode-go and opencode-zen when switching between them", () => {
+    // glm-5.2 is in both catalogs — don't wipe it on a go↔zen flip.
+    expect(
+      modelForProviderChange(
+        "glm-5.2",
+        "opencode-go",
+        "opencode",
+        OPENCODE_ZEN_OPTIONS,
+      ),
+    ).toBe("glm-5.2");
+  });
+
+  it("clears a Go-only model when switching to anthropic", () => {
+    expect(
+      modelForProviderChange(
+        "qwen3.7-max",
+        "opencode-go",
+        "anthropic",
+        ANTHROPIC_OPTIONS,
+      ),
+    ).toBe("");
+  });
 });
 
 // --- load path (the gap that let the "minimax shows no models" bug survive) --
@@ -91,10 +150,13 @@ describe("modelForProviderChange", () => {
 describe("hasClosedModelSet", () => {
   it("is true for providers the backend validates against a fixed list", () => {
     // Mirrors _allowed_models_for_provider in
-    // backend/app/api/v1/kanban/router.py — these two return a list, so an
-    // unknown model is a 422 and the UI must offer a closed picker.
+    // backend/app/api/v1/kanban/router.py — these return a list, so an
+    // unknown model is a 422 and the UI must offer a closed picker. Now
+    // includes OpenCode Go + Zen (catalog seeded in opencode_catalogs).
     expect(hasClosedModelSet("minimax")).toBe(true);
     expect(hasClosedModelSet("anthropic")).toBe(true);
+    expect(hasClosedModelSet("opencode-go")).toBe(true);
+    expect(hasClosedModelSet("opencode")).toBe(true);
   });
 
   it("is false for bedrock", () => {
@@ -151,5 +213,30 @@ describe("modelForProviderLoad", () => {
     // But if it ever is empty, an unvalidatable model must not be presented
     // as valid — Save would 422 on it.
     expect(modelForProviderLoad("opus", "minimax", [])).toBe("");
+  });
+
+  it("clears an opus stored on an opencode-go column", () => {
+    // Same shape as the minimax "stuck on opus" bug: a column stored as
+    // (opencode-go, opus) must not load "opus" into the form, or the
+    // datalist would render empty and Save would 422.
+    expect(modelForProviderLoad("opus", "opencode-go", OPENCODE_GO_OPTIONS)).toBe("");
+  });
+
+  it("keeps a valid opencode-go model", () => {
+    expect(modelForProviderLoad("glm-5.2", "opencode-go", OPENCODE_GO_OPTIONS)).toBe(
+      "glm-5.2",
+    );
+  });
+
+  it("keeps a valid opencode-zen model", () => {
+    expect(modelForProviderLoad("glm-5.1", "opencode", OPENCODE_ZEN_OPTIONS)).toBe(
+      "glm-5.1",
+    );
+  });
+
+  it("clears a Go-only model on a Zen column", () => {
+    // kimi-k3 exists in Go but not in Zen's curated seed — the closed set
+    // for Zen rejects it, so the load helper drops it.
+    expect(modelForProviderLoad("kimi-k3", "opencode", OPENCODE_ZEN_OPTIONS)).toBe("");
   });
 });

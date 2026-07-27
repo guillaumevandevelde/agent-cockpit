@@ -20,7 +20,7 @@ export const WORK_TYPE_ICONS: Record<WorkType, string> = {
   chore: "🔧",
 };
 
-export const PROVIDERS = ["anthropic", "bedrock", "minimax"] as const;
+export const PROVIDERS = ["anthropic", "bedrock", "minimax", "opencode-go", "opencode"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 // Human-readable labels for the provider ids above. Kept as Record<string,
@@ -30,6 +30,8 @@ export const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
   bedrock: "Bedrock",
   minimax: "MiniMax",
+  "opencode-go": "OpenCode Go",
+  opencode: "OpenCode Zen",
 };
 
 // Per-agent-column model+provider override carried on a card. Mirrors the
@@ -76,19 +78,43 @@ export const DEFAULT_MODEL_SUGGESTIONS = ["sonnet", "opus", "haiku"] as const;
 // rejects. Not an enum -- free text is still accepted; these only back the
 // datalist. Keep in sync with the backend default by hand.
 //
-// MiniMax's API only accepts BARE model identifiers ("MiniMax-M3",
-// "MiniMax-M2.7", …); the historical "MiniMax-M3[1m]" bracketed
-// context-window suffix form is rejected as an unknown model (see commit
-// 0ce81be in provider_env.py). The 1M context window is requested separately
-// via CLAUDE_CODE_AUTO_COMPACT_WINDOW, so the suffix was redundant as well
-// as breaking — never offer it as a picker suggestion. The attribution layer
-// still recognises the suffix in older JSONL rows (subscriptions/attribution.py).
 export const MINIMAX_MODEL_SUGGESTIONS = ["MiniMax-M3"] as const;
+
+// OpenCode Go + Zen subscription model seed — manual mirror of the
+// backend ``opencode_catalogs.MODEL_CATALOG`` (same manual-sync contract
+// as MINIMAX_MODEL_SUGGESTIONS above — keep the two files in lockstep).
+// The backend catalog docstring explains why a runtime fetcher is
+// worse than a curated seed.
+export const OPENCODE_GO_MODEL_SUGGESTIONS = [
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "glm-5.1",
+  "glm-5.2",
+  "grok-4.5",
+  "hy3",
+  "kimi-k2.6",
+  "kimi-k2.7-code",
+  "kimi-k3",
+  "mimo-v2.5",
+  "mimo-v2.5-pro",
+  "minimax-m2.7",
+  "minimax-m3",
+  "qwen3.6-plus",
+  "qwen3.7-max",
+  "qwen3.7-plus",
+] as const;
+export const OPENCODE_ZEN_MODEL_SUGGESTIONS = [
+  "glm-5",
+  "glm-5.1",
+  "glm-5.2",
+] as const;
 
 // Providers with a static, non-claude model suggestion list. Providers absent
 // here fall back to the dynamic claude-code options from getModelOptions().
 export const PROVIDER_MODEL_SUGGESTIONS: Record<string, readonly string[]> = {
   minimax: MINIMAX_MODEL_SUGGESTIONS,
+  "opencode-go": OPENCODE_GO_MODEL_SUGGESTIONS,
+  opencode: OPENCODE_ZEN_MODEL_SUGGESTIONS,
 };
 
 // Resolve which model suggestions to show for a given provider. Falls back to

@@ -262,12 +262,30 @@ async def _allowed_models_for_provider(session, provider: str) -> list[str] | No
     ``dispatch.get_cached_minimax_model_options`` (discovered-from-JSONL).
     Bedrock has no cache (AWS model ids are ARN-shaped, not the bare aliases
     the cli returns); ``None`` means "no validation, accept any string".
+
+    OpenCode Go and Zen use a hardcoded catalog — see
+    ``opencode_catalogs.MODEL_CATALOG`` and the rationale in that module
+    (OpenCode publishes no authenticated per-subscriber model endpoint,
+    so a curated seed at code-time is wider than the user's entitlement
+    but narrower than the public docs list). The catalog is a closed set
+    (an unknown model id raises ``ProviderModelNotFoundError`` on spawn),
+    so the router returns the list as a closed list — meaning the UI
+    shows a dropdown instead of free text, same contract as anthropic and
+    minimax.
     """
     from app.kanban import dispatch
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_OPENCODE_GO,
+        PROVIDER_OPENCODE_ZEN,
+    )
+    from app.services.subscriptions.opencode_catalogs import models_for
+
     if provider == "minimax":
         return await dispatch.get_cached_minimax_model_options(session)
     if provider == "anthropic":
         return await dispatch.get_cached_model_options(session)
+    if provider in (PROVIDER_OPENCODE_GO, PROVIDER_OPENCODE_ZEN):
+        return list(models_for(provider))
     return None
 
 

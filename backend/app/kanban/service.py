@@ -20,6 +20,8 @@ from app.services.agentic_cli.provider_env import (
     PROVIDER_BEDROCK,
     PROVIDER_COMPATIBLE,
     PROVIDER_MINIMAX,
+    PROVIDER_OPENCODE_GO,
+    PROVIDER_OPENCODE_ZEN,
 )
 from app.utils.timeutils import ensure_aware
 
@@ -31,11 +33,21 @@ from app.utils.timeutils import ensure_aware
 # added there must also be added here. The legacy "unknown string gets
 # stored and later fails MAX_DISPATCH_FAILURES times" path is closed:
 # the API now returns 422 instead.
+#
+# OpenCode's two hosted-subscription providers (``opencode-go`` and
+# ``opencode`` / Zen) were already in the subscription-pool allow-list
+# and registered in the subscription registry; opening the column-V1
+# allow-list exposes them at the same "column default_provider"
+# surface as anthropic/minimax/bedrock. Their model set lives in
+# ``opencode_catalogs.MODEL_CATALOG`` and is co-validated against the
+# same module in ``router._allowed_models_for_provider``.
 ALLOWED_COLUMN_PROVIDERS: tuple[str, ...] = (
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
     PROVIDER_MINIMAX,
     PROVIDER_COMPATIBLE,
+    PROVIDER_OPENCODE_GO,
+    PROVIDER_OPENCODE_ZEN,
 )
 
 
