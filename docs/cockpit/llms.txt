@@ -25,6 +25,7 @@
 - [Multi-agent kanban — smoke-test cookbook](./multi-agent-kanban.md): type=reference status=active
 - [Portfolio-cap policy: waarde, scope, failure-mode](./portfolio-policy.md): type=reference status=active
 - [Product-inceptie: van gesprek naar spec + plan die een project seedt](./product-inceptie-pipeline.md): type=reference status=active
+- [Recipe-writing conventions — auto-recovery hoort in dezelfde if-tak](./recipe-writing-conventions.md): type=reference status=active
 - [Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo](./repo-provisioning-bootstrap.md): type=reference status=active
 - [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md): type=reference status=active
 - [Sandcastle Integration](./sandcastle.md): type=reference status=active

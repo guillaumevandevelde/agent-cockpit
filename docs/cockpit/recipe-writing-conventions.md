@@ -11,9 +11,12 @@ auto-recovery-pad dat **na** een `if ! X; then exit 1; fi`-handler als losse
 prose staat, is onbereikbaar in precies het scenario dat het moet afhandelen.
 De handler eindigt met `exit 1` en de shell voert de prose nooit uit. De
 22 groene drift-tests in `test_ship_recipe_drift.py` zagen dit niet, omdat
-die alleen **positionele** substrings pinnen en geen structurele validatie
-doen ("de carve-out-substring staat *iets* in de file" i.p.v. "in dezelfde
-uitvoeringspad als de handler die hij moet redden").
+die alleen **substring-/presence-** checks waren en geen structurele
+validatie doen ("de carve-out-substring staat *iets* in de file" i.p.v.
+"in dezelfde uitvoeringspad als de handler die hij moet redden"). De
+**positionele** invariant (carve-out fysiek tussen `merge --no-ff` en
+`push origin HEAD:master` in dezelfde `if`-blok) is precies de fix die
+op §"Hoe validatie werkt" hieronder beschreven staat.
 
 > **Bron van waarheid:** dit doc is leidend voor het schrijven van
 > **shell-recipes** in skills, dispatch-prompts, en CI-scripts waar de
@@ -136,14 +139,16 @@ fi
 ```
 
 De recovery lag in een comment onder de `exit 1` — en de 22
-positionele drift-tests in `test_ship_recipe_drift.py` zagen niets,
-omdat die alleen op *aanwezigheid* van substrings checkten. Een echte
-conflict werd dus nooit auto-gerecovered; de agent moest improviseren,
-en kaart `efb8187b…` documenteerde de resulterende
-PR-merge-failure. De fix hier (commit met de carve-out in de else-tak)
-was wat de canonieke `if ! merge … then carve-out; fi`-vorm
-voortbracht, en deze conventie documenteert expliciet **waarom** die
-vorm de juiste is.
+substring-/presence-drift-tests in `test_ship_recipe_drift.py` zagen
+niets, omdat die alleen op *aanwezigheid* van substrings checkten
+("de substring staat *ergens* in de file") in plaats van op de
+positionele invariant ("de carve-out staat in dezelfde `if`-blok als
+de merge-handler"). Een echte conflict werd dus nooit
+auto-gerecovered; de agent moest improviseren, en kaart `efb8187b…`
+documenteerde de resulterende PR-merge-failure. De fix hier (commit
+met de carve-out in de else-tak) was wat de canonieke `if ! merge …
+then carve-out; fi`-vorm voortbracht, en deze conventie documenteert
+expliciet **waarom** die vorm de juiste is.
 
 ## Geldt ook voor toekomstige recipes
 
