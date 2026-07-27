@@ -50,6 +50,16 @@ import http.server, json, os, sys
 PORT = int(os.environ["PORT"])
 AUTH = os.environ.get("AUTH", "1") == "1"
 LOOPBACK = os.environ.get("LOOPBACK", "1") == "1"
+# When AUTH=1, the unauth POST response is normally 401 with a standard
+# authentication_error body. Tests can override either side via env vars so
+# we can simulate fail-closed proxy bugs that don't actually accept the
+# request: a missing-prisma crash (500) and a virtual-key-DB fallthrough
+# (400 "No connected db."). AUTH_FAIL_CODE defaults to 401 to preserve
+# existing test expectations.
+AUTH_FAIL_CODE = int(os.environ.get("AUTH_FAIL_CODE") or "401")
+AUTH_FAIL_BODY = os.environ.get(
+    "AUTH_FAIL_BODY",
+) or json.dumps({"error": {"type": "authentication_error"}})
 
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # silence the default access log
@@ -82,7 +92,7 @@ class H(http.server.BaseHTTPRequestHandler):
         # whether unauth gets a non-2xx.
         auth = self.headers.get("Authorization", "")
         if AUTH and not auth.startswith("Bearer "):
-            self._send(401, json.dumps({"error": {"type": "authentication_error"}}).encode())
+            self._send(AUTH_FAIL_CODE, AUTH_FAIL_BODY.encode())
             return
         if self.path == "/v1/messages":
             # Respond with a stub message so we don't blow up the test cwd.
@@ -101,14 +111,19 @@ httpd.serve_forever()
 PY
 
 start_fake() {
-  # Args: <port> <auth> <loopback> — sets env and starts background python.
-  # Returns 0 when /health/liveliness returns 200 within a few seconds,
-  # 1 otherwise. The TCP-socket-open check from earlier was unreliable
-  # because BaseHTTPRequestHandler's HTTPServer can accept a TCP connection
-  # before being ready to serve — the SUT's first /health probe would race
-  # and time out. The /health probe is the only reliable readiness check.
-  local port="$1" auth="$2" loopback="$3"
+  # Args: <port> <auth> <loopback> [<auth_fail_code> [<auth_fail_body>]]
+  # Sets env and starts background python. Returns 0 when /health/liveliness
+  # returns 200 within a few seconds, 1 otherwise. The TCP-socket-open check
+  # from earlier was unreliable because BaseHTTPRequestHandler's HTTPServer
+  # can accept a TCP connection before being ready to serve — the SUT's
+  # first /health probe would race and time out. The /health probe is the
+  # only reliable readiness check. AUTH_FAIL_CODE / AUTH_FAIL_BODY override
+  # the default 401 / authentication_error body used when AUTH=1, so tests
+  # can simulate fail-closed proxy bugs (HTTP 500 crash, HTTP 400
+  # 'No connected db.' from a virtual-key-DB fallthrough).
+  local port="$1" auth="$2" loopback="$3" afc="${4:-}" afb="${5:-}"
   PORT="$port" AUTH="$auth" LOOPBACK="$loopback" \
+    AUTH_FAIL_CODE="$afc" AUTH_FAIL_BODY="$afb" \
     python3 "$TMP/fake_litellm.py" >"$TMP/fake.$port.log" 2>&1 &
   FAKE_PID=$!
   local i
@@ -273,6 +288,51 @@ echo "Task 9: without --config-yaml, properties 3-5 are skipped with WARN"
 out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_OK" 2>&1); rc=$?
 check "no-config → rc 0"                      '[ "$rc" -eq 0 ]'
 check "no-config → warns that checks skipped" 'echo "$out" | sanitize | grep -qE "config-checks: no --config-yaml"'
+
+# ----------------------------------------------------------------------------
+echo "Task 10: fail-closed 500 — proxy crashes without forwarding (missing prisma case)"
+# AUTH=1 + override the unauth POST response to 500. This mimics LiteLLM
+# dying inside its auth-exception handler when 'prisma' is not installed
+# (kaart 1941bb1078ac4a63b491f599aabbedc6 / litellm-pilot-meting.md §2.1).
+# The proxy is FAIL-CLOSED — no upstream call — but the status code is not
+# 401, so the script must NOT print "FAIL auth:" with the "proxy accepted"
+# text. WARN, not FAIL.
+PORT_FAIL500=14717
+start_fake "$PORT_FAIL500" "1" "1" "500" \
+  '{"error":{"message":"Internal Server Error"}}' || exit 1
+
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_FAIL500" --config-yaml "$TMP/clean.yaml" 2>&1); rc=$?
+check "fail-closed 500 → rc 0 (advisory)"       '[ "$rc" -eq 0 ]'
+check "fail-closed 500 → no FAIL auth:"         '! echo "$out" | sanitize | grep -qE "FAIL auth:"'
+check "fail-closed 500 → WARN auth:"            'echo "$out" | sanitize | grep -qE "WARN auth:"'
+check "fail-closed 500 → no 'proxy accepted' text" '! echo "$out" | sanitize | grep -qF "proxy accepted"'
+check "fail-closed 500 → names the 500 code"    'echo "$out" | sanitize | grep -qE "auth:.*→ 500"'
+
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_FAIL500" --config-yaml "$TMP/clean.yaml" --strict 2>&1); rc=$?
+check "fail-closed 500 --strict → rc 0 (WARN, not FAIL)" '[ "$rc" -eq 0 ]'
+
+# ----------------------------------------------------------------------------
+echo "Task 11: fail-closed 400 no_db_connection — virtual-key-DB fallthrough on wrong key"
+# AUTH=1 + override the unauth POST response to 400 with the exact
+# LiteLLM body for a missing DB. This is what a wrong master_key returns
+# when there is no DB backing the virtual-key store: the auth handler
+# falls through after the master-key mismatch and crashes looking for the
+# DB (litellm-pilot-meting.md §2.1). FAIL-CLOSED, but the wrong status
+# code; the script must treat it as WARN, not as a successful auth check
+# (PASS) and not as a 2xx that accepted the request (FAIL).
+PORT_FAIL400=14718
+start_fake "$PORT_FAIL400" "1" "1" "400" \
+  '{"error":{"message":"No connected db."}}' || exit 1
+
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_FAIL400" --config-yaml "$TMP/clean.yaml" 2>&1); rc=$?
+check "fail-closed 400 → rc 0 (advisory)"       '[ "$rc" -eq 0 ]'
+check "fail-closed 400 → no FAIL auth:"         '! echo "$out" | sanitize | grep -qE "FAIL auth:"'
+check "fail-closed 400 → WARN auth:"            'echo "$out" | sanitize | grep -qE "WARN auth:"'
+check "fail-closed 400 → no 'proxy accepted' text" '! echo "$out" | sanitize | grep -qF "proxy accepted"'
+check "fail-closed 400 → names the 400 code"    'echo "$out" | sanitize | grep -qE "auth:.*→ 400"'
+
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_FAIL400" --config-yaml "$TMP/clean.yaml" --strict 2>&1); rc=$?
+check "fail-closed 400 --strict → rc 0 (WARN, not FAIL)" '[ "$rc" -eq 0 ]'
 
 # ----------------------------------------------------------------------------
 echo ""

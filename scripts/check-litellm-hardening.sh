@@ -25,6 +25,13 @@
 #   bash scripts/check-litellm-hardening.sh --master-key sk-...
 #   bash scripts/check-litellm-hardening.sh --strict                        # exit 1 on any FAIL
 #
+# Proxy install (the sidecar this check hardens):
+#   python3 -m venv v && ./v/bin/pip install 'litellm[proxy]' prisma
+# `prisma` is NOT optional: LiteLLM's auth-exception handler imports it on
+# every auth rejection, and without it every failed-auth request becomes
+# HTTP 500 instead of 401 (see docs/cockpit/litellm-pilot-meting.md §2.1).
+# No DB / no `prisma generate` needed — `prisma` only has to be importable.
+#
 # Exit codes:
 #   0 — every check PASS or WARN (skip-with-actionable-reason counts as WARN)
 #   1 — at least one FAIL (only with --strict, matching sibling check-*.sh scripts)
@@ -193,9 +200,23 @@ fi
 # ============================================================================
 # Check 2 — master_key auth enforced.
 #
-# POST /v1/messages WITHOUT an Authorization header must return 401 (or any
-# non-2xx — what we want is "unauthenticated was rejected"). If the proxy
-# returns 2xx without auth, anyone can drive it.
+# POST /v1/messages WITHOUT an Authorization header must NOT succeed. The
+# original check read "== 401" as the only accept-signal, which produced a
+# false-positive FAIL on every proxy that crashed in its auth handler with a
+# non-401 status (LiteLLM 1.93 without `prisma` returns 500 here, and a
+# wrong master_key falls through to the virtual-key-DB lookup and returns
+# 400 "No connected db." — both fail-closed, neither means the proxy
+# accepted the request). The new rule:
+#
+#   401/403               → PASS (clean auth rejection)
+#   2xx / 3xx             → FAIL ("proxy accepted" — the only branch that
+#                            prints that text; if you see it, the proxy
+#                            really did return success without auth)
+#   4xx / 5xx (other)     → WARN (non-2xx without an upstream call — fail-
+#                            closed, but the status code points at a setup
+#                            bug the operator should look at: missing
+#                            `prisma` install, unconfigured DB, etc.)
+#   empty / unreachable   → WARN (could not probe)
 # ============================================================================
 if [ "$HEALTH_CODE" = "200" ]; then
   UNAUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
@@ -209,9 +230,26 @@ if [ "$HEALTH_CODE" = "200" ]; then
     "" )
       warn "auth: could not probe $URL/v1/messages (proxy unreachable or timeout) — skipping auth check"
       ;;
-    *)
+    2*|3*)
+      # The "proxy accepted" wording is reserved for this branch ONLY. If
+      # you see it, the proxy really did return 2xx/3xx without auth.
       fail "auth: unauthenticated POST $URL/v1/messages → $UNAUTH_CODE — proxy accepted a request with no Authorization header."
       note "fix: set \`general_settings.master_key: sk-...\` in config.yaml and pass \`--master_key\` (or env LITELLM_MASTER_KEY) at startup."
+      ;;
+    *)
+      # 4xx/5xx without an upstream call — the proxy rejected the request
+      # (or crashed rejecting it) before anything left the box. That is
+      # fail-closed, but the status code suggests an upstream setup bug:
+      #   - 500 with no body → typically LiteLLM's auth-exception handler
+      #     crashing because 'prisma' is not installed (see install note
+      #     in `Usage:` below: `pip install 'litellm[proxy]' prisma`).
+      #   - 400 'No connected db.' → virtual-key-DB fallthrough after a
+      #     master-key mismatch; either the DB is missing or the
+      #     master_key you sent does not match general_settings.master_key.
+      # WARN, not FAIL — auth is effectively enforced, but the operator
+      # needs to investigate the underlying setup bug.
+      warn "auth: unauthenticated POST $URL/v1/messages → $UNAUTH_CODE (non-2xx without upstream call — fail-closed; status code suggests an upstream setup issue, see \`fix:\` note)"
+      note "fix: a non-2xx here means the proxy either crashed in its auth handler (common cause: \`pip install 'litellm[proxy]' prisma\` — \`prisma\` is NOT pulled in by the \`[proxy]\` extra; without it LiteLLM 500's every auth rejection) or fell through to a virtual-key-DB lookup that is not configured (set up the DB, or use a master_key that matches \`general_settings.master_key\`)."
       ;;
   esac
 else

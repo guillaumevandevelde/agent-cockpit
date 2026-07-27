@@ -139,6 +139,14 @@ connected db."}}` in plaats van 401, omdat LiteLLM na een master-key-mismatch
 doorvalt naar de virtual-key-lookup in de database. Ook fail-closed, ook een
 verkeerde statuscode. Zonder DB is dat het gedrag; met DB niet getest.
 
+✅ **Geïmplementeerd (kaart `1941bb10…`):** de install-set staat nu expliciet in
+het `Usage:`-blok van `scripts/check-litellm-hardening.sh` en in §11 van
+[`9router-integratie-analyse.md`](./9router-integratie-analyse.md), met één
+regel rationale. De auth-check zelf klasseert 4xx/5xx non-401/403 als WARN
+in plaats van FAIL — alleen een echte 2xx zonder `Authorization` drukt nog
+de tekst "proxy accepted". Tests Tasks 10 (fail-closed 500) en 11 (fail-closed
+400 `no_db_connection`) bewijzen de carve-out.
+
 ---
 
 ## 3. Prompt-integriteit — behavioraal geverifieerd, niet aangenomen
