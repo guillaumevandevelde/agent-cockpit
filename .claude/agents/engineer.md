@@ -217,22 +217,42 @@ altijd door.
    > **Bron-van-waarheid: de commit-hash, niet je eigen HEAD of de
    > werkboom-state.** Jouw sessie draait in een geïsoleerde werkboom
    > gebaseerd op `origin/master`, waar jouw HEAD identiek is aan
-   > `origin/master`. Reconstrueer de implementatie uitsluitend uit:
-   >   - `git show <COMMIT_HASH>` — voor de files/changes in de commit.
-   >   - `git diff origin/master..<COMMIT_HASH>` — voor de cumulatieve
-   >     delta tegen de `origin/master`-baseline.
+   > `origin/master`. Reconstrueer de implementatie in twee stappen —
+   > de eerste is je **authoritative scope**, de tweede alleen context:
+   >
+   > - **Step 1 — scope (authoritative):** `git show <COMMIT_HASH> --stat`.
+   >   List de files/paden die deze commit zelf heeft veranderd. **Elke
+   >   file die hier NIET in staat is geen onderdeel van jouw review** —
+   >   hoort niet in je blocker-set, niet in je OK-redenering. Dit is
+   >   je scope; alles wat hierbuiten valt is scope-creep, niet jouw zaak.
+   > - **Step 2 — context:** `git diff origin/master..<COMMIT_HASH>`.
+   >   Cumulatieve delta tegen de origin/master-baseline. **Waarschuwing:**
+   >   `origin/master` kan tijdens de sessie bewogen hebben (parallel
+   >   chore-PR die merged is tussen commit en ship). Files die hierin
+   >   verschijnen maar NIET in `git show <HASH> --stat` staan zijn op
+   >   `origin/master` geland, niet door deze commit — negeer ze als
+   >   scope, niet als review-target.
+   >
    > Dat is de *enige* manier waarop je de implementatie in deze set-up te
    > zien krijgt; een lege diff met non-empty requirements is per definitie
    > een reviewer-blokkade, geen OK.
    >
-   > **Actionable refusal als de commit-hash ontbreekt of niet resolveert.**
-   > Als `<COMMIT_HASH>` ontbreekt in deze prompt, niet-resolveert via
-   > `git show <COMMIT_HASH>`, of beide diff-commando's leeg zijn waar
-   > implementatie te verwachten is: stop dan met een **actionable
-   > foutmelding** (`unresolvable commit-hash: <wat er ontbreekt of niet
-   > matcht>`) en **geen content-oordeel**. Een false-OK op een
-   > onresolveerbare hash is precies de falsified-verdict die we hiermee
-   > voorkomen.
+   > **Actionable refusal — twee verschillende fouten, twee verschillende
+   > retoures.**
+   > 1. **Unresolvable commit-hash.** Als `<COMMIT_HASH>` ontbreekt in deze
+   >    prompt, niet-resolveert via `git show <COMMIT_HASH>`, of beide
+   >    diff-commando's leeg zijn waar implementatie te verwachten is: stop
+   >    dan met een **actionable foutmelding**
+   >    (`unresolvable commit-hash: <wat er ontbreekt of niet matcht>`) en
+   >    **geen content-oordeel**. Een false-OK op een onresolveerbare hash
+   >    is precies de falsified-verdict die we hiermee voorkomen.
+   > 2. **Out-of-scope review.** Als je blocker-set files noemt die NIET in
+   >    `git show <COMMIT_HASH> --stat` voorkomen, dan zit je scope
+   >    verkeerd — die files horen niet bij deze implementatie. Retourneer
+   >    **`out-of-scope review: <files> not in <COMMIT_HASH>`** in plaats
+   >    van een content-oordeel. Een false-positive scope-creep-blokkade
+   >    (files van een parallelle merge op origin/master) is precies het
+   >    false-blokkade dat we hiermee voorkomen.
    >
    > Specifiek:
    > - Elke requirement/bullet uit de beschrijving is geïmplementeerd.
