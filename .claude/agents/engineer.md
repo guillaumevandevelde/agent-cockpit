@@ -295,6 +295,23 @@ altijd door.
    commit** op beide plekken, anders raken engineer-sessies en gedispatchte
    sessies uit sync (drift-val: kaart `d9447e49`).
 
+   **Canonieke FCR-mirror — waar de prompt wél en niet staat:** dit bestand
+   (`.claude/agents/engineer.md` §6, deze stap) is de canonieke inline-kopie van
+   de FCR-prompt. `CLAUDE.md` is een losse repo-oriëntatiedoc en draagt de
+   FCR-prompt **niet** — grep daar dus niet naar, en schrijf 'm ook niet als
+   `Where:`-pad in een kaart. De enige twee plekken die de prompt écht bevatten:
+
+   - `.claude/agents/engineer.md` §6 (dit blok) — wat een engineer-sessie leest.
+   - `backend/app/kanban/dispatch.py::_build_ship_instructions` — wat een
+     auto-gedispatchte sessie inline in zijn prompt krijgt.
+
+   De drift-guard `backend/tests/test_fcr_prompt_drift.py` bewaakt precies deze
+   twee via zijn `SOURCES`-registry; komt er ooit een derde mirror bij, dan hoort
+   die in dezelfde commit aan `SOURCES` én aan dit lijstje toegevoegd te worden.
+   Schrijf je een kaart óver de FCR-prompt, noem dan deze paden in je
+   `Where:`-blok (kaart `549ef4d6…` — een eerdere kaart wees naar `CLAUDE.md` en
+   stuurde elke lezer een dood spoor in).
+
 ## Werkomgeving in worktree: venv & cwd-veiligheid
 
 Worktree-sessies (`.claude/worktrees/<branch>/`) hebben **geen lokale Python

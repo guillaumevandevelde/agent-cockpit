@@ -401,3 +401,110 @@ def test_engineer_md_fcr_step_lives_in_review_section() -> None:
         f"worktree' at offset {werkomgeving_idx}). Found FCR at offset "
         f"{fcr_idx}."
     )
+
+
+# Anchor for the "where does the FCR prompt actually live" callout. Kept at
+# module scope so a future editor renaming the callout heading trips one
+# obvious knob rather than hunting through assertion bodies.
+FCR_MIRROR_CALLOUT_ANCHOR = "Canonieke FCR-mirror"
+
+
+def _normalized(text: str) -> str:
+    """Collapse all runs of whitespace so assertions survive re-wrapping.
+
+    The callout is prose inside a numbered Markdown list, so its line
+    breaks and indentation shift whenever someone re-flows the paragraph.
+    Matching on normalized text keeps the guard about *content* rather
+    than about where the wrap points happen to fall.
+    """
+    return " ".join(text.split())
+
+
+def test_engineer_md_names_itself_as_canonical_fcr_mirror() -> None:
+    """engineer.md §6 must name itself the canonical FCR mirror and must
+    explicitly rule out ``CLAUDE.md``.
+
+    Kaart ``549ef4d6…``: a prior self-improve card (``b0a1e111…``)
+    described the FCR mirror as living in "``CLAUDE.md`` Session-end
+    workflow section". It does not — ``CLAUDE.md`` carries no FCR prompt
+    at all, so a reader grepping it finds nothing and has to fall back to
+    a repo-wide ``grep -rln "Feature-Compliance-Review (FCR) als pre-Done"``
+    to locate the real mirror. Every future FCR card copying that pattern
+    inherits the same dead pointer.
+
+    The fix is a callout in the persona itself, so the next card author
+    reads the right paths instead of copying the wrong one. This guard
+    pins all four of its load-bearing claims: the callout exists, it sits
+    inside §6 where a reader of the FCR step will actually see it, it
+    names both real mirrors plus the drift guard, and it says in so many
+    words that ``CLAUDE.md`` is not one of them.
+    """
+    body = _engineer_md_body()
+    normalized = _normalized(body)
+
+    callout_idx = body.find(FCR_MIRROR_CALLOUT_ANCHOR)
+    assert callout_idx != -1, (
+        f"engineer.md: missing the canonical-FCR-mirror callout "
+        f"({FCR_MIRROR_CALLOUT_ANCHOR!r}). Without it, the next author of "
+        f"an FCR self-improve card has no in-persona pointer to the real "
+        f"mirrors and will copy the stale 'CLAUDE.md' framing."
+    )
+
+    # The callout is only useful where the FCR step is read — between the
+    # FCR block and the Werkomgeving section (same window the sibling
+    # test pins for the FCR step itself).
+    fcr_idx = body.lower().find("feature-compliance")
+    werkomgeving_idx = body.find("Werkomgeving in worktree")
+    assert fcr_idx < callout_idx < werkomgeving_idx, (
+        f"engineer.md: the canonical-FCR-mirror callout must live inside "
+        f"§6 alongside the FCR step (between offsets {fcr_idx} and "
+        f"{werkomgeving_idx}); found it at {callout_idx}."
+    )
+
+    # Both real mirrors + the drift guard must be named by path, so the
+    # callout doubles as the grep recipe the card author needs.
+    for label, path in (
+        ("the persona mirror itself", ".claude/agents/engineer.md"),
+        ("the dispatcher mirror", "_build_ship_instructions"),
+        ("the dispatcher module", "backend/app/kanban/dispatch.py"),
+        ("the drift guard", "backend/tests/test_fcr_prompt_drift.py"),
+    ):
+        assert path in normalized, (
+            f"engineer.md: canonical-FCR-mirror callout does not name "
+            f"{label} ({path!r}); the callout is the grep recipe for the "
+            f"next FCR card author, so every real location must appear."
+        )
+
+    # The negative half of the claim — this is the actual bug being fixed,
+    # so it gets an exact-sentence assertion rather than a loose keyword.
+    assert (
+        "`CLAUDE.md` is een losse repo-oriëntatiedoc en draagt de "
+        "FCR-prompt **niet**" in normalized
+    ), (
+        "engineer.md: the canonical-FCR-mirror callout must state "
+        "explicitly that CLAUDE.md does NOT carry the FCR prompt. That "
+        "negative claim is the whole point of kaart 549ef4d6… — a callout "
+        "that merely lists the right paths still lets the next author "
+        "assume CLAUDE.md is a third mirror."
+    )
+
+
+def test_claude_md_does_not_carry_the_fcr_prompt() -> None:
+    """Premise guard for the callout above: ``CLAUDE.md`` really must not
+    contain the FCR prompt.
+
+    The callout asserts a *negative* fact about a file it does not own.
+    If someone later inlines the FCR prompt into ``CLAUDE.md`` — a third
+    mirror, un-guarded by ``SOURCES`` — the callout silently becomes a
+    lie and the drift detector would not notice, because ``CLAUDE.md``
+    is not in the registry. Failing here forces that editor to either
+    back the change out or add ``CLAUDE.md`` to ``SOURCES`` and update
+    the callout in the same commit.
+    """
+    claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "Feature-Compliance-Review" not in claude_md, (
+        "CLAUDE.md now contains the FCR prompt, contradicting the "
+        "canonical-mirror callout in .claude/agents/engineer.md §6. "
+        "Either revert that addition, or add CLAUDE.md to SOURCES here "
+        "and update the callout to name three mirrors."
+    )
