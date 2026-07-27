@@ -184,10 +184,16 @@ Done-kaart `d9447e49`).
   in CI als backend/frontend-gate; draai zelf de frontend-checks voor ships die
   `frontend/` raken (zie git-ship §2). `scripts/cockpit-doctor.sh` is de
   read-only health-check.
-- **Remote branch hygiene**: `delete_branch_on_merge` is enabled (2026-07-07),
-  dus PR-branches ruimen zichzelf op bij merge. Branches van PRs die nooit
-  mergen stranden op `origin` — handmatige `git cherry master origin/<branch>`
-  + delete.
+- **Remote branch hygiene**: twee routes, twee mechanismen. **PR-route:**
+  `delete_branch_on_merge` is enabled (2026-07-07), dus PR-branches ruimen
+  zichzelf op bij merge. **Merge-to-master-route (direct mode):** die sluit
+  geen PR, dus `delete_branch_on_merge` vuurt níét — de ship-recipe doet de
+  `git push origin --delete "$BRANCH"` zelf, alleen ná een geslaagde push
+  (bij een afgewezen push blijft de branch staan voor de PR-fallback). Zonder
+  die regel stapelde elke geshipte kaart een dode branch op `origin`
+  (kaart `3027671c…`: 7 stuks over 6 weken). Branches van PRs die nooit
+  mergen stranden nog steeds op `origin` — handmatige
+  `git cherry master origin/<branch>` + delete.
 
 ## Gotchas
 

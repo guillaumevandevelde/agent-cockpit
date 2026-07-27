@@ -201,7 +201,21 @@ if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
   git -C "$WT" add -A
   git -C "$WT" commit --no-edit
 fi
-git -C "$WT" push origin HEAD:master
+if git -C "$WT" push origin HEAD:master; then
+  # Merge landed on master — delete the now-dead remote branch. GitHub's
+  # `delete_branch_on_merge` (enabled 2026-07-07) only fires when a *PR*
+  # merges; this route closes no PR, so without this line every shipped card
+  # leaves a branch on `origin` forever (kanban card 3027671c…: 7 fully-merged
+  # branches piled up over 6 weeks). Fail-open — an already-deleted branch
+  # must not kill the ship. Only the REMOTE branch goes; the local branch
+  # stays, so redispatch/resume off it still works.
+  git push origin --delete "$BRANCH" || echo "WARN: kon origin/$BRANCH niet verwijderen (al weg?)"
+else
+  # Push rejected (master moved / protected). Keep `origin/$BRANCH` alive —
+  # the pull-request fallback below needs it. Deleting here would strand the
+  # work on exactly the path where the branch is still required.
+  echo "WARN: push naar master afgewezen — origin/$BRANCH bewaard voor de pull-request-fallback." >&2
+fi
 git worktree remove --force "$WT"
 ```
 
