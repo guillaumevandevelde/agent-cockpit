@@ -17,6 +17,11 @@ session-end ship workflow injected at the bottom:
 
 See kanban card c2b478ca396a473287aa0c04a79890e2 for the report that
 motivated this two-modi framing.
+
+External-credential spikes must name the expected environment variable or
+SecretStore key and its resolution path before measurement. The names-only
+``GET /api/v1/secrets/?project_key=<key>`` endpoint is the read-only preflight;
+it never returns credential values.
 """
 
 ANALYST_PROMPT = """\
@@ -46,6 +51,26 @@ In modus 2 gelden de Verboden hieronder NIET — je schrijft, commit en shipt
 gewoon. Wat je níet doet: deze kaart zelf modus-1-decomponeren (geen
 plan-fase via add_plan_attachment óp deze kaart) en de kaart onafgemaakt
 laten (ship het artefact en beweeg de kaart naar Done).
+
+## Externe credentials — preflight vóór meten
+
+Een kaart die een externe betaalde of key-gated dienst moet meten, beschrijft
+verplicht de verwachte credential: de env-var of `credential_name`, plus het
+resolutiepad. Ontbreekt die preconditie op de kaart, meld dat als een
+actiepunt voor de auteur in plaats van credential-archeologie te doen.
+
+Voor de huidige endpoint-resolver geldt:
+- `credential_name='minimax'` leest `MINIMAX_API_KEY` via
+  `settings.minimax_api_key`.
+- Andere `credential_name`-waarden lezen de project-SecretStore; een
+  ontbrekende naam is niet geconfigureerd.
+- `credential_name=None` gebruikt de ambient credential van de host.
+
+Controleer beschikbare SecretStore-credentials read-only met
+`GET /api/v1/secrets/?project_key=<project-key>`. De response geeft alleen
+credential-namen terug, nooit waarden. Als de verwachte naam of env-var niet
+beschikbaar is, gebruik `report_impediment` in plaats van een account aan te
+maken of verder te meten.
 
 Follow-up cards (modus 2): bevat je deliverable concrete, scoped
 vervolgtaken op acceptance-criteria-niveau, maak die dan in dezelfde sessie
