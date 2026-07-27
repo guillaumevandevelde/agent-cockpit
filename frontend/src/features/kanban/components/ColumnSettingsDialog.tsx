@@ -213,10 +213,16 @@ export function ColumnSettingsDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       {/* LG (max-w-4xl) — the edit row packs agent + provider + model
-          + max-sessions controls + token-saver checkbox + Save/Cancel, which
-          overflows the previous MD width once the token-saver toggle landed
-          (kaart a6316dba…). The added row height stays well within LG's
-          max-h-[90vh]. */}
+          + max-sessions controls + token-saver checkbox + Save/Cancel.
+          LG (828px usable) is too narrow for the row's natural
+          ~1220px width once token-saver landed (kaart a6316dba…). The
+          row uses `flex-wrap` + `shrink-0` on every fixed-width control
+          so the controls wrap to a second line when there isn't room
+          instead of being crushed to their min-content sizes (agent
+          dropdown previously rendered at 60px instead of 192px). On
+          wider windows the row still fits on one line; the wrap is
+          graceful, the dialog does NOT need to fill the screen. The
+          max-h-[90vh] still bounds the scrollable column list. */}
       <DialogContent className={MODAL_SIZES.LG}>
         <DialogHeader>
           <DialogTitle>Column Settings</DialogTitle>
@@ -233,18 +239,22 @@ export function ColumnSettingsDialog({
           {items.map((col) => (
             <div
               key={col.id}
-              className="flex items-center gap-2 p-2 rounded border"
+              data-testid="column-row"
+              className="flex flex-wrap items-center gap-2 p-2 rounded border"
             >
               {editingId === col.id ? (
                 <>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-[8rem]">
                     <div className="text-sm font-medium">{col.name}</div>
                   </div>
                   <Select
                     value={editAgent}
                     onValueChange={setEditAgent}
                   >
-                    <SelectTrigger className="w-48">
+                    <SelectTrigger
+                      className="w-48 shrink-0"
+                      data-testid="column-row-agent-trigger"
+                    >
                       <SelectValue placeholder="Default agent" />
                     </SelectTrigger>
                     <SelectContent>
@@ -276,7 +286,10 @@ export function ColumnSettingsDialog({
                       ));
                     }}
                   >
-                    <SelectTrigger className="w-40">
+                    <SelectTrigger
+                      className="w-40 shrink-0"
+                      data-testid="column-row-provider-trigger"
+                    >
                       <SelectValue placeholder="Provider" />
                     </SelectTrigger>
                     <SelectContent>
@@ -288,7 +301,7 @@ export function ColumnSettingsDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-1 shrink-0">
                     <label htmlFor={`default-model-${col.id}`} className="sr-only">
                       Default model
                     </label>
@@ -353,7 +366,7 @@ export function ColumnSettingsDialog({
                       Refresh
                     </button>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       className="h-7 w-7 rounded border text-sm hover:bg-accent disabled:opacity-30"
                       onClick={() => setEditMaxSessions(Math.max(0, (editMaxSessions ?? 1) - 1))}
@@ -383,7 +396,10 @@ export function ColumnSettingsDialog({
                       title="Pause — stops new dispatches into this column; running sessions keep going"
                     >Pause</button>
                   </div>
-                  <label className="flex items-center gap-2 text-xs">
+                  <label
+                    className="flex items-center gap-2 text-xs shrink-0 whitespace-nowrap"
+                    data-testid="column-row-token-saver"
+                  >
                     <input
                       type="checkbox"
                       checked={editTokenSaver}
@@ -395,10 +411,19 @@ export function ColumnSettingsDialog({
                       — reduces Bash output
                     </span>
                   </label>
-                  <Button size="sm" onClick={() => handleUpdate(col.id)}>
+                  <Button
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => handleUpdate(col.id)}
+                  >
                     Save
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="shrink-0"
+                    onClick={() => setEditingId(null)}
+                  >
                     Cancel
                   </Button>
                 </>
