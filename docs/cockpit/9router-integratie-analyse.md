@@ -428,6 +428,23 @@ end-of-card-gate. Een afwijking in deze suite betekent **niet** "de check ligt
 eraan": het betekent de proxy ligt eraan, en die moet eerst worden gefikst
 voor de sidecar in productie kan.
 
+**Install-set.** De proxy-side die deze check hardent heeft een extra
+dependency die de `[proxy]`-extra niet automatisch trekt:
+
+```bash
+python3 -m venv v && ./v/bin/pip install 'litellm[proxy]' prisma
+```
+
+`prisma` is **niet optioneel**: LiteLLM's auth-exception handler importeert
+het bij élke auth-afwijzing, en zonder `prisma` wordt élke correcte
+master_key-rejection HTTP 500 in plaats van 401 (volledige meting:
+[`litellm-pilot-meting.md`](./litellm-pilot-meting.md) §2.1). Geen DB
+nodig, geen `prisma generate` nodig — alleen `import prisma` moet slagen.
+Een gerelateerde, minder vaak geraakte variant: een verkeerde master_key
+valt door naar de virtual-key-DB-lookup en geeft HTTP 400
+`{"error":{"message":"No connected db."}}` — ook fail-closed, ook geen
+echte 401, maar wel dezelfde klasse van "niet wat je verwacht"-fout.
+
 ✅ **Gemeten (kaart `bbfcb365…`, 2026-07-27)** — de pilot heeft gedraaid tegen
 LiteLLM `1.93.0`; volledige uitkomst in
 [`litellm-pilot-meting.md`](./litellm-pilot-meting.md). Kort: de check gaf
