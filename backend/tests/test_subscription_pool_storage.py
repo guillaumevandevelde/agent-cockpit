@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from pydantic import ValidationError
 
 from app.kanban import dispatch, subscription_pool
 from app.kanban.schemas import (

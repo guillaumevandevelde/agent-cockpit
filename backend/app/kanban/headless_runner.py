@@ -981,7 +981,7 @@ async def run_headless(
         stop_event.set()
         try:
             await asyncio.wait_for(tailer_task, timeout=2.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             tailer_task.cancel()
             try:
                 await tailer_task
@@ -1037,7 +1037,7 @@ async def run_headless(
             stop_event.set()
             try:
                 await asyncio.wait_for(tailer_task, timeout=1.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            except (TimeoutError, asyncio.CancelledError, Exception):
                 tailer_task.cancel()
         # Close the event-log writer BEFORE the registry/pidfile cleanup
         # so the log is flushed to disk in case adopt reads it.
@@ -1183,8 +1183,7 @@ async def _consume_log_file(
     dispatched — events are idempotent so no re-processing is needed).
     """
     offset = record.last_read_offset
-    f = open(log_path, "rb")
-    try:
+    with open(log_path, "rb") as f:
         while True:
             # If the parent signalled a stop, exit. The fresh-run path
             # signals after ``proc.wait()`` so the tailer still does a
@@ -1261,11 +1260,6 @@ async def _consume_log_file(
                 break
 
             await asyncio.sleep(0.05)
-    finally:
-        try:
-            f.close()
-        except Exception:
-            pass
     return proc.returncode if proc is not None else 0
 
 

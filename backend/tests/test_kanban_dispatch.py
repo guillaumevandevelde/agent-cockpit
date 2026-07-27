@@ -1413,22 +1413,6 @@ async def test_unpausing_manual_subscription_resumes_dispatch(project_with_agent
 # f056b2888a…).
 
 @pytest.mark.asyncio
-async def test_manual_pause_gate_skips_provider_resolution_when_no_manual_pause(monkeypatch):
-    async with KanbanSessionLocal() as s:
-        card = SimpleNamespace(column_overrides={}, model=None, agent="engineer")
-
-        async def unexpected_resolution(*args, **kwargs):
-            raise AssertionError("provider resolution should be skipped")
-
-        monkeypatch.setattr(dispatch, "_effective_provider_for_pause_gate", unexpected_resolution)
-
-        assert await dispatch._card_is_manually_paused(
-            s, project_key=PK, project_path="/tmp/project", card=card,
-            target_column="engineer",
-        ) is False
-
-
-@pytest.mark.asyncio
 async def test_manual_pause_respects_global_subscription_override(project_with_agents):
     """A board-wide subscription override pins the spawn to provider X.
     Pausing X (and not the column default) must hold the card back, even

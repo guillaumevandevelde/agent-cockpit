@@ -89,10 +89,9 @@ async def test_migration_is_additive_when_column_already_exists():
     guard installs.
     """
     from app.kanban.db import _ensure_column_table
-    from app.kanban.models import KanbanBase
 
     # Reset (clean baseline) then run twice.
-    async with KanbanSessionLocal() as s:
+    async with KanbanSessionLocal():
         # The engine used by TestSessionLocal is shared; calling begin()
         # through the session-binding that fixtures establish requires us
         # to use the underlying connection. We pull it from the test engine

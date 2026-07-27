@@ -12,7 +12,6 @@ Spec: docs/superpowers/specs/2026-07-24-token-saver-integration-design.md §5.
 from __future__ import annotations
 
 import json
-import os
 import stat
 from pathlib import Path
 
@@ -504,7 +503,8 @@ async def test_post_note_dedups_within_60s(tmp_path, monkeypatch):
         await s.commit()
 
     async with KanbanSessionLocal() as s:
-        from sqlalchemy import select, func
+        from sqlalchemy import func, select
+
         from app.kanban.models import KanbanOp
         n = (await s.execute(
             select(func.count()).select_from(KanbanOp)
@@ -554,6 +554,7 @@ async def _create_card(project_key: str = "PROJ", column: str = "Backlog") -> st
 async def _count_token_saver_notes(card_id: str) -> int:
     """Count ``**Note:** Token saver …`` comments on the card's op-log."""
     from sqlalchemy import func, select
+
     from app.kanban.models import KanbanOp
     async with KanbanSessionLocal() as s:
         n = (await s.execute(
@@ -570,6 +571,7 @@ async def _count_token_saver_notes(card_id: str) -> int:
 async def _token_saver_note_text(card_id: str) -> str | None:
     """Return the text of the first ``**Note:** Token saver …`` comment, or None."""
     from sqlalchemy import select
+
     from app.kanban.models import KanbanOp
     async with KanbanSessionLocal() as s:
         op = (await s.execute(
@@ -855,8 +857,9 @@ def _run_sync_bridge_in_thread(
     same on-disk DB the test then reads.
     """
     from concurrent.futures import ThreadPoolExecutor
-    from app.kanban.dispatch import _install_rtk_for_dispatch
+
     from app.config import settings
+    from app.kanban.dispatch import _install_rtk_for_dispatch
 
     def _call() -> str:
         settings.kanban_database_url = kanban_database_url
@@ -875,6 +878,7 @@ def test_sync_bridge_posts_activated_note_from_non_async_caller(
 ):
     """The sync fallback opens a private loop and lands the activity note."""
     import asyncio
+
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.operations import apply_operation
 
@@ -923,6 +927,7 @@ def test_sync_bridge_posts_activated_note_from_non_async_caller(
     async def _read() -> str | None:
         async with KanbanSessionLocal() as s:
             from sqlalchemy import select
+
             from app.kanban.models import KanbanOp
             op = (await s.execute(
                 select(KanbanOp)

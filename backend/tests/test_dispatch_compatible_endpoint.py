@@ -454,8 +454,7 @@ async def test_set_pool_rejects_unresolvable_credential_at_save_time():
     edit). Both are required: save-time rejection is the happy path,
     defence-in-depth catches the corruption-bypass case.
     """
-    from app.services.agentic_cli.endpoints import upsert_endpoint
-    from app.services.agentic_cli.endpoints import Endpoint
+    from app.services.agentic_cli.endpoints import Endpoint, upsert_endpoint
     async with KanbanSessionLocal() as s:
         await upsert_endpoint(
             s, PK, Endpoint(
@@ -575,7 +574,8 @@ def test_sandcastle_accepts_anthropic_compatible_without_endpoint_kwargs():
     no-endpoint-kwargs case.
     """
     from app.kanban.dispatch import (
-        PROVIDER_COMPATIBLE, sandcastle_transport,
+        PROVIDER_COMPATIBLE,
+        sandcastle_transport,
     )
     assert PROVIDER_COMPATIBLE == "anthropic-compatible"
     with pytest.raises(ValueError) as exc_info:
@@ -780,7 +780,6 @@ async def test_dispatch_threshold_trigger_pool_compatible_lands_anthropic_base_u
         PROVIDER_COMPATIBLE,
         build_provider_env,
     )
-    from app.services.subscriptions.base import SubscriptionUsage
 
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -830,9 +829,8 @@ async def test_dispatch_threshold_trigger_pool_compatible_lands_anthropic_base_u
         # entry directly — keeps the test focused on the
         # pool-choice → dispatch → env chain without dragging in a
         # full usage-snapshot fixture.
-        from dataclasses import replace
         pool_entries = await sp.get_subscription_pool(s, PK)
-        spill_entry = pool_entries[1]
+        pool_entries[1]
 
         async def _fake_pick(session, entries, *, project_key, cli_id):
             # Return the second entry whenever it's in the candidate

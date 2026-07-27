@@ -7,6 +7,7 @@ via the OpenCode CLI instead of falling through to claude-code's empty
 (agent_override / {analyst,executor}_agent_id / card.agent-as-known-CLI)
 and must not touch cli_id for claude-code / bedrock / minimax.
 """
+from app.kanban.dispatch import _cli_id_for_opencode_provider
 from app.services.agentic_cli.provider_env import (
     CLAUDE_CODE_CLI_ID,
     OPEN_CODE_CLI_ID,
@@ -15,8 +16,6 @@ from app.services.agentic_cli.provider_env import (
     PROVIDER_OPENCODE_GO,
     PROVIDER_OPENCODE_ZEN,
 )
-
-from app.kanban.dispatch import _cli_id_for_opencode_provider
 
 
 def test_switches_to_open_code_for_opencode_go_when_implicit():

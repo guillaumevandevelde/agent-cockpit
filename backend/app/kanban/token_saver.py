@@ -37,7 +37,6 @@ from sqlalchemy import select
 
 from app.kanban.models import KanbanColumn, KanbanMeta, KanbanOp
 
-
 # Pinned RTK release. Single source of truth — bump here when the project
 # decides to upgrade. Mirrors docs/cockpit/token-saver-mechanismen-decision.md §8
 # (versie-pinnen verplicht; het project shipt RC's in een tempo dat
