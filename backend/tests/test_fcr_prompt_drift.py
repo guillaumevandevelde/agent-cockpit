@@ -161,6 +161,30 @@ CORE_FCR_INVARIANTS: list[tuple[str, str]] = [
         "auto-recovery reachability check (executable path, not post-exit prose)",
         "recovery in het uitvoeringspad",
     ),
+    # Scope-authority ordering (kaart b0a1e1110bb24e2fbdc7f95b1cb43420): the
+    # FCR reviewer must reconstruct the implementation from `git show
+    # <COMMIT_HASH> --stat` FIRST as the authoritative scope, with the
+    # origin/master diff as Step 2 context only. Without this anchor, a
+    # future revert to a HEAD-anchored "files I changed" framing relapses
+    # into the false-positive scope-creep blocker that the original card
+    # observed (a parallel chore-PR that merged between commit and ship).
+    # Both mirrors must name the explicit `--stat` invocation so the
+    # ordering is unambiguous, not buried in prose.
+    (
+        "scope-authority ordering: git show <HASH> --stat is the authoritative scope",
+        "git show <COMMIT_HASH> --stat",
+    ),
+    # Out-of-scope refusal clause (kaart b0a1e1110bb24e2fbdc7f95b1cb43420):
+    # the reviewer must refuse a content verdict when its blocker-set
+    # contains files not in `git show <COMMIT_HASH> --stat`, returning a
+    # machine-checkable `out-of-scope review: <files> not in <COMMIT_HASH>`
+    # string instead. Without this anchor, a reviewer falling back to a
+    # HEAD vs. origin/master diff silently scopes-creep-blocks the commit
+    # for files that landed on origin/master during the session.
+    (
+        "out-of-scope refusal clause: blockers outside --stat → actionable refusal",
+        "out-of-scope review",
+    ),
 ]
 
 
@@ -247,6 +271,45 @@ def test_fcr_step_runs_before_ship_workflow() -> None:
             f"FCR step must appear BEFORE the Sync step in {mode!r} mode. "
             f"Found FCR at offset {fcr_idx}, Sync at offset {sync_idx}."
         )
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_fcr_show_stat_appears_before_diff_step(source_name: str) -> None:
+    """Step 1 (``git show <COMMIT_HASH> --stat``) must appear BEFORE Step 2
+    (``git diff origin/master..<COMMIT_HASH>``) in the rendered prompt.
+
+    Guards against the regression that triggered kaart
+    b0a1e1110bb24e2fbdc7f95b1cb43420: a reviewer that reads the most
+    visible diff (``HEAD..origin/master``) before the commit-anchored
+    ``git show --stat`` treats every file in that diff as "files I
+    changed", including files that landed on origin/master during the
+    session via a parallel chore-PR merge. The acceptance criterion for
+    that card is an *explicit* ordered recipe — Step 1 = scope,
+    Step 2 = context — so a future editor that swaps the order, merges
+    the two bullets into one, or drops the ``--stat`` flag must trip
+    this guard rather than silently regress the safety net.
+
+    Checks both mirrors (engineer.md raw + dispatch-rendered string) so
+    the drift guard catches the same regression in either location.
+    """
+    text = SOURCES[source_name]()
+    show_stat_idx = text.find("git show <COMMIT_HASH> --stat")
+    diff_idx = text.find("git diff origin/master..<COMMIT_HASH>")
+    assert show_stat_idx != -1, (
+        f"{source_name}: missing Step 1 anchor 'git show <COMMIT_HASH> "
+        f"--stat' — the new explicit ordering makes the `--stat` flag "
+        f"part of the scope-authority contract, not optional prose."
+    )
+    assert diff_idx != -1, (
+        f"{source_name}: missing Step 2 anchor 'git diff "
+        f"origin/master..<COMMIT_HASH>'"
+    )
+    assert show_stat_idx < diff_idx, (
+        f"{source_name}: Step 1 (git show --stat) must appear BEFORE "
+        f"Step 2 (git diff origin/master..<COMMIT_HASH>) so the "
+        f"reviewer reconstructs scope first, context second. Found "
+        f"`--stat` at offset {show_stat_idx}, diff at offset {diff_idx}."
+    )
 
 
 def test_fcr_invariants_list_covers_the_required_inputs() -> None:
