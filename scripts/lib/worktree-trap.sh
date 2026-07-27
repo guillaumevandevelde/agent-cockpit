@@ -38,6 +38,30 @@
 # exit (success, error, or signal). Subsequent runs leave no
 # `.tmp*` siblings under $REPO_ROOT.
 
+# Under zsh, `trap ... EXIT` set inside a function is FUNCTION-SCOPED
+# and fires the moment the function returns — not at shell exit. If we
+# just install the trap as-is, the worktree is created and then
+# immediately destroyed before the caller can use it, and the trap
+# function never runs in the caller's scope. `setopt POSIX_TRAPS` makes
+# zsh install the trap at the shell level (matching bash) and is the
+# only portable-in-this-file fix that keeps callers' existing trap
+# semantics (success, error, EXIT, signals) intact. We set it once at
+# source time, which is a documented side-effect: callers sourcing this
+# lib accept POSIX-trap semantics for the rest of the script.
+if [ -n "${ZSH_VERSION:-}" ]; then
+    setopt POSIX_TRAPS 2>/dev/null || true
+fi
+
+# Registry of every scratch worktree the current shell owns. The EXIT
+# trap reads this once at shell exit and cleans them all. Without the
+# registry, every call to with_scratch_worktree would overwrite the
+# previous trap and leak the prior scratch — exactly the
+# `tmp-<id>`-accumulation the card (and the earlier `5c508644…` card)
+# tried to prevent. Format is a newline-separated list of `repo<TAB>path`
+# pairs so a single string survives bash↔zsh round-trips without
+# depending on the array semantics either shell provides differently.
+__SCRATCH_WT_REGISTRY=""
+
 # --- with_scratch_worktree ----------------------------------------------
 # Create a scratch worktree + owned parent + cleanup trap in one go.
 #
@@ -75,11 +99,14 @@ with_scratch_worktree() {
     parent_dir="$repo/$scratch_id"
     wt_path="$parent_dir/wt-$$"
 
-    # Install the cleanup trap BEFORE creating anything so a mid-create
-    # failure still removes whatever did land on disk. Interpolate the
-    # path values at install time so the trap survives pos-arg
-    # clobbering when the script continues running.
-    trap "__scratch_worktree_trap '${repo}' '${wt_path}'" EXIT
+    # Register the scratch BEFORE creating anything so a mid-create
+    # failure still removes whatever did land on disk. The trap body
+    # is a fixed string (no per-call interpolation) so it can be set
+    # exactly once and re-set cheaply on every call without
+    # accumulating args. The registry is the single source of truth.
+    __SCRATCH_WT_REGISTRY="${__SCRATCH_WT_REGISTRY:+${__SCRATCH_WT_REGISTRY}
+}${repo}	${wt_path}"
+    trap '__scratch_worktree_trap_all' EXIT
 
     mkdir -p "$parent_dir"
 
@@ -92,6 +119,9 @@ with_scratch_worktree() {
         echo "error: with_scratch_worktree: git worktree add failed at $wt_path: $err" >&2
         # Force cleanup so the failed parent doesn't linger.
         cleanup_scratch_worktree "$repo" "$wt_path"
+        # Drop the failed entry from the registry so the global trap
+        # does not double-remove it.
+        __SCRATCH_WT_REGISTRY="$(printf '%s\n' "$__SCRATCH_WT_REGISTRY" | grep -vF "	${wt_path}"$'\t' | grep -vF "$(printf '%s\t%s' "$repo" "$wt_path")")"
         return 1
     fi
 
@@ -105,20 +135,33 @@ with_scratch_worktree() {
 # Idempotent: missing dirs are not an error. The EXIT trap installed
 # by with_scratch_worktree calls this internally.
 cleanup_scratch_worktree() {
-    local repo="$1" path="$2"
-    if [ -n "${path:-}" ] && [ -d "$path" ]; then
-        command git -C "$repo" worktree remove --force "$path" >/dev/null 2>&1 || true
+    # NOTE — never name a local `path` here (nor cdpath/fpath/manpath/argv).
+    # Harnesses source this lib from the dispatch shell, which is zsh, and in
+    # zsh `path` is a SPECIAL array parameter tied to $PATH. `local path="$2"`
+    # therefore replaced PATH with the worktree path for the rest of this
+    # function, and every external binary below died at once:
+    #     cleanup_scratch_worktree:12: command not found: dirname
+    # The trap then aborted mid-flight, leaving both the registered worktree
+    # and the `tmp-<id>` parent behind — worse than the naive `mktemp -d`
+    # pattern this helper exists to replace, because callers trust the trap.
+    # Invisible in bash, where `path` is an ordinary scalar (card 95f5199c…).
+    local repo="$1" wt_path="$2"
+    if [ -n "${wt_path:-}" ] && [ -d "$wt_path" ]; then
+        command git -C "$repo" worktree remove --force "$wt_path" >/dev/null 2>&1 || true
     fi
     command git -C "$repo" worktree prune >/dev/null 2>&1 || true
 
-    if [ -z "${path:-}" ]; then
+    if [ -z "${wt_path:-}" ]; then
         return 0
     fi
 
+    # Pure parameter expansion instead of `dirname`/`basename`: the cleanup
+    # path must not depend on PATH resolution at all, so a hostile or stripped
+    # PATH in a teardown context can never strand the scratch dirs again.
     local parent_dir
-    parent_dir="$(dirname "${path}")"
+    parent_dir="${wt_path%/*}"
     parent_dir="${parent_dir%/}"
-    if [ -z "${parent_dir:-}" ]; then
+    if [ -z "${parent_dir:-}" ] || [ "$parent_dir" = "$wt_path" ]; then
         return 0
     fi
 
@@ -126,20 +169,48 @@ cleanup_scratch_worktree() {
     # pattern (`<repo>/tmp-<id>/`). Never delete arbitrary external
     # parent dirs — that would wipe out callers' tmpdirs.
     local basename_parent
-    basename_parent="$(basename "$parent_dir")"
+    basename_parent="${parent_dir##*/}"
     case "$basename_parent" in
         tmp-*) rm -rf "$parent_dir" 2>/dev/null || true ;;
         *)     ;;  # caller-owned parent — leave it alone
     esac
+
+    # Drop the entry from the registry so an explicit cleanup does not
+    # also fire a redundant global cleanup on EXIT.
+    if [ -n "${__SCRATCH_WT_REGISTRY:-}" ]; then
+        __SCRATCH_WT_REGISTRY="$(printf '%s\n' "$__SCRATCH_WT_REGISTRY" | grep -vF "$(printf '%s\t%s' "$repo" "$wt_path")")"
+    fi
 }
 
-# Internal: bridge between the EXIT trap string and the named-args
-# form above. The trap string already carries interpolated REPO + WT
-# path (see the install line in with_scratch_worktree), so this is
-# just a thin adapter. `set +u` keeps the trap robust against callers
-# that run with `set -u` (a missing path would otherwise blow up
-# here).
-__scratch_worktree_trap() {
+# Internal: single EXIT trap body. Reads the registry and cleans every
+# `repo<TAB>wt_path` pair. Installed once and re-asserted on every
+# with_scratch_worktree call (cheap — same string). `set +u` keeps the
+# trap robust against callers that run with `set -u` (a missing
+# registry would otherwise blow up here).
+__scratch_worktree_trap_all() {
     set +u
-    cleanup_scratch_worktree "$1" "$2"
+    if [ -z "${__SCRATCH_WT_REGISTRY:-}" ]; then
+        return 0
+    fi
+    # Snapshot the registry and clear it BEFORE iterating. If the
+    # cleanup body itself traps (e.g. set -e on a caller-provided
+    # function) we don't want a re-entry to see the same entries
+    # twice. Same trick POSIX-aware shells use for signal handlers.
+    local snapshot
+    snapshot="$__SCRATCH_WT_REGISTRY"
+    __SCRATCH_WT_REGISTRY=""
+    local line repo wt_path
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -z "$line" ] && continue
+        # Split on first tab only — wt_path is fully expanded so
+        # cannot contain a tab. Use parameter expansion rather than
+        # `read repo wt_path` so the field separator handling is
+        # identical between bash and zsh.
+        repo="${line%%	*}"
+        wt_path="${line#*	}"
+        [ -z "$wt_path" ] && wt_path="${line#*	}"  # no-op safety
+        cleanup_scratch_worktree "$repo" "$wt_path"
+    done <<EOF
+$snapshot
+EOF
 }

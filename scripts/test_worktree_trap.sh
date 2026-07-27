@@ -169,6 +169,149 @@ check "explicit-ref scratch still leaves no tmp-* parent" \
     '[ -z "$(cd "$REPO" && ls -d tmp-* 2>/dev/null || true)" ]'
 rm -f "$OUT5"
 
+# -----------------------------------------------------------------------------
+echo "Task 6: helper survives being sourced from zsh (dispatch-shell parity)"
+
+# Regression for card 95f5199c…: the dispatch shell is zsh, where `path`
+# is a SPECIAL array parameter bound to $PATH. A `local path="$2"` inside
+# cleanup_scratch_worktree therefore overwrote PATH with the worktree
+# path for the rest of that function, so every external binary in the
+# cleanup body (`dirname`, `basename`, `git`, `rm`) vanished:
+#
+#     cleanup_scratch_worktree:12: command not found: dirname
+#
+# Net effect was worse than the naive `mktemp -d` pattern this helper
+# replaced: the worktree stayed registered in `git worktree list` AND the
+# `tmp-<id>` parent stayed in the working tree, while callers trusted the
+# trap and did not clean up by hand.
+#
+# These assertions must run under zsh — the bug is invisible in bash,
+# where `path` is an ordinary scalar. That shell asymmetry is exactly why
+# the bash-only harness above stayed green through the whole regression.
+if command -v zsh >/dev/null 2>&1; then
+    OUT6="$(mktemp)"
+    ERR6="$(mktemp)"
+    zsh -c '
+      source "$1"
+      with_scratch_worktree "$2" WT >/dev/null
+      printf "%s\n" "$WT" > "$3"
+      echo "payload" > "$WT/payload.txt"
+    ' _ "$LIB" "$REPO" "$OUT6" 2>"$ERR6"
+
+    check "zsh: cleanup emits no 'command not found' on the trap path" \
+        '! grep -q "command not found" "$ERR6"'
+    check "zsh: EXIT trap removed the tmp-<id> parent" \
+        '[ -z "$(cd "$REPO" && ls -d tmp-* 2>/dev/null || true)" ]'
+    check "zsh: EXIT trap removed the worktree subdir" \
+        '[ ! -e "$(cat "$OUT6" 2>/dev/null)" ]'
+    check "zsh: worktree is deregistered from git worktree list" \
+        '! git -C "$REPO" worktree list --porcelain | grep -qF "$(cat "$OUT6" 2>/dev/null)"'
+
+    # Second dynamic path: an EXPLICIT cleanup call (not via the trap).
+    # Asserting on $PATH after the call returns would be tautological —
+    # `local path=` is function-scoped, so PATH is restored on return and
+    # the assertion passes in both the broken and fixed state. Assert on
+    # the call's own stderr instead, which is where the clobber surfaces.
+    ERR6B="$(mktemp)"
+    zsh -c '
+      source "$1"
+      with_scratch_worktree "$2" WT >/dev/null
+      cleanup_scratch_worktree "$2" "$WT"
+    ' _ "$LIB" "$REPO" 2>"$ERR6B"
+    check "zsh: explicit cleanup call emits no 'command not found'" \
+        '! grep -q "command not found" "$ERR6B"'
+
+    # Static guard: no `local` declaration in the lib may shadow a zsh
+    # special parameter. This is the assertion that would have caught the
+    # original bug at review time, in any shell. Two pattern requirements:
+    #   - it must cross earlier declarators on the same line, because the
+    #     original bug lived in the SECOND slot (`local repo="$1" path="$2"`);
+    #   - it must skip comment lines, or the in-lib note documenting this very
+    #     bug matches itself and the guard can never go green.
+    check "lib declares no zsh-special parameter as a local" \
+        '! grep -nE "^[[:space:]]*local\b[^#]*(^|[[:space:]])(path|cdpath|fpath|manpath|mailpath|module_path|argv|status)=" "$LIB"'
+
+    # ---- additional regressions for the second/third bugs the card hid
+    #
+    # While the `dirname` symptom was the visible failure, the
+    # investigation turned up two deeper problems that the symptom was
+    # actually MASKING in zsh:
+    #
+    #   (A) Under zsh, `trap ... EXIT` set inside a function is
+    #       function-scoped and fires the moment the function returns.
+    #       That destroys the just-created worktree before the caller
+    #       can use it. Pre-fix this was invisible because the cleanup
+    #       body had already aborted on `dirname`, so the worktree
+    #       stayed alive by accident.
+    #
+    #   (B) In both bash and zsh, every call to with_scratch_worktree
+    #       installed a NEW trap string. A second call overwrote the
+    #       first call's trap, so the first worktree was never
+    #       cleaned — exactly the accumulation the helper exists to
+    #       prevent. The reviewer's reproduction (two calls in one
+    #       session) hit this on the bash path too.
+
+    # (A) zsh: worktree must be USABLE for the entire body of the
+    # caller, not just for the return of with_scratch_worktree. We
+    # test this by doing real work in the worktree (read a file,
+    # which the previous Task 1-5 never did) and asserting it
+    # succeeds. The pre-fix behavior (with POSIX_TRAPS applied
+    # post-fix) was: worktree created, function returns, trap
+    # immediately fires, worktree gone, `cat` fails. So this would
+    # fail under any fix that DIDN'T also set POSIX_TRAPS.
+    # Use `seed.txt` (committed in the test repo setup above) so the
+    # assertion is self-contained and doesn't rely on a file that's
+    # only present in the project's own working tree.
+    OUT6C="$(mktemp)"
+    zsh -c '
+      source "$1"
+      with_scratch_worktree "$2" WT >/dev/null
+      if head -1 "$WT/seed.txt" > "$3" 2>/dev/null; then
+        echo READABLE > "$3.ok"
+      else
+        echo UNREADABLE > "$3.ok"
+      fi
+    ' _ "$LIB" "$REPO" "$OUT6C" 2>/dev/null
+    check "zsh: worktree is usable AFTER with_scratch_worktree returns" \
+        '[ "$(cat "$OUT6C.ok" 2>/dev/null)" = "READABLE" ]'
+    [ -s "$OUT6C" ] && head -1 "$OUT6C" >/dev/null  # silent the read
+
+    # (B) Two sequential calls in the same shell, then shell exit:
+    # neither scratch may leak. Runs in BOTH shells because the
+    # trap-overwrite bug is shell-agnostic. The trap-overwrite leak
+    # only surfaces if the second call's `trap ... EXIT` overwrites the
+    # first call's; the registry fix below keeps both clean.
+    #
+    # Note: we assert on the parent-dir count (the actual leak
+    # symptom) rather than the registered-worktree count, because
+    # under the pre-fix PATH-clobber `git worktree add` itself dies
+    # before any worktree is registered — so a "registered = 0"
+    # assertion would be green even with leaked parent dirs. The
+    # dir count is the load-bearing check.
+    for shell in bash zsh; do
+        if ! command -v "$shell" >/dev/null 2>&1; then continue; fi
+        "$shell" -c '
+          source "$1"
+          with_scratch_worktree "$2" WT1 >/dev/null
+          with_scratch_worktree "$2" WT2 >/dev/null
+        ' _ "$LIB" "$REPO" >/dev/null 2>&1
+        check "$shell: two sequential calls leave no tmp-* parent" \
+            '[ -z "$(cd "$REPO" && ls -d tmp-* 2>/dev/null || true)" ]'
+    done
+
+    # Park the test scratch outside the repo to keep `tmp-*` from
+    # accumulating in $PWD across re-runs. `rm` is deny-listed in this
+    # project, so the test runner never deletes files — it just moves
+    # them aside. The mktemp names are unique per run.
+    [ -n "$OUT6"   ] && mv "$OUT6"   "$OUT6.parked"   2>/dev/null
+    [ -n "$ERR6"   ] && mv "$ERR6"   "$ERR6.parked"   2>/dev/null
+    [ -n "$ERR6B"  ] && mv "$ERR6B"  "$ERR6B.parked"  2>/dev/null
+    [ -n "$OUT6C"  ] && mv "$OUT6C"  "$OUT6C.parked"  2>/dev/null
+    [ -n "$OUT6C.ok" ] && mv "$OUT6C.ok" "$OUT6C.ok.parked" 2>/dev/null
+else
+    echo "  skip: zsh not installed — dispatch-shell parity unverified"
+fi
+
 # ----------------------------------------------------------------------------
 echo ""
 echo "Summary: $PASS passed, $FAIL failed"
