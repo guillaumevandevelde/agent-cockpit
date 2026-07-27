@@ -664,11 +664,18 @@ const IMPEDIMENT_PREFIX = "**Impediment:** ";
 //      `**Resolution:**` comment and injected into the resumed session's
 //      `## IMPEDIMENT` prompt section (backend /resolve-impediment).
 //
-// Both paths converge on the same `kanbanApi.resolveImpediment` call. The
-// backend prefers the gate answer when both are present; the textarea content
-// still lands on the activity feed as a `**Resolution:**` comment for
-// auditability. This is the consolidated "impediment resolved" + "decision
-// human answered needed" control (kaart 4279448c).
+// Both paths converge on the same `kanbanApi.resolveImpediment` call. When both
+// a gate answer and textarea content are present, the backend carries BOTH into
+// the resumed session's `## IMPEDIMENT` section — the gate pick labelled as the
+// decision ("Chosen option: …"), the typed text as supporting context
+// ("Additional context: …") — via `dispatch.compose_impediment_answer`. The
+// textarea content also lands on the activity feed as a `**Resolution:**`
+// comment for auditability. Note the gate answer is *not* durable in the feed
+// (`service.answer_gate` posts no comment), so the auto-tick reader
+// `dispatch._resolve_impediment` queries `kanban_gates` directly — that gap is
+// what made a gate-only resolve vanish before kaart c3419f63. This is the
+// consolidated "impediment resolved" + "decision human answered needed" control
+// (kaart 4279448c).
 function ResolveImpedimentControl({
   card,
   activity,
