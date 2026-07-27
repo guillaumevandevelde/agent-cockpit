@@ -1374,14 +1374,17 @@ export function CardDrawer({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         className={cn(
-          // MODAL_SIZES.LG ships with `overflow-y-auto`; the body below owns
+          // MODAL_SIZES.XL ships with `overflow-y-auto`; the body below owns
           // scrolling, so the modal itself clips with `overflow-hidden` and
           // `cn` (twMerge) ensures that wins over the constant's `overflow-y-auto`.
           // The `flex flex-col` switch replaces the default `grid` so a
           // single flex child (the body) can take the remaining vertical
-          // space below the sticky DialogHeader.
-          MODAL_SIZES.LG,
-          "h-[80vh] flex flex-col overflow-hidden",
+          // space below the sticky DialogHeader. `h-[85vh]` lifts the
+          // drawer above the previous 80vh so a tall tab body (Run transcript,
+          // Ledger files table) gets more usable height on big monitors
+          // (kanban card b4985b42…: kaarten niet overzichtelijk).
+          MODAL_SIZES.XL,
+          "h-[85vh] flex flex-col overflow-hidden",
         )}
       >
         <DialogHeader className="shrink-0">
@@ -1595,14 +1598,16 @@ export function CardDrawer({
               </TabsContent>
             )}
           </Tabs>
-        ) : (
-          /* Default mode: the single scroll container. `flex-1 min-h-0`
-             lets it shrink to the remaining vertical space inside the
-             flex-column modal; `space-y-4` preserves the visual gap
-             between content sections; children must not declare their
-             own height-cap + overflow (the nested scroll containers
-             removed in this card lived in CardRunTab, CardLedgerTab, and
-             MarkdownPreviewToggle). */
+) : (
+          /* Default mode: a single scroll container so the operator scrolls
+             description → spec → subtasks → action buttons, and the TabsList
+             stays sticky at the top of that body — it remains reachable
+             without scrolling all the way back up past the description, while
+             the active tab content scrolls inline with the rest (one
+             scrollbar, no nested scroll containers). Children must not
+             declare their own height-cap + overflow (the nested scroll
+             containers removed earlier lived in CardRunTab, CardLedgerTab,
+             and MarkdownPreviewToggle). */
           <div
             className="flex-1 min-h-0 space-y-4 overflow-auto"
             data-testid="card-drawer-body"
@@ -1685,20 +1690,29 @@ export function CardDrawer({
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList>
-                <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
-                <TabsTrigger value="screenshots">
-                  Screenshots
-                  {(card.attachments?.length ?? 0) > 0
-                    ? ` (${card.attachments?.length})`
-                    : ""}
-                </TabsTrigger>
-                <TabsTrigger value="activity">Activity</TabsTrigger>
-                <TabsTrigger value="plan">Plan</TabsTrigger>
-                <TabsTrigger value="ledger">Ledger</TabsTrigger>
-                <TabsTrigger value="tokens">Tokens</TabsTrigger>
-                {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
-              </TabsList>
+              {/* Sticky TabsList so an operator scrolling past the description
+                  can still switch tabs without scrolling back up. The bar
+                  pulls a translucent backdrop so the description fading past
+                  stays legible (preferred over an opaque strip that would
+                  punch a hard line through the markdown). `-mx-1 px-1`
+                  matches the body's `space-y-4` gutters so the sticky strip
+                  aligns with the surrounding content edges. */}
+              <div className="sticky top-0 z-10 -mx-1 mb-1 bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                <TabsList className="flex w-full flex-wrap">
+                  <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
+                  <TabsTrigger value="screenshots">
+                    Screenshots
+                    {(card.attachments?.length ?? 0) > 0
+                      ? ` (${card.attachments?.length})`
+                      : ""}
+                  </TabsTrigger>
+                  <TabsTrigger value="activity">Activity</TabsTrigger>
+                  <TabsTrigger value="plan">Plan</TabsTrigger>
+                  <TabsTrigger value="ledger">Ledger</TabsTrigger>
+                  <TabsTrigger value="tokens">Tokens</TabsTrigger>
+                  {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
+                </TabsList>
+              </div>
 
               <TabsContent value="deliverables">
                 {card.deliverables.length === 0 && (

@@ -276,7 +276,9 @@ export function CardItem({
       data-card-id={card.id}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="font-medium text-sm">{card.title}</div>
+        <div className="min-w-0 flex-1 font-medium text-sm leading-snug line-clamp-2">
+          {card.title}
+        </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
           {isDone && (
             <Badge
