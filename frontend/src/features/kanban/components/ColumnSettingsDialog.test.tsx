@@ -368,15 +368,25 @@ describe("ColumnSettingsDialog session limit (pause)", () => {
   });
 });
 
-// --- modal width ---------------------------------------------------------
+// --- edit row layout -----------------------------------------------------
 //
 // Regression guard for kanban card a6316dba…: the edit row packs agent +
-// provider + model + max-sessions controls + token-saver checkbox + Save/
-// Cancel, which overflows the previous MD width once the token-saver toggle
-// landed. The dialog now uses LG (max-w-4xl). Pinning the dialog's rendered
-// className catches a future revert back to MD.
-describe("ColumnSettingsDialog modal width", () => {
-  it("renders the dialog content with the LG (max-w-4xl) width", () => {
+// provider + model + max-sessions + token-saver + Save/Cancel. The row's
+// natural width (~1220px) exceeds LG's 828px usable width, so without a
+// graceful overflow strategy the row was squished into oblivion (agent
+// dropdown rendered at 60px of its 192px request, provider at 109px of
+// 160px, "Token saver (RTK) — reduces Bash output" broke over 3 lines).
+//
+// The first attempt at this card moved MD → LG (128px wider dialog) and
+// shipped a regression test that pinned only the modal-width *constant*
+// (`max-w-4xl` present, `max-w-3xl` absent). That guard passed while the
+// bug was still there — the const-revert path was the only failure mode
+// it caught. The product-effect fix is `flex-wrap` + `shrink-0` on every
+// fixed-width control so the row wraps to a second line instead of being
+// crushed. This test pins that design, not the width constant, so a
+// future revert that removes wrap+shrink-0 still fails the build.
+describe("ColumnSettingsDialog edit row layout", () => {
+  it("wraps controls and prevents squishing on narrow widths", async () => {
     render(
       <ColumnSettingsDialog
         open
@@ -387,16 +397,33 @@ describe("ColumnSettingsDialog modal width", () => {
         onChanged={() => {}}
       />,
     );
-    // Radix DialogContent renders the merged className on a single element
-    // ("fixed left-[50%] … max-w-4xl …"). Find it by concatenating the
-    // rendered classNames across the document — the dialog content is the
-    // only node that exposes MODAL_SIZES.LG's classes.
-    const allClasses = Array.from(document.querySelectorAll("*"))
-      .map((el) => el.className)
-      .filter((c): c is string => typeof c === "string")
-      .join(" ");
-    expect(allClasses).toContain("max-w-4xl");
-    expect(allClasses).not.toContain("max-w-3xl");
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+
+    // The row container must wrap — without flex-wrap the controls stay
+    // on one line and get crushed down to min-content. data-testid hooks
+    // ride alongside the visual fix so this guard survives a future
+    // className rename that keeps the look broken.
+    const row = screen.getByTestId("column-row");
+    expect(row.className).toContain("flex-wrap");
+    expect(row.className).toContain("items-center");
+
+    // Each fixed-width control must opt out of shrinking. A bug that
+    // drops shrink-0 from any of these puts that control back into the
+    // crushed state (60px agent / 109px provider / 3-line label).
+    const agentTrigger = screen.getByTestId("column-row-agent-trigger");
+    expect(agentTrigger.className).toContain("shrink-0");
+    expect(agentTrigger.className).toContain("w-48");
+
+    const providerTrigger = screen.getByTestId("column-row-provider-trigger");
+    expect(providerTrigger.className).toContain("shrink-0");
+    expect(providerTrigger.className).toContain("w-40");
+
+    // The token-saver label must keep its content on one logical piece
+    // — without shrink-0 the parent flex crushed the "—" hint and
+    // "Bash output" broke mid-word across three lines.
+    const tokenSaverLabel = screen.getByTestId("column-row-token-saver");
+    expect(tokenSaverLabel.className).toContain("shrink-0");
+    expect(tokenSaverLabel.className).toContain("whitespace-nowrap");
   });
 });
 
