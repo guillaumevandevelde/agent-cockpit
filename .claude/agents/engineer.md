@@ -240,6 +240,11 @@ altijd door.
    > - De implementatie integreert zonder siblings te breken.
    > - Het deliverable dat in de samenvatting geclaimd wordt, is
    >   daadwerkelijk aanwezig.
+   > - Wanneer de kaart een auto-recovery in een error-handler
+   >   beschrijft: verify dat de recovery in het uitvoeringspad zit
+   >   (dezelfde `if`-blok als de fout-detectie), niet als prose of
+   >   commentaar ná een `exit 1` (kanban-kaart `efb8187b…` /
+   >   `c06a3a2a…`; conventie: `docs/cockpit/recipe-writing-conventions.md`).
    >
    > Output: OK om te shippen, OF een lijst met blokkerende issues met
    > `file:line`-refs. Dit is een **feature-compliance-check**, geen

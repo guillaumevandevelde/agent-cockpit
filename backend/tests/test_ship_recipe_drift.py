@@ -348,3 +348,166 @@ def test_pull_request_mode_is_explicitly_out_of_scope() -> None:
             f"invariants list contains PR-mode primitive {primitive!r} — "
             f"this drift detector is scoped to direct mode only"
         )
+
+
+# Carve-out recovery markers for the positional invariant. The carve-out is
+# the auto-recovery path that fires when the merge hits a conflict in exactly
+# the two generated-doc files; it must live *inside* the merge-handler
+# ``if``-block, not as prose below an unconditional ``exit 1`` (the exact
+# failure mode of kanban-kaart ``efb8187b…`` / ``c06a3a2a…``). The opening
+# marker is the first concrete recovery command — the script MUST be invoked
+# through the worktree path, so the carve-out starts with the `--theirs`
+# checkout that clears merge markers. The closing marker is the commit that
+# finalises the merge result.
+CARVE_OUT_OPEN = 'git -C "$WT" checkout --theirs -- docs/cockpit/README.md docs/cockpit/llms.txt'
+CARVE_OUT_CLOSE = 'git -C "$WT" commit --no-edit'
+MERGE_HANDLER = "merge --no-ff"
+PUSH_HANDLER = "push origin HEAD:master"
+
+
+def _line_indent(line: str) -> int:
+    """Return the leading-whitespace count of ``line``. Used to detect an
+    unconditional ``exit 1`` (same indent as the merge handler) vs. a
+    legitimate nested exit (deeper indent, inside a sub-``if``)."""
+    return len(line) - len(line.lstrip())
+
+
+def _carve_out_is_in_recovery_path(source_text: str) -> tuple[bool, str]:
+    """Return ``(ok, reason)``: whether the carve-out lives in the executable
+    recovery path between ``merge --no-ff`` and ``push origin HEAD:master``,
+    and not as unreachable prose below the merge-handler's closing ``fi``.
+
+    Walks the source line-by-line between the merge-handler line and the
+    push-handler line, and checks:
+
+    1. The carve-out opens (``CARVE_OUT_OPEN``) somewhere inside that span.
+    2. No ``fi`` at the merge-handler's indent level appears *before* the
+       carve-out opening — such a ``fi`` closes the merge-handler ``if``-
+       block, leaving the carve-out as unreachable prose below the handler
+       (the exact failure mode of kanban-kaart ``efb8187b…``). Nested
+       ``fi`` lines (deeper indent) are legitimate: they close the
+       carve-out-rejected branch (``if [ "$CONFLICTED" != "$EXPECTED" ]``)
+       and the strict-check guard (``if ! --check --strict``).
+
+    The check is intentionally *positional*, complementing the
+    substring-presence invariants in ``CORE_RECIPE_INVARIANTS``: those pin
+    *what* must appear in each mirror, this one pins *where* the carve-out
+    must sit for it to actually fire in the conflict scenario.
+    """
+    merge_idx = source_text.find(MERGE_HANDLER)
+    carve_open_idx = source_text.find(CARVE_OUT_OPEN)
+    carve_close_idx = source_text.find(CARVE_OUT_CLOSE)
+    push_idx = source_text.find(PUSH_HANDLER)
+    if merge_idx == -1 or carve_open_idx == -1 or push_idx == -1:
+        return False, (
+            f"missing one of: merge_idx={merge_idx}, "
+            f"carve_open_idx={carve_open_idx}, push_idx={push_idx}"
+        )
+    if not (merge_idx < carve_open_idx < push_idx):
+        return False, (
+            f"carve-out is NOT between merge --no-ff ({merge_idx}) and "
+            f"push origin HEAD:master ({push_idx}); found at {carve_open_idx}"
+        )
+
+    # Determine the merge-handler line's indent so we can spot a ``fi``
+    # that closes the merge-handler ``if``-block prematurely.
+    merge_line_start = source_text.rfind("\n", 0, merge_idx) + 1
+    merge_line_end = source_text.find("\n", merge_idx)
+    merge_line = source_text[merge_line_start:merge_line_end]
+    merge_indent = _line_indent(merge_line)
+
+    # Walk lines between the merge-handler and the carve-out opening,
+    # flagging any ``fi`` at the merge-handler's indent (which would close
+    # the ``if``-block before the carve-out runs).
+    before_carve = source_text[merge_line_start:carve_open_idx]
+    for raw_line in before_carve.split("\n"):
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if MERGE_HANDLER in stripped:
+            continue
+        line_indent = _line_indent(raw_line)
+        if stripped == "fi" and line_indent == merge_indent:
+            return False, (
+                f"`fi` at merge-handler indent {merge_indent} found BEFORE "
+                f"the carve-out opening — the if-block closes prematurely "
+                f"and the recovery is unreachable as prose below "
+                f"(kanban-kaart `c06a3a2a…`/`efb8187b…`). "
+                f"Offending line at indent {line_indent}: {stripped!r}"
+            )
+
+    # Sanity: the carve-out close (``commit --no-edit``) must also be inside
+    # the merge→push span, otherwise the recovery block is broken.
+    if carve_close_idx == -1 or not (merge_idx < carve_close_idx < push_idx):
+        return False, (
+            f"carve-out close ({CARVE_OUT_CLOSE!r}) is NOT between merge "
+            f"and push (found at {carve_close_idx})"
+        )
+    return True, ""
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_carve_out_substring_in_recovery_path(source_name: str) -> None:
+    """The carve-out must live in the executable recovery path, not in prose.
+
+    Pins the position-based invariant from kanban-kaart ``c06a3a2a…`` /
+    ``efb8187b…``: the ``docs/cockpit/README.md`` + ``docs/cockpit/llms.txt``
+    recovery (``checkout --theirs`` → regenerate → ``--check --strict`` →
+    ``add -A`` → ``commit --no-edit``) must physically sit inside the
+    ``if ! git -C "$WT" merge --no-ff …; then … fi`` block, between
+    ``merge --no-ff`` and ``push origin HEAD:master``. An unconditional
+    ``exit 1`` (same indent as the merge handler) anywhere before the
+    carve-out opening makes the recovery unreachable in exactly the
+    scenario it was meant to handle — the original bug shipped because the
+    22 substring-presence drift tests in ``CORE_RECIPE_INVARIANTS`` only
+    verified presence, not structural reachability.
+
+    This test complements the parametrised substring-presence test:
+    presence says "the recovery is *somewhere* in the mirror"; this test
+    says "the recovery is in the executable path". A future edit that
+    demotes the carve-out to a comment below the merge handler (the
+    ``efb8187b…`` regression) trips this test on the next CI run, with a
+    failure message naming the offending line.
+    """
+    source_text = SOURCES[source_name]()
+    ok, reason = _carve_out_is_in_recovery_path(source_text)
+    assert ok, (
+        f"{source_name}: carve-out not in recovery path — {reason}"
+    )
+
+
+def test_carve_out_in_recovery_path_detects_unconditional_exit() -> None:
+    """Demonstrate the positional invariant catches the original bug shape.
+
+    Builds a fake mirror that reproduces the ``efb8187b…`` regression:
+    the merge handler exits unconditionally, and the carve-out lives as
+    prose *below* the ``exit 1``. The structural check must flag this.
+    If this test ever stops failing-on-purpose, the positional invariant
+    has rotted (e.g. the indent comparison shrank to no-op) — pin it down
+    with a live negative case so the contract is enforced, not assumed.
+    """
+    fake_mirror_with_bug = (
+        f'git worktree add --detach "$WT" origin/master\n'
+        f'if ! git -C "$WT" {MERGE_HANDLER} "$BRANCH" -m "Merge $BRANCH"; then\n'
+        f'  echo "ERROR: merge conflict" >&2\n'
+        f'  exit 1\n'
+        f'fi\n'
+        f'# NOTE: if conflict is exactly the two generated files, the\n'
+        f'# recovery is: `git checkout --theirs -- README.md llms.txt`,\n'
+        f'# regenerate, strict-check, add -A, commit --no-edit.\n'
+        f'{CARVE_OUT_OPEN}\n'
+        f'"$WT"/scripts/generate-doc-index.py\n'
+        f'{CARVE_OUT_CLOSE}\n'
+        f'git -C "$WT" {PUSH_HANDLER}\n'
+        f'git worktree remove --force "$WT"\n'
+    )
+    ok, reason = _carve_out_is_in_recovery_path(fake_mirror_with_bug)
+    assert not ok, (
+        f"structural check did NOT flag the efb8187b…-shaped fake mirror; "
+        f"reason={reason!r}. The positional invariant has rotted — a "
+        f"future regression would no longer trip CI."
+    )
+    assert "fi" in reason and "prematurely" in reason, (
+        f"unexpected failure reason for the fake mirror: {reason!r}; "
+        f"expected a premature-`fi` diagnosis."
+    )
