@@ -210,6 +210,12 @@ retro** (invoke the `session-retro` skill — read
 `.claude/skills/session-retro/SKILL.md` for the full procedure: reflect → dedupe → file
 0–N `[self-improve]` cards → `comment` on this host card), and finally `move_card` to
 `Done` with a `summary` of the work you did (required — the move is rejected without it).
+**Product-taal** (conventie §5 van `docs/cockpit/kanban-conventions.md`, kaart
+`4358fe0a…`): leid met één zin *productbetekenis* (wat kan de product owner nu doen /
+zien / beslissen dat voorheen niet kon), zet de engineering-detail (bestanden, endpoints,
+tests) erna. Een kale engineering-summary voldoet aan de gate maar niet aan de
+product-taal-conventie. Voor een `report_impediment` met `options`: druk de opties uit
+als **producttrade-offs**, niet als implementatie-forks.
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
 
@@ -282,7 +288,11 @@ If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), **run the sessio
 (invoke the `session-retro` skill — read `.claude/skills/session-retro/SKILL.md` for the
 full procedure: reflect → dedupe → file 0–N `[self-improve]` cards → `comment` on this host
 card), and finally `move_card` to `Done` with a `summary` of the work you did (required —
-the move is rejected without it).
+the move is rejected without it). **Product-taal** (conventie §5 van
+`docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…`): leid met één zin
+*productbetekenis*, zet de engineering-detail erna. Een kale engineering-summary voldoet
+aan de gate maar niet aan de product-taal-conventie. Voor een `report_impediment` met
+`options`: druk de opties uit als **producttrade-offs**, niet als implementatie-forks.
 
 If the loop exited because a check failed, the PR was closed, or the wait timed
 out: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `report_impediment`
@@ -324,4 +334,8 @@ when leftovers exist.
   and `move_card → Done` so self-improvement lessons land on the Backlog, not in
   the void of a closed transcript.
 - `move_card` into `Done` or `Impediment` requires `summary` — the server rejects the
-  move without it (`report_impediment` already supplies one via its `question` arg).
+  move without it (`report_impediment` already supplies one via its `question` arg). The
+  `summary` itself is bound by the product-taal-conventie (§5 van
+  `docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…`): leid met één zin
+  *productbetekenis*, zet de engineering-detail erna; voor impediment-options: druk
+  *producttrade-offs* uit, niet als implementatie-forks.
