@@ -655,41 +655,61 @@ const IMPEDIMENT_PREFIX = "**Impediment:** ";
 
 // Unified control shown when a card sits in the Impediment column. An agent
 // that got stuck posted an `**Impediment:**` question and released its claim;
-// this lets a human resolve the card via either:
+// this lets a human resolve the card with a single click. The control absorbs
+// all three affordances into ONE panel so the operator never sees a separate
+// open-gate block above it:
 //
-//   1. A previously-answered structured gate (`report_impediment(options=...)`)
-//      — the recorded choice is shown as read-only context, and the textarea
-//      stays so the human can add extra information before clicking Resolve.
-//   2. A free-text answer in the textarea — the answer is posted as a durable
-//      `**Resolution:**` comment and injected into the resumed session's
-//      `## IMPEDIMENT` prompt section (backend /resolve-impediment).
+//   1. Structured options (when `report_impediment(options=[…])` was used) —
+//      rendered as a row of up to 4 buttons inside the control. Agent-supplied
+//      options come first (capped at the first 3 to make room for the Other
+//      filler when ≥4), and any remaining slots are filled by an explicit
+//      "Other (use the text below)" button that selects the textarea as the
+//      source of the answer. The cap of 4 addresses the Revisit note's
+//      complaint about "toevallig 2, 3 of 5" buttons (kaart 4279448c revisit).
+//   2. A previously-answered structured gate — the recorded choice is shown
+//      as read-only context inside the same panel, and the textarea stays so
+//      the human can add extra information before clicking Resolve.
+//   3. A free-text answer in the textarea (always visible) — the answer is
+//      posted as a durable `**Resolution:**` comment and injected into the
+//      resumed session's `## IMPEDIMENT` prompt section.
 //
-// Both paths converge on the same `kanbanApi.resolveImpediment` call. When both
-// a gate answer and textarea content are present, the backend carries BOTH into
-// the resumed session's `## IMPEDIMENT` section — the gate pick labelled as the
-// decision ("Chosen option: …"), the typed text as supporting context
-// ("Additional context: …") — via `dispatch.compose_impediment_answer`. The
-// textarea content also lands on the activity feed as a `**Resolution:**`
-// comment for auditability. Note the gate answer is *not* durable in the feed
-// (`service.answer_gate` posts no comment), so the auto-tick reader
-// `dispatch._resolve_impediment` queries `kanban_gates` directly — that gap is
-// what made a gate-only resolve vanish before kaart c3419f63. This is the
-// consolidated "impediment resolved" + "decision human answered needed" control
-// (kaart 4279448c).
+// Three paths, ONE control, ONE Resolve click. When both a structured pick
+// AND free-text are present, the backend merges them through
+// `dispatch.compose_impediment_answer`: the gate pick is the authoritative
+// decision and the typed text becomes supporting context in the resumed
+// session's `## IMPEDIMENT` block. (kaart 4279448c + revisit: the panel must
+// always show ≤4 buttons, a textarea, and a single Resolve click — never two
+// stacked panels and never a click that "meteen doorgaat, zonder plek voor
+// extra info".)
+const MAX_CHOICE_BUTTONS = 4;
+const OTHER_OPTION_FILLER = "Other — use the text below";
+
 function ResolveImpedimentControl({
   card,
   activity,
+  openGate,
   latestAnsweredGate,
   projectPath,
   onChanged,
 }: {
   card: Card;
   activity: ActivityEntry[];
+  // The first open gate on this card, if any. Passed in (rather than
+  // fetched inside the control) so the parent controls the polling cadence
+  // and so non-Impediment columns can render the same control with no gate.
+  openGate: Gate | null;
+  // Latest answered gate, if any — shown as read-only "Choice recorded"
+  // context when the open gate has already been answered.
   latestAnsweredGate: Gate | null;
   projectPath: string;
   onChanged: () => void;
 }) {
   const [answer, setAnswer] = useState("");
+  // Local selection for the structured-options row. `null` = nothing picked
+  // yet; one of the rendered button labels once the operator clicks. The
+  // `__other__` sentinel represents the explicit "Other — use the text below"
+  // filler button (clicked → operator is expected to type in the textarea).
+  const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Surface the agent's question (latest `**Impediment:**` comment) so the
@@ -706,9 +726,41 @@ function ResolveImpedimentControl({
     ? (question.payload.text as string).slice(IMPEDIMENT_PREFIX.length)
     : null;
 
+  // Cap the visible choice row at MAX_CHOICE_BUTTONS = 4: when the agent
+  // supplied fewer than that, the last slot is the Other filler; when more,
+  // only the first 3 agent options + Other render. With 0 agent options no
+  // choice row renders (just the textarea + Resolve).
+  const choiceButtons: Array<{ key: string; label: string }> = openGate
+    ? (() => {
+        const opts = openGate.options.slice(0, MAX_CHOICE_BUTTONS - 1);
+        const rendered = opts.map((label) => ({ key: label, label }));
+        if (rendered.length < MAX_CHOICE_BUTTONS) {
+          rendered.push({ key: "__other__", label: OTHER_OPTION_FILLER });
+        }
+        return rendered;
+      })()
+    : [];
+
   const submit = async () => {
+    if (submitting) return;
     setSubmitting(true);
     try {
+      // When the operator picked a structured option (and a gate is still
+      // open) the unified control answers the gate first, then resolves the
+      // impediment. The two calls together are a single user action — the
+      // operator only ever sees ONE Resolve click. The backend's
+      // `compose_impediment_answer` merges both into the resumed session's
+      // `## IMPEDIMENT` block (decision from the gate, context from the
+      // textarea).
+      if (openGate && selectedOption) {
+        try {
+          await kanbanApi.answerGate(openGate.id, selectedOption);
+        } catch {
+          toast.error("Failed to submit gate answer");
+          setSubmitting(false);
+          return;
+        }
+      }
       await kanbanApi.resolveImpediment(
         card.id,
         projectPath,
@@ -719,6 +771,7 @@ function ResolveImpedimentControl({
       // already running. See kaart af951ad70... (resolve-impediment → Backlog).
       toast.success("Impediment resolved — card moved to Backlog; auto-dispatch will pick it up");
       setAnswer("");
+      setSelectedOption(null);
       onChanged();
     } catch {
       toast.error("Failed to resolve impediment");
@@ -732,6 +785,7 @@ function ResolveImpedimentControl({
   // the operator's "extra info" slot. When no gate exists, the textarea is
   // the only source of the answer.
   const hasGateAnswer = latestAnsweredGate != null;
+  const hasChoiceRow = choiceButtons.length > 0;
 
   return (
     <div
@@ -762,13 +816,55 @@ function ResolveImpedimentControl({
           </div>
         </div>
       )}
+      {hasChoiceRow && (
+        <div
+          className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
+          data-testid="impediment-choice-row"
+        >
+          {choiceButtons.map((b) => {
+            const isSelected = selectedOption === b.label;
+            return (
+              <Button
+                key={b.key}
+                size="sm"
+                variant={isSelected ? "default" : "outline"}
+                disabled={submitting}
+                onClick={() => setSelectedOption(b.label)}
+                data-testid={
+                  b.key === "__other__"
+                    ? "impediment-choice-other"
+                    : "impediment-choice-option"
+                }
+                data-choice-key={b.key}
+              >
+                {b.label}
+              </Button>
+            );
+          })}
+        </div>
+      )}
       <Textarea
         value={answer}
-        onChange={(e) => setAnswer(e.target.value)}
+        onChange={(e) => {
+          setAnswer(e.target.value);
+          // Typing in the textarea implicitly routes the pick to "Other"
+          // (the textarea is the only place that can carry the actual answer
+          // for a free-form response). The operator can still manually click
+          // a structured option afterwards to override.
+          if (
+            e.target.value.length > 0 &&
+            selectedOption === null &&
+            hasChoiceRow
+          ) {
+            setSelectedOption(OTHER_OPTION_FILLER);
+          }
+        }}
         placeholder={
           hasGateAnswer
             ? "Optional: add extra context for the resumed session."
-            : "Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
+            : hasChoiceRow
+              ? "Optional: add extra info, or pick 'Other' above and type here."
+              : "Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
         }
         disabled={submitting}
         data-testid="resolve-impediment-answer"
@@ -1324,36 +1420,42 @@ export function CardDrawer({
             tab). Decisions + Done summary are never hidden behind a
             widget. */}
         <div className="shrink-0 space-y-3">
-          {openGates.map((gate) => (
-            <div
-              key={gate.id}
-              className="rounded-md border-2 border-primary/50 bg-primary/5 p-3 text-sm"
-            >
-              <div className="mb-2 text-xs font-semibold uppercase text-primary">
-                {card.column === IMPEDIMENT_COLUMN
-                  ? "Decision needed — pick one to unblock"
-                  : "Decision requested"}
+          {openGates
+            // On the Impediment column the open-gate choice row is absorbed
+            // into <ResolveImpedimentControl> below — never render the
+            // separate "Decision needed — pick one to unblock" panel for
+            // those cards, that was the "twee panelen boven elkaar" the
+            // Revisit note called out (kaart 4279448c revisit).
+            .filter(() => card.column !== IMPEDIMENT_COLUMN)
+            .map((gate) => (
+              <div
+                key={gate.id}
+                className="rounded-md border-2 border-primary/50 bg-primary/5 p-3 text-sm"
+              >
+                <div className="mb-2 text-xs font-semibold uppercase text-primary">
+                  Decision requested
+                </div>
+                <MarkdownRenderer content={gate.question} />
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {gate.options.map((option) => (
+                    <Button
+                      key={option}
+                      size="sm"
+                      disabled={answering === gate.id}
+                      onClick={() => answerGate(gate, option)}
+                    >
+                      {option}
+                    </Button>
+                  ))}
+                </div>
               </div>
-              <MarkdownRenderer content={gate.question} />
-              <div className="mt-3 flex flex-wrap gap-2">
-                {gate.options.map((option) => (
-                  <Button
-                    key={option}
-                    size="sm"
-                    disabled={answering === gate.id}
-                    onClick={() => answerGate(gate, option)}
-                  >
-                    {option}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          ))}
+            ))}
 
           {card.column === IMPEDIMENT_COLUMN && (
             <ResolveImpedimentControl
               card={card}
               activity={activity}
+              openGate={openGates[0] ?? null}
               latestAnsweredGate={latestAnsweredGate}
               projectPath={projectPath}
               onChanged={onChanged}
