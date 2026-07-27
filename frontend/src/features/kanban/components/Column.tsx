@@ -68,7 +68,7 @@ export function Column({
 
   return (
     <div
-      className={`flex-1 min-w-56 bg-muted/40 rounded-lg p-2 transition-colors flex flex-col min-h-0 ${
+      className={`flex-1 min-w-64 bg-muted/40 rounded-lg p-2 transition-colors flex flex-col min-h-0 ${
         dragOver ? "ring-2 ring-primary/50" : ""
       }`}
       onDragOver={(e) => {
