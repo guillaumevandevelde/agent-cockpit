@@ -1,6 +1,6 @@
 ---
 name: iteration-loop
-description: Use when running a structured repeat-until-clean loop with a named preset — `verify` (test + lint + build), `simplify` (code-review effort=low), `investigate` (read-only sweep), `flag-cycle` (drain flag-problem findings), `pytest-attr` (attribute pytest failures to engineer vs pre-existing on master), or `bash-test-attr` (attribute bash-test failures the same way for `scripts/test_*.sh`). Emits `<loop-complete>` when clean and `<loop-blocked>` when stuck; tracks each iteration in `.claude/state/iteration-<card-id>.txt` and posts a summary to the host kanban card.
+description: Use when running a structured repeat-until-clean loop with a named preset — `verify` (test + lint + build), `simplify` (code-review effort=low), `investigate` (read-only sweep), `flag-cycle` (drain flag-problem findings), `pytest-attr` (attribute pytest failures to engineer vs pre-existing on master), `bash-test-attr` (attribute bash-test failures the same way for `scripts/test_*.sh`), or `ruff-attr` (attribute `ruff check` hits the same way for `backend/app`+`backend/tests`). Emits `<loop-complete>` when clean and `<loop-blocked>` when stuck; tracks each iteration in `.claude/state/iteration-<card-id>.txt` and posts a summary to the host kanban card.
 ---
 
 # iteration-loop
@@ -230,6 +230,58 @@ particular `investigate` → `flag-cycle` is a common two-pass.
 - **Default iteration cap:** 3 — usually one pass is enough; the
   baseline is cached, so re-running is cheap.
 
+### `ruff-attr` — attribute ruff hits to engineer vs pre-existing
+
+- **Use when:** an engineer card touches `backend/app` or `backend/tests`
+  and the engineer wants to know "is this `ruff check` hit mine or one of
+  the N pre-existing hits on `origin/master`?" without running
+  `git stash -u && ruff && git stash pop` four extra times per session
+  (the pain that motivated kanban card 070911ee for the original 31-hit
+  cleanup, and 7678afc4… for the tooling that prevents the next incident).
+  Pairs with `scripts/ruff-baseline.sh` (one-shot baseline capture) and
+  `scripts/ruff-compare.sh` (current-vs-baseline attribution).
+- **Runs:**
+  1. If `.claude/state/ruff-baseline.txt` is missing or older than
+     `--max-age-hours` (env `RUFF_BASELINE_MAX_AGE_HOURS`, default 24),
+     run `scripts/ruff-baseline.sh` to refresh it on a clean detached
+     worktree of `origin/master`. No-op if a fresh cache already exists.
+  2. Run `scripts/ruff-compare.sh` to capture the current hit set and
+     classify each line as `pre-existing`, `NEW (your fault)`, or
+     `FIXED by your changes`. The comparator runs `ruff check
+     --output-format=concise app tests` so each hit becomes one stable
+     `<file>:<line>:<col>: <CODE> <msg>` line that survives the
+     `comm`-based diff.
+- **Worktree sessions (no local venv):** both scripts resolve ruff via
+  the same worktree-local → shared main-checkout venv → PATH fallback
+  chain as `scripts/pytest-baseline.sh` (the `scripts/lib/resolve-ruff-cmd.sh`
+  sibling), so no `RUFF_CMD=` override is needed even in a fresh
+  worktree. Same caveat as `pytest-attr` re. the shared-box rationale
+  that `ruff` is normally not run locally — this preset exists for
+  engineers who *choose* to debug their backend changes with a local
+  ruff run; CI's `quality.yml` is still the canonical backend gate.
+- **Clean when:** `ruff-compare.sh` exits 0 — every current hit is also
+  in the baseline (no new hits). Pre-existing + FIXED-only diffs are
+  fine; the loop's job is "did this card add any new reds?", not "is
+  master 100% green?".
+- **"Pre-existing" ≠ "passing".** `ruff-compare.sh` classifying a hit as
+  "pre-existing (not your fault)" means the same `<file>:<line>:<col>:`
+  line is already produced on `origin/master` — it does **not** mean
+  ruff passes. Read the actual hit before writing it off as
+  environmental.
+- **Blocked when:** `ruff-compare.sh` exits 1 — at least one `NEW` hit.
+  The attribution output is what the engineer triages; the loop emits
+  `<loop-blocked>` and the engineer fixes the named lines.
+- **Caveat — when NOT to use:** this preset does not run pytest or the
+  bash tests. For a backend-only card with no other lint/test surface,
+  it is the standard end-of-card attribution gate. For a card that
+  touches frontend code, use `verify` for frontend lint/build; for a
+  card that touches `scripts/`, use `bash-test-attr`; for a card that
+  also touches `backend/tests`, use `pytest-attr` for pytest
+  attribution. These checks are complementary when a card spans
+  multiple surfaces.
+- **Default iteration cap:** 3 — usually one pass is enough; the
+  baseline is cached, so re-running is cheap.
+
 ## Per-iteration protocol
 
 ```
@@ -305,6 +357,7 @@ After `<loop-complete>` or `<loop-blocked>`:
 | Work through `[problem]` cards that match this card's scope | `flag-cycle` |
 | Attribute pytest failures to "yours" vs "pre-existing on master" | `pytest-attr` |
 | Attribute bash-test failures (`scripts/test_*.sh`) to "yours" vs "pre-existing on master" | `bash-test-attr` |
+| Attribute `ruff check` hits (`backend/app`+`backend/tests`) to "yours" vs "pre-existing on master" | `ruff-attr` |
 
 If you're not sure, choose by the files touched: use `bash-test-attr` when the card is scripts-only, `verify` when it touches frontend code, and add `pytest-attr` only when explicitly debugging backend pytest failures.
 
