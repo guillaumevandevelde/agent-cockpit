@@ -23,6 +23,15 @@ canonical phrasing lives in three locations that must stay in sync:
      same function's analyst counterpart — the mirror the dispatcher
      inlines into spawned sessions, so dispatched sessions get the same
      reminder as the persona.
+  5. ``.claude/skills/git-ship/SKILL.md`` — the ship-recipe skill that
+     hand-run sessions (i.e. sessions that read the skill rather than
+     receiving the inline dispatch mirror) follow. CLAUDE.md:145-150
+     declares the skill the *source of truth* and the dispatch mirror
+     the copy that must stay in sync. Per kaart ``4358fe0a…``
+     impediment: a future edit to the skill that drops the convention
+     would silently undo the rule for hand-run sessions, and a
+     subsequent re-sync to dispatch.py would propagate the loss
+     outward. The guard has to cover both directions of that drift.
 
 The drift guard ensures all mirrors stay in sync; without it, an edit
 that updates the persona but forgets the dispatch mirror (or vice
@@ -156,6 +165,11 @@ SOURCE_PRODUCT_LANGUAGE_INVARIANTS: dict[str, list[tuple[str, str]]] = {
         COMMON_PRODUCT_LANGUAGE_ANCHORS
         + IMPEDIMENT_OPTIONS_PRODUCT_LANGUAGE_ANCHORS
     ),
+    ".claude/skills/git-ship/SKILL.md": (
+        COMMON_PRODUCT_LANGUAGE_ANCHORS
+        + DONE_SUMMARY_PRODUCT_LANGUAGE_ANCHORS
+        + IMPEDIMENT_OPTIONS_PRODUCT_LANGUAGE_ANCHORS
+    ),
 }
 
 # Flat list kept for the demo negative-case test — picks one anchor
@@ -185,6 +199,20 @@ def _reviewer_md_body() -> str:
 
 def _analyst_prompt_py_body() -> str:
     return (REPO_ROOT / "backend" / "app" / "kanban" / "analyst_prompt.py").read_text(encoding="utf-8")
+
+
+def _git_ship_skill_md_body() -> str:
+    """Return the git-ship skill source-of-truth body.
+
+    Per CLAUDE.md:145-150, ``.claude/skills/git-ship/SKILL.md`` is the
+    *source* the dispatch mirror in ``_build_ship_instructions`` stays in
+    sync with — the inverse of the convention mirror direction used for
+    persona prompts. A hand-run engineer session reading this skill
+    rather than receiving the inlined dispatch mirror gets its
+    Done-summary instruction directly from this file, so the convention
+    has to live here too (kaart ``4358fe0a…`` impediment).
+    """
+    return (REPO_ROOT / ".claude" / "skills" / "git-ship" / "SKILL.md").read_text(encoding="utf-8")
 
 
 def _mcp_move_card_docstring() -> str:
@@ -233,6 +261,7 @@ SOURCES: dict[str, callable[[], str]] = {
     "dispatch._build_ship_instructions('direct')": _dispatch_direct_prompt,
     "dispatch._build_ship_instructions('pull-request')": _dispatch_pull_request_prompt,
     "dispatch._build_analyst_session_end_instructions()": _dispatch_analyst_prompt,
+    ".claude/skills/git-ship/SKILL.md": _git_ship_skill_md_body,
 }
 
 
