@@ -333,6 +333,7 @@ Vijf kind-kaarten, gefaseerd zodat het meetwerk vóór het bouwwerk komt.
 | K3 | Generieke `ninerouter`-provider-entry in `provider_env.py` + pool-allowlist | ✅ Geïmplementeerd (kaart `333af652…` — endpoint-agnostische `anthropic-compatible` provider; data-driven via `endpoints.py` + project-scoped SecretStore lookup) |
 | K4 | Hardening-checklist + doctor-check (savers uit, cloud-sync uit, loopback-only) | hangt af van K3 |
 | K5 | Usage-attributie: eerlijk `betrouwbaarheid="onbekend"` voor router-verkeer | hangt af van K3 |
+| K6 | Endpoint-catalogus — gecureerde seed-lijst van 6 gratis-tier providers | ✅ Geïmplementeerd (kaart `8222fee8…` — `backend/data/free_endpoint_catalog.toml` + `app/services/agentic_cli/free_endpoint_catalog.py` + `/platforms/endpoints-catalog` REST; elke entry draagt `litellm_upstream`-blok + `free_evidence_url` + `free_measured_on`; twee entries end-to-end door LiteLLM-proxy) |
 
 **K1 resultaat (eerste counterbalanced meting, N=2 per trial):**
 `input_tokens` daalt in beide trials (gem. ~45%); `output_tokens` daalt in beide
