@@ -272,6 +272,95 @@ async def test_scoped_to_project_key():
 
 
 @pytest.mark.asyncio
+async def test_review_done_disappears_from_queue():
+    """A review card that has been moved to Done is NOT waiting on the human
+    anymore — the analyst reviewed it and closed the loop. The wachtrij's
+    promise is an *eindige* lijst of what is still waiting, so a closed
+    review must drop out without the human having to remove it manually
+    (the ``metadata.reviewed_card_id`` field is never cleared by design — the
+    card disappearing from the queue is the only signal the review finished).
+
+    Regression for the bug the previous agent flagged on this card: review
+    items stuck in the wachtrij forever because the predicate never scoped by
+    column.
+    """
+    async with KanbanSessionLocal() as s:
+        original_id = await _make_done_card(s, title="shipped thing")
+        review_card = await service.request_review(
+            s, original_id, "Edge case looks fishy to me.",
+        )
+        review_id = review_card.id
+        # Analyst finishes the review and closes the card.
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="", entity_id=review_id,
+            payload={"column": "Done"})
+        await _post_comment(s, review_id, "**Summary:** checked, fine.")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        items = await service.po_wachtrij(s, "PO")
+
+    assert items == [], (
+        f"review card on Done must drop out of the wachtrij; got {items!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_child_in_done_not_in_queue():
+    """A child card (has ``parent_card_id``, no ``plan_ref`` deliverable) that
+    has been moved to Done is NOT waiting on a human. Same shape as the review
+    bug: a closed card must drop out. The plan_ref gate only matters for cards
+    still on the board; once Done, the analyst's plan_ref never had to land for
+    the card to complete (the analyst may have wired the work via a different
+    code path — or the parent was abandoned and the child finished standalone).
+
+    Regression for the bug the previous agent flagged: ``_awaiting_plan_ref``
+    scoped unscoped by column made the wachtrij show finished-but-unreviewed
+    cards in the queue forever.
+    """
+    async with KanbanSessionLocal() as s:
+        parent_id = await _make_card(s, title="parent spike")
+        child_id = await _make_card(s, title="child finishes standalone",
+                                    parent_card_id=parent_id)
+        # Move the child to Done without ever attaching a plan_ref.
+        await apply_operation(s, op_type="move", entity_type="card",
+            project_key="", entity_id=child_id, payload={"column": "Done"})
+        await _post_comment(s, child_id, "**Summary:** shipped without plan.")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        items = await service.po_wachtrij(s, "PO")
+
+    assert items == [], (
+        f"child on Done must not appear in awaiting_plan_ref; got {items!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_child_in_agent_column_not_in_queue():
+    """A child card sitting in an *agent* column (i.e. not in ``schemas.COLUMNS``
+    — the dispatcher has claimed it) is not waiting on a human. The
+    ``_awaiting_plan_ref`` gate's race applies only to the phase between the
+    analyst's create_card and add_plan_attachment; once the card is in flight
+    with an agent, the gate is past. Same scoping dep_resolver.classify_hold
+    uses (``plan_ref_columns=COLUMNS``).
+    """
+    async with KanbanSessionLocal() as s:
+        parent_id = await _make_card(s, title="parent")
+        await _make_card(s, title="child in agent column",
+                         parent_card_id=parent_id, column="Engineer")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        items = await service.po_wachtrij(s, "PO")
+
+    assert items == [], (
+        f"child in agent column must not appear in awaiting_plan_ref; "
+        f"got {items!r}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_sorted_oldest_first():
     """Longest-waiting item comes first.
 

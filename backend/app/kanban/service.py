@@ -15,6 +15,7 @@ from app.kanban.models import (
     KanbanOp,
     KanbanWorkTypeMapping,
 )
+from app.kanban.schemas import COLUMNS
 from app.services.agentic_cli.provider_env import (
     PROVIDER_ANTHROPIC,
     PROVIDER_BEDROCK,
@@ -1278,6 +1279,19 @@ async def delete_work_type_mapping(
 # PO-wachtrij: "Wacht op jou" — finite, sortable list of human-blocked items.
 # ---------------------------------------------------------------------------
 #
+# Fixed-board columns where the ``review_requested`` / ``awaiting_plan_ref``
+# predicates still apply. Mirrors the scoping ``dep_resolver.classify_hold``
+# uses for ``plan_ref_columns=COLUMNS``: a card on an *agent* column (i.e.
+# one not in ``COLUMNS``) has been dispatched, so the create→attach race and
+# the review's "human hasn't looked yet" window are both past. ``Done`` is
+# excluded separately because it's terminal — the gate is past, no further
+# human action is relevant. Without this scope, every closed review and
+# every child that finished without a plan_ref would stay in the queue
+# forever, exactly the "vervuilt zichzelf" trap the previous agent flagged
+# on this card (no way for the human to dismiss a resolved item, so the
+# *eindige* lijst promise broke the moment the first review was closed).
+_WACHTRIJ_ACTIVE_COLUMNS = frozenset(c for c in COLUMNS if c != "Done")
+#
 # Background (kanban card c7ea21b0…):
 #
 # The product owner wants a single, sorted list of everything that is blocked
@@ -1322,21 +1336,6 @@ async def _latest_impediment_question(session, card_id: str) -> str | None:
         text = op.payload.get("text") or ""
         if text.startswith(_IMPEDIMENT_QUESTION_PREFIX):
             return text[len(_IMPEDIMENT_QUESTION_PREFIX):]
-    return None
-
-
-async def _latest_review_requested_note(session, card_id: str) -> str | None:
-    """Latest `**Review requested:** <note>` comment on the card."""
-    stmt = (
-        select(KanbanOp)
-        .where(KanbanOp.entity_id == card_id)
-        .where(KanbanOp.op_type == "comment")
-        .order_by(KanbanOp.hlc.desc())
-    )
-    for op in (await session.execute(stmt)).scalars().all():
-        text = op.payload.get("text") or ""
-        if text.startswith(_REVIEW_REQUESTED_PREFIX):
-            return text[len(_REVIEW_REQUESTED_PREFIX):]
     return None
 
 
@@ -1470,9 +1469,15 @@ async def po_wachtrij(session, project_key: str) -> list[dict]:
         # card (see request_review), not on the review card itself — but
         # `_review_description` plants the note as the first paragraph of
         # the review card's description, so we read from there.
+        #
+        # Scope: only count the review while it is still on an active column
+        # (i.e. not Done and not an agent column). ``metadata.reviewed_card_id``
+        # is never cleared by design, so the only signal that a review closed
+        # is the card moving off the active set — see _WACHTRIJ_ACTIVE_COLUMNS
+        # docstring for the full rationale.
         meta = getattr(card, "meta", None) or {}
         reviewed_card_id = meta.get("reviewed_card_id")
-        if reviewed_card_id:
+        if reviewed_card_id and card.column in _WACHTRIJ_ACTIVE_COLUMNS:
             note = _first_paragraph(card.description or "")
             if not note:
                 note = "(review zonder notitie)"
@@ -1492,7 +1497,15 @@ async def po_wachtrij(session, project_key: str) -> list[dict]:
         # deliverable on the card yet. The dispatcher holds these out; if
         # the analyst's add_plan_attachment never lands, only the human
         # can chase it.
-        if getattr(card, "parent_card_id", None):
+        #
+        # Scope: only count the child while it is still on an active column.
+        # Same rationale as review_requested — a child parked on Done or
+        # sitting in an agent column has already been dispatched or
+        # finished, the plan_ref race no longer applies, and the metadata
+        # is never cleared (the analyst either wired the work via a
+        # different code path or the parent was abandoned).
+        if (getattr(card, "parent_card_id", None)
+                and card.column in _WACHTRIJ_ACTIVE_COLUMNS):
             has_plan_ref = (await session.execute(
                 select(func.count())
                 .select_from(KanbanDeliverable)
