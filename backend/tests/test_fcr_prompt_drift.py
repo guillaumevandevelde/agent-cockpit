@@ -147,6 +147,20 @@ CORE_FCR_INVARIANTS: list[tuple[str, str]] = [
         "missing/unresolvable commit-hash → actionable refusal, no verdict",
         "unresolvable commit-hash",
     ),
+    # Reachability check for auto-recovery in shell error-handlers
+    # (kanban-kaart `c06a3a2a…` / `efb8187b…`): the FCR reviewer must
+    # verify that an auto-recovery path sits in the *executable* branch
+    # of the same `if`-block as the error-detection, not as prose or a
+    # comment that follows an `exit 1`. Without this anchor, the recipe
+    # convention ("auto-recovery hoort in dezelfde if-tak als de
+    # fout-detectie" — `docs/cockpit/recipe-writing-conventions.md`)
+    # cannot be enforced by review; the original `efb8187b…` carve-out
+    # was unreachable precisely because the prose recovery was placed
+    # below the `exit 1` handler. Both mirrors must carry this check.
+    (
+        "auto-recovery reachability check (executable path, not post-exit prose)",
+        "recovery in het uitvoeringspad",
+    ),
 ]
 
 
