@@ -199,6 +199,65 @@ async def test_reopen_does_not_set_resume_fields(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reopen_restores_return_agent_for_reviewer_gate_card():
+    """Mirror of `report_impediment`'s reviewer-gate return-agent-reset
+    (mcp_server.py:820-835). When a reviewer-approved Done card is
+    reopened, the engineer persona must be restored and
+    `review_return_agent` must be cleaned up — otherwise the dispatcher
+    re-runs the reviewer (which has no Write tools) against a card that
+    needs *rework*. Originally regressed in kanban-kaart `0b7c3e98…`
+    (kaart 4279448c observed it in production dispatch `k-overlap-in-im-446b`).
+    """
+    async with KanbanSessionLocal() as s:
+        cid = await _make_done_card(s, project_key="P")
+        # Stamp the state the reviewer-gate redirect leaves behind on Done:
+        # agent=reviewer, metadata.review_return_agent=engineer (the
+        # persona that produced the work).
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid, payload={
+                "agent": service.REVIEWER_COLUMN,
+                "metadata": {service.REVIEW_RETURN_AGENT_KEY: "engineer"},
+            })
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await service.reopen_card(s, cid, "Requirement 2 is missing.")
+        await s.commit()
+
+    # The engineer persona is restored so the dispatch picks the right
+    # agent — *not* the reviewer (which has no Write tools).
+    assert card.agent == "engineer"
+    # The return-agent key is consumed so the dispatcher doesn't carry
+    # stale state forward.
+    assert service.REVIEW_RETURN_AGENT_KEY not in (card.meta or {})
+    # The board mutation still happens.
+    assert card.column == "Backlog"
+
+
+@pytest.mark.asyncio
+async def test_reopen_preserves_non_reviewer_agent():
+    """The reviewer-gate return-agent restoration is gated on
+    `card.agent == REVIEWER_COLUMN`. A regular engineer's Done card (no
+    reviewer column in the project) must not be touched — the rebuttal
+    simply re-enters the dispatch queue with the same persona."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_done_card(s, project_key="P")
+        # No reviewer column → no return-agent redirect. The card sits
+        # in Done with agent=engineer and no special metadata.
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid, payload={"agent": "engineer"})
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await service.reopen_card(s, cid, "Disagree with the call.")
+        await s.commit()
+
+    assert card.agent == "engineer"
+    assert card.meta == {} or card.meta is None
+    assert card.column == "Backlog"
+
+
+@pytest.mark.asyncio
 async def test_revisit_extraction_picks_last_revisit_comment():
     """The dispatch prompt must reflect the *latest* Revisit comment, even
     when multiple rounds of reopen have happened — extract_revisit_question
