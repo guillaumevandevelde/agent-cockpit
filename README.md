@@ -9,111 +9,142 @@
   <img alt="Agent Cockpit dashboard" src="cockpit-rebrand-light.png">
 </picture>
 
-A self-hosted web application for visualizing and managing local AI coding agents. Provides a unified interface for Claude Code configuration, Codex CLI configuration, MCP servers, plugins, slash commands, hooks, agents, permissions, usage tracking, session transcripts, Agent Bridge, and other local agent extensions.
+A self-hosted web application for running and managing local AI coding agents. Two things live in one app:
+
+1. **An agent work loop.** A kanban board where cards are dispatched to real agent sessions — the dispatcher claims a card, spawns an agent in its own git worktree, and the card moves across the board as the agent works, hands off, gets blocked, or ships. Larger cards can be split by an analyst agent into child cards with a dependency graph, and sessions can message each other through Agent Mail.
+2. **A control panel for the agent CLIs themselves.** Configuration, MCP servers, plugins, slash commands, hooks, agents, skills, permissions, transcripts, usage and backups for Claude Code, Codex CLI, OpenCode, GitHub Copilot CLI and MiMoCode — reading and writing the same files those CLIs use.
+
+Everything runs on your machine, against your real config files. No account, no cloud, no telemetry.
 
 ## Credits — Forked from claude-deck
 
-Agent Cockpit is a fork of [**claude-deck**](https://github.com/adrirubio/claude-deck) by Adrian Rubio-Punal and Juan A. Rubio, used under the MIT License. Their original copyright and license are retained in [`LICENSE`](./LICENSE). Agent Cockpit adds a scheduled-messages feature (timer/cron → tmux injection) on top of their work.
+Agent Cockpit is a fork of [**claude-deck**](https://github.com/adrirubio/claude-deck) by Adrian Rubio-Punal and Juan A. Rubio, used under the MIT License. Their original copyright and license are retained in [`LICENSE`](./LICENSE). claude-deck contributed the configuration, MCP, sessions, usage and Agent Bridge surfaces; Agent Cockpit adds the kanban dispatch loop, multi-agent decomposition, Agent Mail, scheduled messages, sandboxed runs, and the multi-CLI provider layer on top.
 
 ## Why This Exists
 
 Claude Code starts simple, then slowly sprawls across config files and directories: `~/.claude.json`, `~/.claude/settings.json`, `.mcp.json`, slash commands, agents, skills, project settings, transcripts, and usage data. That works fine at small scale, but once your setup gets serious it becomes hard to see the whole picture, change things confidently, or understand what is actually configured.
 
-Agent Cockpit gives you one local interface for that sprawl. It also has provider-aware Codex CLI support for tmux sessions, safe TOML configuration, feature flags, diagnostics, MCP/plugin inventory and supported CLI-backed mutations, and redacted export-only backups.
+Running *several* agents at once adds a second problem on top of that one: which session is working on what, which one is stuck waiting for a human, what has already shipped, and what is blocked on something else. Terminal multiplexers answer none of that.
+
+Agent Cockpit is one local interface for both — the configuration sprawl and the work in flight.
 
 ## Best For
 
-Agent Cockpit is best for people running multiple Claude Code or Codex CLI sessions, MCP servers, custom commands, hooks, agents, or tracking Claude Code usage across sessions.
+People running multiple concurrent agent sessions, or a serious Claude Code / Codex CLI setup: several MCP servers, custom commands, hooks, agents, skills, and usage worth keeping an eye on.
 
-If you only use Claude Code casually with mostly default config, Agent Cockpit may be overkill.
+If you use one agent casually with mostly default config, Agent Cockpit is overkill.
 
 ## Trust Model
 
 - **Local only** — no cloud
 - **No account** — nothing to sign up for
 - **No telemetry** — no usage tracking sent anywhere
-- **Works with your real files** — reads and writes existing Claude Code and Codex config files
+- **Works with your real files** — reads and writes existing agent configuration files
 
 > [!WARNING]
-> Agent Cockpit reads and writes your real local agent configuration files. Changes made in the UI affect the files Claude Code and Codex CLI actually use. Review changes carefully, and create a backup before major edits.
+> Agent Cockpit reads and writes your real local agent configuration files, and it can spawn agent sessions that write to your repositories. Changes made in the UI affect the files Claude Code and the other CLIs actually use. Review changes carefully, and create a backup before major edits.
 
 ## Features
 
-- **Dashboard** — Overview of local agent configuration with Claude Code context window visualizer
-- **Provider Switcher** — Move between Claude Code and Codex CLI surfaces without leaving the app
-- **Config Editor** — Browse, inspect, and edit Claude Code JSON settings or Codex TOML settings, including Codex profiles, runtime options, and feature flags
-- **MCP Servers** — Add, edit, test, and manage MCP server connections with OAuth support. Browse and install servers from the [MCP Registry](https://registry.modelcontextprotocol.io). View tools, resources, and prompts. Supports stdio, HTTP, and SSE transports
-- **Slash Commands** — Browse, create, and edit custom commands (user and project scope)
-- **Plugins** — Browse installed plugins with detail views and enable/disable toggles; Codex plugins support CLI-backed inventory, install, and remove where the installed Codex CLI exposes safe commands
-- **Hooks** — Configure automation hooks by event type (PreToolUse, PostToolUse, etc.)
-- **Permissions** — Visual allow/deny rule builder for tool access control
-- **Agents** — Create and manage custom agent configurations
-- **Skills** — Browse installed skills and discover new ones from [skills.sh](https://skills.sh)
-- **Memory** — View and edit Claude Code memory files
-- **Output Styles** — Configure response output formats
-- **Status Line** — Customize Claude Code status line display
-- **Agent Bridge** — Discover and monitor Claude Code and Codex CLI sessions running in tmux. Attach up to 4 terminals simultaneously in a 2x2 grid with independent read-only/interactive modes, fullscreen toggle, and per-pane controls. Spawn new sessions and manage provider-specific options directly from the UI
-- **Session Transcripts** — View conversation history with full message details and tool use
-- **Usage Tracking** — Monitor token usage, costs, and billing blocks with daily/monthly charts
-- **Plan History** — Browse and review Claude Code implementation plans
-- **Backup & Restore** — Create and manage Claude Code backups with selective restore, plus redacted export-only Codex backups
-- **Projects** — Discover and manage project directories
-- **Sandcastle** — Run AI coding agents in isolated sandboxes (Docker, Podman, Vercel) with [sandcastle](https://github.com/mattpocock/sandcastle). Supports parallel execution, kanban integration, scheduled messages, and real-time log streaming
-- **Kanban** — Dispatch work to Claude Code/Codex agents from a kanban board; cards move through columns as agents claim, work, and hand them off, with per-agent performance stats
-- **Scheduled Messages** — Schedule a message for future delivery into a running (or resumable) tmux session, including auto-resume when a session hits its rate limit
-- **Context** — Visualize a session's context window usage over time, including cache efficiency and content breakdown
-- **Presence** — See which tmux panes are active across your agent sessions at a glance
-- **Agent Performance (APM)** — Track per-agent throughput and reliability over time
+### Running work
 
-## What's New for the Next Release
+- **Kanban** — The board that drives the work loop. It has a fixed set of columns — `intake`, `Backlog`, `Impediment`, `Awaiting Subtasks`, `Done` and `To Resume` — plus one column per agent, generated from the project's `.claude/agents/`. Auto-dispatch is opt-in per project: the poller claims a `Backlog` card, moves it into the target agent's column, and spawns that agent in a fresh git worktree. A card carries its own comments, deliverables (PR / branch / commit / link / note), labels, priority, work type, dependencies on other cards, and per-card model, provider or transport overrides. A blocked agent posts an impediment with a concrete question and candidate answers for a human to pick from.
+- **Multi-agent decomposition** — A card that is too big for one session goes to an analyst agent, which splits it into child cards with an explicit dependency DAG and attaches the plan. Executor sessions only start once their dependencies are `Done`.
+- **Agent Mail** — A mailbox between sessions. Each repository gets a durable identity; sessions send structured context requests, handoffs, broadcasts and answers, and a session that is asleep in tmux can be woken to read its inbox. The UI shows participants, roles, charters, inbox load and every pending request.
+- **Agent Bridge** — Discover and observe agent sessions running in tmux, per CLI. Attach up to 4 terminals at once in a 2x2 grid, each independently read-only or interactive, with fullscreen, per-pane controls, and spawn / resume / fork / kill from the UI.
+- **Presence** — A live feed of what each session is doing right now, fed by the agent CLI's hooks: current tool, last narrative line, changed files, and which sessions are waiting on your input.
+- **Scheduled Messages** — Queue a message for future delivery into a running (or resumable) session, as a one-shot timer or a recurring cron expression, with a choice of permission mode and what to do when the session is missing or busy. Includes auto-resume when a session hits its rate limit.
+- **Sandcastle** — Run agents in isolated Docker or Podman containers via [sandcastle](https://github.com/mattpocock/sandcastle), with parallel runs, kanban integration and live log streaming.
+- **Hosts** — Register remote machines over SSH and run agent sessions on them instead of locally.
 
-Codex CLI support has moved from experimental plumbing to a usable provider surface:
+### Overview and control
 
-- Provider-aware Agent Bridge can discover, spawn, resume, fork, attach to, and kill Codex tmux sessions.
-- The Codex config editor now handles safe TOML settings, profiles, runtime controls, and feature flags from `codex features list`.
-- Codex settings include dropdowns for known enum values and help tooltips for settings and feature flags where official descriptions are available.
-- Codex MCP and plugin inventory are visible, with supported CLI-backed add/remove or install/remove actions.
-- Codex exports are redacted and export-only by design.
-- Project discovery is now easier from the UI, including directory browsing when adding projects.
+- **Dashboard** — Which agent CLIs are installed on this machine and what each one actually supports, as a per-capability matrix (read-only vs read/write), plus counts for projects, MCP servers, commands, plugins, hooks and permissions.
+- **Portfolio** — Kanban totals across every tracked project at once: backlog, in progress, impediments, cards finished in the last 24h, dispatch on/off, and last activity.
+- **Agent Performance** — Time per task, success rate, tasks completed per agent and common failure reasons, derived from the kanban operation log.
+- **Security Profile** — Per project: risk class, default transport (worktree or sandbox), whether permission prompts may be skipped, network egress policy with an allowlist, and resource quotas applied to sandboxed runs.
+- **Subscriptions** — Credentials and quota for launching sessions against alternate providers instead of the default vendor, with per-provider usage.
+- **Projects** — Discover, add and switch projects, including a directory browser; the active project scopes most other pages.
+- **Blueprints** — Version-pinned recipes that seed a new project's `.claude/` folder (settings, skills, agents, `CLAUDE.md`) so a new repository starts from a known-good baseline.
+- **MCP Server** — Agent Cockpit's own MCP endpoint, so agents can read and drive the board, sessions and scheduled messages as tools. Includes the client config snippet and token management.
+- **APM** — Per-project agent dependency management via an `apm.yml` manifest.
+- **Updates** — One-click self-update with preflight checks.
+- **Backup & Restore** — Create and manage backups with selective restore. Codex exports are redacted and export-only by design.
 
-Codex support is explicit about provider boundaries: usage/context parity and session transcript browsing are not supported for Codex yet; history and model-cache diagnostics avoid prompt text and raw cache payloads; Codex automatic restore is refused because exports intentionally exclude auth, history, cache, and local state.
+### Per-CLI configuration
+
+Which of these appear depends on the CLI selected in the sidebar and on what that CLI actually supports — the capability matrix drives the navigation, so unsupported surfaces are hidden rather than shown broken.
+
+- **Config** — Claude Code JSON settings across all five scopes (user, user-local, project, project-local, managed) with a form editor, a scope resolver that shows which file wins, and a raw viewer. For Codex: safe TOML settings, profiles, runtime options, and feature flags read from `codex features list`, with dropdowns for known enum values and tooltips where official descriptions exist.
+- **MCP Servers** — Add, edit, test and manage MCP connections over stdio, HTTP and SSE, with OAuth support, plus browse and install from the [MCP Registry](https://registry.modelcontextprotocol.io). Inspect the tools, resources and prompts a server exposes.
+- **Slash Commands** — Browse, create and edit custom commands at user and project scope.
+- **Plugins** — Browse installed plugins with detail views and enable/disable toggles. Codex plugins support CLI-backed inventory, install and remove where the installed Codex CLI exposes safe commands.
+- **Hooks** — Configure automation hooks per event type (PreToolUse, PostToolUse, Stop, Notification, SessionStart, …).
+- **Permissions / Trust** — Visual allow / ask / deny rule builder for tool access, plus the default permission mode.
+- **Agents** — Create and manage subagent definitions, including model and tool restrictions.
+- **Skills** — Browse installed skills and discover new ones from [skills.sh](https://skills.sh), with usage stats.
+- **Memory** — View and edit `CLAUDE.md` memory files at user and project scope.
+- **Output Styles** and **Status Line** — Configure response formatting and the CLI status line.
+- **Session Transcripts** — Browse conversation history per project with full message detail, tool calls and results.
+- **Usage Tracking** — Token usage, cost and billing blocks with daily, monthly, per-session and per-block views, plus JSON/CSV export.
+- **Context** — Context window usage per active session, including cache efficiency and what is filling the window.
+- **Plans** — Browse and review the implementation plans an agent has written.
+
+### Supported agent CLIs
+
+| CLI | Status |
+|-----|--------|
+| Claude Code | Full surface — config, sessions, MCP, plugins, permissions, commands, hooks, agents, skills, memory, output styles, status line, usage, context, backup |
+| Codex CLI | Config (TOML, profiles, feature flags), sessions, MCP and plugin inventory, redacted export-only backup. No transcript browsing or usage/context parity |
+| OpenCode | Config, sessions, MCP, plugins, agents, skills, memory, commands, usage |
+| GitHub Copilot CLI | Session discovery and spawning |
+| MiMoCode | Config, skills, memory |
+
+Codex support is explicit about its boundaries: history and model-cache diagnostics avoid prompt text and raw cache payloads, and automatic restore is refused because exports intentionally exclude auth, history, cache and local state.
 
 ## Screenshots
 
-| Dashboard | MCP Servers |
-|-----------|-------------|
-| ![Dashboard](screenshots/dashboard.png) | ![MCP Servers](screenshots/mcp-servers.png) |
-| High-level overview of your Claude Code setup | Manage MCP connections, status, and configuration |
+All screenshots are taken against a throwaway instance seeded with demo data (`example-project`, `demo-api`), not a real workspace.
 
-| Usage Tracking | Session Transcripts |
-|----------------|---------------------|
-| ![Usage Tracking](screenshots/usage-tracking.png) | ![Session Transcripts](screenshots/sessions.png) |
-| Cost visibility, charts, and billing blocks | Browse conversation history and tool usage details |
-
-| Agent Bridge | Skills |
+| Dashboard | Kanban |
 |-----------|--------|
-| ![Agent Bridge](screenshots/cc-bridge.png) | ![Skills](screenshots/skills.png) |
-| Monitor and interact with Claude Code and Codex tmux sessions | Browse installed skills and discover new ones |
+| ![Dashboard](screenshots/dashboard.png) | ![Kanban](screenshots/kanban.png) |
+| Installed CLIs and their capability matrix, plus configuration counts | Cards moving from intake through per-agent columns to Done, with dispatch controls |
 
-| Kanban | Scheduled Messages |
-|--------|---------------------|
-| ![Kanban](screenshots/kanban.png) | ![Scheduled Messages](screenshots/scheduled-messages.png) |
-| Dispatch cards to agents, track progress across Backlog/Impediment/Done | Schedule messages to be injected into Claude Code sessions on a timer or cron |
+| Portfolio | Agent Performance |
+|-----------|-------------------|
+| ![Portfolio](screenshots/portfolio.png) | ![Agent Performance](screenshots/agent-performance.png) |
+| Board totals across every tracked project at a glance | Throughput, success rate and time per task per agent |
 
-| Sandcastle | Codex Config |
-|------------|--------------|
-| ![Sandcastle](screenshots/sandcastle.png) | ![Codex Config](screenshots/codex-config.png) |
-| Run coding agents in isolated Docker/Podman containers, with live container status | View and edit Codex CLI's TOML configuration |
+| Agent Bridge | Presence |
+|--------------|----------|
+| ![Agent Bridge](screenshots/cc-bridge.png) | ![Presence](screenshots/presence.png) |
+| Attach to a live tmux session, read-only or interactive | What each session is doing right now, and which ones are waiting on you |
 
-| Presence | Context |
-|----------|---------|
-| ![Presence](screenshots/presence.png) | ![Context](screenshots/context.png) |
-| Real-time monitoring of Claude Code session activity | Visualize context window usage and cache efficiency over a session |
+| Agent Mail | Scheduled Messages |
+|------------|--------------------|
+| ![Agent Mail](screenshots/agent-mail.png) | ![Scheduled Messages](screenshots/scheduled-messages.png) |
+| Context requests and handoffs between sessions | Timer and cron messages queued for delivery into a session |
 
-| Agent Performance |
-|--------------------|
-| ![Agent Performance](screenshots/agent-performance.png) |
-| Time per task, success rate, and token use per agent, derived from the kanban op-log |
+| Security Profile | Blueprints |
+|------------------|------------|
+| ![Security Profile](screenshots/security.png) | ![Blueprints](screenshots/blueprints.png) |
+| Risk class, transport, egress policy and quotas per project | Version-pinned recipes that seed a new project's `.claude/` |
+
+| Usage Tracking | Context |
+|----------------|---------|
+| ![Usage Tracking](screenshots/usage-tracking.png) | ![Context](screenshots/context.png) |
+| Cost over time, per-model and per-session breakdowns | Context window pressure across active sessions |
+
+| Session Transcripts | MCP Servers |
+|---------------------|-------------|
+| ![Session Transcripts](screenshots/sessions.png) | ![MCP Servers](screenshots/mcp-servers.png) |
+| Conversation history with full tool-call detail | stdio, HTTP and SSE connections with per-server testing |
+
+| Configuration | Skills |
+|---------------|--------|
+| ![Configuration](screenshots/config.png) | ![Skills](screenshots/skills.png) |
+| Settings across all five scopes, with a resolver and raw viewer | Installed skills, plus discovery from skills.sh |
 
 ## Tech Stack
 
@@ -123,8 +154,12 @@ Codex support is explicit about provider boundaries: usage/context parity and se
 | Frontend | React 19 + TypeScript 6 + Vite 7 |
 | UI Components | shadcn/ui + Tailwind CSS |
 | Charts | Recharts (via shadcn/ui) |
+| Terminals | xterm.js over a WebSocket pty relay to tmux |
+| Scheduling | APScheduler (dispatch poller, scheduled messages, stale detection) |
 | Database | SQLite (async via SQLAlchemy + aiosqlite) |
 | Containerization | Docker + Docker Compose |
+
+Two SQLite stores are used deliberately: `backend/claude_registry.db` holds device-local state (MCP servers, commands, permissions, plugin state), and `~/.claude-registry/kanban.db` holds the kanban board so it stays portable and machine-scoped.
 
 ## Quick Start with Docker
 
@@ -144,7 +179,7 @@ This builds and starts Agent Cockpit at http://localhost:8000, mounting your `~/
 
 ## Manual Installation
 
-**Prerequisites**: Python 3.11+, Node.js 18+
+**Prerequisites**: Python 3.11+, Node.js 18+. tmux is required for Agent Bridge, Presence, scheduled messages and kanban dispatch.
 
 ```bash
 git clone git@github.com:guillaumevandevelde/claude-cockpit.git
@@ -225,6 +260,7 @@ Agent Cockpit reads and writes these Claude Code configuration files:
 | `~/.claude/projects/` | User | Session transcripts & usage data |
 | `.claude/settings.json` | Project | Project settings |
 | `.claude/commands/` | Project | Project slash commands |
+| `.claude/agents/` | Project | Project agents — these become the kanban board's agent columns |
 | `.mcp.json` | Project | Project MCP servers |
 | `CLAUDE.md` | Project | Project instructions |
 
@@ -237,6 +273,8 @@ Codex CLI support uses `$CODEX_HOME`, defaulting to `~/.codex`:
 | `~/.codex/rules/` | User | Codex rule files |
 | `~/.codex/auth.json` | User | Auth status only; raw contents are never returned |
 
+Agent Cockpit's own state lives in `~/.claude-registry/` (kanban board, backups, attachments) and in `backend/claude_registry.db`.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, style, and PR guidelines.
@@ -245,7 +283,7 @@ API documentation is available at http://localhost:8000/docs when running the de
 
 ## Feedback
 
-If you use Claude Code heavily, issues and feature requests are especially welcome.
+If you run agents heavily, issues and feature requests are especially welcome.
 
 ## Built By
 
