@@ -427,6 +427,24 @@ end-of-card-gate. Een afwijking in deze suite betekent **niet** "de check ligt
 eraan": het betekent de proxy ligt eraan, en die moet eerst worden gefikst
 voor de sidecar in productie kan.
 
+✅ **Gemeten (kaart `bbfcb365…`, 2026-07-27)** — de pilot heeft gedraaid tegen
+LiteLLM `1.93.0`; volledige uitkomst in
+[`litellm-pilot-meting.md`](./litellm-pilot-meting.md). Kort: de check gaf
+`exit 0` op alle vijf eigenschappen tegen een echte proxy, tool-use overleeft de
+format-translatie (Read + Edit + Bash end-to-end), en een mid-sessie
+rate-limit werd door de fallback opgevangen zonder dat de sessie omviel — de
+heropen-trigger uit §11.6 is dus **niet** getriggerd en de sidecar-route gaat
+door. Drie correcties op de aannames van dit doc volgen wél uit de meting:
+(a) `cache_read` is via de proxy structureel **0**, wat ~14× meer belastbare
+input per beurt kost dan een warme Anthropic-cache — de sidecar bespaart geen
+tokens, de businesscase moet volledig uit het lagere tarief komen;
+(b) `pip install 'litellm[proxy]'` alleen laat elke auth-afwijzing als HTTP 500
+verschijnen (crash in LiteLLM's eigen exception-handler bij een ontbrekende
+`prisma`), waardoor deze §11-check FAIL't op een correct geconfigureerde proxy —
+`prisma` hoort in de install-set; (c) de `openai/`-prefix routeert naar de
+OpenAI **Responses API**, die Groq/Cerebras/NIM niet implementeren — de
+provider-entry moet de prefix expliciet configureerbaar maken.
+
 ---
 
 **Meet-verantwoording.** Alle cijfers in §3 komen uit de GitHub-API op
