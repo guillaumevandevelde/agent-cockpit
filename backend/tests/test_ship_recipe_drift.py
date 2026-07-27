@@ -80,6 +80,18 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "push-to-master",
         "push origin HEAD:master",
     ),
+    # Remote-branch cleanup after a successful merge-to-master. GitHub's
+    # `delete_branch_on_merge` (enabled 2026-07-07) only fires when a *PR*
+    # merges; the direct route closes no PR, so without this command every
+    # shipped card leaves a dead branch on `origin` forever — 7 fully-merged
+    # branches accumulated over 6 weeks before this was caught (kanban card
+    # 3027671c…). Position matters as much as presence: see
+    # `test_branch_delete_guarded_by_push_success` for the invariant that it
+    # must run *only* when the push to master succeeded.
+    (
+        "remote branch cleanup",
+        'git push origin --delete "$BRANCH"',
+    ),
     # Pre-flight: the detached worktree only sees COMMITTED state, so an
     # uncommitted/untracked branch would merge as a silent no-op. This guard
     # catches that before `git worktree add` runs.
@@ -263,6 +275,11 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     )
     assert any(c == '"$WT"/scripts/generate-doc-index.py' for c in commands), (
         "invariants list lost the worktree-path script invocation command"
+    )
+    # Remote-branch cleanup (kanban card 3027671c…). Without it the direct
+    # route leaks a merged branch onto `origin` on every single ship.
+    assert any("push origin --delete" in c for c in commands), (
+        "invariants list lost the remote branch cleanup command"
     )
 
 
@@ -473,6 +490,126 @@ def test_carve_out_substring_in_recovery_path(source_name: str) -> None:
     ok, reason = _carve_out_is_in_recovery_path(source_text)
     assert ok, (
         f"{source_name}: carve-out not in recovery path — {reason}"
+    )
+
+
+# Remote-branch cleanup markers for the second positional invariant. The
+# delete must be *guarded by push success*: `git push origin --delete` is
+# irreversible-ish (the branch is gone from `origin`), and the recipe
+# explicitly falls back to the pull-request route when the push to master is
+# rejected (master moved / protected). Deleting the branch on that failure
+# path would strand the work — the PR route needs `origin/$BRANCH` to exist.
+# So the delete must sit inside the `if <push>; then` success branch, not
+# unconditionally after a bare push. (kanban card 3027671c…)
+BRANCH_DELETE = 'git push origin --delete "$BRANCH"'
+PUSH_CONDITIONAL = 'if git -C "$WT" push origin HEAD:master; then'
+
+
+def _branch_delete_is_guarded_by_push_success(source_text: str) -> tuple[bool, str]:
+    """Return ``(ok, reason)``: whether the remote-branch delete runs only on
+    a successful push to master.
+
+    Checks, in order:
+
+    1. Both the push and the delete are present.
+    2. The push-to-master is used as an ``if`` *condition* (``PUSH_CONDITIONAL``)
+       rather than a bare statement — a bare ``git push … HEAD:master`` followed
+       by an unconditional delete would nuke ``origin/$BRANCH`` even when the
+       push was rejected.
+    3. The delete sits between that condition and the ``else``/``fi`` that
+       closes it at the same indent — i.e. in the *success* branch, not the
+       rejection branch and not after the block.
+
+    Positional, like ``_carve_out_is_in_recovery_path``: the substring
+    invariant in ``CORE_RECIPE_INVARIANTS`` pins *that* the delete exists,
+    this pins *when it fires*.
+    """
+    push_idx = source_text.find(PUSH_HANDLER)
+    delete_idx = source_text.find(BRANCH_DELETE)
+    if push_idx == -1 or delete_idx == -1:
+        return False, (
+            f"missing one of: push_idx={push_idx}, delete_idx={delete_idx} "
+            f"(expected {PUSH_HANDLER!r} and {BRANCH_DELETE!r})"
+        )
+    if delete_idx < push_idx:
+        return False, (
+            f"branch delete ({delete_idx}) appears BEFORE the push to master "
+            f"({push_idx}) — the branch would be deleted while the merge is "
+            f"still unpushed"
+        )
+    cond_idx = source_text.find(PUSH_CONDITIONAL)
+    if cond_idx == -1:
+        return False, (
+            f"push-to-master is not used as an if-condition "
+            f"({PUSH_CONDITIONAL!r} not found) — an unconditional delete after "
+            f"a bare push would also fire when the push is REJECTED, deleting "
+            f"the branch the pull-request fallback needs (kanban card 3027671c…)"
+        )
+
+    # Find the `else`/`fi` that closes the push-conditional at its own indent.
+    cond_line_start = source_text.rfind("\n", 0, cond_idx) + 1
+    cond_indent = _line_indent(source_text[cond_line_start:cond_idx + len(PUSH_CONDITIONAL)])
+    cursor = source_text.find("\n", cond_idx) + 1
+    close_idx = -1
+    for raw_line in source_text[cursor:].split("\n"):
+        stripped = raw_line.strip()
+        if stripped in ("else", "fi") and _line_indent(raw_line) == cond_indent:
+            close_idx = source_text.find(raw_line, cursor)
+            break
+        cursor += len(raw_line) + 1
+    if close_idx == -1:
+        return False, (
+            f"could not find the `else`/`fi` closing the push-conditional at "
+            f"indent {cond_indent} — the if-block looks malformed"
+        )
+    if not (cond_idx < delete_idx < close_idx):
+        return False, (
+            f"branch delete ({delete_idx}) is NOT inside the push-success "
+            f"branch (condition at {cond_idx}, closed at {close_idx}) — it "
+            f"would fire even when the push to master is rejected, deleting "
+            f"the branch the pull-request fallback needs"
+        )
+    return True, ""
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_branch_delete_guarded_by_push_success(source_name: str) -> None:
+    """The remote-branch delete must fire only after a successful push.
+
+    Pins the positional invariant from kanban card ``3027671c…``. Presence
+    of ``git push origin --delete "$BRANCH"`` alone is not enough: the recipe
+    documents a pull-request fallback for when the push to master is rejected
+    (master moved / branch protection), and that fallback needs
+    ``origin/$BRANCH`` to still exist. A delete placed unconditionally after
+    a bare push would destroy the branch on exactly the path where it is
+    still needed — turning a recoverable rejection into lost work.
+    """
+    source_text = SOURCES[source_name]()
+    ok, reason = _branch_delete_is_guarded_by_push_success(source_text)
+    assert ok, f"{source_name}: branch delete not guarded by push success — {reason}"
+
+
+def test_branch_delete_guard_detects_unconditional_delete() -> None:
+    """Demonstrate the guard catches the naive "just append the delete" shape.
+
+    The card's own suggested fix appended ``git push origin --delete`` directly
+    after a bare ``git push origin HEAD:master``. That shape deletes the branch
+    even when the push was rejected. Pin the detector with a live negative case
+    so the contract is enforced, not assumed.
+    """
+    naive_mirror = (
+        'git -C "$WT" push origin HEAD:master\n'
+        'git push origin --delete "$BRANCH" || echo "WARN: al weg?"\n'
+        'git worktree remove --force "$WT"\n'
+    )
+    ok, reason = _branch_delete_is_guarded_by_push_success(naive_mirror)
+    assert not ok, (
+        f"guard did NOT flag an unconditional delete after a bare push; "
+        f"reason={reason!r}. The positional invariant has rotted."
+    )
+    assert "if-condition" in reason, (
+        f"unexpected failure reason: {reason!r}; expected a missing "
+        f"if-condition diagnosis."
     )
 
 
