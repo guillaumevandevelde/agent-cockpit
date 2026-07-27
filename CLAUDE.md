@@ -135,6 +135,10 @@ cd frontend && npm run lint      # ESLint
 ./scripts/ruff-baseline.sh                  # Capture pre-existing ruff hits (idempotent, cached 24h)
 ./scripts/ruff-compare.sh                   # Run ruff + classify: pre-existing / NEW / FIXED
 
+# Project-key re-key (na een repo-rename op de forge — zie rebrand-decision.md §2.3)
+./scripts/migrate-project-key.py --new-remote <url>                     # Dry-run: tel de te herschrijven rijen
+./scripts/migrate-project-key.py --new-remote <url> --apply --update-remote  # Herschrijf + zet origin om in één run
+
 # Version
 ./scripts/bump-version.sh <major|minor|patch>  # Sync version across VERSION, package.json, pyproject.toml
 ```

@@ -72,6 +72,8 @@ Bewust buiten scope, met reden:
 | `claude_registry.db` | Idem. |
 | `cockpit-kanban` MCP-server | Bevat het vendorwoord al níet. Blijft ongewijzigd. |
 | `orange-*` klassen in `instanceAccent.ts` | **Geen merkkleur.** Dit is een door de gebruiker kiesbaar per-instance accent (default `blue`); oranje is één optie van zeven. Een blinde `orange-`-sweep sloopt deze feature. |
+| Lokale checkout `/home/vdvgu/claude-cockpit` | Draagt 24 geregistreerde worktrees, ~70 hardgecodeerde absolute paden in code/tests/docs/scripts, en de path-afgeleide DB-kolommen (`resume_project_folder`, `session_cache.project_folder`, `usage_cache`, `mail_*`, `project_security_profiles`). Zie §2.3. |
+| Lokale `origin`-remote-URL | Bewust losgekoppeld van de forge-rename, omdat de board-identiteit eraan hangt. Zie §2.3. |
 
 > **Let op voor de uitvoerder:** de laatste rij is de belangrijkste val. De
 > ~20 overige `orange-`-treffers in `frontend/src` (plugins, backup, memory,
@@ -95,6 +97,55 @@ migratie-instructie in één regel.
 
 Niet te verwarren met `cockpit-kanban` — dat is een aparte server, die
 ongewijzigd blijft.
+
+## 2.3 De repo-naam zelf — gefaseerd, want de board-identiteit hangt eraan
+
+> Toegevoegd 2026-07-28. De oorspronkelijke analyse (§5) mat de *string*-sweep
+> en liet de repo- en directorynaam onbesproken; dit is die leemte.
+
+**De val.** De board-identiteit is *afgeleid, niet opgeslagen*:
+`resolve_project_key()` ([`project_key.py:41`](../../backend/app/kanban/project_key.py))
+shelt bij elke request uit naar `git remote get-url origin` en normaliseert dat
+tot `git:<host>/<pad>`. Hernoem je de repo op de forge **én** werk je de lokale
+remote bij, dan verschuift de sleutel van
+`git:github.com/guillaumevandevelde/claude-cockpit` naar `…/agent-cockpit` en
+horen alle bestaande rijen bij een sleutel die niets meer resolvet. Er gaat
+niets stuk met een foutmelding — het bord leest gewoon als **leeg** en de
+autodispatch-, max-sessions-, shipmode- en gate-configuratie is weg.
+
+Gemeten omvang: **13.372 rijen** over zes kolommen in beide stores
+(`kanban_ops`/`kanban_cards`/`kanban_columns`/`kanban_gates`.`project_key`,
+`kanban_meta`.`key`, en `security_audit`.`project_key` in de registry-DB). De
+acht `kanban_meta`-sleutels zijn het enige niet-triviale geval: die embedden de
+projectsleutel achter een namespace-prefix (`autodispatch:`, `shipmode:`) en
+soms met een card-id-suffix (`portfolio_stale:<key>:<card-id>:last_posted_at`),
+dus daar is een `replace()` nodig in plaats van een gelijkheidsvergelijking.
+
+**Besloten: in drie fasen, niet in één keer.** De forge-rename en de
+sleutelmigratie zijn ontkoppeld, en dat kan omdat GitHub na een rename een
+redirect achterlaat: zolang `origin` de oude URL houdt, blijven `fetch`/`push`
+werken en blijft `resolve_project_key()` de oude waarde teruggeven.
+
+| Fase | Wat | Status |
+|---|---|---|
+| 1 | `gh repo rename agent-cockpit -R guillaumevandevelde/claude-cockpit` — **alleen** de forge. De `-R`-vorm laat de lokale remote expliciet ongemoeid; de vorm zónder `-R` schrijft 'm wél bij en zou fase 2 ongepland afdwingen. | ✅ 2026-07-28 |
+| 2 | `origin` omzetten + de 13.372 rijen herschrijven, in één run via `scripts/migrate-project-key.py`. | ⏳ wacht op een leeg dispatch-venster |
+| 3 | Lokale checkout hernoemen. | ❌ niet gepland — zie §2.1 |
+
+Fase 2 draait `--dry-run` by default, snapshot beide DB's naar
+`~/.claude-registry/backups/` via de `sqlite3`-backup-API (een platte
+bestandskopie is niet consistent terwijl de backend een connectie openhoudt),
+en **weigert** te draaien zolang een niet-Done kaart een `claimed_by`-claim
+heeft: onder een lopende dispatcher hernoemen trekt de kaart weg onder een
+sessie die 'm nog vasthoudt. `--update-remote` zet de remote in dezelfde run om,
+zodat remote en bord niet uit elkaar kunnen lopen — de faalmodus die deze hele
+paragraaf beschrijft.
+
+Buiten scope van fase 2, en dat is opzettelijk: de path-afgeleide kolommen en
+de ~70 absolute paden veranderen **niet** door een remote-rename. Die horen bij
+fase 3. Cosmetisch en ongemoeid gelaten: vrije tekst in
+`kanban_ops.payload`/`kanban_cards.description` en de PR-URL in
+`kanban_deliverables.ref` (die redirect ook).
 
 ## 3. Thema en kleur
 
