@@ -116,6 +116,16 @@ async def promote_to_tmux(
         mode="resume",
         session_id=resume_session_id,
         project_folder=resume_project_folder,
+        # ``project_path`` is the project_root (the same value the dispatcher
+        # passes as ``directory`` to ``make_resume_transport``). ``spawn_session``
+        # rewrites ``options.directory`` to the worktree via
+        # ``resolve_directory`` for resume mode, so the worktree is what Claude
+        # Code actually sees as its cwd. Thread ``repo_path`` so
+        # ``_project_mcp_config_args`` can fall back to
+        # ``<repo-root>/.mcp.json`` when the worktree has no copy — the
+        # external product-project case (untracked ``.mcp.json`` in the
+        # repo-root; kaart ``bc123e2d…`` / route 2 from kaart ``3672c073…``).
+        repo_path=project_path,
         skip_permissions=True,
     )
     result = spawn(
