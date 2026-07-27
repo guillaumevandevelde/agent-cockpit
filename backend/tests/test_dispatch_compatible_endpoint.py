@@ -681,3 +681,227 @@ async def test_apply_operation_rejects_anthropic_compatible_column_override_with
                     "Backlog": {"provider": "anthropic-compatible"},
                 }},
             )
+
+
+# ---- kaart 66180bc9… end-to-end env pins ------------------------------------
+#
+# The earlier transport-recording tests in this file pin the kwargs the
+# dispatch path forwards; the ``provider_env`` suite pins the env dict
+# ``build_provider_env`` returns given those kwargs. The keystone
+# acceptance criterion for the gratis-lanes card is that **both halves
+# agree**: a column_override/pool entry carrying
+# ``provider="anthropic-compatible"`` and a non-empty
+# ``endpoint_name`` lands ``ANTHROPIC_BASE_URL=<endpoint.base_url>``
+# (not the column default, not the pool fall-through) on the spawned
+# process. The single combined test below exercises the full chain in
+# one go so a future refactor that quietly drops the endpoint kwargs
+# between resolve and env-merge fails both halves at once.
+
+
+async def test_dispatch_column_override_compatible_lands_anthropic_base_url_on_spawn():
+    """End-to-end keystone: column_override[provider="anthropic-compatible"
+    + endpoint_name="router"] → transport gets endpoint_* kwargs →
+    ``build_provider_env`` returns ``ANTHROPIC_BASE_URL=<endpoint.base_url>``
+    + ``ANTHROPIC_AUTH_TOKEN=<endpoint.auth_token>`` on the spawned
+    Claude-Code process.
+
+    Composes the two halves already pinned separately (transport
+    kwargs + env dict) so a regression in either half breaks this
+    single test instead of staying silent."""
+    from app.services.agentic_cli.endpoints import Endpoint, upsert_endpoint
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await upsert_endpoint(
+            s, PK, Endpoint(
+                name="router-e2e",
+                base_url="https://router-e2e.example/anthropic",
+                model="claude-e2e",
+            ),
+        )
+        await _make_column(s, default_provider="anthropic")
+        cid = await _make_card(
+            s, column_overrides={
+                "engineer": {
+                    "provider": "anthropic-compatible",
+                    "model": None,
+                    "endpoint_name": "router-e2e",
+                },
+            },
+        )
+        await s.commit()
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    assert len(transport.calls) == 1
+    kwargs = transport.calls[0]
+    assert kwargs["provider"] == PROVIDER_COMPATIBLE
+    assert kwargs["endpoint_name"] == "router-e2e"
+    assert kwargs["endpoint_base_url"] == "https://router-e2e.example/anthropic"
+    assert kwargs["endpoint_auth_token"] is None  # ambient credential
+
+    # Now wire the captured kwargs through ``build_provider_env`` — the
+    # exact call ``services/runs/spawn.py:213`` makes — and assert the
+    # env dict the spawned Claude-Code process would receive via tmux.
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url=kwargs["endpoint_base_url"],
+        model=kwargs["model"],
+        auth_token=kwargs["endpoint_auth_token"],
+        cli_id=kwargs["cli_id"],
+    )
+    assert env["ANTHROPIC_BASE_URL"] == "https://router-e2e.example/anthropic"
+    assert env["ANTHROPIC_MODEL"] == "claude-e2e"
+    # No credential in this scenario → ``build_provider_env`` strips the
+    # empty token and omits the env var (same discipline
+    # ``test_claude_code_compatible_without_auth_token_omits_token``
+    # pins in isolation).
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+
+async def test_dispatch_threshold_trigger_pool_compatible_lands_anthropic_base_url_on_spawn():
+    """End-to-end keystone for the drempel-spillover scenario: the pool's
+    head (anthropic) is above its drempel, so the router picks the
+    second entry (a ``PROVIDER_COMPATIBLE`` entry with
+    ``endpoint_name="router-spill"``). The full chain must still land
+    the endpoint's ``base_url`` on the spawned process — a regression
+    in any single half of the chain silently degrades to the column
+    default and bills the Anthropic subscription the operator was
+    trying to spare.
+    """
+    from app.services.agentic_cli.endpoints import Endpoint, upsert_endpoint
+    from app.services.agentic_cli.provider_env import (
+        PROVIDER_COMPATIBLE,
+        build_provider_env,
+    )
+    from app.services.subscriptions.base import SubscriptionUsage
+
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await upsert_endpoint(
+            s, PK, Endpoint(
+                name="router-spill",
+                base_url="https://router-spill.example/anthropic",
+                model="claude-spill",
+            ),
+        )
+        # Two-entry pool — anthropic at drempel 0.9, the free-tier
+        # ``anthropic-compatible`` entry as the spillover target. The
+        # dispatch pool picker reads live usage via
+        # ``SubscriptionUsage``, so we have to seed the registry with
+        # the right snapshot so anthropic looks above its drempel.
+        from app.kanban import subscription_pool as sp
+        await sp.set_subscription_pool(
+            s, PK, [
+                sp.PoolEntry(
+                    provider="anthropic", drempel=0.9, model=None,
+                ),
+                sp.PoolEntry(
+                    provider=PROVIDER_COMPATIBLE, drempel=0.9,
+                    model=None, endpoint_name="router-spill",
+                ),
+            ],
+        )
+        # Seed the anthropic snapshot above its drempel via the
+        # existing usage-provider registry. ``UnknownUsageProvider``
+        # reports ``beschikbaar=True`` + ``drempel_gebruikt=None`` (no
+        # signal) so it won't push anthropic over the drempel on its
+        # own. The pool picker uses
+        # ``subscription_prefs_service._resolve_usage_for``; the
+        # dispatch integration already covers the "above drempel"
+        # scenario via a thin test seam in
+        # ``_pick_pool_choice``. To keep this test focused on the
+        # end-to-end env pin we monkeypatch the live picker with the
+        # same threshold-trigger scenario the router test
+        # (``test_threshold_trigger_picks_anthropic_compatible_entry_with_endpoint_name``)
+        # already exercises, asserting only that the chosen entry's
+        # kwargs reach the spawned process.
+        await _make_column(s)  # geen default_provider — pool's head wint
+        cid = await _make_card(s)
+        await s.commit()
+
+        # Monkeypatch ``_pick_pool_choice`` to return the second
+        # entry directly — keeps the test focused on the
+        # pool-choice → dispatch → env chain without dragging in a
+        # full usage-snapshot fixture.
+        from dataclasses import replace
+        pool_entries = await sp.get_subscription_pool(s, PK)
+        spill_entry = pool_entries[1]
+
+        async def _fake_pick(session, entries, *, project_key, cli_id):
+            # Return the second entry whenever it's in the candidate
+            # list (i.e., whenever ``column_default_provider`` is
+            # None), matching the threshold-trigger scenario.
+            for e in entries:
+                if e.provider == PROVIDER_COMPATIBLE:
+                    return e
+            return None
+
+        original = dispatch._pick_pool_choice
+        dispatch._pick_pool_choice = _fake_pick
+        try:
+            await dispatch.dispatch_card(
+                s, card_id=cid, project_path="/p", transport=transport,
+            )
+            await s.commit()
+        finally:
+            dispatch._pick_pool_choice = original
+
+    assert len(transport.calls) == 1
+    kwargs = transport.calls[0]
+    assert kwargs["provider"] == PROVIDER_COMPATIBLE
+    assert kwargs["endpoint_name"] == "router-spill"
+    assert kwargs["endpoint_base_url"] == "https://router-spill.example/anthropic"
+
+    env = build_provider_env(
+        PROVIDER_COMPATIBLE,
+        base_url=kwargs["endpoint_base_url"],
+        model=kwargs["model"],
+        auth_token=kwargs["endpoint_auth_token"],
+        cli_id=kwargs["cli_id"],
+    )
+    assert env["ANTHROPIC_BASE_URL"] == "https://router-spill.example/anthropic"
+    assert env["ANTHROPIC_MODEL"] == "claude-spill"
+
+
+async def test_dispatch_compatible_does_not_leak_endpoint_kwarg_when_provider_anthropic():
+    """Negative keystone: a non-compatible card MUST NOT see
+    ``ANTHROPIC_BASE_URL`` in its spawned env. The companion to the
+    positive keystone above — without it, a regression that always
+    sets ``ANTHROPIC_BASE_URL`` would still pass the positive test
+    (the column override would still pick up its endpoint), but every
+    ordinary Anthropic card would silently start pointing at the
+    last-resolved endpoint."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_column(s, default_provider="anthropic")
+        cid = await _make_card(s)
+        await s.commit()
+        await dispatch.dispatch_card(
+            s, card_id=cid, project_path="/p", transport=transport,
+        )
+        await s.commit()
+
+    kwargs = transport.calls[0]
+    assert kwargs["provider"] == "anthropic"
+    assert kwargs["endpoint_base_url"] is None
+    assert kwargs["endpoint_auth_token"] is None
+
+    # ``build_provider_env("anthropic")`` returns the empty dict
+    # (PROVIDER_ANTHROPIC has no env vars to set); the spawned
+    # Claude-Code process falls back to its own
+    # ``ANTHROPIC_BASE_URL`` from the host env (or to api.anthropic.com
+    # by default). The keystone: ``ANTHROPIC_BASE_URL`` is NOT
+    # injected by the dispatcher for the default-Anthropic path.
+    from app.services.agentic_cli.provider_env import build_provider_env
+    env = build_provider_env(
+        "anthropic",
+        cli_id=kwargs["cli_id"],
+    )
+    assert "ANTHROPIC_BASE_URL" not in env
