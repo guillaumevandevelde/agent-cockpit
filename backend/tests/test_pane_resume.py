@@ -15,7 +15,7 @@ docs/cockpit/sessie-limiet-auto-dispatch-analyse.md §5 (R2).
 import json
 import re
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -338,9 +338,14 @@ async def test_handle_rate_limit_signal_falls_back_when_pane_gone(
 async def test_handle_rate_limit_signal_reschedules_with_backoff_on_relimit(
     tmp_path, monkeypatch,
 ):
-    """Card already has pane_resume_pending (a previous nudge ran). Another
-    transcript-tail sweep sees another limit hit → bump attempts and
-    reschedule the nudge at a later fire time, do NOT fall back yet."""
+    """Card already has pane_resume_pending AND ``pane_resume_fired=True``
+    (the previous nudge actually went out and Claude re-hit the limit
+    afterwards). Another transcript-tail sweep sees another limit hit →
+    bump attempts and reschedule the nudge at a later fire time, do NOT
+    fall back yet. The ``fired=True`` distinction is load-bearing: without
+    it, every dispatch tick (≈10 s) would treat the in-transcript limit as
+    a fresh re-hit and burn the attempt budget before any nudge ever fires
+    (kaart e2116332, productie-meting 2026-07-24)."""
     session_name = "k-backoff-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
@@ -356,7 +361,10 @@ async def test_handle_rate_limit_signal_reschedules_with_backoff_on_relimit(
             s, op_type="claim", entity_type="card", project_key=PK,
             entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
         )
-        # Seed metadata as if a previous nudge was scheduled
+        # Seed metadata as if a previous nudge already fired and the session
+        # re-hit the limit. `pane_resume_fired=True` is what makes this a
+        # genuine re-limit rather than the same in-transcript message being
+        # re-scanned before the apscheduler job got a chance to fire.
         await apply_operation(
             s, op_type="update", entity_type="card", project_key=PK,
             entity_id=cid,
@@ -364,6 +372,7 @@ async def test_handle_rate_limit_signal_reschedules_with_backoff_on_relimit(
                 "pane_resume_pending": True,
                 "pane_resume_attempts": 1,
                 "pane_resume_reset_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+                "pane_resume_fired": True,
             }},
         )
         await s.commit()
@@ -398,11 +407,79 @@ async def test_handle_rate_limit_signal_reschedules_with_backoff_on_relimit(
 
 
 @pytest.mark.asyncio
+async def test_handle_rate_limit_signal_skips_when_nudge_not_fired(
+    tmp_path, monkeypatch,
+):
+    """Card has pane_resume_pending but pane_resume_fired=False: the nudge
+    is scheduled in apscheduler but hasn't fired yet (it's aimed at reset
+    + margin, which can be hours away). A subsequent transcript-tail sweep
+    sees the same in-transcript limit again — this is NOT a re-hit, it's
+    the same limit message being re-scanned, and the apscheduler job will
+    deliver the nudge at the scheduled time. handle_rate_limit_signal must
+    return False without rescheduling, otherwise the attempt budget gets
+    burned in ~30 s before any nudge can fire (kaart e2116332, productie-
+    meting 2026-07-24: 36 events × ~30 s tot fallback, 0 echte nudges)."""
+    session_name = "k-pending-0001"
+    repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    _patch_auto_resume(monkeypatch)
+    add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="pending")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
+        )
+        # Seed: a previous nudge is scheduled for 4h from now, hasn't fired.
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid,
+            payload={"metadata": {
+                "pane_resume_pending": True,
+                "pane_resume_attempts": 1,
+                "pane_resume_reset_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+                "pane_resume_fired": False,
+            }},
+        )
+        await s.commit()
+
+    with patch.object(
+        dispatch, "move_limited_session_to_resume", return_value=True,
+    ) as move_mock:
+        moved = await dispatch.handle_rate_limit_signal(
+            cwd=str(repo / ".claude" / "worktrees" / session_name),
+            message="You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+            source="transcript",
+        )
+
+    # Must NOT reschedule, must NOT fall back. The in-flight apscheduler
+    # job gets its chance to fire; recovery clears the pending state from
+    # the transcript-tail sweep; a real re-hit is gated on pane_resume_fired.
+    add_job_mock.assert_not_called()
+    move_mock.assert_not_called()
+    assert moved is False
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    # Attempts stays put so the eventual fire-and-re-limit path still has
+    # the right budget.
+    assert card.meta["pane_resume_pending"] is True
+    assert card.meta["pane_resume_attempts"] == 1
+
+
+@pytest.mark.asyncio
 async def test_handle_rate_limit_signal_falls_back_after_max_attempts(
     tmp_path, monkeypatch,
 ):
-    """Card has pane_resume_pending with attempts == MAX. Next limit hit must
-    trigger the existing kill+To Resume reaction (acceptance criteria #4)."""
+    """Card has pane_resume_pending with attempts == MAX and
+    pane_resume_fired=True. Next limit hit must trigger the existing
+    kill+To Resume reaction (acceptance criteria #4). The `fired=True`
+    precondition reflects the realistic scenario: we only get to the cap
+    after the previous nudge actually went out."""
     session_name = "k-maxattempts-0001"
     repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
@@ -425,6 +502,7 @@ async def test_handle_rate_limit_signal_falls_back_after_max_attempts(
                 "pane_resume_pending": True,
                 "pane_resume_attempts": dispatch.PANE_RESUME_MAX_ATTEMPTS,
                 "pane_resume_reset_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+                "pane_resume_fired": True,
             }},
         )
         await s.commit()
@@ -507,3 +585,126 @@ async def test_detect_transcript_clears_pane_resume_pending_on_recovered_transcr
     async with KanbanSessionLocal() as s:
         card = await get_card(s, cid)
     assert not (card.meta or {}).get("pane_resume_pending")
+
+
+# ---- execute / fallback: scheduler hygiene ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_pane_resume_marks_fired_after_successful_send(
+    tmp_path, monkeypatch,
+):
+    """When the apscheduler job fires `_execute_pane_resume` and the
+    keystroke delivery succeeds, the card's `pane_resume_fired` flag flips
+    to True. That's the bookkeeping signal that lets the next
+    `handle_rate_limit_signal` call distinguish "same limit message
+    re-scanned before the nudge could fire" (skip) from "previous nudge
+    actually landed and Claude re-hit the limit" (bump attempts +
+    reschedule) — see kaart e2116332."""
+    session_name = "k-execfired-0001"
+    repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    _patch_auto_resume(monkeypatch)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="exec-fired")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
+        )
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid,
+            payload={"metadata": {
+                "pane_resume_pending": True,
+                "pane_resume_attempts": 1,
+                "pane_resume_reset_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+                "pane_resume_fired": False,
+            }},
+        )
+        await s.commit()
+
+    target = f"{session_name}:0.0"
+    with patch(
+        "app.services.scheduling.session_resolver.resolve_target", return_value=target,
+    ), patch(
+        "app.services.scheduling.tmux_inject.wait_for_pane_ready",
+        new=AsyncMock(return_value=True),
+    ), patch(
+        "app.services.scheduling.tmux_inject.send_text", return_value=True,
+    ) as send_mock:
+        ok = await dispatch._execute_pane_resume(
+            cwd=str(repo / ".claude" / "worktrees" / session_name),
+            message="Continue where you left off.",
+        )
+    assert ok is True
+    send_mock.assert_called_once_with(target, "Continue where you left off.")
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    assert card.meta["pane_resume_fired"] is True
+    assert card.meta["pane_resume_pending"] is True  # still pending until recovery clears it
+
+
+@pytest.mark.asyncio
+async def test_pane_resume_fallback_removes_scheduler_job(
+    tmp_path, monkeypatch,
+):
+    """The fallback path must cancel the still-scheduled apscheduler job
+    before moving the card to To Resume. Otherwise the nudge fires hours
+    later into a tmux pane that no longer belongs to this card (the
+    worktree was reused by a different session) and injects a stray
+    "Continue where you left off." keystroke into an unrelated session.
+    Gemeten op 2026-07-24 (kaart e2116332): 2 lost-injection events from
+    exactly this race."""
+    session_name = "k-fallbackjob-0001"
+    repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    _patch_auto_resume(monkeypatch)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="fallback-job")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
+        )
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid,
+            payload={"metadata": {
+                "pane_resume_pending": True,
+                "pane_resume_attempts": 2,
+                "pane_resume_reset_at": (datetime.now(UTC) + timedelta(hours=4)).isoformat(),
+                "pane_resume_fired": True,
+            }},
+        )
+        await s.commit()
+
+    cwd = str(repo / ".claude" / "worktrees" / session_name)
+    expected_job_id = dispatch._pane_resume_job_id(cwd)
+
+    from app.services.scheduling import scheduler as sched_module
+
+    remove_job_mock = MagicMock(return_value=None)
+    monkeypatch.setattr(
+        sched_module.scheduler_service._sched, "remove_job", remove_job_mock,
+    )
+    with patch.object(
+        dispatch, "move_limited_session_to_resume", return_value=True,
+    ) as move_mock:
+        await dispatch._pane_resume_fallback_to_kill(cwd)
+
+    remove_job_mock.assert_called_once_with(expected_job_id)
+    move_mock.assert_awaited_once()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    # Pending state cleared on fallback.
+    assert not (card.meta or {}).get("pane_resume_pending")
+    assert not (card.meta or {}).get("pane_resume_fired")

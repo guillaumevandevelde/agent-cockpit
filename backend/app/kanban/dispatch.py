@@ -4049,13 +4049,34 @@ PANE_RESUME_BACKOFF_S = 60
 PANE_RESUME_MAX_ATTEMPTS = 3
 
 
+def _pane_resume_job_id(cwd: str) -> str:
+    """Stable apscheduler job id for the pane-resume nudge of a given cwd.
+
+    Exposed so the fallback path can remove the job deterministically —
+    without that, the previously-scheduled nudge still fires at the parsed
+    reset time even after the card has been moved to "To Resume", and ends
+    up injecting keystrokes into a worktree that's been reused for a
+    different session (kaart e2116332, gemeten op 2026-07-24).
+    """
+    return f"pane-resume-{hash(cwd) % 100000}"
+
+
 async def _read_pane_resume_state(cwd: str) -> dict | None:
     """Read the pane-resume metadata for the card claimed by `cwd`'s session.
 
-    Returns ``{"attempts": int, "reset_at": iso}`` when a previous nudge is
-    pending, ``None`` otherwise. Reads via `_resume_target_from_cwd` +
-    `list_cards` so it follows the same "kanban card claimed by this session
-    on a non-fixed column" predicate as `move_limited_session_to_resume`.
+    Returns ``{"attempts": int, "reset_at": iso, "fired": bool}`` when a
+    previous nudge is pending, ``None`` otherwise. Reads via
+    `_resume_target_from_cwd` + `list_cards` so it follows the same "kanban
+    card claimed by this session on a non-fixed column" predicate as
+    `move_limited_session_to_resume`.
+
+    ``fired`` distinguishes "nudge scheduled, waiting for the apscheduler
+    job to fire it" (False) from "nudge already fired, monitoring for
+    recovery/re-limit on subsequent ticks" (True). Without this flag the
+    dispatch tick would treat every re-detection of the same in-transcript
+    limit as a fresh re-hit and burn the attempt budget in ~30 s, well
+    before the scheduled nudge ever got a chance to fire — see kanban card
+    e2116332 for the production measurement that surfaced this race.
     """
     target = _resume_target_from_cwd(cwd)
     if target is None:
@@ -4083,6 +4104,7 @@ async def _read_pane_resume_state(cwd: str) -> dict | None:
     return {
         "attempts": int(meta.get("pane_resume_attempts", 0)),
         "reset_at": meta.get("pane_resume_reset_at"),
+        "fired": bool(meta.get("pane_resume_fired", False)),
     }
 
 
@@ -4116,6 +4138,7 @@ async def _clear_pane_resume_state(cwd: str) -> None:
         meta.pop("pane_resume_pending", None)
         meta.pop("pane_resume_attempts", None)
         meta.pop("pane_resume_reset_at", None)
+        meta.pop("pane_resume_fired", None)
         await apply_operation(
             ks, op_type="update", entity_type="card", project_key=project_key,
             entity_id=card.id, payload={"metadata": meta},
@@ -4138,6 +4161,7 @@ async def _clear_pane_resume_metadata_for_card(card, project_path: str) -> None:
     meta.pop("pane_resume_pending", None)
     meta.pop("pane_resume_attempts", None)
     meta.pop("pane_resume_reset_at", None)
+    meta.pop("pane_resume_fired", None)
     project_key = safe_resolve_project_key(project_path)
     if project_key is None:
         return
@@ -4205,7 +4229,7 @@ async def try_pane_resume(
     # `_execute_pane_resume` (the standard auto_resume_service._execute_resume
     # doesn't include the wait_for_pane_ready guard the acceptance criteria
     # ask for).
-    job_id = f"pane-resume-{hash(cwd) % 100000}"
+    job_id = _pane_resume_job_id(cwd)
     try:
         scheduler_service._sched.remove_job(job_id)
     except Exception:
@@ -4222,7 +4246,10 @@ async def try_pane_resume(
 
     # Persist the pending state on the card so the next dispatch tick knows
     # this nudge is in flight and can back off / fall back when (if) another
-    # limit is detected.
+    # limit is detected. `pane_resume_fired` starts False and flips to True
+    # once `_execute_pane_resume` actually delivers the keystroke — that's
+    # the signal that a *new* limit detection is a real re-hit rather than
+    # the same in-transcript message being re-scanned every tick.
     resume_target = _resume_target_from_cwd(cwd)
     if resume_target is None:
         return False
@@ -4246,6 +4273,7 @@ async def try_pane_resume(
         meta["pane_resume_pending"] = True
         meta["pane_resume_attempts"] = attempts
         meta["pane_resume_reset_at"] = reset_time.isoformat()
+        meta["pane_resume_fired"] = False
         await apply_operation(
             ks, op_type="update", entity_type="card", project_key=project_key,
             entity_id=card.id, payload={"metadata": meta},
@@ -4276,6 +4304,11 @@ async def _execute_pane_resume(cwd: str, message: str) -> bool:
     Any failure (pane gone, never ready, send_text returned False) falls
     back to the existing kill+To Resume reaction so the card doesn't sit
     claimed indefinitely while the session is actually dead.
+
+    On a successful delivery the card's `pane_resume_fired` metadata flips
+    to True — that's the signal that flips the bookkeeping from "nudge
+    scheduled, don't reschedule" to "nudge landed, watch the transcript for
+    recovery or a real re-hit" (kaart e2116332).
     """
     from app.services.scheduling.session_resolver import resolve_target
     from app.services.scheduling.tmux_inject import send_text, wait_for_pane_ready
@@ -4302,17 +4335,69 @@ async def _execute_pane_resume(cwd: str, message: str) -> bool:
         await _pane_resume_fallback_to_kill(cwd)
         return False
 
+    await _mark_pane_resume_fired(cwd)
     logger.info("pane-resume: nudge sent to %s", target)
     return True
 
 
+async def _mark_pane_resume_fired(cwd: str) -> None:
+    """Flip the card's `pane_resume_fired` flag to True after the nudge is
+    actually delivered. Idempotent — a no-op when there's no card in the
+    expected claimed/pending state. Called from `_execute_pane_resume` after
+    a successful send so the next dispatch tick knows that subsequent
+    re-detection of an in-transcript limit is a real re-hit rather than the
+    same scheduled nudge still waiting in the scheduler queue."""
+    target = _resume_target_from_cwd(cwd)
+    if target is None:
+        return
+    project_path, session_name = target
+    project_key = safe_resolve_project_key(project_path)
+    if project_key is None:
+        return
+    claimant = CLAIMANT_PREFIX + session_name
+    from app.kanban.db import KanbanSessionLocal
+    async with KanbanSessionLocal() as ks:
+        cards = await list_cards(ks, project_key)
+        card = next(
+            (c for c in cards
+             if c.column not in ("Done", "To Resume")
+             and c.claimed_by == claimant),
+            None,
+        )
+        if card is None:
+            return
+        meta = dict(card.meta or {})
+        if not meta.get("pane_resume_pending"):
+            return
+        if meta.get("pane_resume_fired"):
+            return  # already marked — no need to rewrite
+        meta["pane_resume_fired"] = True
+        await apply_operation(
+            ks, op_type="update", entity_type="card", project_key=project_key,
+            entity_id=card.id, payload={"metadata": meta},
+        )
+        await ks.commit()
+
+
 async def _pane_resume_fallback_to_kill(cwd: str) -> None:
     """When the scheduled nudge can't be delivered (pane gone / not ready /
-    send_keys failed), strip the pending metadata and run the standard
-    kill+To Resume reaction so the card moves into the existing
-    auto-resume-rebuild path. Reads the parsed reset time back from the
-    card metadata so the reaction schedules a resume at the same wall-clock
-    moment the (failed) nudge was aiming at."""
+    send_keys failed) or the max-attempts cap has been hit, strip the
+    pending metadata, cancel the still-scheduled apscheduler job, and run
+    the standard kill+To Resume reaction so the card moves into the
+    existing auto-resume-rebuild path. Reads the parsed reset time back
+    from the card metadata so the reaction schedules a resume at the same
+    wall-clock moment the (failed) nudge was aiming at.
+
+    The apscheduler-job cancellation is load-bearing: without it, the
+    already-scheduled `_execute_pane_resume` still fires at its original
+    reset-time + margin and ends up injecting a "Continue where you left
+    off." keystroke into whatever tmux pane happens to be hosting the
+    worktree by then — which, on a long reset window, is very likely a
+    *different* session that claimed the same worktree in the meantime
+    (kaart e2116332: 2 lost-injection events gemeten op 2026-07-24).
+    """
+    from app.services.scheduling.scheduler import scheduler_service
+
     resume_target = _resume_target_from_cwd(cwd)
     if resume_target is None:
         return
@@ -4321,6 +4406,16 @@ async def _pane_resume_fallback_to_kill(cwd: str) -> None:
     if project_key is None:
         return
     claimant = CLAIMANT_PREFIX + session_name
+
+    # Cancel the still-scheduled apscheduler job up front — idempotent, a
+    # missing job (the scheduler was restarted, the nudge already ran, …)
+    # is not an error condition here.
+    job_id = _pane_resume_job_id(cwd)
+    try:
+        scheduler_service._sched.remove_job(job_id)
+    except Exception:
+        pass
+
     from app.kanban.db import KanbanSessionLocal
     async with KanbanSessionLocal() as ks:
         cards = await list_cards(ks, project_key)
@@ -4336,6 +4431,7 @@ async def _pane_resume_fallback_to_kill(cwd: str) -> None:
             meta.pop("pane_resume_pending", None)
             meta.pop("pane_resume_attempts", None)
             meta.pop("pane_resume_reset_at", None)
+            meta.pop("pane_resume_fired", None)
             await apply_operation(
                 ks, op_type="update", entity_type="card", project_key=project_key,
                 entity_id=card.id, payload={"metadata": meta},
@@ -4418,18 +4514,41 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
         logger.exception("failed to set dispatch pause for %s", cwd)
 
     # Pane-resume branch: prefer nudging the still-alive tmux pane at reset+margin
-    # over the existing kill+To Resume reaction. Falls back to the latter when
-    # (a) the pane is gone, (b) a previous nudge already maxed out attempts, or
-    # (c) we hit the max-attempts cap this round (subsequent re-limits).
+    # over the existing kill+To Resume reaction. The bookkeeping distinguishes
+    # two flavours of "pending" — `fired=False` means a nudge is scheduled for
+    # a future reset time and the apscheduler job will deliver it, while
+    # `fired=True` means the nudge already landed and a fresh detection is a
+    # real re-hit. Without this split, every dispatch tick (≈10 s) would
+    # reschedule because the same in-transcript limit stays at the tail until
+    # the nudge fires — burning the 3-attempt budget in ~30 s and falling back
+    # before any nudge ever got a chance to run (kaart e2116332, gemeten op
+    # 2026-07-24: 36 echte events × ~30 s tot fallback, 0 echte nudges).
     pending = await _read_pane_resume_state(cwd)
-    if pending is not None and pending["attempts"] >= PANE_RESUME_MAX_ATTEMPTS:
-        await _clear_pane_resume_state(cwd)
-        moved = await _do_move_to_resume(cwd, pause_until)
+    if pending is not None and pending["fired"]:
+        # Previous nudge already fired — this detection is a genuine re-hit.
+        # Bump attempts (or fall back at the cap) the way the spec describes.
+        next_attempts = pending["attempts"] + 1
+        if next_attempts >= PANE_RESUME_MAX_ATTEMPTS:
+            await _clear_pane_resume_state(cwd)
+            moved = await _do_move_to_resume(cwd, pause_until)
+        else:
+            scheduled = await try_pane_resume(
+                cwd, pause_until, DEFAULT_RESUME_MESSAGE,
+                attempts=next_attempts,
+            )
+            if scheduled:
+                moved = False
+            else:
+                moved = await _do_move_to_resume(cwd, pause_until)
+    elif pending is not None:
+        # Previous nudge still in flight (scheduled but not yet fired). Don't
+        # reschedule — the apscheduler job handles delivery at the parsed reset
+        # time, and a recovery will clear the pending state from the
+        # transcript-tail detection sweep.
+        moved = False
     else:
-        next_attempts = (pending["attempts"] + 1) if pending else 1
         scheduled = await try_pane_resume(
-            cwd, pause_until, DEFAULT_RESUME_MESSAGE,
-            attempts=next_attempts,
+            cwd, pause_until, DEFAULT_RESUME_MESSAGE, attempts=1,
         )
         if scheduled:
             moved = False

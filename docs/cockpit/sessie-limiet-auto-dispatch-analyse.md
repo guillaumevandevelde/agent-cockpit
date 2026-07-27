@@ -408,6 +408,29 @@ zonder herstart (dat is wat de handmatige workflow suggereert, maar het is niet 
 dat een nudge vóór de reset niet meer dan één extra mislukte call kost. Backoff en een
 maximum aantal pogingen zijn daarom onderdeel van de kaart.
 
+> ✅ **Geïmplementeerd (kaart `e2116332…`)** — `try_pane_resume` +
+> `_execute_pane_resume` + `handle_rate_limit_signal`
+> (`backend/app/kanban/dispatch.py`) plannen een apscheduler-job op
+> `reset_time + margin*attempts` met max 3 pogingen, en de bestaande
+> `tmux_inject`-machinerie levert de nudge af zonder de sessie te killen.
+> De fallback naar kill + To Resume blijft staan voor de drie
+> vangnet-routes uit de acceptance criteria (pane gone, niet ready,
+> max attempts). Een tweede pass op 2026-07-25
+> (`commit e9ff0a1` → productie) mat echter twee ontwerp-bugs die
+> gemeten regressie veroorzaakten (36 events × ~30 s tot fallback, 0
+> echte nudges, 108 misleidende comments, 2 losse keystroke-injecties
+> in hergebruikte panes): de dispatch-tick interpreteerde dezelfde
+> in-transcript limit als een nieuwe re-hit en brandde het
+> attempt-budget op vóór de eerste nudge kon vuren, en de fallback
+> cancelde het apscheduler-job niet. Fix toegepast in een vervolg op
+> dezelfde kaart: een `pane_resume_fired`-vlag differentieert
+> "scheduled, wacht op fire" van "gevuurd, monitor re-limit", en
+> `_pane_resume_fallback_to_kill` ruimt het apscheduler-job op voor
+> het naar To Resume gaat. De kern-aanname ("`claude` accepteert na
+> een limiet invoer en hervat productief") is daarmee eindelijk meetbaar
+> in productie — gemeten uitkomst volgt zodra de eerste echte reset
+> passeert.
+
 ### R3 — Voortgangs-liveness: stilstand is óók dood (kaart C4)
 
 Dit is het enige voorstel dat niet afhangt van het correct herkennen van een specifieke
