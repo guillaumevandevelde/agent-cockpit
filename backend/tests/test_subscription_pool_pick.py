@@ -396,6 +396,9 @@ class TestPickSubscriptionCliAware:
         assert chosen.cli == DEFAULT_POOL_CLI
         assert chosen.provider == "anthropic"
 
+
+
+
     def test_mixed_cli_pool_isolates_signals(self):
         """Pool contains both claude-code and open-code entries; each
         one looks up under its own ``{cli}:{provider}`` key, ignoring
@@ -512,3 +515,87 @@ class TestPickSubscriptionForCliFilter:
         )
         assert chosen is not None
         assert chosen.cli == DEFAULT_POOL_CLI
+
+
+class TestPickSubscriptionThresholdSpilloverToCompatible:
+    """Kaart 66180bc9… (gratis-lanes bedraden): the threshold-triggered
+    path that promotes a free-tier endpoint to the active subscription.
+
+    The earlier threshold tests in this file only exercise
+    ``provider="minimax"`` as the spillover target. The product-side
+    scenario this card adds is "the drempel of the head is hit → the
+    spillover-target is a named ``anthropic-compatible`` endpoint, so
+    the dispatched card actually uses the free-tier upstream." Pin the
+    router's choice end-to-end: the chosen entry carries the right
+    ``provider`` AND a non-empty ``endpoint_name`` so the dispatch
+    path's ``endpoint_resolution`` lookup has a key to resolve.
+    """
+
+    def test_threshold_trigger_picks_anthropic_compatible_entry_with_endpoint_name(self):
+        """The head (anthropic) is above its drempel; the next entry is
+        ``PROVIDER_COMPATIBLE`` with a non-empty ``endpoint_name``. The
+        router must return that second entry — *with its endpoint slug
+        intact* — so the dispatch path can resolve ``base_url`` +
+        ``auth_token`` and thread them into the spawned process."""
+        from dataclasses import replace
+
+        from app.services.agentic_cli.provider_env import PROVIDER_COMPATIBLE
+
+        entries = [
+            _entry(provider="anthropic", drempel=0.9),
+            _entry(
+                provider=PROVIDER_COMPATIBLE, drempel=0.9,
+                model=None,
+            ),
+        ]
+        # Tag the compatible entry's endpoint_name via the dataclass
+        # directly — the router only inspects provider/drempel/cli, but
+        # the dispatch path consumes endpoint_name, so the chosen entry
+        # must round-trip with the slug attached.
+        entries[1] = replace(entries[1], endpoint_name="router-free")
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                drempel_gebruikt=0.95,  # above 0.9 → skip
+            ),
+        }
+        chosen = pick_subscription(
+            entries, usages, paused_providers=set(),
+        )
+        assert chosen is not None
+        assert chosen.provider == PROVIDER_COMPATIBLE
+        assert chosen.endpoint_name == "router-free"
+
+    def test_threshold_trigger_preserves_endpoint_name_on_last_resort(self):
+        """Even when every entry's drempel is hit (the 'laatste
+        val-terug' fallback), the chosen entry must still carry its
+        ``endpoint_name`` so the dispatch path resolves the same way it
+        does for the spillover target — otherwise a saturated free-tier
+        endpoint would silently fall back to the column default and
+        start billing the Anthropic subscription the operator was
+        trying to spare."""
+        from dataclasses import replace
+
+        from app.services.agentic_cli.provider_env import PROVIDER_COMPATIBLE
+
+        entries = [
+            _entry(provider="anthropic", drempel=0.9),
+            _entry(provider=PROVIDER_COMPATIBLE, drempel=0.9),
+        ]
+        entries[1] = replace(entries[1], endpoint_name="router-fallback")
+        usages = {
+            f"{DEFAULT_POOL_CLI}:anthropic": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+                drempel_gebruikt=0.95,
+            ),
+            f"{DEFAULT_POOL_CLI}:{PROVIDER_COMPATIBLE}": _usage(
+                subscription_id=f"{DEFAULT_POOL_CLI}:{PROVIDER_COMPATIBLE}",
+                drempel_gebruikt=0.95,
+            ),
+        }
+        chosen = pick_subscription(
+            entries, usages, paused_providers=set(),
+        )
+        assert chosen is not None
+        assert chosen.provider == PROVIDER_COMPATIBLE
+        assert chosen.endpoint_name == "router-fallback"
