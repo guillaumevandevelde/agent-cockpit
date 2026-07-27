@@ -463,16 +463,24 @@ def test_engineer_md_names_itself_as_canonical_fcr_mirror() -> None:
 
     # Both real mirrors + the drift guard must be named by path, so the
     # callout doubles as the grep recipe the card author needs.
+    #
+    # Scoped to the callout's own text, NOT the whole file: the older
+    # "Bron van waarheid" paragraph just above already names dispatch.py
+    # and _build_ship_instructions, so a whole-body search would stay
+    # green even if the callout dropped them — a tautological assertion
+    # that passes in both the broken and the fixed state.
+    callout_text = _normalized(body[callout_idx:werkomgeving_idx])
     for label, path in (
         ("the persona mirror itself", ".claude/agents/engineer.md"),
         ("the dispatcher mirror", "_build_ship_instructions"),
         ("the dispatcher module", "backend/app/kanban/dispatch.py"),
         ("the drift guard", "backend/tests/test_fcr_prompt_drift.py"),
     ):
-        assert path in normalized, (
+        assert path in callout_text, (
             f"engineer.md: canonical-FCR-mirror callout does not name "
             f"{label} ({path!r}); the callout is the grep recipe for the "
-            f"next FCR card author, so every real location must appear."
+            f"next FCR card author, so every real location must appear "
+            f"inside the callout itself, not merely elsewhere in the file."
         )
 
     # The negative half of the claim — this is the actual bug being fixed,
