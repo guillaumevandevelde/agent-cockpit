@@ -4225,6 +4225,184 @@ def test_make_resume_transport_records_call():
     assert result == {"session_name": "k-test-0001"}
 
 
+def test_make_resume_transport_threads_repo_path_for_mcp_fallback():
+    """Kaart ``bc123e2d…``: the resume transport must pass ``repo_path`` so a
+    resume spawn into a worktree without ``.mcp.json`` still gets
+    ``--mcp-config <repo-root>/.mcp.json`` (route 2, kaart ``3672c073…``).
+
+    The dispatcher passes the project_root as the transport's ``directory``
+    kwarg (``card_transport(directory=project_path, ...)`` in dispatch.py).
+    Without ``repo_path`` threaded through, ``SpawnCommandOptions.repo_path``
+    defaults to ``None``, and ``_project_mcp_config_args`` falls back to
+    ``--strict-mcp-config`` alone — silently losing ``cockpit-kanban`` MCP
+    on the first resume of any external product-project card.
+    """
+    calls = []
+
+    def fake_spawn(cli_id, options, *, session_name, **kwargs):
+        calls.append({"options": options, "session_name": session_name})
+        return {"session_name": session_name}
+
+    import unittest.mock as mock
+    with mock.patch("app.services.runs.spawn.spawn_session", fake_spawn), \
+         mock.patch("app.services.scheduling.session_registry.session_registry.can_add_session",
+                    return_value=True):
+        transport = dispatch.make_resume_transport(
+            session_id="abc-123", project_folder="-home-user-repo",
+        )
+        # The dispatcher's project_root is the transport's ``directory`` arg.
+        project_root = "/scratch/scratchpad/product-x"
+        transport(directory=project_root, prompt="continue", session_name="k-test-0001")
+
+    assert len(calls) == 1
+    opts = calls[0]["options"]
+    assert opts.repo_path == project_root, (
+        f"resume transport must thread repo_path so the worktree's "
+        f"missing .mcp.json falls back to the repo-root copy; got "
+        f"opts.repo_path={opts.repo_path!r}"
+    )
+
+
+def test_make_resume_transport_repo_fallback_reaches_spawn_command(
+    monkeypatch, tmp_path,
+):
+    """End-to-end (kaart ``bc123e2d…``): the resume transport's
+    ``SpawnCommandOptions`` translate into a ``claude --mcp-config
+    <repo-root>/.mcp.json`` argv when the resume cwd (the worktree) lacks
+    the file but the repo-root has it.
+
+    The original ``spawn_session`` would call ``cli.resolve_directory`` to
+    rewrite ``options.directory`` to the worktree path before invoking
+    ``cli.build_spawn_command`` — so we replay that two-step path inside
+    the fake ``spawn_session`` here to assert the *final* argv a dispatched
+    agent would receive. Worktree precedence is also pinned: when the
+    worktree has its own ``.mcp.json``, the launch cwd wins.
+    """
+    import unittest.mock as mock
+
+    # Layout: repo-root has .mcp.json (external product-project after
+    # POST /enable); worktree has none. After the fix, the spawned argv
+    # must point --mcp-config at the repo-root copy.
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".mcp.json").write_text(
+        '{"mcpServers": {"cockpit-kanban": {}}}', encoding="utf-8"
+    )
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+
+    # resolve_directory looks up the cwd from the transcript; stand in
+    # with a fixed worktree path so the fake spawn_session exercises the
+    # same `directory` rewrite the real one does.
+    from app.services.agentic_cli import claude_code as cc_mod
+
+    monkeypatch.setattr(cc_mod.ClaudeCodeCli, "resolve_directory",
+                        lambda self, options: str(worktree))
+
+    captured = {}
+
+    def fake_spawn(cli_id, options, *, session_name, **kwargs):
+        # Replay the same two-step the real spawn_session does
+        # (claude_code.py:96-102 / spawn.py:192-193): rewrite `directory`
+        # via resolve_directory, then build the actual argv.
+        cli = cc_mod.ClaudeCodeCli()
+        resolved_directory = cli.resolve_directory(options)
+        from app.services.agentic_cli.base import SpawnCommandOptions
+        resolved_options = SpawnCommandOptions(
+            **{**options.__dict__, "directory": resolved_directory},
+        )
+        captured["argv"] = cli.build_spawn_command(resolved_options)
+        return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
+
+    with mock.patch("app.services.runs.spawn.spawn_session", fake_spawn), \
+         mock.patch("app.services.scheduling.session_registry.session_registry.can_add_session",
+                    return_value=True):
+        transport = dispatch.make_resume_transport(
+            session_id="abc-123", project_folder="-home-user-repo",
+        )
+        transport(directory=str(repo_root), prompt="continue",
+                  session_name="k-resume-test")
+
+    argv = captured["argv"]
+    assert "--mcp-config" in argv, (
+        f"resume into a worktree without .mcp.json must fall back to the "
+        f"repo-root copy via --mcp-config; argv={argv}"
+    )
+    idx = argv.index("--mcp-config")
+    assert argv[idx + 1] == str(repo_root / ".mcp.json"), (
+        f"--mcp-config must point at the repo-root .mcp.json; got {argv[idx + 1]!r}"
+    )
+    assert "--strict-mcp-config" in argv, (
+        f"host ~/.claude.json MCPs would leak into the resume; argv={argv}"
+    )
+    # Route 1 (file copy into the worktree) was rejected — the fallback must
+    # NOT have materialised a file inside the worktree either (kaart 3672c073…).
+    assert not (worktree / ".mcp.json").exists(), (
+        "resume transport must not copy .mcp.json into the worktree; ship "
+        "gate would refuse to run and the API token could leak via commit"
+    )
+
+
+def test_make_resume_transport_prefers_worktree_mcp_over_repo_root(
+    monkeypatch, tmp_path,
+):
+    """Precedence (kaart ``bc123e2d…`` AC4): when the resume cwd (worktree)
+    has its own ``.mcp.json`` *and* the repo-root does, the launch cwd
+    wins — its copy is the canonical origin/master version (cockpit itself
+    tracks the file so every worktree has it; an external product-project
+    typically has the worktree empty so this is the cockpit-internal lane).
+    The point of this test is to lock the precedence at the resume transport
+    layer: a future refactor of ``_project_mcp_config_args`` can't silently
+    flip it without the resume path breaking too.
+    """
+    import unittest.mock as mock
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".mcp.json").write_text(
+        '{"mcpServers": {"REPO": {}}}', encoding="utf-8"
+    )
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".mcp.json").write_text(
+        '{"mcpServers": {"WORKTREE": {}}}', encoding="utf-8"
+    )
+
+    from app.services.agentic_cli import claude_code as cc_mod
+
+    monkeypatch.setattr(cc_mod.ClaudeCodeCli, "resolve_directory",
+                        lambda self, options: str(worktree))
+
+    captured = {}
+
+    def fake_spawn(cli_id, options, *, session_name, **kwargs):
+        cli = cc_mod.ClaudeCodeCli()
+        resolved_directory = cli.resolve_directory(options)
+        from app.services.agentic_cli.base import SpawnCommandOptions
+        resolved_options = SpawnCommandOptions(
+            **{**options.__dict__, "directory": resolved_directory},
+        )
+        captured["argv"] = cli.build_spawn_command(resolved_options)
+        return {"session_name": session_name, "tmux_target": f"{session_name}:0.0"}
+
+    with mock.patch("app.services.runs.spawn.spawn_session", fake_spawn), \
+         mock.patch("app.services.scheduling.session_registry.session_registry.can_add_session",
+                    return_value=True):
+        transport = dispatch.make_resume_transport(
+            session_id="abc-123", project_folder="-home-user-repo",
+        )
+        transport(directory=str(repo_root), prompt="continue",
+                  session_name="k-resume-test")
+
+    argv = captured["argv"]
+    assert "--mcp-config" in argv, f"argv={argv}"
+    idx = argv.index("--mcp-config")
+    assert argv[idx + 1] == str(worktree / ".mcp.json"), (
+        f"worktree .mcp.json must take precedence over repo-root; "
+        f"got {argv[idx + 1]!r}"
+    )
+
+
 # ---- cause-aware spawn-gate message (bevinding 5) --------------------------
 #
 # All three transports in dispatch.py (worktree, sandcastle, resume) and the

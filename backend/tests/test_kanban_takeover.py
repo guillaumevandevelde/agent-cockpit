@@ -88,6 +88,46 @@ async def test_promote_spawns_resume_with_same_session_name_and_persists_resume_
 
 
 @pytest.mark.asyncio
+async def test_promote_threads_repo_path_for_mcp_fallback():
+    """Kaart ``bc123e2d…``: ``promote_to_tmux`` builds the same ``SpawnCommandOptions``
+    as ``make_resume_transport`` and must therefore also thread ``repo_path``
+    (= the repo-root passed in via ``project_path``) so the resume spawn into
+    the worktree still falls back to ``<repo>/.mcp.json`` when the worktree
+    itself has none. Without this the takeover path silently loses
+    ``cockpit-kanban`` MCP on the first promotion of any external product-project
+    card — same bug class as the resume transport.
+    """
+    spawn_calls = []
+
+    def fake_spawn(**kwargs):
+        spawn_calls.append(kwargs)
+        return {"tmux_target": "k-hl-mcp:0.0", "session_name": "k-hl-mcp"}
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await _claim(s, cid, "agent:k-hl-mcp")
+        await s.commit()
+
+        project_root = "/scratch/scratchpad/product-x"
+        await takeover.promote_to_tmux(
+            s, card_id=cid, project_key=PK, project_path=project_root,
+            resolve=lambda p, n: ("sess-abc", "-repo--claude-worktrees-k-hl-mcp"),
+            live_sessions=lambda: set(),
+            kill_headless=lambda n: True,
+            spawn=fake_spawn,
+        )
+        await s.commit()
+
+    assert len(spawn_calls) == 1
+    call = spawn_calls[0]
+    assert call["options"].repo_path == project_root, (
+        f"takeover must thread repo_path so the worktree's missing "
+        f".mcp.json falls back to the repo-root copy; got "
+        f"opts.repo_path={call['options'].repo_path!r}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_promote_raises_when_card_not_claimed_by_agent():
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s)

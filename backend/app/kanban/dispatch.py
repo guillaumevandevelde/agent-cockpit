@@ -7588,6 +7588,16 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             session_id=session_id,
             project_folder=project_folder,
             prompt=prompt,
+            # ``directory`` here is the project_root passed by the dispatcher
+            # (``card_transport(directory=project_path, ...)`` at
+            # dispatch.py:5375). ``spawn_session`` rewrites ``options.directory``
+            # to the worktree via ``resolve_directory`` for resume mode, so the
+            # worktree is what Claude Code actually sees as its cwd. Thread
+            # ``repo_path`` so ``_project_mcp_config_args`` can fall back to
+            # ``<repo-root>/.mcp.json`` when the worktree has no copy — the
+            # external product-project case (untracked ``.mcp.json`` in the
+            # repo-root; kaart ``bc123e2d…`` / route 2 from kaart ``3672c073…``).
+            repo_path=directory,
             skip_permissions=skip_permissions,
             # Same product-lane wiring as make_worktree_transport — see the
             # comment on that factory for the rationale and the analysis
