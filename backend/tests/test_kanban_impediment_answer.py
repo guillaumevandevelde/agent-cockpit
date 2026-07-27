@@ -128,6 +128,27 @@ def test_build_card_prompt_documents_rest_fallback_for_minus_32602():
     assert "/cards/{id}/deliverables" in prompt
 
 
+def test_rest_fallback_block_documents_list_envelope_create_and_stop_retrying():
+    """The REST fallback has to be usable on the first read (kanban card
+    939a9770: a session where *every* MCP call returned -32602 burned turns on
+    (a) parsing `GET /cards` as a bare list, (b) inferring `POST /cards`, and
+    (c) retrying each call once even though the first retry already failed)."""
+    class _C:
+        title = "Bug"
+        description = "Fix the crash"
+    prompt = dispatch.build_card_prompt(_C(), persona=None, ship_mode="direct")
+    block = prompt.split("## If a `cockpit-kanban` MCP call fails with `-32602`")[1]
+    block = block.split("\n## ")[0]
+    # (a) the list endpoint's response envelope, not a bare list
+    assert '{"items": [' in block
+    # (b) the create endpoint plus its payload shape
+    assert "POST /cards`" in block
+    for field in ("project_key", "title", "description", "column", "work_type"):
+        assert f'"{field}"' in block
+    # (c) one failed retry means MCP is down — stop retrying per call
+    assert "stop retrying" in block
+
+
 # --- REST --------------------------------------------------------------------
 
 

@@ -2074,20 +2074,40 @@ def _build_mcp_fallback_instructions() -> str:
     fine; retrying often clears it once the client re-initializes. A session
     that doesn't know the REST equivalents can burn several turns rediscovering
     endpoint paths, or worse strand a finished card in its dispatch column. See
-    kanban card 7b1d0a91 for the full postmortem."""
+    kanban card 7b1d0a91 for the full postmortem.
+
+    Two follow-up gaps from kanban card 939a9770 (a session where -32602 was
+    100% of calls, not an intermittent race, and the REST fallback carried the
+    whole session) are closed here: the list endpoint's `{"items": [...]}`
+    envelope is spelled out (three parse attempts failed on the assumption it
+    returned a bare list), `POST /cards` is listed so filing a follow-up card
+    doesn't need endpoint archaeology, and the retry advice now caps at one
+    failed retry per session instead of one per call."""
     return (
         "## If a `cockpit-kanban` MCP call fails with `-32602`\n"
         "`-32602` (Invalid request parameters) from a `mcp__cockpit-kanban__*` "
-        "tool is an intermittent MCP handshake race, **not** a bad payload — "
-        "retry the same call once. If it still fails, fall back to the REST API "
-        "at `http://localhost:8000/api/v1/kanban` (same board, same effect):\n"
+        "tool is usually an intermittent MCP handshake race, **not** a bad "
+        "payload — retry the same call once. If that retry also fails, treat "
+        "MCP as **down for the rest of this session**: stop retrying per call "
+        "and go straight to REST for every subsequent board update (a broken "
+        "session handshake fails 100% of calls, not intermittently, and the "
+        "per-call retry never clears it). The REST API is at "
+        "`http://localhost:8000/api/v1/kanban` (same board, same effect):\n"
         "- `POST /cards/{id}/comment` — body `{\"text\": \"…\"}`\n"
         "- `POST /cards/{id}/move` — body `{\"column\": \"…\"}` (for Done/Impediment, "
         "follow with a `comment` carrying your summary — the REST move has no "
         "`summary` field)\n"
         "- `POST /cards/{id}/deliverables` — body `{\"kind\": \"branch|pr|commit|link|note\", \"ref\": \"…\"}`\n"
-        "- `GET /cards?project_key=<key>&column=<col>` — list cards\n"
-        "- `GET /project-key?project_path=<abs path>` — resolve the project key\n"
+        "- `GET /cards?project_key=<key>&column=<col>` — list cards. Returns "
+        "`{\"items\": [...]}` — an object, **not** a bare list; index `.items` "
+        "before iterating (`jq '.items[]'`)\n"
+        "- `POST /cards` — create a card; body `{\"project_key\": \"…\", "
+        "\"title\": \"…\", \"description\": \"…\", \"column\": \"Backlog\", "
+        "\"work_type\": \"…\"}` (`column` defaults to `Backlog`; an unknown "
+        "`project_key` is rejected with 404 `unknown_project_key` — resolve it "
+        "first, don't guess)\n"
+        "- `GET /project-key?project_path=<abs path>` — resolve the project "
+        "key; returns `{\"project_key\": \"…\"}`\n"
     )
 
 
