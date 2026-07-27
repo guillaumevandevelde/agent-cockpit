@@ -633,7 +633,13 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
                        model: str | None = None,
                        endpoint_name: str | None = None,
                        endpoint_base_url: str | None = None,
-                       endpoint_auth_token: str | None = None) -> dict:
+                       endpoint_auth_token: str | None = None,
+                       # Accepted for SpawnTransport parity, deliberately
+                       # unused — the RTK token-saver (kaart c31333bf…) is
+                       # installed only by the worktree transport. See
+                       # tests/test_spawn_transport_signature_parity.py.
+                       card_id: str | None = None,
+                       column_name: str | None = None) -> dict:
     """SpawnTransport sibling for headless ``stream-json`` runs.
 
     Mirrors :func:`app.kanban.dispatch.make_worktree_transport`'s signature so

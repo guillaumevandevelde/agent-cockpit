@@ -3368,7 +3368,15 @@ def sandcastle_transport(*, directory: str, prompt: str, session_name: str,
                          model: str | None = None,
                          endpoint_name: str | None = None,
                          endpoint_base_url: str | None = None,
-                         endpoint_auth_token: str | None = None) -> dict:
+                         endpoint_auth_token: str | None = None,
+                         # Accepted for SpawnTransport parity, deliberately
+                         # unused — the RTK token-saver (kaart c31333bf…) is
+                         # installed only by the worktree transport; the
+                         # sandbox run is driven by the per-project sandcastle
+                         # config. See
+                         # tests/test_spawn_transport_signature_parity.py.
+                         card_id: str | None = None,
+                         column_name: str | None = None) -> dict:
     """Sandcastle transport: run the agent in an isolated sandbox via sandcastle.
 
     `cli_id`, `provider`, `model` are accepted for transport-signature parity
@@ -7497,7 +7505,18 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
                    model: str | None = None,
                    endpoint_name: str | None = None,
                    endpoint_base_url: str | None = None,
-                   endpoint_auth_token: str | None = None) -> dict:
+                   endpoint_auth_token: str | None = None,
+                   # Accepted for SpawnTransport parity and deliberately
+                   # unused: the RTK token-saver (kaart c31333bf…) is
+                   # installed only by the worktree transport, which owns the
+                   # fresh worktree its hook scripts are written into. A
+                   # resume re-enters an existing worktree that already has
+                   # (or lacks) the hook from its original spawn. Dropping
+                   # these from the signature is what broke every resume
+                   # dispatch with a TypeError — see
+                   # tests/test_spawn_transport_signature_parity.py.
+                   card_id: str | None = None,
+                   column_name: str | None = None) -> dict:
         from app.services.agentic_cli.base import SpawnCommandOptions
         from app.services.runs.spawn import spawn_session
         from app.services.scheduling.session_registry import session_registry
