@@ -110,11 +110,17 @@ async def test_resolve_impediment_legacy_free_text_question_path(
 
 
 @pytest.mark.asyncio
-async def test_resolve_impediment_gate_wins_over_resolution_comment(
+async def test_resolve_impediment_gate_leads_and_free_text_follows(
         monkeypatch, _client):
-    """Priority rule: when both a gate answer AND a `**Resolution:**` comment
-    exist on the same card (re-resolve path), the gate's structured pick wins
-    — it's the most recent, structured decision from the dedicated UI."""
+    """Priority rule: when both a gate answer AND free text exist on the same
+    card, the gate's structured pick is the *decision* and the free text is
+    supporting context — both reach the session, with the choice labelled and
+    listed first (kaart c3419f63, fix option 3).
+
+    Rationale for carrying both rather than dropping the text: once a gate is
+    answered, the UI labels the textarea "Optional: add extra context for the
+    resumed session" (kaart 4279448c), so the text is context by design. The
+    earlier contract discarded it, which silently lost operator input."""
     from app.kanban import dispatch as dispatch_mod
     from app.kanban import dispatch as dispatch_module
 
@@ -140,14 +146,17 @@ async def test_resolve_impediment_gate_wins_over_resolution_comment(
         await service.answer_gate(s, gates[0].id, "Postgres")
         await s.commit()
 
-    # 2. Resolve-impediment with a stale `answer` field set to "SQLite" — the
-    #    structured gate pick "Postgres" must still win.
+    # 2. Resolve-impediment with extra context in `answer` — the structured
+    #    gate pick leads, the typed context follows it.
     r = await _client.post(
         f"/api/v1/kanban/cards/{cid}/resolve-impediment",
         json={"project_path": "/tmp", "target_agent": "engineer",
-              "answer": "SQLite"},
+              "answer": "mind the connection pool"},
     )
     assert r.status_code == 200, r.text
     assert captured["impediment_question"] == "Postgres or SQLite?"
-    assert captured["impediment_answer"] == "Postgres"
+    answer = captured["impediment_answer"]
+    assert "Postgres" in answer
+    assert "mind the connection pool" in answer
+    assert answer.index("Postgres") < answer.index("mind the connection pool")
     _ = dispatch_module  # silence unused-import lint (we only need dispatch_mod)

@@ -1705,6 +1705,38 @@ def extract_impediment_answer(activity) -> str | None:
     return None
 
 
+def compose_impediment_answer(gate_answer: str | None,
+                              free_text: str | None) -> str | None:
+    """Merge the two substrates a human answer can arrive on into the single
+    ``impediment_answer`` string the prompt renders.
+
+    Two independent channels exist and an operator can use both in one
+    resolve round:
+
+    * a **structured gate choice** (``report_impediment(options=[...])`` →
+      ``service.answer_gate``), which lives in the ``kanban_gates`` table and
+      posts *no* activity comment, and
+    * **free text**, stamped as a durable ``**Resolution:** <text>`` comment by
+      ``router.resolve_impediment``.
+
+    Precedence: the gate pick is the decision (it's the structured artefact
+    from the dedicated UI), the free text is supporting context — so when both
+    are present they are rendered as a labelled pair rather than one
+    overwriting the other (kanban card c3419f63: the choice never reached the
+    resumed session at all, because the downstream reader only knew about the
+    comment). Identical values collapse to one line: an operator who typed
+    exactly what they clicked shouldn't see it echoed twice.
+
+    Returns None when neither channel carries anything, which keeps
+    ``build_card_prompt`` on its "please address this question" framing.
+    """
+    gate = (gate_answer or "").strip()
+    text = (free_text or "").strip()
+    if gate and text and gate != text:
+        return f"Chosen option: {gate}\n\nAdditional context: {text}"
+    return gate or text or None
+
+
 def extract_revisit_question(activity) -> str | None:
     """Return the text of the latest `**Revisit:** <note>` comment on a
     card's activity feed, or None when no such comment exists.
@@ -1925,13 +1957,21 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
             f"> {impediment_question}\n\n"
         )
         if impediment_answer:
-            # A human answered the blocker via /resolve-impediment (or a
-            # `**Resolution:**` comment). Surface it as authoritative so the
+            # A human answered the blocker via /resolve-impediment: a structured
+            # gate choice, a `**Resolution:**` comment, or both merged by
+            # `compose_impediment_answer`. Surface it as authoritative so the
             # resumed session acts on the decision instead of re-asking.
+            # Blockquote every line — a merged answer is multi-line, and a bare
+            # `> ` on the first line only would leave the rest reading as loose
+            # prose outside the quote.
+            quoted = "\n".join(
+                f"> {line}" if line.strip() else ">"
+                for line in str(impediment_answer).splitlines()
+            )
             impediment_section += (
                 "A human has since answered this — treat the answer as an "
                 "authoritative decision and proceed accordingly:\n"
-                f"> {impediment_answer}\n\n"
+                f"{quoted}\n\n"
             )
         else:
             impediment_section += (
@@ -2210,14 +2250,15 @@ async def _resolve_revisit(session, card) -> tuple[str | None, dict | None]:
 
 
 async def _resolve_impediment(session, card) -> tuple[str | None, str | None]:
-    """Look up the latest ``**Impediment:**`` question and the latest
-    ``**Resolution:**`` answer on a card's activity feed.
+    """Look up the latest ``**Impediment:**`` question and the human's answer
+    to it, reading **both** answer substrates: the structured gate choice
+    (``kanban_gates``) and the free-text ``**Resolution:**`` comment.
 
-    Returns ``(question, answer)``; both are None when the card has no such
-    comments (the common case — only cards that went through the
-    resolve-impediment flow carry these). Mirrors ``_resolve_revisit`` in
+    Returns ``(question, answer)``; both are None when the card has no
+    impediment question (the common case — only cards that went through the
+    resolve-impediment flow carry one). Mirrors ``_resolve_revisit`` in
     shape and intent: cheap (one short scan of an already-materialised op-log)
-    and only contributes to the prompt when the comments actually exist, so
+    and only contributes to the prompt when the question actually exists, so
     ordinary cards see no IMPEDIMENT section.
 
     Plumbed through ``dispatch_project`` (auto-tick) so a card that just
@@ -2226,6 +2267,16 @@ async def _resolve_impediment(session, card) -> tuple[str | None, str | None]:
     kolom) still gets the human's question + authoritative decision in the
     next spawned session's prompt. Without this, dropping the card in
     Backlog would silently lose the impediment context.
+
+    **Why the gate lookup lives here** (kaart c3419f63): the resolve endpoint
+    computes the answer correctly but ``dispatch_impediment_card`` only parks
+    the card on Backlog — the spawn happens a tick later and re-derives the
+    context from here. Reading only the ``**Resolution:**`` comment therefore
+    dropped every gate-only resolve (``service.answer_gate`` posts no comment),
+    so an operator who clicked "Postgres" and typed nothing saw the resumed
+    agent re-ask the settled question. The gate query is skipped entirely when
+    the card has no impediment question, so an ordinary card carrying an
+    ``open_gate`` answer can't grow a phantom IMPEDIMENT answer.
     """
     from app.kanban import service as svc
 
@@ -2234,7 +2285,7 @@ async def _resolve_impediment(session, card) -> tuple[str | None, str | None]:
     # router.resolve_impediment's priority rules). The Impediment question
     # itself doesn't change across resolve rounds, but walking in the same
     # direction keeps the two extractors symmetric.
-    answer = extract_impediment_answer(activity)
+    free_text = extract_impediment_answer(activity)
     question = None
     for op in reversed(list(activity)):
         if op.op_type != "comment":
@@ -2243,7 +2294,10 @@ async def _resolve_impediment(session, card) -> tuple[str | None, str | None]:
         if text.startswith(svc._IMPEDIMENT_QUESTION_PREFIX):
             question = text[len(svc._IMPEDIMENT_QUESTION_PREFIX):]
             break
-    return question, answer
+    if question is None:
+        return None, None
+    gate_answer = await svc.latest_gate_answer(session, card.id)
+    return question, compose_impediment_answer(gate_answer, free_text)
 
 
 async def _stamp_resume_target(session, *, card, project_key: str,

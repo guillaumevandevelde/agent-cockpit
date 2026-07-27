@@ -2047,18 +2047,17 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
         if not impediment_question:
             impediment_question = "No impediment question found"
 
-        # Resolve in priority order:
-        # 1. Structured-options gate answer (the new report_impediment
-        #    options= path): when the human clicked a choice button, that's the
-        #    most recent, structured decision — it wins over a free-text
-        #    resolution comment on the same card.
-        # 2. Free-text `**Resolution:**` comment (legacy / resolve-impediment
-        #    payload.answer path).
-        gate_answer = await service.latest_gate_answer(s, cid)
-        if gate_answer is not None:
-            impediment_answer = gate_answer
-        else:
-            impediment_answer = dispatch.extract_impediment_answer(activity)
+        # Both answer substrates are merged by the single shared composer in
+        # dispatch (`compose_impediment_answer`): the structured gate choice is
+        # the decision, a free-text `**Resolution:**` comment is supporting
+        # context, and both are rendered when both exist. Using the same helper
+        # the auto-tick reader uses keeps this endpoint and
+        # `dispatch._resolve_impediment` from drifting apart — the drift is
+        # exactly what made the gate choice vanish downstream (kaart c3419f63).
+        impediment_answer = dispatch.compose_impediment_answer(
+            await service.latest_gate_answer(s, cid),
+            dispatch.extract_impediment_answer(activity),
+        )
 
         # Determine target agent based on workflow rules or override
         target_agent = payload.target_agent
