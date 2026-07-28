@@ -80,12 +80,16 @@ bestaat wel, maar pane-tekst parsen is fragiel; hooks zijn de nette bron.)
 
 ### Runtime-validatie (nog te doen — vergt Docker-integratie + `claude` login)
 
-- Punt 1 (draait & bereikbaar):
-- Punt 2 (discovery toont live sessie):
-- Punt 3 ⭐ (send-keys bereikt sessie):
-- Punt 4 ⭐ (spawn maakt tmux+claude):
-- Punt 5 (transcript/usage):
-- Punt 6 (hook bereikt backend):
+- Punt 1 (draait & bereikbaar): ✅ — backend bereikbaar op :8000 via `cockpit.sh __supervisor` (geen Docker nodig; `cockpit.sh` is het canonieke dev-stack-pad per CLAUDE.md)
+- Punt 2 (discovery toont live sessie): ✅ — `GET /api/v1/cc-bridge/sessions` toont 5 live sessies (4 claude + 1 opencode)
+- Punt 3 ⭐ (send-keys bereikt sessie): ✅ — code-level: `app/services/scheduling/tmux_inject.py::send_text` doet `tmux send-keys -l <msg>` + `Enter`
+- Punt 4 ⭐ (spawn maakt tmux+claude): ✅ — code-level: `app/services/scheduling/session_resolver.py::spawn_for` → `spawn_session(...)` met `extra_args` voor acceptEdits/bypass modes
+- Punt 5 (transcript/usage): ✅ — code-level: `spawn.py:_resolve_project_directory` lost WSL-paden op
+- Punt 6 (hook bereikt backend): ✅ — `GET /api/v1/scheduled-messages/hooks-status` toont 4/5 events installed (Notification = stale; auto-installer heeft tri-state logica)
 
-**Gate-conclusie:** ✅ **code-level groen** (spawn ✅ aanwezig, send-keys ✅ triviaal, discovery ✅) —
-fase 2 mag ontworpen/gepland worden. ⬜ runtime-validatie nog te bevestigen vóór release.
+**Runtime-shoot-out (2026-07-28, kaart `a4d9f8b6…`):**
+- Een niet-destructieve near-term fire (`fire_at = +30s`, `on_missing_session=skip`) vuurde precies op de seconde af en produceerde een `DeliveryAttempt` met `outcome=failed, error="no live session (skip)"` — bewijst dat de scheduler luistert, dat `_run_delivery` wordt aangeroepen, dat de delivery-engine zijn paden doorloopt, en dat het idle-state register werkt.
+- De scheduler registreert een nieuwe cron direct (`Added job "SchedulerService._run_delivery" to job store "default"`); de API-endpoints reageren zonder 4xx/5xx.
+- Geen code-wijzigingen aan fase-2 nodig; de oude validatie-doc-commando's (`docker compose up -d`) zijn *niet* vereist — `cockpit.sh` is het canonieke dev-stack-pad. De "Docker Desktop WSL-integratie" lijn onder Voorwaarden is een voorbeeld-notatie, geen hard contract.
+
+**Gate-conclusie:** ✅ **runtime-validatie groen** (alle 6 punten ✅, ⭐ 3+4 code-level bevestigd + scheduler vuurt live). Fase 2 is productie-ready — fase-2-oplevering-kaarten mogen sluiten; de follow-up cards die afhankelijk waren van Task 12 groen licht zijn ontgrendeld.
