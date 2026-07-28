@@ -5,6 +5,14 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # TS 7 is blocked: typescript-eslint stabiel (8.65.0) declareert peer
+    # `typescript >=4.8.4 <6.1.0`. Zie kanban-kaart 75b7d11f... voor de twee
+    # bekende blockers (peer-range + tsconfig baseUrl). Zodra typescript-eslint
+    # een stabiele release met TS 7 in de peer-range uitbrengt, deze ignore
+    # verwijderen in dezelfde commit als de bump.
+    ignore:
+      - dependency-name: "typescript"
+        versions: ["7.x"]
 
   - package-ecosystem: pip
     directory: /backend
