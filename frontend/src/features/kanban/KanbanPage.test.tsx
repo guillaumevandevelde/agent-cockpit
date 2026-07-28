@@ -197,6 +197,50 @@ describe("KanbanPage new-card dialog", () => {
     expect(body.analyst_agent_id).toBeNull();
     expect(body.executor_agent_id).toBeNull();
   });
+
+  it("uploads each staged attachment right after createCard resolves", async () => {
+    const createCardMock = kanbanApi.createCard as ReturnType<typeof vi.fn>;
+    const uploadMock = kanbanApi.uploadAttachment as ReturnType<typeof vi.fn>;
+    createCardMock.mockResolvedValue({ id: "card-123" });
+    uploadMock.mockResolvedValue({});
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "New card" }));
+    });
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "With attachment" },
+    });
+    // Drive the same code path the dialog would: pass a fake File into the
+    // hidden input, then submit. createObjectURL/revokeObjectURL aren't in
+    // jsdom, so the CardEditDialog test covers the staging side; here we
+    // only care that KanbanPage hands the files to uploadAttachment with
+    // the id returned by createCard.
+    const dialogInput = screen.getByLabelText("Bijlage kiezen") as HTMLInputElement;
+    const file1 = new File(["a"], "shot-a.png", { type: "image/png" });
+    const file2 = new File(["b"], "shot-b.png", { type: "image/png" });
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: () => "blob:fake",
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: () => {},
+    });
+    await act(async () => {
+      fireEvent.change(dialogInput, { target: { files: [file1, file2] } });
+    });
+    await act(() => {
+      screen.getByRole("button", { name: "Create" }).click();
+    });
+
+    await waitFor(() => expect(createCardMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(uploadMock).toHaveBeenCalledTimes(2));
+    expect(uploadMock.mock.calls[0]).toEqual(["card-123", file1]);
+    expect(uploadMock.mock.calls[1]).toEqual(["card-123", file2]);
+  });
 });
 
 describe("KanbanPage ?card= deep link", () => {

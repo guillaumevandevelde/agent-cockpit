@@ -628,9 +628,9 @@ export default function KanbanPage() {
           projectKey={projectKey}
           projectPath={projectPath}
           onClose={() => setCreating(false)}
-          onSubmit={async ({ title, description, priority, labels, work_type, agent, model, column_overrides, transport, resume_session_id, resume_project_folder, scheduled_at, analyst_agent_id, executor_agent_id }) => {
+          onSubmit={async ({ title, description, priority, labels, work_type, agent, model, column_overrides, transport, resume_session_id, resume_project_folder, scheduled_at, analyst_agent_id, executor_agent_id, attachments }) => {
             try {
-              await kanbanApi.createCard({
+              const created = await kanbanApi.createCard({
                 project_key: projectKey,
                 title,
                 description,
@@ -647,6 +647,24 @@ export default function KanbanPage() {
                 analyst_agent_id,
                 executor_agent_id,
               });
+              // Attachments require a card id, so they can't ride on the
+              // createCard body. Upload each staged file individually; a
+              // single failure shouldn't drop the card the user just made.
+              if (created?.id && attachments && attachments.length > 0) {
+                const failed: string[] = [];
+                for (const file of attachments) {
+                  try {
+                    await kanbanApi.uploadAttachment(created.id, file);
+                  } catch {
+                    failed.push(file.name);
+                  }
+                }
+                if (failed.length > 0) {
+                  toast.error(
+                    `Bijlage upload mislukt: ${failed.join(", ")}`,
+                  );
+                }
+              }
               setCreating(false);
               void reload();
             } catch {

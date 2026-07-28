@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 vi.mock("@/contexts/ProviderContext", () => ({
   useProviderContext: () => ({
@@ -291,5 +296,84 @@ describe("CardEditDialog", () => {
     expect(onSubmit.mock.calls[0][0].column_overrides).toEqual({
       engineer: { model: "opus", provider: "anthropic" },
     });
+  });
+});
+
+describe("CardEditDialog attachment staging", () => {
+  // jsdom does not implement URL.createObjectURL/revokeObjectURL; stub them so
+  // the component's preview-thumbnail path doesn't blow up when file input
+  // handlers fire in tests.
+  const objectUrlStubs: string[] = [];
+  const originalCreate = (URL as unknown as { createObjectURL?: (b: Blob) => string }).createObjectURL;
+  const originalRevoke = (URL as unknown as { revokeObjectURL?: (u: string) => void }).revokeObjectURL;
+  beforeEach(() => {
+    (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = () => {
+      const url = `blob:fake-${objectUrlStubs.length}`;
+      objectUrlStubs.push(url);
+      return url;
+    };
+    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = () => {};
+  });
+  afterEach(() => {
+    if (originalCreate) (URL as unknown as { createObjectURL: typeof originalCreate }).createObjectURL = originalCreate;
+    else delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
+    if (originalRevoke) (URL as unknown as { revokeObjectURL: typeof originalRevoke }).revokeObjectURL = originalRevoke;
+    else delete (URL as unknown as { revokeObjectURL?: unknown }).revokeObjectURL;
+    objectUrlStubs.length = 0;
+  });
+
+  it("renders the attachment picker in create mode and forwards the files on submit", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+    const input = screen.getByLabelText("Bijlage kiezen") as HTMLInputElement;
+    const file1 = new File(["png-bytes-1"], "shot-1.png", { type: "image/png" });
+    const file2 = new File(["png-bytes-2"], "shot-2.png", { type: "image/png" });
+    await act(async () => {
+      fireEvent.change(input, { target: { files: [file1, file2] } });
+    });
+    expect(screen.getByRole("img", { name: "shot-1.png" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "shot-2.png" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "With screenshots" },
+    });
+    screen.getByRole("button", { name: /create/i }).click();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.attachments).toEqual([file1, file2]);
+  });
+
+  it("rejects non-image files with a toast and does not stage them", () => {
+    render(
+      <CardEditDialog
+        open
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    const input = screen.getByLabelText("Bijlage kiezen") as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "doc.pdf", { type: "application/pdf" })] },
+    });
+    expect(screen.queryByRole("img", { name: "doc.pdf" })).toBeNull();
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("doc.pdf"));
+  });
+
+  it("does not render the attachment picker in edit mode (initial is set)", () => {
+    render(
+      <CardEditDialog
+        open
+        initial={{ title: "Existing", description: "" }}
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText("Bijlage kiezen")).toBeNull();
   });
 });

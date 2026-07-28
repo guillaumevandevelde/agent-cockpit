@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ImagePlus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -121,6 +123,9 @@ export function CardEditDialog({
     scheduled_at: string | null;
     analyst_agent_id: string | null;
     executor_agent_id: string | null;
+    // Screenshots staged in the dialog (create mode only). The caller uploads
+    // them after the card exists — see KanbanPage's create handler.
+    attachments: File[];
   }) => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -155,6 +160,47 @@ export function CardEditDialog({
   );
   const { providers } = useProviderContext();
   const installedProviders = providers.filter((p) => p.installed);
+
+  // Screenshots staged for a *new* card. A card must exist before
+  // POST /cards/{id}/attachments can run, so the files are kept in memory here
+  // and uploaded by the caller right after createCard resolves. Editing an
+  // existing card keeps using the drawer's Attachments tab (which uploads
+  // immediately), hence create-mode only.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [staged, setStaged] = useState<{ file: File; previewUrl: string }[]>([]);
+  // Mirror of `staged` for the unmount cleanup below: that effect runs once, so
+  // reading the state variable there would revoke a stale (first-render) list.
+  const stagedRef = useRef(staged);
+  useEffect(() => {
+    stagedRef.current = staged;
+  }, [staged]);
+
+  const addStagedFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const accepted: { file: File; previewUrl: string }[] = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) {
+        toast.error(`${file.name} is geen afbeelding`);
+        continue;
+      }
+      accepted.push({ file, previewUrl: URL.createObjectURL(file) });
+    }
+    setStaged((prev) => [...prev, ...accepted]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const removeStagedFile = (previewUrl: string) => {
+    setStaged((prev) => prev.filter((s) => s.previewUrl !== previewUrl));
+    URL.revokeObjectURL(previewUrl);
+  };
+
+  // Release the object URLs when the dialog unmounts so the blobs aren't
+  // retained for the lifetime of the page.
+  useEffect(() => {
+    return () => {
+      for (const s of stagedRef.current) URL.revokeObjectURL(s.previewUrl);
+    };
+  }, []);
 
   const [resumeSessions, setResumeSessions] = useState<ResumableSession[]>([]);
   const [selectedResume, setSelectedResume] = useState<ResumableSession | null>(null);
@@ -282,6 +328,63 @@ export function CardEditDialog({
             <Label>Description</Label>
             <MarkdownPreviewToggle value={description} onChange={setDescription} minHeight="140px" />
           </div>
+
+          {!initial && (
+            <div className="space-y-2">
+              <Label>Bijlagen</Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                aria-label="Bijlage kiezen"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                multiple
+                className="hidden"
+                onChange={(e) => addStagedFiles(e.target.files)}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <ImagePlus className="h-4 w-4" />
+                Screenshot toevoegen
+              </Button>
+              {staged.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Optioneel — screenshots worden na het aanmaken geüpload en aan
+                  de sessie meegegeven zodra de kaart gedispatcht wordt.
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {staged.map((s) => (
+                    <div
+                      key={s.previewUrl}
+                      className="group relative overflow-hidden rounded border bg-muted/30"
+                    >
+                      <img
+                        src={s.previewUrl}
+                        alt={s.file.name}
+                        className="h-20 w-full object-cover"
+                      />
+                      <Button
+                        size="icon"
+                        variant="destructive"
+                        className="absolute right-1 top-1 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeStagedFile(s.previewUrl);
+                        }}
+                        aria-label={`${s.file.name} verwijderen`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Priority</Label>
@@ -656,6 +759,7 @@ export function CardEditDialog({
                 scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
                 analyst_agent_id: analystAgentId === AUTO ? null : analystAgentId,
                 executor_agent_id: executorAgentId === AUTO ? null : executorAgentId,
+                attachments: staged.map((s) => s.file),
               })
             }
           >
