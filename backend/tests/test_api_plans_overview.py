@@ -76,6 +76,28 @@ async def _create_card(ac: AsyncClient, project_key: str, title: str) -> str:
     return r.json()["id"]
 
 
+async def _create_card_with_meta(
+    ac: AsyncClient, project_key: str, title: str,
+    metadata: dict,
+) -> str:
+    """Create a card whose ``metadata`` bag carries the supplied keys.
+
+    Used by the B↔C correlation tests to plant ``metadata.spec_doc`` on a
+    card via the existing card-create payload (no ORM shortcut, no PATCH
+    round-trip). Goes through ``POST /cards`` so the op-log materialises
+    the same way real traffic does — matches the exercise-the-real-pipeline
+    rationale of ``_create_card`` above.
+    """
+    body = {
+        "project_key": project_key, "title": title,
+        "confirm_new_project": True,
+        "metadata": metadata,
+    }
+    r = await ac.post("/api/v1/kanban/cards", json=body)
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
 async def _attach_plan_deliverable(card_id: str, kind: str, ref: str) -> str:
     """Insert a ``plan``/``plan_ref`` row directly through the ORM.
 
@@ -321,7 +343,7 @@ async def test_overview_sections_are_independent(patched_project_key):
     patched_project_key("/tmp/indep", "git:overview-indep")
     calls = {"n": 0}
 
-    def _stub_docs() -> list:
+    def _stub_docs(correlations=None) -> list:
         calls["n"] += 1
         return []
 
@@ -441,3 +463,150 @@ async def test_overview_doc_rejects_path_traversal(patched_project_key):
             "/api/v1/plans/overview/docs/backend/requirements.txt",
         )
         assert r3.status_code == 400, r3.text
+
+
+# ---------------------------------------------------------------------------
+# B↔C correlation (kanban plan 2026-07-28-plans-b-c-correlation, Task 1)
+# ---------------------------------------------------------------------------
+#
+# These tests pin the spec-driven-development Fase-1 join end-to-end: a
+# card whose ``metadata.spec_doc`` exactly equals a C doc-path must show
+# up on BOTH sides of the response, and a card with no / wrong / URL
+# spec must NOT leak into the C ``implemented_by`` list. The join runs
+# project-scoped (no cross-project leakage) and the B row's
+# ``spec_doc`` mirrors the metadata value so the SPA can render a
+# clickable doclink without re-reading the card.
+#
+# Three behaviours are pinned (one assertion each, named so a failure
+# message points at the broken invariant):
+#   * exact-match: present in B's ``spec_doc`` AND in C's
+#     ``implemented_by``;
+#   * missing-match: present in neither (the C row carries an empty
+#     ``implemented_by`` list, B's ``spec_doc`` is ``null``);
+#   * URL-spec: filtered out — never appears in C's ``implemented_by``,
+#     never appears in B's ``spec_doc`` (both null/empty).
+
+
+@pytest.mark.asyncio
+async def test_overview_correlation_exact_match_populates_both_sides(
+    patched_project_key,
+):
+    """A card with ``metadata.spec_doc`` matching a C doc-path shows up
+    on both sides of the response: B's ``spec_doc`` field equals the
+    repo-relative path; C's ``implemented_by`` lists the card. This is
+    the happy path the SPA renders as "click here to jump to the doc /
+    these cards implemented this doc".
+    """
+    target_doc = "docs/cockpit/kanban-conventions.md"
+    patched_project_key("/tmp/corr-exact", "git:overview-corr-exact")
+    async with _client() as ac:
+        card_id = await _create_card_with_meta(
+            ac, "git:overview-corr-exact", "spec author",
+            metadata={"spec_doc": target_doc},
+        )
+        # Add a plan deliverable so the card also produces a B row — the
+        # join must produce BOTH the B row (with ``spec_doc`` populated)
+        # and the C-row chip, demonstrating the LEFT JOIN semantics
+        # called out in the plan: "kaarten zonder plan-deliverable wel
+        # correlaties leveren maar geen B-rij".
+        await _attach_plan_deliverable(card_id, kind="plan", ref="# x")
+
+        r = await ac.get("/api/v1/plans/overview", params={
+            "project_path": "/tmp/corr-exact",
+        })
+    body = r.json()
+
+    # B side: the card row carries ``spec_doc == target_doc``.
+    rows_for_card = [
+        row for row in body["cards"] if row["card_id"] == card_id
+    ]
+    assert len(rows_for_card) == 1, "exactly one B row per card"
+    assert rows_for_card[0]["spec_doc"] == target_doc
+
+    # C side: the doc row lists our card in ``implemented_by``.
+    docs_for_target = [
+        d for d in body["docs"] if d["path"] == target_doc
+    ]
+    assert len(docs_for_target) == 1
+    impl = docs_for_target[0]["implemented_by"]
+    assert impl == [
+        {"card_id": card_id, "card_title": "spec author"},
+    ], f"implemented_by mismatch: {impl!r}"
+
+
+@pytest.mark.asyncio
+async def test_overview_correlation_missing_match_yields_empty_and_null(
+    patched_project_key,
+):
+    """A card whose ``spec_doc`` doesn't match any C doc-path must NOT
+    contaminate the response: ``DocSpecItem.implemented_by`` is an empty
+    list for the doc (no claim is recorded), and ``CardPlanItem.spec_doc``
+    on the B row is ``null`` (the metadata value is preserved as-is so
+    the SPA can render a "no matching doc" hint, not silently dropped).
+    """
+    patched_project_key("/tmp/corr-miss", "git:overview-corr-miss")
+    # Pick a path that almost certainly isn't in docs/cockpit/ — short
+    # ASCII, no slashes that could match a real doc by accident.
+    bogus = "docs/cockpit/__definitely-not-a-real-doc__.md"
+    async with _client() as ac:
+        card_id = await _create_card_with_meta(
+            ac, "git:overview-corr-miss", "miss author",
+            metadata={"spec_doc": bogus},
+        )
+        await _attach_plan_deliverable(card_id, kind="plan", ref="# y")
+
+        r = await ac.get("/api/v1/plans/overview", params={
+            "project_path": "/tmp/corr-miss",
+        })
+    body = r.json()
+
+    # B side: ``spec_doc`` reflects the card's metadata verbatim (null is
+    # reserved for "no anchor"; we don't silently rewrite the bogus path
+    # into null because that would hide a real bug from the SPA).
+    rows_for_card = [
+        row for row in body["cards"] if row["card_id"] == card_id
+    ]
+    assert rows_for_card[0]["spec_doc"] == bogus
+
+    # C side: every doc row has an empty ``implemented_by`` list (no
+    # claim is recorded, because no path matched).
+    for d in body["docs"]:
+        assert d["implemented_by"] == [], (
+            f"unexpected implemented_by on {d['path']!r}: "
+            f"{d['implemented_by']!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_overview_correlation_url_spec_doc_is_filtered_out(
+    patched_project_key,
+):
+    """``http://``/``https://`` ``spec_doc`` values are explicitly NOT
+    correlatable (the URL points at content outside the repo, so we
+    cannot link a card back to a C row without lying). The card still
+    exists in B with ``spec_doc`` populated to the URL string — the
+    filter is on the C-side join only, so the SPA can still surface
+    "external spec" affordances without polluting ``implemented_by``.
+    """
+    patched_project_key("/tmp/corr-url", "git:overview-corr-url")
+    url_spec = "https://example.com/external-spec.md"
+    async with _client() as ac:
+        card_id = await _create_card_with_meta(
+            ac, "git:overview-corr-url", "url author",
+            metadata={"spec_doc": url_spec},
+        )
+        await _attach_plan_deliverable(card_id, kind="plan", ref="# z")
+
+        r = await ac.get("/api/v1/plans/overview", params={
+            "project_path": "/tmp/corr-url",
+        })
+    body = r.json()
+
+    # C side: every doc row has an empty ``implemented_by`` list (URLs
+    # never match a repo-relative path). Most importantly, no doc's
+    # implemented_by references our card.
+    for d in body["docs"]:
+        assert d["implemented_by"] == []
+    for d in body["docs"]:
+        for entry in d["implemented_by"]:
+            assert entry["card_id"] != card_id

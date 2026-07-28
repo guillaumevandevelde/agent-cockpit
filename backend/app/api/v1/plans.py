@@ -3,11 +3,13 @@
 ``GET /plans/overview`` (kanban card 885d0b61, Optie B, stap 1) returns a
 read-only B+C aggregate: B is the set of ``plan``/``plan_ref``
 deliverables on cards scoped to ``project_key``, C is the repo-wide
-``docs/cockpit/*.md`` filesystem index. The two sections are returned
-side-by-side without correlation — the ``spec_doc`` join is a deferred
-follow-up (kanban card bb1f61aa) and intentionally not implemented here.
-``GET /plans/overview/docs/{path}`` fetches a single doc's body for the
-detail view.
+``docs/cockpit/*.md`` filesystem index. The two sections are correlated
+by ``card.metadata["spec_doc"]`` (kanban plan 2026-07-28-plans-b-c-
+correlation, Task 1): each B row carries the card's ``spec_doc`` anchor,
+each C row lists the cards that claim it via ``implemented_by``. URL
+``spec_doc`` values and missing-path matches are filtered out so the
+correlation never lies. ``GET /plans/overview/docs/{path}`` fetches a
+single doc's body for the detail view.
 
 ``project_path`` is accepted (so the SPA can pass the active project's
 path unchanged) and resolved to a ``project_key`` via
@@ -29,14 +31,16 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from app.config import PROJECT_ROOT
 from app.kanban.db import KanbanSessionLocal
 from app.kanban.models import KanbanCard, KanbanDeliverable
 from app.kanban.project_key import resolve_project_key
+from app.kanban.schemas import SPEC_DOC_META_KEY
 from app.models.schemas import (
     CardPlanItem,
+    CorrelatedCardItem,
     DocContentResponse,
     DocSpecItem,
     PlansOverviewResponse,
@@ -75,7 +79,7 @@ def _resolve_project_key(project_path: str | None) -> str:
 # Plans overview — B+C aggregator (kanban card 885d0b61, Optie B, stap 1)
 # ---------------------------------------------------------------------------
 #
-# Two read-only sections returned as siblings, NOT joined:
+# Two read-only sections returned as siblings, correlated per row:
 #   * B — ``plan``/``plan_ref`` deliverables on cards scoped to the
 #     resolved project_key. Source of truth: the kanban DB.
 #   * C — repo-wide ``docs/cockpit/*.md`` filesystem index. Source of
@@ -83,10 +87,14 @@ def _resolve_project_key(project_path: str | None) -> str:
 #     is the platform's SSOT, shared across every project the SPA asks
 #     about — see ``docs/cockpit/plans-feature-decision.md`` §6.
 #
-# The ``spec_doc`` join (an anchor that today has 0× producers) is
-# deliberately NOT implemented here; see kanban card bb1f61aa for the
-# deferred follow-up. The shape is intentionally flat so the SPA can
-# render B and C without a join step in the client either.
+# The B↔C correlation (kanban plan 2026-07-28-plans-b-c-correlation,
+# Task 1) joins on ``card.metadata["spec_doc"] == c.path`` and ships
+# inside each row (``CardPlanItem.spec_doc`` / ``DocSpecItem.implemented_by``),
+# not at the top level — so the SPA can render the link without a
+# client-side join. URL-anchored ``spec_doc`` values are filtered out
+# (no repo-relative path to match) and a card with a bogus path simply
+# fails to correlate (the B row keeps the original anchor so the SPA
+# can show "no matching doc" without losing information).
 
 # How much of the deliverable's ``ref`` to surface in the row excerpt.
 # 240 chars mirrors the existing ``PlanSummary.excerpt`` budget and
@@ -102,6 +110,13 @@ _COCKPIT_DOCS_DIR = PROJECT_ROOT / "docs" / "cockpit"
 # to mirror the row budget; we don't expect a title longer than that,
 # but a runaway H1 should not blow the response.
 _DOC_TITLE_MAX_CHARS = 200
+
+# URL schemes that disqualify a ``spec_doc`` value from the C-side
+# correlation (the doc lives outside the repo, so we cannot link a card
+# back to a C row). Both forms appear in real cards today (the Fase-1
+# ``SPEC_DOC_META_KEY`` schema permits them), so the filter is a
+# runtime concern, not a writer-side constraint.
+_NON_CORRELATABLE_URL_PREFIXES = ("http://", "https://")
 
 
 def _excerpt(ref: str) -> str:
@@ -119,7 +134,33 @@ def _excerpt(ref: str) -> str:
     return text
 
 
-def _list_cockpit_docs() -> list[DocSpecItem]:
+def _correlation_spec_doc(meta: dict | None) -> str | None:
+    """Return a card's ``spec_doc`` value if it is correlatable, else ``None``.
+
+    The Fase-1 ``SPEC_DOC_META_KEY`` schema allows the anchor to be
+    either a repo-relative path or a URL; only the former can match a
+    ``docs/cockpit/*.md`` C row. Reads the metadata bag defensively:
+    non-dict / missing / non-string / empty / URL values all return
+    ``None``. Whitespace is preserved verbatim (no normalisation that
+    could silently turn a typo into a match) — equality with the C path
+    is exact, by design.
+    """
+    if not isinstance(meta, dict):
+        return None
+    raw = meta.get(SPEC_DOC_META_KEY)
+    if not isinstance(raw, str):
+        return None
+    candidate = raw  # exact, no strip: equality with C-path is the contract
+    if not candidate:
+        return None
+    if candidate.startswith(_NON_CORRELATABLE_URL_PREFIXES):
+        return None
+    return candidate
+
+
+def _list_cockpit_docs(
+    correlations: dict[str, list[CorrelatedCardItem]] | None = None,
+) -> list[DocSpecItem]:
     """Scan ``docs/cockpit/*.md`` and emit one ``DocSpecItem`` per file.
 
     Kept as a module-level function (not nested in the handler) so the
@@ -129,6 +170,15 @@ def _list_cockpit_docs() -> list[DocSpecItem]:
     fast enough at request time, and pulling it into a cache would mask
     "doc added today" from showing up in the overview without a
     separate cache-bust.
+
+    ``correlations`` is an optional ``path -> [card, ...]`` mapping (built
+    by ``_list_plan_overview_data`` from the same kanban-DB read). Each
+    row carries its matched cards in ``implemented_by`` so the SPA can
+    render "implemented by cards" chips without a second round-trip. The
+    argument defaults to ``None`` for legacy callers (and the legacy
+    test, which monkey-patches this as a no-arg function) — passing
+    ``None`` produces empty ``implemented_by`` lists, which is the
+    pre-correlation contract.
     """
     items: list[DocSpecItem] = []
     if not _COCKPIT_DOCS_DIR.is_dir():
@@ -149,45 +199,110 @@ def _list_cockpit_docs() -> list[DocSpecItem]:
         title = first_line[0] if first_line else f"# {path.name}"
         if len(title) > _DOC_TITLE_MAX_CHARS:
             title = title[: _DOC_TITLE_MAX_CHARS - 1] + "…"
+        rel_path = f"docs/cockpit/{path.name}"
         items.append(DocSpecItem(
-            path=f"docs/cockpit/{path.name}",
+            path=rel_path,
             title=title,
             modified_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC)
                 .isoformat(timespec="seconds")
                 .replace("+00:00", "Z"),
             size_bytes=stat.st_size,
+            implemented_by=list(correlations.get(rel_path, []))
+            if correlations else [],
         ))
     return items
 
 
-async def _list_card_plan_items(project_key: str) -> list[CardPlanItem]:
-    """Project-scoped list of ``plan``/``plan_ref`` deliverables.
+async def _list_plan_overview_data(
+    project_key: str,
+) -> tuple[list[CardPlanItem], dict[str, list[CorrelatedCardItem]]]:
+    """One SQL round-trip producing both B rows and the B↔C correlation map.
 
-    Single SQL round-trip: ``KanbanCard`` join with ``KanbanDeliverable``
-    filtered by ``kind IN ('plan','plan_ref')`` and ``project_key``.
-    ``selectinload`` would force a second query for each card — overkill
-    here because we only need one column off the card (``title``), so
-    a plain join suffices and keeps the test-fixture ergonomics obvious.
+    Builds the B section (plan/plan_ref deliverables, project-scoped)
+    AND a ``path -> [card, ...]`` correlation map keyed by C doc-path
+    from a single ``LEFT JOIN`` of project cards against their plan
+    deliverables. The deliverable-kind filter lives in the ON clause
+    (not WHERE), so cards with no plan deliverable still appear in the
+    result with NULL deliverable fields — that lets them feed the
+    correlation map without producing a stray B row.
+
+    Output:
+      * ``cards`` — one ``CardPlanItem`` per ``plan``/``plan_ref``
+        deliverable in the project, ordered newest-first, with
+        ``spec_doc`` mirrored from the card's metadata (defensively
+        filtered for URL values).
+      * ``correlations`` — ``docs/cockpit/<file>.md`` -> list of cards
+        whose ``metadata.spec_doc`` exactly equals that path. Cards
+        are deduplicated per path (a card can only link once to a
+        doc) and sorted by ``card_id`` so the rendered chip order is
+        stable across requests. URLs and missing paths contribute
+        nothing — that's the whole point of the filter.
+
+    The map's keys are *not* the C-section's full set: it only carries
+    paths that have at least one matching card. ``_list_cockpit_docs``
+    fills ``implemented_by = []`` for any C row whose path is absent.
     """
     async with KanbanSessionLocal() as s:
+        # LEFT JOIN: project cards on the left, plan deliverables on the
+        # right (filtered to ``plan``/``plan_ref`` in the ON clause).
+        # Cards with no matching deliverable appear once with NULL
+        # deliverable fields; cards with one match appear once; cards
+        # with N matches appear N times (one B row per deliverable).
+        # ``card.title`` is a single extra column off the card — cheap
+        # to keep in the projection; ``selectinload`` would force a
+        # second query per card for no benefit here.
         rows = (await s.execute(
-            select(KanbanDeliverable, KanbanCard.title)
-            .join(KanbanCard, KanbanDeliverable.card_id == KanbanCard.id)
+            select(KanbanCard, KanbanDeliverable)
+            .outerjoin(
+                KanbanDeliverable,
+                and_(
+                    KanbanDeliverable.card_id == KanbanCard.id,
+                    KanbanDeliverable.kind.in_(("plan", "plan_ref")),
+                ),
+            )
             .where(KanbanCard.project_key == project_key)
-            .where(KanbanDeliverable.kind.in_(("plan", "plan_ref")))
-            .order_by(KanbanDeliverable.created_at.desc())
+            .order_by(
+                KanbanDeliverable.created_at.desc().nulls_last(),
+                KanbanCard.id.asc(),
+            )
         )).all()
-    return [
-        CardPlanItem(
-            deliverable_id=d.id,
-            kind=d.kind,
-            card_id=d.card_id,
-            card_title=title or "",
-            excerpt=_excerpt(d.ref),
-            created_at=d.created_at,
-        )
-        for (d, title) in rows
-    ]
+
+    cards: list[CardPlanItem] = []
+    # Order-preserving dict: cards that share a path keep the iteration
+    # order in which they first appear, then a deterministic sort by
+    # ``card_id`` is applied per path before the map ships out.
+    correlations_in_order: dict[str, dict[str, str]] = {}
+
+    for card, deliverable in rows:
+        spec_doc = _correlation_spec_doc(card.meta)
+        if spec_doc is not None:
+            bucket = correlations_in_order.setdefault(spec_doc, {})
+            # Dedup per (path, card_id): a card can only claim a doc once.
+            bucket[card.id] = card.title or ""
+
+        if deliverable is None:
+            # LEFT JOIN row with no matching deliverable — feeds the
+            # correlation map only; not a B row.
+            continue
+
+        cards.append(CardPlanItem(
+            deliverable_id=deliverable.id,
+            kind=deliverable.kind,
+            card_id=card.id,
+            card_title=card.title or "",
+            excerpt=_excerpt(deliverable.ref),
+            created_at=deliverable.created_at,
+            spec_doc=spec_doc,
+        ))
+
+    correlations: dict[str, list[CorrelatedCardItem]] = {
+        path: [
+            CorrelatedCardItem(card_id=cid, card_title=title)
+            for cid, title in sorted(by_id.items())
+        ]
+        for path, by_id in correlations_in_order.items()
+    }
+    return cards, correlations
 
 
 @router.get("/plans/overview", response_model=PlansOverviewResponse)
@@ -206,11 +321,15 @@ async def get_plans_overview(
     Cards (``B``) are scoped to ``project_key``; docs (``C``) are
     repo-wide because ``docs/cockpit/`` is the platform's SSOT tree
     shared across every project (see the per-section rationale above).
+    The B↔C correlation lives INSIDE each row (``CardPlanItem.spec_doc`` /
+    ``DocSpecItem.implemented_by``) and is built from the same kanban-DB
+    read that powers B, so a single round-trip produces the entire
+    response — see ``_list_plan_overview_data`` for the join shape.
     """
     project_key = _resolve_project_key(project_path)
     try:
-        cards = await _list_card_plan_items(project_key)
-        docs = _list_cockpit_docs()
+        cards, correlations = await _list_plan_overview_data(project_key)
+        docs = _list_cockpit_docs(correlations)
     except Exception as e:
         # Two failure surfaces share this guard: the kanban-DB read can
         # raise on a connection/session error, and the filesystem scan
