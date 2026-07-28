@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Dialog,
   DialogContent,
@@ -22,10 +23,11 @@ import { MarkdownPreviewToggle } from "@/components/shared/MarkdownPreviewToggle
 import { MODAL_SIZES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { formatTimestamp } from "@/features/usage/utils";
-import { fetchResumableSessions } from "@/features/cc-bridge/api";
+import { fetchEndpoints, fetchResumableSessions } from "@/features/cc-bridge/api";
 import { useProviderContext } from "@/contexts/ProviderContext";
 import { PRIORITIES, PROVIDERS, PROVIDER_LABELS, WORK_TYPES, DEFAULT_MODEL_SUGGESTIONS, modelSuggestionsForProvider, MINIMAX_MODEL_SUGGESTIONS, type Priority, type WorkType, type ColumnOverride, type KanbanColumn } from "../types";
 import { kanbanApi } from "../api";
+import type { EndpointResponse } from "@/features/cc-bridge/types";
 import type { ResumableSession } from "@/types/sessions";
 
 function parseLabels(raw: string): string[] {
@@ -38,11 +40,16 @@ function parseLabels(raw: string): string[] {
 const AUTO = "__auto__"; // sentinel: null agent (dispatch resolves the provider at run time)
 const NO_WORK_TYPE = ""; // sentinel: no work_type set (routing hint is purely optional)
 const DEFAULT_PROVIDER_SENTINEL = "__default__"; // per-column provider: no override (use column default)
+const COMPATIBLE_PROVIDER = "anthropic-compatible";
 
 // Form-side shape for one per-column override row. Provider uses the sentinel
 // above to mean "no override"; the model is free text. Serialized to the
 // ColumnOverride API shape ({model, provider} with nulls) on submit.
-type OverrideDraft = { model: string; provider: string };
+type OverrideDraft = {
+  model: string;
+  provider: string;
+  endpoint_name: string;
+};
 
 function draftsFromOverrides(
   overrides: Record<string, ColumnOverride> | null | undefined,
@@ -52,6 +59,7 @@ function draftsFromOverrides(
     out[name] = {
       model: ov?.model ?? "",
       provider: ov?.provider ?? DEFAULT_PROVIDER_SENTINEL,
+      endpoint_name: ov?.endpoint_name ?? "",
     };
   }
   return out;
@@ -63,8 +71,11 @@ function overridesFromDrafts(
   const out: Record<string, ColumnOverride> = {};
   for (const [name, d] of Object.entries(drafts)) {
     const model = d.model.trim() || null;
-    const provider = d.provider === DEFAULT_PROVIDER_SENTINEL ? null : d.provider;
-    if (model || provider) out[name] = { model, provider };
+    const provider =
+      d.provider === DEFAULT_PROVIDER_SENTINEL ? null : d.provider;
+    const endpoint_name =
+      provider === COMPATIBLE_PROVIDER ? (d.endpoint_name.trim() || null) : null;
+    if (model || provider) out[name] = { model, provider, endpoint_name };
   }
   return Object.keys(out).length ? out : null;
 }
@@ -146,6 +157,7 @@ export function CardEditDialog({
     !!(initial?.analyst_agent_id || initial?.executor_agent_id)
   );
   const [columns, setColumns] = useState<KanbanColumn[]>([]);
+  const [endpoints, setEndpoints] = useState<EndpointResponse[]>([]);
   const [overrideDrafts, setOverrideDrafts] = useState<Record<string, OverrideDraft>>(
     () => draftsFromOverrides(initial?.column_overrides)
   );
@@ -191,6 +203,21 @@ export function CardEditDialog({
     return () => { cancelled = true; };
   }, [open, projectKey]);
 
+  useEffect(() => {
+    if (!open || !projectKey) return;
+    let cancelled = false;
+    fetchEndpoints(projectKey)
+      .then((r) => {
+        if (!cancelled) setEndpoints(r.endpoints ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setEndpoints([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, projectKey]);
+
   // Agent columns are those wired to a default_agent (persona). The dispatcher
   // keys per-card overrides on the column name, which equals the persona name,
   // so these are exactly the columns a user can override per card.
@@ -198,7 +225,11 @@ export function CardEditDialog({
 
   const setOverride = (name: string, patch: Partial<OverrideDraft>) =>
     setOverrideDrafts((prev) => {
-      const base = prev[name] ?? { model: "", provider: DEFAULT_PROVIDER_SENTINEL };
+      const base = prev[name] ?? {
+        model: "",
+        provider: DEFAULT_PROVIDER_SENTINEL,
+        endpoint_name: "",
+      };
       return { ...prev, [name]: { ...base, ...patch } };
     });
 
@@ -388,7 +419,19 @@ export function CardEditDialog({
                       </datalist>
                       <Select
                         value={providerValue}
-                        onValueChange={(v) => setOverride(col.name, { provider: v })}
+                        onValueChange={(v) => {
+                          if (v === COMPATIBLE_PROVIDER) {
+                            setOverride(col.name, {
+                              provider: v,
+                              endpoint_name: endpoints[0]?.name ?? "",
+                            });
+                          } else {
+                            setOverride(col.name, {
+                              provider: v,
+                              endpoint_name: "",
+                            });
+                          }
+                        }}
                       >
                         <SelectTrigger aria-label={`Provider for ${col.name}`}>
                           <SelectValue placeholder="Default" />
@@ -397,12 +440,56 @@ export function CardEditDialog({
                           <SelectItem value={DEFAULT_PROVIDER_SENTINEL}>Default</SelectItem>
                           {PROVIDERS.map((p) => (
                             <SelectItem key={p} value={p}>
-                              {PROVIDER_LABELS[p]}
+                              {PROVIDER_LABELS[p] ?? p}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      {defaultLabel && (
+                      {providerValue === COMPATIBLE_PROVIDER &&
+                        (endpoints.length === 0 ? (
+                          <div className="col-span-3 -mt-1 flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2">
+                            <p className="text-xs text-muted-foreground">
+                              Geen endpoints geconfigureerd — voeg er één toe via
+                              de Endpoints-pagina.
+                            </p>
+                            <Link
+                              to="/endpoints"
+                              className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-background px-3 text-xs shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                            >
+                              Naar Endpoints
+                            </Link>
+                          </div>
+                        ) : (
+                          <div className="col-span-3 -mt-1">
+                            <Select
+                              value={
+                                overrideDrafts[col.name]?.endpoint_name ?? ""
+                              }
+                              onValueChange={(endpoint_name) =>
+                                setOverride(col.name, { endpoint_name })
+                              }
+                            >
+                              <SelectTrigger
+                                className="h-8"
+                                aria-label={`Endpoint for ${col.name}`}
+                              >
+                                <SelectValue placeholder="Select endpoint" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {endpoints.map((endpoint) => (
+                                  <SelectItem
+                                    key={endpoint.name}
+                                    value={endpoint.name}
+                                  >
+                                    {endpoint.name} — {endpoint.model}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ))}
+                      {providerValue !== COMPATIBLE_PROVIDER &&
+                        defaultLabel && (
                         <p className="col-span-3 -mt-1 text-[10px] text-muted-foreground">
                           Default: {defaultLabel}
                         </p>

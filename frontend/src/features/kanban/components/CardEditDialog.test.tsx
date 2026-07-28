@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 vi.mock("@/contexts/ProviderContext", () => ({
   useProviderContext: () => ({
@@ -11,6 +12,7 @@ vi.mock("@/contexts/ProviderContext", () => ({
 
 vi.mock("@/features/cc-bridge/api", () => ({
   fetchResumableSessions: vi.fn(async () => ({ sessions: [] })),
+  fetchEndpoints: vi.fn(async () => ({ endpoints: [] })),
 }));
 
 const listColumnsMock = vi.fn(async () => ({
@@ -31,6 +33,7 @@ vi.mock("../api", () => ({
 }));
 
 import { CardEditDialog } from "./CardEditDialog";
+import { fetchEndpoints } from "@/features/cc-bridge/api";
 
 afterEach(() => {
   cleanup();
@@ -170,7 +173,7 @@ describe("CardEditDialog", () => {
     const payload = onSubmit.mock.calls[0][0];
     // provider left at Default -> null; model is the typed override.
     expect(payload.column_overrides).toEqual({
-      engineer: { model: "sonnet-5", provider: null },
+      engineer: { model: "sonnet-5", provider: null, endpoint_name: null },
     });
   });
 
@@ -278,7 +281,7 @@ describe("CardEditDialog", () => {
         initial={{
           title: "T",
           description: "",
-          column_overrides: { engineer: { model: "opus", provider: "anthropic" } },
+          column_overrides: { engineer: { model: "opus", provider: "anthropic", endpoint_name: null } },
         }}
         onClose={() => {}}
         onSubmit={onSubmit}
@@ -289,7 +292,176 @@ describe("CardEditDialog", () => {
     // Round-trips unchanged on submit.
     screen.getByRole("button", { name: /update/i }).click();
     expect(onSubmit.mock.calls[0][0].column_overrides).toEqual({
-      engineer: { model: "opus", provider: "anthropic" },
+      engineer: { model: "opus", provider: "anthropic", endpoint_name: null },
     });
+  });
+
+  it("round-trips endpoint_name for an anthropic-compatible column override", async () => {
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({
+      endpoints: [
+        {
+          name: "groq-free",
+          base_url: "http://127.0.0.1:4000/v1",
+          model: "groq/llama",
+          credential_name: "groq_api_key",
+          credential_configured: true,
+        },
+      ],
+    });
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        projectKey="proj"
+        initial={{
+          title: "T",
+          description: "",
+          column_overrides: {
+            engineer: {
+              model: null,
+              provider: "anthropic-compatible",
+              endpoint_name: "groq-free",
+            },
+          },
+        }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const endpoint = await screen.findByRole("combobox", {
+      name: "Endpoint for engineer",
+    });
+    expect(endpoint).toHaveTextContent("groq-free");
+    expect(fetchEndpoints).toHaveBeenCalledWith("proj");
+
+    screen.getByRole("button", { name: /update/i }).click();
+    expect(onSubmit.mock.calls[0][0].column_overrides).toEqual({
+      engineer: {
+        model: null,
+        provider: "anthropic-compatible",
+        endpoint_name: "groq-free",
+      },
+    });
+  });
+
+  it("clears endpoint_name when a column override switches away from anthropic-compatible", async () => {
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({
+      endpoints: [
+        {
+          name: "groq-free",
+          base_url: "http://127.0.0.1:4000/v1",
+          model: "groq/llama",
+          credential_name: null,
+          credential_configured: false,
+        },
+      ],
+    });
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        projectKey="proj"
+        initial={{
+          title: "T",
+          description: "",
+          column_overrides: {
+            engineer: {
+              model: null,
+              provider: "anthropic-compatible",
+              endpoint_name: "groq-free",
+            },
+          },
+        }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    await screen.findByRole("combobox", { name: "Endpoint for engineer" });
+    fireEvent.click(screen.getByRole("combobox", { name: "Provider for engineer" }));
+    fireEvent.click(screen.getByRole("option", { name: "Anthropic" }));
+
+    expect(
+      screen.queryByRole("combobox", { name: "Endpoint for engineer" }),
+    ).toBeNull();
+    screen.getByRole("button", { name: /update/i }).click();
+    expect(onSubmit.mock.calls[0][0].column_overrides).toEqual({
+      engineer: { model: null, provider: "anthropic", endpoint_name: null },
+    });
+  });
+
+  it("selects the first endpoint when a column override switches to anthropic-compatible", async () => {
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({
+      endpoints: [
+        {
+          name: "groq-free",
+          base_url: "http://127.0.0.1:4000/v1",
+          model: "groq/llama",
+          credential_name: null,
+          credential_configured: false,
+        },
+      ],
+    });
+    const onSubmit = vi.fn();
+    render(
+      <CardEditDialog
+        open
+        projectKey="proj"
+        initial={{ title: "T", description: "" }}
+        onClose={() => {}}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const provider = await screen.findByRole("combobox", {
+      name: "Provider for engineer",
+    });
+    fireEvent.click(provider);
+    fireEvent.click(screen.getByRole("option", { name: "Compatible endpoint" }));
+
+    expect(
+      await screen.findByRole("combobox", { name: "Endpoint for engineer" }),
+    ).toHaveTextContent("groq-free");
+    screen.getByRole("button", { name: /update/i }).click();
+    expect(onSubmit.mock.calls[0][0].column_overrides).toEqual({
+      engineer: {
+        model: null,
+        provider: "anthropic-compatible",
+        endpoint_name: "groq-free",
+      },
+    });
+  });
+
+  it("links an empty compatible override to endpoint management", async () => {
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({ endpoints: [] });
+    render(
+      <MemoryRouter>
+        <CardEditDialog
+          open
+          projectKey="proj"
+          initial={{
+            title: "T",
+            description: "",
+            column_overrides: {
+              engineer: {
+                model: null,
+                provider: "anthropic-compatible",
+                endpoint_name: null,
+              },
+            },
+          }}
+          onClose={() => {}}
+          onSubmit={() => {}}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(/geen endpoints geconfigureerd/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /naar endpoints/i }),
+    ).toHaveAttribute("href", "/endpoints");
   });
 });

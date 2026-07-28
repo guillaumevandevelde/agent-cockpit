@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("@/features/cc-bridge/api", () => ({
+  fetchEndpoints: vi.fn(async () => ({ endpoints: [] })),
 }));
 
 vi.mock("../api", () => ({
@@ -18,6 +23,7 @@ vi.mock("../api", () => ({
 }));
 
 const { kanbanApi } = await import("../api");
+const { fetchEndpoints } = await import("@/features/cc-bridge/api");
 const { toast } = await import("sonner");
 const { SubscriptionPoolDialog } = await import("./SubscriptionPoolDialog");
 
@@ -218,7 +224,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
     );
     await waitFor(() =>
       expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
-        { provider: "anthropic", model: null, drempel: 0.9 },
+        { provider: "anthropic", model: null, endpoint_name: null, drempel: 0.9 },
       ]),
     );
   });
@@ -253,7 +259,217 @@ describe("SubscriptionPoolDialog — pool section", () => {
       expect.stringMatching(/pool.*cleared/i),
     );
   });
+
+  it("shows the project endpoint selector for an anthropic-compatible entry", async () => {
+    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project_key: PK,
+      pool: [
+        {
+          provider: "anthropic-compatible",
+          model: null,
+          endpoint_name: "groq-free",
+          drempel: 0.9,
+        },
+      ],
+    });
+    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, override: null });
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: null,
+      paused_providers: [],
+      manually_paused_providers: [],
+    });
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({
+      endpoints: [
+        {
+          name: "groq-free",
+          base_url: "http://127.0.0.1:4000/v1",
+          model: "groq/llama",
+          credential_name: "groq_api_key",
+          credential_configured: true,
+        },
+      ],
+    });
+
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const endpoint = await screen.findByRole("combobox", {
+      name: "Endpoint for pool entry 1",
+    });
+    expect(endpoint).toHaveTextContent("groq-free");
+    expect(fetchEndpoints).toHaveBeenCalledWith(PK);
+  });
+
+  it("atomically picks the first endpoint when changing an entry to anthropic-compatible", async () => {
+    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project_key: PK,
+      pool: [{ provider: "anthropic", model: null, endpoint_name: null, drempel: 0.9 }],
+    });
+    (kanbanApi.setSubscriptionPool as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project_key: PK,
+      pool: [],
+    });
+    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, override: null });
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: null,
+      paused_providers: [],
+      manually_paused_providers: [],
+    });
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({
+      endpoints: [
+        {
+          name: "groq-free",
+          base_url: "http://127.0.0.1:4000/v1",
+          model: "groq/llama",
+          credential_name: null,
+          credential_configured: false,
+        },
+      ],
+    });
+
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    const provider = await screen.findByRole("combobox", {
+      name: "Provider for pool entry 1",
+    });
+    fireEvent.click(provider);
+    fireEvent.click(screen.getByRole("option", { name: "Compatible endpoint" }));
+
+    await waitFor(() =>
+      expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
+        {
+          provider: "anthropic-compatible",
+          model: null,
+          endpoint_name: "groq-free",
+          drempel: 0.9,
+        },
+      ]),
+    );
+  });
+
+  it("clears endpoint_name when changing a compatible entry to another provider", async () => {
+    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project_key: PK,
+      pool: [
+        {
+          provider: "anthropic-compatible",
+          model: null,
+          endpoint_name: "groq-free",
+          drempel: 0.9,
+        },
+      ],
+    });
+    (kanbanApi.setSubscriptionPool as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project_key: PK,
+      pool: [],
+    });
+    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, override: null });
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: null,
+      paused_providers: [],
+      manually_paused_providers: [],
+    });
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({
+      endpoints: [
+        {
+          name: "groq-free",
+          base_url: "http://127.0.0.1:4000/v1",
+          model: "groq/llama",
+          credential_name: null,
+          credential_configured: false,
+        },
+      ],
+    });
+
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    const provider = await screen.findByRole("combobox", {
+      name: "Provider for pool entry 1",
+    });
+    fireEvent.click(provider);
+    fireEvent.click(screen.getByRole("option", { name: "Anthropic" }));
+
+    await waitFor(() =>
+      expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
+        {
+          provider: "anthropic",
+          model: null,
+          endpoint_name: null,
+          drempel: 0.9,
+        },
+      ]),
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "Endpoint for pool entry 1" }),
+    ).toBeNull();
+  });
+
+  it("links the compatible-entry empty state to endpoint management", async () => {
+    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>).mockResolvedValue({
+      project_key: PK,
+      pool: [
+        {
+          provider: "anthropic-compatible",
+          model: null,
+          endpoint_name: "deleted-endpoint",
+          drempel: 0.9,
+        },
+      ],
+    });
+    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, override: null });
+    (kanbanApi.dispatchPause as ReturnType<typeof vi.fn>).mockResolvedValue({
+      paused: false,
+      paused_until: null,
+      paused_providers: [],
+      manually_paused_providers: [],
+    });
+    (fetchEndpoints as ReturnType<typeof vi.fn>).mockResolvedValue({ endpoints: [] });
+
+    render(
+      <MemoryRouter>
+        <SubscriptionPoolDialog
+          open
+          projectKey={PK}
+          onClose={() => {}}
+          onChanged={() => {}}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(/geen endpoints geconfigureerd/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /naar endpoints/i }),
+    ).toHaveAttribute("href", "/endpoints");
+  });
 });
+
 
 describe("SubscriptionPoolDialog — override interaction with pool", () => {
   it("renders the override-active rule when an override is set", async () => {
