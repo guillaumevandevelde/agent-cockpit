@@ -80,9 +80,38 @@ def register_provider(provider: SubscriptionUsageProvider) -> None:
     _PROVIDERS[provider.id] = provider
 
 
+def _seedable_clis() -> tuple[tuple[str, str], ...]:
+    """Return ``(cli_id, display_name)`` for every registered CLI adapter.
+
+    Derived from the ``agentic_cli`` registry at call time — the same
+    source of truth ``dispatch._known_cli_ids`` and
+    ``subscription_pool._known_pool_clis`` use — so a newly registered
+    CLI picks up its no-signal stubs on the next
+    ``register_default_providers`` run without a second hardcoded list
+    drifting out of sync.
+
+    Falls back to the historical hardcoded baseline when the
+    ``agentic_cli`` import fails, so a broken registry can never leave
+    this one empty (that was the ea7e038b… D2 failure mode)."""
+    try:
+        from app.services.agentic_cli import get_agentic_clis
+    except Exception:
+        return (
+            ("claude-code", "Claude Code"),
+            ("codex-cli", "Codex CLI"),
+            ("copilot-cli", "Copilot CLI"),
+            ("mimo-code", "MiMo Code"),
+            ("open-code", "OpenCode"),
+        )
+    return tuple(
+        (cli.id, getattr(cli, "display_name", None) or cli.id)
+        for cli in get_agentic_clis()
+    )
+
+
 def register_default_providers() -> None:
     """Populate the registry with honest no-signal stubs for the known
-    ``(cli, provider)`` pairs Claude Code supports today.
+    ``(cli, provider)`` pairs every registered CLI supports today.
 
     Called once at app startup (``main.lifespan``) so the registry is
     never empty. Each stub is an ``UnknownUsageProvider`` — its
@@ -94,28 +123,55 @@ def register_default_providers() -> None:
     end-to-end instead of short-circuiting on ``get_provider_for ->
     None``.
 
+    Kaart 8f40d443… (quota-pool CLI-agnostisch): the seed covers every
+    **registered CLI**, not just ``claude-code``. The pool router
+    discriminates per ``{cli, provider}`` (see
+    ``subscription_pool.pick_subscription_for_cli``), so a pool entry
+    for ``open-code:anthropic`` needs a row here — otherwise
+    ``_gather_pool_usage_snapshots`` silently skips it and the operator
+    cannot tell "this CLI has no quota source" from "this subscription
+    is at 0% used". Both keep the entry eligible, but only the stub
+    degrades *explicitly* (``betrouwbaarheid="onbekend"``, which
+    ``SubscriptionUsageRowItem.tsx`` renders as an "Unknown" badge
+    instead of a percentage).
+
     Idempotent: ``register_provider`` replaces by id, so a later call
     with a real ``AnthropicUsageProvider`` / ``MinimaxUsageProvider``
     (configured at runtime) cleanly takes over without code changes
     here. The default registration only seeds; it doesn't lock the
     registry in."""
-    for prov in (PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX):
-        register_provider(UnknownUsageProvider(
-            subscription_id=f"claude-code:{prov}",
-            subscription_label=f"Claude Code ({prov} — geen signaal-bron)",
-        ))
-    # Kaart 390756e6... (router-eindpunt): ``anthropic-compatible`` is
-    # de provider-id voor een data-driven eindpunt (zie
-    # ``agentic_cli/endpoints.py`` — 9router / LiteLLM / etc. zijn
-    # rijen). Een router verbergt meerdere upstreams achter één
-    # endpoint, dus er is geen betrouwbare quota-bron — de seed is
-    # een ``RouterUsageProvider`` (specifieke ``bron``) in plaats van
-    # een generieke ``UnknownUsageProvider`` zodat de UI de
-    # router-context niet verliest tussen andere onzekere rijen.
-    register_provider(RouterUsageProvider(
-        subscription_id=f"claude-code:{PROVIDER_COMPATIBLE}",
-        subscription_label="Claude Code (Router — geen quota-bron)",
-    ))
+    for cli_id, cli_label in _seedable_clis():
+        for prov in (PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX):
+            register_provider(UnknownUsageProvider(
+                subscription_id=f"{cli_id}:{prov}",
+                subscription_label=f"{cli_label} ({prov} — geen signaal-bron)",
+            ))
+        # Kaart 390756e6... (router-eindpunt): ``anthropic-compatible`` is
+        # de provider-id voor een data-driven eindpunt (zie
+        # ``agentic_cli/endpoints.py`` — 9router / LiteLLM / etc. zijn
+        # rijen). Een router verbergt meerdere upstreams achter één
+        # endpoint, dus er is geen betrouwbare quota-bron — de seed is
+        # een ``RouterUsageProvider`` (specifieke ``bron``) in plaats van
+        # een generieke ``UnknownUsageProvider`` zodat de UI de
+        # router-context niet verliest tussen andere onzekere rijen.
+        #
+        # Alleen voor claude-code: router-eindpunten zijn een
+        # claude-code-concept (``agentic_cli/endpoints.py``). Voor de
+        # overige CLI's blijft het een generieke
+        # ``UnknownUsageProvider``, zodat de UI eerlijk "geen
+        # signaal-bron" toont i.p.v. een onverdiende router-badge.
+        if cli_id == "claude-code":
+            register_provider(RouterUsageProvider(
+                subscription_id=f"{cli_id}:{PROVIDER_COMPATIBLE}",
+                subscription_label="Claude Code (Router — geen quota-bron)",
+            ))
+        else:
+            register_provider(UnknownUsageProvider(
+                subscription_id=f"{cli_id}:{PROVIDER_COMPATIBLE}",
+                subscription_label=(
+                    f"{cli_label} ({PROVIDER_COMPATIBLE} — geen signaal-bron)"
+                ),
+            ))
     # OpenCode's own hosted-subscription providers — built into the
     # OpenCode CLI's catalog. OpenCode publishes no authenticated
     # "remaining quota" surface for either Go (flat $10/mo budget) or
