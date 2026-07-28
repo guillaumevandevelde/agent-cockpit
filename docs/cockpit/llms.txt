@@ -58,6 +58,7 @@
 
 - [9Router-integratie — analyse & beslissing](./9router-integratie-analyse.md): type=decision status=decided
 - [Beslissing: ACP (Agent-Client Protocol) als gestructureerd transport achter `SpawnTransport`](./acp-transport-decision.md): type=decision status=decided
+- [Beslissing: ACP-adaptertransport voor OpenCode — go/no-go bij de geopende trigger-poort](./acp-transport-opencode-go-nogo.md): type=decision status=decided
 - [Beslissing — De analyse-levenscyclus op het bord: parkeerkolom, subtaak-rollup, statusvocabulaire](./analyse-levenscyclus-decision.md): type=decision status=decided
 - [Beslissing — De analyse-fase krijgt een afdwingbaar uitkomst-contract](./analysis-outcome-contract-decision.md): type=decision status=decided
 - [Beslissing — Leaf-spike maakt zijn eigen vervolgkaarten aan (autonomie i.p.v. review-round-trip)](./autonomous-leaf-spike-followup.md): type=decision status=decided

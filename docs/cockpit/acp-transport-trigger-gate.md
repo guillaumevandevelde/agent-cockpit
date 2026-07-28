@@ -7,8 +7,17 @@ status: proposed
 # Trigger-poort: ACP-adaptertransport (§6 kaart 5) — status bij premature dispatch
 
 **Datum:** 2026-07-15
-**Status:** **geen actie — trigger niet gevuurd.** De ACP-per-vendor go/no-go is *niet*
-geproduceerd, en dat is de juiste uitkomst: de kaart is gedispatcht vóór zijn eigen poort.
+**Status:** **achterhaald sinds 2026-07-28 — de poort is opengegaan.** De `open-code`-CLI bracht
+tussen 2026-07-27 en 2026-07-28 37 kaarten naar Done; daarmee is P3's proof-of-hedge geleverd en
+is de spike alsnog beantwoord in
+[`acp-transport-opencode-go-nogo.md`](./acp-transport-opencode-go-nogo.md) (uitkomst: GO op een
+ACP-backed transport voor `open-code`). Dit doc blijft staan als het verslag van *waarom de vraag
+op 2026-07-15 terecht onbeantwoord bleef* — de analyse in §1-§3 was correct voor zijn moment en
+§2 (de poort was prosa) is nog steeds waar.
+
+**Oorspronkelijke status (2026-07-15):** geen actie — trigger niet gevuurd. De ACP-per-vendor
+go/no-go is *niet* geproduceerd, en dat is de juiste uitkomst: de kaart is gedispatcht vóór zijn
+eigen poort.
 **Trigger:** kanban-kaart `a4a091fa3f6b4e209efed6014ac1ee4f` — "[spike][transport][GEPOORT — niet
 nu] ACP-adaptertransport als SpawnTransport-sibling" = [`acp-transport-decision.md`](./acp-transport-decision.md)
 §6 kaart 5.
@@ -133,8 +142,15 @@ gepoorte intentie hoort in een doc, niet in een kolom.
 
 - **Deze kaart** (`a4a091fa…`) → Done, uitkomst *geen actie nodig* (trigger niet gevuurd). Niet
   "afgewerkt", niet "afgewezen" — de vraag is nog steeds geldig, alleen niet nu stelbaar.
+  ✅ **Achterhaald op 2026-07-28** — de kaart is nooit naar Done gegaan (hij bleef in de
+  `analyst`-kolom staan en werd opnieuw gedispatcht), en tegen die tijd wás de trigger gevuurd.
+  De kaart is alsnog afgerond met uitkomst *decomposed*.
 - **Heropenen** wanneer P3 vuurt: een tweede CLI-vendor rondt een kaart af. Herlees dan §6 kaart 5
   + §1 hierboven (de kandidatentabel is dan je startpunt).
+  ✅ **Gebeurd op 2026-07-27/28** — `open-code` rondde 37 kaarten af. De heropening is uitgevoerd
+  in [`acp-transport-opencode-go-nogo.md`](./acp-transport-opencode-go-nogo.md); de kandidatentabel
+  uit §1 was inderdaad het startpunt, en de rij voor `open-code` bleek onvolledig (zij noemt alleen
+  `opencode serve`, niet de `opencode acp`-server die de binary sinds 1.18.8 ook meelevert).
 - **Gefiled:** `[problem]`-kaart voor de ontbrekende parkeerplek — trigger-gepoorte kaarten hebben
   geen niet-dispatchbare houdtoestand. Verwant maar niet hetzelfde als de bestaande kaart
   `04f7c427…` (`Awaiting Subtasks`-parkeerkolom): die parkeert een parent op een *interne* conditie
