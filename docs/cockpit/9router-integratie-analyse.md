@@ -440,16 +440,64 @@ feitelijk doet): `/health/liveliness` als bereikbaarheidsbewijs,
 `Authorization` als master-key-bewijs. Twee checks via de **geladen**
 configuratie — niet de aanwezigheid van een string in een bestand,
 maar de inhoud die de proxy daadwerkelijk binnenhaalt — geverifieerd met
-`--config-yaml <pad>` of `--master-key <key>`. Alle flag-namen komen uit de
-upstream LiteLLM docs (`success_callback`, `failure_callback`,
-`service_callbacks`, `callbacks`, `guardrails`, `router_settings.plugins`,
-`alerting`, `database_url`), niet uit een gok.
+`--config-yaml <pad>` of `--master-key <key>`.
+
+**Guardrails in drie vormen — uniform.** LiteLLM aanvaardt guardrail-wiring op
+drie verschillende plaatsen in `config.yaml`, en de hardening-check moet ze
+alle drie zien:
+
+1. **Top-level `guardrails:`** — een lijst met `guardrail_name` + `litellm_params`
+   (docs.litellm.ai/proxy/guardrails/quick_start).
+2. **`litellm_settings.guardrails:`** — een lijst waarvan elk item een
+   single-key mapping is met `callbacks: [...]` en `default_on: bool`
+   (`tests/local_testing/test_configs/test_guardrails_config.yaml` in de OSS
+   repo). Let op: `default_on: false` onderdrukt alleen de runtime-aanroep,
+   niet de wiring — een lege `callbacks`-array of een ontbrekend item is
+   voor deze check niet voldoende.
+3. **Per-model `litellm_params.guardrails:`** — een lijst guardrail-namen
+   op een individuele `model_list`-entry
+   (`litellm/proxy/utils.py::_check_and_merge_model_level_guardrails`).
+
+De eerste versie van de check detecteerde alleen vorm 1 — een config in
+vorm 2 of 3 gaf groen terwijl een guardrail die de request-inhoud aanraakte
+actief was. Vorm 2 was het exacte faalpad dat in de oorspronkelijke
+kaarttekst expliciet werd blootgelegd: *"een verkeerd gegokte vlag geeft
+een check die groen kleurt zonder iets te controleren — dat is erger dan
+geen check"*. Vorm 3 is dezelfde risicoklasse via een andere route. De
+huidige check behandelt alle drie identiek als FAIL op property 3
+(no-prompt-mutation) en noemt de gevonden vorm in de FAIL-message.
+
+**Phantom-flag: `service_callbacks`.** `service_callbacks` staat in de
+publieke `litellm_settings`-referentietabel met als beschrijving "System
+health monitoring", maar heeft **0 hits** in de hele
+`BerriAI/litellm`-repository (`gh search code 'service_callbacks'
+--repo BerriAI/litellm` retourneert een lege resultaatset). Geen enkele
+loader leest de sleutel. De eerdere §11-doc noemde hem als onderdeel van
+de flag-lijst — dat was een documentation-artifact, geen runtime-waarheid.
+De check noemt hem nu niet meer in de PASS-message, niet in de telemetry-FAIL,
+en niet in de callback-detectie; een operator die `service_callbacks: ["sentry"]`
+toevoegt aan zijn config omdat de docs dat suggereren, krijgt niet langer
+een FAIL die hem op een dwaalspoor zet. De `fix:`-note onder een
+prompt-mutation-FAIL legt kort uit waarom de sleutel ontbreekt.
+
+**Overige flag-namen.** De resterende vlag-namen
+(`success_callback`, `failure_callback`, `callbacks`, `guardrails`,
+`router_settings.plugins`, `alerting`, `database_url`) zijn geverifieerd
+op 2026-07-21 tegen de upstream LiteLLM-documentatie, en zijn op
+2026-07-28 nogmaals gecontroleerd voor de drie guardrails-vormen en de
+`service_callbacks`-correctie. Bron van waarheid per vlag staat in de
+header van `check-litellm-hardening.sh`.
 
 Resultaat: `--strict` exit 1 bij een afwijking; advisory default exit 0 met
 uitgebreide `fix:`-regels onder elke FAIL. Vangnet: niet elke property kan
 zonder `--config-yaml` worden geverifieerd (geen `--master-key`-pad tegen de
 bekende `/api/v1/config`-leak); de check waarschuwt luid wanneer 3-5 worden
 overgeslagen in plaats van ze stiekem groen te kleuren.
+
+✅ **Geïmplementeerd (kaart `94011364…`)** — `scripts/check-litellm-hardening.sh`
+is bijgewerkt voor de drie guardrails-vormen (Task 12, 13) en de
+`service_callbacks`-phantom-flag cleanup (Task 14); regressietest in
+`scripts/test_check_litellm_hardening.sh` (57 asserts, 0 fails).
 
 **Documentatieverplichting.** Het pilot-resultaat (`bbfcb365…`) en het
 schrijven van deze check (§11.2) zijn onlosmakelijk: zonder een groene check
@@ -573,7 +621,13 @@ de lane-keuze stuurt.
 voor de PR-telling). De technische feiten in §2 komen uit de repo-tree en
 `next.config.mjs` op commit `0513bf39`, niet uit de README. De tokenbesparings-
 claim in §2.1 is **niet gemeten** en is als zodanig gelabeld. De §11.2-config-flag-namen
-(`success_callback`, `failure_callback`, `service_callbacks`, `guardrails`,
-`plugins`, `alerting`, `database_url`) zijn geverifieerd tegen de upstream
-LiteLLM-documentatie op 2026-07-21, niet uit de originele kaarttekst overgenomen
-(de kaart waarschuwt expliciet om zelf op te zoeken — kaart `94011364…`).
+(`success_callback`, `failure_callback`, `callbacks`, `guardrails` in drie
+vormen — top-level, `litellm_settings.guardrails`, en per-model
+`litellm_params.guardrails` — `plugins`, `alerting`, `database_url`) zijn
+geverifieerd tegen de upstream LiteLLM-documentatie op 2026-07-21, en op
+2026-07-28 nogmaals tegen `tests/local_testing/test_configs/test_guardrails_config.yaml`
+en `litellm/proxy/utils.py::_check_and_merge_model_level_guardrails` voor de
+twee extra guardrails-vormen. `service_callbacks` is geverifieerd als
+phantom-flag (0 hits in `BerriAI/litellm`-repo) en uit de check verwijderd.
+Geen enkele flag-naam is uit de originele kaarttekst overgenomen (de kaart
+waarschuwt expliciet om zelf op te zoeken — kaart `94011364…`).

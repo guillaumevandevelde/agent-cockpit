@@ -11,7 +11,11 @@
 #   1. loopback-only binding     (proxy is not reachable outside the host)
 #   2. master_key auth enforced  (proxy rejects unauthenticated /v1/messages)
 #   3. no prompt-mutation        (no callbacks / guardrails / transformations
-#                                  are wired up that would touch request bodies)
+#                                  are wired up that would touch request bodies;
+#                                  guardrails are checked in all three
+#                                  documented forms — top-level `guardrails:`,
+#                                  `litellm_settings.guardrails:`, and
+#                                  per-model `litellm_params.guardrails:`)
 #   4. no telemetry / no external sync (no success_callback to a third party,
 #                                  no alerting hooks, no database_url to a
 #                                  third-party host)
@@ -37,12 +41,16 @@
 #   1 — at least one FAIL (only with --strict, matching sibling check-*.sh scripts)
 #   2 — invocation error (missing tool, bad args)
 #
-# Source of truth for the requirement list: §11.2 (herziening 2026-07-21).
+# Source of truth for the requirement list: §11.2 (herziening 2026-07-21,
+# geüpdatet 2026-07-28 voor de drie guardrails-vormen en de
+# service_callbacks-phantom-flag).
 # Source of truth for the key names we read: the liteLLM proxy `config_settings`
-# page (general_settings / litellm_settings / router_settings). The flag-name
-# list was deliberately NOT taken from the card description — the card warns
-# explicitly to verify each name against the upstream documentation before
-# shipping (kanban card `94011364…` body).
+# page (general_settings / litellm_settings / router_settings), the upstream
+# test fixtures in `tests/local_testing/test_configs/test_guardrails_config.yaml`,
+# and the runtime loader `litellm/proxy/utils.py::_check_and_merge_model_level_guardrails`.
+# The flag-name list was deliberately NOT taken from the card description — the
+# card warns explicitly to verify each name against the upstream documentation
+# before shipping (kanban card `94011364…` body; impediment decision C).
 
 set -uo pipefail
 
@@ -326,17 +334,24 @@ except Exception as e:
 results = []
 
 # --- Property 3: no prompt-mutation -----------------------------------------
-# success_callback / failure_callback / service_callbacks / callbacks must
-# not contain anything that touches request bodies. langfuse, langsmith,
-# lunary, helicone, etc. write to external services; we treat any non-empty
-# callback list as a FAIL until the operator documents it. We also look for
-# the standalone `guardrails:` block and `router_settings.plugins:` list,
-# which is where LiteLLM wires in guardrail transforms.
+# success_callback / failure_callback / callbacks must not contain anything
+# that touches request bodies. langfuse, langsmith, lunary, helicone, etc.
+# write to external services; we treat any non-empty callback list as a FAIL
+# until the operator documents it. We also look for guardrail wiring in any
+# of the three documented forms (top-level `guardrails:` block,
+# `litellm_settings.guardrails:` block, and per-model
+# `litellm_params.guardrails:` list — see docs/cockpit/9router-integratie-
+# analyse.md §11.2) plus `router_settings.plugins:`, which is where LiteLLM
+# wires in guardrail transforms. `service_callbacks` is intentionally NOT
+# listed below: it appears in the public `litellm_settings` reference table
+# but has 0 hits in the BerriAI/litellm source repo, i.e. it is a
+# documentation artifact, not a real loader key (kaart 94011364…, impediment
+# decision C).
 ls = cfg.get("litellm_settings") or {}
 gs = cfg.get("general_settings")  or {}
 rs = cfg.get("router_settings")   or {}
 
-callback_keys = ["success_callback", "failure_callback", "service_callbacks", "callbacks"]
+callback_keys = ["success_callback", "failure_callback", "callbacks"]
 active_callbacks = []
 for k in callback_keys:
     v = ls.get(k)
@@ -345,11 +360,45 @@ for k in callback_keys:
     elif isinstance(v, str) and v.strip():
         active_callbacks.append(f"litellm_settings.{k}=\"{v}\"")
 
-# Guardrails: top-level `guardrails:` block (LiteLLM guardrails) or the
-# router's plugins list, OR any litellm_settings.modify_params with a
-# value that could re-write request bodies (we accept the documented
-# built-ins but flag custom script paths).
-guardrails_block = cfg.get("guardrails")
+# Three documented guardrail-wiring locations. Any non-empty entry here is a
+# FAIL: even `default_on: false` still registers the callback, and any
+# payload-mutating guardrail (Lakera, Presidio, OpenAI moderations, ...) can
+# silently rewrite the request body. Reference for the three forms:
+#   - top-level `guardrails:`            docs.litellm.ai/proxy/guardrails/quick_start
+#   - `litellm_settings.guardrails:`     tests/local_testing/test_configs/test_guardrails_config.yaml
+#   - per-model `litellm_params.guardrails:`  litellm/proxy/utils.py::_check_and_merge_model_level_guardrails
+guardrail_findings = []
+# Form 1: top-level `guardrails:` block (a list of dicts each with a
+# guardrail_name, or a dict keyed by guardrail_name). Truthy iff non-empty.
+top_guardrails = cfg.get("guardrails")
+if top_guardrails:
+    if isinstance(top_guardrails, (list, dict)) and len(top_guardrails) > 0:
+        guardrail_findings.append(f"top-level 'guardrails:' block ({type(top_guardrails).__name__}, {len(top_guardrails)} entries)")
+# Form 2: litellm_settings.guardrails — a list of single-key dicts, each
+# value being {callbacks: [...], default_on: bool}. Even with default_on:
+# false the callback is still registered with the proxy (init_guardrails.py
+# iterates the full list); default_on: false only suppresses the runtime
+# invocation, not the wiring. Empty list = no callbacks wired.
+ls_guardrails = ls.get("guardrails")
+if isinstance(ls_guardrails, list) and ls_guardrails:
+    guardrail_findings.append(f"litellm_settings.guardrails (list, {len(ls_guardrails)} entries)")
+elif isinstance(ls_guardrails, dict) and ls_guardrails:
+    # Tolerate the dict form too — not documented as a primary form but
+    # safe to treat as "wiring present".
+    guardrail_findings.append(f"litellm_settings.guardrails (dict, {len(ls_guardrails)} entries)")
+# Form 3: per-model `litellm_params.guardrails:` (a list of guardrail name
+# strings). Each entry activates a callback against every request to that
+# model — confirmed via litellm/proxy/utils.py::_check_and_merge_model_level_guardrails.
+per_model_guardrails = []
+for entry in cfg.get("model_list") or []:
+    lp = (entry or {}).get("litellm_params") or {}
+    g = lp.get("guardrails")
+    if isinstance(g, list) and g:
+        per_model_guardrails.append((entry.get("model_name"), g))
+if per_model_guardrails:
+    names = ", ".join(f"{n}={g!r}" for n, g in per_model_guardrails)
+    guardrail_findings.append(f"litellm_params.guardrails on model_list entries: {names}")
+
 router_plugins = rs.get("plugins") if isinstance(rs, dict) else None
 
 # --- Property 4: no telemetry / external sync ------------------------------
@@ -396,9 +445,10 @@ if active_callbacks:
     emit("prompt_mutation", "FAIL",
          "callbacks wired up: " + "; ".join(active_callbacks) +
          " — even an observability callback touches request metadata; a payload-mutating one (e.g. a guardrails plugin) can rewrite the prompt silently.")
-elif guardrails_block:
+elif guardrail_findings:
     emit("prompt_mutation", "FAIL",
-         "top-level 'guardrails:' block present — LiteLLM applies each guardrail to request bodies. Remove or document inline.")
+         "guardrail wiring present: " + "; ".join(guardrail_findings) +
+         " — LiteLLM applies each guardrail to request bodies; even default_on:false only suppresses the runtime invocation, not the wiring. Remove the entry, or document inline if intentional.")
 elif isinstance(router_plugins, list) and router_plugins:
     emit("prompt_mutation", "FAIL",
          f"router_settings.plugins={router_plugins} — plugins run on the request path and may mutate the body.")
@@ -447,7 +497,7 @@ PY
           ;;
         prompt_mutation:FAIL:*)
           fail "prompt-mutation: ${line#prompt_mutation:FAIL:}"
-          note "fix: in $CONFIG_YAML, drop success_callback / failure_callback / service_callbacks / call_hooks entries and any top-level 'guardrails:' block; router_settings.plugins must be empty."
+          note "fix: in $CONFIG_YAML, drop success_callback / failure_callback / callbacks entries, the top-level 'guardrails:' block, litellm_settings.guardrails, and any per-model litellm_params.guardrails: list; router_settings.plugins must be empty. Note: 'service_callbacks' is listed in the public litellm_settings reference docs but has 0 hits in the BerriAI/litellm source repo (kaart 94011364…) — it is a documentation artifact and is intentionally NOT checked here."
           ;;
         prompt_mutation:WARN:*)
           warn "prompt-mutation: ${line#prompt_mutation:WARN:}"

@@ -335,6 +335,91 @@ out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_FAIL400" --config-yaml "$TMP/cle
 check "fail-closed 400 --strict → rc 0 (WARN, not FAIL)" '[ "$rc" -eq 0 ]'
 
 # ----------------------------------------------------------------------------
+echo "Task 12: litellm_settings.guardrails: block → prompt-mutation FAIL"
+# The previous version of the script only detected the top-level `guardrails:`
+# block. LiteLLM also accepts `litellm_settings.guardrails:` — confirmed against
+# tests/local_testing/test_configs/test_guardrails_config.yaml in the OSS repo.
+# A config in this form passes the previous check green while a guardrail that
+# touches the request body is active; the regression test below pins the
+# expectation that both forms are treated identically (kaart 94011364…,
+# impediment decision C).
+cat > "$TMP/dirty_litellm_settings_guardrails.yaml" <<'EOF'
+model_list:
+  - model_name: gpt
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+litellm_settings:
+  guardrails:
+    - prompt_injection:
+        callbacks: [lakera_prompt_injection]
+        default_on: true
+EOF
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_OK" --config-yaml "$TMP/dirty_litellm_settings_guardrails.yaml" --strict 2>&1); rc=$?
+check "litellm_settings.guardrails --strict → exit 1"        '[ "$rc" -eq 1 ]'
+check "litellm_settings.guardrails → prompt-mutation FAIL"  'echo "$out" | sanitize | grep -qE "FAIL prompt-mutation:"'
+check "litellm_settings.guardrails → names the form"        'echo "$out" | sanitize | grep -qE "litellm_settings.guardrails"'
+
+# ----------------------------------------------------------------------------
+echo "Task 13: per-model litellm_params.guardrails: list → prompt-mutation FAIL"
+# A third documented form: each model_list entry can attach a guardrail by
+# name under `litellm_params.guardrails:`. Confirmed via
+# docs.litellm.ai/proxy/guardrails/quick_start ("Model-level guardrails") and
+# the runtime helper `_check_and_merge_model_level_guardrails` in
+# litellm/proxy/utils.py. Without this check, a config like the one below
+# loads a guardrail that runs on every request to `claude-haiku` while the
+# hardening check reports a clean PASS.
+cat > "$TMP/dirty_per_model_guardrails.yaml" <<'EOF'
+model_list:
+  - model_name: claude-haiku
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+      guardrails: ["azure-text-moderation"]
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+litellm_settings: {}
+EOF
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_OK" --config-yaml "$TMP/dirty_per_model_guardrails.yaml" --strict 2>&1); rc=$?
+check "per-model guardrails --strict → exit 1"              '[ "$rc" -eq 1 ]'
+check "per-model guardrails → prompt-mutation FAIL"        'echo "$out" | sanitize | grep -qE "FAIL prompt-mutation:"'
+check "per-model guardrails → names the form"              'echo "$out" | sanitize | grep -qE "litellm_params.guardrails"'
+
+# ----------------------------------------------------------------------------
+echo "Task 14: service_callbacks is a phantom flag — must not appear in check output"
+# `service_callbacks` is listed in the public litellm_settings reference docs
+# but has 0 hits in the entire BerriAI/litellm source repo (gh search code
+# returns an empty result). It is a documentation artifact, not a real loader
+# key. A check that mentions it in its output is misleading the operator into
+# believing they configured something that does nothing.
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_OK" --config-yaml "$TMP/clean.yaml" 2>&1); rc=$?
+check "clean → rc 0"                                       '[ "$rc" -eq 0 ]'
+check "service_callbacks is not in PASS message"           '! echo "$out" | sanitize | grep -qF "service_callbacks"'
+check "service_callbacks is not in fix note"               '! echo "$out" | sanitize | grep -qF "service_callbacks"'
+
+# And a config that *would* have been flagged if the check trusted the docs:
+# the operator adds `service_callbacks: ["sentry"]` expecting monitoring, but
+# LiteLLM ignores the key. The check must NOT punish the operator for trusting
+# the public docs.
+cat > "$TMP/phantom_service_callbacks.yaml" <<'EOF'
+model_list:
+  - model_name: gpt
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+litellm_settings:
+  service_callbacks: ["sentry"]
+EOF
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_OK" --config-yaml "$TMP/phantom_service_callbacks.yaml" 2>&1); rc=$?
+check "phantom service_callbacks → rc 0 (advisory)"        '[ "$rc" -eq 0 ]'
+check "phantom service_callbacks → no FAIL prompt-mutation" '! echo "$out" | sanitize | grep -qE "FAIL prompt-mutation:"'
+check "phantom service_callbacks → no FAIL telemetry"      '! echo "$out" | sanitize | grep -qE "FAIL telemetry/external-sync:"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
