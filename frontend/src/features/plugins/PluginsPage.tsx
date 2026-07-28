@@ -113,7 +113,7 @@ export function PluginsPage() {
   const handleUpdatePlugin = useCallback(async (name: string) => {
     try {
       const data = await apiClient<{ success: boolean; message: string }>(
-        `/api/v1/plugins/${name}/update`,
+        `plugins/${name}/update`,
         { method: "POST" }
       );
       if (data.success) {
@@ -162,7 +162,7 @@ export function PluginsPage() {
     for (const plugin of plugins) {
       if (plugin.enabled === false && plugin.source !== "local" && plugin.source !== "local-project") {
         try {
-          await apiClient(`/api/v1/plugins/${plugin.name}/toggle`, {
+          await apiClient(`plugins/${plugin.name}/toggle`, {
             method: "POST",
             body: JSON.stringify({ enabled: true, source: plugin.source }),
           });
@@ -183,7 +183,7 @@ export function PluginsPage() {
     for (const plugin of plugins) {
       if (plugin.enabled !== false && plugin.source !== "local" && plugin.source !== "local-project") {
         try {
-          await apiClient(`/api/v1/plugins/${plugin.name}/toggle`, {
+          await apiClient(`plugins/${plugin.name}/toggle`, {
             method: "POST",
             body: JSON.stringify({ enabled: false, source: plugin.source }),
           });

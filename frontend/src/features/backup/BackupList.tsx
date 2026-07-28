@@ -116,7 +116,7 @@ export function BackupList({ backups, onRestore, onDownload, onDelete }: BackupL
     setPlan(null);
 
     try {
-      const response = await apiClient<RestorePlan>(`/api/v1/backup/${backup.id}/plan`);
+      const response = await apiClient<RestorePlan>(`backup/${backup.id}/plan`);
       setPlan(response);
     } catch (err) {
       setPlanError(err instanceof Error ? err.message : "Failed to load plan");

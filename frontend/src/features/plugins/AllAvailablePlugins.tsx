@@ -39,7 +39,7 @@ export function AllAvailablePlugins({
       setError(null);
       try {
         const data = await apiClient<{ plugins: MarketplacePlugin[] }>(
-          "/api/v1/plugins/available"
+          "plugins/available"
         );
         setPlugins(data.plugins || []);
       } catch (err) {
