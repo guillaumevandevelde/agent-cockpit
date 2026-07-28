@@ -120,6 +120,9 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 ./scripts/sweep_dangling_depends_on.py        # Flag niet-Done kaarten waarvan een depends_on-id naar een niet-bestaande kaart verwijst
 ./scripts/sweep_dangling_plan_refs.py         # Flag plan_ref-deliverables waarvan de parent of het plan niet meer resolvet
 
+# Remote-branch sweeper (vangnet voor merged-maar-niet-verwijderde branches op `origin`; volgt op de direct-mode ship-recipe fix uit kanban-kaart `3027671c…` — advisory; --strict = exit 1; JSON op stdout; nudge vanuit `cockpit.sh start`)
+./scripts/sweep_merged_remote_branches.py      # Flag refs/remotes/<remote>/* branches die `git cherry <base> <ref>` met 0 `+`-regels beantwoorden (volledig gemerged)
+
 # Lint
 cd frontend && npm run lint      # ESLint
 
