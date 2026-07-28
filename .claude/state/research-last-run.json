@@ -1,41 +1,67 @@
 {
-  "last_run": "2026-07-10",
+  "last_run": "2026-07-28",
   "previous_run": "2026-07-10",
-  "trigger_card": "5952108813274da6a06dca1fe2501505",
+  "trigger_card": "210e5042d4584da9ba00579c47d3df68",
+  "successor_card": "d2f3a10de06f4bcc9a0e887a91b789f9",
+  "successor_scheduled_at": "2026-08-03T09:00:00+02:00",
   "sources_seen": {
-    "claude-task-master": "0.43.1 (Mar 31) and 0.43.0 (Feb 4) — no new releases since previous sweep; optional metadata field on tasks (already filed as 5a4eabb8 in previous sweep) remains the most-cited 2026 change.",
-    "Aperant/Auto-Claude": "v2.7.6 stable (Feb 20) and v2.8.0-beta.4..6 (Mar 13–23); repo silent on pushes since 2026-03-23. New finding this run: 'Queue System v2 — Smart task prioritization with auto-promotion and intelligent rate limit recovery' (filed as c6ced802fa1246e9a09a186170b3126f).",
-    "claude-deck (upstream fork origin, adrirubio/claude-deck)": "v2.0.1 (Jun 20) stabilization; v2.0.0 (Jun 19) Agent Mail + Agent Teams + external orchestration — already triaged in upstream-agent-teams-decision.md, upstream-presence-removal-decision.md, upstream-docker-removal-decision.md. Nothing new since previous sweep.",
-    "Claude Code changelog (code.claude.com/docs/en/changelog)": "2.1.183 (Jun 19) through 2.1.206 (Jul 9). Headline items: 2.1.197 Sonnet 5 default with 1M-token context, 2.1.198 subagents run in background by default + new Notification hook subtypes (agent_needs_input / agent_completed) for background agents, 2.1.205 /commit-push-pr auto-allows git push, 2.1.206 /doctor trim-checked-in-CLAUDE.md. Filed: 11fe18aaf11845c0a25f70adc7d7323c (Notification hook events for kanban dispatch).",
-    "Claude Agent SDK Python (anthropics/claude-agent-sdk-python)": "0.1.0 introduced programmatic subagents via 'agents' option (large refactor, noted only — would need a parent card with decomposition if pursued); 0.2.111 zombie-subprocess prevention, 0.2.101 typed TaskUpdatedMessage, 0.1.65 SessionStore adapters — all SDK-only and Cockpit uses raw subprocess/tmux today, so noted for a future SDK-migration decision card.",
-    "Anthropic API changelog": "structured outputs GA (Sonnet/Opus/Haiku 4.5), prompt-caching workspace-isolation (2026-02-05) — not directly actionable, Cockpit orchestrates via CLI sessions not raw API calls. Sonnet 5 1M-context announcement (Jun 30) is a model-default change, no Cockpit change needed.",
-    "LangGraph": "1.2.5 (Jun 12) through 1.2.9 (Jul 10) — all bug-fix releases focused on DeltaChannel / updateState / subgraphs. Headline multi-agent work (v3 streaming, RemoteGraph.interleave, websocket transports) shipped in 1.2.3 (Jun 1) just outside the 30-day window. Noted but not filed: would need decomposition (SaaS-coupled RemoteGraph requires LangSmith).",
-    "GitHub topics ai-agent / autonomous-coding / ai-coding-agents": "Topic page does not surface creation date — cannot identify truly NEW repos with the current WebFetch. WebSearch with date filters is the only reliable path; deferred to a follow-up that adds a WebSearch-based discovery step to the skill."
+    "claude-task-master (eyaltoledano/claude-task-master)": "No change. Latest release still 0.43.1 (Mar 31); repo `pushed_at` = 2026-04-28, no commits in the window. Effectively dormant — worth deciding next sweep whether it stays on the source list.",
+    "Aperant (AndyMik90/Aperant)": "SOURCE-LIST FIX: the skill table said `Aperant` / \"Auto Claude\" with no owner; `Aperant/Auto-Claude` 404s. Real repo is `AndyMik90/Aperant` (rebranded from Auto-Claude in Mar 2026, 14.5k stars). Public repo `pushed_at` = 2026-06-14, latest release v2.8.0-beta.6 (Mar 23) — nothing in the window. Per web search, 3.0 work sits in a separate private dev repo and will be merged back, so the public repo will look dead until then. Skill table updated with the correct owner.",
+    "claude-deck (adrirubio/claude-deck, fork upstream)": "No change. Zero commits on master since 2026-07-10; latest release still v2.0.1 (Jun 20). Divergence check clean.",
+    "Claude Code changelog (code.claude.com/docs/en/changelog)": "2.1.212 through 2.1.220 — the richest source this window; both filed cards come from it. Also noted but not filed: 2.1.218 `/code-review` now runs as a background subagent and `context: fork` skills default to background; 2.1.216 fixed worktree-isolated subagents redirecting git into the shared checkout via `git -C`/`--git-dir`/`GIT_DIR`; 2.1.214 added the EndConversation tool and fixed hooks with exit code 2 not blocking when their stdout JSON fails schema validation.",
+    "Claude Agent SDK Python (anthropics/claude-agent-sdk-python)": "17 releases in the window (0.2.112 -> 0.2.128). Substantive: 0.2.126 added `terminal_reason` on ResultMessage (completed/max_turns/aborted_streaming/aborted_tools) and typed `model_usage` with `canonicalModel`/`provider`; 0.2.127 fixed premature stdin closure killing SDK-MCP tool calls from background subagents; 0.2.121/0.2.124 hardened argv/flag injection via `resume` and `session_id`. Not filed: Cockpit spawns the CLI directly via subprocess/tmux and does not consume the SDK, so these matter only behind a future SDK-migration decision. Did check our own spawner (`agentic_cli/claude_code.py:67-84`) for the same argv-injection shape — `--resume` takes a store-generated session id and the prompt is a trailing positional, so no live exposure.",
+    "Anthropic API changelog (platform.claude.com/docs/en/release-notes/api)": "Opus 5 launched Jul 24 ($5/$25, 1M context, thinking on by default; disabling thinking now 400s at effort xhigh/max). Fast mode REMOVED for Opus 4.7 on Jul 24 (now errors, no fallback). Mid-conversation tool changes in beta. The rest of the window is Managed Agents surface (webhooks, initial_events, event deltas, effort on agent model config), which Cockpit does not use — it orchestrates CLI sessions, not raw API calls. The Opus 5 half fed the dedupe comment on eb26d1e7.",
+    "LangGraph (langchain-ai/langgraph)": "No change in the window. 1.2.9 (Jul 10) was already head at the previous sweep; nothing newer.",
+    "GitHub topics ai-agent / autonomous-coding / ai-coding-agents": "Still not pulled — the topic pages do not expose repo creation dates, so the '>1k stars, created last 30d' filter is not expressible via WebFetch. Same limitation as the previous sweep. Deferred again; a WebSearch-based discovery step remains the open follow-up on the skill."
   },
   "findings": {
     "filed": [
       {
-        "card_id": "11fe18aaf11845c0a25f70adc7d7323c",
-        "title": "[research] Wire Claude Code Notification hook events (agent_needs_input / agent_completed) into kanban dispatch",
-        "source": "Claude Code 2.1.198 (Jul 1, 2026)",
-        "scope": "~3 files (auto_resume.py + scheduled_messages/router.py + 1 new test file)",
-        "dedupe_check": "Existing hook-related cards (c0d4e37e hook-event gap tracking, 2b0be5ab reaper for 429) target *missing* hooks for stuck-session detection — different problem, complementary not duplicate."
+        "card_id": "90a6117559fb42d495ab3697362db0ad",
+        "title": "[research] CLAUDE.md `pkill -f`-zelfval-gotcha is deels achterhaald — CC 2.1.214 fixte de zelf-kill, wij draaien 2.1.220",
+        "source": "Claude Code 2.1.214 (Jul 18, 2026)",
+        "scope": "~1-2 files (CLAUDE.md:217, plus a note on docs/cockpit/updates-feature-decision.md:88)",
+        "dedupe_check": "No existing card touches the pkill gotcha. grep over docs/cockpit/*.md + .claude/skills/*/SKILL.md found only references that cite it as still-true (approval-privilege-separation-analyse.md:391, lemma-platform-analyse.md:185, token-saver-mechanismen-decision.md:919) — none flags it as stale.",
+        "note": "Verified `claude --version` = 2.1.220 locally, so the upstream fix is live. Card explicitly says QUALIFY, not delete: only the self-kill is fixed; killing a CONCURRENT dispatched session on this shared box is still possible."
       },
       {
-        "card_id": "c6ced802fa1246e9a09a186170b3126f",
-        "title": "[research] Apply priority sort to dispatch_all_pending (and other bulk paths) — today only the auto-tick honors `priority`",
-        "source": "Aperant v2.7.6 (Feb 20, 2026) — Queue System v2",
-        "scope": "~1-2 files (dispatch.py — extract _priority_key helper, apply to dispatch_all_pending + redispatch_all_orphans loops, replace inline sort in _next_card)",
-        "dedupe_check": "Auto-tick (_next_card line 1003, orphan line 1015) already sorts by priority; the gap is only in the manual bulk paths. No existing card covers this. The recently-merged 2b0be5ab (429/Token Plan reaper) is complementary, not duplicate."
+        "card_id": "4781e971dc00498d9da92b19944407a2",
+        "title": "[research] Detecteer een stil overgeslagen `--mcp-config` bij spawn via `mcp_server_errors` (CC 2.1.219)",
+        "source": "Claude Code 2.1.219 (Jul 24, 2026)",
+        "scope": "~2-3 files (headless stream-json spawn path in dispatch.py + 1 test)",
+        "dedupe_check": "grep -rn 'mcp_server_errors|MCP.*startup' backend/app/kanban/dispatch.py => no hits; no detection exists today. Backlog card a254b3111a2340478da726eb8fd015b9 concerns the REST-fallback docs for an MCP outage (recovery after the fact) — this is detection at spawn. Complementary, not duplicate."
       }
     ],
-    "deduped": 0,
-    "no_op": 0,
+    "deduped": [
+      {
+        "card_id": "eb26d1e7eafd42ccbd908f6d743db79a",
+        "title": "[research] Add `claude-opus-5` to Cockpit's context/pricing/settings surfaces",
+        "what_was_added": "Verified in pricing_service.py that `claude-opus-5` is absent from MODEL_PRICING and that the full fallback ladder in get_model_pricing (:179-208) — including the fuzzy substring pass — returns None for it. Also flagged PRICING_VERSION='2026-06-20' as stale, and that Sonnet 5 sits at $3/$15 while the API changelog states $2/$10 introductory pricing through Aug 31 2026."
+      },
+      {
+        "card_id": "aaa81b2350ee4f499c2777ee18e065d2",
+        "title": "[research] Surface Claude Code subagent-cap knobs as per-lane column_overrides",
+        "what_was_added": "The default this card is built on flipped within 3 days: 2.1.217 disabled nested subagents by default, 2.1.219 set the default nesting depth to 3 (was 1). The card must verify against the installed CLI, not a changelog line. Also noted the concurrency cap (default 20) and the 2.1.217 --max-budget-usd fix for background subagents."
+      },
+      {
+        "card_id": "824e6f8d2e0c4971a02519459b768764",
+        "title": "[research] Wire `--forward-subagent-text` into agent-bridge",
+        "what_was_added": "2.1.219 added nested subagent forwarding: depth-2+ subagents now appear, keyed by their spawning Agent `tool_use` id. The stream is no longer flat (needs parent-attribution in the session panel) and volume can be far higher than assumed given the depth-3 default."
+      }
+    ],
+    "no_op": false,
     "filter_rejects": [
-      "Claude Agent SDK migration (programmatic subagents, typed TaskUpdatedMessage) — large-scope architectural change, would need a parent card with explicit 'needs decomposition' callout. Deferred to a separate parent feature card; not filed in this run because the acceptance criteria are 1-3 cards and the SDK migration is borderline a different category (library swap, not feature add).",
-      "Sonnet 5 1M-token context default — not actionable for Cockpit (model change, no platform change).",
-      "LangGraph DeltaChannel / ContextHubBackend — SaaS-coupled (LangSmith required), would need decomposition. Previously evaluated in last sweep, still not filed.",
-      "Aperant 'auto-changelog' / 'ideation phase' — feature parity not requested by any current Cockpit card, no friction point in current operator workflow."
+      "Claude Agent SDK argv/flag-injection hardening (0.2.121, 0.2.124) — checked our own spawner for the same shape and found no live exposure; filing would be speculative hardening with no observed failure.",
+      "Agent SDK migration writ large (terminal_reason, typed model_usage, background-task stdin fix) — same call as the previous sweep: large architectural change, needs a parent card with an explicit decomposition callout, not a research card.",
+      "Managed Agents surface (webhooks, initial_events, event deltas, session config overrides) — Cockpit orchestrates CLI sessions, not the Managed Agents API. Not applicable.",
+      "Opus 5 / Sonnet 5 model launches as such — model availability is not a platform change for Cockpit; the only actionable slice is the pricing/settings table, already covered by eb26d1e7.",
+      "2.1.216 worktree-isolated subagent git-redirect fix — adjacent to our own worktree-scope safety rule (card 513e37a1), but it hardens the CLI's own `--worktree` isolation, which is not the mechanism dispatch uses (pre-made worktrees + cwd). No Cockpit change implied.",
+      "2.1.218 /code-review as background subagent + `context: fork` skills backgrounding by default — affects how the session-end FCR reads, but the FCR prose already picks its subagent type explicitly. No change needed until a failure is observed."
     ]
-  }
+  },
+  "skill_changes": [
+    "Source table: `Aperant` / \"Auto Claude\" -> `AndyMik90/Aperant` (the unqualified name made this sweep 404 on a guessed path).",
+    "Step 7 anchor: compute next_scheduled_at from the host card's own `scheduled_at` + 7d, not from 'now' + 7d. This run fired a day late (host scheduled Mon Jul 27, dispatched Tue Jul 28) and the documented 'now'-anchored formula produced Aug 10 — 13 days out, silently converting the weekly cadence to fortnightly. Correct answer was Aug 3.",
+    "Step 7 trap: `create_card` has no `scheduled_at` parameter and silently creates the successor with null, which makes it immediately dispatchable rather than dormant until Monday. Documented the follow-up REST PATCH + verify."
+  ]
 }
