@@ -1,9 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import type { DocContentResponse, PlansOverviewResponse } from '@/types/plans'
+
+const navigate = vi.fn()
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>(
+    'react-router-dom',
+  )
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  }
+})
 
 const docContent: DocContentResponse = {
   path: 'docs/cockpit/plans-feature-decision.md',
@@ -72,6 +84,7 @@ const { PlanDetailPage } = await import('./PlanDetailPage')
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  navigate.mockClear()
 })
 
 function renderDetail(pathParam: string) {
@@ -167,6 +180,31 @@ describe('PlanDetailPage B↔C correlation (Optie B, kanban plan 2026-07-28-plan
     })
     expect(chipCardAbc.getAttribute('href')).toBe('/kanban?card=card-abc')
     expect(chipCardGhi.getAttribute('href')).toBe('/kanban?card=card-ghi')
+  })
+
+  // I1 (PlanDetailPage side) — the chip anchors used to be raw <a>
+  // elements without an onClick handler, so clicking them caused a full
+  // browser navigation (SPA hard-reload). The interaction test below
+  // pins the router-integrated behaviour: a chip click must prevent
+  // the default browser navigation AND fire the SPA navigate().
+  it('card-chip click prevents default browser navigation AND fires SPA navigate', async () => {
+    navigate.mockClear()
+    renderDetail(encodeURIComponent('docs/cockpit/plans-feature-decision.md'))
+    await screen.findByRole('heading', {
+      level: 1,
+      name: /plans feature — analyse/i,
+    })
+    const chipCardAbc = screen.getByRole('link', {
+      name: /open kanban card aggregator design doc/i,
+    }) as HTMLAnchorElement
+    const evt = createEvent.click(chipCardAbc, { bubbles: true, cancelable: true })
+    fireEvent(chipCardAbc, evt)
+    // SPA navigation fired with the chip's href target — the chip
+    // click must hit React Router, not the browser-default <a> reload.
+    expect(navigate).toHaveBeenCalledWith('/kanban?card=card-abc')
+    // Default browser navigation was prevented — without this the SPA
+    // hard-reloads on every chip click (the original I1 bug).
+    expect(evt.defaultPrevented).toBe(true)
   })
 
   it('omits the chip-list when the current doc item has empty implemented_by', async () => {

@@ -146,6 +146,7 @@ export function PlanDetailPage() {
         cards={implementedBy}
         loading={overviewLoading}
         error={overviewError}
+        onCardClick={(cardId) => navigate(`/kanban?card=${cardId}`)}
       />
     </div>
   )
@@ -163,10 +164,12 @@ function ImplementedBySection({
   cards,
   loading,
   error,
+  onCardClick,
 }: {
   cards: CorrelatedCardItem[]
   loading: boolean
   error: string | null
+  onCardClick: (cardId: string) => void
 }) {
   if (loading && cards.length === 0) {
     return (
@@ -209,7 +212,17 @@ function ImplementedBySection({
               <li key={card.card_id}>
                 <a
                   href={`/kanban?card=${card.card_id}`}
-                  className="inline-flex items-center gap-1 rounded-md border bg-secondary px-2 py-0.5 text-xs font-medium hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    onCardClick(card.card_id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onCardClick(card.card_id)
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border bg-secondary px-2 py-0.5 text-xs font-medium hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
                   aria-label={`Open kanban card ${card.card_title}`}
                   title={`Open kanban card: ${card.card_title}`}
                 >

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import and_, select
@@ -118,8 +119,23 @@ _DOC_TITLE_MAX_CHARS = 200
 # correlation (the doc lives outside the repo, so we cannot link a card
 # back to a C row). Both forms appear in real cards today (the Fase-1
 # ``SPEC_DOC_META_KEY`` schema permits them), so the filter is a
-# runtime concern, not a writer-side constraint.
+# runtime concern, not a writer-side constraint. Case-insensitive on
+# purpose: ``HTTPS://``-style anchors are not correlatable either, and
+# silently leaving them as a "valid" path would make the SPA render a
+# broken affordance against a path that will never match a C row.
 _NON_CORRELATABLE_URL_PREFIXES = ("http://", "https://")
+
+
+def _is_non_correlatable_url(value: str) -> bool:
+    """Return True iff ``value`` is an http(s) URL we cannot link to a C row.
+
+    Case-insensitive: ``HTTPS://…`` is treated like ``https://…``. Pure
+    pins below cover the lowercase contract; ``assert``s are in the test
+    file (``test_overview_correlation_url_spec_doc_is_case_insensitive``)
+    so this stays the single source of truth.
+    """
+    lowered = value.lower()
+    return any(lowered.startswith(prefix) for prefix in _NON_CORRELATABLE_URL_PREFIXES)
 
 
 def _excerpt(ref: str) -> str:
@@ -137,6 +153,81 @@ def _excerpt(ref: str) -> str:
     return text
 
 
+def _extract_h1(
+    path: Path,
+    *,
+    fallback: str | None = None,
+    lines: list[str] | None = None,
+) -> str:
+    """Return the first Markdown H1 in ``path`` without slurping the whole file.
+
+    ``docs/cockpit/*.md`` files are frontmatter + H1 + body; we only
+    want the H1 (for the title in the list view). Reading the entire
+    2.1MB ``orchestration-substrate-decision.md`` on every overview
+    request is wasteful — stream line-by-line until the first ``# …``
+    line, then stop. A file with optional leading YAML frontmatter (the
+    ``---\n…\n---\n`` block most docs/cockpit/*.md carry today) is
+    skipped transparently: a closed ``---`` on a later line ends the
+    frontmatter and the next ``# …`` is what we return.
+
+    Detail callers that have already loaded the full content into memory
+    can pass ``lines=splitlines_result`` to avoid a second ``read_text``
+    call (M4): the helper walks the supplied lines without re-reading.
+
+    If no H1 is found (empty file, malformed YAML, body without an
+    H1), ``fallback`` is returned when supplied; otherwise the literal
+    ``"# <filename>"`` (matching the legacy contract callers rely on).
+    """
+    h1 = fallback if fallback is not None else f"# {path.name}"
+    if lines is not None:
+        # Detail path: caller already paid for the full read, walk the
+        # in-memory lines and apply the same frontmatter-skipping rules.
+        in_frontmatter = False
+        for raw in lines:
+            stripped = raw.strip()
+            if stripped == "---":
+                if not in_frontmatter:
+                    in_frontmatter = True
+                    continue
+                in_frontmatter = False
+                continue
+            if in_frontmatter:
+                continue
+            if stripped.startswith("# ") and not stripped.startswith("## "):
+                h1 = stripped
+                break
+    else:
+        # List path: stream ``path`` directly without slurping the body.
+        try:
+            # ``encoding="utf-8"`` + ``errors="replace"`` so a malformed byte
+            # in the frontmatter doesn't crash the overview; we'd rather
+            # show "# filename" than 500 the whole endpoint. The detail
+            # read uses ``errors="strict"`` and surfaces the failure as a
+            # 500 — only the title path needs to be lenient.
+            with path.open("r", encoding="utf-8", errors="replace") as fh:
+                in_frontmatter = False
+                for raw in fh:
+                    line = raw.rstrip("\n")
+                    stripped = line.strip()
+                    if stripped == "---":
+                        if not in_frontmatter:
+                            in_frontmatter = True
+                            continue
+                        in_frontmatter = False
+                        continue
+                    if in_frontmatter:
+                        continue
+                    if stripped.startswith("# ") and not stripped.startswith("## "):
+                        h1 = stripped
+                        break
+        except OSError:
+            # File vanished between glob and open; keep the fallback.
+            pass
+    if len(h1) > _DOC_TITLE_MAX_CHARS:
+        h1 = h1[: _DOC_TITLE_MAX_CHARS - 1] + "…"
+    return h1
+
+
 def _correlation_spec_doc(meta: dict | None) -> str | None:
     """Return a card's ``spec_doc`` value if it is correlatable, else ``None``.
 
@@ -147,6 +238,10 @@ def _correlation_spec_doc(meta: dict | None) -> str | None:
     ``None``. Whitespace is preserved verbatim (no normalisation that
     could silently turn a typo into a match) — equality with the C path
     is exact, by design.
+
+    URL filtering is **case-insensitive** via ``_is_non_correlatable_url``:
+    ``HTTPS://example.com/…`` is normalised to ``None`` (cannot link to
+    a C row) just like ``https://example.com/…``. See M1.
     """
     if not isinstance(meta, dict):
         return None
@@ -156,7 +251,7 @@ def _correlation_spec_doc(meta: dict | None) -> str | None:
     candidate = raw  # exact, no strip: equality with C-path is the contract
     if not candidate:
         return None
-    if candidate.startswith(_NON_CORRELATABLE_URL_PREFIXES):
+    if _is_non_correlatable_url(candidate):
         return None
     return candidate
 
@@ -195,13 +290,7 @@ def _list_cockpit_docs(
             # A file that disappears between glob and stat (concurrent
             # editor) is not interesting enough to 500 the whole overview.
             continue
-        try:
-            first_line = path.read_text(encoding="utf-8").splitlines()[:1]
-        except (OSError, UnicodeDecodeError):
-            first_line = []
-        title = first_line[0] if first_line else f"# {path.name}"
-        if len(title) > _DOC_TITLE_MAX_CHARS:
-            title = title[: _DOC_TITLE_MAX_CHARS - 1] + "…"
+        title = _extract_h1(path)
         rel_path = f"docs/cockpit/{path.name}"
         items.append(DocSpecItem(
             path=rel_path,
@@ -420,10 +509,15 @@ async def _read_cockpit_doc(rel_path: str) -> DocContentResponse:
             status_code=500,
             detail=f"Failed to read doc: {e}",
         )
-    first_line = content.splitlines()[:1]
-    title = first_line[0] if first_line else f"# {candidate.name}"
-    if len(title) > _DOC_TITLE_MAX_CHARS:
-        title = title[: _DOC_TITLE_MAX_CHARS - 1] + "…"
+    # Derive the title from the same lines we just loaded — avoids the
+    # second full read that M4 specifically flags as the regression to
+    # prevent on large docs (orchestration-substrate-decision.md is
+    # 2.1MB; the legacy read_text().splitlines()[:1] path was O(file_size)).
+    title = _extract_h1(
+        candidate,
+        fallback=f"# {candidate.name}",
+        lines=content.splitlines(),
+    )
     stat = candidate.stat()
     return DocContentResponse(
         path=f"docs/cockpit/{candidate.name}",

@@ -673,3 +673,150 @@ async def test_overview_correlation_no_deliverable_card_still_correlates(
     assert impl == [
         {"card_id": card_id, "card_title": "spec-only author"},
     ], f"implemented_by mismatch: {impl!r}"
+
+
+# ---------------------------------------------------------------------------
+# Final-fixwave (kaart 725fbdd3…, review comments I1-I4, M1-M4)
+# ---------------------------------------------------------------------------
+#
+# Two regressions to pin explicitly that the earlier waves left as
+# implicit invariants:
+#   * M1 — URL filter must be case-insensitive (the Fase-1 schema allows
+#     ``HTTPS://…``-shaped anchors; the previous lowercase-only filter
+#     would silently treat them as correlatable and link to a non-existent
+#     C row).
+#   * M2 — ``implemented_by`` must contain each claiming card EXACTLY ONCE
+#     even when the card has multiple ``plan``/``plan_ref`` deliverables
+#     pointing at the same doc (a card with a plan body + a plan_ref child
+#     both anchored to ``docs/cockpit/foo.md`` must not double-count).
+
+
+@pytest.mark.asyncio
+async def test_overview_correlation_url_spec_doc_is_case_insensitive(
+    patched_project_key,
+):
+    """M1 — ``HTTPS://…``/``Http://…``/``hTtPs://…`` anchors are not
+    correlatable, exactly like their lowercase counterparts. The SPA
+    renders ``null`` on the B side and an empty ``implemented_by`` on
+    the C side. Without this case-insensitive filter, an uppercase
+    URL would slip past the ``startswith("http://")`` check and the
+    backend would publish a link to a path that doesn't exist.
+    """
+    patched_project_key("/tmp/corr-url-case", "git:overview-corr-url-case")
+    async with _client() as ac:
+        card_id = await _create_card_with_meta(
+            ac, "git:overview-corr-url-case", "uppercase url author",
+            metadata={"spec_doc": "HTTPS://example.com/SPEC.md"},
+        )
+        await _attach_plan_deliverable(card_id, kind="plan", ref="# uppercase")
+
+        r = await ac.get("/api/v1/plans/overview", params={
+            "project_path": "/tmp/corr-url-case",
+        })
+    body = r.json()
+
+    rows_for_card = [
+        row for row in body["cards"] if row["card_id"] == card_id
+    ]
+    assert len(rows_for_card) == 1
+    assert rows_for_card[0]["spec_doc"] is None, (
+        f"Uppercase HTTPS spec_doc must normalise to None on the B side, "
+        f"got {rows_for_card[0]['spec_doc']!r}"
+    )
+    for d in body["docs"]:
+        assert d["implemented_by"] == []
+        for entry in d["implemented_by"]:
+            assert entry["card_id"] != card_id
+
+
+@pytest.mark.asyncio
+async def test_overview_correlation_dedup_across_multiple_deliverables(
+    patched_project_key,
+):
+    """M2 — when one card carries multiple ``plan``/``plan_ref``
+    deliverables all anchored to the SAME ``metadata.spec_doc``, the
+    matching C row's ``implemented_by`` list must contain the card
+    exactly once (not once per deliverable). The list is sorted by
+    ``card_id`` so the rendered chip order stays stable regardless of
+    how many deliverables a card has.
+    """
+    target_doc = "docs/cockpit/kanban-conventions.md"
+    patched_project_key("/tmp/corr-dup", "git:overview-corr-dup")
+    async with _client() as ac:
+        card_id = await _create_card_with_meta(
+            ac, "git:overview-corr-dup", "multi-deliverable author",
+            metadata={"spec_doc": target_doc},
+        )
+        # Two plan deliverables on the same card, both pointing at the
+        # same spec_doc — without dedup the LEFT JOIN would surface the
+        # card twice in ``implemented_by``.
+        await _attach_plan_deliverable(
+            card_id, kind="plan", ref="# Plan body",
+        )
+        await _attach_plan_deliverable(
+            card_id, kind="plan_ref", ref='{"parent_card_id": "x"}',
+        )
+
+        r = await ac.get("/api/v1/plans/overview", params={
+            "project_path": "/tmp/corr-dup",
+        })
+    body = r.json()
+
+    docs_for_target = [
+        d for d in body["docs"] if d["path"] == target_doc
+    ]
+    assert len(docs_for_target) == 1
+    impl = docs_for_target[0]["implemented_by"]
+    impl_ids = [e["card_id"] for e in impl]
+    assert impl_ids.count(card_id) == 1, (
+        f"implemented_by must contain each card exactly once; got "
+        f"{impl!r}"
+    )
+    # B side still produces 2 rows (one per deliverable) — only the C
+    # side is deduped.
+    rows_for_card = [
+        row for row in body["cards"] if row["card_id"] == card_id
+    ]
+    assert len(rows_for_card) == 2
+
+
+@pytest.mark.asyncio
+async def test_overview_correlation_two_cards_one_doc_each_appears_once(
+    patched_project_key,
+):
+    """M2 (companion) — two distinct cards on the same doc both show
+    up in ``implemented_by``, each exactly once. Verifies the
+    deterministic sort-by-card_id and that no card gets accidentally
+    merged into another.
+    """
+    target_doc = "docs/cockpit/kanban-conventions.md"
+    patched_project_key("/tmp/corr-2cards", "git:overview-corr-2cards")
+    async with _client() as ac:
+        # Force a deterministic order: card "alpha-…" < card "bravo-…"
+        # alphabetically; the response must reflect that order.
+        card_alpha = await _create_card_with_meta(
+            ac, "git:overview-corr-2cards", "alpha author",
+            metadata={"spec_doc": target_doc},
+        )
+        card_bravo = await _create_card_with_meta(
+            ac, "git:overview-corr-2cards", "bravo author",
+            metadata={"spec_doc": target_doc},
+        )
+        await _attach_plan_deliverable(card_alpha, kind="plan", ref="# alpha")
+        await _attach_plan_deliverable(card_bravo, kind="plan", ref="# bravo")
+
+        r = await ac.get("/api/v1/plans/overview", params={
+            "project_path": "/tmp/corr-2cards",
+        })
+    body = r.json()
+
+    docs_for_target = [
+        d for d in body["docs"] if d["path"] == target_doc
+    ]
+    assert len(docs_for_target) == 1
+    impl = docs_for_target[0]["implemented_by"]
+    impl_ids = [e["card_id"] for e in impl]
+    assert impl_ids.count(card_alpha) == 1
+    assert impl_ids.count(card_bravo) == 1
+    assert len(impl) == 2
+    assert sorted([card_alpha, card_bravo]) == sorted(impl_ids)

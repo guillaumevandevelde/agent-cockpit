@@ -229,10 +229,14 @@ function CardPlanSection({
 // Inline B-side doclink (kanban plan 2026-07-28-plans-b-c-correlation
 // Task 2). Lives inside a CLICKABLE_CARD — its onClick MUST
 // ``stopPropagation()`` so a click on the link doesn't also navigate
-// to the outer card's row destination (``/kanban?card=<id>``). The
-// link is rendered as an anchor element with an ``href`` so it's
-// keyboard-focusable + middle-click-open + copyable, and so the SPA
-// does the navigation via React Router rather than a full page reload.
+// to the outer card's row destination (``/kanban?card=<id>``) AND
+// ``preventDefault()`` so the browser doesn't follow the ``href`` and
+// hard-reload the SPA (the raw-anchor + onClick + navigate pattern
+// without preventDefault causes a full page reload on every chip
+// click — see review finding I1). The link is rendered as an anchor
+// element with an ``href`` so it's keyboard-focusable +
+// middle-click-open + copyable, and so the SPA does the navigation
+// via React Router rather than a full page reload.
 function SpecDocLink({
   path,
   onDocLinkClick,
@@ -246,6 +250,7 @@ function SpecDocLink({
       <a
         href={href}
         onClick={(e) => {
+          e.preventDefault()
           e.stopPropagation()
           onDocLinkClick(path)
         }}
@@ -364,7 +369,9 @@ function DocSection({
 // an ``href`` so it's keyboard-focusable + middle-click-open +
 // copyable. Chips live inside a CLICKABLE_CARD — their ``onClick``
 // MUST ``stopPropagation()`` so a chip click doesn't bubble up to the
-// outer card's row destination (``/plans/<encoded-path>``).
+// outer card's row destination (``/plans/<encoded-path>``) AND
+// ``preventDefault()`` so the browser doesn't follow the ``href`` and
+// hard-reload the SPA (review finding I1).
 function ImplementedByChips({
   cards,
   onCardLinkClick,
@@ -384,6 +391,7 @@ function ImplementedByChips({
             <a
               href={`/kanban?card=${card.card_id}`}
               onClick={(e) => {
+                e.preventDefault()
                 e.stopPropagation()
                 onCardLinkClick(card.card_id)
               }}

@@ -1,9 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 import type { PlansOverviewResponse } from '@/types/plans'
+
+const navigate = vi.fn()
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>(
+    'react-router-dom',
+  )
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  }
+})
 
 const overview: PlansOverviewResponse = {
   project_key: 'git:github.com/example/repo',
@@ -79,6 +91,7 @@ const { PlansPage } = await import('./PlansPage')
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  navigate.mockClear()
 })
 
 function renderPlans() {
@@ -291,13 +304,73 @@ describe('PlansPage B↔C correlation (Optie B, kanban plan 2026-07-28-plans-b-c
     )
     expect(chipCardAbc).toBeTruthy()
     expect(chipCardGhi).toBeTruthy()
-    // Chips live inside a CLICKABLE_CARD row — without stopPropagation,
-    // a chip click would bubble to the row's onClick and navigate to
-    // /plans/<encoded-path>. We assert the chip anchors are inside a
-    // parent that has a button role — i.e., they would bubble without
-    // an explicit stopPropagation. The implementation owns the
-    // stopPropagation contract on the inner click handler.
-    expect(chipCardAbc?.closest('[role="button"]')).toBeTruthy()
-    expect(chipCardGhi?.closest('[role="button"]')).toBeTruthy()
+  })
+
+  // I1 + I2 — interaction tests for the B↔C inner-link propagation
+  // contract. The previous test asserted ``closest('[role=button]')``
+  // tautologically (any anchor under a button-role parent matches,
+  // regardless of whether stopPropagation is wired). These tests
+  // exercise the real click path and assert both directions:
+  //   * the chip-click navigates to its OWN href (card route), AND
+  //   * the chip-click does NOT also navigate to the outer row's
+  //     destination (doc route) — i.e. stopPropagation works, AND
+  //   * the chip-click prevents the default browser navigation
+  //     (which would otherwise cause a full page reload, hard-reloading
+  //     the SPA on a chip click — see I1).
+  //
+  // We assert ``defaultPrevented`` on the *native event* via
+  // ``createEvent.click`` + ``bubbles: true`` so React's synthetic-event
+  // delegate fires and we can inspect the actual DOM event after the
+  // handler ran. Reading ``defaultPrevented`` off the bare element is
+  // undefined (the property lives on the event, not the element).
+  it('inner B-doclink click navigates to /plans/<path> AND prevents default + stops propagation', async () => {
+    navigate.mockClear()
+    renderPlans()
+    const aggregatorRow = await screen.findByRole('button', {
+      name: /open kanban card aggregator design doc/i,
+    })
+    const docLink = aggregatorRow.querySelector(
+      'a[href="/plans/docs%2Fcockpit%2Fplans-feature-decision.md"]'
+    ) as HTMLAnchorElement | null
+    expect(docLink).toBeTruthy()
+    const evt = createEvent.click(docLink!, { bubbles: true, cancelable: true })
+    fireEvent(docLink!, evt)
+    // SPA navigation fired with the doc route — the inner onClick
+    // handler called navigate() with the right path.
+    expect(navigate).toHaveBeenCalledWith(
+      '/plans/docs%2Fcockpit%2Fplans-feature-decision.md',
+    )
+    // Default browser navigation was prevented — without preventDefault
+    // the browser would reload the SPA on every inner-link click.
+    expect(evt.defaultPrevented).toBe(true)
+    // Outer-row destination was NOT navigated to — only one call (the
+    // chip's own), proving stopPropagation worked.
+    const kanbanCalls = navigate.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && c[0].startsWith('/kanban?'),
+    )
+    expect(kanbanCalls.length).toBe(0)
+  })
+
+  it('inner C-cardchip click navigates to /kanban?card=<id> AND prevents default + stops propagation', async () => {
+    navigate.mockClear()
+    renderPlans()
+    const plansDocRow = await screen.findByRole('button', {
+      name: /open doc # plans feature — analyse/i,
+    })
+    const chipCardAbc = plansDocRow.querySelector(
+      'a[href="/kanban?card=card-abc"]'
+    ) as HTMLAnchorElement | null
+    expect(chipCardAbc).toBeTruthy()
+    const evt = createEvent.click(chipCardAbc!, { bubbles: true, cancelable: true })
+    fireEvent(chipCardAbc!, evt)
+    // Chip's own destination fired.
+    expect(navigate).toHaveBeenCalledWith('/kanban?card=card-abc')
+    // Default browser navigation was prevented.
+    expect(evt.defaultPrevented).toBe(true)
+    // Outer-row destination (doc route) was NOT navigated to.
+    const docCalls = navigate.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && c[0].startsWith('/plans/'),
+    )
+    expect(docCalls.length).toBe(0)
   })
 })
