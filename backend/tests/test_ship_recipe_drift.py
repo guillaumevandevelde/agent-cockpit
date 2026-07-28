@@ -71,6 +71,26 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "detached-worktree merge target",
         'git worktree add --detach "$WT" origin/master',
     ),
+    # Post-`worktree add` 0-byte-index guard. A crashed/aborted predecessor
+    # in the shared gitdir can leave the freshly-created slot's `index` at
+    # 0 bytes; `git worktree add` reports success anyway, and the very next
+    # `merge` dies with `fatal: …/index: index file smaller than expected`
+    # while `git worktree remove --force` refuses with `is not a working
+    # tree` — orphaning the slot (kanban card 608e2a27…). The recovery is
+    # `git read-tree HEAD` against the slot: the checkout already holds the
+    # right tree, only the index needs rebuilding.
+    (
+        "slot gitdir resolution",
+        'WT_GITDIR=$(git -C "$WT" rev-parse --absolute-git-dir)',
+    ),
+    (
+        "0-byte index detection",
+        'if [ ! -s "$WT_GITDIR/index" ]',
+    ),
+    (
+        "0-byte index recovery",
+        'git -C "$WT" read-tree HEAD',
+    ),
     # Required so master history shows a real merge commit, not a fast-forward.
     (
         "--no-ff merge flag",
@@ -397,6 +417,16 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     # route leaks a merged branch onto `origin` on every single ship.
     assert any("push origin --delete" in c for c in commands), (
         "invariants list lost the remote branch cleanup command"
+    )
+    # 0-byte-index guard (kanban card 608e2a27…). Without it, a slot whose
+    # index was truncated by an aborted predecessor kills the merge with
+    # `index file smaller than expected` and needs a manual
+    # `git read-tree HEAD` rescue.
+    assert any("read-tree HEAD" in c for c in commands), (
+        "invariants list lost the 0-byte-index recovery command"
+    )
+    assert any('[ ! -s "$WT_GITDIR/index" ]' in c for c in commands), (
+        "invariants list lost the 0-byte-index detection guard"
     )
 
 
@@ -1181,4 +1211,142 @@ def test_recipe_writing_conventions_doc_does_not_show_add_A_as_good() -> None:
         "match. The counter-example `# NOTE:` comment at ~line 138 is fine "
         "(it shows the OLD broken pattern under an `exit 1` and is filtered "
         "out by `_executable_lines`); only the GOED example matters."
+    )
+
+
+# 0-byte-index guard positional markers (kanban card 608e2a27…). The guard
+# only helps if it runs *between* `git worktree add` (which is what leaves —
+# or fails to repair — the truncated index) and the `merge --no-ff` that dies
+# on it. And, per `docs/cockpit/recipe-writing-conventions.md`, the recovery
+# must sit in the *executable* path of the detection `if`, not as prose after
+# an `exit 1`: that is the exact `efb8187b…`/`c06a3a2a…` failure shape, one
+# level down.
+WORKTREE_ADD = 'git worktree add --detach "$WT" origin/master'
+INDEX_GUARD_GITDIR = 'WT_GITDIR=$(git -C "$WT" rev-parse --absolute-git-dir)'
+INDEX_GUARD_DETECT = 'if [ ! -s "$WT_GITDIR/index" ]'
+INDEX_GUARD_RECOVER = 'git -C "$WT" read-tree HEAD'
+
+
+def _index_guard_is_in_recovery_path(source_text: str) -> tuple[bool, str]:
+    """Return ``(ok, reason)``: whether the 0-byte-index guard detects *and*
+    recovers between ``git worktree add`` and ``merge --no-ff``.
+
+    Checks, in order:
+
+    1. All four markers are present (worktree-add, gitdir resolution,
+       detection, recovery).
+    2. Their order is add → gitdir → detect → recover → merge. A guard after
+       the merge is useless (the merge already died); a recovery before the
+       detection is not a guard at all.
+    3. No ``exit 1`` sits between the detection and the recovery — that would
+       make the recovery unreachable in exactly the scenario it exists for
+       (the `efb8187b…` prose-after-exit shape).
+    """
+    add_idx = source_text.find(WORKTREE_ADD)
+    gitdir_idx = source_text.find(INDEX_GUARD_GITDIR)
+    detect_idx = source_text.find(INDEX_GUARD_DETECT)
+    recover_idx = source_text.find(INDEX_GUARD_RECOVER)
+    merge_idx = source_text.find(MERGE_HANDLER)
+    missing = [
+        name
+        for name, idx in (
+            ("worktree add", add_idx),
+            ("slot gitdir resolution", gitdir_idx),
+            ("0-byte index detection", detect_idx),
+            ("0-byte index recovery", recover_idx),
+            ("merge handler", merge_idx),
+        )
+        if idx == -1
+    ]
+    if missing:
+        return False, f"missing marker(s): {', '.join(missing)}"
+    if not (add_idx < gitdir_idx < detect_idx < recover_idx < merge_idx):
+        return False, (
+            f"guard is out of order — expected add({add_idx}) < "
+            f"gitdir({gitdir_idx}) < detect({detect_idx}) < "
+            f"recover({recover_idx}) < merge({merge_idx}). A guard that runs "
+            f"after the merge cannot prevent the `index file smaller than "
+            f"expected` fatal it exists for."
+        )
+    between = source_text[detect_idx:recover_idx]
+    if "exit 1" in between:
+        return False, (
+            "an `exit 1` sits between the 0-byte-index detection and the "
+            "`git read-tree HEAD` recovery — the recovery is unreachable in "
+            "exactly the case it handles (kanban-kaart `efb8187b…` shape)."
+        )
+    return True, ""
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_index_guard_runs_before_the_merge(source_name: str) -> None:
+    """The 0-byte-index guard must fire between `worktree add` and the merge.
+
+    Pins kanban card ``608e2a27…``: a concurrent session that aborts mid-ship
+    can leave the shared-gitdir slot's ``index`` at 0 bytes. ``git worktree
+    add`` still reports success, so the corruption only surfaces on the next
+    ``merge``, as ``fatal: …/index: index file smaller than expected`` —
+    and ``git worktree remove --force`` then refuses with ``is not a working
+    tree``, orphaning the slot. The checkout already holds the right tree, so
+    ``git read-tree HEAD`` rebuilds the index from the slot's own HEAD and the
+    merge proceeds. Presence alone is not enough: the guard has to run *before*
+    the merge, and its recovery has to be inside the detection branch.
+    """
+    source_text = SOURCES[source_name]()
+    ok, reason = _index_guard_is_in_recovery_path(source_text)
+    assert ok, f"{source_name}: 0-byte-index guard not wired correctly — {reason}"
+
+
+def test_index_guard_detects_a_mirror_without_the_guard() -> None:
+    """Live negative case: the pre-fix recipe shape must fail the invariant.
+
+    Replays the recipe exactly as it read before kanban card ``608e2a27…`` —
+    ``worktree add`` immediately followed by ``merge --no-ff``, no index
+    check. If this stops failing, the positional invariant has rotted.
+    """
+    pre_fix_mirror = (
+        f'{WORKTREE_ADD}\n'
+        f'if ! git -C "$WT" {MERGE_HANDLER} "$BRANCH" -m "Merge $BRANCH"; then\n'
+        f'  exit 1\n'
+        f'fi\n'
+        f'git -C "$WT" {PUSH_HANDLER}\n'
+    )
+    ok, reason = _index_guard_is_in_recovery_path(pre_fix_mirror)
+    assert not ok, (
+        f"guard detector did NOT flag the pre-fix mirror; reason={reason!r}"
+    )
+    assert "missing marker" in reason, (
+        f"unexpected failure reason: {reason!r}; expected a missing-marker "
+        f"diagnosis."
+    )
+
+
+def test_index_guard_detects_recovery_after_an_exit() -> None:
+    """Live negative case: recovery demoted below an `exit 1` must be flagged.
+
+    The `efb8187b…` / `c06a3a2a…` failure shape, applied to this guard: the
+    detection aborts the ship and the ``read-tree`` rescue is left as
+    documentation the agent has to notice and re-run by hand — which is
+    exactly the ~4-tool-call manual rescue this card removes.
+    """
+    prose_mirror = (
+        f'{WORKTREE_ADD}\n'
+        f'{INDEX_GUARD_GITDIR}\n'
+        f'{INDEX_GUARD_DETECT}; then\n'
+        f'  echo "ERROR: corrupt slot index" >&2\n'
+        f'  exit 1\n'
+        f'fi\n'
+        f'# To recover by hand, run: {INDEX_GUARD_RECOVER}\n'
+        f'if ! git -C "$WT" {MERGE_HANDLER} "$BRANCH" -m "Merge $BRANCH"; then\n'
+        f'  exit 1\n'
+        f'fi\n'
+    )
+    ok, reason = _index_guard_is_in_recovery_path(prose_mirror)
+    assert not ok, (
+        f"guard detector did NOT flag the prose-after-exit mirror; "
+        f"reason={reason!r}"
+    )
+    assert "unreachable" in reason, (
+        f"unexpected failure reason: {reason!r}; expected an unreachable-"
+        f"recovery diagnosis."
     )

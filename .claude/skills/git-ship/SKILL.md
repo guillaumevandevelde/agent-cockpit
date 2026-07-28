@@ -214,6 +214,24 @@ WT="$SHIP_TMP/ship-merge-$$"
 # fresh slot per invocation — do NOT simplify back to a fixed name.
 # (kanban card c23dfe46…)
 git worktree add --detach "$WT" origin/master
+# 0-byte-index guard. A predecessor that aborted mid-ship in the shared
+# gitdir can leave this slot's `index` truncated to 0 bytes, and
+# `git worktree add` reports success anyway — the corruption only surfaces
+# on the next command, as `fatal: …/index: index file smaller than
+# expected`. Worse, `git worktree remove --force` then refuses with
+# `is not a working tree`, so the slot is orphaned and the ship needs a
+# manual rescue (kanban card 608e2a27…). The checkout already holds the
+# right tree; only the index needs rebuilding, which `read-tree HEAD` does
+# from the slot's own HEAD. Detect and repair here, BEFORE the merge, so
+# the recovery is automatic instead of ~4 manual tool calls.
+WT_GITDIR=$(git -C "$WT" rev-parse --absolute-git-dir)
+if [ ! -s "$WT_GITDIR/index" ]; then
+  echo "WARN: 0-byte index in $WT_GITDIR — rebuilding from HEAD (aborted predecessor in the shared gitdir)." >&2
+  if ! git -C "$WT" read-tree HEAD; then
+    echo "ERROR: read-tree HEAD failed — slot $WT is unusable; report_impediment." >&2
+    exit 1
+  fi
+fi
 if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
   # CONFLICT path: try the generated-doc-index carve-out, otherwise
   # report_impediment. The condition MUST be machine-checkable — a
@@ -320,6 +338,19 @@ product-taal-conventie. Voor een `report_impediment` met `options`: druk de opti
 als **producttrade-offs**, niet als implementatie-forks.
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
+
+**Corrupt-slot recovery (0-byte index).** The `ship-merge-$$` slot lives in the
+shared `.git/worktrees/`, which a concurrent or crashed session can leave in a
+half-written state. The observed shape (kanban card `608e2a27…`): `git worktree
+add --detach` prints `Preparing worktree (detached HEAD …)` and exits 0, but the
+slot's `index` is 0 bytes — so the *merge* is what fails, with `fatal:
+…/ship-merge-<pid>/index: index file smaller than expected`. The obvious cleanup
+(`git worktree remove --force "$WT"`) then refuses with `is not a working tree`,
+leaving the slot orphaned. Nothing about the checkout itself is wrong: it holds
+the correct tree at the correct HEAD, only the index is missing. `git -C "$WT"
+read-tree HEAD` rebuilds it from that HEAD, and the same slot merges normally on
+the retry. The guard above does exactly that inline, so no session has to
+rediscover the recipe by hand.
 
 **Carve-out semantics.** If the merge block hits a conflict, the script enumerates
 the conflict set with `git diff --name-only --diff-filter=U`. When that set is a
