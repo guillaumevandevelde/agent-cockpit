@@ -45,11 +45,22 @@ printf '%scockpit-doctor%s  (%s)\n' "$bold" "$rst" "$ROOT"
 # failed/missing `gh` auth only costs one `gh` call, not one per check.
 # `gh auth status` exits non-zero when not logged in; that's our opt-in
 # gate — a box without a gh session shouldn't spam doctor with WARNs.
+#
+# Capture the SUT's exit code AND its merged output (stdout + stderr).
+# Bare `|| true` (the previous shape) swallowed a real invocation error
+# — e.g. workflow resolution failed mid-call, exit 2 — and turned it
+# into a silent PASS. That's exactly the "reassurance that's worse than
+# the pre-card silence" the original card flagged: doctor would claim
+# CI health clean while the check itself never ran. Capture RC and use
+# it in check 9 so a non-zero exit (especially exit 2) is reported with
+# its ERROR lines, not buried under a misleading PASS.
 CI_HEALTH_OUT=""
 CI_HEALTH_RAN=0
+CI_HEALTH_RC=0
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if [ -x "$ROOT/scripts/check-ci-health.sh" ]; then
-    CI_HEALTH_OUT="$("$ROOT/scripts/check-ci-health.sh" 2>/dev/null || true)"
+    CI_HEALTH_OUT=$("$ROOT/scripts/check-ci-health.sh" 2>&1)
+    CI_HEALTH_RC=$?
     CI_HEALTH_RAN=1
   fi
 fi
@@ -166,13 +177,32 @@ fi
 #   - N consecutive red quality.yml runs on master (the "CI will catch it"
 #     assumption silently becoming false — kanban card 4cae38ff…)
 # `gh` auth + the script being present are both required; otherwise we
-# stay quiet (a CI-less box shouldn't spam doctor with WARNs). Count
-# WARNING: lines (the script's only hit marker — its `OK:` lines are
-# noise from the doctor's point of view). Same ANSI-strip pattern as
-# check 8: `WARNING:` here is followed by `\x1b[0m`, so the literal-text
-# grep on `WARNING:` works after stripping.
+# stay quiet (a CI-less box shouldn't spam doctor with WARNs).
+#
+# Three signal paths, in priority order — each must produce the right
+# line, never a silent PASS:
+#   (a) RC == 2 (SUT invocation error: missing prereq, workflow not
+#       resolvable, bad flag) → WARN with the SUT's ERROR lines, NOT a
+#       PASS. The previous shape (`|| true` + grep WARNING:) swallowed
+#       this and reported "clean" while the check itself never ran.
+#   (b) RC == 0/1 + WARNING: lines → WARN, count those lines (script's
+#       only hit marker — its `OK:` lines are noise from the doctor's
+#       point of view). Same ANSI-strip pattern as check 8.
+#   (c) RC == 0 + no WARNING: → PASS.
 if [ "$CI_HEALTH_RAN" -eq 0 ]; then
     pass "no gh auth or check-ci-health.sh missing (CI health check skipped — opt-in)."
+elif [ "$CI_HEALTH_RC" -eq 2 ]; then
+    # Surface the SUT's ERROR lines so the operator can see *why* the
+    # check itself failed (network blip, gh auth lapse, workflow renamed,
+    # etc.) — not just "the gate is unverified".
+    err_lines=$(printf '%s\n' "$CI_HEALTH_OUT" \
+        | sed 's/\x1b\[[0-9;]*m//g' \
+        | grep -E '^check-ci-health: ' || true)
+    if [ -n "$err_lines" ]; then
+        warn "CI health check itself failed (exit 2) — gate is UNVERIFIED, not green. Run scripts/check-ci-health.sh directly. SUT output: $(printf '%s' "$err_lines" | tr '\n' ';' | sed 's/;$//')"
+    else
+        warn "CI health check itself failed (exit 2 with no error text) — gate is UNVERIFIED, not green. Run scripts/check-ci-health.sh directly."
+    fi
 else
     CI_HEALTH_WARNS=$(printf '%s\n' "$CI_HEALTH_OUT" \
         | sed 's/\x1b\[[0-9;]*m//g' \
