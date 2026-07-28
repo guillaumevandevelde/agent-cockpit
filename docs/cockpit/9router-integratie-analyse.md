@@ -334,6 +334,7 @@ Vijf kind-kaarten, gefaseerd zodat het meetwerk vóór het bouwwerk komt.
 | K4 | Hardening-checklist + doctor-check (savers uit, cloud-sync uit, loopback-only) | hangt af van K3 |
 | K5 | Usage-attributie: eerlijk `betrouwbaarheid="onbekend"` voor router-verkeer | hangt af van K3 |
 | K6 | Endpoint-catalogus — gecureerde seed-lijst van 6 gratis-tier providers | ✅ Geïmplementeerd (kaart `8222fee8…` — `backend/data/free_endpoint_catalog.toml` + `app/services/agentic_cli/free_endpoint_catalog.py` + `/platforms/endpoints-catalog` REST; elke entry draagt `litellm_upstream`-blok + `free_evidence_url` + `free_measured_on`; twee entries end-to-end door LiteLLM-proxy) |
+| K7 | UI mist `endpoint_name`-picker voor pool-entries en column_overrides met `PROVIDER_COMPATIBLE` | ✅ Geïmplementeerd (kaart `d628054b261442c98892c7b7b17251b9` — `endpoint_name: string \| null` toegevoegd aan `ColumnOverride` + `PoolEntry`; `anthropic-compatible` aan `PROVIDERS`/`PROVIDER_LABELS`; `SubscriptionPoolDialog` + `CardEditDialog` tonen een endpoint-selector enkel voor compatible-entries, met auto-pick van de eerste endpoint bij switch naar compatible en clearing bij switch weg; lege-lijst hint linkt naar de nieuwe `/endpoints`-pagina — `features/endpoints/{EndpointsPage,EndpointDialog}.tsx` met upsert/delete CRUD via bestaande `/platforms/endpoints` REST; 4 nieuwe EndpointsPage-tests + 8 nieuwe dialog-tests) |
 
 **K1 resultaat (eerste counterbalanced meting, N=2 per trial):**
 `input_tokens` daalt in beide trials (gem. ~45%); `output_tokens` daalt in beide
@@ -363,7 +364,11 @@ resolutie op `POST /sessions` honoreert dezelfde `project_key`-query-param
 als de list/upsert/delete-endpoints (kaart `333af652…` blocker 2). De
 credential-setup-link in de dialoog is vervangen door een accurate
 verwijzing naar `POST /api/v1/secrets` (de Subscriptions-pagina heeft
-geen endpoint-UI; een dedicated UI is een vervolgkaart).
+geen endpoint-UI; een dedicated UI is een vervolgkaart). Kaart
+`d628054b261442c98892c7b7b17251b9` (zie rij **K7** in §9) heeft die dedicated
+UI alsnog geleverd op `/endpoints`, met CRUD via dezelfde `/platforms/endpoints`
+REST; de `SubscriptionPoolDialog` + `CardEditDialog` plukken `endpoint_name`
+nu uit die lijst in plaats van een handmatige string.
 
 K2 hangt aan K1 omdat de meetuitslag de vergelijking voedt. K3 hangt aan K2 omdat
 de spike bepaalt *welk* endpoint de entry krijgt. K4 en K5 hangen beide aan K3

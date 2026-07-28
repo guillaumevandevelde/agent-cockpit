@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, Trash2, GripVertical, Pause, Play } from "lucide-react";
 import {
@@ -20,13 +21,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
+import { fetchEndpoints } from "@/features/cc-bridge/api";
 import { PROVIDERS, PROVIDER_LABELS } from "../types";
+import type { EndpointResponse } from "@/features/cc-bridge/types";
 import type { PoolEntry } from "../types";
 
 /** Sentinel value used by the override's provider <Select>. The Radix
  *  SelectItem requires a non-empty string; the API expresses "no override"
  *  as `null`. Mirrors the previous `ActiveSubscriptionOverride` value. */
 const NONE_VALUE = "__none__";
+const COMPATIBLE_PROVIDER = "anthropic-compatible";
 
 /** Sensible-default entry for the "Add first subscription" affordance —
  *  matches what the previous standalone SubscriptionPool seeded. The
@@ -34,7 +38,12 @@ const NONE_VALUE = "__none__";
  *  the pool always routes through the single supported CLI
  *  (claude-code) and there's no per-entry CLI choice to make. */
 function makeDefaultEntry(): PoolEntry {
-  return { provider: "anthropic", model: null, drempel: 0.9 };
+  return {
+    provider: "anthropic",
+    model: null,
+    endpoint_name: null,
+    drempel: 0.9,
+  };
 }
 
 /** Combined dialog for board-wide subscription routing:
@@ -65,6 +74,9 @@ export function SubscriptionPoolDialog({
   onChanged: () => void;
 }) {
   const [pool, setPool] = useState<PoolEntry[] | null | undefined>(undefined);
+  const [endpoints, setEndpoints] = useState<EndpointResponse[] | undefined>(
+    undefined,
+  );
   const [override, setOverride] = useState<
     { provider: string; model: string | null } | null | undefined
   >(undefined);
@@ -101,13 +113,24 @@ export function SubscriptionPoolDialog({
     } catch {
       setManuallyPaused(new Set());
     }
+    try {
+      const r = await fetchEndpoints(projectKey);
+      setEndpoints(r.endpoints ?? []);
+    } catch {
+      setEndpoints([]);
+    }
   }, [projectKey]);
 
   useEffect(() => {
     if (open) void reload();
   }, [open, reload]);
 
-  if (!open || pool === undefined || override === undefined) {
+  if (
+    !open ||
+    pool === undefined ||
+    override === undefined ||
+    endpoints === undefined
+  ) {
     // Render nothing (or the dialog frame) until we've loaded — keeps the
     // precedence rule and lock-state from flashing on every open.
     return (
@@ -154,6 +177,20 @@ export function SubscriptionPoolDialog({
       i === index ? { ...entry, ...patch } : entry,
     );
     void savePool(next);
+  };
+
+  const setEntryProvider = (index: number, provider: string) => {
+    const endpoint_name =
+      provider === COMPATIBLE_PROVIDER ? (endpoints[0]?.name ?? null) : null;
+    if (provider === COMPATIBLE_PROVIDER && !endpoint_name) {
+      setPool(
+        editable.map((entry, i) =>
+          i === index ? { ...entry, provider, endpoint_name: null } : entry,
+        ),
+      );
+      return;
+    }
+    updateEntry(index, { provider, endpoint_name });
   };
 
   const removeEntry = (index: number) => {
@@ -456,12 +493,13 @@ export function SubscriptionPoolDialog({
                         </label>
                         <Select
                           value={entry.provider}
-                          onValueChange={(v) =>
-                            updateEntry(index, { provider: v })
-                          }
+                          onValueChange={(v) => setEntryProvider(index, v)}
                           disabled={overrideLockedPool}
                         >
-                          <SelectTrigger className="h-8">
+                          <SelectTrigger
+                            className="h-8"
+                            aria-label={`Provider for pool entry ${index + 1}`}
+                          >
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -512,6 +550,52 @@ export function SubscriptionPoolDialog({
                           disabled={overrideLockedPool}
                         />
                       </div>
+
+                      {entry.provider === COMPATIBLE_PROVIDER &&
+                        (endpoints.length === 0 ? (
+                          <div className="sm:col-span-9 flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2">
+                            <p className="text-xs text-muted-foreground">
+                              Geen endpoints geconfigureerd — voeg er één toe via
+                              de Endpoints-pagina.
+                            </p>
+                            <Link
+                              to="/endpoints"
+                              className="inline-flex h-8 items-center justify-center rounded-md border border-input bg-background px-3 text-xs shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                            >
+                              Naar Endpoints
+                            </Link>
+                          </div>
+                        ) : (
+                          <div className="sm:col-span-9">
+                            <label className="block text-xs text-muted-foreground mb-1">
+                              Endpoint
+                            </label>
+                            <Select
+                              value={entry.endpoint_name ?? ""}
+                              onValueChange={(endpoint_name) =>
+                                updateEntry(index, { endpoint_name })
+                              }
+                              disabled={overrideLockedPool}
+                            >
+                              <SelectTrigger
+                                className="h-8"
+                                aria-label={`Endpoint for pool entry ${index + 1}`}
+                              >
+                                <SelectValue placeholder="Select endpoint" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {endpoints.map((endpoint) => (
+                                  <SelectItem
+                                    key={endpoint.name}
+                                    value={endpoint.name}
+                                  >
+                                    {endpoint.name} — {endpoint.model}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ))}
                     </div>
 
                     <Button

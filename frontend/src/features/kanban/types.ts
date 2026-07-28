@@ -20,7 +20,14 @@ export const WORK_TYPE_ICONS: Record<WorkType, string> = {
   chore: "🔧",
 };
 
-export const PROVIDERS = ["anthropic", "bedrock", "minimax", "opencode-go", "opencode"] as const;
+export const PROVIDERS = [
+  "anthropic",
+  "bedrock",
+  "minimax",
+  "anthropic-compatible",
+  "opencode-go",
+  "opencode",
+] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 // Human-readable labels for the provider ids above. Kept as Record<string,
@@ -30,6 +37,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic",
   bedrock: "Bedrock",
   minimax: "MiniMax",
+  "anthropic-compatible": "Compatible endpoint",
   "opencode-go": "OpenCode Go",
   opencode: "OpenCode Zen",
 };
@@ -41,6 +49,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
 export interface ColumnOverride {
   model: string | null;
   provider: string | null;
+  endpoint_name: string | null;
 }
 
 // One entry in the subscription pool (fase 1b). Mirrors backend
@@ -61,6 +70,7 @@ export interface ColumnOverride {
 export interface PoolEntry {
   provider: string;
   model: string | null;
+  endpoint_name: string | null;
   drempel: number;
 }
 
