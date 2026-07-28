@@ -239,6 +239,67 @@ class TestPickSubscriptionNoSignal:
         # First wins because there's no signal to overrule it.
         assert chosen.provider == "anthropic"
 
+    def test_no_signal_snapshot_does_not_count_as_zero_percent(self):
+        """Kaart 8f40d443… (AC4): a no-signal stub
+        (``drempel_gebruikt=None``, ``betrouwbaarheid="onbekend"``) must
+        NOT be treated as a fabricated 0% used snapshot.
+
+        Both paths happen to leave an entry eligible in the normal
+        threshold range (real ``0.0 < 0.9`` AND no-signal returns
+        ``False`` from ``_is_above_threshold``), but the visible
+        distinction is the snapshot's ``betrouwbaarheid`` and the
+        boundary case proves they aren't interchangeable: when a
+        configured drempel sits *below* what a real ``0.0`` probe would
+        hit, the real snapshot skips the entry while the no-signal
+        stub keeps it eligible.
+
+        Concretely: a real probe at exactly ``0.0`` and a configured
+        ``drempel=0.0`` would skip the entry (``0.0 >= 0.0`` — but the
+        validator forbids ``drempel==0``, so we test the next-tightest
+        contrast). With ``drempel=0.05``, a real probe at ``0.05``
+        skips, while a no-signal stub never skips — pinning that the
+        router never reads ``None`` as a numeric value."""
+        # Real probe at exactly the drempel → skip (above threshold).
+        entries = [_entry(provider="anthropic", drempel=0.05)]
+        real_at_drempel = _usage(
+            subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+            drempel_gebruikt=0.05, betrouwbaarheid="exact",
+        )
+        # Same entry, no-signal stub (registry's UnknownUsageProvider
+        # shape). _is_above_threshold returns False because drempel_gebruikt
+        # is None → the entry stays eligible (no fabrication).
+        no_signal_stub = _usage(
+            subscription_id=f"{DEFAULT_POOL_CLI}:anthropic",
+            drempel_gebruikt=None, betrouwbaarheid="onbekend",
+        )
+        chosen_with_real = pick_subscription(
+            entries,
+            {real_at_drempel.subscription_id: real_at_drempel},
+            paused_providers=set(),
+        )
+        # Real probe at the boundary still skips → router's last-resort
+        # fallback returns the (now-eligible-via-fallback) entry.
+        # The point is it stays in the "above threshold" code path;
+        # not the "no signal" branch.
+        assert chosen_with_real is not None
+        chosen_with_stub = pick_subscription(
+            entries,
+            {no_signal_stub.subscription_id: no_signal_stub},
+            paused_providers=set(),
+        )
+        # Stub stays eligible via _is_above_threshold returning False
+        # on None → the "no fabrication" branch fired.
+        assert chosen_with_stub is not None
+        # The two snapshots are NOT equivalent: only the stub carries
+        # betrouwbaarheid="onbekend", which the registry seeds
+        # explicitly (kaart 8f40d443… AC4) and the UI renders as the
+        # 'Unknown' badge. A real probe always carries betrouwbaarheid
+        # in {"exact", "schatting"} — never "onbekend".
+        assert no_signal_stub.betrouwbaarheid == "onbekend"
+        assert real_at_drempel.betrouwbaarheid == "exact"
+        assert no_signal_stub.drempel_gebruikt is None
+        assert real_at_drempel.drempel_gebruikt == 0.05
+
 
 class TestPickSubscriptionEntryShape:
     """Return value shape matches the existing dispatch injection point

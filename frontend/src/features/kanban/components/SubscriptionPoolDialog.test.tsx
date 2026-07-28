@@ -224,9 +224,108 @@ describe("SubscriptionPoolDialog — pool section", () => {
     );
     await waitFor(() =>
       expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
-        { provider: "anthropic", model: null, endpoint_name: null, drempel: 0.9 },
+        {
+          cli: "claude-code",
+          provider: "anthropic",
+          model: null,
+          endpoint_name: null,
+          drempel: 0.9,
+        },
       ]),
     );
+  });
+
+  it("renders a CLI selector defaulting to Claude Code on new entries (kaart 8f40d443…)", async () => {
+    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, pool: null });
+    (kanbanApi.setSubscriptionPool as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, pool: [] });
+    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, override: null });
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await flushLoads();
+    fireEvent.click(
+      screen.getByRole("button", { name: /add first subscription/i }),
+    );
+    // The CLI combobox for entry 1 has aria-label "CLI for pool entry 1".
+    const cli = await screen.findByRole("combobox", {
+      name: "CLI for pool entry 1",
+    });
+    expect(cli).toHaveTextContent(/claude code/i);
+  });
+
+  it("changing the CLI selector persists the new cli on the entry (kaart 8f40d443…)", async () => {
+    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, pool: null });
+    (kanbanApi.setSubscriptionPool as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, pool: [] });
+    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, override: null });
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await flushLoads();
+    fireEvent.click(
+      screen.getByRole("button", { name: /add first subscription/i }),
+    );
+    const cli = await screen.findByRole("combobox", {
+      name: "CLI for pool entry 1",
+    });
+    fireEvent.click(cli);
+    fireEvent.click(screen.getByRole("option", { name: /^opencode$/i }));
+    await waitFor(() =>
+      expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
+        {
+          cli: "open-code",
+          provider: "anthropic",
+          model: null,
+          endpoint_name: null,
+          drempel: 0.9,
+        },
+      ]),
+    );
+  });
+
+  it("renders existing entries without a cli field as Claude Code (legacy round-trip)", async () => {
+    // Legacy KanbanMeta rows from before kaart 8f40d443… omit the ``cli``
+    // field. The dialog's ``entryCli`` fallback keeps them functional by
+    // defaulting the CLI selector to Claude Code so the existing snapshot
+    // key still matches — the operator can flip it to e.g. open-code
+    // explicitly when migrating.
+    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({
+        project_key: PK,
+        pool: [{ provider: "anthropic", model: null, drempel: 0.9 }],
+      });
+    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ project_key: PK, override: null });
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(kanbanApi.getSubscriptionPool).toHaveBeenCalled(),
+    );
+    const cli = await screen.findByRole("combobox", {
+      name: "CLI for pool entry 1",
+    });
+    expect(cli).toHaveTextContent(/claude code/i);
   });
 
   it("Clear-pool POSTs null and announces success", async () => {
@@ -354,6 +453,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
     await waitFor(() =>
       expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
         {
+          cli: "claude-code",
           provider: "anthropic-compatible",
           model: null,
           endpoint_name: "groq-free",
@@ -416,6 +516,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
     await waitFor(() =>
       expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, [
         {
+          cli: "claude-code",
           provider: "anthropic",
           model: null,
           endpoint_name: null,

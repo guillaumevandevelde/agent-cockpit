@@ -52,22 +52,59 @@ export interface ColumnOverride {
   endpoint_name: string | null;
 }
 
+// CLI ids the subscription pool can route on. Mirrors the backend's
+// `services/agentic_cli/__init__.py` registered adapters (the same
+// source `dispatch._known_cli_ids` and `subscription_pool._known_pool_clis`
+// consult). Order matches the `agentic_cli` registry at the time of
+// writing — the backend tolerates a different order (it's a set in the
+// router), but the frontend keeps the canonical order so the dialog's
+// CLI dropdown reads top-down in the same order as the registry.
+export const KNOWN_POOL_CLIS = [
+  "claude-code",
+  "codex-cli",
+  "copilot-cli",
+  "mimo-code",
+  "open-code",
+] as const;
+export type PoolCli = (typeof KNOWN_POOL_CLIS)[number];
+
+// Human-readable labels for the CLI ids above. Kept as Record<string,
+// string> (not Record<PoolCli, string>) so an unknown id — e.g. one
+// round-tripped from a future backend that registers a new adapter —
+// still resolves via the fallback `?? cli_id`. Mirrors
+// `subscription_pool._known_pool_clis` / `registry._seedable_clis`.
+export const POOL_CLI_LABELS: Record<string, string> = {
+  "claude-code": "Claude Code",
+  "codex-cli": "Codex CLI",
+  "copilot-cli": "Copilot CLI",
+  "mimo-code": "MiMo Code",
+  "open-code": "OpenCode",
+};
+
 // One entry in the subscription pool (fase 1b). Mirrors backend
-// app/kanban/subscription_pool.py PoolEntry exactly: `provider` is
-// the vendor the CLI authenticates against, `model` is an optional
-// model pin (null = fall through to the column/card/persona chain),
-// and `drempel` is the fraction (0..1] at which the router spills to
-// the next entry. Priority is the entry's position in the pool list —
+// app/kanban/subscription_pool.py PoolEntry: `provider` is the vendor
+// the CLI authenticates against, `model` is an optional model pin
+// (null = fall through to the column/card/persona chain), and
+// `drempel` is the fraction (0..1] at which the router spills to the
+// next entry. Priority is the entry's position in the pool list —
 // index 0 is the preferred subscription.
 //
-// The legacy `cli` field that pre-fix builds carried on each entry
-// was dropped in kanban card 0b3ad6e2… (analysis §3 D3): the pool
-// always routes through the single supported CLI (claude-code), and
-// `cli_id` is resolved earlier in dispatch than the pool is even
-// consulted — so the field was a UI promise the backend never kept.
-// A backend migration shim strips the field on read so stale KanbanMeta
-// rows still load.
+// `cli` discriminates the snapshot lookup key — the pool router now
+// routes per `{cli, provider}` (kaart 8f40d443…), so an OpenCode
+// subscription stops cannibalising the claude-code signal. Optional
+// (legacy rows / older API responses round-trip without the field);
+// the dialog defaults new entries to `claude-code` and treats
+// `null`/missing as `claude-code` everywhere it reads.
+//
+// History: an earlier build carried `cli` but never consumed it
+// (kaart 0b3ad6e2… dropped it as "a UI promise the code did not
+// keep"). It is reintroduced here alongside the consuming router
+// change so the field stays honest — the regression test
+// `test_no_signal_snapshot_does_not_count_as_zero_percent` pins the
+// "missing ≠ 0%" contract and the API rejects unknown CLI ids at
+// write time.
 export interface PoolEntry {
+  cli?: string | null;
   provider: string;
   model: string | null;
   endpoint_name: string | null;

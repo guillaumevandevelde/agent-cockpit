@@ -22,7 +22,12 @@ import { Input } from "@/components/ui/input";
 import { MODAL_SIZES } from "@/lib/constants";
 import { kanbanApi } from "../api";
 import { fetchEndpoints } from "@/features/cc-bridge/api";
-import { PROVIDERS, PROVIDER_LABELS } from "../types";
+import {
+  KNOWN_POOL_CLIS,
+  POOL_CLI_LABELS,
+  PROVIDERS,
+  PROVIDER_LABELS,
+} from "../types";
 import type { EndpointResponse } from "@/features/cc-bridge/types";
 import type { PoolEntry } from "../types";
 
@@ -32,13 +37,35 @@ import type { PoolEntry } from "../types";
 const NONE_VALUE = "__none__";
 const COMPATIBLE_PROVIDER = "anthropic-compatible";
 
+/** Default CLI id for new pool entries — matches the backend's
+ *  ``subscription_pool.DEFAULT_POOL_CLI`` so a freshly created entry
+ *  looks up the same ``claude-code:<provider>`` snapshot key the legacy
+ *  pool used. Kaart 8f40d443… (quota-pool CLI-agnostisch): every CLI
+ *  now has a snapshot slot, so this default is just the historical
+ *  baseline — operators can flip it to e.g. ``open-code`` for an
+ *  OpenCode subscription that needs its own threshold. */
+const DEFAULT_POOL_CLI = "claude-code";
+
+/** Resolve the effective CLI id of a pool entry. Older rows and the
+ *  legacy API contract return ``cli=null`` (or omit it entirely); this
+ *  helper makes that round-trippable as the default CLI without
+ *  surprising every read site with a fallback. Mirrors
+ *  ``PoolEntry.resolved_cli`` on the backend. */
+function entryCli(entry: PoolEntry): string {
+  return entry.cli ?? DEFAULT_POOL_CLI;
+}
+
 /** Sensible-default entry for the "Add first subscription" affordance —
- *  matches what the previous standalone SubscriptionPool seeded. The
- *  legacy `cli` field was dropped in card 0b3ad6e2… (analysis §3 D3):
- *  the pool always routes through the single supported CLI
- *  (claude-code) and there's no per-entry CLI choice to make. */
+ *  matches what the previous standalone SubscriptionPool seeded. Kaart
+ *  8f40d443… re-introduces the per-entry ``cli`` field with explicit
+ *  consumption: the pool router now looks up snapshots under
+ *  ``{cli}:{provider}``, so each entry needs a CLI to disambiguate.
+ *  New entries default to ``claude-code`` (matches the backend's
+ *  ``DEFAULT_POOL_CLI`` and the legacy board-wide pool behaviour — no
+ *  operator migration needed). */
 function makeDefaultEntry(): PoolEntry {
   return {
+    cli: DEFAULT_POOL_CLI,
     provider: "anthropic",
     model: null,
     endpoint_name: null,
@@ -97,7 +124,16 @@ export function SubscriptionPoolDialog({
     if (!projectKey) return;
     try {
       const r = await kanbanApi.getSubscriptionPool(projectKey);
-      setPool(r.pool);
+      // Kaart 8f40d443…: normalise legacy entries without a ``cli`` field
+      // (rows persisted before this card round-tripped via the backend's
+      // ``DEFAULT_POOL_CLI`` fallback) to ``cli: DEFAULT_POOL_CLI``. Without
+      // this every mutation on a legacy row re-saves the entry without a
+      // ``cli``, drifting the persisted shape from the type contract.
+      const normalised = (r.pool ?? []).map((entry) => ({
+        ...entry,
+        cli: entry.cli ?? DEFAULT_POOL_CLI,
+      }));
+      setPool(normalised.length > 0 ? normalised : null);
     } catch {
       setPool(null);
     }
@@ -486,7 +522,32 @@ export function SubscriptionPoolDialog({
                       </button>
                     </div>
 
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-9 gap-2">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-12 gap-2">
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs text-muted-foreground mb-1">
+                          CLI
+                        </label>
+                        <Select
+                          value={entryCli(entry)}
+                          onValueChange={(cli) => updateEntry(index, { cli })}
+                          disabled={overrideLockedPool}
+                        >
+                          <SelectTrigger
+                            className="h-8"
+                            aria-label={`CLI for pool entry ${index + 1}`}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {KNOWN_POOL_CLIS.map((cli) => (
+                              <SelectItem key={cli} value={cli}>
+                                {POOL_CLI_LABELS[cli] ?? cli}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
                       <div className="sm:col-span-3">
                         <label className="block text-xs text-muted-foreground mb-1">
                           Provider
@@ -512,7 +573,7 @@ export function SubscriptionPoolDialog({
                         </Select>
                       </div>
 
-                      <div className="sm:col-span-3">
+                      <div className="sm:col-span-4">
                         <label className="block text-xs text-muted-foreground mb-1">
                           Model (optional)
                         </label>
@@ -553,7 +614,7 @@ export function SubscriptionPoolDialog({
 
                       {entry.provider === COMPATIBLE_PROVIDER &&
                         (endpoints.length === 0 ? (
-                          <div className="sm:col-span-9 flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2">
+                          <div className="sm:col-span-12 flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2">
                             <p className="text-xs text-muted-foreground">
                               Geen endpoints geconfigureerd — voeg er één toe via
                               de Endpoints-pagina.
@@ -566,7 +627,7 @@ export function SubscriptionPoolDialog({
                             </Link>
                           </div>
                         ) : (
-                          <div className="sm:col-span-9">
+                          <div className="sm:col-span-12">
                             <label className="block text-xs text-muted-foreground mb-1">
                               Endpoint
                             </label>

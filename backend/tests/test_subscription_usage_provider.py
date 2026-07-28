@@ -735,6 +735,68 @@ class TestRegistrySeeding:
         reg.register_provider(real)
         assert reg.get_provider_for(cli="claude-code", provider="anthropic") is real
 
+    def test_seeds_every_registered_cli_not_just_claude_code(self):
+        """Kaart 8f40d443… (AC4): the pool router discriminates per
+        ``{cli, provider}``, so *every* registered CLI needs a
+        no-signal stub — not just ``claude-code``.
+
+        Without this, ``get_provider_for(cli="open-code",
+        provider="anthropic")`` returns ``None``, the entry is skipped
+        from ``_gather_pool_usage_snapshots``' map entirely, and the
+        operator has no way to tell "this CLI has no quota source" from
+        "this subscription is at 0%". Both keep the entry eligible
+        (analyse §6.3) but they are different stories (§6.1 "no
+        fabrication")."""
+        from app.services.agentic_cli import get_agentic_clis
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        cli_ids = [cli.id for cli in get_agentic_clis()]
+        assert len(cli_ids) > 1, "expected multiple registered CLI adapters"
+        for cli_id in cli_ids:
+            for prov in (
+                "anthropic", "bedrock", "minimax", "anthropic-compatible",
+            ):
+                assert reg.get_provider_for(
+                    cli=cli_id, provider=prov,
+                ) is not None, f"missing no-signal stub for {cli_id}:{prov}"
+
+    async def test_non_claude_code_stubs_degrade_explicitly(self):
+        """Kaart 8f40d443… (AC4): a seeded stub for a non-claude-code
+        CLI reports ``betrouwbaarheid="onbekend"`` /
+        ``drempel_gebruikt=None`` — an *explicit* no-signal degradation,
+        never a fabricated 0%. ``beschikbaar`` stays True so routing is
+        unchanged (analyse §6.3); only the honesty channel changes."""
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        for cli_id in ("open-code", "codex-cli", "copilot-cli", "mimo-code"):
+            provider = reg.get_provider_for(cli=cli_id, provider="anthropic")
+            usage = await provider.get_usage()
+            assert usage.subscription_id == f"{cli_id}:anthropic"
+            assert usage.betrouwbaarheid == "onbekend"
+            assert usage.drempel_gebruikt is None
+            assert usage.beschikbaar is True
+
+    async def test_router_provider_stays_claude_code_only(self):
+        """The ``RouterUsageProvider`` seed is a claude-code concept
+        (router endpoints live under the claude-code transport — see
+        ``agentic_cli/endpoints.py``). Other CLIs get the generic
+        ``UnknownUsageProvider`` for ``anthropic-compatible`` so the UI
+        shows an honest "geen signaal-bron" rather than an unearned
+        router badge."""
+        from app.services.subscriptions import registry as reg
+        reg.register_default_providers()
+        assert isinstance(
+            reg.get_provider_for(
+                cli="claude-code", provider="anthropic-compatible",
+            ),
+            RouterUsageProvider,
+        )
+        other = reg.get_provider_for(
+            cli="open-code", provider="anthropic-compatible",
+        )
+        assert other is not None
+        assert not isinstance(other, RouterUsageProvider)
+
     def test_seeding_is_idempotent(self):
         from app.services.subscriptions import registry as reg
         reg.register_default_providers()
