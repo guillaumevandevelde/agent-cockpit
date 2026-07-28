@@ -538,11 +538,15 @@ async def test_overview_correlation_exact_match_populates_both_sides(
 async def test_overview_correlation_missing_match_yields_empty_and_null(
     patched_project_key,
 ):
-    """A card whose ``spec_doc`` doesn't match any C doc-path must NOT
-    contaminate the response: ``DocSpecItem.implemented_by`` is an empty
-    list for the doc (no claim is recorded), and ``CardPlanItem.spec_doc``
-    on the B row is ``null`` (the metadata value is preserved as-is so
-    the SPA can render a "no matching doc" hint, not silently dropped).
+    """A card whose ``spec_doc`` is a non-empty, non-URL string that
+    doesn't match any C doc-path must NOT contaminate the response:
+    ``DocSpecItem.implemented_by`` is an empty list for the doc (no
+    claim is recorded — the C side never sees a match), and
+    ``CardPlanItem.spec_doc`` on the B row is the verbatim anchor
+    string (so the SPA can render a "no matching doc" hint without
+    the backend silently rewriting a typo into ``null`` and hiding
+    the bug). Only URL anchors are normalised to ``null`` on the B
+    side — see the URL-filter test for that contract.
     """
     patched_project_key("/tmp/corr-miss", "git:overview-corr-miss")
     # Pick a path that almost certainly isn't in docs/cockpit/ — short
@@ -560,9 +564,10 @@ async def test_overview_correlation_missing_match_yields_empty_and_null(
         })
     body = r.json()
 
-    # B side: ``spec_doc`` reflects the card's metadata verbatim (null is
-    # reserved for "no anchor"; we don't silently rewrite the bogus path
-    # into null because that would hide a real bug from the SPA).
+    # B side: ``spec_doc`` reflects the card's metadata verbatim
+    # (non-empty, non-URL strings round-trip on the B row so the SPA
+    # can show the anchor verbatim). The normalisation-to-null
+    # contract applies only to URL anchors.
     rows_for_card = [
         row for row in body["cards"] if row["card_id"] == card_id
     ]
@@ -581,12 +586,13 @@ async def test_overview_correlation_missing_match_yields_empty_and_null(
 async def test_overview_correlation_url_spec_doc_is_filtered_out(
     patched_project_key,
 ):
-    """``http://``/``https://`` ``spec_doc`` values are explicitly NOT
-    correlatable (the URL points at content outside the repo, so we
-    cannot link a card back to a C row without lying). The card still
-    exists in B with ``spec_doc`` populated to the URL string — the
-    filter is on the C-side join only, so the SPA can still surface
-    "external spec" affordances without polluting ``implemented_by``.
+    """``http://``/``https://`` ``spec_doc`` values are NOT correlatable
+    on EITHER side: they cannot link a card back to a C row (the URL
+    points at content outside the repo) and the B row's ``spec_doc``
+    is normalised to ``null`` so the SPA never tries to render a
+    "click to jump" affordance that would 404 on a missing C path.
+    The card still surfaces in B (because of the plan deliverable) —
+    its ``spec_doc`` is just ``null``.
     """
     patched_project_key("/tmp/corr-url", "git:overview-corr-url")
     url_spec = "https://example.com/external-spec.md"
@@ -602,6 +608,18 @@ async def test_overview_correlation_url_spec_doc_is_filtered_out(
         })
     body = r.json()
 
+    # B side: the card row exists (it has a plan deliverable) but its
+    # ``spec_doc`` is ``null`` — the URL is intentionally not surfaced,
+    # because there is no C row to jump to.
+    rows_for_card = [
+        row for row in body["cards"] if row["card_id"] == card_id
+    ]
+    assert len(rows_for_card) == 1, "card with plan deliverable still produces a B row"
+    assert rows_for_card[0]["spec_doc"] is None, (
+        f"URL spec_doc must normalise to None on the B side, got "
+        f"{rows_for_card[0]['spec_doc']!r}"
+    )
+
     # C side: every doc row has an empty ``implemented_by`` list (URLs
     # never match a repo-relative path). Most importantly, no doc's
     # implemented_by references our card.
@@ -610,3 +628,48 @@ async def test_overview_correlation_url_spec_doc_is_filtered_out(
     for d in body["docs"]:
         for entry in d["implemented_by"]:
             assert entry["card_id"] != card_id
+
+
+@pytest.mark.asyncio
+async def test_overview_correlation_no_deliverable_card_still_correlates(
+    patched_project_key,
+):
+    """LEFT-JOIN core path: a card with a matching ``metadata.spec_doc``
+    but NO ``plan``/``plan_ref`` deliverable must still feed the
+    ``DocSpecItem.implemented_by`` list (the whole point of using a
+    LEFT JOIN with the kind-filter in the ON clause) AND must NOT
+    produce a stray B row (no deliverable means no B row, by design).
+    This is the symmetric case to
+    ``test_overview_correlation_exact_match_populates_both_sides``
+    which exercises the BOTH-deliverable-and-spec path.
+    """
+    target_doc = "docs/cockpit/kanban-conventions.md"
+    patched_project_key("/tmp/corr-nodel", "git:overview-corr-nodel")
+    async with _client() as ac:
+        card_id = await _create_card_with_meta(
+            ac, "git:overview-corr-nodel", "spec-only author",
+            metadata={"spec_doc": target_doc},
+        )
+        # Intentionally NO ``plan``/``plan_ref`` deliverable attached —
+        # the card has only a ``spec_doc`` anchor, no plan body.
+
+        r = await ac.get("/api/v1/plans/overview", params={
+            "project_path": "/tmp/corr-nodel",
+        })
+    body = r.json()
+
+    # B side: the card produces NO row (no plan deliverable to project).
+    assert not any(
+        row["card_id"] == card_id for row in body["cards"]
+    ), "card with no plan deliverable must not appear in B"
+
+    # C side: the matching doc lists the card — the LEFT JOIN caught
+    # the card even though the deliverable side was NULL.
+    docs_for_target = [
+        d for d in body["docs"] if d["path"] == target_doc
+    ]
+    assert len(docs_for_target) == 1
+    impl = docs_for_target[0]["implemented_by"]
+    assert impl == [
+        {"card_id": card_id, "card_title": "spec-only author"},
+    ], f"implemented_by mismatch: {impl!r}"

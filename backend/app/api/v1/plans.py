@@ -91,10 +91,13 @@ def _resolve_project_key(project_path: str | None) -> str:
 # Task 1) joins on ``card.metadata["spec_doc"] == c.path`` and ships
 # inside each row (``CardPlanItem.spec_doc`` / ``DocSpecItem.implemented_by``),
 # not at the top level — so the SPA can render the link without a
-# client-side join. URL-anchored ``spec_doc`` values are filtered out
-# (no repo-relative path to match) and a card with a bogus path simply
-# fails to correlate (the B row keeps the original anchor so the SPA
-# can show "no matching doc" without losing information).
+# client-side join. The contract on both sides is the same:
+# ``spec_doc`` is the *correlatable* anchor. URL-anchored ``spec_doc``
+# values (no repo-relative path to match) are normalised to ``None``
+# on the B side AND excluded from the C-side ``implemented_by`` list.
+# A card with a bogus (non-URL, non-empty) path lands as ``spec_doc``
+# populated on the B row (so the SPA can show the anchor verbatim)
+# but does NOT match any C row, so its C-side contribution is empty.
 
 # How much of the deliverable's ``ref`` to surface in the row excerpt.
 # 240 chars mirrors the existing ``PlanSummary.excerpt`` budget and
@@ -229,8 +232,10 @@ async def _list_plan_overview_data(
     Output:
       * ``cards`` — one ``CardPlanItem`` per ``plan``/``plan_ref``
         deliverable in the project, ordered newest-first, with
-        ``spec_doc`` mirrored from the card's metadata (defensively
-        filtered for URL values).
+        ``spec_doc`` mirrored from the card's metadata when the value
+        is a non-empty, non-URL string (``None`` otherwise — the SPA
+        can show "no matching doc" / "external spec" affordances
+        without breaking the correlation contract).
       * ``correlations`` — ``docs/cockpit/<file>.md`` -> list of cards
         whose ``metadata.spec_doc`` exactly equals that path. Cards
         are deduplicated per path (a card can only link once to a
@@ -248,11 +253,21 @@ async def _list_plan_overview_data(
         # Cards with no matching deliverable appear once with NULL
         # deliverable fields; cards with one match appear once; cards
         # with N matches appear N times (one B row per deliverable).
-        # ``card.title`` is a single extra column off the card — cheap
-        # to keep in the projection; ``selectinload`` would force a
-        # second query per card for no benefit here.
+        #
+        # Project only the columns we actually read: ``id``, ``title``
+        # and ``meta`` off the card (the correlation map needs all
+        # three; nothing else is touched); all columns off the
+        # deliverable (small row, every field is consumed). Selecting
+        # whole ORM entities would hydrate ~17 unused columns per card
+        # across the project — wasteful on projects with hundreds of
+        # cards and a non-trivial latency hit on the test fixtures.
         rows = (await s.execute(
-            select(KanbanCard, KanbanDeliverable)
+            select(
+                KanbanCard.id,
+                KanbanCard.title,
+                KanbanCard.meta,
+                KanbanDeliverable,
+            )
             .outerjoin(
                 KanbanDeliverable,
                 and_(
@@ -262,7 +277,13 @@ async def _list_plan_overview_data(
             )
             .where(KanbanCard.project_key == project_key)
             .order_by(
-                KanbanDeliverable.created_at.desc().nulls_last(),
+                # Deliverable rows sort newest-first; null-deliverable
+                # rows (cards with no plan/plan_ref) come last in
+                # iteration order because the Python loop short-circuits
+                # them before they reach the cards list, so an
+                # explicit NULLS clause would only cost portability on
+                # older SQLite (3.30+).
+                KanbanDeliverable.created_at.desc(),
                 KanbanCard.id.asc(),
             )
         )).all()
@@ -273,12 +294,12 @@ async def _list_plan_overview_data(
     # ``card_id`` is applied per path before the map ships out.
     correlations_in_order: dict[str, dict[str, str]] = {}
 
-    for card, deliverable in rows:
-        spec_doc = _correlation_spec_doc(card.meta)
+    for card_id, card_title, card_meta, deliverable in rows:
+        spec_doc = _correlation_spec_doc(card_meta)
         if spec_doc is not None:
             bucket = correlations_in_order.setdefault(spec_doc, {})
             # Dedup per (path, card_id): a card can only claim a doc once.
-            bucket[card.id] = card.title or ""
+            bucket[card_id] = card_title or ""
 
         if deliverable is None:
             # LEFT JOIN row with no matching deliverable — feeds the
@@ -288,8 +309,8 @@ async def _list_plan_overview_data(
         cards.append(CardPlanItem(
             deliverable_id=deliverable.id,
             kind=deliverable.kind,
-            card_id=card.id,
-            card_title=card.title or "",
+            card_id=card_id,
+            card_title=card_title or "",
             excerpt=_excerpt(deliverable.ref),
             created_at=deliverable.created_at,
             spec_doc=spec_doc,

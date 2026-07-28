@@ -1728,10 +1728,16 @@ class ActiveSessionsResponse(BaseModel):
 #     Not project-scoped: ``docs/cockpit/`` is the platform-wide SSOT,
 #     shared across every project the SPA might ask about.
 #
-# No ``spec_doc`` join: that would require a producer for the anchor
-# (currently 0× populated, kanban card bb1f61aa is the deferred follow-up).
-# The shape is intentionally flat so the SPA can show both columns without
-# deciding up-front which store each row belongs to.
+# B↔C correlation (kanban plan 2026-07-28-plans-b-c-correlation, Task 1):
+# ``CardPlanItem.spec_doc`` mirrors the card's ``metadata["spec_doc"]`` so
+# the SPA can render a clickable doclink on each B row, and
+# ``DocSpecItem.implemented_by`` lists every card in the project whose
+# ``metadata["spec_doc"]`` exactly equals the doc path (so the SPA can
+# render an "implemented by cards" chip-list on each C row). URL anchors
+# are normalised to ``None`` on the B side and excluded from the C side
+# (no repo-relative path to match). Cards with no ``plan``/``plan_ref``
+# deliverable can still contribute to ``implemented_by`` — the join is
+# a LEFT JOIN, not an INNER JOIN.
 class CorrelatedCardItem(BaseModel):
     """A single card that implements (or updates) a ``docs/cockpit/`` doc.
 
