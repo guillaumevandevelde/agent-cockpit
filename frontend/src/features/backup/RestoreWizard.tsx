@@ -81,8 +81,8 @@ export function RestoreWizard({
     setError(null);
     try {
       const url = projectPath
-        ? `/api/v1/backup/${backup.id}/plan?project_path=${encodeURIComponent(projectPath)}`
-        : `/api/v1/backup/${backup.id}/plan`;
+        ? `backup/${backup.id}/plan?project_path=${encodeURIComponent(projectPath)}`
+        : `backup/${backup.id}/plan`;
       const response = await apiClient<RestorePlan>(url);
       setPlan(response);
     } catch {
@@ -174,7 +174,7 @@ export function RestoreWizard({
       };
 
       const result = await apiClient<RestoreResult>(
-        `/api/v1/backup/${backup.id}/restore`,
+        `backup/${backup.id}/restore`,
         {
           method: "POST",
           body: JSON.stringify(options),
@@ -209,7 +209,7 @@ export function RestoreWizard({
       };
 
       const result = await apiClient<DependencyInstallResult>(
-        `/api/v1/backup/${backup.id}/install-dependencies`,
+        `backup/${backup.id}/install-dependencies`,
         {
           method: "POST",
           body: JSON.stringify(request),

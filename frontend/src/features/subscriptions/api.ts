@@ -5,7 +5,7 @@ import type {
   SubscriptionUsageListResponse,
 } from './types'
 
-const BASE = '/api/v1/subscriptions'
+const BASE = 'subscriptions'
 
 export async function fetchSubscriptionUsage(): Promise<SubscriptionUsageListResponse> {
   return apiClient<SubscriptionUsageListResponse>(`${BASE}/usage`)

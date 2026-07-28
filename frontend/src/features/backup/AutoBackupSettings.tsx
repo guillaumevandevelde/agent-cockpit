@@ -40,7 +40,7 @@ export function AutoBackupSettings({ onChange }: AutoBackupSettingsProps) {
     setLoading(true);
     try {
       const data = await apiClient<AutoBackupSettingsType>(
-        "/api/v1/backup/auto/settings"
+        "backup/auto/settings"
       );
       setSettings(data);
     } catch {
@@ -63,7 +63,7 @@ export function AutoBackupSettings({ onChange }: AutoBackupSettingsProps) {
     setSaving(true);
     try {
       const saved = await apiClient<AutoBackupSettingsType>(
-        "/api/v1/backup/auto/settings",
+        "backup/auto/settings",
         {
           method: "PUT",
           body: JSON.stringify({
@@ -89,7 +89,7 @@ export function AutoBackupSettings({ onChange }: AutoBackupSettingsProps) {
     setRunning(true);
     try {
       const result = await apiClient<AutoBackupRunResult>(
-        "/api/v1/backup/auto/run",
+        "backup/auto/run",
         { method: "POST" }
       );
       if (result.success) {
