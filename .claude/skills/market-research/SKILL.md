@@ -71,7 +71,7 @@ nothing changed since the last run, end here with a "no findings" record
 | Source | What to extract |
 |---|---|
 | `claude-task-master` — releases, README, `.claude/`, `src/` | New `research`-tool enhancements, complexity-analysis changes, supported AI providers, MCP integrations |
-| `Aperant` / "Auto Claude" — releases, ideation-phase outputs | New "Ideation"-phase categories, worktree-isolation tweaks, auto-changelog patterns |
+| `AndyMik90/Aperant` — releases, ideation-phase outputs (was "Auto Claude"; rebranded Mar 2026) | New "Ideation"-phase categories, worktree-isolation tweaks, auto-changelog patterns |
 | `claude-deck` — this fork's upstream (releases + `master` commits since last sweep) | Anything that didn't make it across via the fork — divergence check |
 | GitHub topic `ai-agent` (>1k★, created last 30d) | New repos worth a glance |
 | GitHub topic `autonomous-coding` (same filter) | New repos worth a glance |
@@ -181,15 +181,30 @@ otherwise the chain dies and the next week has to be re-seeded by hand.
 1. Resolve the project key via Step 1 — never guess (see Common mistakes).
 2. Compute `next_scheduled_at` = next Monday 09:00 in the project's default
    timezone (`Europe/Brussels`), expressed as an ISO-8601 string with offset.
-   Compute from "now + 7 days, then snap forward to the next Monday 09:00"
-   so the chain self-corrects after a missed run rather than drifting
-   forward by exactly 7 days.
+   Anchor on the **host card's own `scheduled_at` + 7 days**, then snap
+   forward to Monday 09:00 — *not* on "now + 7 days". A run that fires late
+   (the dispatch tick claimed it Tuesday instead of Monday) would, under the
+   "now"-anchored form, schedule 13 days out and silently turn the weekly
+   cadence into a fortnightly one. Anchoring on `scheduled_at` is both
+   drift-free and self-correcting. Observed 2026-07-28: host scheduled for
+   Mon Jul 27, dispatched Tue Jul 28 — "now + 7" gave Aug 10, the correct
+   answer was Aug 3.
 3. Call `create_card` (or REST `POST /api/v1/kanban/cards`) with the same
    `parent_card_id` as your host card, the same `project`, `work_type`,
    `agent`, and `labels`, and `scheduled_at = next_scheduled_at`. **Always
    include `parent_card_id`** — without it, the successor is an orphan
    with no link back to the cadence proposal and the audit trail in the
    kanban activity feed is broken.
+
+   **Trap: the `create_card` MCP tool has no `scheduled_at` parameter.**
+   It silently creates the successor with `scheduled_at: null`, which is
+   not a harmless omission — an unscheduled Backlog card with
+   `work_type=analysis` is immediately dispatchable, so the chain can
+   re-fire the sweep within the next 10 s tick instead of next Monday.
+   Set it in a second call right after creating the card:
+   `PATCH /api/v1/kanban/cards/<new-id>` with
+   `{"scheduled_at": "<next_scheduled_at>"}`, then verify the response
+   echoes the value back.
 4. The successor's `description` is a verbatim copy of the host card's
    description (which already includes the "Step 7 — schedule the next run"
    instruction). One typo and the chain dies — copy carefully, or build the
