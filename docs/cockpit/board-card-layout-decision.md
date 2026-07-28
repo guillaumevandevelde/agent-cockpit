@@ -124,9 +124,13 @@ leest als een renderbug, een uitgefadede chip leest als "hier staat meer".
   lege-lane-default en wordt bewaard in `localStorage`
   (`kanban-collapsed-columns`, per kolom-id). Corrupte of geblokkeerde storage
   valt terug op de default in plaats van het bord mee te nemen.
-- Lanes krijgen `basis-56` (224px voorkeur) met `min-w-52` (208px minimum). Die
-  16px rek is wat 7 lanes op 1440×900 van "schuift altijd horizontaal" naar
-  "past" brengt; pas als zelfs de geknepen lanes niet passen, schuift het bord.
+- Uitgeklapte lanes verdelen de beschikbare breedte gelijk (`flex-1`, dus
+  `flex: 1 1 0%`) met een **vloer van 208px** (`min-w-52`). Een lane is dus zo
+  breed als er ruimte voor is — 293px bij vijf lanes op 1920×1080, 208px zodra ze
+  anders dunner geknepen zouden worden — en pas ónder die vloer schuift het bord
+  horizontaal. De oude vaste `min-w-64` (256px) legde die vloer boven wat een
+  laptopviewport kan dragen; dat is precies waarom het bord op elke realistische
+  breedte horizontaal schoof.
 
 ## 4. Meting ná
 
@@ -139,9 +143,17 @@ Zelfde bord, zelfde meetmethode (§6), met de nieuwe layout:
 | Mediane kaarthoogte | 144px | **115px** | 107px |
 | Zichtbare Backlog-kaarten | 4 / 16 | 4 / 17 | 5 / 17 |
 
-Op een deterministische fixture met dezelfde bordvorm (7 lanes, 49 kaarten,
-titels op de lange kant) meet dezelfde layout 0/49 afgekapte titels, mediaan
-115px en **0px** horizontaal schuiven op 1440×900.
+De lanestaat hoort bij die cijfers, want ze bepalen de breedte-rekening. Bij de
+ná-meting op 1440×900 waren `engineer` en `reviewer` beide leeg en dus rails:
+5 uitgeklapte lanes × 208px + 2 rails × 40px + 6 gaps × 12px = 1192px tegen
+1136px viewport = de 56px die de tabel noemt. (De vóór-meting in §2 dateert van
+een uur eerder, toen `engineer` nog 3 kaarten had; kaarten bewegen tussen de
+metingen, lanebreedtes niet.)
+
+Op een deterministische fixture met dezelfde bordvorm (7 lanes waarvan één leeg,
+49 kaarten, titels op de lange kant) meet dezelfde layout 0/49 afgekapte titels,
+mediaan 115px en **0px** horizontaal schuiven op 1440×900: 6 uitgeklapte lanes ×
+216px + 1 rail × 40px + 72px gaps = 1408px, precies de containerbreedte.
 
 **Eerlijk over de trade-off:** verticaal scrollen in Backlog verbetert op
 1440×900 niet (4 kaarten zichtbaar, vóór en ná) — de mediane kaart werd 20%

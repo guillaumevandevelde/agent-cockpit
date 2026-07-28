@@ -347,8 +347,11 @@ export function CardItem({
           "mt-1.5 flex items-center gap-1.5 overflow-hidden text-xs text-muted-foreground [&>*]:shrink-0 " +
           // The mask turns a hard clip into a fade, so a chip cut off at the
           // right edge reads as "there is more here" instead of as a rendering
-          // bug. It is a no-op when the row fits: the gradient sits at the
-          // row's right edge, where there is then nothing to fade.
+          // bug. Note the gradient is anchored to the row's *box*, not to where
+          // the chips end: a chip that reaches into the last 24px fades a little
+          // even when the row technically fits. That is the accepted cost of a
+          // pure-CSS fade — the alternative is measuring overflow in JS on every
+          // card, and a slightly soft final chip is cheaper than that.
           "[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]"
         }
         data-testid="card-meta-row"

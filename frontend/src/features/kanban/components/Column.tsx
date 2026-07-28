@@ -80,12 +80,15 @@ export function Column({
       className={`${
         collapsed
           ? "w-10 shrink-0 cursor-pointer"
-          // `basis-56` is the lane's preferred width (224px) and `min-w-52`
-          // (208px) is how far flexbox may squeeze it to keep the whole board
-          // on screen. That 16px of give is what turns 7 lanes at 1440x900
-          // from "always horizontally scrolling" into "fits" — the board only
-          // scrolls sideways once even the squeezed lanes don't fit.
-          : "flex-1 min-w-52 basis-56"
+          // Expanded lanes split the board's width evenly (`flex-1` is
+          // `flex: 1 1 0%`), floored at `min-w-52` = 208px. So a lane is as wide
+          // as there is room for — 293px with five lanes at 1920x1080, 208px
+          // once the lanes would otherwise be squeezed thinner than that — and
+          // only below that floor does the board scroll sideways. The previous
+          // fixed `min-w-64` (256px) put that floor above what a laptop viewport
+          // can hold, which is why the board scrolled horizontally at every
+          // realistic width.
+          : "flex-1 min-w-52"
       } bg-muted/40 rounded-lg p-2 transition-colors flex flex-col min-h-0 ${
         dragOver ? "ring-2 ring-primary/50" : ""
       }`}
