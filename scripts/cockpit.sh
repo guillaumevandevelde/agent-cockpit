@@ -345,6 +345,43 @@ run_doctor() {
     "$SCRIPT_DIR/cockpit-doctor.sh" || true
 }
 
+# Vangnet voor dead remote branches: volgt op de direct-mode ship-recipe fix
+# uit kanban-kaart `3027671c…` (die het *nieuwe* lek dicht). De ship-recipe
+# dekt alleen de direct-mode merge-route; branches die via PR-route nooit
+# mergen, handmatige pushes, of sessies die na push maar vóór ship crashen
+# blijven alsnog op `origin` staan. De sweeper is read-only — geen auto-
+# delete — net als de sibling sweeper nudges: surface the signal, let a
+# human (or follow-up chore card) decide.
+run_merged_branches_sweeper() {
+    [ -x "$SCRIPT_DIR/sweep_merged_remote_branches.py" ] || return 0
+    # Read-only over het netwerk kan tijdens een offline start irritant zijn;
+    # geef de operator de mogelijkheid om met COCKPIT_SKIP_REMOTE_SWEEP=1 de
+    # nudge over te slaan. Default: draaien.
+    if [ -n "${COCKPIT_SKIP_REMOTE_SWEEP:-}" ]; then
+        return 0
+    fi
+    local out hits
+    if ! out="$(python3 "$SCRIPT_DIR/sweep_merged_remote_branches.py" \
+            --repo "$REPO_ROOT" 2>&1)"; then
+        # Network failure, missing origin, etc. — never block start.
+        sup_log "remote-branches-sweeper: skip (sweeper niet kunnen draaien)"
+        return 0
+    fi
+    hits="$(echo "$out" | python3 -c \
+        'import json,sys
+try:
+    d=json.loads(sys.stdin.read())
+except Exception:
+    sys.exit(1)
+print(d["totals"]["fully_merged"])' 2>/dev/null)" || hits=""
+    if [ -n "$hits" ] && [ "$hits" -gt 0 ] 2>/dev/null; then
+        sup_log "remote-branches-sweeper: $hits dead branch(es) op origin (zie scripts/sweep_merged_remote_branches.py)"
+        echo "remote-branches-sweeper: $hits volledig gemergede branch(es) op origin gevonden."
+        echo "  inspecteer met: python3 scripts/sweep_merged_remote_branches.py --repo \"$REPO_ROOT\""
+        echo "  opruimen: voor elke branch in \`.rows[]\` → \`git push origin --delete <branch>\`"
+    fi
+}
+
 cmd_start() {
     if is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER"; then
         echo "Cockpit draait al (supervisor pid $(cat "$RUN_DIR/supervisor.pid")). Gebruik 'restart' of 'status'."
@@ -354,6 +391,7 @@ cmd_start() {
     if [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ]; then
         ensure_deps || return 1
         run_worktree_gc
+        run_merged_branches_sweeper
         run_doctor
     fi
     # Preflight: don't crash-loop fighting another stack for the ports. Skipped
