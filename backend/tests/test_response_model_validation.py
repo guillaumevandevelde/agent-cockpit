@@ -1,13 +1,13 @@
 """Explicit Pydantic v2 model_validate() checks for the response models added to
-agent_activity.py and codex_config.py, complementing the existing HTTP smoke
-tests in test_api_agent_activity.py / test_api_codex_config.py."""
+run_activity.py and codex_config.py, complementing the existing HTTP smoke
+tests in test_api_run_activity.py / test_api_codex_config.py."""
 from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api.v1 import agent_activity as agent_activity_api
 from app.api.v1 import codex_config as codex_config_api
+from app.api.v1 import run_activity as run_activity_api
 from app.main import app
 from app.services.codex_config_service import CodexConfigService
 
@@ -32,7 +32,7 @@ async def test_live_agents_response_validates():
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/live")
     assert r.status_code == 200, r.text
-    agent_activity_api.RunActivityListResponse.model_validate(r.json())
+    run_activity_api.RunActivityListResponse.model_validate(r.json())
 
 
 @pytest.mark.asyncio
@@ -41,7 +41,7 @@ async def test_activity_summary_response_validates():
         async with _client() as ac:
             r = await ac.get("/api/v1/agent-activity/summary")
     assert r.status_code == 200, r.text
-    agent_activity_api.ActivitySummaryResponse.model_validate(r.json())
+    run_activity_api.ActivitySummaryResponse.model_validate(r.json())
 
 
 @pytest.mark.asyncio
