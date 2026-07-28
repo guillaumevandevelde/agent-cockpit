@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ClipboardList, Search, FileText, KanbanSquare, BookText, ExternalLink } from 'lucide-react'
+import { ClipboardList, Search, FileText, KanbanSquare, BookText, ExternalLink, Link2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -9,24 +9,38 @@ import { usePlansApi } from '@/hooks/usePlansApi'
 import { useFetchData } from '@/hooks/useFetchData'
 import { CLICKABLE_CARD } from '@/lib/constants'
 import { formatBytes } from '@/types/backup'
-import type { CardPlanItem, DocSpecItem, PlansOverviewResponse } from '@/types/plans'
+import type { CardPlanItem, CorrelatedCardItem, DocSpecItem, PlansOverviewResponse } from '@/types/plans'
 
 // Module-level empty arrays so the ``useMemo`` deps below don't churn
 // on every render. ``data?.cards ?? EMPTY_CARDS`` keeps a stable
 // reference when the overview hasn't loaded yet.
 const EMPTY_CARDS: CardPlanItem[] = []
 const EMPTY_DOCS: DocSpecItem[] = []
+const EMPTY_IMPLEMENTED_BY: CorrelatedCardItem[] = []
 
 /**
  * Read-only "Plans & Specs" overview (Optie B, kanban card 9e33a359).
  *
- * Two sections:
+ * Two sections, each carrying B↔C correlation data (kanban plan
+ * 2026-07-28-plans-b-c-correlation Task 1):
  *   * **B — from cards.** ``plan``/``plan_ref`` deliverables attached to
  *     kanban cards scoped to the active project. Click a row to jump to
- *     the source card (``/kanban?card=<card_id>``).
+ *     the source card (``/kanban?card=<card_id>``). Rows whose card has
+ *     a ``spec_doc`` anchor also surface a small inline doclink that
+ *     navigates straight to the matching C row at
+ *     ``/plans/<encoded-path>`` — without that link, the user would
+ *     need to find the doc manually.
  *   * **C — from docs.** ``docs/cockpit/*.md`` files in the repo's SSOT
  *     tree. Click a row to open the doc detail page
- *     (``/plans/<encoded-path>``).
+ *     (``/plans/<encoded-path>``). Rows whose ``implemented_by`` list is
+ *     non-empty render an "Implemented by cards" chip-list below the
+ *     path; each chip is a kanban-card link (``/kanban?card=<id>``) so
+ *     the user can jump from a doc to the cards that implement it.
+ *
+ * Inner links live inside CLICKABLE_CARD rows — they MUST call
+ * ``stopPropagation()`` on their ``onClick`` so a chip click doesn't
+ * also trigger the outer card's row-navigation. Convention from
+ * ``HostsPage`` / ``ScheduledMessagesPage``.
  *
  * Each section has its own empty/loading/error state — independent
  * failures aren't possible today (one fetch, two sections) but the
@@ -97,6 +111,7 @@ export function PlansPage() {
         loading={loading && cards.length === 0}
         searchQuery={searchQuery}
         onCardClick={(cardId) => navigate(`/kanban?card=${cardId}`)}
+        onDocLinkClick={(path) => navigate(`/plans/${encodeURIComponent(path)}`)}
       />
 
       <DocSection
@@ -104,6 +119,7 @@ export function PlansPage() {
         loading={loading && docs.length === 0}
         searchQuery={searchQuery}
         onDocClick={(path) => navigate(`/plans/${encodeURIComponent(path)}`)}
+        onCardLinkClick={(cardId) => navigate(`/kanban?card=${cardId}`)}
       />
     </div>
   )
@@ -118,11 +134,13 @@ function CardPlanSection({
   loading,
   searchQuery,
   onCardClick,
+  onDocLinkClick,
 }: {
   items: CardPlanItem[]
   loading: boolean
   searchQuery: string
   onCardClick: (cardId: string) => void
+  onDocLinkClick: (path: string) => void
 }) {
   return (
     <section aria-labelledby="card-plans-heading" className="space-y-3">
@@ -178,6 +196,12 @@ function CardPlanSection({
                       <p className="text-sm text-muted-foreground line-clamp-2">
                         {item.excerpt || '(no excerpt)'}
                       </p>
+                      {item.spec_doc && (
+                        <SpecDocLink
+                          path={item.spec_doc}
+                          onDocLinkClick={onDocLinkClick}
+                        />
+                      )}
                     </div>
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
                       <span
@@ -202,6 +226,41 @@ function CardPlanSection({
   )
 }
 
+// Inline B-side doclink (kanban plan 2026-07-28-plans-b-c-correlation
+// Task 2). Lives inside a CLICKABLE_CARD — its onClick MUST
+// ``stopPropagation()`` so a click on the link doesn't also navigate
+// to the outer card's row destination (``/kanban?card=<id>``). The
+// link is rendered as an anchor element with an ``href`` so it's
+// keyboard-focusable + middle-click-open + copyable, and so the SPA
+// does the navigation via React Router rather than a full page reload.
+function SpecDocLink({
+  path,
+  onDocLinkClick,
+}: {
+  path: string
+  onDocLinkClick: (path: string) => void
+}) {
+  const href = `/plans/${encodeURIComponent(path)}`
+  return (
+    <div className="mt-1.5">
+      <a
+        href={href}
+        onClick={(e) => {
+          e.stopPropagation()
+          onDocLinkClick(path)
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+        className="inline-flex items-center gap-1 text-xs text-primary hover:underline focus-visible:underline focus-visible:outline-none"
+        aria-label={`Open spec doc ${path}`}
+        title={`Open spec doc: ${path}`}
+      >
+        <Link2 className="h-3 w-3" />
+        <span className="font-mono truncate">{path}</span>
+      </a>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Section C — docs/cockpit/*.md index
 // ---------------------------------------------------------------------------
@@ -211,11 +270,13 @@ function DocSection({
   loading,
   searchQuery,
   onDocClick,
+  onCardLinkClick,
 }: {
   items: DocSpecItem[]
   loading: boolean
   searchQuery: string
   onDocClick: (path: string) => void
+  onCardLinkClick: (cardId: string) => void
 }) {
   return (
     <section aria-labelledby="doc-section-heading" className="space-y-3">
@@ -269,6 +330,10 @@ function DocSection({
                       <p className="text-xs text-muted-foreground font-mono truncate">
                         {doc.path}
                       </p>
+                      <ImplementedByChips
+                        cards={doc.implemented_by ?? EMPTY_IMPLEMENTED_BY}
+                        onCardLinkClick={onCardLinkClick}
+                      />
                     </div>
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
                       <span
@@ -292,6 +357,51 @@ function DocSection({
   )
 }
 
+// Inline C-side "implemented by cards" chip-list (kanban plan
+// 2026-07-28-plans-b-c-correlation Task 2). Renders only when the
+// ``implemented_by`` array is non-empty (cards that claim this doc
+// via ``metadata["spec_doc"] == path``). Each chip is an anchor with
+// an ``href`` so it's keyboard-focusable + middle-click-open +
+// copyable. Chips live inside a CLICKABLE_CARD — their ``onClick``
+// MUST ``stopPropagation()`` so a chip click doesn't bubble up to the
+// outer card's row destination (``/plans/<encoded-path>``).
+function ImplementedByChips({
+  cards,
+  onCardLinkClick,
+}: {
+  cards: CorrelatedCardItem[]
+  onCardLinkClick: (cardId: string) => void
+}) {
+  if (cards.length === 0) return null
+  return (
+    <div className="mt-2">
+      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+        Implemented by cards
+      </h4>
+      <ul className="flex flex-wrap gap-1.5">
+        {cards.map((card) => (
+          <li key={card.card_id}>
+            <a
+              href={`/kanban?card=${card.card_id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onCardLinkClick(card.card_id)
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 rounded-md border bg-secondary px-2 py-0.5 text-xs font-medium hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Open kanban card ${card.card_title}`}
+              title={`Open kanban card: ${card.card_title}`}
+            >
+              <KanbanSquare className="h-3 w-3" />
+              <span className="truncate max-w-[180px]">{card.card_title}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -312,7 +422,8 @@ function filterCards(items: CardPlanItem[], query: string): CardPlanItem[] {
   return items.filter(
     (item) =>
       item.card_title.toLowerCase().includes(q) ||
-      item.excerpt.toLowerCase().includes(q)
+      item.excerpt.toLowerCase().includes(q) ||
+      (item.spec_doc?.toLowerCase().includes(q) ?? false)
   )
 }
 

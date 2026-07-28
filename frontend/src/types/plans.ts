@@ -6,7 +6,15 @@
 // ``GET /plans/overview/docs/{path}``.
 //
 // Mirrors ``backend/app/models/schemas.py``:
-//   CardPlanItem / DocSpecItem / PlansOverviewResponse / DocContentResponse.
+//   CorrelatedCardItem / CardPlanItem / DocSpecItem /
+//   PlansOverviewResponse / DocContentResponse.
+
+export interface CorrelatedCardItem {
+  /** Kanban card id (``KanbanCard.id``); used to build ``/kanban?card=<id>``. */
+  card_id: string
+  /** Display title; rendered as the chip text on the C row. */
+  card_title: string
+}
 
 export interface CardPlanItem {
   /** Unique row id (KanbanDeliverable.id). Stable across refreshes. */
@@ -22,6 +30,14 @@ export interface CardPlanItem {
   /** Truncated body / JSON envelope; full text lives on the kanban card. */
   excerpt: string
   created_at: string
+  /** Repo-relative path of the ``docs/cockpit/`` doc this card claims to
+   *  implement (mirrors ``card.metadata["spec_doc"]``). The SPA renders
+   *  this as a clickable doclink on the B row that navigates to the
+   *  matching C row at ``/plans/<encoded-path>``. ``null`` when the
+   *  card has no anchor or when the anchor is a URL — both cases are
+   *  non-correlatable, see the read-side filter in
+   *  ``backend/app/api/v1/plans.py``. */
+  spec_doc: string | null
 }
 
 export interface DocSpecItem {
@@ -33,11 +49,16 @@ export interface DocSpecItem {
   /** ISO8601 UTC (filesystem mtime). */
   modified_at: string
   size_bytes: number
+  /** Cards in the project whose ``metadata["spec_doc"]`` exactly equals
+   *  ``path``. The SPA renders these as an "implemented by cards"
+   *  chip-list on the C row, each chip linking back to its source kanban
+   *  card (``/kanban?card=<id>``). Empty when no card claims this doc. */
+  implemented_by: CorrelatedCardItem[]
 }
 
 export interface PlansOverviewResponse {
   /** Project key the SPA resolved to (echoed so the UI can show
-   *  "scoped to <bucket>"). Empty projects still get an echo. */
+   * "scoped to <bucket>"). Empty projects still get an echo. */
   project_key: string
   cards: CardPlanItem[]
   docs: DocSpecItem[]
