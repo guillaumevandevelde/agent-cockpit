@@ -124,44 +124,125 @@ DEMO_BLUEPRINT = {
 }
 
 # Two example scheduled messages — the Scheduled Messages page renders
-# these on first load.
+# these on first load. Shape matches `ScheduledMessageCreate` in
+# `backend/app/models/scheduled_message_schemas.py` so the wrapper can
+# POST them verbatim.
 DEMO_SCHEDULED_MESSAGES = [
     {
-        "id": "demo-msg-001",
-        "label": "Daily kanban sweep",
-        "cron": "17 9 * * 1-5",
+        "kind": "scheduled_message",
+        "target_project": "/srv/projects/example-project",
         "message": "Sweep the kanban for stale Doing cards.",
+        "trigger_type": "cron",
+        "cron_expr": "17 9 * * 1-5",
+        "timezone": "UTC",
+        "permission_mode": "acceptEdits",
+        "on_missing_session": "spawn",
+        "when_busy": "wait_until_idle",
+        "target_kind": "project",
+        "session_preview": "Daily kanban sweep",
     },
     {
-        "id": "demo-msg-002",
-        "label": "Hourly usage poll",
-        "cron": "7 * * * *",
+        "kind": "scheduled_message",
+        "target_project": "/srv/projects/demo-api",
         "message": "Poll provider usage so the Usage page stays fresh.",
+        "trigger_type": "cron",
+        "cron_expr": "7 * * * *",
+        "timezone": "UTC",
+        "permission_mode": "acceptEdits",
+        "on_missing_session": "spawn",
+        "when_busy": "wait_until_idle",
+        "target_kind": "project",
+        "session_preview": "Hourly usage poll",
     },
 ]
 
-# A handful of presence events so the Presence page is not empty.
+# A handful of presence events so the Presence page is not empty. Shape
+# matches `PresenceEventIn` in `backend/app/models/schemas.py:1830`.
+# Each event triggers `process_event` which is the same path real
+# Claude Code HTTP hooks take — no separate code path.
 DEMO_PRESENCE_EVENTS = [
     {
-        "session_id": "sess-demo-engineer-001",
-        "agent": "engineer",
-        "status": "running",
-        "current_tool": "Edit",
-        "narrative": "Refining seed-demo-home.py — sanitization tightening",
+        "kind": "presence_event",
+        "session_id": "demo-engineer-001",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Edit",
+        "cwd": "/srv/projects/example-project",
+        "user_prompt": "Refining seed-demo-home.py — sanitization tightening",
     },
     {
-        "session_id": "sess-demo-analyst-002",
-        "agent": "analyst",
-        "status": "idle",
-        "current_tool": None,
-        "narrative": "Awaiting parent card review",
+        "kind": "presence_event",
+        "session_id": "demo-analyst-002",
+        "hook_event_name": "UserPromptSubmit",
+        "cwd": "/srv/projects/example-project",
+        "user_prompt": "Awaiting parent card review",
     },
     {
-        "session_id": "sess-demo-reviewer-003",
-        "agent": "reviewer",
-        "status": "blocked",
-        "current_tool": "AskUserQuestion",
-        "narrative": "Awaiting human decision on shape of FCR prompt",
+        "kind": "presence_event",
+        "session_id": "demo-reviewer-003",
+        "hook_event_name": "PermissionRequest",
+        "cwd": "/srv/projects/demo-api",
+        "user_prompt": "Awaiting human decision on shape of FCR prompt",
+    },
+]
+
+# A small backlog + doing + done mix so the kanban screenshot has rows on
+# every column a default project shows. Shape matches `CardCreate` in
+# `backend/app/kanban/schemas.py:341`. `confirm_new_project=True` lets the
+# first POST seed the project bucket on the demo backend.
+DEMO_KANBAN_CARDS = [
+    {
+        "kind": "kanban_card",
+        "project_key": "example-project",
+        "title": "Refresh demo landing page",
+        "description": "Recapture the landing-page hero against the new branding.",
+        "column": "Backlog",
+        "work_type": "feature",
+        "labels": ["frontend"],
+    },
+    {
+        "kind": "kanban_card",
+        "project_key": "example-project",
+        "title": "Add OpenAPI schema lint to CI",
+        "description": "Run spectral on every PR to catch breaking changes early.",
+        "column": "Backlog",
+        "work_type": "chore",
+        "labels": ["backend", "ci"],
+    },
+    {
+        "kind": "kanban_card",
+        "project_key": "example-project",
+        "title": "Wire presence hook into demo project",
+        "description": "Hook the demo project's settings.json to the presence webhook.",
+        "column": "Doing",
+        "work_type": "feature",
+        "labels": ["frontend"],
+    },
+    {
+        "kind": "kanban_card",
+        "project_key": "demo-api",
+        "title": "Replace sandbox shim with v2 contract",
+        "description": "Migrate the sandcastle bridge to the v2 manifest.",
+        "column": "Doing",
+        "work_type": "chore",
+        "labels": ["backend"],
+    },
+    {
+        "kind": "kanban_card",
+        "project_key": "example-project",
+        "title": "Seed example transcripts",
+        "description": "Add 5 transcript files under .claude/projects/example-project/.",
+        "column": "Done",
+        "work_type": "chore",
+        "labels": ["chore"],
+    },
+    {
+        "kind": "kanban_card",
+        "project_key": "demo-api",
+        "title": "Pin agent config defaults",
+        "description": "Lock provider + model defaults to keep the demo screenshots stable.",
+        "column": "Done",
+        "work_type": "chore",
+        "labels": ["chore"],
     },
 ]
 
@@ -283,7 +364,7 @@ def seed_registry_dir(registry_dir: Path) -> None:
 
 
 def write_demo_state_jsonl(target_dir: Path) -> None:
-    """Write a sidecar JSONL the capture script can POST to the backend.
+    """Write a sidecar JSONL the wrapper POSTs to the backend.
 
     The backend creates its kanban DB schema on first launch but starts
     empty; capturing the kanban page from an empty board would yield a
@@ -292,34 +373,16 @@ def write_demo_state_jsonl(target_dir: Path) -> None:
     presence / scheduled-messages pages render with a believable amount
     of demo content.
 
-    Returned shape: a JSONL file with one JSON object per line, each
-    line has a `kind` discriminator (`kanban_card`, `presence_event`,
-    `scheduled_message`) and the matching fields. The wrapper translates
-    that into the right POST endpoint per kind.
+    Shape: one JSON object per line, each carries a `kind` discriminator
+    that selects the POST endpoint:
+      * `kanban_card`       → POST /api/v1/kanban/cards
+      * `presence_event`    → POST /api/v1/presence/events
+      * `scheduled_message` → POST /api/v1/scheduled-messages
+    Other fields on each line match the matching Pydantic Create
+    schema, so the wrapper forwards the payload verbatim.
     """
     state_file = target_dir / "demo-state.jsonl"
-    lines: list[dict] = []
-
-    # Kanban cards — a small backlog + doing + done mix so the board
-    # screenshot has rows on every column that exists in a default
-    # project.
-    kanban_cards = [
-        {"column": "Backlog", "title": "Refresh demo landing page", "labels": ["frontend"]},
-        {"column": "Backlog", "title": "Add OpenAPI schema lint to CI", "labels": ["backend", "chore"]},
-        {"column": "Doing", "title": "Wire presence hook into demo project", "labels": ["frontend"]},
-        {"column": "Doing", "title": "Replace sandbox shim with v2 contract", "labels": ["backend"]},
-        {"column": "Done", "title": "Seed example transcripts", "labels": ["chore"]},
-        {"column": "Done", "title": "Pin agent config defaults", "labels": ["chore"]},
-    ]
-    for card in kanban_cards:
-        lines.append({"kind": "kanban_card", **card})
-
-    for event in DEMO_PRESENCE_EVENTS:
-        lines.append({"kind": "presence_event", **event})
-
-    for msg in DEMO_SCHEDULED_MESSAGES:
-        lines.append({"kind": "scheduled_message", **msg})
-
+    lines: list[dict] = list(DEMO_KANBAN_CARDS) + list(DEMO_PRESENCE_EVENTS) + list(DEMO_SCHEDULED_MESSAGES)
     write_text(state_file, "\n".join(json.dumps(line) for line in lines) + "\n")
 
 

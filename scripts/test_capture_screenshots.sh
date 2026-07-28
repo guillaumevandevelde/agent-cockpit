@@ -233,5 +233,48 @@ check "hero dark PNG emitted at repo root" \
 
 # ----------------------------------------------------------------------------
 echo
+echo "Task 11: demo-state POST loop — wrapper consumes demo-state.jsonl"
+# Without this step the kanban / presence / scheduled-messages
+# screenshots would be blank (the previous ad-hoc flow did this
+# seeding by hand; commits f2b2153 + kaart 35d372a0 both shipped demo
+# data alongside the PNGs).
+check "wrapper references demo-state.jsonl" \
+    'echo "$src" | grep -qF "demo-state.jsonl"'
+check "wrapper POSTs to /api/v1/kanban/cards" \
+    'echo "$src" | grep -qE "/api/v1/kanban/cards"'
+check "wrapper POSTs to /api/v1/presence/events" \
+    'echo "$src" | grep -qE "/api/v1/presence/events"'
+check "wrapper POSTs to /api/v1/scheduled-messages" \
+    'echo "$src" | grep -qE "/api/v1/scheduled-messages"'
+check "wrapper uses curl with -X POST" \
+    'echo "$src" | grep -qE "curl[^\\n]*-X[[:space:]]+POST"'
+
+# Also verify the seeder actually emits the kinds the wrapper expects.
+if [ -x "$SEED" ]; then
+    seed_check_tmp="$(mktemp -d)"
+    python3 "$SEED" --target "$seed_check_tmp/out" >/dev/null 2>&1 || true
+    if [ -f "$seed_check_tmp/out/demo-state.jsonl" ]; then
+        kinds="$(python3 -c '
+import json, sys
+seen = set()
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line: continue
+    try: seen.add(json.loads(line).get("kind", ""))
+    except Exception: pass
+print(" ".join(sorted(k for k in seen if k)))
+' "$seed_check_tmp/out/demo-state.jsonl")"
+        for expected in kanban_card presence_event scheduled_message; do
+            check "demo-state.jsonl contains $expected entries" \
+                "printf '%s' \"\$kinds\" | grep -qF \"$expected\""
+        done
+    else
+        bad "demo-state.jsonl not produced by seed script"
+    fi
+    rm -rf "$seed_check_tmp"
+fi
+
+# ----------------------------------------------------------------------------
+echo
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

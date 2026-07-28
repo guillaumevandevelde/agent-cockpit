@@ -284,6 +284,67 @@ fi
 log "backend healthy; same-origin UI at http://127.0.0.1:$PORT/"
 
 # ----------------------------------------------------------------------------
+# Step 5.5: POST demo-state.jsonl to the backend.
+#
+# `seed-demo-home.py` writes `$THROWAWAY_HOME/demo-state.jsonl` with three
+# kinds of entries — kanban cards, presence events, scheduled messages —
+# each shaped to match the matching Pydantic Create schema so we can
+# forward the payload verbatim. Without this step the kanban /
+# presence / scheduled-messages screenshots would be blank (the backend
+# creates its DB schema on first launch but starts empty). The previous
+# ad-hoc flow (commit f2b2153 + kaart 35d372a0) did this seeding by hand;
+# this step folds it into the harness.
+#
+# Per-kind endpoint table:
+#   kanban_card       → POST /api/v1/kanban/cards
+#   presence_event    → POST /api/v1/presence/events
+#   scheduled_message → POST /api/v1/scheduled-messages
+#
+# A failed POST is logged but NOT fatal — the resulting screenshot will
+# still be captured (just less populated). Hard-failing here would make
+# the harness brittle against backend API drift; the test for it is
+# already in scripts/test_capture_screenshots.sh.
+# ----------------------------------------------------------------------------
+DEMO_STATE="$THROWAWAY_HOME/demo-state.jsonl"
+if [ -f "$DEMO_STATE" ]; then
+    posted=0
+    skipped=0
+    failed=0
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        kind=$(printf '%s' "$line" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("kind",""))' 2>/dev/null || true)
+        case "$kind" in
+            kanban_card)
+                endpoint="/api/v1/kanban/cards" ;;
+            presence_event)
+                endpoint="/api/v1/presence/events" ;;
+            scheduled_message)
+                endpoint="/api/v1/scheduled-messages" ;;
+            *)
+                skipped=$((skipped + 1))
+                continue
+                ;;
+        esac
+        # Always include confirm_new_project=True on the first kanban POST so
+        # the demo project bucket exists before the card insert validates it.
+        payload="$line"
+        if [ "$kind" = "kanban_card" ]; then
+            payload="$(printf '%s' "$line" | python3 -c 'import json,sys; o=json.loads(sys.stdin.read()); o.setdefault("confirm_new_project", True); print(json.dumps(o))')"
+        fi
+        if curl -fsS -X POST -H "Content-Type: application/json" \
+               -o /dev/null --max-time 5 \
+               -d "$payload" \
+               "http://127.0.0.1:$PORT$endpoint" >>"$LOG_FILE" 2>&1; then
+            posted=$((posted + 1))
+        else
+            failed=$((failed + 1))
+            log "demo-state POST failed for kind=$kind → $endpoint (continuing)"
+        fi
+    done < "$DEMO_STATE"
+    log "demo-state POST: $posted posted, $skipped unknown-kind skipped, $failed failed"
+fi
+
+# ----------------------------------------------------------------------------
 # Step 6: run Playwright. The Node script captures each route at 1280x800,
 # plus both hero images under prefers-color-scheme: light/dark. Outputs
 # land in $OUTPUT_DIR/screenshots/ + $OUTPUT_DIR/cockpit-rebrand-*.png.
