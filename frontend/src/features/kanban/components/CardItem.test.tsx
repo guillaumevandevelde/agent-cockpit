@@ -112,6 +112,97 @@ describe("CardItem labels", () => {
   });
 });
 
+// Kanban card 1fafd87c ("kan niet alles lezen en nog veel te vaak scrollen").
+// Measured on the live board at 1440x900 before this change: 38 of 49 rendered
+// titles were clipped by a 2-line clamp, and the median card was 144px tall
+// because the metadata row wrapped to three lines — 4 of 16 Backlog cards fitted
+// on screen. These tests pin the two structural rules that fixed it, so a later
+// refactor can't quietly reintroduce either.
+describe("CardItem read/scan layout contract", () => {
+  it("gives the title five lines, word-breaking, and a full-title tooltip", () => {
+    const longTitle =
+      "[feature] Wire `--forward-subagent-text` so a dispatched executor streams " +
+      "its subagent output back into the parent transcript";
+    render(
+      <CardItem card={{ ...baseCard, title: longTitle }} onOpen={() => {}} />,
+    );
+    const title = screen.getByTestId("card-title");
+    expect(title.className).toContain("line-clamp-5");
+    // A long unbroken token (backticked flag, branch name) must wrap inside the
+    // card instead of forcing the lane wider.
+    expect(title.className).toContain("break-words");
+    // Whatever the clamp still cuts stays readable on hover.
+    expect(title.getAttribute("title")).toBe(longTitle);
+  });
+
+  it("renders the title outside the metadata row so status badges never narrow it", () => {
+    // Previously the Done / To Resume / Impediment badges sat beside the title
+    // as a `shrink-0` cluster, costing it ~110px of width on exactly the
+    // columns that hold the most cards.
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "Done", completed_at: "2026-07-10T12:00:00Z" }}
+        onOpen={() => {}}
+      />,
+    );
+    const title = screen.getByTestId("card-title");
+    const metaRow = screen.getByTestId("card-meta-row");
+    expect(metaRow.contains(title)).toBe(false);
+    expect(metaRow.contains(screen.getByTestId("done-badge"))).toBe(true);
+  });
+
+  it("keeps the metadata row on a single clipped line instead of wrapping", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, labels: ["a", "b"], dispatch_provider: "minimax" }}
+        readyState="ready"
+        subtasks={{ done: 1, total: 3 }}
+        onOpen={() => {}}
+      />,
+    );
+    const metaRow = screen.getByTestId("card-meta-row");
+    expect(metaRow.className).toContain("overflow-hidden");
+    expect(metaRow.className).not.toContain("flex-wrap");
+  });
+
+  it("shows the first two labels and folds the rest into a +N chip", () => {
+    render(
+      <CardItem
+        card={{ ...baseCard, labels: ["tokens", "providers", "prompt-injectie", "dispatch"] }}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("tokens")).not.toBeNull();
+    expect(screen.getByText("providers")).not.toBeNull();
+    expect(screen.queryByText("prompt-injectie")).toBeNull();
+    const overflow = screen.getByTestId("labels-overflow-badge");
+    expect(overflow.textContent).toBe("+2");
+    // Nothing is lost: the folded labels are named in the tooltip.
+    expect(overflow.getAttribute("title")).toBe("prompt-injectie, dispatch");
+  });
+
+  it("renders no +N chip when the card has two labels or fewer", () => {
+    render(
+      <CardItem card={{ ...baseCard, labels: ["error", "kanban"] }} onOpen={() => {}} />,
+    );
+    expect(screen.queryByTestId("labels-overflow-badge")).toBeNull();
+  });
+
+  it("keeps quick-actions out of the clipped metadata row", () => {
+    // A half-clipped button is a button you cannot click.
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "intake" }}
+        onOpen={() => {}}
+        onPromote={vi.fn()}
+      />,
+    );
+    const metaRow = screen.getByTestId("card-meta-row");
+    const promote = screen.getByTestId("promote-to-project-quick-action");
+    expect(metaRow.contains(promote)).toBe(false);
+  });
+});
+
 describe("CardItem To Resume auto-resume badge", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -268,7 +359,20 @@ describe("CardItem ReadyStateBadge", () => {
     expect(impeded.getAttribute("title")).toBe("Waiting on a human decision");
   });
 
-  it("renders a 'Completed' badge when readyState='completed' is supplied", () => {
+  it("renders a 'Completed' badge when readyState='completed' is supplied off the Done column", () => {
+    render(
+      <CardItem card={baseCard} readyState="completed" onOpen={() => {}} />,
+    );
+    const completed = screen.getByText("Completed");
+    expect(completed).not.toBeNull();
+    expect(completed.getAttribute("title")).toBe("Work is done");
+  });
+
+  // Kanban card 1fafd87c: the ✅ Done badge and the "Completed" chip are the
+  // same fact, and `readyState="completed"` is set iff the column is Done
+  // (KanbanPage.tsx:243-245) — so on a Done card the chip is pure duplicate
+  // height on the column that holds the most cards.
+  it("suppresses the duplicate 'Completed' chip on a Done card", () => {
     render(
       <CardItem
         card={{ ...baseCard, column: "Done" }}
@@ -276,9 +380,37 @@ describe("CardItem ReadyStateBadge", () => {
         onOpen={() => {}}
       />,
     );
-    const completed = screen.getByText("Completed");
-    expect(completed).not.toBeNull();
-    expect(completed.getAttribute("title")).toBe("Work is done");
+    expect(screen.getByTestId("done-badge")).not.toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
+  });
+
+  it("suppresses the generic 'Impeded' chip when a specific impediment status is shown", () => {
+    render(
+      <CardItem
+        card={{
+          ...baseCard,
+          column: "Impediment",
+          impediment_status: "needs_answer",
+        }}
+        readyState="impeded"
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("impediment-status-badge")).not.toBeNull();
+    expect(screen.queryByText("Impeded")).toBeNull();
+  });
+
+  it("keeps the 'Impeded' chip when the card has no specific impediment status", () => {
+    // Older cards have no op-log-derived status; the generic chip is then the
+    // only signal that the card is blocked, so it must survive.
+    render(
+      <CardItem
+        card={{ ...baseCard, column: "Impediment", impediment_status: null }}
+        readyState="impeded"
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByText("Impeded")).not.toBeNull();
   });
 
   it("omits the ready-state badge entirely when no readyState prop is passed", () => {

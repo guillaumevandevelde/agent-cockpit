@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Card, Column as Col, KanbanColumn } from "../types";
 import type { ReadyState } from "./ReadyStateBadge";
 import { CardItem } from "./CardItem";
@@ -39,6 +40,8 @@ export function Column({
   subtaskCounts,
   projectPath,
   onPromote,
+  collapsed = false,
+  onToggleCollapsed,
 }: {
   column: Col;
   kanbanColumn?: KanbanColumn;
@@ -57,6 +60,12 @@ export function Column({
   // only when this is set AND the card's column is "intake" — keeps the
   // button out of the way on every other column.
   onPromote?: (c: Card) => void;
+  // Rail mode: the lane shrinks to a ~40px vertical strip that still shows the
+  // name + count and still accepts card drops. Seven full-width lanes never fit
+  // a laptop viewport (7 × 224px + gaps = 1640px), so the lanes an operator is
+  // not using right now give their width back to the ones they are.
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -68,9 +77,20 @@ export function Column({
 
   return (
     <div
-      className={`flex-1 min-w-64 bg-muted/40 rounded-lg p-2 transition-colors flex flex-col min-h-0 ${
+      className={`${
+        collapsed
+          ? "w-10 shrink-0 cursor-pointer"
+          // `basis-56` is the lane's preferred width (224px) and `min-w-52`
+          // (208px) is how far flexbox may squeeze it to keep the whole board
+          // on screen. That 16px of give is what turns 7 lanes at 1440x900
+          // from "always horizontally scrolling" into "fits" — the board only
+          // scrolls sideways once even the squeezed lanes don't fit.
+          : "flex-1 min-w-52 basis-56"
+      } bg-muted/40 rounded-lg p-2 transition-colors flex flex-col min-h-0 ${
         dragOver ? "ring-2 ring-primary/50" : ""
       }`}
+      data-testid={`kanban-column-${column}`}
+      data-collapsed={collapsed ? "true" : "false"}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -92,6 +112,23 @@ export function Column({
         clearDrag();
       }}
     >
+      {collapsed ? (
+        // Rail: vertical name + count, click anywhere to reopen. The lane keeps
+        // its drop handlers (see the outer div) so dragging a card onto a closed
+        // lane still moves it there.
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          className="flex flex-1 min-h-0 w-full flex-col items-center gap-2 rounded text-xs font-semibold uppercase text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          data-testid={`kanban-column-expand-${column}`}
+          title={`${column} (${cards.length}) — klik om uit te klappen`}
+        >
+          <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="shrink-0 tabular-nums">{cards.length}</span>
+          <span className="[writing-mode:vertical-rl] truncate">{column}</span>
+        </button>
+      ) : (
+        <>
       <div
         draggable={!!kanbanColumn}
         onDragStart={(e) => {
@@ -100,9 +137,32 @@ export function Column({
             onDragStartColumn?.(kanbanColumn.id);
           }
         }}
-        className="px-1 pb-2 text-xs font-semibold uppercase text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0"
+        className="flex items-center gap-1 px-1 pb-2 text-xs font-semibold uppercase text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0"
       >
-        {column} <span className="ml-1">({cards.length})</span>
+        {/* The name truncates, the count never does — a header reading
+            "AWAITING SUBTASKS (1…" is worse than a truncated name. */}
+        <span className="min-w-0 truncate" title={column}>
+          {column}
+        </span>
+        <span className="shrink-0 tabular-nums">({cards.length})</span>
+        <span className="flex-1" />
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={(e) => {
+              // The header is a drag handle for column reordering; a click on
+              // the collapse chevron must not start or be read as that drag.
+              e.stopPropagation();
+              onToggleCollapsed();
+            }}
+            className="shrink-0 rounded p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            data-testid={`kanban-column-collapse-${column}`}
+            title={`${column} inklappen`}
+            aria-label={`${column} inklappen`}
+          >
+            <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )}
       </div>
       <div className="overflow-y-auto flex-1 min-h-0">
         {cards.map((c, i) => {
@@ -137,6 +197,8 @@ export function Column({
         })}
         {dropIndex === cards.length && <div className="h-0.5 bg-primary rounded mb-2" />}
       </div>
+        </>
+      )}
     </div>
   );
 }
