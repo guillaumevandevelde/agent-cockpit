@@ -138,6 +138,34 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "conflict-set enumeration",
         'git -C "$WT" diff --name-only --diff-filter=U',
     ),
+    # Carve-out must accept a non-empty subset of {README.md, llms.txt},
+    # not the exact pair — a conflict in only one of the two is the same
+    # class as both, and both files are regenerated from frontmatter
+    # regardless (kanban card 72db7429…). The previous
+    # `[ "$CONFLICTED" != "$EXPECTED" ]` exact-equality check rejected the
+    # subset and forced a fallback to report_impediment. A subset idiom
+    # (e.g. `comm -23` to surface non-generated paths) is the
+    # machine-checkable predicate that supersedes it.
+    (
+        "conflict-set subset check (non-generated exclusion)",
+        "comm -23",
+    ),
+    # README.md is partially generated: only the block between
+    # `BEGIN GENERATED DOC INDEX` and `END GENERATED DOC INDEX` is owned
+    # by `scripts/generate-doc-index.py`. The surrounding hand-curated
+    # prose (feature → canonical-doc mapping, "Regels", etc.) must NOT
+    # be silently clobbered by the regenerate. The carve-out therefore
+    # verifies that any conflict hunks in README.md all lie between
+    # those markers — anything outside still falls through to
+    # report_impediment (kanban card 72db7429…).
+    (
+        "README marker-boundary check (BEGIN side)",
+        "BEGIN GENERATED DOC INDEX",
+    ),
+    (
+        "README marker-boundary check (END side)",
+        "END GENERATED DOC INDEX",
+    ),
     # Concrete resolution command for the carved-out conflict files. The
     # abstract "keep the generated files from the merge result" wording
     # that this replaced (kanban card efb8187b…) had no operational meaning
@@ -281,6 +309,19 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     )
     assert any(c == '"$WT"/scripts/generate-doc-index.py' for c in commands), (
         "invariants list lost the worktree-path script invocation command"
+    )
+    # Subset + marker-boundary invariants (kanban card 72db7429…). The
+    # exact-equality `[ "$CONFLICTED" != "$EXPECTED" ]` check rejected
+    # the legitimate subset of {README.md, llms.txt}; the new predicate
+    # is a subset exclusion (`comm -23` over the expected set) plus a
+    # marker-boundary check for README.md conflicts. Pin both so the
+    # carve-out can't silently regress to the strict exact-equality
+    # form.
+    assert any("comm -23" in c for c in commands), (
+        "invariants list lost the conflict-set subset check (comm -23)"
+    )
+    assert any("BEGIN GENERATED DOC INDEX" in c for c in commands), (
+        "invariants list lost the README marker-boundary check"
     )
     # Remote-branch cleanup (kanban card 3027671c…). Without it the direct
     # route leaks a merged branch onto `origin` on every single ship.
@@ -749,4 +790,95 @@ def test_carve_out_in_recovery_path_detects_unconditional_exit() -> None:
     assert "fi" in reason and "prematurely" in reason, (
         f"unexpected failure reason for the fake mirror: {reason!r}; "
         f"expected a premature-`fi` diagnosis."
+    )
+
+
+# Carve-out exact-equality anti-pattern (kanban card 72db7429…). The
+# previous predicate `[ "$CONFLICTED" != "$EXPECTED" ]` rejected any
+# subset of {README.md, llms.txt} — a conflict in only one file was
+# treated as a handwritten conflict and forced a report_impediment
+# fallback. The new predicate must allow non-empty subsets, so the
+# exact-equality form must be GONE from every mirror. Pinned as an
+# explicit anti-presence so a future editor who reverts the carve-out
+# to the exact-equality shape trips this test on the next CI run.
+EXACT_EQUALITY_ANTI_PATTERN = '[ "$CONFLICTED" != "$EXPECTED" ]'
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_carve_out_does_not_use_strict_exact_equality(source_name: str) -> None:
+    """The carve-out must NOT use `[ "$CONFLICTED" != "$EXPECTED" ]`.
+
+    Pins kanban card ``72db7429…``: the previous predicate was a strict
+    set-equality check, which rejected legitimate subsets of
+    ``{docs/cockpit/README.md, docs/cockpit/llms.txt}`` (a conflict in
+    only one of the two) and fell through to ``report_impediment`` even
+    though the regenerate step would have reconciled from the merged
+    frontmatter. The new predicate accepts any non-empty subset and adds
+    a marker-boundary check for ``README.md`` conflicts.
+    """
+    source_text = SOURCES[source_name]()
+    assert EXACT_EQUALITY_ANTI_PATTERN not in source_text, (
+        f"{source_name}: carve-out still uses strict exact-equality "
+        f"({EXACT_EQUALITY_ANTI_PATTERN!r}). A conflict in only "
+        f"README.md or only llms.txt would fall through to "
+        f"report_impediment (kanban card 72db7429…)."
+    )
+
+
+# README marker-boundary positional check (kanban card 72db7429…). The
+# README conflict check must run BEFORE the `checkout --theirs` that
+# clears the merge markers — once cleared, the hunks are gone and the
+# boundary check has nothing to look at. So in the source text:
+# BEGIN_MARKER_REF must appear AFTER the conflict enumeration
+# (`diff --name-only --diff-filter=U`) and BEFORE the carve-out OPEN
+# (`checkout --theirs`). Complement the structural (substring) invariants
+# above with a positional one, mirroring the carve-out recovery-path
+# check from kanban-kaart ``efb8187b…``.
+BEGIN_MARKER_REF = "BEGIN GENERATED DOC INDEX"
+CONFLICT_ENUM = 'git -C "$WT" diff --name-only --diff-filter=U'
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_readme_marker_check_sits_between_enumeration_and_open(
+    source_name: str,
+) -> None:
+    """The README marker check must lie between conflict enumeration and carve-out open.
+
+    Pins the *position* of the marker-boundary check, complementing the
+    *presence* invariant above. The carve-out order is:
+
+        CONFLICTED=$(git -C "$WT" diff --name-only --diff-filter=U ...)
+        <non-empty subset check>
+        <README marker-boundary check (BEGIN/END line numbers)>
+        git -C "$WT" checkout --theirs -- ...
+
+    If the marker check moves after ``checkout --theirs``, the merge
+    markers are already cleared and the check silently no-ops —
+    `report_impediment` never fires for a README conflict outside the
+    generated block. This test catches that order regression.
+    """
+    source_text = SOURCES[source_name]()
+    enum_idx = source_text.find(CONFLICT_ENUM)
+    marker_idx = source_text.find(BEGIN_MARKER_REF)
+    open_idx = source_text.find(CARVE_OUT_OPEN)
+    assert enum_idx != -1, (
+        f"{source_name}: missing conflict enumeration command "
+        f"({CONFLICT_ENUM!r})"
+    )
+    assert marker_idx != -1, (
+        f"{source_name}: missing README marker reference "
+        f"({BEGIN_MARKER_REF!r}) — subset check is wired but the "
+        f"marker-boundary check is not"
+    )
+    assert open_idx != -1, (
+        f"{source_name}: missing carve-out open command "
+        f"({CARVE_OUT_OPEN!r})"
+    )
+    assert enum_idx < marker_idx < open_idx, (
+        f"{source_name}: README marker check is NOT positioned between "
+        f"conflict enumeration and carve-out open. "
+        f"enum_idx={enum_idx}, marker_idx={marker_idx}, open_idx={open_idx}. "
+        f"If the marker check sits after `checkout --theirs`, the merge "
+        f"markers are already cleared and the check silently no-ops "
+        f"(kanban card 72db7429…)."
     )
