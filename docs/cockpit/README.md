@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 108 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 109 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -149,7 +149,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (34)
+### Decision (35)
 
 | Document | Status |
 |---|---|
@@ -166,6 +166,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md) | 🔵 decided |
 | [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md) | 🔵 decided |
 | [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md) | 🔵 decided |
+| [LiteLLM als sidecar — lifecycle, faalgedrag en scope van het kritieke pad](./litellm-sidecar-lifecycle-decision.md) | 🔵 decided |
 | [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md) | 🔵 decided |
 | [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md) | 🔵 decided |
 | [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md) | 🔵 decided |

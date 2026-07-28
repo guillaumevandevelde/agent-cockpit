@@ -386,11 +386,37 @@ Deze beslissing is niet "nooit". Heropen bij een van deze triggers:
 
 ---
 
-## 11. Operationele voorwaarde — hardening-check
+## 11. De herziening van 2026-07-21 — LiteLLM als sidecar
 
-**Deze sectie is de operationele leeswijzer voor §11.2 van de herziening
-(2026-07-21, kaart `27cdc2bd…`)**. §11.2 zelf is elders in dit traject
-vastgelegd; deze §11 is de uitvoeringskant daarvan.
+> **Noot over de nummering (toegevoegd 2026-07-27, kaart `2bfefe22…`).** De
+> herziening van 2026-07-21 heeft wél plaatsgevonden, maar landde uitsluitend als
+> een set kind-kaarten (`8222fee8…`, `66180bc9…`, `d0446fd8…` en de herschreven
+> `2bfefe22…`) — niet als documenttekst. *(De eerste twee zijn op 2026-07-27 van het
+> bord verdwenen; hun inhoud is daarom hieronder uitgeschreven in plaats van
+> doorverwezen.)* Daardoor verwezen die kaarten én
+> [`litellm-pilot-meting.md`](./litellm-pilot-meting.md) naar §11.2/§11.3/§11.5/§11.6
+> terwijl §11 helemaal geen subsecties had. **De subsecties hieronder zijn later
+> opgeschreven dan de citaten die ernaar wijzen**, gereconstrueerd uit het enige
+> echte record (de kaarten). Dit is dezelfde klasse fout als de `§12/V6`-verwijzing
+> die de Herkomst-noot van `2bfefe22…` al signaleerde; ze is hier hersteld in plaats
+> van herhaald.
+
+### 11.1 Uitkomst van de herziening
+
+De conditionele GO uit §6 blijft staan, maar de **backend-keuze valt op LiteLLM in
+plaats van 9router**. Dat is geen nieuwe afweging — §6 benoemde het alternatief al
+letterlijk ("voor de scope die wij overhouden zijn ze functioneel inwisselbaar, en
+dan wint LiteLLM op maturiteit"). De herziening voert die zin uit: de API-key-tier is
+alles wat overblijft na §2.2, en binnen die scope is er geen eigenschap van 9router
+die de keuze nog kan kantelen — wél drie van LiteLLM (Python, institutioneel steviger,
+geen default-aan prompt-mutatie; die laatste is inmiddels gemeten, zie §11.2).
+
+**Lifecycle, faalgedrag en de scope van het kritieke pad zijn géén onderdeel van deze
+sectie** — die zijn apart beslist in
+[`litellm-sidecar-lifecycle-decision.md`](./litellm-sidecar-lifecycle-decision.md)
+(2026-07-27, kaart `2bfefe22…`).
+
+### 11.2 Operationele voorwaarde — hardening-check
 
 De sidecar-GO op een LiteLLM-proxy (§6, vormgelijk aan de MiniMax-tak) staat
 of valt met vijf hardnekkige eigenschappen van die proxy: hij mag de prompt
@@ -421,7 +447,7 @@ bekende `/api/v1/config`-leak); de check waarschuwt luid wanneer 3-5 worden
 overgeslagen in plaats van ze stiekem groen te kleuren.
 
 **Documentatieverplichting.** Het pilot-resultaat (`bbfcb365…`) en het
-schrijven van deze check (§11) zijn onlosmakelijk: zonder een groene check
+schrijven van deze check (§11.2) zijn onlosmakelijk: zonder een groene check
 op een echte LiteLLM is de sidecar-route geen GO. De `iteration-loop verify`-preset
 draait de test van `test_check_litellm_hardening.sh` (33 asserts) als
 end-of-card-gate. Een afwijking in deze suite betekent **niet** "de check ligt
@@ -458,10 +484,82 @@ input per beurt kost dan een warme Anthropic-cache — de sidecar bespaart geen
 tokens, de businesscase moet volledig uit het lagere tarief komen;
 (b) `pip install 'litellm[proxy]'` alleen laat elke auth-afwijzing als HTTP 500
 verschijnen (crash in LiteLLM's eigen exception-handler bij een ontbrekende
-`prisma`), waardoor deze §11-check FAIL't op een correct geconfigureerde proxy —
+`prisma`), waardoor deze §11.2-check FAIL't op een correct geconfigureerde proxy —
 `prisma` hoort in de install-set; (c) de `openai/`-prefix routeert naar de
 OpenAI **Responses API**, die Groq/Cerebras/NIM niet implementeren — de
 provider-entry moet de prefix expliciet configureerbaar maken.
+
+### 11.3 Twee inzet-modi, en de breedte-eis
+
+De product-owner wil goedkope/gratis modellen in **twee modi tegelijk**, niet in
+één:
+
+1. **Vangnet** — onderaan de `subscription_pool`, met drempel. Normaal draait alles
+   op het Anthropic-abonnement; pas bij een bereikte drempel schuift dispatch door.
+2. **Per kolom/persona** — goedkoop werk standaard naar een goedkoop model, complex
+   werk naar Anthropic. Letterlijk: *"op dezelfde manier zoals we vandaag tussen
+   subscriptions en persona's schakelen in de kolommen"* — dus via
+   `card.column_overrides[<kolom>]`.
+
+Beide mechanismen bestáán al (`subscription_pool.py` doet geordende entries met
+per-entry drempel; `PROVIDER_COMPATIBLE` staat in `_ALLOWED_POOL_PROVIDERS`,
+`subscription_pool.py:75-80`). Het werk is bedraden en aantonen, niet ontwerpen — dat
+stond als kaart `66180bc9…` op het bord tot 2026-07-27 en staat er nu niet meer.
+
+**De breedte-eis** die hierbij hoort: één endpoint is geen dekking. De sidecar moet
+meerdere API-key-providers kunnen bedienen als configuratie, niet als code (kaart
+`8222fee8…`, eveneens van het bord verdwenen). De pilot heeft die eis getoetst en
+overeind gelaten, mét één correctie:
+de provider-**prefix** bepaalt welk upstream-endpoint LiteLLM aanroept
+(`openai/` → `/v1/responses`, `groq/`|`cerebras/`|`nvidia_nim/`|`openrouter/` →
+`/v1/chat/completions`), dus de prefix moet expliciet configureerbaar zijn en
+`openai/` is geen veilige default (pilot §6).
+
+Welke **lanes** die twee modi mogen gebruiken — en welke uitdrukkelijk niet — is
+beslist in [`litellm-sidecar-lifecycle-decision.md`](./litellm-sidecar-lifecycle-decision.md) §5.
+
+### 11.4 Wat de herziening met de kaarten deed
+
+De vervolgkaarten uit §9 zijn op 2026-07-21 herschreven van 9router naar LiteLLM.
+Dat raakte de *backend-naam*, niet de *vorm* van het plan: K3 was al bewust
+endpoint-agnostisch opgezet (§6, laatste alinea), dus de herziening kostte
+kaartteksten en geen herontwerp. `333af652…` is vervolgens geland als de
+data-driven `anthropic-compatible` provider — precies één configuratie-rij per
+endpoint, wat de kern van de conditie uit §6 is.
+
+### 11.5 Wat §5's argument 2 wél en niet betekent
+
+§5 wees "integreren als geheel" af op vier gronden, waarvan argument 2 luidt:
+*"Cockpit doet per ontwerp nul LLM-calls."* Dat argument gold tegen **vendoren**, en
+alleen daar — het zegt dat Cockpit geen inference-verantwoordelijkheid moet
+absorberen.
+
+**Tegen een sidecar geldt het niet.** Bij een sidecar doet Cockpit nog steeds nul
+LLM-calls: de gespawnde CLI praat met de proxy, Cockpit zet alleen environment
+variables (`provider_env.py:240-261`). De verantwoordelijkheidsgrens verschuift dus
+niet. Wie deze beslissing heropent, moet dat op §11.6's triggers doen — niet door
+argument 2 opnieuw in te brengen.
+
+*(Ter voorkoming van herhaling: de eerste versie van kaart `2bfefe22…` verwees naar
+een "§12/V6" van dit document. Die sectie heeft nooit bestaan.)*
+
+### 11.6 Heropen-trigger voor de sidecar-route
+
+**Trigger:** werkt de format-translatie niet betrouwbaar voor *agentic* verkeer —
+tool-use, meerdere beurten, streaming — dan valt de route terug op
+Anthropic-native-only en vervalt de sidecar-GO.
+
+**Status: niet getriggerd.** De pilot (`bbfcb365…`) heeft tool-use end-to-end over de
+proxy gedraaid (Read + Edit + Bash, `is_error: false`, bestand op schijf werkelijk
+gewijzigd), prompt-integriteit byte-exact gemeten, en een mid-sessie rate-limit door
+de fallback laten opvangen zonder dat de sessie omviel. De sidecar-route gaat door.
+
+Wat de meting wél veranderde is de *rechtvaardiging*, niet de richting: `cache_read`
+is via de proxy structureel 0, dus de sidecar bespaart geen tokens en elke
+businesscase moet volledig op het tarief van de upstream steunen. Dat is geen
+heropen-trigger — het is een randvoorwaarde die in
+[`litellm-sidecar-lifecycle-decision.md`](./litellm-sidecar-lifecycle-decision.md) §5
+de lane-keuze stuurt.
 
 ---
 
@@ -469,7 +567,7 @@ provider-entry moet de prefix expliciet configureerbaar maken.
 2026-07-19 (`gh api repos/decolua/9router`, `search/issues`, paginering-headers
 voor de PR-telling). De technische feiten in §2 komen uit de repo-tree en
 `next.config.mjs` op commit `0513bf39`, niet uit de README. De tokenbesparings-
-claim in §2.1 is **niet gemeten** en is als zodanig gelabeld. De §11-config-flag-namen
+claim in §2.1 is **niet gemeten** en is als zodanig gelabeld. De §11.2-config-flag-namen
 (`success_callback`, `failure_callback`, `service_callbacks`, `guardrails`,
 `plugins`, `alerting`, `database_url`) zijn geverifieerd tegen de upstream
 LiteLLM-documentatie op 2026-07-21, niet uit de originele kaarttekst overgenomen
