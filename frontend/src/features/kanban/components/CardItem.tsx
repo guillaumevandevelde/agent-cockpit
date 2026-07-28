@@ -42,6 +42,13 @@ const DELIVERABLE_KIND_ICONS: Record<string, string> = {
 
 const DONE_SUMMARY_MAX = 80;
 
+// Board cards render at most this many free-form labels; the rest collapse into
+// a single "+N" chip whose tooltip lists them. Free-form labels were the single
+// biggest driver of card height on the real board — three 10-15 char labels
+// ("tokens", "providers", "prompt-injectie") wrapped the meta row to three
+// lines, so a card spent more vertical space on labels than on its own title.
+const LABELS_SHOWN_MAX = 2;
+
 function isFutureSchedule(scheduledAt: string | null): boolean {
   return !!scheduledAt && new Date(scheduledAt).getTime() > Date.now();
 }
@@ -230,6 +237,25 @@ export function CardItem({
     : null;
   const deliverableChips = isDone ? deliverablesByKind(card.deliverables) : [];
 
+  // Label diet (see LABELS_SHOWN_MAX): show the first two verbatim, fold the
+  // rest into one "+N" chip that names them in its tooltip. Nothing is lost —
+  // the drawer still lists every label.
+  const shownLabels = labels.slice(0, LABELS_SHOWN_MAX);
+  const hiddenLabels = labels.slice(LABELS_SHOWN_MAX);
+
+  // Two ready-state chips are the same fact twice, and both land on the two
+  // fullest columns — so they are the cheapest height to give back:
+  //   - "Completed" next to ✅ Done. `readyState="completed"` is set iff
+  //     `column === "Done"` (KanbanPage.tsx:243-245), so the chip carries no
+  //     information the Done badge doesn't already carry.
+  //   - "Impeded" next to a `needs answer` / `dispatch failed` chip. The
+  //     impediment-status badge is strictly more specific; when it is absent
+  //     (older card without an op-log status) the generic chip still renders.
+  const showReadyState =
+    !!readyState &&
+    !(isDone && readyState === "completed") &&
+    !(isImpediment && readyState === "impeded" && !!impedimentSpec);
+
   // Inceptie-pipeline entry point (kanban card c33b2f14 / facet A). Intake
   // cards are human-only — they never auto-dispatch — but the human can
   // promote them to a brand-new project via the Promote-to-project action.
@@ -263,7 +289,7 @@ export function CardItem({
 
   return (
     <UiCard
-      className={`${CLICKABLE_CARD} p-3 mb-2`}
+      className={`${CLICKABLE_CARD} p-2 mb-1.5`}
       role="button"
       tabIndex={0}
       onClick={() => onOpen(card)}
@@ -275,48 +301,30 @@ export function CardItem({
       }}
       data-card-id={card.id}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1 font-medium text-sm leading-snug line-clamp-2">
-          {card.title}
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-          {isDone && (
-            <Badge
-              variant="secondary"
-              className="text-[10px] font-normal"
-              data-testid="done-badge"
-              title={
-                card.completed_at
-                  ? `Voltooid: ${new Date(card.completed_at).toLocaleString()}`
-                  : "Voltooid"
-              }
-            >
-              &#9989; Done{completedLabel ? ` ${completedLabel}` : ""}
-            </Badge>
-          )}
-          {isToResume && (
-            <Badge
-              variant="outline"
-              className="text-[10px] font-normal border text-muted-foreground"
-              title={autoResumeTooltip}
-            >
-              <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
-              {autoResumeLabel}
-            </Badge>
-          )}
-          {impedimentSpec && (
-            <Badge
-              variant={impedimentSpec.variant}
-              className="text-[10px] font-normal"
-              title={impedimentSpec.title}
-              data-testid="impediment-status-badge"
-              data-impediment-status={impedimentStatus}
-            >
-              <impedimentSpec.Icon className="mr-1 h-3 w-3" aria-hidden="true" />
-              {impedimentSpec.label}
-            </Badge>
-          )}
-        </div>
+      {/* The title owns the full card width and up to five lines. Three changes
+          vs the previous layout, all aimed at "kan niet alles lezen" (kanban
+          card 1fafd87c):
+            - the status badges no longer sit beside the title stealing ~110px
+              of its width on exactly the busiest columns (Done/Impediment);
+            - the clamp went 2 → 5 lines. Measured title lengths on the real
+              board: median 96 chars, p90 130, max 180 — a 2-line clamp cut 38
+              of 49 rendered titles. The clamp is a ceiling, not a reserved
+              height, so a short title still renders one line; 5 is where the
+              measured curve knees (live board, 1440x900: clamp-3 → 27/40 titles
+              cut at a 98px median card, clamp-4 → 12/40 at 115px, clamp-5 →
+              6/40 at the *same* 115px, clamp-6 → 3/40 but one fewer card on
+              screen). Five buys almost all the readability that six does and
+              costs nothing extra in height;
+            - `break-words` keeps a long unbroken token (a backticked flag, a
+              branch name) inside the card instead of widening the lane.
+          The tooltip carries the full title for whatever the ceiling still
+          cuts. */}
+      <div
+        className="font-medium text-sm leading-tight line-clamp-5 break-words"
+        title={card.title}
+        data-testid="card-title"
+      >
+        {card.title}
       </div>
       {isDone && doneSummarySnippet && (
         <div
@@ -327,8 +335,64 @@ export function CardItem({
           {doneSummarySnippet}
         </div>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        {readyState && (
+      {/* Metadata is a scan surface, not a read surface: it stays on ONE line,
+          ordered most-informative-first, and clips instead of wrapping. Before,
+          a card with three labels wrapped this row to three lines and pushed the
+          median card to 144px tall — only 4 of 16 Backlog cards fitted on a
+          1440x900 screen. Every fact here is still available in full in the
+          drawer, and the chips that can be acted on (Redispatch / Promote)
+          live in their own row below so they can never be clipped. */}
+      <div
+        className={
+          "mt-1.5 flex items-center gap-1.5 overflow-hidden text-xs text-muted-foreground [&>*]:shrink-0 " +
+          // The mask turns a hard clip into a fade, so a chip cut off at the
+          // right edge reads as "there is more here" instead of as a rendering
+          // bug. Note the gradient is anchored to the row's *box*, not to where
+          // the chips end: a chip that reaches into the last 24px fades a little
+          // even when the row technically fits. That is the accepted cost of a
+          // pure-CSS fade — the alternative is measuring overflow in JS on every
+          // card, and a slightly soft final chip is cheaper than that.
+          "[mask-image:linear-gradient(to_right,black_calc(100%-1.5rem),transparent)]"
+        }
+        data-testid="card-meta-row"
+      >
+        {isDone && (
+          <Badge
+            variant="secondary"
+            className="text-[10px] font-normal"
+            data-testid="done-badge"
+            title={
+              card.completed_at
+                ? `Voltooid: ${new Date(card.completed_at).toLocaleString()}`
+                : "Voltooid"
+            }
+          >
+            &#9989; Done{completedLabel ? ` ${completedLabel}` : ""}
+          </Badge>
+        )}
+        {isToResume && (
+          <Badge
+            variant="outline"
+            className="text-[10px] font-normal border text-muted-foreground"
+            title={autoResumeTooltip}
+          >
+            <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
+            {autoResumeLabel}
+          </Badge>
+        )}
+        {impedimentSpec && (
+          <Badge
+            variant={impedimentSpec.variant}
+            className="text-[10px] font-normal"
+            title={impedimentSpec.title}
+            data-testid="impediment-status-badge"
+            data-impediment-status={impedimentStatus}
+          >
+            <impedimentSpec.Icon className="mr-1 h-3 w-3" aria-hidden="true" />
+            {impedimentSpec.label}
+          </Badge>
+        )}
+        {showReadyState && readyState && (
           <ReadyStateBadge
             state={readyState}
             blockerTitles={blockerTitles}
@@ -337,6 +401,24 @@ export function CardItem({
             heldSince={heldSince}
           />
         )}
+        {/* Deliverables sit high in the row on purpose: on a Done card "what
+            shipped" is the second thing an operator looks for after the title,
+            so it must never be the chip that gets clipped. */}
+        {card.deliverables.length > 0 &&
+          (isDone ? (
+            <span
+              className="inline-flex items-center gap-1.5"
+              data-testid="done-deliverable-icons"
+            >
+              {deliverableChips.map((c) => (
+                <span key={c.kind} title={`${c.count} ${c.kind}`}>
+                  {c.icon} {c.count}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span>&#128206; {card.deliverables.length}</span>
+          ))}
         {subtasks && subtasks.total > 0 && (
           <Badge
             variant="outline"
@@ -360,7 +442,7 @@ export function CardItem({
             {priority}
           </Badge>
         )}
-        {labels.map((l) => (
+        {shownLabels.map((l) => (
           <Badge
             key={l}
             variant={l === "error" ? "destructive" : "outline"}
@@ -369,6 +451,16 @@ export function CardItem({
             {l}
           </Badge>
         ))}
+        {hiddenLabels.length > 0 && (
+          <Badge
+            variant="outline"
+            className="text-[10px] font-normal"
+            data-testid="labels-overflow-badge"
+            title={hiddenLabels.join(", ")}
+          >
+            +{hiddenLabels.length}
+          </Badge>
+        )}
         {card.analyst_agent_id && (
           <span className="inline-flex items-center gap-1 rounded bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
             🪄 Multi-agent
@@ -395,23 +487,14 @@ export function CardItem({
           </Badge>
         )}
         {card.claimed_by && !readyState && (
-          <span>&#128100; {card.claimed_by}</span>
+          <span className="truncate">&#128100; {card.claimed_by}</span>
         )}
-        {card.deliverables.length > 0 &&
-          (isDone ? (
-            <span
-              className="inline-flex items-center gap-1.5"
-              data-testid="done-deliverable-icons"
-            >
-              {deliverableChips.map((c) => (
-                <span key={c.kind} title={`${c.count} ${c.kind}`}>
-                  {c.icon} {c.count}
-                </span>
-              ))}
-            </span>
-          ) : (
-            <span>&#128206; {card.deliverables.length}</span>
-          ))}
+      </div>
+      {/* Action row. Kept out of the clipped metadata row above: a quick-action
+          that is half-clipped is a quick-action you cannot click. Renders only
+          for the two states that have one, so it costs zero height otherwise. */}
+      {(canRedispatch || (isIntake && onPromote)) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {canRedispatch && (
           <Button
             size="sm"
@@ -452,7 +535,8 @@ export function CardItem({
             Promote to project
           </Button>
         )}
-      </div>
+        </div>
+      )}
     </UiCard>
   );
 }

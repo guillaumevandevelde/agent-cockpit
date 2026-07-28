@@ -348,8 +348,16 @@ describe("KanbanPage ready-state precedence", () => {
         ?.querySelector("[data-ready-state]")
         ?.getAttribute("data-ready-state");
 
-    await waitFor(() => expect(stateOf("card-done")).toBe("completed"));
-    expect(stateOf("card-impeded")).toBe("impeded");
+    await waitFor(() => expect(stateOf("card-impeded")).toBe("impeded"));
+    // A Done card no longer renders a "Completed" chip — it duplicates the ✅
+    // Done badge, so CardItem suppresses it (kanban card 1fafd87c). The
+    // guarantee under test survives: the terminal column must beat the stale
+    // `agent:` claim, so this card must NOT read "in_progress". A regression to
+    // the claim-derived state renders the chip and fails this assertion.
+    expect(stateOf("card-done")).toBeUndefined();
+    expect(
+      document.querySelector('[data-card-id="card-done"] [data-testid="done-badge"]'),
+    ).not.toBeNull();
     expect(stateOf("card-in-progress")).toBe("in_progress");
     expect(stateOf("card-missing-dep")).toBe("missing_dep");
     expect(stateOf("card-dependent")).toBe("dependent");
