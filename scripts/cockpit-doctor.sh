@@ -15,6 +15,11 @@
 #   7. orphan bridge sessions — Cockpit-spawned tmux sessions with no live kanban claim
 #   8. litellm sidecar — opt-in: `PASS` wanneer geen sidecar, anders `WARN` bij
 #                         hardening-FAILs uit scripts/check-litellm-hardening.sh
+#   9. CI health       — opt-in: `PASS` wanneer geen live `gh` auth, anders
+#                         een WARN uit scripts/check-ci-health.sh wanneer een
+#                         recente Actions-run niet echt draaide (billing-
+#                         block-signaal) of wanneer N opeenvolgende quality
+#                         runs op master rood zijn
 #
 # Usage: scripts/cockpit-doctor.sh
 set -uo pipefail
@@ -35,6 +40,19 @@ crit() { printf '  %sFAIL%s %s\n' "$red" "$rst" "$1"; worst=2; }
 tree_count() { git ls-tree -r --name-only "$1" 2>/dev/null | wc -l | tr -d ' '; }
 
 printf '%scockpit-doctor%s  (%s)\n' "$bold" "$rst" "$ROOT"
+
+# Pre-compute CI-health once (used by check 9 below). Done up here so a
+# failed/missing `gh` auth only costs one `gh` call, not one per check.
+# `gh auth status` exits non-zero when not logged in; that's our opt-in
+# gate — a box without a gh session shouldn't spam doctor with WARNs.
+CI_HEALTH_OUT=""
+CI_HEALTH_RAN=0
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  if [ -x "$ROOT/scripts/check-ci-health.sh" ]; then
+    CI_HEALTH_OUT="$("$ROOT/scripts/check-ci-health.sh" 2>/dev/null || true)"
+    CI_HEALTH_RAN=1
+  fi
+fi
 
 # 1. bare-sanity
 if [ "$(git config core.bare)" = "true" ] && [ -f "$ROOT/CLAUDE.md" ]; then
@@ -138,6 +156,31 @@ else
         warn "litellm sidecar hardening: $HARDENING_FAILS FAIL(s) — run scripts/check-litellm-hardening.sh --strict (with --config-yaml $LITELLM_CONFIG_PATH) for details."
     else
         pass "litellm sidecar hardening clean (no FAILs reported; reachability included)."
+    fi
+fi
+
+# 9. CI health (opt-in, mirrors check 8's pattern). Delegates to
+# scripts/check-ci-health.sh, which itself can WARN on two failure modes:
+#   - recent run with conclusion=failure AND empty job steps (the Actions
+#     billing-block / runner-outage signature — NOT a test failure)
+#   - N consecutive red quality.yml runs on master (the "CI will catch it"
+#     assumption silently becoming false — kanban card 4cae38ff…)
+# `gh` auth + the script being present are both required; otherwise we
+# stay quiet (a CI-less box shouldn't spam doctor with WARNs). Count
+# WARNING: lines (the script's only hit marker — its `OK:` lines are
+# noise from the doctor's point of view). Same ANSI-strip pattern as
+# check 8: `WARNING:` here is followed by `\x1b[0m`, so the literal-text
+# grep on `WARNING:` works after stripping.
+if [ "$CI_HEALTH_RAN" -eq 0 ]; then
+    pass "no gh auth or check-ci-health.sh missing (CI health check skipped — opt-in)."
+else
+    CI_HEALTH_WARNS=$(printf '%s\n' "$CI_HEALTH_OUT" \
+        | sed 's/\x1b\[[0-9;]*m//g' \
+        | grep -cE '^WARNING:' || true)
+    if [ "${CI_HEALTH_WARNS:-0}" -gt 0 ]; then
+        warn "CI health: $CI_HEALTH_WARNS WARNING(s) from scripts/check-ci-health.sh — run it directly for details (a billing-block / N-red-run warning means \"CI is the gate\" is no longer trustworthy)."
+    else
+        pass "CI health clean (no infra-block, no failure threshold reached)."
     fi
 fi
 
