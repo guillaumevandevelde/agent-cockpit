@@ -1728,10 +1728,29 @@ class ActiveSessionsResponse(BaseModel):
 #     Not project-scoped: ``docs/cockpit/`` is the platform-wide SSOT,
 #     shared across every project the SPA might ask about.
 #
-# No ``spec_doc`` join: that would require a producer for the anchor
-# (currently 0× populated, kanban card bb1f61aa is the deferred follow-up).
-# The shape is intentionally flat so the SPA can show both columns without
-# deciding up-front which store each row belongs to.
+# B↔C correlation (kanban plan 2026-07-28-plans-b-c-correlation, Task 1):
+# ``CardPlanItem.spec_doc`` mirrors the card's ``metadata["spec_doc"]`` so
+# the SPA can render a clickable doclink on each B row, and
+# ``DocSpecItem.implemented_by`` lists every card in the project whose
+# ``metadata["spec_doc"]`` exactly equals the doc path (so the SPA can
+# render an "implemented by cards" chip-list on each C row). URL anchors
+# are normalised to ``None`` on the B side and excluded from the C side
+# (no repo-relative path to match). Cards with no ``plan``/``plan_ref``
+# deliverable can still contribute to ``implemented_by`` — the join is
+# a LEFT JOIN, not an INNER JOIN.
+class CorrelatedCardItem(BaseModel):
+    """A single card that implements (or updates) a ``docs/cockpit/`` doc.
+
+    Embedded in ``DocSpecItem.implemented_by`` so the SPA can render the
+    "implemented by" chip-list next to each C row and link each chip back
+    to the kanban board. Sorted deterministically (by ``card_id``) so the
+    rendered chip order is stable across requests.
+    """
+
+    card_id: str
+    card_title: str
+
+
 class CardPlanItem(BaseModel):
     """One row in the B section — a single ``plan``/``plan_ref`` deliverable
     on a card, joined with the card's title so the SPA can render the row.
@@ -1747,6 +1766,13 @@ class CardPlanItem(BaseModel):
     # via the existing ``/cards/{cid}`` route when a row is expanded.
     excerpt: str
     created_at: datetime
+    # Repo-relative path of the ``docs/cockpit/`` doc this card implements
+    # (read from ``card.metadata["spec_doc"]``). ``None`` when the card has
+    # no ``spec_doc`` anchor OR when the anchor is a URL — both are
+    # intentionally non-correlatable, see the read-side filter in
+    # ``api/v1/plans.py``. The SPA uses this to render the clickable
+    # doclink on the B row that navigates to the matching C row.
+    spec_doc: str | None = None
 
 
 class DocSpecItem(BaseModel):
@@ -1759,14 +1785,23 @@ class DocSpecItem(BaseModel):
     title: str  # H1 line (with "# " prefix preserved)
     modified_at: str  # ISO8601 UTC
     size_bytes: int
+    # Cards whose ``metadata.spec_doc`` exactly equals ``path``. Built from
+    # the same project-scoped LEFT JOIN as the B section so we don't read
+    # the kanban DB twice; empty when the project has no cards claiming
+    # this doc (or when every claim is filtered out — URLs, whitespace).
+    implemented_by: list[CorrelatedCardItem] = []
 
 
 class PlansOverviewResponse(BaseModel):
     """Aggregated read-only view of the two real plan/spec stores.
 
-    B and C are returned as independent sections. No correlation field
-    is added at the top level — the ``spec_doc`` join is a separate
-    follow-up (kanban card bb1f61aa).
+    B and C are returned as independent top-level sections; the B↔C
+    correlation lives INSIDE each row (``CardPlanItem.spec_doc`` on the
+    B side, ``DocSpecItem.implemented_by`` on the C side) so the SPA can
+    render the link without re-reading the card or running its own join.
+    See kanban plan 2026-07-28-plans-b-c-correlation (Task 1) for the
+    exact-match semantics; URL/wrong-path ``spec_doc`` values are
+    filtered out and never appear in either side.
     """
 
     project_key: str

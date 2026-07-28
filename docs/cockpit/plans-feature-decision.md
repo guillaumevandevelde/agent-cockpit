@@ -237,6 +237,22 @@ Dit is dezelfde pathologie als `kanban_plans`: infra zonder producent. Optie B b
 haalbaar (B en C zijn los prima afleidbaar), maar wie de **B↔C-join** wil, moet eerst
 een producent voor `spec_doc` regelen — dat is echt werk, geen "geen nieuw datamodel".
 
+> ✅ **Geïmplementeerd (kaart `725fbdd35bfa413e98c24315d0a174d1`)** — adoptie-gate uit
+> `spec-doc-producer-design.md` §6.1 gemeten en **doorstaan**: 10 kaarten dragen nu een
+> niet-lege `spec_doc` over 8 `docs/cockpit/*.md`-docs (gemeten op
+> `~/.claude-registry/kanban.db` met de `json_extract(metadata, '$.spec_doc')`-query
+> uit §10). Daarmee is het "0-kaarten" lucht-faalpad uit deze paragraaf verleden tijd;
+> de correlatie kan eindelijk ergens naar verwijzen. De join zelf is geschied in twee
+> commits: Task 1 (`/plans/overview` endpoint, LEFT JOIN op `KanbanDeliverable.kind`,
+> `CorrelatedCardItem` / `CardPlanItem.spec_doc` / `DocSpecItem.implemented_by` in
+> `schemas.py` + `plans.py`) en Task 2 (frontend `PlansPage` toont
+> `ImplementedByChips` op C-rijen + `SpecDocLink` op B-rijen, `PlanDetailPage` haalt
+> de overview parallel aan de doc-body). URL-`spec_doc` normaliseert naar `None` op de
+> B-zijde en telt niet mee in `implemented_by`. Dedup per `(path, card_id)`, sortering
+> op `card_id`. Vitest-dekking 16/16 groen op de plans-features; backend pytest
+> `test_api_plans_overview.py` 15/16 (1 pre-existing terminology-frontmatter failure
+> buiten scope). Zie §10 voor de vervolgkaart-status.
+
 **3. De beslissing stond ten onrechte als genomen geboekt.** `decisions.md` voerde deze
 vraag sinds de register-backfill (`4101d56`, 2026-07-15) op met uitkomst
 "**Herbestemmen.**", terwijl §7 expliciet op een go/no-go wacht die nooit kwam. Omdat
@@ -348,3 +364,12 @@ plan-attachment):
 Kaart 4 is bewust `work_type=analysis` en losgekoppeld: de join wacht op een
 `spec_doc`-producent en blokkeert de kern-levering (1-3) niet. Daarmee is de
 "gedefinieerd, geen producent"-val uit §8.2 vermeden i.p.v. herhaald.
+
+> ✅ **Status van de B↔C-join.** Kaart 4 (`bb1f61aa…`) leverde de **decompositie** van
+> de join: producent-kaart `c0cccd74…` (analyst zet `spec_doc` op kind-kaarten) +
+> correlatie-kaart `725fbdd35bfa413e98c24315d0a174d1` met adoptie-gate. Die laatste is
+> nu geïmplementeerd (zie §8.2 hierboven voor details + gemeten adoptie). De
+> `spec_doc`-join leeft dus niet meer "op lucht": er is een producent **én** een
+> gemeten niet-triviale populatie (10 kaarten / 8 docs) waarop de correlatie zinvol
+> grijpt. De oorspronkelijke "uitstel tot na een producent"-randvoorwaarde is daarmee
+> ingelost; de kanban-kaart `725fbdd3…` is shipbaar.
