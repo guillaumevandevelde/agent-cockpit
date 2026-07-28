@@ -58,6 +58,7 @@ bulk-sync vallen:
 | `ensure_intake_column` (`service.py:558`) | Iedere keer een intake-kaart wordt aangemaakt op een project dat nog geen `intake`-rij had | Voegt `intake` aan `kanban_columns` toe met `rank="0000"` (linksboven) en verschuift bestaande rijen +1 — idempotent, dus dubbel-aanroep is veilig. |
 | `ensure_analyst_column` (`service.py:531`) | Iedere keer een kaart een `analyst_agent_id` krijgt op een project dat nog geen `analyst`-rij had | Idempotent, rank net vóór `Done` zodat de analyst-kolom op de natuurlijke plek tussen agent-kolommen en Done landt. |
 | `ensure_awaiting_subtasks_column` (`service.py:635`) | Vanuit de `move_card`-parkeerlogica, de eerste keer een kaart écht in `Awaiting Subtasks` parkeert op een project dat nog geen rij had | Idempotent, rank net vóór `Done` — zelfde beleid als `ensure_analyst_column`. |
+| `ensure_fixed_columns` (`service.py`) | Bij élke `GET /api/v1/kanban/columns` — dus zodra iemand het bord opent (kaart `4f0677c7…`) | Vult voor een *enabled* bord (≥1 rij) alle ontbrekende `COLUMNS`-namen aan: `intake` via `ensure_intake_column` (links), de rest achteraan. Idempotent; schrijft alleen bij de eerste load na een gat, daarna is de poll read-only. Een bord zonder rijen (nooit enabled) blijft ongemoeid. |
 
 > **De "ensure_intake_column"-bugklasse** — een project dat `enable` draaide
 > **vóór** `intake` aan `COLUMNS` werd toegevoegd, heeft geen `intake`-rij in
@@ -67,6 +68,20 @@ bulk-sync vallen:
 > [`scripts/check-kanban-conventions.sh`](../../scripts/check-kanban-conventions.sh)
 > detecteert deze klasse voor elk project dat wel een `kanban_columns`-rij heeft
 > maar niet alle namen uit `COLUMNS`.
+>
+> **Sinds kaart `4f0677c7…` repareert het bord zichzelf.** `GET
+> /api/v1/kanban/columns` roept `service.ensure_fixed_columns` aan: een project
+> met ≥1 `kanban_columns`-rij krijgt idempotent een rij voor élke naam uit
+> `COLUMNS` (`intake` links via `ensure_intake_column`, de rest achteraan
+> aangevuld). Dat is exact de invariant die het validatiescript al toetste — die
+> meldde dit bord als stale (*"missing fixed columns: intake, To Resume"*)
+> terwijl 25 kaarten in `To Resume` op geen enkele lane stonden, en de toolbar
+> ze wél meetelde in `Dispatch all (41)`. Een project **zonder** rijen is nooit
+> enabled en blijft met rust — `POST /enable` blijft de bewuste actie. Een
+> *niet-vaste* kolom met kaarten en zonder rij (agent-kolom waarvan de rij is
+> verwijderd, legacy-naam als `Doing`) kan de backend niet verzinnen: `Board.tsx`
+> tekent die als expliciet gemarkeerde "unconfigured"-lane, zodat zo'n kaart
+> zichtbaar blijft in plaats van stil te verdwijnen.
 
 > **`Awaiting Subtasks` is een parkeerkolom, geen agent-kolom.** Een `move_card`
 > naar `Done` op een kaart met ≥1 kind-kaart (`parent_card_id == card.id`) landt
@@ -547,7 +562,10 @@ valideert dat elk project dat `kanban` enabled heeft (≥1 `kanban_columns`-rij)
 rij heeft voor elke naam uit `COLUMNS`. Dit vangt de
 "project-enabled-vóór-`intake`-toegevoegd"-klasse van bugs voordat ze aan de
 oppervlakte komen in de UI. Draai het lokaal of in CI na elke wijziging aan
-`COLUMNS` of `ensure_*_column` helpers.
+`COLUMNS` of `ensure_*_column` helpers. Sinds kaart `4f0677c7…` herstelt
+`ensure_fixed_columns` deze drift bij het openen van het bord, dus een hit hier
+betekent nu: dat bord is nog niet geladen sinds het gat ontstond (of het project
+is nooit enabled — dan is er geen enkele rij en meldt het script niets).
 
 [`scripts/check-decision-register.sh`](../../scripts/check-decision-register.sh)
 valideert dat elk `docs/cockpit/*-decision.md` gelinkt is vanuit het beslis-register

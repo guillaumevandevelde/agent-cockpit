@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Card, KanbanColumn } from "../types";
 import { Column, type CardMeta, type SubtaskSummary } from "./Column";
 
@@ -53,6 +53,24 @@ export function Board({
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const [collapseOverrides, setCollapseOverrides] = useState(readCollapseOverrides);
 
+  // Column names that cards are sitting on but that have no `kanban_columns`
+  // row. Before kaart 4f0677c7… these cards fell out of every lane and were
+  // invisible on the board — while the toolbar kept counting them ("Dispatch
+  // all (41)" against 18 visible Backlog cards, because the 25 cards in
+  // `To Resume` had no lane). The backend now backfills the *fixed* columns
+  // (`ensure_fixed_columns`), which covers the canonical names; this renders
+  // whatever is left — an agent column whose row was deleted, a legacy name —
+  // as a flagged lane instead of dropping it. Sorted so lane order is stable
+  // across polls.
+  const unconfiguredColumns = useMemo(() => {
+    const known = new Set(columns.map((c) => c.name));
+    const seen = new Set<string>();
+    for (const card of cards) {
+      if (!known.has(card.column)) seen.add(card.column);
+    }
+    return [...seen].sort();
+  }, [columns, cards]);
+
   const toggleCollapsed = useCallback((columnId: string, currentlyCollapsed: boolean) => {
     setCollapseOverrides((prev) => {
       const next = { ...prev, [columnId]: !currentlyCollapsed };
@@ -96,6 +114,32 @@ export function Board({
             onPromote={onPromote}
             collapsed={collapsed}
             onToggleCollapsed={() => toggleCollapsed(col.id, collapsed)}
+          />
+        );
+      })}
+      {/* Lanes without a column row, rendered last so they never displace the
+          configured board. They always hold ≥1 card by construction, so they
+          never start collapsed; the operator can still rail them by hand. A
+          card dropped out of one lands on a real column and the lane
+          disappears on the next poll. */}
+      {unconfiguredColumns.map((name) => {
+        const columnCards = cards.filter((c) => c.column === name);
+        const key = `unconfigured:${name}`;
+        const collapsed = collapseOverrides[key] ?? false;
+        return (
+          <Column
+            key={key}
+            column={name}
+            cards={columnCards}
+            unconfigured
+            onOpen={onOpen}
+            onDropCardAt={onDropCardAt}
+            cardMeta={cardMeta}
+            subtaskCounts={subtaskCounts}
+            projectPath={projectPath}
+            onPromote={onPromote}
+            collapsed={collapsed}
+            onToggleCollapsed={() => toggleCollapsed(key, collapsed)}
           />
         );
       })}

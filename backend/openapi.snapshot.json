@@ -26409,6 +26409,7 @@
     },
     "/api/v1/kanban/columns": {
       "get": {
+        "description": "The board's lane list. Also the one place that repairs a board whose\nfixed columns drifted out of `kanban_columns` \u2014 a card on a column with no\nrow renders in no lane at all (kaart 4f0677c7\u2026). `ensure_fixed_columns`\nwrites only on the first load after a name goes missing, so the board's 5s\npoll stays read-only in steady state; there is no migration system to do\nthis at deploy time.",
         "operationId": "columns_api_v1_kanban_columns_get",
         "parameters": [
           {

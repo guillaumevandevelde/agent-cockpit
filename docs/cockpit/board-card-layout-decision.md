@@ -222,3 +222,9 @@ nabootst, plus een Playwright-screenshot in licht en donker.
   `To Resume` en `intake`, samen 25+ kaarten) verschijnen nergens. Dat is een
   echte "kan niet alles lezen"-oorzaak, maar een data-/kolomconfiguratieprobleem
   in plaats van een layoutprobleem — apart gefiled.
+  ✅ Geïmplementeerd (kaart `4f0677c7…`): `GET /api/v1/kanban/columns` vult de
+  vaste `COLUMNS`-rijen van een enabled bord idempotent aan
+  (`service.ensure_fixed_columns`), en `Board.tsx` tekent elke overige kolom
+  waar kaarten op staan als expliciet gemarkeerde "unconfigured"-lane. Het
+  lane-breedtebudget uit §3c draagt dit: een lege lane is een 40px-rail, dus
+  `intake` + `To Resume` erbij kost 80px, geen twee volle lanes.

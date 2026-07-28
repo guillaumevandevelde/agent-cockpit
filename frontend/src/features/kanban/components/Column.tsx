@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Card, Column as Col, KanbanColumn } from "../types";
 import type { ReadyState } from "./ReadyStateBadge";
 import { CardItem } from "./CardItem";
@@ -42,6 +42,7 @@ export function Column({
   onPromote,
   collapsed = false,
   onToggleCollapsed,
+  unconfigured = false,
 }: {
   column: Col;
   kanbanColumn?: KanbanColumn;
@@ -66,9 +67,16 @@ export function Column({
   // not using right now give their width back to the ones they are.
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  // This lane has no `kanban_columns` row — it exists only because cards are
+  // sitting on that column name (kaart 4f0677c7…). Rendering it flagged beats
+  // the previous behaviour, where such cards fell out of every lane and were
+  // invisible while the toolbar kept counting them.
+  unconfigured?: boolean;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+
+  const unconfiguredHint = `"${column}" heeft geen kolomrij — deze ${cards.length} kaart(en) horen bij geen enkele ingestelde lane. Maak de kolom aan via Columns of versleep de kaarten naar een bestaande lane.`;
 
   const clearDrag = () => {
     setDragOver(false);
@@ -90,10 +98,11 @@ export function Column({
           // realistic width.
           : "flex-1 min-w-52"
       } bg-muted/40 rounded-lg p-2 transition-colors flex flex-col min-h-0 ${
-        dragOver ? "ring-2 ring-primary/50" : ""
+        dragOver ? "ring-2 ring-primary/50" : unconfigured ? "ring-1 ring-amber-500/60" : ""
       }`}
       data-testid={`kanban-column-${column}`}
       data-collapsed={collapsed ? "true" : "false"}
+      data-unconfigured={unconfigured ? "true" : "false"}
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -124,8 +133,18 @@ export function Column({
           onClick={onToggleCollapsed}
           className="flex flex-1 min-h-0 w-full flex-col items-center gap-2 rounded text-xs font-semibold uppercase text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           data-testid={`kanban-column-expand-${column}`}
-          title={`${column} (${cards.length}) — klik om uit te klappen`}
+          title={
+            unconfigured
+              ? unconfiguredHint
+              : `${column} (${cards.length}) — klik om uit te klappen`
+          }
         >
+          {unconfigured && (
+            <AlertTriangle
+              className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500"
+              aria-hidden="true"
+            />
+          )}
           <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="shrink-0 tabular-nums">{cards.length}</span>
           <span className="[writing-mode:vertical-rl] truncate">{column}</span>
@@ -144,7 +163,17 @@ export function Column({
       >
         {/* The name truncates, the count never does — a header reading
             "AWAITING SUBTASKS (1…" is worse than a truncated name. */}
-        <span className="min-w-0 truncate" title={column}>
+        {unconfigured && (
+          <span
+            data-testid={`kanban-column-unconfigured-${column}`}
+            title={unconfiguredHint}
+            aria-label={unconfiguredHint}
+            className="shrink-0 text-amber-600 dark:text-amber-500"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+          </span>
+        )}
+        <span className="min-w-0 truncate" title={unconfigured ? unconfiguredHint : column}>
           {column}
         </span>
         <span className="shrink-0 tabular-nums">({cards.length})</span>
