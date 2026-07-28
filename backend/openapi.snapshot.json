@@ -2516,6 +2516,498 @@
         "title": "BlueprintUpdate",
         "type": "object"
       },
+      "BoardExportAttachment": {
+        "description": "Attachment metadata only. The binary lives on disk and is *not*\nincluded in the JSON blob \u2014 callers that need the file should rely on\nthe regular backup zip (which now also includes the kanban DB).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "mime_type": {
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "storage_path": {
+            "title": "Storage Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "mime_type",
+          "size_bytes",
+          "storage_path",
+          "created_at"
+        ],
+        "title": "BoardExportAttachment",
+        "type": "object"
+      },
+      "BoardExportCard": {
+        "description": "One card, fully flattened. Every persisted column is surfaced so\nthe JSON is a true snapshot of the board at ``exported_at``. The\n``metadata`` field uses the same alias dance as ``CardResponse`` so\nthe SQLAlchemy attribute (``meta``) and the JSON key (``metadata``)\nstay aligned.",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "analyst_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Agent Id"
+          },
+          "analyst_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analyst Run Id"
+          },
+          "attachments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BoardExportAttachment"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "claimed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed By"
+          },
+          "column": {
+            "title": "Column",
+            "type": "string"
+          },
+          "column_overrides": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Overrides"
+          },
+          "comments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BoardExportComment"
+            },
+            "title": "Comments",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deliverables": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BoardExportDeliverable"
+            },
+            "title": "Deliverables",
+            "type": "array"
+          },
+          "depends_on": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "dispatch_failures": {
+            "default": 0,
+            "title": "Dispatch Failures",
+            "type": "integer"
+          },
+          "dispatch_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Model"
+          },
+          "dispatch_project_folder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Project Folder"
+          },
+          "dispatch_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Provider"
+          },
+          "dispatch_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Session Id"
+          },
+          "dispatch_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatch Started At"
+          },
+          "executor_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executor Agent Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "parent_card_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Card Id"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "string"
+          },
+          "release_without_terminal_move": {
+            "default": 0,
+            "title": "Release Without Terminal Move",
+            "type": "integer"
+          },
+          "resume_project_folder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Project Folder"
+          },
+          "resume_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Session Id"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
+          }
+        },
+        "required": [
+          "id",
+          "project_key",
+          "title",
+          "description",
+          "column",
+          "rank",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BoardExportCard",
+        "type": "object"
+      },
+      "BoardExportComment": {
+        "description": "One comment op harvested from the op-log. Kept minimal \u2014 just the\nsurfaced text + the audit fields (``op_id`` / ``hlc`` / ``created_at``)\nso a re-import can rebroadcast the op.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "hlc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hlc"
+          },
+          "op_id": {
+            "title": "Op Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op_id",
+          "text",
+          "created_at"
+        ],
+        "title": "BoardExportComment",
+        "type": "object"
+      },
+      "BoardExportDeliverable": {
+        "description": "Deliverable row \u2014 same shape as ``DeliverableResponse`` plus a\nstable id so the rows are identifiable across cards in the export.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "ref",
+          "created_at"
+        ],
+        "title": "BoardExportDeliverable",
+        "type": "object"
+      },
+      "BoardExportResponse": {
+        "description": "Envelope for ``GET /api/v1/kanban/export``.\n\n``format_version`` lets future re-import paths detect the wire shape\ninstead of guessing. Bump it when fields are renamed/added/removed.",
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/BoardExportCard"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnResponse"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "exported_at": {
+            "format": "date-time",
+            "title": "Exported At",
+            "type": "string"
+          },
+          "format_version": {
+            "default": 1,
+            "title": "Format Version",
+            "type": "integer"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_key",
+          "exported_at",
+          "columns",
+          "cards"
+        ],
+        "title": "BoardExportResponse",
+        "type": "object"
+      },
       "Body_upload_attachment_api_v1_kanban_cards__cid__attachments_post": {
         "properties": {
           "file": {
@@ -3662,6 +4154,42 @@
             ],
             "title": "Executor Agent Id"
           },
+          "held_blocker": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Blocker"
+          },
+          "held_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Reason"
+          },
+          "held_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Since"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -4101,6 +4629,121 @@
         "title": "CardUpdate",
         "type": "object"
       },
+      "CatalogEntryResponse": {
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "credential_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Name"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "free_evidence_url": {
+            "title": "Free Evidence Url",
+            "type": "string"
+          },
+          "free_measured_on": {
+            "title": "Free Measured On",
+            "type": "string"
+          },
+          "free_notes": {
+            "title": "Free Notes",
+            "type": "string"
+          },
+          "free_tier_kind": {
+            "title": "Free Tier Kind",
+            "type": "string"
+          },
+          "litellm_upstream": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLitellmUpstreamResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name",
+          "provider",
+          "base_url",
+          "model",
+          "credential_name",
+          "free_tier_kind",
+          "free_evidence_url",
+          "free_measured_on",
+          "free_notes",
+          "litellm_upstream"
+        ],
+        "title": "CatalogEntryResponse",
+        "type": "object"
+      },
+      "CatalogListResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntryResponse"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "CatalogListResponse",
+        "type": "object"
+      },
+      "CatalogLitellmUpstreamResponse": {
+        "properties": {
+          "api_base": {
+            "title": "Api Base",
+            "type": "string"
+          },
+          "api_key_env": {
+            "title": "Api Key Env",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "api_base",
+          "api_key_env"
+        ],
+        "title": "CatalogLitellmUpstreamResponse",
+        "type": "object"
+      },
       "ClaimRequest": {
         "properties": {
           "claimed_by": {
@@ -4485,6 +5128,17 @@
               }
             ],
             "title": "Rank"
+          },
+          "token_saver_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Saver Enabled"
           }
         },
         "required": [
@@ -4560,6 +5214,11 @@
           "rank": {
             "title": "Rank",
             "type": "string"
+          },
+          "token_saver_enabled": {
+            "default": false,
+            "title": "Token Saver Enabled",
+            "type": "boolean"
           },
           "updated_at": {
             "format": "date-time",
@@ -4645,6 +5304,17 @@
               }
             ],
             "title": "Rank"
+          },
+          "token_saver_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Saver Enabled"
           }
         },
         "title": "ColumnUpdate",
@@ -14996,6 +15666,32 @@
         "title": "SecurityProfileUpsert",
         "type": "object"
       },
+      "SeedCatalogResponse": {
+        "properties": {
+          "installed": {
+            "title": "Installed",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "skipped_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped Names",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installed",
+          "skipped",
+          "skipped_names"
+        ],
+        "title": "SeedCatalogResponse",
+        "type": "object"
+      },
       "SessionBlock": {
         "description": "5-hour billing block usage.",
         "properties": {
@@ -16680,7 +17376,7 @@
         "type": "object"
       },
       "SubscriptionPoolEntry": {
-        "description": "One entry in the subscription pool (fase 1b).\n\nKaart 8f40d443\u2026: the per-entry ``cli`` field is back and\n**consumed** by the router. ``cli`` is the spawn transport the\nentry targets (``\"claude-code\"``, ``\"codex-cli\"``,\n``\"copilot-cli\"``, ``\"mimo-code\"``, ``\"open-code\"``); ``cli=None``\nfalls back to ``subscription_pool.DEFAULT_POOL_CLI`` so the\ncommon claude-code case keeps building without ceremony. The\npreviously-removed cli field (kaart 0b3ad6e2\u2026) is required again\nso OpenCode/Codex-spawned sessions consult their own quota axis\ninstead of silently riding the claude-code one.\n\n``provider`` is the vendor the CLI authenticates against\n(validated against the same allow-list as the\nactive-subscription-override). ``model`` is optional \u2014 ``None``\nleaves the dispatch precedence chain (column default / card model\n/ persona) to fill it in. ``drempel`` is the fraction (0..1] at\nwhich the router considers this entry \"full\" and spills to the\nnext entry.\n\nLegacy payloads that omit ``cli`` are accepted by the deserialiser\nshim \u2014 the field is back-filled with ``DEFAULT_POOL_CLI`` on read\nso a row written by a pre-kaart-8f40d443 build still loads.",
+        "description": "One entry in the subscription pool (fase 1b).\n\nKaart 8f40d443\u2026: the per-entry ``cli`` field is back and\n**consumed** by the router. ``cli`` is the spawn transport the\nentry targets (``\"claude-code\"``, ``\"codex-cli\"``,\n``\"copilot-cli\"``, ``\"mimo-code\"``, ``\"open-code\"``); ``cli=None``\nfalls back to ``subscription_pool.DEFAULT_POOL_CLI`` so the\ncommon claude-code case keeps building without ceremony. The\npreviously-removed cli field (kaart 0b3ad6e2\u2026) is required again\nso OpenCode/Codex-spawned sessions consult their own quota axis\ninstead of silently riding the claude-code one.\n\n``provider`` is the vendor the CLI authenticates against\n(validated against the same allow-list as the\nactive-subscription-override). ``model`` is optional \u2014 ``None``\nleaves the dispatch precedence chain (column default / card model\n/ persona) to fill it in. ``drempel`` is the fraction (0..1] at\nwhich the router considers this entry \"full\" and spills to the\nnext entry.\n\n``endpoint_name`` is required when ``provider`` is\n``\"anthropic-compatible\"`` and ignored otherwise \u2014 kaart\n27317b4871\u2026 (FCR gap 2) closes the REST-carrier drift that\npreviously dropped this field on the way to ``PoolEntry``, so a\ncompatible pool save via ``POST /api/v1/kanban/subscription-pool``\ncouldn't persist the endpoint slug. Now the field round-trips\nthrough the schema \u2192 entries \u2192 PoolEntry and the\n``set_subscription_pool`` fail-fast check (existence + credential\nresolution) catches misconfiguration at save time.\n\nLegacy payloads that omit ``cli`` are accepted by the deserialiser\nshim \u2014 the field is back-filled with ``DEFAULT_POOL_CLI`` on read\nso a row written by a pre-kaart-8f40d443 build still loads.",
         "properties": {
           "cli": {
             "anyOf": [
@@ -16696,6 +17392,17 @@
           "drempel": {
             "title": "Drempel",
             "type": "number"
+          },
+          "endpoint_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Name"
           },
           "model": {
             "anyOf": [
@@ -17218,6 +17925,24 @@
           "id"
         ],
         "title": "TokenRevokeResponse",
+        "type": "object"
+      },
+      "TokenSaverRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_key",
+          "enabled"
+        ],
+        "title": "TokenSaverRequest",
         "type": "object"
       },
       "ToolConsumption": {
@@ -18141,6 +18866,88 @@
         ]
       }
     },
+    "/api/v1/agent-bridge/platforms/endpoints-catalog": {
+      "get": {
+        "description": "Return the curated free-tier seed catalog (kaart 8222fee8\u2026).\n\nThe catalog is a repo file (``backend/data/free_endpoint_catalog.toml``)\nthat pairs each Anthropic-format endpoint with a free-tier annotation\n(``free_evidence_url`` + ``free_measured_on``) so an operator can decide\nwhich entries are worth installing into their project's\nendpoint-registry. No secrets: ``credential_name`` is a SecretStore\nkey name, not the key value.",
+        "operationId": "list_free_endpoint_catalog_api_v1_agent_bridge_platforms_endpoints_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Free Endpoint Catalog",
+        "tags": [
+          "Agent Bridge"
+        ]
+      }
+    },
+    "/api/v1/agent-bridge/platforms/endpoints-catalog/seed": {
+      "post": {
+        "description": "Bulk-install the seed catalog into the project's endpoint registry.\n\nBy default, entries that already exist under the same ``name`` are left\nalone \u2014 the operator's runtime-config wins over the catalog. Pass\n``?overwrite=true`` to replace existing rows with the catalog values\n(intended for re-seeding after a catalog bump; it will NOT touch any\nSecretStore entries, so credentials survive intact).",
+        "operationId": "seed_free_endpoint_catalog_api_v1_agent_bridge_platforms_endpoints_catalog_seed_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overwrite",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Overwrite",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeedCatalogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Seed Free Endpoint Catalog",
+        "tags": [
+          "Agent Bridge"
+        ]
+      }
+    },
     "/api/v1/agent-bridge/platforms/endpoints/{name}": {
       "delete": {
         "operationId": "delete_endpoint_endpoint_api_v1_agent_bridge_platforms_endpoints__name__delete",
@@ -18386,6 +19193,24 @@
       },
       "post": {
         "operationId": "spawn_session_endpoint_api_v1_agent_bridge_sessions_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -26128,7 +26953,7 @@
     },
     "/api/v1/kanban/cards/{cid}/resolve-impediment": {
       "post": {
-        "description": "Resolve an impediment by dispatching to a specific agent.\n\nComposes the resumed session's `## IMPEDIMENT` prompt section from up to\nthree sources, in the order they appear in `build_card_prompt`:\n\n1. The most recent `**Impediment:**` comment (set by `report_impediment`).\n2. If the card has an answered KanbanGate (the human picked one of the\n   structured options `report_impediment(options=[...])` advertised),\n   that pick is forwarded as `impediment_answer` so the resumed session\n   sees the human's decision as authoritative \u2014 even when the resolver\n   didn't supply an `answer` field of their own.\n3. If `payload.answer` is supplied, it's stamped as a durable\n   `**Resolution:**` comment (free-text path) and read back via\n   `dispatch.extract_impediment_answer` so it survives a re-resolve.\n\nWhen both (2) and (3) are present, the gate pick wins \u2014 it's the more\nrecent, structured decision from the dedicated choice UI.",
+        "description": "Resolve an impediment by parking the card on **Backlog** for the\nauto-dispatch tick to pick up \u2014 *not* by spawning a fresh session\nsynchronously.\n\nKaart af951ad70... (\"Resolve impediment moet niet meteen naar engineer\nkolom maar eerst naar backlog\"): the previous behaviour moved the card\nstraight to the engineer Doing column and immediately spawned a session,\nwhich flooded the dispatcher when the operator cleared a batch of\nimpediments in one go. The fix routes the resolved card through the same\nBacklog queue ordinary cards use; the next auto-tick picks it up at its\nown pace (per-column cap, depends_on gate, single-card-per-tick loop).\n\nComposes the resumed session's `## IMPEDIMENT` prompt section from up to\nthree sources, in the order they appear in `build_card_prompt`. All three\nland on the activity feed as durable comments; the auto-tick re-reads\nthem via ``dispatch._resolve_impediment`` and threads them into\n``_run_card`` when it spawns the resumed session.\n\n1. The most recent `**Impediment:**` comment (set by `report_impediment`).\n2. If the card has an answered KanbanGate (the human picked one of the\n   structured options `report_impediment(options=[...])` advertised),\n   that pick is forwarded as `impediment_answer` so the resumed session\n   sees the human's decision as authoritative \u2014 even when the resolver\n   didn't supply an `answer` field of their own.\n3. If `payload.answer` is supplied, it's stamped as a durable\n   `**Resolution:**` comment (free-text path) and read back via\n   `dispatch.extract_impediment_answer` so it survives a re-resolve.\n\nWhen both (2) and (3) are present, the gate pick wins \u2014 it's the more\nrecent, structured decision from the dedicated choice UI.",
         "operationId": "resolve_impediment_api_v1_kanban_cards__cid__resolve_impediment_post",
         "parameters": [
           {
@@ -26822,6 +27647,49 @@
         ]
       }
     },
+    "/api/v1/kanban/export": {
+      "get": {
+        "description": "Lossless JSON export of one project board.\n\nReturns every card with all its columns, every deliverable, every\nattachment, every comment op from the op-log, and every column. The\nresponse envelope carries a ``format_version`` so a future re-import\npath can detect the wire shape without guessing.\n\nPowers the \"borddata overleeft de applicatie\" property called out in\nkanban-pro analyse \u00a74.2 (kanban card 39d2d54a\u2026): the institutional\nmemory of a project should not hang on a single SQLite file, and\nmarkdown-per-card would lose `depends_on`, the per-card dispatch\nbreadcrumbs, and the `**Summary:**` / `**Impediment:**` /\n`**Resolution:**` comment chain. JSON is the lossless substrate for\na future restore; the restore flow itself is out of scope by design\n(card acceptance criterion #5).\n\nThe same `unknown_project_key` 404 guard as the rest of the\nuser-facing endpoints applies \u2014 a typo'd key returns 404 instead of\na silent empty board (kaart 91c85199 / `_assert_project_key_known`).",
+        "operationId": "export_board_api_v1_kanban_export_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": true,
+            "schema": {
+              "title": "Project Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoardExportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Board",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
     "/api/v1/kanban/gates/{gate_id}/answer": {
       "post": {
         "operationId": "answer_gate_api_v1_kanban_gates__gate_id__answer_post",
@@ -26869,6 +27737,47 @@
           }
         },
         "summary": "Answer Gate",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/holds": {
+      "get": {
+        "description": "Every card the dispatcher is currently holding back, oldest hold first.\n\nThe one query that replaces asking three separate advisory sweepers\n(`sweep_dangling_depends_on.py`, `sweep_dangling_plan_refs.py`,\n`check-analysis-outcomes.sh`) what they each independently rediscover from\nthe outside. Those exist because the dispatcher used to skip cards without\nrecording why; now that it does, \"what is stuck, for how long, and who can\nclear it\" is a read.\n\n`held_for_hours` is the actionable column: a hold whose reason is temporary\n(`dependent`, `awaiting_plan_ref`) but whose age is measured in days is a\nhold whose producer is gone \u2014 the shape that stranded 13 cards.",
+        "operationId": "list_holds_api_v1_kanban_holds_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": true,
+            "schema": {
+              "title": "Project Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Holds",
         "tags": [
           "Kanban"
         ]
@@ -27414,7 +28323,7 @@
     },
     "/api/v1/kanban/subscription-pool": {
       "get": {
-        "description": "Read the subscription pool (fase 1b of the analyse).\n\nReturns ``{\"project_key\": ..., \"pool\": <list[PoolEntry]|None>}``.\n``None`` means no pool is configured \u2014 the dispatcher falls back to\ntoday's column-default chain exactly as before. Each ``PoolEntry``\nis shaped as ``{cli, provider, model|null, drempel}`` so the frontend\ncan render it verbatim without per-field reshaping. Kaart 8f40d443\u2026:\nthe per-entry ``cli`` field is again first-class and consumed by\nthe router (it was briefly dropped in kaart 0b3ad6e2\u2026 and is now\nrequired again to honour the per-CLI quota axis). The default\n``cli`` value (``subscription_pool.DEFAULT_POOL_CLI``,\n``\"claude-code\"``) is back-filled on read for rows that omit it,\nso legacy stored payloads still load.",
+        "description": "Read the subscription pool (fase 1b of the analyse).\n\nReturns ``{\"project_key\": ..., \"pool\": <list[PoolEntry]|None>}``.\n``None`` means no pool is configured \u2014 the dispatcher falls back to\ntoday's column-default chain exactly as before. Each ``PoolEntry``\nis shaped as ``{cli, provider, model|null, drempel, endpoint_name}``\nso the frontend can render it verbatim without per-field reshaping.\nKaart 8f40d443\u2026: the per-entry ``cli`` field is again first-class and\nconsumed by the router (it was briefly dropped in kaart 0b3ad6e2\u2026 and\nis now required again to honour the per-CLI quota axis). The default\n``cli`` value (``subscription_pool.DEFAULT_POOL_CLI``,\n``\"claude-code\"``) is back-filled on read for rows that omit it,\nso legacy stored payloads still load.\n\nKaart 27317b4871\u2026 (FCR gap 2): the response also carries each\nentry's ``endpoint_name`` so the POST\u2192GET round-trip is\nidempotent. Previously the GET handler dropped the field, so a\nUI that re-saved the response would silently lose the endpoint\nbinding of an ``anthropic-compatible`` entry \u2014 the storage\nfail-fast check would only catch the misconfiguration at the next\nsave, and the dispatch fail-fast only at the next spawn.",
         "operationId": "get_subscription_pool_api_v1_kanban_subscription_pool_get",
         "parameters": [
           {
@@ -27526,6 +28435,85 @@
           }
         },
         "summary": "Sync Agent Columns Endpoint",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/token-saver": {
+      "get": {
+        "description": "Read the per-project token-saver kill-switch (kaart c31333bf\u2026).\n\nReturns the current state of the ``token_saver:<project_key>``\nrow in ``KanbanMeta``. The dispatcher reads this on every spawn\ntick so toggling off via this endpoint takes effect on the next\ndispatch without a backend restart.",
+        "operationId": "get_token_saver_api_v1_kanban_token_saver_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": true,
+            "schema": {
+              "title": "Project Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Token Saver",
+        "tags": [
+          "Kanban"
+        ]
+      },
+      "post": {
+        "description": "Persist the per-project token-saver kill-switch.\n\nIdempotent. Writes ``\"1\"`` for enabled, ``\"0\"`` for disabled \u2014\nmatches the convention used by ``set_autodispatch`` and\n``set_skip_permissions``. The kill-switch is the operator-facing\noverride that lets the team turn RTK off project-wide without\ntouching the per-lane column flags.",
+        "operationId": "set_token_saver_api_v1_kanban_token_saver_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenSaverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Token Saver",
         "tags": [
           "Kanban"
         ]
@@ -33577,7 +34565,7 @@
     },
     "/api/v1/scheduled-messages/hooks-install": {
       "post": {
-        "description": "Additively install any missing scheduling hooks in ~/.claude/settings.json.",
+        "description": "Additively install any missing scheduling hooks in ~/.claude/settings.json.\n\nReinstalling the event for which the entry was ``stale`` is the\nexpected flow: ``install_missing_hooks`` only appends missing events, so\nto clear a ``stale`` status the client should first drop the affected\nevent from ``~/.claude/settings.json`` (or use the equivalent admin\nhelper) and then call this endpoint.",
         "operationId": "hooks_install_api_v1_scheduled_messages_hooks_install_post",
         "responses": {
           "200": {
@@ -33597,7 +34585,7 @@
     },
     "/api/v1/scheduled-messages/hooks-status": {
       "get": {
-        "description": "Whether the four CC hooks that feed this pipeline are installed.\n\nWithout them, ``/hook-event`` above is never called, so limit detection\nand auto-resume are silently dead \u2014 see\ndocs/cockpit/analyse-sessie-limieten-claude-code.md.",
+        "description": "Per-event install status for the CC hooks that feed this pipeline.\n\nEach event is one of ``missing`` (no entry), ``stale`` (an entry exists\nbut its command differs from what the current renderer emits), or\n``installed`` (exact match). Without them, ``/hook-event`` above is never\ncalled, so limit detection and auto-resume are silently dead \u2014 see\ndocs/cockpit/analyse-sessie-limieten-claude-code.md.\n\nThe aggregate ``installed`` flag is only true when every event is\n``installed``; ``stale`` events are listed under ``stale`` so the\nfrontend/installer can offer a \"reinstall\" action.",
         "operationId": "hooks_status_api_v1_scheduled_messages_hooks_status_get",
         "responses": {
           "200": {
