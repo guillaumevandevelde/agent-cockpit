@@ -31,7 +31,7 @@ def derive_repo_identity(cwd: str) -> dict:
         logger.debug("git common-dir lookup failed for %s: %s", norm, exc)
 
     return {
-        "repo_id": hashlib.sha1(anchor.encode("utf-8")).hexdigest()[:16],
+        "repo_id": hashlib.sha1(anchor.encode("utf-8"), usedforsecurity=False).hexdigest()[:16],
         "repo_root": repo_root,
         "repo_name": os.path.basename(repo_root) or repo_root,
     }
