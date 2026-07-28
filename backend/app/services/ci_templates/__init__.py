@@ -128,10 +128,15 @@ class CITemplateService:
         # `StrictUndefined` makes an undeclared template variable a render
         # error rather than silently rendering as empty string — that's the
         # desired behaviour for parametric templates: typos must surface.
-        self._env = Environment(
+        # `autoescape=False` is deliberate: these templates render YAML CI
+        # workflows (`*.yml.j2`), not HTML. HTML-escaping would rewrite `&`,
+        # `<` and quotes into entities inside the generated workflow and
+        # corrupt it. No untrusted value reaches an HTML sink here.
+        self._env = Environment(  # nosec B701
             loader=FileSystemLoader(str(self._templates_dir)),
             undefined=StrictUndefined,
             keep_trailing_newline=True,
+            autoescape=False,
         )
 
     # -- catalog ----------------------------------------------------------

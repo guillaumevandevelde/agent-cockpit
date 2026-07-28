@@ -7,11 +7,11 @@ import inspect
 
 import pytest
 
-from app.api.v1 import agent_activity, codex_config, permissions, plugins, providers
+from app.api.v1 import codex_config, permissions, plugins, providers, run_activity
 
 HANDLERS = [
-    (agent_activity, "get_live_agents"),
-    (agent_activity, "get_activity_summary"),
+    (run_activity, "get_live_agents"),
+    (run_activity, "get_activity_summary"),
     (codex_config, "get_codex_config"),
     (codex_config, "list_codex_config_files"),
     (codex_config, "get_codex_config_file"),
