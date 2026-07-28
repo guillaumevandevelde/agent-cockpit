@@ -25,6 +25,7 @@
 - [Multi-agent kanban — smoke-test cookbook](./multi-agent-kanban.md): type=reference status=active
 - [Portfolio-cap policy: waarde, scope, failure-mode](./portfolio-policy.md): type=reference status=active
 - [Product-inceptie: van gesprek naar spec + plan die een project seedt](./product-inceptie-pipeline.md): type=reference status=active
+- [Recipe-writing conventions — auto-recovery hoort in dezelfde if-tak](./recipe-writing-conventions.md): type=reference status=active
 - [Repo-provisioning & project-bootstrap: van kanban-artefact naar werkende app-repo](./repo-provisioning-bootstrap.md): type=reference status=active
 - [`risk_class`-taxonomie + classifier voor `ProjectSecurityPolicy`](./risk-class-taxonomie.md): type=reference status=active
 - [Sandcastle Integration](./sandcastle.md): type=reference status=active
@@ -68,6 +69,7 @@
 - [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md): type=decision status=decided
 - [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md): type=decision status=decided
 - [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md): type=decision status=decided
+- [LiteLLM als sidecar — lifecycle, faalgedrag en scope van het kritieke pad](./litellm-sidecar-lifecycle-decision.md): type=decision status=decided
 - [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md): type=decision status=decided
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided
 - [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md): type=decision status=decided
