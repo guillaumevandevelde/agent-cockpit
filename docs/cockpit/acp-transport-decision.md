@@ -265,6 +265,15 @@ Daarom is de beslissing nadrukkelijk **additief, geen migratie**:
    waarom de poort niet hield (ze was prosa; de dispatcher kent geen "niet nu") en houdt de
    kandidatentabel klaar voor het moment dat P3 vuurt. Heropen deze kaart wanneer een tweede
    CLI-vendor een kaart afrondt.
+   ✅ **Uitgevoerd (GO) op 2026-07-28, kaart `a4a091fa…`:**
+   [`acp-transport-opencode-go-nogo.md`](./acp-transport-opencode-go-nogo.md). De poort ging open
+   toen `open-code` 37 kaarten naar Done bracht. Gemeten tegen OpenCode 1.18.8: `opencode acp` is
+   een first-party ACP-server die een volledige prompt-cyclus over stdio aflegt, en
+   `session/request_permission` werkt als getypeerde facet-D-gate mét unified diff (mits de
+   permission-config niet op auto-allow staat). De native route gaf in dezelfde context 0 bytes.
+   Het event-model van kaart 2 draagt de gemeten ACP-events ongewijzigd, met twee gaten
+   (`usage_update`, `available_commands_update`). De N-vendor-helft van de vraag blijft open —
+   die vraagt een tweede binary.
 
 ## 7. Bewust buiten scope
 
