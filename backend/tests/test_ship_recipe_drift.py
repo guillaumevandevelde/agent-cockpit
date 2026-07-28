@@ -58,14 +58,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # point is that an inconsistency here is loud, not silent.
 CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # The throwaway detached worktree that sidesteps the "master already
-    # checked out in the main worktree" error from git-worktree-add. The
-    # worktree lives under the shared `.git/worktrees/<name>` (NOT under
-    # `mktemp -d`) so the Bash tool's harness can't reap it between calls —
-    # otherwise the merge commit lands in a vanished checkout and the
-    # subsequent `git push` fails with a spurious non-fast-forward
-    # (kanban card 01aa1ef5…). Slot name is `ship-merge-$$` (PID-unique),
-    # not a fixed name — a fixed slot collides across concurrent dispatched
-    # sessions (kanban card c23dfe46).
+    # checked out in the main worktree" error from git-worktree-add. Its
+    # PATH is pinned by the two `SHIP_TMP`/`WT` invariants further down:
+    # persistent (not `mktemp -d` — the Bash harness reaps /tmp mid-ship,
+    # kanban card 01aa1ef5…) and outside `.git/worktrees/` (that is git's
+    # own admin dir for the worktree being created; overlapping them
+    # corrupted the index and broke every ship, kanban card 7dd8a3dd…).
+    # Slot name stays `ship-merge-$$` (PID-unique), not a fixed name — a
+    # fixed slot collides across concurrent dispatched sessions (kanban
+    # card c23dfe46).
     (
         "detached-worktree merge target",
         'git worktree add --detach "$WT" origin/master',
@@ -95,9 +96,17 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # Pre-flight: the detached worktree only sees COMMITTED state, so an
     # uncommitted/untracked branch would merge as a silent no-op. This guard
     # catches that before `git worktree add` runs.
+    #
+    # The trailing `--` is part of the invariant (kanban card 7dd8a3dd…):
+    # without it a repo-root file named `HEAD` makes the argument ambiguous
+    # and git exits 128 (`fatal: ambiguous argument 'HEAD': both revision and
+    # filename`). Under `if ! ...` a 128 reads as "tree is dirty", so EVERY
+    # ship aborted with a bogus uncommitted-changes error before reaching the
+    # merge. Ten such files really were tracked on master; see
+    # `scripts/check-worktree-admin-files.sh` for the standing gate.
     (
         "pre-flight uncommitted-changes guard",
-        "git diff --quiet HEAD",
+        "git diff --quiet HEAD --",
     ),
     # Tracked-files-only counterpart of the above. Deliberately NOT
     # `[ -n "$(git ls-files --others --exclude-standard)" ]`: on this shared
@@ -186,6 +195,29 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "worktree-path script invocation",
         '"$WT"/scripts/generate-doc-index.py',
     ),
+    # Throwaway worktree location (kanban card 7dd8a3dd…). It must be
+    # persistent (not `/tmp`, which the Bash harness can reap mid-ship —
+    # card 01aa1ef5…) AND outside `.git/worktrees/`, because that directory
+    # is where git keeps its own admin files (HEAD, index, MERGE_*) for the
+    # very worktree being created. Overlapping the checkout with the admin
+    # dir is what let `add -A` commit ten of git's files to the repo root
+    # and broke every subsequent ship. `$HOME/.cache/` satisfies both.
+    (
+        "ship worktree outside .git and outside /tmp",
+        'SHIP_TMP="${HOME}/.cache/cockpit-ship"',
+    ),
+    (
+        "PID-unique ship worktree path",
+        'WT="$SHIP_TMP/ship-merge-$$"',
+    ),
+    # The carve-out stages by explicit path, never `add -A` (kanban card
+    # 7dd8a3dd…). A blind `add -A` stages everything under the worktree
+    # root; the carve-out is only entitled to commit the two files it just
+    # regenerated, so it should only be able to stage those.
+    (
+        "carve-out stages by explicit path",
+        'git -C "$WT" add -- docs/cockpit/README.md docs/cockpit/llms.txt',
+    ),
 ]
 
 def _dispatch_direct_prompt() -> str:
@@ -232,6 +264,21 @@ def _skill_md_direct_recipe() -> str:
     return (REPO_ROOT / ".claude/skills/git-ship/SKILL.md").read_text(encoding="utf-8")
 
 
+def _engineer_md_worktree_pattern() -> str:
+    """Read the engineer persona prompt — third mirror of the recipe shape.
+
+    ``.claude/agents/engineer.md`` carries a paragraph teaching the engineer
+    persona where to put scratch worktrees. Historically that paragraph named
+    ``WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"`` — the
+    exact pattern that caused card 7dd8a3dd…'s incident: a checkout on top
+    of git's live admin dir. After the fix it should reference the
+    ``$HOME/.cache/cockpit-ship/ship-merge-$$`` pattern instead. Like the
+    skill, we match the full file (not just the paragraph) so the test is
+    resilient to prose renames; only the load-bearing substrings matter.
+    """
+    return (REPO_ROOT / ".claude/agents/engineer.md").read_text(encoding="utf-8")
+
+
 # Source registry: name -> callable that yields the source text. Using a dict
 # so the parametrised test can iterate sources symmetrically and the failure
 # message reads "SOURCE_NAME missing LABEL: 'command'", which is exactly what
@@ -241,6 +288,12 @@ def _skill_md_direct_recipe() -> str:
 # own copy of the recipe (see module docstring), so it structurally cannot
 # contain these bash-command invariants. It is still guarded, just by
 # test_claude_md_points_at_the_two_mirrors below.
+#
+# .claude/agents/engineer.md is a PARTIAL mirror: it carries only the
+# scratch-worktree placement as a teaching example, not the full ship recipe.
+# Adding it to SOURCES would fail almost every CORE_RECIPE_INVARIANT. Instead,
+# test_engineer_md_does_not_teach_the_broken_worktree_pattern below pins just
+# the one shape engineer.md is responsible for.
 SOURCES: dict[str, callable[[], str]] = {
     "dispatch._build_ship_instructions('direct')": _dispatch_direct_prompt,
     ".claude/skills/git-ship/SKILL.md": _skill_md_direct_recipe,
@@ -294,8 +347,25 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     assert "push origin HEAD:master" in commands, (
         "invariants list lost the 'push origin HEAD:master' core command"
     )
-    assert "git diff --quiet HEAD" in commands, (
-        "invariants list lost the pre-flight 'git diff --quiet HEAD' guard"
+    assert "git diff --quiet HEAD --" in commands, (
+        "invariants list lost the pre-flight 'git diff --quiet HEAD --' "
+        "guard (note the trailing `--`: without it a repo-root file named "
+        "`HEAD` makes the argument ambiguous and git exits 128, which reads "
+        "as a dirty tree and aborts every ship — kanban card 7dd8a3dd…)"
+    )
+    # Ship-worktree placement + explicit staging (kanban card 7dd8a3dd…).
+    # Both are load-bearing against the same incident: an overlapping
+    # checkout/admin dir plus a blind `add -A` committed ten of git's own
+    # per-worktree admin files to the repo root and broke every ship.
+    assert any("cockpit-ship" in c for c in commands), (
+        "invariants list lost the ship-worktree location (must be outside "
+        "both /tmp and .git/worktrees/)"
+    )
+    assert any(
+        c == 'git -C "$WT" add -- docs/cockpit/README.md docs/cockpit/llms.txt'
+        for c in commands
+    ), (
+        "invariants list lost the explicit-path carve-out staging command"
     )
     # The carve-out has its own dedicated invariants — pin them too so a
     # future editor can't soften the carve-out back to prose without
@@ -422,7 +492,7 @@ def test_pull_request_mode_is_explicitly_out_of_scope() -> None:
 # merge worktree reads COMMITTED state only, so untracked files cannot cause
 # the silent no-op the guard exists to prevent.
 BLOCKING_PREFLIGHT = (
-    'if ! git diff --quiet HEAD || [ -n "$(git status --porcelain | grep -v \'^??\')" ]; then'
+    'if ! git diff --quiet HEAD -- || [ -n "$(git status --porcelain | grep -v \'^??\')" ]; then'
 )
 
 
@@ -881,4 +951,234 @@ def test_readme_marker_check_sits_between_enumeration_and_open(
         f"If the marker check sits after `checkout --theirs`, the merge "
         f"markers are already cleared and the check silently no-ops "
         f"(kanban card 72db7429…)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Negative pins for kanban card 7dd8a3dd… — the "no card can ship at all"
+# incident. Ten files whose names are exactly git's per-worktree admin
+# filenames (AUTO_MERGE, HEAD, MERGE_HEAD, MERGE_MODE, MERGE_MSG, ORIG_HEAD,
+# commondir, gitdir, index, index.lock) were committed to the repo root by a
+# single ship that went through the conflict carve-out. Two recipe properties
+# combined to allow it, and both are pinned below as *absence* assertions —
+# the presence-based invariants above cannot express "must NOT contain X".
+
+
+# Negative pins combine badly with prose: both mirrors *explain* the banned
+# shapes in comments (that is the point of the comments — the next editor
+# needs to know why `add -A` is forbidden). A naive `X not in source_text`
+# would therefore flag the explanation itself. Restrict the absence checks to
+# the executable lines: strip each line and drop the ones that start with `#`.
+# Fenced-code and prompt indentation are handled by the strip.
+def _executable_lines(source_text: str) -> str:
+    return "\n".join(
+        line
+        for raw in source_text.splitlines()
+        if not (line := raw.strip()).startswith("#")
+    )
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_ship_worktree_is_not_nested_under_git_worktrees(source_name: str) -> None:
+    """The throwaway checkout must not live inside `.git/worktrees/`.
+
+    `.git/worktrees/<name>/` is where git stores that worktree's own admin
+    files. Pointing `git worktree add` at the same path overlaps the checkout
+    with the admin dir, so the carve-out's staging step saw git's HEAD/index/
+    MERGE_* as ordinary project files. Once committed, every later
+    `git worktree add` checked the tracked copies out over git's live admin
+    files and produced `fatal: .../index: index file smaller than expected` —
+    after which the conflict carve-out read an EMPTY conflict set, failed its
+    predicate, and reported an impediment with `conflicted: ` (blank).
+
+    Pinned as an absence assertion: the old shape derived the path from
+    `git rev-parse --git-common-dir`, so its reappearance anywhere in the
+    `WT=` assignment is the regression.
+    """
+    source_text = _executable_lines(SOURCES[source_name]())
+    assert '--git-common-dir)/worktrees/' not in source_text, (
+        f"{source_name}: ship worktree is nested under `.git/worktrees/` "
+        f"again. That path is git's own admin directory for the worktree "
+        f"being created — the checkout overlaps it and corrupts the index "
+        f"(kanban card 7dd8a3dd…). Use a persistent location outside every "
+        f"gitdir, e.g. `${{HOME}}/.cache/cockpit-ship`."
+    )
+    # And the replacement must not swing back to the /tmp shape that
+    # `--git-common-dir` was introduced to fix (kanban card 01aa1ef5…).
+    assert 'WT="$(mktemp' not in source_text and "WT=$(mktemp" not in source_text, (
+        f"{source_name}: ship worktree moved back under `mktemp -d`. The "
+        f"Bash harness can reap /tmp between calls, losing the merge commit "
+        f"(kanban card 01aa1ef5…)."
+    )
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_carve_out_never_stages_everything(source_name: str) -> None:
+    """The carve-out must stage by explicit path, never `add -A`.
+
+    `git -C "$WT" add -A` stages every file under the worktree root. That is
+    the exact contamination route from kanban card 7dd8a3dd…: with the
+    worktree nested under `.git/worktrees/`, "every file under the worktree
+    root" included git's own admin files, and one conflicted ship committed
+    all ten.
+
+    Relocating the worktree (test above) removes that specific exposure, but
+    an explicit path list closes the whole class — the carve-out is only ever
+    entitled to commit the two files it just regenerated, so a future nesting
+    mistake can no longer turn into a repo-breaking commit.
+    """
+    source_text = _executable_lines(SOURCES[source_name]())
+    assert 'git -C "$WT" add -A' not in source_text, (
+        f"{source_name}: carve-out stages with `add -A` again. It must name "
+        f"the files it regenerated: "
+        f"`git -C \"$WT\" add -- docs/cockpit/README.md docs/cockpit/llms.txt` "
+        f"(kanban card 7dd8a3dd…)."
+    )
+
+
+def test_negative_pins_would_flag_the_pre_fix_recipe() -> None:
+    """Live negative case: the pre-fix recipe must trip both pins.
+
+    Without this, a future edit could soften either assertion (e.g. narrow
+    the substring until it no longer matches anything) and the pins would
+    pass vacuously on every mirror. Replays both checks against a fake mirror
+    carrying the exact shapes that shipped the incident.
+    """
+    pre_fix_mirror = (
+        'WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"\n'
+        'git worktree add --detach "$WT" origin/master\n'
+        '"$WT"/scripts/generate-doc-index.py\n'
+        'git -C "$WT" add -A\n'
+        'git -C "$WT" commit --no-edit\n'
+    )
+    # Run through the SAME filter the live pins use. This is the part that
+    # would rot silently: `_executable_lines` drops comment lines so the
+    # mirrors can *explain* the banned shapes, and an over-eager filter (one
+    # that stripped fenced-code indentation as comments, say) would make both
+    # pins pass vacuously on every mirror. Asserting through the helper keeps
+    # the filter honest.
+    executable = _executable_lines(pre_fix_mirror)
+    assert '--git-common-dir)/worktrees/' in executable, (
+        "the nesting pin's substring no longer matches the pre-fix shape "
+        "after _executable_lines() — the regression pin has rotted and "
+        "would pass vacuously."
+    )
+    assert 'git -C "$WT" add -A' in executable, (
+        "the `add -A` pin's substring no longer matches the pre-fix shape "
+        "after _executable_lines() — the regression pin has rotted and "
+        "would pass vacuously."
+    )
+    # And the filter must actually remove commentary, otherwise the mirrors'
+    # own explanations would trip the live pins (they did, before this).
+    commented = _executable_lines(
+        '# note: never use `git -C "$WT" add -A` here\n'
+        'git -C "$WT" add -- docs/cockpit/README.md docs/cockpit/llms.txt\n'
+    )
+    assert 'add -A' not in commented, (
+        "_executable_lines() no longer strips comment lines — the mirrors' "
+        "explanatory comments would false-positive the negative pins."
+    )
+    assert 'add -- docs/cockpit/README.md' in commented, (
+        "_executable_lines() stripped an executable line — the negative "
+        "pins would pass vacuously."
+    )
+
+
+def test_repo_has_no_tracked_worktree_admin_files() -> None:
+    """The ten admin files must never be tracked again.
+
+    Belt-and-braces alongside `.gitignore` (which `git add -f` bypasses) and
+    `scripts/check-worktree-admin-files.sh` (advisory unless `--strict`).
+    While any of these is tracked, NO card can ship: `git worktree add`
+    corrupts the new worktree's index, and a tracked `HEAD` makes
+    `git diff --quiet HEAD` exit 128 with an ambiguity fatal.
+    """
+    admin_files = [
+        "AUTO_MERGE", "HEAD", "MERGE_HEAD", "MERGE_MODE", "MERGE_MSG",
+        "ORIG_HEAD", "commondir", "gitdir", "index", "index.lock",
+    ]
+    tracked = [f for f in admin_files if (REPO_ROOT / f).exists()]
+    assert not tracked, (
+        f"git per-worktree admin files present in the repo root: {tracked}. "
+        f"While tracked these break every ship (kanban card 7dd8a3dd…). "
+        f"Remove with `git rm -f` (plain `rm` is deny-listed in this repo)."
+    )
+
+
+def test_engineer_md_does_not_teach_the_broken_worktree_pattern() -> None:
+    """engineer.md is a PARTIAL mirror of the recipe — pin the one shape it owns.
+
+    The engineer persona prompt carries a paragraph teaching sessions WHERE
+    to put scratch worktrees. Historically that paragraph pointed at the
+    broken ``WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"``
+    pattern — the exact path whose overlap with git's admin dir caused the
+    card-7dd8a3dd… incident. After the fix it points at
+    ``$HOME/.cache/cockpit-ship/ship-merge-$$`` instead.
+
+    engineer.md is NOT in SOURCES (it carries only the worktree-placement
+    teaching, not the full ship recipe, so almost every CORE_RECIPE_INVARIANT
+    would falsely fail). This test pins just the one shape engineer.md is
+    responsible for: positive (the new pattern appears) and negative (the
+    old full bash-assignment is gone).
+
+    The negative check targets the full ``WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"``
+    bash assignment — the exact teaching shape the original paragraph used.
+    A bare mention of the path as prose (e.g. an explanation of why we no
+    longer use it) won't trip it, but a re-introduction of the teaching
+    paragraph would. Unlike SKILL.md / dispatch.py, engineer.md is prose
+    without `#` comment blocks, so we don't filter via _executable_lines.
+    """
+    text = _engineer_md_worktree_pattern()
+
+    # Positive: the new pattern is the example the persona teaches.
+    assert "cockpit-ship/ship-merge-$$" in text, (
+        "engineer.md no longer teaches the new scratch-worktree pattern "
+        "`$HOME/.cache/cockpit-ship/ship-merge-$$`. Restore the paragraph "
+        "in the Bash-cwd section so engineers keep placing scratch worktrees "
+        "outside every gitdir (kanban card 7dd8a3dd…)."
+    )
+
+    # Negative: the original teaching paragraph (full bash assignment) is
+    # gone. A bare path mention in prose is fine; this matches only the
+    # exact variable-assignment shape.
+    assert 'WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"' not in text, (
+        "engineer.md teaches the broken worktree shape as a positive "
+        "example again (`WT=\"$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$\"`). "
+        "That path overlaps git's live admin dir; checkout there breaks "
+        "the index, and a tracked `HEAD` makes `git diff --quiet HEAD` exit "
+        "128 (kanban card 7dd8a3dd…). The teaching paragraph must point at "
+        "`$HOME/.cache/cockpit-ship/ship-merge-$$` instead."
+    )
+
+
+def test_recipe_writing_conventions_doc_does_not_show_add_A_as_good() -> None:
+    """recipe-writing-conventions.md carries a fenced bash example claiming
+    to be "extracted uit `.claude/skills/git-ship/SKILL.md` §4a".
+
+    That doc-as-mirror must keep in sync with the canonical mirrors: an
+    editor who fixes the `add -A` bug in SKILL.md but misses this doc has
+    just shipped a doc that contradicts its own source citation. The
+    counter-example block at line ~138 deliberately shows the OLD broken
+    pattern (it's the "wat er fout ging" lesson for kaart efb8187b…) and
+    sits inside a `# NOTE:` comment, so `_executable_lines` correctly
+    strips it; only the GOED example's `add -A` would survive the filter.
+
+    Same scope as `test_carve_out_never_stages_everything` but targeted at
+    this single doc rather than parametrised over SOURCES: this doc is a
+    *teaching* mirror, not a *recipe* mirror, so its presence-based
+    invariants from SOURCES don't apply.
+    """
+    doc_text = (REPO_ROOT / "docs/cockpit/recipe-writing-conventions.md").read_text(
+        encoding="utf-8"
+    )
+    executable = _executable_lines(doc_text)
+    assert 'git -C "$WT" add -A' not in executable, (
+        "docs/cockpit/recipe-writing-conventions.md still teaches "
+        "`git -C \"$WT\" add -A` as the GOED carve-out pattern. SKILL.md "
+        "§4a replaced it with `git -C \"$WT\" add -- docs/cockpit/README.md "
+        "docs/cockpit/llms.txt` (kanban card 7dd8a3dd…) — the fenced bash "
+        "example in this doc, which claims to be extracted from §4a, must "
+        "match. The counter-example `# NOTE:` comment at ~line 138 is fine "
+        "(it shows the OLD broken pattern under an `exit 1` and is filtered "
+        "out by `_executable_lines`); only the GOED example matters."
     )

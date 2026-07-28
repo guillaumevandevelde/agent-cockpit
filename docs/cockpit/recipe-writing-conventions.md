@@ -60,7 +60,7 @@ Concreet:
       echo "ERROR: generate-doc-index.py --check --strict failed after regenerate." >&2
       exit 1
     fi
-    git -C "$WT" add -A
+    git -C "$WT" add -- docs/cockpit/README.md docs/cockpit/llms.txt
     git -C "$WT" commit --no-edit
   fi
   ```

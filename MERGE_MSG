@@ -1,5 +1,0 @@
-Merge k-problem-ui-mi-50e4
-
-# Conflicts:
-#	frontend/src/features/kanban/components/CardEditDialog.test.tsx
-#	frontend/src/features/kanban/components/CardEditDialog.tsx

@@ -63,6 +63,30 @@ htmlcov/
 .claude/worktrees/
 .playwright-mcp/
 
+# Git's own per-worktree admin files, root-anchored. These are NOT project
+# files — they are what git writes into `.git/worktrees/<name>/`. They landed
+# in the repo root once (kanban card 7dd8a3dd…) because the direct-mode ship
+# recipe placed its throwaway merge worktree *inside* `.git/worktrees/` and
+# then ran `git -C "$WT" add -A`, which staged git's own admin files relative
+# to that worktree root. Once committed they broke every subsequent ship: a
+# fresh `git worktree add` checked them out on top of git's live admin files
+# ("index file smaller than expected"), and a tracked `HEAD` made `git diff
+# --quiet HEAD` fail with `ambiguous argument 'HEAD': both revision and
+# filename`. The recipe no longer stages blindly and no longer nests the
+# worktree under `.git/`, but these entries make a re-introduction impossible
+# to commit by accident. `scripts/check-worktree-admin-files.sh` is the
+# belt-and-braces gate that also catches a `git add -f`.
+/AUTO_MERGE
+/HEAD
+/MERGE_HEAD
+/MERGE_MODE
+/MERGE_MSG
+/ORIG_HEAD
+/commondir
+/gitdir
+/index
+/index.lock
+
 # measure-token-saver.sh default RESULT_DIR (line 102). Each gate invocation
 # writes a fresh <UTC-timestamp>/ subdir under it; without this entry every
 # scripts/test_*.sh run leaves an untracked dir in the worktree root and trips
