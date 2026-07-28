@@ -143,16 +143,43 @@ printf '%scheck-ci-health%s  repo=%s workflow=%s red-threshold=%s\n' \
 # also returns runs from other workflows when the file-name matches a path
 # in multiple repos; the JSON shape with `workflowDatabaseId` is the
 # authoritative filter. Resolved via `gh workflow list` once, then compared.
+#
+# gh workflow list's valid `--json` fields are name, id, path — NOT
+# databaseId (that field belongs to `gh run list`'s output, not workflows).
+# The human-readable `name` is the workflow's display name (e.g. "Quality"
+# for quality.yml); the `path` is the file path. Match on the path's
+# basename so callers can pass `--workflow=quality.yml` directly, and use
+# python to parse the JSON robustly — the previous awk pattern built a
+# regex against compact single-line JSON like `^""quality.yml""` (note the
+# doubled quotes), which never matched `{"id":...,"name":"Quality",...}`
+# and silently dropped every workflow. That made live mode exit 2 with
+# "workflow not found" even when the repo's quality.yml clearly exists.
 if [ "$LIVE_MODE" -eq 1 ]; then
-  WORKFLOW_LIST_JSON="$(gh workflow list --repo "$REPO" --json name,databaseId 2>/dev/null || true)"
-  # The `name` field for the file-backed workflow IS the file basename
-  # (e.g. "quality.yml"); the `databaseId` is the stable id. Match on the
-  # basename so callers can pass `--workflow=quality.yml` directly.
-  WORKFLOW_ID="$(printf '%s' "$WORKFLOW_LIST_JSON" \
-    | awk -v want="$WORKFLOW" '
-        BEGIN { q = "\"" want "\"" }
-        $0 ~ "^\"" q "\"" { match($0, /"databaseId": *[0-9]+/); if (RSTART) { print substr($0, RSTART, RLENGTH); exit } }')"
-  WORKFLOW_ID="${WORKFLOW_ID#\"databaseId\": }"
+  WORKFLOW_LIST_JSON="$(gh workflow list --repo "$REPO" --json name,id,path 2>/dev/null || true)"
+  # Surface a real failure when the list call itself dies (network, auth,
+  # missing field on an older gh). Bare `|| true` swallowed real errors.
+  if [ -z "$WORKFLOW_LIST_JSON" ]; then
+    echo "check-ci-health: ERROR: gh workflow list returned no data for $REPO (network/auth?); cannot resolve workflow id." >&2
+    exit 2
+  fi
+  WORKFLOW_ID="$(WORKFLOW_LIST_JSON="$WORKFLOW_LIST_JSON" WORKFLOW="$WORKFLOW" python3 - <<'PY'
+import json, os, sys
+data = json.loads(os.environ["WORKFLOW_LIST_JSON"])
+want = os.environ["WORKFLOW"]
+for wf in data:
+    path = wf.get("path", "") or ""
+    # `path` looks like ".github/workflows/quality.yml"; basename match
+    # accepts "quality.yml" (default), ".github/workflows/quality.yml",
+    # and the bare "Quality" display name as a convenience fallback.
+    base = path.rsplit("/", 1)[-1]
+    if base == want or path == want or wf.get("name") == want:
+        wid = wf.get("id")
+        if wid is not None:
+            print(wid)
+            sys.exit(0)
+sys.exit(1)
+PY
+)"
   if [ -z "$WORKFLOW_ID" ]; then
     echo "check-ci-health: ERROR: workflow '$WORKFLOW' not found in $REPO" >&2
     exit 2
@@ -250,11 +277,47 @@ fi
 infra_warned=0
 master_red_streak=0
 checked_for_streak=0
+consecutive_red_warned=0
 
-# Walk runs NEWEST-FIRST (the run-list JSON from `gh run list --limit N` is
-# already newest-first; we reverse the bash array so iteration order matches
-# the operator's mental model of "the most recent N runs").
-for ((i=${#RUN_IDS[@]}-1; i>=0; i--)); do
+# Walk runs NEWEST-FIRST. `gh run list --limit N` returns JSON with the
+# most recent run at index 0; `mapfile` preserves that order so RUN_IDS[0]
+# is the newest. Iterate from index 0 forward.
+#
+# Why this direction matters (the bug that motivated this card): walking
+# from the OLDEST run toward the newest — the original direction — would
+# break out of the consecutive-red check the moment it hit the first
+# older non-master failure or older green build. With real `gh run list`
+# output (which interleaves master pushes with feature-branch pushes and
+# older green builds), that meant the script silently stopped before
+# ever reaching the 3 newest red master runs, and reported "healthy" for
+# both AC 1 and AC 2. Walking newest-first sees the operator's actual
+# concern — "did the most recent runs break?" — first.
+#
+# Streak semantics (newest-first walk):
+#   - master failure       → streak += 1 (continue)
+#   - master non-failure   → streak = 0; BREAK (true streak boundary —
+#                             a green master is conclusive evidence
+#                             that "the last N pushes" were not all red)
+#   - non-master ANYTHING   → streak = 0; BREAK. A dependabot or
+#                             feature-branch push doesn't count toward
+#                             the master streak (task 10's contract);
+#                             the previous shape treated it as a
+#                             boundary for the same reason — but that
+#                             also erased an already-reached threshold
+#                             when an older non-master run sat below
+#                             the reds. We pair "break on non-master"
+#                             with an inline threshold check (below)
+#                             so a streak that already fired at index
+#                             N-1 isn't dropped by a later reset at
+#                             index N. See task 17.
+#   - in-flight / queued   → SKIP (empty `conclusion`).
+#
+# Threshold check fires INLINE the moment the streak reaches the limit,
+# not after the loop. If we waited until after the loop, a later
+# master-green or run-limit break could reset the streak to 0 and
+# silently drop the warning we'd otherwise emit at index N-1 of the
+# current run.
+for ((i=0; i<${#RUN_IDS[@]}; i++)); do
   spec="${RUN_IDS[$i]}"
   IFS='|' read -r rid conc branch wf_id <<<"$spec"
   [ -z "$rid" ] && continue
@@ -284,34 +347,40 @@ for ((i=${#RUN_IDS[@]}-1; i>=0; i--)); do
     esac
   fi
 
-  # Check 2 — consecutive red on master. Walk newest→oldest:
-  #   - master failure   → streak += 1 (continue)
-  #   - master non-fail  → streak = 0 (we hit the streak boundary; stop)
-  #   - non-master run   → streak = 0 (a feature-branch push sits BETWEEN
-  #                         master runs in the gh timeline, so it would
-  #                         otherwise inflate the count; treat it as a
-  #                         boundary too and stop — accepting task 10's
-  #                         semantics: "non-master failure breaks streak")
+  # Check 2 — consecutive red on master (walk newest→oldest; see
+  # semantics table above).
   if [ "$branch" = "master" ] || [ "$branch" = "main" ]; then
     if [ "$conc" = "failure" ]; then
       master_red_streak=$((master_red_streak + 1))
       checked_for_streak=$((checked_for_streak + 1))
     else
+      # Master green (or any non-failure master conclusion) is a true
+      # streak boundary — no point scanning further back.
       master_red_streak=0
       break
     fi
   else
+    # Non-master run: doesn't count toward the master streak, and the
+    # older test 10 contract is that this is also a boundary. Pair with
+    # the inline threshold check below so a streak that already fired
+    # at index N-1 isn't dropped by this reset.
     master_red_streak=0
     break
   fi
+
+  # Inline threshold check. Fires the moment the streak reaches
+  # --red-threshold, regardless of what older runs we still have to
+  # walk past. `consecutive_red_warned` keeps it to one warning per
+  # run, even if the streak keeps growing.
+  if [ "$master_red_streak" -ge "$RED_THRESHOLD" ] && [ "$consecutive_red_warned" -eq 0 ]; then
+    warn "last $master_red_streak consecutive $WORKFLOW run(s) on master all concluded failure — \"CI will catch it\" is no longer a safe assumption; investigate before shipping more."
+    consecutive_red_warned=1
+  fi
+
   if [ "$checked_for_streak" -ge "$LIMIT" ]; then
     break
   fi
 done
-
-if [ "$master_red_streak" -ge "$RED_THRESHOLD" ]; then
-  warn "last $master_red_streak consecutive $WORKFLOW run(s) on master all concluded failure — \"CI will catch it\" is no longer a safe assumption; investigate before shipping more."
-fi
 
 if [ "$worst" -eq 0 ]; then
   pass "$WORKFLOW healthy on $REPO (no runs looked unstarted; last master failure count under threshold $RED_THRESHOLD)."
