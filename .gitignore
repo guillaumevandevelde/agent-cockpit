@@ -63,6 +63,12 @@ htmlcov/
 .claude/worktrees/
 .playwright-mcp/
 
+# measure-token-saver.sh default RESULT_DIR (line 102). Each gate invocation
+# writes a fresh <UTC-timestamp>/ subdir under it; without this entry every
+# scripts/test_*.sh run leaves an untracked dir in the worktree root and trips
+# the ship pre-flight `git ls-files --others --exclude-standard` check.
+.tmp-measure-token-saver/
+
 # Git worktrees
 .worktrees/
 
