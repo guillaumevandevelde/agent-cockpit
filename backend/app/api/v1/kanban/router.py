@@ -184,7 +184,15 @@ def _column_validation_errors():
 
 @router.get("/columns")
 async def columns(project_key: str = Query(...)):
+    """The board's lane list. Also the one place that repairs a board whose
+    fixed columns drifted out of `kanban_columns` — a card on a column with no
+    row renders in no lane at all (kaart 4f0677c7…). `ensure_fixed_columns`
+    writes only on the first load after a name goes missing, so the board's 5s
+    poll stays read-only in steady state; there is no migration system to do
+    this at deploy time."""
     async with KanbanSessionLocal() as s:
+        if await service.ensure_fixed_columns(s, project_key):
+            await s.commit()
         cols = await service.list_columns(s, project_key)
         return {"columns": [ColumnResponse.model_validate(c) for c in cols]}
 

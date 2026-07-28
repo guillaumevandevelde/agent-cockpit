@@ -724,3 +724,40 @@ describe("KanbanPage board filter", () => {
     expect(getByTestId("location").textContent).toBe("/kanban");
   });
 });
+// Kanban card 4f0677c7…: "Dispatch all (41)" over 18 visible Backlog cards.
+// The counter counts unclaimed Backlog + To Resume cards; the board rendered
+// only the columns with a `kanban_columns` row, so the 25 cards on `To Resume`
+// were counted but drawn nowhere. The counter and the lanes must agree.
+describe("KanbanPage toolbar counters vs. rendered lanes", () => {
+  const visibleCardIds = () =>
+    Array.from(document.querySelectorAll("[data-card-id]")).map(
+      (el) => el.getAttribute("data-card-id") ?? "",
+    );
+
+  it("renders every card the Dispatch-all counter promises, incl. lane-less columns", async () => {
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [BACKLOG_COLUMN],
+    });
+    (kanbanApi.listCards as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        makeCard({ id: "card-backlog", column: "Backlog" }),
+        makeCard({ id: "card-resume-1", column: "To Resume" }),
+        makeCard({ id: "card-resume-2", column: "To Resume" }),
+      ],
+    });
+
+    renderAt("/kanban");
+    await waitFor(() => expect(kanbanApi.listCards).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByText("Dispatch all (3)")).toBeInTheDocument();
+    expect(visibleCardIds().sort()).toEqual([
+      "card-backlog",
+      "card-resume-1",
+      "card-resume-2",
+    ]);
+    // …and the operator can see WHY that lane looks different from the rest.
+    expect(
+      screen.getByTestId("kanban-column-To Resume").getAttribute("data-unconfigured"),
+    ).toBe("true");
+  });
+});

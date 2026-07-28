@@ -946,6 +946,106 @@ async def ensure_awaiting_subtasks_column(session, project_key: str) -> bool:
     return True
 
 
+async def ensure_fixed_columns(session, project_key: str) -> list[str]:
+    """Idempotent: give an already-enabled board a `kanban_columns` row for
+    every fixed `COLUMNS` name it is missing. Returns the names created
+    (empty list = nothing to do, the common case).
+
+    Why this exists (kanban card 4f0677c7…): the board renders exactly the
+    columns `GET /columns` returns and buckets cards by `card.column ==
+    column.name`, so a card whose column has no row falls out of every lane
+    and is **invisible** — while the toolbar keeps counting it (`Dispatch all
+    (N)` counts Backlog + To Resume regardless of what renders). Measured on
+    the live board 2026-07-28: `kanban_columns` had 7 rows, `To Resume` was
+    not one of them, and 25 cards sat there unfindable. Rows are created per
+    project by `POST /enable` + the column-CRUD; nothing kept them in sync
+    with `COLUMNS` afterwards, so a name added to `COLUMNS` later (or a row
+    deleted by hand) stranded every card on it — the "stale column" bug class
+    that `scripts/check-kanban-conventions.sh` reports and this repairs.
+
+    The invariant is the one that script already asserts, unchanged: a project
+    with ≥1 `kanban_columns` row has a row for every name in `COLUMNS`. Empty
+    fixed lanes are cheap — the board collapses a lane with no cards to a 40px
+    rail (board-card-layout-decision.md §3c), so restoring `intake` +
+    `To Resume` costs 80px, not two full lanes.
+
+    Placement reuses the existing per-column helpers where one exists
+    (`ensure_intake_column` leftmost, `ensure_awaiting_subtasks_column` just
+    before `Done`) so a lane sits in the same place regardless of which path
+    created it; the remaining names are appended after the last lane.
+
+    A project with *no* rows at all was never enabled; this leaves it alone,
+    matching the validator's own predicate. Inventing rows there would quietly
+    enable a board as a side effect of someone opening it.
+
+    A *non-fixed* column with cards and no row (an agent column whose row was
+    deleted, a legacy name like `Doing`) is not something this helper can
+    invent a policy for — the board renders those as an explicitly flagged
+    "unconfigured" lane instead (`Board.tsx`), so they stay visible rather
+    than being silently dropped.
+
+    Called from `GET /columns` (the board's own load path) so the fix needs no
+    schema migration and no operator action — the repo has no migration system
+    (see CLAUDE.md). It writes only on the first load after a name goes
+    missing; every later poll is read-only. Two concurrent first-loads could
+    in principle both insert the same name (there is no unique index on
+    `(project_key, name)`); the result would be a visible duplicate lane an
+    operator can delete — never a silently dropped card, which is the failure
+    mode worth avoiding here.
+    """
+    existing = await list_columns(session, project_key)
+    if not existing:
+        return []
+    existing_names = {c.name for c in existing}
+    missing = [n for n in COLUMNS if n not in existing_names]
+    if not missing:
+        return []
+
+    created: list[str] = []
+    # Two fixed names already own a placement rule elsewhere; go through their
+    # helper so a column lands in the same spot no matter which path created it
+    # (`intake` leftmost, `Awaiting Subtasks` just before `Done`).
+    for name, helper in (
+        ("intake", ensure_intake_column),
+        ("Awaiting Subtasks", ensure_awaiting_subtasks_column),
+    ):
+        if name not in missing:
+            continue
+        if await helper(session, project_key):
+            created.append(name)
+        missing = [n for n in missing if n != name]
+    if created:
+        existing = await list_columns(session, project_key)
+    if not missing:
+        await session.flush()
+        return created
+
+    # Everything else is appended after the current last lane. That matches
+    # what `POST /enable` does for a name added late to `COLUMNS` (it ranks by
+    # list index, and the new names are at the end), and it keeps the ranks of
+    # the lanes the operator already arranged untouched.
+    # Floor at the lane count so a board whose ranks are all non-numeric
+    # (uuid4 hex — `create_column`'s default when no rank is passed) still gets
+    # a sane 4-digit rank instead of "0000". Ranks are compared as strings
+    # (`list_columns` orders lexicographically), so on such a board the
+    # repaired lane still sorts ahead of the hex ones — that board has no
+    # meaningful lane order to preserve in the first place; what matters is
+    # that the lane exists.
+    max_rank = len(existing) - 1
+    for col in existing:
+        try:
+            max_rank = max(max_rank, int(col.rank))
+        except (TypeError, ValueError):
+            # Non-numeric rank — can't participate in the numeric ordering.
+            continue
+    for i, name in enumerate(missing):
+        await create_column(session, project_key, name=name,
+                            rank=f"{max_rank + 1 + i:04d}")
+        created.append(name)
+    await session.flush()
+    return created
+
+
 async def card_has_children(session, card_id: str) -> bool:
     """True if ≥1 card has `parent_card_id == card_id`, regardless of the
     children's own column. Parent-generic — not gated on `work_type`

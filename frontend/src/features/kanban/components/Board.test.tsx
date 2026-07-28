@@ -149,3 +149,73 @@ describe("Board lane collapsing", () => {
     expect(onDropCardAt).toHaveBeenCalledWith("a", "reviewer", 0);
   });
 });
+
+// Kanban card 4f0677c7…: the board used to render *only* the columns with a
+// `kanban_columns` row and bucket cards by `c.column === col.name`, so a card
+// on any other column fell out of every lane and was invisible — 25 cards on
+// `To Resume` on the live board, while the toolbar still counted them in
+// "Dispatch all (41)". The backend backfills the fixed column names; these
+// tests pin the frontend's guarantee for everything else: no card is ever
+// silently dropped.
+describe("Board lanes for columns without a kanban_columns row", () => {
+  it("renders a card whose column has no row instead of dropping it", () => {
+    renderBoard([card("a", "Backlog"), card("b", "To Resume")]);
+    const lane = screen.getByTestId("kanban-column-To Resume");
+    expect(lane.getAttribute("data-unconfigured")).toBe("true");
+    expect(screen.getByText("Card b")).not.toBeNull();
+  });
+
+  it("flags the lane so the operator can see the column is not configured", () => {
+    renderBoard([card("b", "Doing")]);
+    const marker = screen.getByTestId("kanban-column-unconfigured-Doing");
+    expect(marker.getAttribute("title")).toContain("geen kolomrij");
+    // Configured lanes stay unflagged.
+    expect(
+      screen.getByTestId("kanban-column-Backlog").getAttribute("data-unconfigured"),
+    ).toBe("false");
+    expect(screen.queryByTestId("kanban-column-unconfigured-Backlog")).toBeNull();
+  });
+
+  it("adds no lane when every card's column has a row", () => {
+    renderBoard([card("a", "Backlog"), card("b", "reviewer")]);
+    expect(
+      document.querySelectorAll('[data-unconfigured="true"]').length,
+    ).toBe(0);
+  });
+
+  it("groups every stranded column into its own lane, sorted", () => {
+    renderBoard([
+      card("a", "To Resume"),
+      card("b", "Doing"),
+      card("c", "To Resume"),
+    ]);
+    const lanes = [...document.querySelectorAll('[data-unconfigured="true"]')].map(
+      (el) => el.getAttribute("data-testid"),
+    );
+    expect(lanes).toEqual(["kanban-column-Doing", "kanban-column-To Resume"]);
+    expect(screen.getByTestId("kanban-column-To Resume").textContent).toContain("(2)");
+  });
+
+  it("starts expanded — a stranded card must be readable, not hidden in a rail", () => {
+    renderBoard([card("b", "To Resume")]);
+    expect(
+      screen.getByTestId("kanban-column-To Resume").getAttribute("data-collapsed"),
+    ).toBe("false");
+  });
+
+  it("lets a card be dragged out of a stranded lane onto a real one", () => {
+    const onDropCardAt = vi.fn();
+    render(
+      <Board
+        columns={columns}
+        cards={[card("b", "To Resume")]}
+        onOpen={() => {}}
+        onDropCardAt={onDropCardAt}
+      />,
+    );
+    fireEvent.drop(screen.getByTestId("kanban-column-Backlog"), {
+      dataTransfer: { getData: () => "b" },
+    });
+    expect(onDropCardAt).toHaveBeenCalledWith("b", "Backlog", 0);
+  });
+});

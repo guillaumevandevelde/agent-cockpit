@@ -25,6 +25,22 @@ async def _tables():
     yield
 
 
+async def _fetch_column(ac: AsyncClient, project_key: str, column_id: str) -> dict:
+    """The column with this id out of `GET /columns`.
+
+    Deliberately not `["columns"][0]`: `GET /columns` backfills the fixed
+    `COLUMNS` rows for an enabled board (kaart 4f0677c7… — a card on a column
+    with no row renders in no lane at all), so the created column is no longer
+    the only entry, nor necessarily the first one.
+    """
+    listing = (await ac.get("/api/v1/kanban/columns",
+                            params={"project_key": project_key})
+               ).json()["columns"]
+    match = [c for c in listing if c["id"] == column_id]
+    assert match, f"column {column_id} missing from {[c['name'] for c in listing]}"
+    return match[0]
+
+
 @pytest.mark.asyncio
 async def test_patch_column_can_clear_max_sessions_with_null():
     """`∞` in the UI PATCHes {max_sessions: null} — that null must land."""
@@ -34,9 +50,7 @@ async def test_patch_column_can_clear_max_sessions_with_null():
             "project_key": "PROJ", "name": "engineer",
             "max_sessions": 2,
         })).json()["id"]
-        assert (await ac.get("/api/v1/kanban/columns",
-                             params={"project_key": "PROJ"})
-                ).json()["columns"][0]["max_sessions"] == 2
+        assert (await _fetch_column(ac, "PROJ", cid))["max_sessions"] == 2
 
         r = await ac.patch(f"/api/v1/kanban/columns/{cid}",
                            json={"max_sessions": None})
@@ -44,10 +58,7 @@ async def test_patch_column_can_clear_max_sessions_with_null():
         assert r.json()["max_sessions"] is None
 
         # And the persisted value (re-GET) is null — not the old cap.
-        listing = (await ac.get("/api/v1/kanban/columns",
-                                params={"project_key": "PROJ"})
-                   ).json()["columns"]
-        assert listing[0]["max_sessions"] is None
+        assert (await _fetch_column(ac, "PROJ", cid))["max_sessions"] is None
 
 
 @pytest.mark.asyncio
@@ -59,9 +70,7 @@ async def test_patch_column_can_clear_default_agent_with_null():
             "project_key": "PROJ", "name": "engineer",
             "default_agent": "engineer",
         })).json()["id"]
-        assert (await ac.get("/api/v1/kanban/columns",
-                             params={"project_key": "PROJ"})
-                ).json()["columns"][0]["default_agent"] == "engineer"
+        assert (await _fetch_column(ac, "PROJ", cid))["default_agent"] == "engineer"
 
         r = await ac.patch(f"/api/v1/kanban/columns/{cid}",
                            json={"default_agent": None})
@@ -78,9 +87,7 @@ async def test_patch_column_can_clear_default_provider_with_null():
             "project_key": "PROJ", "name": "engineer",
             "default_provider": "minimax",
         })).json()["id"]
-        assert (await ac.get("/api/v1/kanban/columns",
-                             params={"project_key": "PROJ"})
-                ).json()["columns"][0]["default_provider"] == "minimax"
+        assert (await _fetch_column(ac, "PROJ", cid))["default_provider"] == "minimax"
 
         r = await ac.patch(f"/api/v1/kanban/columns/{cid}",
                            json={"default_provider": None})
@@ -97,9 +104,7 @@ async def test_patch_column_can_clear_default_model_with_null():
             "project_key": "PROJ", "name": "engineer",
             "default_model": "opus",
         })).json()["id"]
-        assert (await ac.get("/api/v1/kanban/columns",
-                             params={"project_key": "PROJ"})
-                ).json()["columns"][0]["default_model"] == "opus"
+        assert (await _fetch_column(ac, "PROJ", cid))["default_model"] == "opus"
 
         r = await ac.patch(f"/api/v1/kanban/columns/{cid}",
                            json={"default_model": None})
@@ -321,9 +326,7 @@ async def test_patch_column_rejects_switching_provider_when_old_model_doesnt_fit
         assert r.status_code == 422, r.text
         # The persisted state must be untouched — neither provider nor
         # model flipped silently to a partial invalid combo.
-        body = (await ac.get("/api/v1/kanban/columns",
-                              params={"project_key": "PROJ"})
-                ).json()["columns"][0]
+        body = await _fetch_column(ac, "PROJ", cid)
         assert body["default_provider"] == "anthropic"
         assert body["default_model"] == "opus"
 
