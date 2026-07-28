@@ -11,6 +11,8 @@ status: decided
 **Kaart:** `2bfefe2241f54bfab9723f8f4c9a03e1`
 **Uitkomst:** De LiteLLM-sidecar draait als **opt-in, gesuperviseerde derde service onder `cockpit.sh`**; dispatch is **fail-closed** op een dode proxy en de terugval gebeurt één laag hoger — in de pool-router vóór de spawn — in plaats van in een error-handler ná de fout.
 
+✅ **Geïmplementeerd (kaart `893033c6…`, V1):** opt-in `cockpit.sh`-service met `/health/liveliness`-watchdog, eigen venv met `litellm==1.93.0` + `prisma` gepind in `config/litellm/requirements.txt`, conditionele doctor-check die `check-litellm-hardening.sh` hergebruikt, `*.example`-configsjabloon + gitignored real config. De upgrade-procedure uit §7 staat nu inline in het requirements-bestand zelf.
+
 ---
 
 ## 0. De zes antwoorden in één tabel

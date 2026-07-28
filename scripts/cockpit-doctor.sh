@@ -13,6 +13,8 @@
 #   5. worktree leaks  — merged+clean worktrees left lying around
 #   6. test-project rows — leftover "mcp-test-*" rows in claude_registry.db
 #   7. orphan bridge sessions — Cockpit-spawned tmux sessions with no live kanban claim
+#   8. litellm sidecar — opt-in: `PASS` wanneer geen sidecar, anders `WARN` bij
+#                         hardening-FAILs uit scripts/check-litellm-hardening.sh
 #
 # Usage: scripts/cockpit-doctor.sh
 set -uo pipefail
@@ -102,6 +104,40 @@ if [ -x "$ROOT/scripts/list-orphan-bridge-sessions.sh" ]; then
         warn "$orphans orphan agent-bridge session(s) with no active kanban claim — run scripts/list-orphan-bridge-sessions.sh for details."
     else
         pass "no orphan agent-bridge sessions."
+    fi
+fi
+
+# 8. LiteLLM sidecar hardening (opt-in). Hergebruikt dezelfde check die de
+# sidecar zelf verifieert (scripts/check-litellm-hardening.sh) — zelfde patroon
+# als checks 5/6/7 die een ánder script in dry-run draaien en regels tellen.
+# Doctor zou geen eigen `curl`-logica moeten schrijven: dat zet een tweede,
+# zwakkere waarheid naast de 33-assert-check die al bestaat. Een dode sidecar
+# krijgt WARN, niet FAIL — doctor reserveert exit-1 voor actief kapotte
+# repo-staat (scripts/cockpit-doctor.sh:113-114 hieronder).
+LITELLM_CONFIG_PATH="${LITELLM_CONFIG_PATH:-$ROOT/config/litellm/config.yaml}"
+if [ ! -f "$LITELLM_CONFIG_PATH" ]; then
+    # Geen sidecar geconfigureerd: sla over (geen permanente WARN voor boxen
+    # die de sidecar niet gebruiken — zou mensen alleen maar trainen om
+    # doctor-output weg te kijken).
+    pass "no litellm sidecar configured (check skipped — opt-in)."
+elif [ ! -x "$ROOT/scripts/check-litellm-hardening.sh" ]; then
+    warn "litellm sidecar configured but scripts/check-litellm-hardening.sh missing — kan niet verifiëren."
+else
+    # Draai de hardening-check in advisory modus. We geven het config-pad mee
+    # zodat properties 3-5 (no-prompt-mutation, no-telemetry, credentials) ook
+    # gecontroleerd worden; anders zou die drie overslaan (zie de check zelf:
+    # "config-checks: no --config-yaml given — checks 3 ... are SKIPPED").
+    HARDENING_OUT=$("$ROOT/scripts/check-litellm-hardening.sh" \
+        --config-yaml "$LITELLM_CONFIG_PATH" 2>/dev/null) || true
+    # Strip ANSI kleurcodes rond `FAIL`/`WARN`/`PASS`-markers — anders matcht
+    # `^[[:space:]]+FAIL ` niet: de echte regel is "  \x1b[31mFAIL\x1b[0m ...".
+    HARDENING_FAILS=$(printf '%s\n' "$HARDENING_OUT" \
+        | sed 's/\x1b\[[0-9;]*m//g' \
+        | grep -cE '^[[:space:]]+FAIL ' || true)
+    if [ "${HARDENING_FAILS:-0}" -gt 0 ]; then
+        warn "litellm sidecar hardening: $HARDENING_FAILS FAIL(s) — run scripts/check-litellm-hardening.sh --strict (with --config-yaml $LITELLM_CONFIG_PATH) for details."
+    else
+        pass "litellm sidecar hardening clean (no FAILs reported; reachability included)."
     fi
 fi
 
