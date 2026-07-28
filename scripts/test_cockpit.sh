@@ -165,5 +165,88 @@ unset COCKPIT_BACKEND_CMD COCKPIT_FRONTEND_CMD
 rm -rf "$TMP_L"
 
 echo ""
+echo "Task 5b: litellm sidecar opt-in (no service when no config present)"
+# Status reports the litellm column either way (so operators see why it's not
+# running), but no service is started and no extra pid is created unless the
+# operator explicitly dropped a config on the expected path.
+TMP_O="$(mktemp -d)"
+unset LITELLM_CONFIG_PATH
+(
+    unset COCKPIT_BACKEND_CMD COCKPIT_FRONTEND_CMD LITELLM_CONFIG_PATH
+    export LITELLM_CONFIG_PATH="$TMP_O/__nonexistent__.yaml"
+    LOG_DIR="$TMP_O" RUN_DIR="$TMP_O/.run" bash "$SCRIPT_DIR/cockpit.sh" status > "$TMP_O/out" 2>&1
+)
+check "status prints litellm column"              'grep -q "^litellm:" "$TMP_O/out"'
+check "status says 'not configured' without cfg"  'grep -q "not configured" "$TMP_O/out"'
+check "no litellm pid written without config"     '[ ! -f "$TMP_O/.run/litellm.pid" ]'
+# Full lifecycle with injected cmds and no config: still no service spawned,
+# still clean stop, status unchanged.
+(
+    export COCKPIT_BACKEND_CMD="sleep 1000"
+    export COCKPIT_FRONTEND_CMD="sleep 1000"
+    unset LITELLM_CONFIG_PATH
+    export LITELLM_CONFIG_PATH="$TMP_O/__nonexistent__.yaml"
+    LOG_DIR="$TMP_O" RUN_DIR="$TMP_O/.run" bash "$SCRIPT_DIR/cockpit.sh" start >/dev/null 2>&1
+    sleep 1
+    LOG_DIR="$TMP_O" RUN_DIR="$TMP_O/.run" bash "$SCRIPT_DIR/cockpit.sh" status > "$TMP_O/out2" 2>&1
+    LOG_DIR="$TMP_O" RUN_DIR="$TMP_O/.run" bash "$SCRIPT_DIR/cockpit.sh" stop  >/dev/null 2>&1
+)
+check "no litellm pid after start (no config)"    '[ ! -f "$TMP_O/.run/litellm.pid" ]'
+check "status unchanged under full lifecycle"     'grep -q "not configured" "$TMP_O/out2"'
+rm -rf "$TMP_O"
+unset COCKPIT_BACKEND_CMD COCKPIT_FRONTEND_CMD LITELLM_CONFIG_PATH
+
+echo ""
+echo "Task 5c: litellm sidecar opt-in (config present => status flips to 'stopped')"
+# Drop a fixture config, run status — supervisor reads LITELLM_CONFIG_PATH
+# and prints 'config present but service not running' because no supervisor is
+# actually started (status doesn't spawn). The flip is the proof: the column
+# reads from the config existence, not from a watched pid file.
+TMP_O2="$(mktemp -d)"
+CFG="$TMP_O2/config.yaml"
+touch "$CFG"
+(
+    unset COCKPIT_BACKEND_CMD COCKPIT_FRONTEND_CMD
+    export LITELLM_CONFIG_PATH="$CFG"
+    LOG_DIR="$TMP_O2" RUN_DIR="$TMP_O2/.run" bash "$SCRIPT_DIR/cockpit.sh" status > "$TMP_O2/out" 2>&1
+)
+check "status says 'config present' with cfg"  'grep -q "config present" "$TMP_O2/out"'
+rm -rf "$TMP_O2"
+unset LITELLM_CONFIG_PATH
+
+echo ""
+echo "Task 5d: should_start_litellm opt-in helper (source-mode unit tests)"
+# Three laws, in order: (a) injected backend cmd => always false; (b) no
+# config file => false; (c) real config file + no injected cmds => true.
+TMP_O3="$(mktemp -d)"
+CFG3="$TMP_O3/config.yaml"
+touch "$CFG3"
+(
+    export COCKPIT_NO_MAIN=1
+    source "$SCRIPT_DIR/cockpit.sh"
+    export COCKPIT_BACKEND_CMD="sleep 1000"
+    export LITELLM_CONFIG_PATH="$CFG3"
+    check "should_start_litellm false under injected backend cmd" '! should_start_litellm'
+    unset COCKPIT_BACKEND_CMD
+    export LITELLM_CONFIG_PATH="$TMP_O3/__missing__.yaml"
+    check "should_start_litellm false when config missing"        '! should_start_litellm'
+    export LITELLM_CONFIG_PATH="$CFG3"
+    check "should_start_litellm true with config + default cmds"  'should_start_litellm'
+)
+# Smoke-test the cmd/url builders — they're shell-quoted so a path mismatch
+# is loud in the failure log.
+(
+    export COCKPIT_NO_MAIN=1
+    unset LITELLM_CONFIG_PATH LITELLM_VENV LITELLM_PORT LITELLM_REQUIREMENTS
+    source "$SCRIPT_DIR/cockpit.sh"
+    CMD=$(default_litellm_cmd)
+    URL=$(default_litellm_health_url)
+    check "default_litellm_cmd activates venv"     '[ -n "$CMD" ] && [[ "$CMD" == *"$LITELLM_VENV/bin/activate"* ]]'
+    check "default_litellm_health_url is loopback" '[[ "$URL" == http://127.0.0.1:* ]]'
+)
+rm -rf "$TMP_O3"
+unset LITELLM_CONFIG_PATH
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

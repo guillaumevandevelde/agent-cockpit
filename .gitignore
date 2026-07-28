@@ -94,3 +94,9 @@ apm_modules/
 
 # Personal/business notes not meant for the public repo (see docs/cockpit history)
 .local-notes/
+
+# LiteLLM sidecar — echte config bevat master_key, blijft uit de repo. Het
+# `.example`-sjabloon wordt wél gevolgd; gebruik `cp config/litellm/config.yaml.example
+# config/litellm/config.yaml` om de sidecar te activeren. Onderdeel van de
+# opt-in lifecycle uit `docs/cockpit/litellm-sidecar-lifecycle-decision.md` §2.
+/config/litellm/config.yaml

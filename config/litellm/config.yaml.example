@@ -1,0 +1,45 @@
+# --- LiteLLM sidecar — voorbeeldconfig ---------------------------------------
+#
+# Kopieer dit bestand naar `config.yaml` in dezelfde directory en vul de
+# `os.environ/*`-verwijzingen in met echte env-var-namen die de operator zelf
+# in de shell zet. De echte config (`config.yaml`) staat in `.gitignore`
+# omdat `master_key` een geheim is dat je niet commit.
+#
+# Conventies uit de hardening-check (scripts/check-litellm-hardening.sh):
+#   * api_key MOET `os.environ/VAR_NAME` zijn — plaintext sleutels in dit
+#     bestand falen property 5.
+#   * master_key MOET in general_settings staan, ook als `os.environ/...`.
+#   * Geen success_callback / failure_callback / alerting — anders faalt
+#     property 3 (prompt-mutatie) of property 4 (telemetry).
+#
+# `drop_params: true` laat LiteLLM parameters droppen die de upstream niet
+# kent, in plaats van een 400 terug te geven — gemeten in de pilot §6.
+# `router_settings.fallbacks` isoleert een rate-limit van één upstream; één
+# maprij per directionele koppel is het minimum dat de pilot onder stres
+# heeft geverifieerd.
+#
+# Bron: docs/cockpit/litellm-pilot-meting.md §1 + docs/cockpit/litellm-sidecar-lifecycle-decision.md
+
+model_list:
+  - model_name: your-model-alias
+    litellm_params:
+      model: openai/<upstream-model-id>    # bv. openai/MiniMax-M2.5
+      api_base: https://<upstream-host>/v1
+      api_key: os.environ/<UPSTREAM_API_KEY_VAR>
+    model_info: {id: upstream-primary}
+
+general_settings:
+  # Verplicht vanaf elke loopback-sidecar die je wilt harden. Zet
+  # LITELLM_MASTER_KEY als env-var in de shell die `cockpit.sh start`
+  # draait. Geen literal in dit bestand.
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  drop_params: true
+
+router_settings:
+  # failovers binnen LiteLLM — een rate-limit valt door zonder dat Cockpit
+  # er iets van merkt. health-check op de upstream hoort niet hier, alleen
+  # in de upstream zelf.
+  fallbacks: [{"your-model-alias": ["your-model-alias-fb"]}]
+  num_retries: 1

@@ -248,6 +248,65 @@ ensure_deps() {
         (cd "$PROJECT_ROOT/backend" && npm install) \
             || { echo "Fout: backend npm install mislukt — zie uitvoer hierboven."; return 1; }
     fi
+
+    # --- LiteLLM sidecar (opt-in) ---
+    # Symmetrisch aan de backend-blok hierboven: eigen venv, eigen pin, alleen
+    # geactiveerd wanneer er een config-bestand is (opt-in == no config ==
+    # no install, geen venv-directory aangemaakt op de box van de operator).
+    ensure_litellm_deps || return 1
+}
+
+# Install the sidecar's pinned dependencies into its own venv. Skipped when
+# there is no sidecar config (opt-in) AND in test-injection mode (COCKPIT_*_CMD
+# injected via env). Returns non-zero when a real install error happens.
+ensure_litellm_deps() {
+    if ! should_start_litellm; then
+        return 0
+    fi
+    local need=0
+    if [ ! -f "$LITELLM_VENV/bin/activate" ]; then
+        need=1
+    elif [ -f "$LITELLM_REQUIREMENTS" ] && [ "$LITELLM_REQUIREMENTS" -nt "$LITELLM_VENV/bin/activate" ]; then
+        need=1
+    fi
+    if [ "$need" -eq 1 ]; then
+        local py=""
+        for candidate in python3.13 python3.12 python3.11; do
+            command -v "$candidate" &>/dev/null && { py="$candidate"; break; }
+        done
+        [ -z "$py" ] && { echo "Fout: Python 3.11+ niet gevonden voor litellm sidecar venv."; return 1; }
+        if [ ! -d "$LITELLM_VENV" ]; then
+            echo "LiteLLM sidecar venv aanmaken..."
+            "$py" -m venv "$LITELLM_VENV" \
+                || { echo "Fout: liteLLM venv aanmaken mislukt."; return 1; }
+        fi
+        if [ ! -f "$LITELLM_REQUIREMENTS" ]; then
+            echo "Fout: $LITELLM_REQUIREMENTS ontbreekt — pin-bestand vereist voor opt-in install."
+            return 1
+        fi
+        echo "LiteLLM sidecar dependencies installeren (gepinde versie)..."
+        "$LITELLM_VENV/bin/pip" install -q -r "$LITELLM_REQUIREMENTS" \
+            || { echo "Fout: pip install voor litellm sidecar mislukt — zie uitvoer hierboven."; return 1; }
+        touch "$LITELLM_VENV/bin/activate"
+    fi
+}
+
+# --- LiteLLM sidecar (opt-in) ----------------------------------------------------
+# Een derde `watch_service` die alleen start wanneer er een sidecar-config op de
+# verwachte plek ligt. Zonder config: geen service, geen log-directory, geen
+# gedragsverandering — wie de sidecar niet gebruikt merkt er niets van. Beslist
+# in `docs/cockpit/litellm-sidecar-lifecycle-decision.md` §2 (Q1).
+LITELLM_CONFIG_PATH="${LITELLM_CONFIG_PATH:-$PROJECT_ROOT/config/litellm/config.yaml}"
+LITELLM_VENV="${LITELLM_VENV:-$PROJECT_ROOT/litellm/venv}"
+LITELLM_PORT="${LITELLM_PORT:-4000}"
+LITELLM_REQUIREMENTS="${LITELLM_REQUIREMENTS:-$PROJECT_ROOT/config/litellm/requirements.txt}"
+
+# True when the supervisor should start the sidecar: we are in the default-
+# commands path (not test injection), AND the config the operator wrote is
+# present. None of these are absolute — they are guards, not auth.
+should_start_litellm() {
+    [ -z "${COCKPIT_BACKEND_CMD:-}" ] && [ -z "${COCKPIT_FRONTEND_CMD:-}" ] \
+        && [ -f "$LITELLM_CONFIG_PATH" ]
 }
 
 # --- default service commands (overridable via env for tests) ---
@@ -261,6 +320,18 @@ default_backend_cmd() {
 }
 default_frontend_cmd() {
     echo "cd '$PROJECT_ROOT/frontend' && exec npm run dev ${HOST:+-- --host $HOST}"
+}
+
+# Loopback-only bind zodat check-litellm-hardening.sh check 1 (binding op
+# loopback) standaard al slaagt. De operator kan --host op een ander adres
+# zetten door een eigen config te schrijven; dit is de default die we
+# verdedigbaar vinden.
+default_litellm_cmd() {
+    echo "source '$LITELLM_VENV/bin/activate' && exec litellm --host 127.0.0.1 --port $LITELLM_PORT --config '$LITELLM_CONFIG_PATH'"
+}
+
+default_litellm_health_url() {
+    echo "http://127.0.0.1:$LITELLM_PORT/health/liveliness"
 }
 
 # Check if frontend build is needed (dist missing or source newer than dist)
@@ -308,7 +379,7 @@ supervisor_main() {
     mkdir -p "$LOG_DIR"
     mkdir -p "$RUN_DIR"
     echo "$$" > "$RUN_DIR/supervisor.pid"
-    local backend_cmd frontend_cmd backend_health=""
+    local backend_cmd frontend_cmd backend_health="" litellm_cmd="" litellm_health=""
     backend_cmd="${COCKPIT_BACKEND_CMD:-}"
     if [ -z "$backend_cmd" ]; then
         backend_cmd="$(default_backend_cmd)"
@@ -317,11 +388,22 @@ supervisor_main() {
     fi
     frontend_cmd="${COCKPIT_FRONTEND_CMD:-}"
     [ -z "$frontend_cmd" ] && frontend_cmd="$(default_frontend_cmd)"
+    # Sidecar: alleen starten wanneer er een config-bestand op de verwachte
+    # plek ligt (opt-in). Zonder config géén service, géén pid-file, géén log
+    # directory aangemaakt door de supervisor.
+    if should_start_litellm; then
+        litellm_cmd="$(default_litellm_cmd)"
+        litellm_health="$(default_litellm_health_url)"
+        sup_log "sidecar enabled (config=$LITELLM_CONFIG_PATH, port=$LITELLM_PORT)"
+    fi
     local children=()
     trap 'for c in "${children[@]}"; do kill_tree "$c"; done; rm -f "$RUN_DIR"/*.pid; exit 0' TERM INT
     sup_log "supervisor started (pid $$)"
-    watch_service backend  "$backend_cmd" "$backend_health" & children+=("$!")
-    watch_service frontend "$frontend_cmd" & children+=("$!")
+    watch_service backend  "$backend_cmd"  "$backend_health"  & children+=("$!")
+    watch_service frontend "$frontend_cmd" ""                 & children+=("$!")
+    if [ -n "$litellm_cmd" ]; then
+        watch_service litellm "$litellm_cmd" "$litellm_health" & children+=("$!")
+    fi
     wait
 }
 
@@ -448,7 +530,7 @@ cmd_stop() {
 cmd_restart() { cmd_stop; sleep 1; cmd_start; }
 
 cmd_status() {
-    local s b f
+    local s b f l
     is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER" && s="running (pid $(cat "$RUN_DIR/supervisor.pid"))" || s="stopped"
     is_running "$RUN_DIR/backend.pid"    && b="running (pid $(cat "$RUN_DIR/backend.pid"))"    || b="stopped"
     is_running "$RUN_DIR/frontend.pid"   && f="running (pid $(cat "$RUN_DIR/frontend.pid"))"   || f="stopped"
@@ -461,9 +543,22 @@ cmd_status() {
             b="$b, UNHEALTHY (reageert niet)"
         fi
     fi
+    # Sidecar: drie toestanden — niet geconfigureerd, gestopt, of draaiend.
+    # "not configured" is een eerlijke mededeling (geen service om te starten),
+    # niet "stopped" (dat zou impliceren dat ie had moeten draaien).
+    if [ -f "$LITELLM_CONFIG_PATH" ]; then
+        if is_running "$RUN_DIR/litellm.pid"; then
+            l="running (pid $(cat "$RUN_DIR/litellm.pid"))"
+        else
+            l="stopped (config present but service not running)"
+        fi
+    else
+        l="not configured (no $LITELLM_CONFIG_PATH)"
+    fi
     echo "supervisor: $s"
     echo "backend:    $b"
     echo "frontend:   $f"
+    echo "litellm:    $l"
 }
 
 cmd_logs() {
@@ -485,8 +580,8 @@ Commands:
   start          Start de zelfhelende supervisor (gedetacheerd)
   stop           Stop supervisor + processen
   restart        Stop, dan start
-  status         Toon status van supervisor/backend/frontend
-  logs [svc]     Volg logs (svc = backend|frontend, default backend)
+  status         Toon status van supervisor/backend/frontend/litellm
+  logs [svc]     Volg logs (svc = backend|frontend|litellm, default backend)
   doctor         Read-only health check (repo mode, tree wipe, drift, worktrees, hook)
 
 Options:

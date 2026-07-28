@@ -1,0 +1,36 @@
+# LiteLLM sidecar — gepinde install-set.
+#
+# Bewust NIET opgenomen in backend/requirements.txt: het sidecar-deel hoort
+# niet bij de backend (zie docs/cockpit/litellm-sidecar-lifecycle-decision.md
+# §7, Q6 — voorwaarde 2 van de kaart). Een eigen venv onder litellm/venv/
+# voorkomt dat een sidecar-pin ooit per ongeluk de backend infiltreert.
+#
+# ============================================================================
+# UPGRADE-PROCEDURE (drie stappen, in deze volgorde)
+# ============================================================================
+# 1. `litellm==<nieuwe-versie>` hier ophogen. `prisma` blijft verplicht
+#    meeleveren — zonder `prisma` antwoordt de proxy HTTP 500 in plaats van
+#    401 op een authenticatie-afwijzing (gemeten in pilot §2.1).
+# 2. `bash scripts/check-litellm-hardening.sh --config-yaml <pad> --strict`
+#    draaien tegen de nieuwe versie, met de UPSTREAM-keys in de env. Een
+#    upgrade die geen groene `--strict`-run oplevert is geen upgrade maar
+#    een onbekende toestand — de check verifieert de afwezigheid van
+#    config-flags, dus een upstream-hernoeming van `success_callback`,
+#    `failure_callback`, `service_callbacks`, `guardrails`,
+#    `router_settings.plugins`, `alerting`, of `database_url` wordt direct
+#    stil detecteerbaar door een FAIL op property 3, 4 of 5.
+# 3. Bij twijfel over routering ook de prefix-probe uit pilot §6 herhalen
+#    (de prefix→endpoint-tabel verspringt soms zonder changelog-notitie).
+# 4. Pas als alle drie groen zijn: mergen.
+# ============================================================================
+
+# De proxy-implementatie. 1.93.0 is wat de pilot en hardening-check
+# daadwerkelijk hebben gemeten (zie docs/cockpit/litellm-pilot-meting.md);
+# auto-update breekt stil de hardening-check zodra upstream een
+# flag-naam hernoemt.
+litellm==1.93.0
+
+# Wordt door LiteLLM geïmporteerd in de auth-exception-handler. Zonder
+# `prisma` antwoordt de proxy HTTP 500 in plaats van 401 op een
+# authenticatie-afwijzing. Gemeten in pilot §2.1.
+prisma
