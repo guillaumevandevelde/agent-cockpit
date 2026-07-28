@@ -7,6 +7,7 @@ import { RefreshButton } from '@/components/shared/RefreshButton'
 import { useSessionsApi } from '@/hooks/useSessionsApi'
 import { useFetchData } from '@/hooks/useFetchData'
 import { useProjectContext } from '@/contexts/ProjectContext'
+import { claudeProjectFolderFromPath } from '@/lib/utils'
 import { SessionList } from './SessionList'
 
 export function SessionsPage() {
@@ -14,9 +15,15 @@ export function SessionsPage() {
   const { activeProject } = useProjectContext()
   const { listProjects } = useSessionsApi()
 
-  const [selectedProject, setSelectedProject] = useState<string | null>(
-    activeProject?.path || searchParams.get('project') || null
-  )
+  // The backend's list_sessions expects Claude's encoded project folder
+  // (e.g. '-tmp-product-a'), not the absolute path the active project carries.
+  // _ensure_safe_path_component rejects '/' in the query value, so seeding
+  // selectedProject from activeProject?.path directly causes HTTP 500 and
+  // an empty sessions list. See kanban card afa728df91c6446abc1fb93613cc73d1.
+  const [selectedProject, setSelectedProject] = useState<string | null>(() => {
+    if (activeProject?.path) return claudeProjectFolderFromPath(activeProject.path)
+    return searchParams.get('project')
+  })
 
   const { data, loading, refresh: loadProjects } = useFetchData(
     () => listProjects(),

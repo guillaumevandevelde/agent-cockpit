@@ -27,7 +27,7 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     setSubmitting(true);
 
     try {
-      const result = await apiClient<{ name: string }>("/api/v1/plugins/marketplaces", {
+      const result = await apiClient<{ name: string }>("plugins/marketplaces", {
         method: "POST",
         body: JSON.stringify({ input: marketplaceInput }),
       });
@@ -48,7 +48,7 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     }
 
     try {
-      await apiClient(`/api/v1/plugins/marketplaces/${name}`, {
+      await apiClient(`plugins/marketplaces/${name}`, {
         method: "DELETE",
       });
 
@@ -63,7 +63,7 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     setUpdating(name);
 
     try {
-      await apiClient(`/api/v1/plugins/marketplace/${name}/update`, {
+      await apiClient(`plugins/marketplace/${name}/update`, {
         method: "POST",
       });
 
@@ -80,7 +80,7 @@ export function MarketplaceManager({ marketplaces, onRefresh }: MarketplaceManag
     setTogglingAutoUpdate(name);
 
     try {
-      await apiClient(`/api/v1/plugins/marketplace/${name}/auto-update`, {
+      await apiClient(`plugins/marketplace/${name}/auto-update`, {
         method: "PUT",
         body: JSON.stringify({ enabled }),
       });

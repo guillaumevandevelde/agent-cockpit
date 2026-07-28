@@ -153,12 +153,11 @@ fi
 # effective_transport are the bool/str the dispatch hot path would
 # use *without* the override (the risk_class-derived default).
 #
-# Stderr is redirected to a tempfile so we can recover it AFTER the exit
-# code is known: command substitution eats stderr unless we capture it
-# ourselves, but bash sets $? to the substituted command's exit code, so
-# the in-flight check (`if [ "$PY_RC" -ne 0 ]`) is reliable. The pattern
-# matches scripts/check-analysis-outcomes.sh.
+# Stderr is redirected to a tempfile so we can print the diagnosis after a
+# non-zero exit. The assignment is in an `||` list so `set -e` does not exit
+# before the PY_RC handler runs.
 PY_STDERR_FILE="$(mktemp)"
+PY_RC=0
 HIT_TSV="$(python3 - "$KANBAN_DB_PATH" "$REGISTRY_DB_PATH" 2>"$PY_STDERR_FILE" <<'PY'
 import re, sqlite3, subprocess, sys
 from pathlib import Path
@@ -331,10 +330,9 @@ for row in override_rows:
         ])
     )
 PY
-)"
-PY_RC=$?
+)" || PY_RC=$?
 if [ "$PY_RC" -ne 0 ]; then
-  echo "ERROR: conflict query failed (exit $PY_RC); see stderr above." >&2
+  echo "ERROR: conflict query failed (exit $PY_RC); see stderr below." >&2
   [ -s "$PY_STDERR_FILE" ] && cat "$PY_STDERR_FILE" >&2 || true
   rm -f "$PY_STDERR_FILE"
   exit 2

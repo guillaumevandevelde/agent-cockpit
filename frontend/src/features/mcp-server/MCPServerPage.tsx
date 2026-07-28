@@ -63,7 +63,7 @@ export function MCPServerPage() {
     setLoading(true)
     try {
       const data = await apiClient<{ tokens: MCPToken[] }>(
-        "/api/v1/mcp-server/tokens"
+        "mcp-server/tokens"
       )
       setTokens(data.tokens)
     } catch {
@@ -84,7 +84,7 @@ export function MCPServerPage() {
     }
     try {
       const data = await apiClient<TokenCreateResponse>(
-        "/api/v1/mcp-server/tokens",
+        "mcp-server/tokens",
         {
           method: "POST",
           body: JSON.stringify({
@@ -108,7 +108,7 @@ export function MCPServerPage() {
 
   const handleRevoke = async (id: number) => {
     try {
-      await apiClient(`/api/v1/mcp-server/tokens/${id}`, {
+      await apiClient(`mcp-server/tokens/${id}`, {
         method: "DELETE",
       })
       fetchTokens()

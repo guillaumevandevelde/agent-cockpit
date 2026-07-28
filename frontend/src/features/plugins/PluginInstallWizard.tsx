@@ -78,7 +78,7 @@ export function PluginInstallWizard({
     setStep("installing");
 
     try {
-      const data = await apiClient<PluginInstallResponse>("/api/v1/plugins/install", {
+      const data = await apiClient<PluginInstallResponse>("plugins/install", {
         method: "POST",
         body: JSON.stringify({
           name: plugin.name,

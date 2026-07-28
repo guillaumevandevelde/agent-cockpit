@@ -80,7 +80,7 @@ export function MarketplaceBrowser({ marketplaces, installedPlugins, onInstall, 
     setError(null);
 
     apiClient<{ plugins: MarketplacePlugin[] }>(
-      `/api/v1/plugins/marketplace/${selectedMarketplace}/browse`
+      `plugins/marketplace/${selectedMarketplace}/browse`
     )
       .then((data) => {
         setPlugins(data.plugins || []);
@@ -102,7 +102,7 @@ export function MarketplaceBrowser({ marketplaces, installedPlugins, onInstall, 
     
     try {
       const details = await apiClient<PluginDetails>(
-        `/api/v1/plugins/marketplace/${selectedMarketplace}/plugin/${plugin.name}`
+        `plugins/marketplace/${selectedMarketplace}/plugin/${plugin.name}`
       );
       setPreviewDetails(details);
     } catch {

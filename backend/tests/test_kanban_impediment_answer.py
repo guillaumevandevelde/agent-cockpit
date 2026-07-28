@@ -108,8 +108,13 @@ def test_build_card_prompt_omits_answer_block_when_no_answer():
     )
     assert "## IMPEDIMENT" in prompt
     assert "Which library?" in prompt
-    assert "authoritative" not in prompt
-    assert "clarify what's needed" in prompt
+    # Scope to the IMPEDIMENT section: a bare keyword check collides with
+    # the FCR block ("**authoritative scope**") that every prompt carries.
+    # Mirrors the section-scoped pattern in
+    # test_rest_fallback_block_documents_list_envelope_create_and_stop_retrying.
+    impediment_block = prompt.split("## IMPEDIMENT")[1].split("\n## ")[0]
+    assert "treat the answer as an" not in impediment_block
+    assert "clarify what's needed" in impediment_block
 
 
 def test_build_card_prompt_documents_rest_fallback_for_minus_32602():

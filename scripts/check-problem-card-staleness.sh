@@ -106,13 +106,11 @@ fi
 #
 #   <card_id>\t<title>\t<created_at>\t<kind>\t<source_date>\t<source_ref>\t<overlap_csv>
 #
-# Stderr is redirected to a tempfile so we can recover it AFTER the exit
-# code is known: command substitution eats stderr unless we capture it
-# ourselves, but bash sets $? to the substituted command's exit code, so
-# the in-flight check (`if [ "$PY_RC" -ne 0 ]`) is reliable. The pattern
-# matches check-analysis-outcomes.sh and scripts/worktree-gc.sh's invocation
-# of scripts/kanban_active_worktrees.py.
+# Stderr is redirected to a tempfile so we can print the diagnosis after a
+# non-zero exit. The assignment is in an `||` list so `set -e` does not exit
+# before the PY_RC handler runs.
 PY_STDERR_FILE="$(mktemp)"
+PY_RC=0
 HIT_TSV="$(python3 - "$DB_PATH" "$DECISIONS_MD" "$REPO_ROOT" 2>"$PY_STDERR_FILE" <<'PY'
 import json, re, sqlite3, subprocess, sys
 from datetime import datetime, timedelta
@@ -317,10 +315,9 @@ if git_failed and sys.stderr.isatty():
 
 con.close()
 PY
-)"
-PY_RC=$?
+)" || PY_RC=$?
 if [ "$PY_RC" -ne 0 ]; then
-  echo "ERROR: staleness query failed (exit $PY_RC); see stderr above." >&2
+  echo "ERROR: staleness query failed (exit $PY_RC); see stderr below." >&2
   [ -s "$PY_STDERR_FILE" ] && cat "$PY_STDERR_FILE" >&2 || true
   rm -f "$PY_STDERR_FILE"
   exit 2

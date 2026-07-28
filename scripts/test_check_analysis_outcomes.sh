@@ -26,7 +26,9 @@
 #  12.  error path — bad --since format → exit 2.
 #  13.  --strict mode → exit 1 on hits; exit 0 when clean.
 #  14.  unknown argument → exit 2.
-#  15.  real ~/.claude-registry/kanban.db is reachable AND the real board
+#  15.  inline Python query failure → exit 2 + wrapper ERROR and captured
+#       sqlite diagnostic.
+#  16.  real ~/.claude-registry/kanban.db is reachable AND the real board
 #       emits the clean-state OK line (not the loose "OK or WARNING"
 #       tautology that an earlier shape of this task masked — see
 #       self-improve card e5136a3f959d4886a7757b85e9d31f55).
@@ -296,7 +298,19 @@ check "unknown arg → exit 2"         '[ "$rc" -eq 2 ]'
 check "unknown arg → ERROR names the bad flag" 'echo "$out" | grep -qF "unknown argument"'
 
 # ----------------------------------------------------------------------------
-echo "Task 15: the real ~/.claude-registry/kanban.db is reachable"
+echo "Task 15: inline Python query failure prints wrapper + captured stderr"
+bad_db="$TMP/bad.db"
+python3 - "$bad_db" <<'PY'
+import sqlite3, sys
+sqlite3.connect(sys.argv[1]).close()
+PY
+out=$(run "$bad_db"); rc=$?
+check "query failure → exit 2"              '[ "$rc" -eq 2 ]'
+check "query failure → wrapper ERROR"       'echo "$out" | grep -qF "ERROR: kanban-sweeper query failed (exit 2)"'
+check "query failure → captured sqlite error" 'echo "$out" | grep -qF "ERROR: sqlite query failed: no such table: kanban_cards"'
+
+# ----------------------------------------------------------------------------
+echo "Task 16: the real ~/.claude-registry/kanban.db is reachable"
 if [ -r "$HOME/.claude-registry/kanban.db" ]; then
   out=$(bash "$SUT" 2>&1); rc=$?
   # Real board is expected to be clean (every Done analysis carries an

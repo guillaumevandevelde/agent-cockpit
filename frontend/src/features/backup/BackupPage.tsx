@@ -43,7 +43,7 @@ export function BackupPage() {
       return Promise.all(
         response.backups.map(async (backup) => {
           try {
-            const detailed = await apiClient<Backup>(`/api/v1/backup/${backup.id}`);
+            const detailed = await apiClient<Backup>(`backup/${backup.id}`);
             return detailed;
           } catch {
             return backup;
