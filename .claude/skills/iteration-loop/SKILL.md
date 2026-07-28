@@ -263,10 +263,12 @@ After `<loop-complete>` or `<loop-blocked>`:
    path `.claude/state/iteration-<card-id>.txt` is in `.gitignore`
    (added by commit `31f3a51` "chore: gitignore iteration-loop
    progress files"), so a file written there is ignored by git — the
-   ship pre-flight's `git ls-files --others --exclude-standard`
-   doesn't see it, and `scripts/worktree-gc.sh` treats the worktree
-   as clean and removes the whole `.claude/` subtree along with the
-   worktree when the card moves to `Done`. No manual `rm` needed.
+   ship pre-flight only tests tracked-file changes (`git status
+   --porcelain | grep -v '^??'`), so untracked files like this one are
+   out of the blocking path, and `scripts/worktree-gc.sh` treats the
+   worktree as clean and removes the whole `.claude/` subtree along
+   with the worktree when the card moves to `Done`. No manual `rm`
+   needed.
 
    Some past sessions have also committed these files into their
    card's commit (search `git ls-files .claude/state/` — they're
@@ -281,18 +283,19 @@ After `<loop-complete>` or `<loop-blocked>`:
    appending to `.claude/state/…` from that cwd), the file lands at
    e.g. `backend/.claude/state/iteration-<card-id>.txt` — and the
    gitignore pattern does **not** match nested paths, so the file
-   appears as untracked. That trips the ship pre-flight and forces
-   one of:
-   - `mv backend/.claude/state/iteration-<card-id>.txt .claude/state/`
-     so it lands in the gitignored path (then re-run pre-flight), or
-   - `git add -f .claude/state/iteration-<card-id>.txt && git commit
-     --amend` to ride it along with the card's commit (matches what
-     past sessions did).
+   shows up under `git status` as untracked. With the new pre-flight
+   (tracked-files-only), an untracked `iteration-*.txt` no longer
+   *blocks* the ship, but it still leaks across worktree boundaries
+   if the loop writes to a subdir. Best practice: the loop writes to
+   the gitignored root (`.claude/state/`) so the file is invisible to
+   both `git status` and the pre-flight — if you ever see the file
+   under a non-ignored subdir, move it before the next ship so it
+   doesn't ride along on a different worktree's `git worktree remove`.
 
-   If the pre-flight ever complains about an untracked
-   `iteration-*.txt` you didn't expect, `git status --ignored` will
+   If the pre-flight ever mentions an untracked
+   `iteration-*.txt` in its advisory, `git status --ignored` will
    tell you whether the loop wrote it under the gitignored root or
-   a non-ignored subdir.
+   a non-ignored subdir — the advisory lists the first 20.
 
 ## Choosing a preset — quick decision table
 
