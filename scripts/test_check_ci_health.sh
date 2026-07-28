@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+# Test harness for scripts/check-ci-health.sh.
+#
+# The SUT (script under test) shells out to `gh` to read recent CI runs and
+# the per-run jobs breakdown. We do NOT want to depend on a live `gh` auth
+# session from the test harness, and we don't want the test to be flaky when
+# the real board happens to be red or green. The SUT therefore accepts a
+# fixture directory via `CI_HEALTH_FIXTURES_DIR=<dir>`; in that mode it reads
+#   run-list.json                — output of `gh run list --json databaseId,conclusion,headBranch,workflowDatabaseId,name`
+#   run-<id>.json                — output of `gh run view --json jobs <id>`
+# instead of calling `gh api`. The harness builds those fixtures synthetically.
+#
+# Tasks covered (mirroring the card's acceptance criteria):
+#   1.  arg parsing — `--help` works and mentions the real flags.
+#   2.  error — missing fixtures dir → exit 2.
+#   3.  error — unknown argument → exit 2.
+#   4.  empty fixtures dir → exit 0 with "no runs" OK line.
+#   5.  **CI-didn't-run check**: a recent run with `conclusion=failure` and
+#       zero steps in any job (the billing-block signature) → flagged with a
+#       distinct "infrastructure" message (acceptance criterion 1).
+#   6.  **CI-didn't-run check**: the same scenario but EVERY job has zero
+#       steps and the run total runtime < 10s → also flagged.
+#   7.  **Real test failure**: a run with `conclusion=failure` but a normal
+#       step count + normal duration → NOT flagged as "infrastructure",
+#       just contributes to the consecutive-red count.
+#   8.  **consecutive-red**: last N (default 3) completed runs on master are
+#       all failure → flagged (acceptance criterion 2). Configurable via
+#       `--red-threshold=N`.
+#   9.  consecutive-red threshold: with threshold=5 and 3 reds → not flagged.
+#  10.  consecutive-red respects branch: a failure on a non-master branch
+#       does NOT count toward the master streak.
+#  11.  the threshold default is 3 — checked by arg-parsing test.
+#  12.  exit-1 only under --strict (matching sibling check-*.sh scripts).
+#  13.  the same fixture set produces BOTH warnings → both lines emitted;
+#       one --strict run covers both failure modes.
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUT="$SCRIPT_DIR/check-ci-health.sh"
+
+PASS=0; FAIL=0
+ok()   { echo "  ok: $1"; PASS=$((PASS+1)); }
+bad()  { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
+# `check <description> <expression>` — runs the expression in a fresh
+# subshell with the captured stdout/stderr passed via the env var `$OUT`.
+# Using an env var (rather than `eval "echo \"$out\" | ..."`) is
+# load-bearing: the SUT's --help text contains backticks (`` ``conclusion
+# == failure`` ``), and `eval "echo \"$out\" | ..."` would evaluate those
+# backticks as command substitution, hiding the actual line and producing
+# false negatives. The env-var handoff keeps the data out of the shell
+# parser on the receiving side — backticks in `$OUT` stay literal text.
+check(){
+  local desc="$1" expr="$2"
+  # Pass captured stdout+stderr as $OUT and the captured exit code as $RC
+  # via env vars (NOT positional args), so the expression's `$OUT` /
+  # `$RC` references resolve inside the fresh subshell. Env-var handoff is
+  # load-bearing: the SUT's --help text contains backticks, and any
+  # `eval`-based interpolation would evaluate them as command substitution.
+  # A separate env var for $RC means expressions like `[ "$RC" -eq 0 ]`
+  # work the same way the existing check-*.sh test harnesses use them.
+  # `: "${rc:=}"` guards against `set -u` on the first --help call where
+  # `out=...; rc=$?` hasn't run yet (no $rc is in scope).
+  : "${rc:=}"
+  if OUT="$out" RC="$rc" bash -c "$expr"; then ok "$desc"; else bad "$desc"; fi
+}
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# ----------------------------------------------------------------------------
+# Helper: build a `run-list.json` and per-run `run-<id>.json` fixtures in
+# `$1` from a simple `runs` spec: each entry is `id|conclusion|branch|dur_s`.
+# The run-id is the same as the databaseId; jobs are derived from the duration
+# (long → 14-step backend + 10-step frontend + 0-step skipped e2e; short/zero
+# → all jobs empty-step). The shape is intentionally close enough to the real
+# `gh run view --json jobs` output for the SUT's jq-free awk parser.
+write_fixtures() {
+  local dir="$1"; shift
+  mkdir -p "$dir"
+  : > "$dir/run-list.json"
+  printf '[' >> "$dir/run-list.json"
+  local first=1
+  for spec in "$@"; do
+    IFS='|' read -r id conc branch dur <<<"$spec"
+    if [ "$first" -eq 0 ]; then printf ',' >> "$dir/run-list.json"; fi
+    first=0
+    cat >> "$dir/run-list.json" <<EOF
+{"databaseId":${id},"conclusion":"${conc}","headBranch":"${branch}","workflowDatabaseId":1,"name":"Quality"}
+EOF
+    # Per-run JSON. Long-duration → 14-step backend failure + 10-step frontend
+    # success + 0-step skipped e2e (mirrors the real run observed on master
+    # 2026-07-28). Short-duration → every job is empty-step + conclusion
+    # failure (the billing-block signature).
+    if [ "${dur:-0}" -ge 30 ]; then
+      cat > "$dir/run-${id}.json" <<EOF
+{"jobs":[
+{"name":"backend","conclusion":"${conc}","startedAt":"2026-07-28T10:00:00Z","completedAt":"2026-07-28T10:00:${dur#0}Z","steps":[
+{"name":"Set up job","conclusion":"${conc}","startedAt":"2026-07-28T10:00:00Z","completedAt":"2026-07-28T10:00:01Z","number":1},
+{"name":"Run actions/checkout@v7","conclusion":"${conc}","startedAt":"2026-07-28T10:00:01Z","completedAt":"2026-07-28T10:00:02Z","number":2},
+{"name":"Run ruff","conclusion":"${conc}","startedAt":"2026-07-28T10:00:02Z","completedAt":"2026-07-28T10:00:10Z","number":3},
+{"name":"Run bandit","conclusion":"${conc}","startedAt":"2026-07-28T10:00:10Z","completedAt":"2026-07-28T10:00:18Z","number":4},
+{"name":"Run pytest","conclusion":"${conc}","startedAt":"2026-07-28T10:00:18Z","completedAt":"2026-07-28T10:00:40Z","number":5},
+{"name":"Complete job","conclusion":"${conc}","startedAt":"2026-07-28T10:00:40Z","completedAt":"2026-07-28T10:00:46Z","number":6}
+]},
+{"name":"frontend","conclusion":"success","startedAt":"2026-07-28T10:00:00Z","completedAt":"2026-07-28T10:01:20Z","steps":[
+{"name":"Set up job","conclusion":"success","startedAt":"2026-07-28T10:00:00Z","completedAt":"2026-07-28T10:00:01Z","number":1},
+{"name":"Complete job","conclusion":"success","startedAt":"2026-07-28T10:01:20Z","completedAt":"2026-07-28T10:01:20Z","number":15}
+]},
+{"name":"e2e","conclusion":"skipped","startedAt":"2026-07-28T10:01:20Z","completedAt":"2026-07-28T10:01:20Z","steps":[]}
+]}
+EOF
+    else
+      # Short or zero duration → empty-step + failure on every job (the
+      # billing-block signature). Dur is intentionally small so the
+      # run-level "<10s" rule fires for tasks 5/6.
+      cat > "$dir/run-${id}.json" <<EOF
+{"jobs":[
+{"name":"backend","conclusion":"${conc}","startedAt":"2026-07-28T10:00:00Z","completedAt":"2026-07-28T10:00:0${dur:-0}Z","steps":[]},
+{"name":"frontend","conclusion":"${conc}","startedAt":"2026-07-28T10:00:00Z","completedAt":"2026-07-28T10:00:0${dur:-0}Z","steps":[]},
+{"name":"e2e","conclusion":"${conc}","startedAt":"2026-07-28T10:00:00Z","completedAt":"2026-07-28T10:00:0${dur:-0}Z","steps":[]}
+]}
+EOF
+    fi
+  done
+  printf ']' >> "$dir/run-list.json"
+}
+
+# ----------------------------------------------------------------------------
+echo "Task 1: arg parsing — --help"
+out=$(bash "$SUT" --help 2>&1 || true)
+check "--help mentions Usage" 'echo "$OUT" | grep -qE "Usage:"'
+check "--help mentions --strict" 'echo "$OUT" | grep -qE "\-\-strict"'
+check "--help mentions --red-threshold" 'echo "$OUT" | grep -qE "\-\-red-threshold"'
+check "--help mentions --fixtures-dir" 'echo "$OUT" | grep -qE "\-\-fixtures-dir"'
+check "--help mentions the empty-steps signature" 'echo "$OUT" | grep -qiE "steps"'
+
+# ----------------------------------------------------------------------------
+echo "Task 2: error — missing fixtures dir"
+out=$(CI_HEALTH_FIXTURES_DIR="$TMP/nope" bash "$SUT" 2>&1); rc=$?
+check "missing fixtures dir → exit 2" '[ "$RC" -eq 2 ]'
+check "missing fixtures dir → ERROR mentions path" 'echo "$OUT" | grep -qE "ERROR.*fixtures"'
+
+# ----------------------------------------------------------------------------
+echo "Task 3: error — unknown argument"
+out=$(bash "$SUT" --bogus 2>&1); rc=$?
+check "unknown argument → exit 2" '[ "$RC" -eq 2 ]'
+check "unknown argument → ERROR names the flag" 'echo "$OUT" | grep -qE "ERROR.*--bogus"'
+
+# ----------------------------------------------------------------------------
+echo "Task 4: empty fixtures dir → exit 0 with a clean OK"
+empty="$TMP/empty"; mkdir -p "$empty"
+: > "$empty/run-list.json"
+printf '[]\n' > "$empty/run-list.json"
+out=$(CI_HEALTH_FIXTURES_DIR="$empty" bash "$SUT" 2>&1); rc=$?
+check "empty fixtures → exit 0" '[ "$RC" -eq 0 ]'
+check "empty fixtures → emits an OK line" 'echo "$OUT" | grep -qE "^OK:"'
+check "empty fixtures → no WARNING line" '! echo "$OUT" | grep -qE "WARNING:"'
+
+# ----------------------------------------------------------------------------
+echo "Task 5: billing-block signature — conclusion=failure with empty-step jobs and short run duration"
+# Run 101 is the most recent (largest id). Steps are empty, duration is 3s.
+# The SUT must flag this with a distinct "infrastructure" message.
+bb="$TMP/bb"
+write_fixtures "$bb" \
+  "101|failure|master|3"
+out=$(CI_HEALTH_FIXTURES_DIR="$bb" bash "$SUT" 2>&1); rc=$?
+check "billing-block → exit 0 (advisory)" '[ "$RC" -eq 0 ]'
+check "billing-block → emits WARNING" 'echo "$OUT" | grep -qE "WARNING:"'
+check "billing-block → message mentions infrastructure OR billing OR empty-steps" \
+  'echo "$OUT" | grep -qiE "infrastructure|billing|empty[- ]steps|did not (run|execute)"'
+check "billing-block → names the run id" 'echo "$OUT" | grep -qE "#?101"'
+check "billing-block → does NOT say consecutive-red" '! echo "$OUT" | grep -qiE "consecutive"'
+
+# ----------------------------------------------------------------------------
+echo "Task 6: billing-block signature — every job empty-steps AND total duration <10s"
+# Same shape but with duration 0 — exercises the alternate "looptijd < 10s" branch
+# of the rule (kanban card text: "of looptijd < ~10s").
+bb2="$TMP/bb2"
+write_fixtures "$bb2" \
+  "201|failure|master|0"
+out=$(CI_HEALTH_FIXTURES_DIR="$bb2" bash "$SUT" 2>&1); rc=$?
+check "bb2 → exit 0" '[ "$RC" -eq 0 ]'
+check "bb2 → flagged as infrastructure" 'echo "$OUT" | grep -qiE "infrastructure|billing|empty[- ]steps|did not (run|execute)"'
+
+# ----------------------------------------------------------------------------
+echo "Task 7: real test failure — many steps + normal duration → not the infrastructure path"
+# This is the "your tests are red, not CI" case. It should NOT trigger the
+# empty-steps/billing warning; it may contribute to the consecutive-red
+# counter (covered separately below).
+real="$TMP/real"
+write_fixtures "$real" \
+  "301|failure|master|46"
+out=$(CI_HEALTH_FIXTURES_DIR="$real" bash "$SUT" 2>&1); rc=$?
+check "real-fail → exit 0 (advisory under default threshold)" '[ "$RC" -eq 0 ]'
+check "real-fail → does NOT mention infrastructure/billing/empty-steps" \
+  '! echo "$OUT" | grep -qiE "infrastructure|billing|empty[- ]steps|did not (run|execute)"'
+
+# ----------------------------------------------------------------------------
+echo "Task 8: consecutive-red — last 3 runs on master all fail → flagged"
+cr="$TMP/cr"
+write_fixtures "$cr" \
+  "401|failure|master|46" \
+  "402|failure|master|55" \
+  "403|failure|master|40"
+out=$(CI_HEALTH_FIXTURES_DIR="$cr" bash "$SUT" 2>&1); rc=$?
+check "3-red → exit 0 (advisory)" '[ "$RC" -eq 0 ]'
+check "3-red → mentions consecutive" 'echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+check "3-red → names the threshold (3)" 'echo "$OUT" | grep -qE "3"'
+
+# ----------------------------------------------------------------------------
+echo "Task 9: --red-threshold=N raises the bar — 3 reds but threshold=5 → not flagged"
+out=$(CI_HEALTH_FIXTURES_DIR="$cr" bash "$SUT" --red-threshold=5 2>&1); rc=$?
+check "3-red / threshold=5 → exit 0" '[ "$RC" -eq 0 ]'
+check "3-red / threshold=5 → does NOT flag consecutive-red" \
+  '! echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+
+# ----------------------------------------------------------------------------
+echo "Task 10: only master counts — a non-master failure does not extend the streak"
+mixed="$TMP/mixed"
+write_fixtures "$mixed" \
+  "501|failure|master|46" \
+  "502|failure|master|55" \
+  "503|failure|feature/x|40" \
+  "504|failure|master|50"
+# Runs are sorted newest-first by id; we want the script to walk from the
+# most recent. Run 504 is newest; 503 (non-master) breaks the master streak.
+out=$(CI_HEALTH_FIXTURES_DIR="$mixed" bash "$SUT" 2>&1); rc=$?
+check "mixed-branches → exit 0" '[ "$RC" -eq 0 ]'
+# With threshold=3 the consecutive-master-red streak is at most 1 (run 504
+# alone, then 503 breaks it). So no consecutive warning.
+check "mixed-branches → no consecutive-red warning" \
+  '! echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+
+# ----------------------------------------------------------------------------
+echo "Task 11: --strict exits 1 on the consecutive-red warning"
+out=$(CI_HEALTH_FIXTURES_DIR="$cr" bash "$SUT" --strict 2>&1); rc=$?
+check "3-red --strict → exit 1" '[ "$RC" -eq 1 ]'
+check "3-red --strict → still names the threshold" 'echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+
+# ----------------------------------------------------------------------------
+echo "Task 12: --strict exits 1 on the billing-block warning"
+out=$(CI_HEALTH_FIXTURES_DIR="$bb" bash "$SUT" --strict 2>&1); rc=$?
+check "billing-block --strict → exit 1" '[ "$RC" -eq 1 ]'
+
+# ----------------------------------------------------------------------------
+echo "Task 13: combined — both warnings fire on one run-set"
+both="$TMP/both"
+# Most-recent run (601) is a billing-block signature; the previous two (602,
+# 603) are real test failures. We expect: 601 → infrastructure warning,
+# AND the last 3 master runs (601, 602, 603) are all failure → consecutive-red
+# warning. Two warnings from one fixture set.
+write_fixtures "$both" \
+  "601|failure|master|3" \
+  "602|failure|master|46" \
+  "603|failure|master|55"
+out=$(CI_HEALTH_FIXTURES_DIR="$both" bash "$SUT" 2>&1); rc=$?
+check "combined → exit 0 (advisory)" '[ "$RC" -eq 0 ]'
+check "combined → mentions infrastructure" \
+  'echo "$OUT" | grep -qiE "infrastructure|billing|empty[- ]steps|did not (run|execute)"'
+check "combined → mentions consecutive-red" \
+  'echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+out=$(CI_HEALTH_FIXTURES_DIR="$both" bash "$SUT" --strict 2>&1); rc=$?
+check "combined --strict → exit 1" '[ "$RC" -eq 1 ]'
+
+# ----------------------------------------------------------------------------
+echo ""
+echo "passed: $PASS, failed: $FAIL"
+[ "$FAIL" -eq 0 ]
