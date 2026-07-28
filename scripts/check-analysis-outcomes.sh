@@ -103,13 +103,11 @@ fi
 # partial answer — are silently filtered out. `missing_csv` always lists all
 # three so a triage reader can see exactly what the card has and lacks.
 #
-# Stderr is redirected to a tempfile so we can recover it AFTER the exit
-# code is known: command substitution eats stderr unless we capture it
-# ourselves, but bash sets $? to the substituted command's exit code, so
-# the in-flight check (`if [ "$PY_RC" -ne 0 ]`) is reliable. The pattern
-# matches scripts/worktree-gc.sh's invocation of
-# scripts/kanban_active_worktrees.py.
+# Stderr is redirected to a tempfile so we can print the diagnosis after a
+# non-zero exit. The assignment is in an `||` list so `set -e` does not exit
+# before the PY_RC handler runs.
 PY_STDERR_FILE="$(mktemp)"
+PY_RC=0
 HIT_TSV="$(python3 - "$DB_PATH" "$SINCE" 2>"$PY_STDERR_FILE" <<'PY'
 import json, sqlite3, sys
 db_path, since = sys.argv[1], sys.argv[2]
@@ -187,10 +185,9 @@ for c in cards:
     print(f'{c["id"]}\t{title}\t{created}\toutcome-comment,label,children\t{historic}')
 con.close()
 PY
-)"
-PY_RC=$?
+)" || PY_RC=$?
 if [ "$PY_RC" -ne 0 ]; then
-  echo "ERROR: kanban-sweeper query failed (exit $PY_RC); see stderr above." >&2
+  echo "ERROR: kanban-sweeper query failed (exit $PY_RC); see stderr below." >&2
   [ -s "$PY_STDERR_FILE" ] && cat "$PY_STDERR_FILE" >&2 || true
   rm -f "$PY_STDERR_FILE"
   exit 2

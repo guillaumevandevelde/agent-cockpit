@@ -43,7 +43,9 @@
 #  17.  card with no usable keywords (just "[problem]") → never flagged
 #       (no overlap possible).
 #  18.  multiple decision hits on same card → each reported as own line.
-#  19.  real ~/.claude-registry/kanban.db is reachable AND the real board
+#  19.  inline Python query failure → exit 2 + wrapper ERROR and captured
+#       sqlite diagnostic.
+#  20.  real ~/.claude-registry/kanban.db is reachable AND the real board
 #       emits the clean-state OK line (not the loose "OK or WARNING"
 #       tautology that an earlier shape of this task masked — see
 #       self-improve card e5136a3f959d4886a7757b85e9d31f55).
@@ -404,7 +406,22 @@ check "multi-hit → names first doc"         'echo "$out" | grep -qF "multi-dec
 check "multi-hit → names second doc"        'echo "$out" | grep -qF "multi-decision-2.md"'
 
 # ----------------------------------------------------------------------------
-echo "Task 19: the real ~/.claude-registry/kanban.db is reachable"
+echo "Task 19: inline Python query failure prints wrapper + captured stderr"
+bad_db="$TMP/bad.db"
+python3 - "$bad_db" <<'PY'
+import sqlite3, sys
+sqlite3.connect(sys.argv[1]).close()
+PY
+write_decisions "$TMP/dec_bad.md" <<'EOF'
+EOF
+seed_repo "$TMP/repo_bad"
+out=$(run "$bad_db" "$TMP/dec_bad.md" "$TMP/repo_bad"); rc=$?
+check "query failure → exit 2"              '[ "$rc" -eq 2 ]'
+check "query failure → wrapper ERROR"       'echo "$out" | grep -qF "ERROR: staleness query failed (exit 2)"'
+check "query failure → captured sqlite error" 'echo "$out" | grep -qF "ERROR: sqlite query failed: no such table: kanban_cards"'
+
+# ----------------------------------------------------------------------------
+echo "Task 20: the real ~/.claude-registry/kanban.db is reachable"
 if [ -r "$HOME/.claude-registry/kanban.db" ] && [ -r "$HOME/claude-cockpit/docs/cockpit/decisions.md" ]; then
   out=$(KANBAN_DB="$HOME/.claude-registry/kanban.db" \
         DECISIONS_MD="$HOME/claude-cockpit/docs/cockpit/decisions.md" \

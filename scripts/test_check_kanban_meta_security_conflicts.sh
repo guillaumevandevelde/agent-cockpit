@@ -32,7 +32,9 @@
 #  12.  error path — missing kanban DB → exit 2.
 #  13.  error path — missing registry DB → exit 2.
 #  14.  error path — bad flag → exit 2.
-#  15.  real ~/.claude-registry/kanban.db + main registry DB are
+#  15.  inline Python query failure → exit 2 + wrapper ERROR and captured
+#       sqlite diagnostic.
+#  16.  real ~/.claude-registry/kanban.db + main registry DB are
 #       reachable; the check runs against the live board and reports
 #       the load-bearing overrides documented in kanban card d5642a57.
 
@@ -362,7 +364,19 @@ check "unknown arg → exit 2"           '[ "$rc" -eq 2 ]'
 check "unknown arg → ERROR names flag" 'echo "$out" | grep -qF "unknown argument"'
 
 # ----------------------------------------------------------------------------
-echo "Task 15: real ~/.claude-registry/kanban.db + main registry DB"
+echo "Task 15: inline Python query failure prints wrapper + captured stderr"
+bad_kdb="$TMP/bad-kanban.db"
+python3 - "$bad_kdb" <<'PY'
+import sqlite3, sys
+sqlite3.connect(sys.argv[1]).close()
+PY
+out=$(run "$bad_kdb" "$clean_dir/registry.db"); rc=$?
+check "query failure → exit 2"              '[ "$rc" -eq 2 ]'
+check "query failure → wrapper ERROR"       'echo "$out" | grep -qF "ERROR: conflict query failed (exit 2)"'
+check "query failure → captured sqlite error" 'echo "$out" | grep -qF "ERROR: kanban_meta query failed: no such table: kanban_meta"'
+
+# ----------------------------------------------------------------------------
+echo "Task 16: real ~/.claude-registry/kanban.db + main registry DB"
 # The live board has the load-bearing overrides documented in kanban card
 # d5642a57; the check should reach them via the git-common-dir fallback.
 if [ -r "$HOME/.claude-registry/kanban.db" ] \
