@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+import httpx
 import yaml
 
 from app.config import settings
@@ -952,15 +953,182 @@ async def _gather_pool_usage_snapshots(
     return snapshots
 
 
+# ---- endpoint reachability probe (kaart 424c23d4…) -------------------------
+#
+# When an ``anthropic-compatible`` pool entry's resolved endpoint URL is
+# unreachable, the pool router must treat the provider as paused so the
+# pool picks the next entry instead of looping through
+# ``MAX_DISPATCH_FAILURES`` on a dead proxy. Explicit pins on the same
+# provider (column_overrides / per-card provider pin) stay fail-closed —
+# they walk the existing spawn-failure path because
+# ``resolve_effective_provider_and_model`` does NOT consult
+# ``_paused_providers_for_pool`` on its higher layers (see
+# ``_pick_pool_choice`` as the only entry point that does).
+#
+# The probe result is cached per ``(project_key, endpoint_name)`` for
+# ``_ENDPOINT_PROBE_TTL_S`` so the dispatch hot path issues at most one
+# HTTP call per dispatch tick per endpoint, not one per card. ``False``
+# (unreachable) keeps the provider in the paused set; ``True`` (or
+# probe failure — see _probe_endpoint_reachable) keeps it available.
+
+_ENDPOINT_PROBE_TTL_S = 30.0
+_ENDPOINT_PROBE_HTTP_TIMEOUT_S = 2.0
+
+# Per-endpoint probe verdict cache. ``(project_key, endpoint_name)`` →
+# ``(reachable, expires_at_monotonic)``. Process-local — the window is
+# too short for cross-process coordination to be worth a global lock,
+# and a falsified verdict on another process is far cheaper than
+# gating dispatch on it. Tests clear this in their fixture.
+_endpoint_reach_cache: dict[tuple[str, str], tuple[bool, float]] = {}
+
+
+async def _probe_endpoint_reachable(base_url: str) -> bool:
+    """Return ``True`` iff ``base_url`` answers *some* HTTP response.
+
+    Public seam with the wrapper contract: any exception inside the
+    raw probe is swallowed and translated to ``True`` ("available"),
+    per the acceptance criteria ("bij twijfel geldt de provider als
+    beschikbaar, zodat een kapotte probe geen werkende lane platlegt").
+    Tests patch the inner ``_endpoint_probe_uncached`` so they exercise
+    the fail-soft contract without a real network.
+
+    Empty/``None`` URLs return ``True`` — "no signal → available",
+    matching the analyse §6.3 contract every other probe in dispatch
+    honours.
+    """
+    if not base_url:
+        return True
+    try:
+        return await _endpoint_probe_uncached(base_url)
+    except Exception:
+        return True
+
+
+async def _endpoint_probe_uncached(base_url: str) -> bool:
+    """Inner probe: raw ``GET {base_url}`` with no auth header. Tests
+    patch this (NOT the wrapper) so the wrapper's exception-swallow
+    contract stays exercised end-to-end.
+
+    Accepts any status < 600 as "reachable" — a 401 means the proxy is
+    up but credentials are wrong, which is a *different* failure mode
+    that the spawn/credential layer already captures. Network-level
+    failures (timeout, DNS, connection refused) propagate as
+    ``httpx.RequestError`` or ``OSError`` to the wrapper.
+    """
+    async with httpx.AsyncClient(
+        timeout=_ENDPOINT_PROBE_HTTP_TIMEOUT_S,
+    ) as client:
+        response = await client.get(base_url)
+        return response.status_code < 600
+
+
+async def _unreachable_compatible_providers(
+    session, *, project_key: str,
+) -> set[str]:
+    """Return the set of pool-provider names whose
+    ``anthropic-compatible`` endpoint fails the reachability probe.
+
+    Walks the project's pool, resolves each compatible entry's
+    ``endpoint_name`` to its ``base_url`` via the project-scoped
+    endpoint registry, and probes the URL. ``False`` adds the provider
+    to the returned set; the pool router's hard-skip semantics then
+    keep that provider off the dispatch path until a subsequent
+    probe finds it reachable again (cache TTL ``_ENDPOINT_PROBE_TTL_S``).
+
+    Probe or registry failures (timeout, DNS, missing endpoint row)
+    resolve to "available" via ``_probe_endpoint_reachable``'s
+    fail-soft contract — they do NOT add the provider to the paused
+    set.
+    """
+    from app.services.agentic_cli.endpoints import (
+        get_endpoint as _get_endpoint,
+    )
+    entries = await subscription_pool.get_subscription_pool(
+        session, project_key,
+    )
+    if not entries:
+        return set()
+    paused: set[str] = set()
+    seen: set[str] = set()
+    now = time.monotonic()
+    for entry in entries:
+        if entry.provider != PROVIDER_COMPATIBLE:
+            continue
+        if not entry.endpoint_name:
+            # No endpoint to probe — skip (per validator this should not
+            # happen for a stored entry, but be defensive for legacy /
+            # hand-edited rows).
+            continue
+        if entry.endpoint_name in seen:
+            # Same endpoint under multiple entries — one probe covers all.
+            continue
+        seen.add(entry.endpoint_name)
+        cache_key = (project_key, entry.endpoint_name)
+        cached = _endpoint_reach_cache.get(cache_key)
+        if cached is not None:
+            reachable, expires_at = cached
+            if expires_at > now:
+                if not reachable:
+                    paused.add(entry.provider)
+                continue
+        try:
+            endpoint = await _get_endpoint(
+                session, project_key, entry.endpoint_name,
+            )
+        except Exception:
+            # Endpoint lookup itself failed (DB / serialiser drift) —
+            # fall through and treat as "no signal → available". The
+            # next tick can retry; surfacing a louder error here would
+            # only wedge the dispatch tick on a registry hiccup.
+            logger.exception(
+                "subscription pool: endpoint lookup raised for %s/%s; "
+                "treating as available",
+                project_key, entry.endpoint_name,
+            )
+            continue
+        if endpoint is None:
+            # Endpoint row missing — skip. The provider is "registered
+            # nowhere → no signal", per the same §6.3 contract.
+            continue
+        reachable = await _probe_endpoint_reachable(endpoint.base_url)
+        _endpoint_reach_cache[cache_key] = (reachable, now + _ENDPOINT_PROBE_TTL_S)
+        if not reachable:
+            paused.add(entry.provider)
+            logger.info(
+                "subscription pool: anthropic-compatible endpoint "
+                "%s/%s unreachable — pausing provider %r until next "
+                "probe (TTL %.1fs)",
+                project_key, entry.endpoint_name, entry.provider,
+                _ENDPOINT_PROBE_TTL_S,
+            )
+    return paused
+
+
 async def _paused_providers_for_pool(
-    session,
+    session, *, project_key: str,
 ) -> set[str]:
     """Return the set of providers whose per-provider pause is currently
-    active. Wraps ``dispatch_pause.list_paused_providers`` so the pool
-    router can consume the read-only shape directly."""
+    active. Three sources are merged:
+
+    1. The time-based per-provider pause (``dispatch_pause.list_paused_providers``)
+    2. The operator's manual pause list (``list_manually_paused_providers``,
+       merged in by ``_pick_pool_choice`` itself)
+    3. The endpoint-reachability probe for ``anthropic-compatible`` pool
+       entries (kaart 424c23d4…): a dead proxy pauses the provider so
+       the pool picks the next entry instead of looping on a dead host.
+
+    Callers (pool picker, spillover gate) pass the project_key they are
+    routing for. The probe layer is process-local + TTL-cached so the
+    hot path issues at most one HTTP call per dispatch tick per
+    endpoint, never one per card.
+    """
     from app.kanban import dispatch_pause
     paused = await dispatch_pause.list_paused_providers(session)
-    return {p for p in paused if p}
+    base_paused = {p for p in paused if p}
+    reachable_paused = await _unreachable_compatible_providers(
+        session, project_key=project_key,
+    )
+    return base_paused | reachable_paused
 
 
 async def _pick_pool_choice(
@@ -983,7 +1151,7 @@ async def _pick_pool_choice(
     signal → first entry of cli_id wins" so a flaky usage provider
     cannot block dispatch.
     """
-    paused = await _paused_providers_for_pool(session)
+    paused = await _paused_providers_for_pool(session, project_key=project_key)
     # Kaart f056b2888a…: merge in the operator's manual pause list. The pool
     # router treats ``paused_providers`` as a hard skip set; if we don't add
     # the manual slots here, a pool that contains only manually-paused
@@ -1042,7 +1210,7 @@ async def _pool_spillover_available(
     entries = await get_subscription_pool(session, project_key)
     if not entries:
         return False
-    paused = await _paused_providers_for_pool(session)
+    paused = await _paused_providers_for_pool(session, project_key=project_key)
     paused.add(limited_provider)
     try:
         snapshots = await _gather_pool_usage_snapshots(entries)
