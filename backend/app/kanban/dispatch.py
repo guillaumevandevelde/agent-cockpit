@@ -2250,7 +2250,17 @@ def _build_mcp_fallback_instructions() -> str:
     envelope is spelled out (three parse attempts failed on the assumption it
     returned a bare list), `POST /cards` is listed so filing a follow-up card
     doesn't need endpoint archaeology, and the retry advice now caps at one
-    failed retry per session instead of one per call."""
+    failed retry per session instead of one per call.
+
+    Analyst-fase coverage (kanban card a254b3111a2340478da726eb8fd015b9): an
+    analyst session with MCP down must still be able to finish decomposition.
+    `POST /cards/{id}/plan-attachment` is the REST mirror of
+    `add_plan_attachment` — wiring a `plan_ref` deliverable on every child is
+    **not optional**, even when `depends_on_graph={}` (an independent child
+    without a `plan_ref` is silently held by the `awaiting_plan_ref` dispatch
+    gate and never runs). `POST /cards` must also expose `parent_card_id` and
+    `metadata`, since the `decomposed`-gate on the parent's Done-move refuses
+    the move with `no_children` when a child is missing `parent_card_id`."""
     return (
         "## If a `cockpit-kanban` MCP call fails with `-32602`\n"
         "`-32602` (Invalid request parameters) from a `mcp__cockpit-kanban__*` "
@@ -2271,9 +2281,29 @@ def _build_mcp_fallback_instructions() -> str:
         "before iterating (`jq '.items[]'`)\n"
         "- `POST /cards` — create a card; body `{\"project_key\": \"…\", "
         "\"title\": \"…\", \"description\": \"…\", \"column\": \"Backlog\", "
-        "\"work_type\": \"…\"}` (`column` defaults to `Backlog`; an unknown "
+        "\"work_type\": \"…\", \"parent_card_id\": \"…\", \"metadata\": {…}}` "
+        "(`column` defaults to `Backlog`; `parent_card_id` is required when "
+        "creating a child of an analyst decomposition (a child without it makes "
+        "the parent's `decomposed`-Done-move fail with `no_children`); "
+        "`metadata` carries analyst/parent-tag context; an unknown "
         "`project_key` is rejected with 404 `unknown_project_key` — resolve it "
         "first, don't guess)\n"
+        "- `POST /cards/{id}/plan-attachment` — body "
+        "`{\"plan_markdown\": \"…\", \"child_card_ids\": [\"…\"], "
+        "\"depends_on_graph\": {\"<child_id>\": [\"<sibling_id>\", …]}}` "
+        "(REST mirror of `add_plan_attachment`; **not optional** — every "
+        "decomposition child MUST get a `plan_ref` deliverable, even when "
+        "`depends_on_graph={}`. Without it the `awaiting_plan_ref` dispatch "
+        "hold keeps the child silent: it looks unclaimed and unstarted but "
+        "never dispatches. Returns `{\"parent_card_id\": \"…\", "
+        "\"plan_deliverable_id\": \"…\", \"child_card_ids\": [\"…\"]}` — **the "
+        "response does NOT include the newly wired `plan_ref` deliverables** "
+        "(the `add_plan_attachment` handler hits the router `_reload` "
+        "staleness trap: the freshly bound `card` in its identity map holds "
+        "the pre-commit collection). To verify the write landed, **her-fetch "
+        "the card via `GET /cards/{id}`** and confirm `deliverables[].kind == "
+        "\"plan_ref\"` on each child — treat the empty `deliverables` list in "
+        "the response as the router-side omission it is, NOT a write failure)\n"
         "- `GET /project-key?project_path=<abs path>` — resolve the project "
         "key; returns `{\"project_key\": \"…\"}`\n"
     )
