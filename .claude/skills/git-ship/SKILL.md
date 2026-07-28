@@ -161,7 +161,14 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # session's work aside. `git status --porcelain | grep -v '^??'` keeps every
 # tracked state (` M`, `M `, `MM`, `A `, `D `) so a `git add` without a
 # `git commit` is still refused, and drops only the `??` untracked lines.
-if ! git diff --quiet HEAD || [ -n "$(git status --porcelain | grep -v '^??')" ]; then
+#
+# The trailing `--` is load-bearing: it separates revisions from paths. Without
+# it, a file named `HEAD` anywhere in the repo root makes the argument
+# ambiguous and git exits 128 with `fatal: ambiguous argument 'HEAD': both
+# revision and filename` — which, under `if ! ...`, reads as "tree is dirty"
+# and aborts EVERY ship with a bogus uncommitted-changes error (kanban card
+# 7dd8a3dd…). `--` costs nothing and makes the guard immune to that class.
+if ! git diff --quiet HEAD -- || [ -n "$(git status --porcelain | grep -v '^??')" ]; then
   echo 'ERROR: uncommitted changes to tracked files — git add + git commit first, then re-run.' >&2; exit 1
 fi
 # Untracked files are advisory, never fatal: a brand-new file you forgot to
@@ -172,16 +179,32 @@ if [ -n "$UNTRACKED" ]; then
   echo 'NOTE: untracked files present (not blocking the ship). If any of these are YOURS and belong in this card, git add + git commit them now:' >&2
   printf '%s\n' "$UNTRACKED" | head -20 >&2
 fi
-# Throwaway worktree lives under the shared `.git/worktrees/<name>` — NOT
-# under `mktemp -d`. The Bash tool's harness can reap `/tmp` between calls,
-# so a /tmp-resident worktree may vanish mid-ship: the merge commit lands in
-# a now-missing checkout, the subsequent `git push` fails with a spurious
-# non-fast-forward, and the local merge is lost. Using `git rev-parse
-# --git-common-dir` puts the slot under the same `.git/worktrees/` git
-# already manages for dispatched sessions — persistent for the lifetime of
-# the gitdir, and cleaned up by `git worktree remove` regardless of how
-# many Bash calls intervene. (kanban card 01aa1ef5…)
-WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"
+# Throwaway worktree location. Two constraints, and they pull in opposite
+# directions:
+#
+#   1. NOT under `mktemp -d` / `/tmp`. The Bash tool's harness can reap `/tmp`
+#      between calls, so a /tmp-resident worktree may vanish mid-ship: the
+#      merge commit lands in a now-missing checkout, the subsequent
+#      `git push` fails with a spurious non-fast-forward, and the local merge
+#      is lost. (kanban card 01aa1ef5…)
+#   2. NOT under `.git/worktrees/` either. That was the previous fix for (1),
+#      and it is actively harmful: `.git/worktrees/<name>/` is ALSO where git
+#      keeps its own admin files (HEAD, index, MERGE_*, commondir, gitdir) for
+#      that very worktree. Placing the CHECKOUT at the same path means the two
+#      overlap — so `git -C "$WT" add -A` in the conflict carve-out staged
+#      git's own admin files, and one ship through that branch committed ten
+#      of them to the repo root. From then on every `git worktree add` checked
+#      the tracked copies out over git's live admin files
+#      ("fatal: .../index: index file smaller than expected") and no card
+#      could ship at all. (kanban card 7dd8a3dd…)
+#
+# `$HOME/.cache/` satisfies both: persistent across Bash calls (not reaped),
+# and outside every git working tree and gitdir. Note git still registers the
+# admin slot under `.git/worktrees/ship-merge-$$` — that is correct and
+# harmless; only the CHECKOUT must live elsewhere.
+SHIP_TMP="${HOME}/.cache/cockpit-ship"
+mkdir -p "$SHIP_TMP"
+WT="$SHIP_TMP/ship-merge-$$"
 # Slot name MUST be unique per session: git derives the `.git/worktrees/<name>`
 # entry from the path's basename, so a fixed name (e.g. `ship-merge`) collides
 # under concurrent dispatched sessions — both target the same gitdir slot, and
@@ -256,7 +279,14 @@ if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
     echo "ERROR: generate-doc-index.py --check --strict failed after regenerate." >&2
     exit 1
   fi
-  git -C "$WT" add -A
+  # Stage the two generated files BY NAME, never `add -A`. A blind `add -A`
+  # stages everything under the worktree root, which is how ten of git's own
+  # admin files (HEAD, index, MERGE_*, …) got committed to the repo root and
+  # broke every subsequent ship (kanban card 7dd8a3dd…). Moving the worktree
+  # out of `.git/` already removes that specific exposure; an explicit path
+  # list closes the class — the carve-out is only ever entitled to commit the
+  # files it just regenerated, so it should only ever be able to stage those.
+  git -C "$WT" add -- docs/cockpit/README.md docs/cockpit/llms.txt
   git -C "$WT" commit --no-edit
 fi
 if git -C "$WT" push origin HEAD:master; then

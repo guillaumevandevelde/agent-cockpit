@@ -540,11 +540,14 @@ def test_direct_ship_recipe_has_uncommitted_changes_preflight():
     in the source worktree merge as "Everything up-to-date" instead of shipping.
     A pre-flight check must abort with an explicit error before the merge."""
     instructions = dispatch._build_ship_instructions("direct")
-    assert "git diff --quiet HEAD" in instructions
+    # Pin the `--` separator: a tracked file named HEAD makes the unguarded
+    # form exit 128 (`ambiguous argument 'HEAD'`) and turn every ship into
+    # a bogus "uncommitted changes" abort (kanban card 7dd8a3dd…).
+    assert "git diff --quiet HEAD --" in instructions
     assert "ls-files --others --exclude-standard" in instructions
     assert "uncommitted" in instructions
     # The guard must sit before the detached-worktree merge it protects.
-    assert instructions.index("git diff --quiet HEAD") < instructions.index(
+    assert instructions.index("git diff --quiet HEAD --") < instructions.index(
         "git worktree add --detach"
     )
 

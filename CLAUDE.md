@@ -116,6 +116,9 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Dispatch resolver-usage self-check (gate dat ad-hoc provider/model lookups in dispatch.py flagt — kaart 931855b0…)
 ./scripts/check-dispatch-resolver-usage.sh          # Flag ad-hoc provider/model lookups in backend/app/kanban/dispatch.py die de canonieke resolve_effective_provider_and_model omzeilen (advisory; --strict = exit 1)
 
+# Git per-worktree admin files getrackt in de repo-root (breekt ELKE ship — kaart 7dd8a3dd…)
+./scripts/check-worktree-admin-files.sh             # Flag getrackte HEAD/index/MERGE_*/commondir/gitdir/AUTO_MERGE/ORIG_HEAD in de repo-root (advisory; --strict = exit 1)
+
 # Dangling-dep sweepers (vangnet voor verweesde kanban-references — advisory; --strict = exit 1; JSON op stdout)
 ./scripts/sweep_dangling_depends_on.py        # Flag niet-Done kaarten waarvan een depends_on-id naar een niet-bestaande kaart verwijst
 ./scripts/sweep_dangling_plan_refs.py         # Flag plan_ref-deliverables waarvan de parent of het plan niet meer resolvet

@@ -382,13 +382,23 @@ Vuistregels (harness-contract: cwd lekt tussen calls):
   vanuit je worktree-cwd (geen `cd` nodig).
 
 (CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$WT"`-patroon
-voor de merge-stap, met `$WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"`
+voor de merge-stap, met `WT="$HOME/.cache/cockpit-ship/ship-merge-$$"`
 — de slot-naam `ship-merge-$$` (per-proces uniek) voorkomt dat
-concurrent sessies dezelfde `.git/worktrees/`-gitdir hergebruiken; dit is de
-algemene variant voor élke git-mutatie binnen een worktree-sessie. Merk op
-dat dit bewust **niet** onder `$(mktemp -d)` leeft — de Bash-tool kan `/tmp`
-tussen calls reapen, dus de worktree moet onder het persistente shared-gitdir
-staan om niet halverwege de ship te verdwijnen; zie kaart `01aa1ef5…`.)
+concurrent sessies dezelfde worktree-directory hergebruiken. Dit is de
+algemene variant voor élke git-mutatie binnen een worktree-sessie: zet
+de scratch-worktree onder `$HOME/.cache/cockpit-ship/` (persistent, maar
+**buiten** élke gitdir en élke werkboom). Twee eerdere keuzes faalden:
+
+  - **Niet** onder `$(mktemp -d)` — de Bash-tool reapet `/tmp` tussen
+    calls, dus de worktree kan halverwege verdwijnen (kaart `01aa1ef5…`).
+  - **Niet** onder `$(git rev-parse --git-common-dir)/worktrees/` — die
+    directory is git's live admin-dir (HEAD, index, MERGE_*, …); een
+    checkout erop schrijft die over en breekt het werkende admin-bestand.
+    Een trackt `HEAD` in de repo maakte bovendien `git diff --quiet HEAD`
+    ambigu (exit 128) zodat élke ship faalde met een bogus
+    "uncommitted changes" (kaart `7dd8a3dd…`).
+
+Persistent + buiten-git is wat hier telt.)
 
 ### Write/Edit = worktree-relatief (geen absolute paden naar de hoofd-checkout)
 
