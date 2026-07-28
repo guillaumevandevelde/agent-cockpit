@@ -248,6 +248,20 @@ check "wrapper POSTs to /api/v1/scheduled-messages" \
     'echo "$src" | grep -qE "/api/v1/scheduled-messages"'
 check "wrapper uses curl with -X POST" \
     'echo "$src" | grep -qE "curl[^\\n]*-X[[:space:]]+POST"'
+check "POST loop sends confirm_new_project=True on kanban cards" \
+    'echo "$src" | grep -qE "confirm_new_project"'
+check "curl POST lives in an if/else so failures continue, not exit 1" \
+    'echo "$src" | grep -qF "posted="'
+check "curl POST failure path does NOT exit 1" 'post_block="$(printf "%s" "$src" | sed -n "/DEMO_STATE=/,/PLAYWRIGHT_NODE/p")"; ! printf "%s" "$post_block" | grep -qF "exit 1"'
+
+# Ordering: the POST loop must run AFTER `wait_for_health` and BEFORE
+# the Playwright capture. Line numbers from grep -n serve as a cheap
+# textual proxy for script order.
+wait_health_line="$(printf '%s\n' "$src" | grep -nF 'if ! wait_for_health' | head -1 | cut -d: -f1)"
+post_loop_line="$(printf '%s\n' "$src" | grep -nF 'DEMO_STATE=' | head -1 | cut -d: -f1)"
+playwright_line="$(printf '%s\n' "$src" | grep -nF 'cat > "$PLAYWRIGHT_NODE"' | head -1 | cut -d: -f1)"
+check "POST loop sits between wait_for_health and Playwright capture" \
+    '[ -n "$wait_health_line" ] && [ -n "$post_loop_line" ] && [ -n "$playwright_line" ] && [ "$wait_health_line" -lt "$post_loop_line" ] && [ "$post_loop_line" -lt "$playwright_line" ]'
 
 # Also verify the seeder actually emits the kinds the wrapper expects.
 if [ -x "$SEED" ]; then
