@@ -99,11 +99,17 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "pre-flight uncommitted-changes guard",
         "git diff --quiet HEAD",
     ),
-    # Untracked-file counterpart of the above (git diff --quiet only checks
-    # tracked changes).
+    # Tracked-files-only counterpart of the above. Deliberately NOT
+    # `[ -n "$(git ls-files --others --exclude-standard)" ]`: on this shared
+    # box concurrent dispatched sessions share a worktree mount, so a foreign
+    # session's untracked scratch output (e.g. a `.tmp-measure-*/` harness dir
+    # with hundreds of files) blocked the ship for changes the merge never
+    # reads — and `rm` is deny-listed, so recovery meant a `mv` dance
+    # (kanban card c28e576d…). `git status --porcelain | grep -v '^??'` keeps
+    # every tracked state (` M`, `M `, `MM`, `A `, `D `) and drops only `??`.
     (
-        "pre-flight untracked-files guard",
-        "git ls-files --others --exclude-standard",
+        "pre-flight tracked-changes guard",
+        "git status --porcelain | grep -v '^??'",
     ),
     # Throwaway detached worktree cleanup. Slot name MUST be the same `ship-merge-$$`
     # used by `git worktree add` so the remove targets the entry git actually created.
@@ -365,6 +371,102 @@ def test_pull_request_mode_is_explicitly_out_of_scope() -> None:
             f"invariants list contains PR-mode primitive {primitive!r} — "
             f"this drift detector is scoped to direct mode only"
         )
+
+
+# The blocking pre-flight condition, as a single shell test. Both mirrors must
+# use exactly this — a bare `git ls-files --others --exclude-standard` inside
+# the *blocking* condition is the regression this pins (kanban card
+# c28e576d…): on this shared box, concurrent dispatched sessions write
+# untracked scratch output into the same worktree mount, and the throwaway
+# merge worktree reads COMMITTED state only, so untracked files cannot cause
+# the silent no-op the guard exists to prevent.
+BLOCKING_PREFLIGHT = (
+    'if ! git diff --quiet HEAD || [ -n "$(git status --porcelain | grep -v \'^??\')" ]; then'
+)
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_blocking_preflight_ignores_foreign_untracked_files(source_name: str) -> None:
+    """The blocking pre-flight must test tracked changes only.
+
+    Regression pin for kanban card ``c28e576d…``: the previous condition
+    ``[ -n "$(git ls-files --others --exclude-standard)" ]`` aborted a ship
+    because a *different* dispatched session had left 544 untracked files in
+    ``.tmp-measure-token-saver/`` in the shared worktree mount. Nothing the
+    merge reads was affected (the detached worktree only ever sees committed
+    state), and because ``rm`` is deny-listed in this repo the only recovery
+    was moving another session's work aside with ``mv``.
+
+    ``git status --porcelain | grep -v '^??'`` keeps every tracked state
+    (`` M``, ``M ``, ``MM``, ``A ``, ``D ``, ``R ``) — so a session that ran
+    ``git add`` but not ``git commit`` is still refused — and drops only the
+    ``??`` untracked lines.
+    """
+    source_text = SOURCES[source_name]()
+    assert BLOCKING_PREFLIGHT in source_text, (
+        f"{source_name}: blocking pre-flight is not the tracked-changes-only "
+        f"form. Expected the line {BLOCKING_PREFLIGHT!r}."
+    )
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_untracked_files_are_advisory_not_blocking(source_name: str) -> None:
+    """Untracked files must still be *reported*, just never fatal.
+
+    Dropping ``??`` from the blocking condition removes a real (if noisy)
+    safety net: a session that created a brand-new file and forgot to
+    ``git add`` it would now ship a merge without it, silently. The fix keeps
+    the signal as a non-fatal advisory — an untracked listing printed before
+    the merge, with no ``exit 1`` attached — so the agent can spot its own
+    forgotten file while a foreign session's scratch dir stays harmless.
+
+    Asserts (a) the advisory names the untracked-listing command, and (b) the
+    only ``exit 1`` in the pre-flight belongs to the blocking condition, i.e.
+    the advisory is not silently upgraded back to a hard abort.
+    """
+    source_text = SOURCES[source_name]()
+    assert "git ls-files --others --exclude-standard" in source_text, (
+        f"{source_name}: lost the untracked-files advisory entirely — "
+        f"untracked files must still be surfaced, just not block the ship."
+    )
+
+    # The advisory sits after the blocking `fi`, before `git worktree add`.
+    blocking_idx = source_text.index(BLOCKING_PREFLIGHT)
+    worktree_add_idx = source_text.index("git worktree add --detach")
+    advisory_region = source_text[blocking_idx:worktree_add_idx]
+    assert "git ls-files --others --exclude-standard" in advisory_region, (
+        f"{source_name}: untracked advisory is not between the blocking "
+        f"pre-flight and `git worktree add` — it would not run before the merge."
+    )
+
+    # Exactly one `exit 1` in the pre-flight region: the blocking condition's.
+    # A second one would mean the advisory became fatal again.
+    assert advisory_region.count("exit 1") == 1, (
+        f"{source_name}: expected exactly 1 `exit 1` in the pre-flight region "
+        f"(the tracked-changes guard), found "
+        f"{advisory_region.count('exit 1')} — the untracked advisory must not "
+        f"abort the ship (kanban card c28e576d…)."
+    )
+
+
+def test_blocking_preflight_would_flag_the_old_untracked_shape() -> None:
+    """Live negative case: the old shape must fail the new invariant.
+
+    Without this, a future editor could revert the blocking condition to the
+    ``git ls-files``-based form and only notice via a substring test that no
+    longer applies. Replays the exact check against a fake mirror carrying the
+    pre-fix condition.
+    """
+    old_shape_mirror = (
+        'if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then\n'
+        "  echo 'ERROR: uncommitted/untracked changes' >&2; exit 1\n"
+        "fi\n"
+        'git worktree add --detach "$WT" origin/master\n'
+    )
+    assert BLOCKING_PREFLIGHT not in old_shape_mirror, (
+        "the tracked-changes invariant no longer distinguishes the old "
+        "untracked-blocking shape — the regression pin has rotted."
+    )
 
 
 # Carve-out recovery markers for the positional invariant. The carve-out is
