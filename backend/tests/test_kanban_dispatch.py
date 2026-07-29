@@ -3786,7 +3786,8 @@ def _dispatch_order(transport) -> list[str]:
     for call in transport.calls:
         prompt = call["prompt"]
         for title in ("urgent", "medium-card", "low-card", "card-a", "card-b",
-                      "card-c", "orphan-high", "orphan-mid", "orphan-low"):
+                      "card-c", "orphan-high", "orphan-mid", "orphan-low",
+                      "resume-low", "backlog-high"):
             if title in prompt:
                 out.append(title)
                 break
@@ -3855,6 +3856,71 @@ async def test_redispatch_all_orphans_dispatches_high_priority_first():
         await s.commit()
     assert len(results) == 3
     assert _dispatch_order(transport) == ["orphan-high", "orphan-mid", "orphan-low"]
+
+
+# ---- dispatch column order: To Resume drains before Backlog ----------------
+#
+# The order of `_DISPATCH_COLUMNS` is the policy "finish interrupted work before
+# starting new work". It used to be ("Backlog", "To Resume") purely because that
+# was the literal order of the tuple in the initial commit — no test pinned it,
+# so the intended policy could silently flip back on any edit. These tests pin it
+# on all three call sites: the tuple itself, the auto-tick, and "Dispatch All".
+
+
+def test_dispatch_columns_order_puts_to_resume_first():
+    """Pin the tuple order itself: `_next_card` returns the first column that
+    yields a selectable card, so this order *is* the policy. Membership-only
+    assertions elsewhere (test_inception, test_dispatch_gate) don't catch a flip."""
+    assert dispatch._DISPATCH_COLUMNS == ("To Resume", "Backlog")
+
+
+def test_dispatch_order_key_ranks_column_above_priority():
+    """Column beats priority, matching `_next_card`'s column-then-priority walk:
+    a low-priority To Resume card outranks a high-priority Backlog card, and an
+    orphan (column outside the tuple) sorts last."""
+    resume_low = KanbanCard(column="To Resume", priority="low", project_key=PK)
+    backlog_high = KanbanCard(column="Backlog", priority="high", project_key=PK)
+    orphan_high = KanbanCard(column="developer", priority="high", project_key=PK)
+    ordered = sorted([backlog_high, orphan_high, resume_low],
+                     key=dispatch._dispatch_order_key)
+    assert [c.column for c in ordered] == ["To Resume", "Backlog", "developer"]
+
+
+@pytest.mark.asyncio
+async def test_tick_dispatches_to_resume_before_backlog():
+    """The auto-tick picks the To Resume card first even though the Backlog card
+    is higher priority and was created first — interrupted work owns a worktree
+    and a resumable transcript, both of which decay while it waits."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="backlog-high", column="Backlog", priority="high")
+        await _make_card(s, title="resume-low", column="To Resume", priority="low")
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert _dispatch_order(transport)[0] == "resume-low"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_all_pending_dispatches_to_resume_before_backlog():
+    """"Dispatch All" follows the same column order as the tick. Before
+    `_dispatch_order_key`, this path sorted by priority across both columns and
+    would have dispatched the high-priority Backlog card first — the bulk path
+    silently contradicting the auto-tick."""
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await _make_card(s, title="backlog-high", column="Backlog", priority="high")
+        await _make_card(s, title="resume-low", column="To Resume", priority="low")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        results = await dispatch.dispatch_all_pending(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+    assert len(results) == 2
+    assert _dispatch_order(transport) == ["resume-low", "backlog-high"]
 
 
 def test_priority_key_helper_matches_priority_rank():
@@ -5496,8 +5562,15 @@ async def test_dispatch_picks_up_to_resume_card():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_prefers_backlog_over_to_resume():
-    """_next_card prefers Backlog cards over To Resume cards."""
+async def test_dispatch_prefers_to_resume_over_backlog():
+    """_next_card prefers To Resume cards over Backlog cards: interrupted work is
+    finished before new work is started.
+
+    Reversed from the original Backlog-first assertion, which pinned the literal
+    order of the `_DISPATCH_COLUMNS` tuple as it happened to be written in the
+    initial commit rather than a decided policy. Backlog does not starve behind
+    this: a limit-parked To Resume card carries a future `scheduled_at` and is
+    held out of `selectable()` by `_is_due` until its reset time."""
     async with KanbanSessionLocal() as s:
         await _make_card(s, title="new-task", column="Backlog")
         await _make_card(s, title="resume-me", column="To Resume")
@@ -5507,8 +5580,8 @@ async def test_dispatch_prefers_backlog_over_to_resume():
         cards = await list_cards(s, PK)
         next_card = dispatch._next_card(cards)
     assert next_card is not None
-    assert next_card.title == "new-task"
-    assert next_card.column == "Backlog"
+    assert next_card.title == "resume-me"
+    assert next_card.column == "To Resume"
 
 
 @pytest.mark.asyncio
@@ -5696,18 +5769,24 @@ async def test_dispatch_all_pending_skips_future_scheduled_card():
 
 @pytest.mark.asyncio
 async def test_dispatch_column_preference_beats_priority():
-    """Backlog still wins over To Resume even when the To Resume card is 'high'
-    priority — the column preference is about resume-recovery, not urgency."""
+    """The column preference is about finishing interrupted work, not urgency, so
+    priority never crosses a column boundary: To Resume still wins over a 'high'
+    priority Backlog card.
+
+    The direction flipped with `_DISPATCH_COLUMNS`, but the contract this test was
+    written for (commit e0acb7d3, "honor card priority in auto-dispatch ordering")
+    is unchanged and is the point of the assertion: priority sorts *within* a
+    column only."""
     async with KanbanSessionLocal() as s:
-        await _make_card(s, title="new-task", column="Backlog", priority=None)
-        await _make_card(s, title="resume-me", column="To Resume", priority="high")
+        await _make_card(s, title="new-task", column="Backlog", priority="high")
+        await _make_card(s, title="resume-me", column="To Resume", priority=None)
         await s.commit()
 
     async with KanbanSessionLocal() as s:
         cards = await list_cards(s, PK)
         next_card = dispatch._next_card(cards)
     assert next_card is not None
-    assert next_card.title == "new-task"
+    assert next_card.title == "resume-me"
 
 
 # ---- git-ship / session-end workflow --------------------------------------
