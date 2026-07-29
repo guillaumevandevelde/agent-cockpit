@@ -29,7 +29,7 @@ synoniem en het is belangrijk ze uit elkaar te houden.
 | Set | Bron van waarheid | Wat zit erin | Wat wordt er wel/niet mee gedaan |
 |---|---|---|---|
 | **`COLUMNS`** | `backend/app/kanban/schemas.py:13` | `["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]` | **Bron van waarheid voor wat een "vaste" kolom is op de server.** De frontend `KanbanPage.tsx FIXED_COLUMNS` is een snapshot (kans op drift). |
-| **`_DISPATCH_COLUMNS`** | `backend/app/kanban/dispatch.py:1655` | `("Backlog", "To Resume")` | **Auto-dispatch scan alleen deze twee** — nieuwe kaarten worden van `Backlog` opgepakt, heropende kaarten van `To Resume`. Alles wat hier niet in zit, wordt nooit automatisch naar een sessie gestuurd. |
+| **`_DISPATCH_COLUMNS`** | `backend/app/kanban/dispatch.py` (`_DISPATCH_COLUMNS`) | `("To Resume", "Backlog")` | **Auto-dispatch scan alleen deze twee** — hervatte kaarten worden van `To Resume` opgepakt, nieuwe kaarten van `Backlog`. Alles wat hier niet in zit, wordt nooit automatisch naar een sessie gestuurd. **De volgorde is load-bearing**: zie hieronder. |
 | **`FIXED_COLUMNS`** | `frontend/src/features/kanban/KanbanPage.tsx:23` | `new Set([...])` met dezelfde namen als `COLUMNS` | Alleen voor bord-rendering (welke kolommen verdwijnen in de agent-sectie). |
 
 ### Wat betekent dit in de praktijk?
@@ -41,8 +41,21 @@ synoniem en het is belangrijk ze uit elkaar te houden.
   kolommen zijn per definitie niet auto-dispatched, dus een nieuwe vaste kolom
   wordt automatisch overgeslagen.
 - **`_DISPATCH_COLUMNS` uitbreiden** → doe dit alleen als de nieuwe kolom **wel**
-  auto-dispatched moet worden. Vrijwel nooit: `Backlog` + `To Resume` zijn de
-  complete set voor de "nieuwe taak" + "hervatte taak" flows, respectievelijk.
+  auto-dispatched moet worden. Vrijwel nooit: `To Resume` + `Backlog` zijn de
+  complete set voor de "hervatte taak" + "nieuwe taak" flows, respectievelijk.
+- **De volgorde van `_DISPATCH_COLUMNS` niet omdraaien zonder beslissing.** Het is
+  geen cosmetische tuple-volgorde: `_next_card` loopt 'm af en geeft de eerste
+  kolom terug die een selecteerbare kaart oplevert, en `_dispatch_order_key`
+  (gebruikt door "Dispatch All") rangschikt op dezelfde index. `To Resume` staat
+  vooraan zodat onderbroken werk wordt afgemaakt vóór nieuw werk wordt gestart —
+  een kaart daar bezit al een worktree én een hervatbare transcript, en beide
+  verouderen naarmate `master` wegdrijft. Sinds 2026-07-29; daarvoor stond
+  `Backlog` vooraan, wat nooit een beslissing was maar de letterlijke
+  tuple-volgorde uit de init-commit.
+- **Prioriteit steekt nooit een kolomgrens over.** `_next_card` sorteert op
+  prioriteit *binnen* een kolom; een `high` Backlog-kaart wint het dus niet van
+  een `none` To Resume-kaart (contract uit commit `e0acb7d3`, vastgelegd in
+  `test_dispatch_column_preference_beats_priority`).
 - **`FIXED_COLUMNS` in de frontend** → update deze **alleen** als je ook `COLUMNS`
   in `schemas.py` verandert. De lijst is een snapshot voor client-side logica;
   de server-side `COLUMNS` is leidend.

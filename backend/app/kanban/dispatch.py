@@ -5242,7 +5242,19 @@ def _live_sessions() -> set[str] | None:
 # the source of truth for "what is a fixed column"; a column outside
 # this tuple is by definition not auto-dispatched. See
 # docs/cockpit/kanban-conventions.md §1 for the full convention map.
-_DISPATCH_COLUMNS = ("Backlog", "To Resume")  # new cards from Backlog, resumed cards from To Resume
+# Order is load-bearing, not cosmetic: `_next_card` walks this tuple and returns
+# the first column that yields a selectable card, and `_dispatch_order_key` ranks
+# the bulk paths by the same index. "To Resume" comes first so interrupted work is
+# finished before new work is started ("stop starting, start finishing") — a card
+# there already owns a worktree and a resumable transcript, both of which decay as
+# master drifts away from them. Backlog-first was never a decision; it was the
+# literal order of this tuple since the initial commit.
+#
+# Backlog does not starve behind it: a "To Resume" card parked by the limit-recovery
+# path carries a future `scheduled_at`, so `_is_due` keeps it out of `selectable()`
+# until its reset time, and the per-provider pause (dispatch_pause.py) plus
+# MAX_DISPATCH_FAILURES bound the "resume → dies → back to To Resume" loop.
+_DISPATCH_COLUMNS = ("To Resume", "Backlog")  # resumed cards first, then new cards from Backlog
 _PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1, "none": 0}
 
 
@@ -5253,6 +5265,28 @@ def _priority_key(card) -> int:
     auto-tick's _next_card and the bulk paths (dispatch_all_pending,
     redispatch_all_orphans) so the three call sites can't drift."""
     return _PRIORITY_RANK.get(getattr(card, "priority", None), 0)
+
+
+def _dispatch_order_key(card) -> tuple[int, int]:
+    """Flat sort key reproducing `_next_card`'s ordering for the bulk paths.
+
+    Lower tuple sorts first: `_DISPATCH_COLUMNS` index primary (so "To Resume"
+    drains before "Backlog"), priority descending secondary. A column outside the
+    tuple ranks last — the bulk callers pre-filter to dispatchable cards, so that
+    branch only ever catches an orphan.
+
+    Column beats priority on purpose: `_next_card` returns the first *column* that
+    yields a selectable card and only sorts by priority *within* it, so a high
+    Backlog card does not jump a low To Resume card there either. Keeping the bulk
+    "Dispatch All" path on the same rule is the whole point of this helper — before
+    it, the bulk path sorted by priority across both columns and silently
+    contradicted the tick.
+    """
+    try:
+        col_rank = _DISPATCH_COLUMNS.index(card.column)
+    except ValueError:
+        col_rank = len(_DISPATCH_COLUMNS)
+    return (col_rank, -_priority_key(card))
 
 
 def _is_due(card: KanbanCard) -> bool:
@@ -7567,7 +7601,7 @@ async def dispatch_all_pending(
     session, *, project_key: str, project_path: str,
     transport: SpawnTransport | None = None,
 ) -> list[dict]:
-    """Dispatch all unclaimed Backlog cards for a project at once.
+    """Dispatch all unclaimed dispatch-column cards for a project at once.
 
     Bypasses the busy cap so multiple cards can be dispatched concurrently.
     When transport is None, each card's transport is auto-selected based on its
@@ -7594,11 +7628,12 @@ async def dispatch_all_pending(
         transport = await get_transport_for_project(project_path)
     from app.kanban.service import list_pending_cards
     pending = [c for c in await list_pending_cards(session, project_key) if _is_due(c)]
-    # list_pending_cards returns rows ordered by rank. Stable-sort by priority
-    # descending so an operator clicking "Dispatch All" gets the same priority-
-    # aware ordering the auto-tick already gives — high jumps the queue, low
-    # sinks. Within-priority ties keep their existing rank order (stable sort).
-    pending.sort(key=_priority_key, reverse=True)
+    # list_pending_cards returns rows ordered by rank, mixing both dispatch
+    # columns. Stable-sort by `_dispatch_order_key` so an operator clicking
+    # "Dispatch All" gets the same ordering the auto-tick gives: "To Resume"
+    # ahead of "Backlog", priority descending within a column, and within-priority
+    # ties keeping their existing rank order (stable sort).
+    pending.sort(key=_dispatch_order_key)
     column_caps = await _column_max_sessions(session, project_key)
     results = []
     # Apply the same depends_on gate the auto-dispatch tick uses so a "Dispatch All"
