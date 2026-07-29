@@ -9,7 +9,7 @@ import pytest
 
 def test_resume_resolve_directory_prefers_transcript_cwd(monkeypatch, tmp_path):
     from app.services.agentic_cli.base import SpawnCommandOptions
-    from app.services.agentic_cli.claude_code import ClaudeCodeProvider
+    from app.services.agentic_cli.claude_code import ClaudeCodeCli
     from app.services.runs import spawn as claude_spawn
 
     worktree_dir = tmp_path / "wt"
@@ -24,7 +24,7 @@ def test_resume_resolve_directory_prefers_transcript_cwd(monkeypatch, tmp_path):
 
     monkeypatch.setattr(claude_spawn.Path, "home", classmethod(lambda cls: tmp_path))
 
-    provider = ClaudeCodeProvider()
+    provider = ClaudeCodeCli()
     resolved = provider.resolve_directory(
         SpawnCommandOptions(
             directory=str(tmp_path),  # non-empty, deliberately NOT the worktree

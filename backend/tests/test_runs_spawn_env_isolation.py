@@ -12,8 +12,10 @@ in spawn_session`, follow-up #5 in `docs/cockpit/veilig-bouwen-en-uitleveren.md`
    once follow-up #4 lands. Spawns in project A see only A's keys; spawns
    in project B that don't supply A's keys never see them — even when
    they're sitting in another project's SecretStore mock.
-3. ``COCKPIT_PROJECT_KEY`` and ``COCKPIT_RUNTIME`` are auto-injected when
-   the caller supplies ``project_key``/``runtime``.
+3. ``COCKPIT_PROJECT_KEY`` is auto-injected when the caller supplies
+   ``project_key``. ``COCKPIT_RUNTIME`` is *always* injected — from ``runtime``
+   when supplied, else from ``_DEFAULT_RUNTIME`` ("worktree"), which 9233b8d4
+   added for backward compat with the callers that pass no runtime.
 4. Control characters (``\n``/``\r``/``\x00``) in any injected value raise
    ``ValueError`` — same rule ``build_provider_env`` already enforces in
    ``agentic_cli/provider_env.py``.
@@ -110,8 +112,17 @@ def test_spawn_session_injects_cockpit_project_key_and_runtime(monkeypatch, tmp_
     assert env["COCKPIT_RUNTIME"] == "worktree"
 
 
-def test_spawn_session_runtime_omitted_when_not_supplied(monkeypatch, tmp_path):
-    """``COCKPIT_RUNTIME`` only appears when the caller passes ``runtime``."""
+def test_spawn_session_runtime_defaults_to_worktree_when_not_supplied(monkeypatch, tmp_path):
+    """``COCKPIT_RUNTIME`` falls back to ``worktree`` when the caller omits it.
+
+    `build_spawn_env` does guard on ``runtime is not None``, but `spawn_session`
+    resolves `_DEFAULT_RUNTIME` before calling it, so the guard is unreachable
+    from this path. That default is deliberate and load-bearing: 5 of the 7
+    `spawn_session` call sites (both REST router paths and both scheduling
+    resolver paths) pass no `runtime`, and dropping it would silently stop
+    `COCKPIT_RUNTIME` reaching those agents. See 9233b8d4, which introduced the
+    default "for backward compat with existing callers".
+    """
     from app.services.agentic_cli.base import SpawnCommandOptions
     from app.services.runs import spawn
 
@@ -125,7 +136,7 @@ def test_spawn_session_runtime_omitted_when_not_supplied(monkeypatch, tmp_path):
 
     env = _env_dict_argv(calls[0])
     assert env["COCKPIT_PROJECT_KEY"] == "git:example.com/repo-a"
-    assert "COCKPIT_RUNTIME" not in env
+    assert env["COCKPIT_RUNTIME"] == "worktree"
 
 
 def test_spawn_session_extra_env_keys_reach_tmux(monkeypatch, tmp_path):

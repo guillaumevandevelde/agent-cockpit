@@ -3,30 +3,30 @@ from unittest.mock import MagicMock
 
 
 def test_is_claude_code_matches_claude_command():
-    from app.services.runs.discovery import _is_claude_code
+    from app.services.runs.cc_legacy import _is_claude_code
     assert _is_claude_code("claude") is True
 
 
 def test_is_claude_code_rejects_other_commands():
-    from app.services.runs.discovery import _is_claude_code
+    from app.services.runs.cc_legacy import _is_claude_code
     assert _is_claude_code("vim") is False
     assert _is_claude_code("bash") is False
     assert _is_claude_code("node") is False
 
 
 def test_is_claude_code_matches_claude_variants():
-    from app.services.runs.discovery import _is_claude_code
+    from app.services.runs.cc_legacy import _is_claude_code
     assert _is_claude_code("claude") is True
 
 
 def test_discover_returns_list():
-    from app.services.runs.discovery import discover_cc_sessions
+    from app.services.runs.cc_legacy import discover_cc_sessions
     result = discover_cc_sessions()
     assert isinstance(result, list)
 
 
 def test_discover_session_dict_shape():
-    from app.services.runs.discovery import _build_session_info
+    from app.services.runs.cc_legacy import _build_session_info
 
     mock_pane = MagicMock()
     mock_pane.pane_current_command = "claude"

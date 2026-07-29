@@ -26,7 +26,9 @@ def test_claude_worktree_uses_generated_session_name_when_blank(monkeypatch, tmp
 
     assert result["session_name"] == "repo-abcd"
     assert calls[0][:7] == ["tmux", "new-session", "-d", "-s", "repo-abcd", "-c", str(tmp_path)]
-    assert "--worktree repo-abcd" in calls[0][7]
+    # The shell command is the LAST argv element, not index 7: spawn.py splices
+    # `-e KEY=VALUE` env flags in between `-c <dir>` and the command.
+    assert "--worktree repo-abcd" in calls[0][-1]
     assert spawn.get_spawned_sessions()["repo-abcd"]["worktree_name"] == "repo-abcd"
 
 
@@ -67,7 +69,7 @@ def test_claude_resume_resolves_directory_from_transcript_cwd(monkeypatch, tmp_p
 
     assert result["session_name"] == "claude-deck-abcd"
     assert calls[0][:7] == ["tmux", "new-session", "-d", "-s", "claude-deck-abcd", "-c", str(project_dir)]
-    assert "--resume session-123" in calls[0][7]
+    assert "--resume session-123" in calls[0][-1]
 
 
 def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
@@ -245,9 +247,19 @@ def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
     )
 
     argv = calls[0]
-    assert "-e" not in argv
     assert argv[:7] == ["tmux", "new-session", "-d", "-s", "repo-abcd", "-c", str(tmp_path)]
-    assert len(argv) == 8
+    # anthropic is the native provider, so it contributes NO provider-specific
+    # env vars (contrast Bedrock/MiniMax). It is not "no env flags at all":
+    # spawn.py always injects the COCKPIT_* vars (see 9233b8d4 and
+    # test_runs_spawn_env_isolation.py), so assert on the provider vars only.
+    injected = {
+        arg.split("=", 1)[0]
+        for prev, arg in zip(argv, argv[1:], strict=False)
+        if prev == "-e"
+    }
+    assert all(k.startswith("COCKPIT_") for k in injected), (
+        f"anthropic must add no provider env vars, got: {sorted(injected)}"
+    )
     assert spawn.get_spawned_sessions()["repo-abcd"]["provider"] == "anthropic"
 
 
@@ -364,7 +376,7 @@ def test_spawn_session_sanitizes_dirty_worktree_name(monkeypatch, tmp_path):
     assert result["worktree_name"] == "feature/foo-bar"
     assert result["worktree_name_adjusted"] is True
     # the sanitized branch is what reaches `claude --worktree`
-    assert "--worktree feature/foo-bar" in calls[0][7]
+    assert "--worktree feature/foo-bar" in calls[0][-1]
     # and what is stored so cleanup removes the real worktree
     stored = spawn.get_spawned_sessions()[result["session_name"]]
     assert stored["worktree_name"] == "feature/foo-bar"
