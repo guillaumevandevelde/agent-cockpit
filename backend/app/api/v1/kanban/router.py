@@ -1170,8 +1170,13 @@ async def add_plan_attachment(cid: str, payload: AddPlanAttachmentRequest):
     out from under it by `worktree-gc.sh`).
 
     Returns the new `plan_deliverable_id` plus the wired child card ids on
-    success. On validation failure returns 4xx with the error code in the
-    `detail` field (matches the MCP error-dict contract).
+    success. The `plan_refs` map echoes the freshly wired `plan_ref`
+    deliverable id per child so the caller can verify the write landed
+    without re-fetching each child (the router-side identity-map shape does
+    not apply here — the handler uses `s.get()` for the pre-check, the safe
+    pattern from CLAUDE.md, so there is no `_reload` staleness to chase).
+    On validation failure returns 4xx with the error code in the `detail`
+    field (matches the MCP error-dict contract).
     """
     from app.kanban import dep_resolver
     from app.kanban.models import KanbanCard, KanbanDeliverable
@@ -1232,6 +1237,7 @@ async def add_plan_attachment(cid: str, payload: AddPlanAttachmentRequest):
             )
         ).scalars().first().id
 
+        plan_refs: dict[str, str] = {}
         for child_id in payload.child_card_ids:
             await apply_operation(
                 s, op_type="link_plan_ref", entity_type="deliverable",
@@ -1241,12 +1247,26 @@ async def add_plan_attachment(cid: str, payload: AddPlanAttachmentRequest):
                     "plan_deliverable_id": plan_deliverable_id,
                 }), "depends_on": list(deps.get(child_id, []) or [])},
             )
+            # Capture the freshly wired plan_ref deliverable id so the caller
+            # can verify the write landed without re-fetching the child card.
+            # Mirrors the dispatch-side pattern for the plan deliverable above
+            # (the most-recently-created plan_ref row for this child).
+            plan_ref_id = (
+                await s.execute(
+                    select(KanbanDeliverable)
+                    .where(KanbanDeliverable.card_id == child_id,
+                           KanbanDeliverable.kind == "plan_ref")
+                    .order_by(KanbanDeliverable.created_at.desc())
+                )
+            ).scalars().first().id
+            plan_refs[child_id] = plan_ref_id
         await s.commit()
 
     return AddPlanAttachmentResponse(
         parent_card_id=cid,
         plan_deliverable_id=plan_deliverable_id,
         child_card_ids=list(payload.child_card_ids),
+        plan_refs=plan_refs,
     )
 
 

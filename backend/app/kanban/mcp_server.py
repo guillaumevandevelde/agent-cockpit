@@ -1212,7 +1212,18 @@ async def add_plan_attachment(
     Requires at least one child — for a childless card, use
     `attach_deliverable(kind="plan")` instead.
 
-    Returns the parent card on success, or an error dict:
+    Returns on success:
+        {"parent_card_id": "...", "plan_deliverable_id": "...",
+         "child_card_ids": [...],
+         "plan_refs": {child_card_id: plan_ref_deliverable_id, ...}}.
+
+    The ``plan_refs`` map echoes the freshly wired ``plan_ref`` deliverable id
+    per child so the caller can verify the write landed without re-fetching
+    each child. Mirrors the REST `POST /cards/{id}/plan-attachment` response
+    shape (backend/app/kanban/schemas.py::AddPlanAttachmentResponse) — same
+    op-log, same validation, same return.
+
+    On failure returns an error dict:
         {error: "not_found"} / {error: "no_children"} / {error: "parent_mismatch"} /
         {error: "child_not_found"} / {error: "cycle_detected", cycle: [...]} /
         {error: "too_many_children", max: 50}.
@@ -1264,6 +1275,7 @@ async def add_plan_attachment(
         ).scalars().first().id
 
         # Link plan_ref on each child + fan out depends_on.
+        plan_refs: dict[str, str] = {}
         for cid in child_card_ids:
             await apply_operation(
                 s, op_type="link_plan_ref", entity_type="deliverable",
@@ -1273,11 +1285,23 @@ async def add_plan_attachment(
                     "plan_deliverable_id": plan_deliverable_id,
                 }), "depends_on": list(deps.get(cid, []) or [])},
             )
+            # Capture the freshly wired plan_ref deliverable id so the caller
+            # can verify the write landed without re-fetching the child card.
+            plan_ref_id = (
+                await s.execute(
+                    select(KanbanDeliverable)
+                    .where(KanbanDeliverable.card_id == cid,
+                           KanbanDeliverable.kind == "plan_ref")
+                    .order_by(KanbanDeliverable.created_at.desc())
+                )
+            ).scalars().first().id
+            plan_refs[cid] = plan_ref_id
         await s.commit()
         return {
             "parent_card_id": card_id,
             "plan_deliverable_id": plan_deliverable_id,
             "child_card_ids": list(child_card_ids),
+            "plan_refs": plan_refs,
         }
 
 

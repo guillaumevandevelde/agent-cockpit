@@ -67,6 +67,14 @@ async def test_add_plan_happy_path_attaches_plan_and_refs():
     assert "error" not in result, result
     assert result["parent_card_id"] == parent_id
     assert set(result["child_card_ids"]) == {c1, c2}
+    # Response must echo each freshly wired plan_ref deliverable id so the
+    # caller can verify the write landed without re-fetching each child
+    # (kanban card a254b3111a2340478da726eb8fd015b9, second iteration).
+    assert set(result["plan_refs"].keys()) == {c1, c2}
+    c1_plan_ref_id = result["plan_refs"][c1]
+    c2_plan_ref_id = result["plan_refs"][c2]
+    assert c1_plan_ref_id and c2_plan_ref_id
+    assert c1_plan_ref_id != c2_plan_ref_id
 
     async with KanbanSessionLocal() as s:
         parent = await _load_card(s, parent_id)
@@ -80,6 +88,9 @@ async def test_add_plan_happy_path_attaches_plan_and_refs():
         c2_refs = [d for d in c2_card.deliverables if d.kind == "plan_ref"]
         assert len(c1_refs) == 1
         assert len(c2_refs) == 1
+        # The echoed ids must match the rows that landed on each child.
+        assert c1_refs[0].id == c1_plan_ref_id
+        assert c2_refs[0].id == c2_plan_ref_id
 
         # The c2 child's depends_on column should reflect the graph.
         assert list(c2_card.depends_on or []) == [c1]

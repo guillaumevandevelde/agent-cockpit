@@ -74,6 +74,14 @@ async def test_rest_add_plan_happy_path_attaches_plan_and_refs():
         assert body["parent_card_id"] == parent
         assert set(body["child_card_ids"]) == {c1, c2}
         assert body["plan_deliverable_id"]
+        # Response must echo each freshly wired plan_ref deliverable id so
+        # callers can verify the write landed without a follow-up fetch
+        # (kanban card a254b3111a2340478da726eb8fd015b9, second iteration).
+        assert set(body["plan_refs"].keys()) == {c1, c2}
+        c1_plan_ref_id = body["plan_refs"][c1]
+        c2_plan_ref_id = body["plan_refs"][c2]
+        assert c1_plan_ref_id and c2_plan_ref_id
+        assert c1_plan_ref_id != c2_plan_ref_id
 
         parent_card = await _load_card_deliverables(parent)
         plans = [d for d in parent_card.deliverables if d.kind == "plan"]
@@ -86,6 +94,9 @@ async def test_rest_add_plan_happy_path_attaches_plan_and_refs():
         c2_refs = [d for d in c2_card.deliverables if d.kind == "plan_ref"]
         assert len(c1_refs) == 1
         assert len(c2_refs) == 1
+        # The echoed ids must match the rows that landed on each child.
+        assert c1_refs[0].id == c1_plan_ref_id
+        assert c2_refs[0].id == c2_plan_ref_id
         assert list(c2_card.depends_on or []) == [c1]
         assert list(c1_card.depends_on or []) == []
 

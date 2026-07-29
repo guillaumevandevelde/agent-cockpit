@@ -492,6 +492,12 @@ class AddPlanAttachmentResponse(BaseModel):
     parent_card_id: str
     plan_deliverable_id: str
     child_card_ids: list[str]
+    # child_card_id → freshly wired plan_ref deliverable id. Returned so the
+    # caller can verify the write landed without re-fetching each child (the
+    # REST and MCP handlers each populate this from their own just-created
+    # plan_ref row; see router.add_plan_attachment and
+    # mcp_server.add_plan_attachment).
+    plan_refs: dict[str, str] = Field(default_factory=dict)
 
 
 class ActivityEntry(BaseModel):
