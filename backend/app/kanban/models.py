@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -273,6 +274,19 @@ class KanbanWorkTypeMapping(KanbanBase):
     follow-ups.
     """
     __tablename__ = "kanban_work_type_mappings"
+    # The (project_key, work_type) pair MUST be unique here, not only in the
+    # raw-DDL bootstrap in db.py: `create_all` runs first and wins, so a
+    # constraint declared only there is never actually created. Without this,
+    # `upsert_work_type_mapping`'s ON CONFLICT (project_key, work_type) has no
+    # matching uniqueness to target and every upsert raises
+    # "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint".
+    __table_args__ = (
+        UniqueConstraint(
+            "project_key",
+            "work_type",
+            name="uq_kanban_work_type_mappings_project_work_type",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     project_key: Mapped[str] = mapped_column(String(512), index=True)

@@ -1351,10 +1351,17 @@ async def upsert_work_type_mapping(
     )
     await session.execute(stmt)
     await session.flush()
+    # `populate_existing` is load-bearing: the statement above is a Core
+    # INSERT ... ON CONFLICT DO UPDATE, so it bypasses the ORM unit of work and
+    # the identity map keeps whatever persona this session read earlier. Two
+    # upserts on the same (project_key, work_type) in one session would
+    # otherwise return the FIRST persona, silently reporting the update as a
+    # no-op while the DB row is correct.
     row = (await session.execute(
         select(KanbanWorkTypeMapping)
         .where(KanbanWorkTypeMapping.project_key == project_key)
         .where(KanbanWorkTypeMapping.work_type == work_type)
+        .execution_options(populate_existing=True)
     )).scalar_one()
     return row
 
