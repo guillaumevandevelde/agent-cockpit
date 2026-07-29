@@ -47,6 +47,15 @@ _GATE_DEFAULT_TIMEOUT_SECONDS = 1800
 # ``docs/cockpit/approval-privilege-separation-analyse.md`` §5 path 3.
 _PERMISSION_PROMPT_DEFAULT_TIMEOUT_SECONDS = 300
 
+# report_impediment's `options` must be exactly this many entries when
+# supplied. Kaart 4279448c revisit: the Impediment UI used to pad a
+# shorter agent-supplied list up to 4 buttons with a synthetic "Other" filler
+# — the human rejected that as not "steeds 4 keuzes" (always 4 choices);
+# the 4 buttons must all be agent-proposed. Enforcing the count here, at the
+# only place a gate is created for the Impediment column, means the UI never
+# has to invent a filler again.
+_IMPEDIMENT_OPTION_COUNT = 4
+
 # The fully-qualified MCP tool name Claude Code will pass back via
 # ``--permission-prompt-tool``. Format is ``mcp__<server>__<tool>``; the server
 # name ``cockpit-kanban`` matches the FastMCP("cockpit-kanban") below and the
@@ -790,6 +799,16 @@ async def report_impediment(card_id: str, question: str,
     `**Impediment:**` comment + `impediment_question` channel
     (dispatch.build_card_prompt + router.resolve_impediment).
 
+    When supplied, `options` must contain exactly 4 entries — the Impediment
+    UI always renders 4 choice buttons, and all 4 must be your own proposed
+    answers (kaart 4279448c revisit: a UI-injected "Other" filler used to pad
+    a shorter list, which the human rejected). If you have fewer than 4
+    genuine alternatives, add plausible ones yourself (even a deliberately
+    weaker one) to reach 4, or omit `options` entirely to ask a free-text
+    question instead. Supplying 1-3 options is rejected with
+    `error: "invalid_option_count"` and the call has no effect — retry with
+    exactly 4 or none.
+
     When `options` is supplied a KanbanGate row is also created in status="open",
     so the kanban UI can render choice buttons on the card in the Impediment
     column. The chosen answer replaces the question in the resumed prompt.
@@ -811,6 +830,22 @@ async def report_impediment(card_id: str, question: str,
     Backwards compatible: omitting `options` keeps the legacy free-text path
     (no KanbanGate created).
     """
+    if options is not None and len(options) != _IMPEDIMENT_OPTION_COUNT:
+        logger.info(
+            "report_impediment: %s rejected — options=%d (need exactly %d)",
+            card_id, len(options), _IMPEDIMENT_OPTION_COUNT,
+        )
+        return {
+            "error": "invalid_option_count",
+            "message": (
+                f"options must contain exactly {_IMPEDIMENT_OPTION_COUNT} "
+                f"entries (got {len(options)}). Supply "
+                f"{_IMPEDIMENT_OPTION_COUNT} agent-proposed choices, or omit "
+                "`options` entirely to ask a free-text question instead."
+            ),
+            "card_id": card_id,
+        }
+
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
         if card is None:

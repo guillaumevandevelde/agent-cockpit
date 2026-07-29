@@ -55,7 +55,7 @@ async def test_resolve_impediment_forwards_gate_answer_as_impediment_answer(
     cid = card["id"]
     await m.claim_card(cid, "agent:sess")
     await m.report_impediment(cid, "Postgres or SQLite?",
-                              options=["Postgres", "SQLite"])
+                              options=["Postgres", "SQLite", "MySQL", "MariaDB"])
 
     # 2. Human answers the gate (mirrors the UI clicking a choice).
     async with KanbanSessionLocal() as s:
@@ -140,7 +140,7 @@ async def test_resolve_impediment_gate_leads_and_free_text_follows(
     cid = card["id"]
     await m.claim_card(cid, "agent:sess")
     await m.report_impediment(cid, "Postgres or SQLite?",
-                              options=["Postgres", "SQLite"])
+                              options=["Postgres", "SQLite", "MySQL", "MariaDB"])
     async with KanbanSessionLocal() as s:
         gates = await service.list_gates(s, cid)
         await service.answer_gate(s, gates[0].id, "Postgres")
