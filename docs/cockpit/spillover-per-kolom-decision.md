@@ -21,8 +21,31 @@ status: decided
   bij een echte uitwijk.
 - 8 nieuwe tests in `test_subscription_pool_dispatch.py` (waaronder de AC-scenario
   uit kaart `0172e94d…`); 6 bestaande pin-tests bijgewerkt naar de nieuwe semantiek.
-- UI-tekst in `SubscriptionPoolDialog.tsx` en deze doc bijgewerkt; per-kolom-staart
-  (kaart `b36ca702…`) en UI-spillover-zichtbaarheid (`7411d25e…`) blijven open.
+- UI-tekst in `SubscriptionPoolDialog.tsx` en deze doc bijgewerkt; UI-spillover-zichtbaarheid
+  (`7411d25e…`) blijft open.
+
+✅ **Geïmplementeerd** in 2026-07-29 (kaart `b36ca702…`):
+- `get_subscription_pool` / `set_subscription_pool` hebben een optionele `column`
+  gekregen; de key wordt `subscription_pool:<project_key>:<column>`, met
+  fallback naar `subscription_pool:<project_key>` wanneer er geen kolom-rij is.
+- Asymmetrische semantiek: een board-wide lege lijst wordt nog steeds geweigerd
+  (UI-bescherming), maar een per-kolom lege lijst is een **geldig onderscheidbaar**
+  signaal — "nooit uitwijken voor deze kolom". `get_subscription_pool(column=…)`
+  geeft voor die rij `[]` terug, niet `None`, zodat de UI hem als bewuste keuze
+  kan tonen in plaats van als "geen config".
+- `resolve_effective_provider_and_model` en `_pool_spillover_available` lezen
+  nu de kolom-specifieke staart; de call site in `move_limited_session_to_resume`
+  geeft `card.column` mee.
+- REST: `GET /api/v1/kanban/subscription-pool?column=…` en
+  `POST /api/v1/kanban/subscription-pool` (`column` in body) zijn
+  backward-compatible; oude clients zonder `column` krijgen/houden board-wide.
+- `SubscriptionPoolDialog` toont een kolom-`<Select>` ("Board-wide" + agent
+  kolommen); bij een kolom-selectie wordt `column.default_provider` als
+  read-only eerste regel getoond zodat zichtbaar is dat de staart geen
+  routing-pin is — de impliciete kop wint altijd.
+- 9 storage-tests + 4 dispatch-integratie-tests + 5 REST-endpoint-tests
+  toegevoegd; AC-scenario (reviewer met lege staart blijft pauzeren op limiet,
+  engineer met `[anthropic]`-staart wijkt onmiddellijk uit) is gedekt.
 
 **Trigger:** kanban-kaart `2688bf80…` "[analyse] Spillover vs. per-persona provider — de pool
 overrulet stilzwijgend elke kolom-default", kind van
@@ -333,7 +356,7 @@ Aangemaakt als kind-kaarten van `2688bf80…`:
 | `0172e94d…` | Pool wordt spillover-keten met de kolom-default als impliciete kop (§5 stap 1) | — |
 | `98064955…` | Kolom-model-alias mag niet meeliften naar een andere vendor (§3.1) | — |
 | `9ff86416…` | Reactief limiet-pad leest de echt gespawnde provider (§3.2) | — |
-| `b36ca702…` | Per-kolom spillover-staart (§5 stap 2) | `0172e94d…` |
+| `b36ca702…` | Per-kolom spillover-staart (§5 stap 2) — ✅ geïmplementeerd 2026-07-29 | `0172e94d…` |
 | `7411d25e…` | UI toont of spillover aan staat en wat de keten per kolom doet (§2) | `0172e94d…` |
 
 De twee defect-kaarten (§3.1, §3.2) hebben **geen** `depends_on`: het zijn zelfstandige

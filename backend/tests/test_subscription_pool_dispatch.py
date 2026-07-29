@@ -438,7 +438,218 @@ async def test_get_subscription_pool_endpoint_default():
             params={"project_key": PK},
         )
     assert r.status_code == 200
-    assert r.json() == {"project_key": PK, "pool": None}
+    assert r.json() == {"project_key": PK, "pool": None, "column": None}
+
+
+# ---- per-column REST surface (kaart b36ca702…) -------------------------
+#
+# Acceptance criterion: GET/POST on the existing subscription-pool
+# endpoints accept an optional ``column`` parameter; without it the
+# behaviour is board-wide (backwards-compatible). The per-column POST
+# body preserves the explicit-empty semantics (``pool: []`` + column
+# = "nooit uitwijken") which is distinguishable from "no row" (= erf
+# de bord-brede staart).
+
+
+@pytest.mark.asyncio
+async def test_get_subscription_pool_endpoint_with_column_falls_back_to_board_wide():
+    """GET with ``column`` parameter but no column-specific row → returns
+    the board-wide pool. The response echoes the column parameter so a
+    UI that re-saves can keep the round-trip consistent."""
+    body = {
+        "project_key": PK,
+        "pool": [
+            {"provider": "anthropic", "model": None, "drempel": 0.9},
+        ],
+    }
+    async with _client() as c:
+        await c.post("/api/v1/kanban/subscription-pool", json=body)
+        r = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK, "column": "reviewer"},
+        )
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["column"] == "reviewer"
+    assert payload["pool"] == [
+        {"cli": "claude-code", "provider": "anthropic",
+         "model": None, "drempel": 0.9, "endpoint_name": None},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_with_column_round_trips():
+    """POST with ``column`` writes to the per-column row and the GET
+    reads back exactly that tail. Board-wide pool is untouched."""
+    # FCR kaart b36ca702… F2: the column must exist before POSTing to
+    # its per-column pool row — the router validates against the
+    # project's real ``kanban_columns`` rows. Create one here.
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        await s.commit()
+    body = {
+        "project_key": PK,
+        "column": "reviewer",
+        "pool": [
+            {"provider": "anthropic", "model": None, "drempel": 0.9},
+        ],
+    }
+    async with _client() as c:
+        r = await c.post("/api/v1/kanban/subscription-pool", json=body)
+        assert r.status_code == 200
+        r2 = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK, "column": "reviewer"},
+        )
+        # Board-wide still empty.
+        r3 = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK},
+        )
+    assert r2.json()["pool"] == [
+        {"cli": "claude-code", "provider": "anthropic",
+         "model": None, "drempel": 0.9, "endpoint_name": None},
+    ]
+    assert r3.json()["pool"] is None
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_with_column_empty_list_is_valid():
+    """``pool: []`` with ``column`` is a valid "nooit uitwijken" choice;
+    the GET reads back the empty list (NOT None)."""
+    # FCR kaart b36ca702… F2: create the column first; the router
+    # validates the column exists before persisting the per-column row.
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        await s.commit()
+    body = {
+        "project_key": PK,
+        "column": "reviewer",
+        "pool": [],
+    }
+    async with _client() as c:
+        r = await c.post("/api/v1/kanban/subscription-pool", json=body)
+        assert r.status_code == 200
+        r2 = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK, "column": "reviewer"},
+        )
+    assert r2.json()["pool"] == []
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_with_column_null_clears_only_that_column():
+    """``pool: null`` with ``column`` deletes only the column-specific
+    row — the board-wide row stays intact."""
+    async with _client() as c:
+        # Set board-wide.
+        await c.post(
+            "/api/v1/kanban/subscription-pool",
+            json={"project_key": PK, "pool": [
+                {"provider": "minimax", "model": None, "drempel": 0.9},
+            ]},
+        )
+        # Set column-specific tail.
+        await c.post(
+            "/api/v1/kanban/subscription-pool",
+            json={"project_key": PK, "column": "reviewer",
+                  "pool": [
+                      {"provider": "anthropic", "model": None, "drempel": 0.9},
+                  ]},
+        )
+        # Clear only the column-specific row.
+        await c.post(
+            "/api/v1/kanban/subscription-pool",
+            json={"project_key": PK, "column": "reviewer", "pool": None},
+        )
+        r_col = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK, "column": "reviewer"},
+        )
+        r_board = await c.get(
+            "/api/v1/kanban/subscription-pool",
+            params={"project_key": PK},
+        )
+    # Per-column inherits board-wide (minimax).
+    assert r_col.json()["pool"] == [
+        {"cli": "claude-code", "provider": "minimax",
+         "model": None, "drempel": 0.9, "endpoint_name": None},
+    ]
+    # Board-wide still intact.
+    assert r_board.json()["pool"] == [
+        {"cli": "claude-code", "provider": "minimax",
+         "model": None, "drempel": 0.9, "endpoint_name": None},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_board_wide_empty_list_still_rejected():
+    """Backwards-compat: board-wide (no column) still rejects an empty
+    pool. The per-column-only "empty is valid" rule does NOT bleed
+    into the board-wide path — see ``_validate_entries``."""
+    async with _client() as c:
+        r = await c.post(
+            "/api/v1/kanban/subscription-pool",
+            json={"project_key": PK, "pool": []},
+        )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_with_unknown_column_rejected():
+    """FCR kaart b36ca702… F2: a raw API caller cannot write a
+    ``column`` value that doesn't resolve to a real ``kanban_columns``
+    row. Without this gate, a stray payload like
+    ``column='../stray'`` would persist under
+    ``subscription_pool:<project_key>:../stray`` — the same DB, but a
+    silently orphaned key the dispatcher would never consult. This
+    test pins the 422 for unknown column names; the equivalent clear
+    (pool: null + unknown column) is also rejected to keep the contract
+    symmetric across writes."""
+    async with _client() as c:
+        r_set = await c.post(
+            "/api/v1/kanban/subscription-pool",
+            json={
+                "project_key": PK,
+                "column": "nope-this-column-does-not-exist",
+                "pool": [],
+            },
+        )
+        r_clear = await c.post(
+            "/api/v1/kanban/subscription-pool",
+            json={
+                "project_key": PK,
+                "column": "../stray",
+                "pool": None,
+            },
+        )
+    assert r_set.status_code == 422
+    assert "column" in r_set.json().get("detail", "").lower()
+    assert r_clear.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_subscription_pool_with_known_column_accepted():
+    """Counter-test for the F2 gate: an existing column writes cleanly.
+    Pins that the allow-list is on names, not "any string is fine"."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        await s.commit()
+    async with _client() as c:
+        r = await c.post(
+            "/api/v1/kanban/subscription-pool",
+            json={"project_key": PK, "column": "reviewer", "pool": []},
+        )
+    assert r.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -1577,3 +1788,379 @@ def test_build_spillover_candidates_duplicate_provider_only_dedups_matching_cli(
     assert chain[1].resolved_cli == "open-code"
     assert chain[2].resolved_cli == "claude-code"
     assert chain[2].provider == "bedrock"
+
+
+# ---- per-column spillover tail (kaart b36ca702…) -------------------------
+#
+# Acceptance criteria pinned end-to-end at the dispatch level:
+#
+#   * ``resolve_effective_provider_and_model`` uses the column-specific
+#     tail (with the board-wide tail as fallback) instead of always
+#     reading the board-wide pool.
+#   * ``_pool_spillover_available`` resolves the same column-specific
+#     tail, so the spillover decision and the subsequent dispatch pick
+#     cannot diverge.
+#   * A ``reviewer`` column with an explicit empty tail stays on the
+#     reset-time pause on a limit hit — no spillover, because the
+#     operator chose "nooit uitwijken".
+#   * An ``engineer`` column with a non-empty tail spills over
+#     immediately on a limit hit.
+
+async def _move_card_to_resume(s, card_id, **kwargs):
+    """Helper: a non-rate-limit move to the resume column for fixtures
+    that don't need the full ``move_limited_session_to_resume`` path.
+    The dispatch integration tests below patch ``_pool_spillover_available``
+    directly so the move itself stays a plain helper."""
+    from app.kanban.operations import apply_operation
+    await apply_operation(
+        s, op_type="update", entity_type="card", project_key=PK,
+        entity_id=card_id, payload={"column": "To Resume"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_effective_uses_per_column_tail_when_present():
+    """``resolve_effective_provider_and_model`` reads the column-specific
+    tail when one is configured. A reviewer column with ``[anthropic]``
+    sees anthropic in its spillover chain; the board-wide pool does not
+    bleed in."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        # Board-wide pool intentionally points elsewhere.
+        await subscription_pool.set_subscription_pool(s, PK, [
+            _entry(provider="minimax", drempel=0.9),
+        ])
+        # Per-column tail for reviewer is empty — "nooit uitwijken".
+        await subscription_pool.set_subscription_pool(
+            s, PK, [], column="reviewer",
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        resolved = await dispatch.resolve_effective_provider_and_model(
+            s,
+            project_key=PK,
+            target_agent="reviewer",
+            project_path="/p",
+            pick_pool=None,
+        )
+    # reviewer.default_provider = anthropic wins the head; pool is empty
+    # so chain contains only the head; provider is anthropic.
+    assert resolved["provider"] == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_resolve_effective_falls_back_to_board_wide_when_no_column_tail():
+    """Without a column-specific row, the per-column reader falls back
+    to the board-wide pool — the existing behaviour is preserved for
+    every column that hasn't been individually configured."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        # Board-wide pool only.
+        await subscription_pool.set_subscription_pool(s, PK, [
+            _entry(provider="minimax", drempel=0.9),
+        ])
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        resolved = await dispatch.resolve_effective_provider_and_model(
+            s,
+            project_key=PK,
+            target_agent="reviewer",
+            project_path="/p",
+            pick_pool=None,
+        )
+    # Kop (anthropic) wint over de pool — zelfde gedrag als vóór
+    # deze kaart; alleen de bron van de pool-rij verandert.
+    assert resolved["provider"] == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_pool_spillover_available_uses_per_column_tail():
+    """``_pool_spillover_available`` resolves the per-column tail — a
+    reviewer column with an explicit empty tail returns False (no
+    spillover), even when the board-wide pool has an alternative."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        # Board-wide: another vendor is available as fallback.
+        await subscription_pool.set_subscription_pool(s, PK, [
+            _entry(provider="minimax", drempel=0.9),
+        ])
+        # Reviewer-only: "nooit uitwijken".
+        await subscription_pool.set_subscription_pool(
+            s, PK, [], column="reviewer",
+        )
+        await s.commit()
+
+    # No-snapshot mode: the head is "above threshold" trivially via
+    # "geen signaal = beschikbaar", and the explicit empty tail
+    # means there are no fallback entries to pick. The reviewer
+    # stays on its reset-time pause.
+    async with KanbanSessionLocal() as s:
+        result = await dispatch._pool_spillover_available(
+            s,
+            project_key=PK,
+            limited_provider="anthropic",
+            cli_id="claude-code",
+            column="reviewer",
+        )
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_pool_spillover_available_with_per_column_tail_finds_fallback():
+    """An engineer column with an explicit non-empty tail spills over
+    when its column-default provider is rate-limited. The pool picks
+    the tail's first available entry instead of falling back to the
+    board-wide pool."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer", default_provider="minimax",
+        )
+        # Board-wide: a different vendor.
+        await subscription_pool.set_subscription_pool(s, PK, [
+            _entry(provider="bedrock", drempel=0.9),
+        ])
+        # Engineer-only: anthropic as the spillover target.
+        await subscription_pool.set_subscription_pool(
+            s, PK, [_entry(provider="anthropic", drempel=0.9)],
+            column="engineer",
+        )
+        await s.commit()
+
+    # With snapshots None for everyone → "geen signaal = beschikbaar",
+    # the router's first-entry-wins branch puts anthropic on top.
+    # ``_pool_spillover_available`` should report True: an alternative
+    # subscription exists for engineer.
+    async with KanbanSessionLocal() as s:
+        result = await dispatch._pool_spillover_available(
+            s,
+            project_key=PK,
+            limited_provider="minimax",
+            cli_id="claude-code",
+            column="engineer",
+        )
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_pool_spillover_available_per_column_tail_independent_of_board_wide():
+    """Per-column tails are independent from the board-wide pool.
+    Setting one column's tail does not bleed into another column's
+    spillover decision."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer", default_provider="minimax",
+        )
+        # Reviewer: empty tail (no spillover).
+        await subscription_pool.set_subscription_pool(
+            s, PK, [], column="reviewer",
+        )
+        # Engineer: anthropic fallback.
+        await subscription_pool.set_subscription_pool(
+            s, PK, [_entry(provider="anthropic", drempel=0.9)],
+            column="engineer",
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        reviewer = await dispatch._pool_spillover_available(
+            s,
+            project_key=PK,
+            limited_provider="anthropic",
+            cli_id="claude-code",
+            column="reviewer",
+        )
+        engineer = await dispatch._pool_spillover_available(
+            s,
+            project_key=PK,
+            limited_provider="minimax",
+            cli_id="claude-code",
+            column="engineer",
+        )
+    assert reviewer is False
+    assert engineer is True
+
+
+# ---------------------------------------------------------------------------
+# FCR kaart b36ca702… F3: end-to-end coverage for
+# ``move_limited_session_to_resume`` with per-column spillover tails.
+#
+# The headline scenario is "reviewer met lege staart blijft op To Resume
+# met de reset-tijd staan; engineer met staart [anthropic] wordt direct
+# herdispatchbaar". The previous tests pin ``_pool_spillover_available``
+# and the resolver, but the actual card-move path needs its own test
+# because the column-aware plumbing (the
+# ``column=card.column`` propagation at dispatch.py:6270) lives one
+# layer up. Without this test, a refactor that drops the column kwarg
+# would silently regress to the board-wide pool.
+#
+# Strategy: drive ``move_limited_session_to_resume`` end-to-end via
+# monkeypatched I/O boundaries (``_resume_target_from_cwd``,
+# ``list_cards``) and capture the ``effective_scheduled_at`` passed to
+# ``_move_to_resume`` — the function-under-test's contract surface.
+# This is exactly the assertion that has to hold for the AC scenario:
+# ``scheduled_at is None`` when the column tail spills, preserved
+# otherwise. Per the test-doubles convention (CLAUDE.md §3c), the
+# patches target the *consumer* — the bindings inside dispatch.py —
+# so a future ``import _pool_spillover_available`` refactor that moves
+# the helper out of dispatch would still pick the patch up via
+# ``from app.kanban import dispatch`` followed by ``monkeypatch.setattr(
+# dispatch, "_pool_spillover_available", ...)``.
+# ---------------------------------------------------------------------------
+
+
+async def _make_card_with_column(s, project_key: str, column: str) -> str:
+    """Create a card on ``column`` and return its id. The card starts
+    claimed by ``agent:lim-test`` so ``move_limited_session_to_resume``
+    recognises it as ours."""
+    from app.kanban.models import KanbanCard
+    import uuid as _uuid
+    cid = str(_uuid.uuid4())
+    s.add(KanbanCard(
+        id=cid,
+        project_key=project_key,
+        column=column,
+        rank="0",
+        title="lim-test card",
+        claimed_by="agent:lim-test",
+        work_type="bug",
+    ))
+    await s.flush()
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_reviewer_empty_tail_keeps_reset_time():
+    """AC scenario: a reviewer card with an explicit empty tail stays
+    on its reset-time pause. End-to-end pin at the
+    ``_move_to_resume`` boundary — ``scheduled_at`` must be preserved
+    (the reset ISO we passed in), NOT collapsed to ``None``."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="reviewer",
+            default_agent="reviewer", default_provider="anthropic",
+        )
+        # Board-wide fallback present but irrelevant: reviewer's empty
+        # tail wins.
+        await subscription_pool.set_subscription_pool(s, PK, [
+            _entry(provider="minimax", drempel=0.9),
+        ])
+        await subscription_pool.set_subscription_pool(
+            s, PK, [], column="reviewer",
+        )
+        await s.commit()
+
+    captured_scheduled_at: dict[str, object] = {}
+    real_scheduled_at = (
+        datetime.now(UTC) + timedelta(hours=1)
+    ).isoformat()
+
+    async def _capture(ks, **kwargs):
+        captured_scheduled_at["value"] = kwargs.get("scheduled_at")
+        return True
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card_with_column(s, PK, "reviewer")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await dispatch.list_cards(s, PK)
+        card = next(c for c in cards if c.id == cid)
+
+    from _pytest.monkeypatch import MonkeyPatch
+    mp = MonkeyPatch()
+    try:
+        mp.setattr(dispatch, "list_cards", lambda ks, project_key: _async_iter([card]))
+        mp.setattr(dispatch, "_move_to_resume", _capture)
+        mp.setattr(
+            dispatch, "_resume_target_from_cwd",
+            lambda cwd: ("/tmp/fake-project-path", "lim-test"),
+        )
+        mp.setattr(dispatch, "safe_resolve_project_key", lambda _p: PK)
+        moved = await dispatch.move_limited_session_to_resume(
+            "/tmp/fake-project-path/.claude/worktrees/lim-test",
+            scheduled_at=real_scheduled_at,
+        )
+    finally:
+        mp.undo()
+    assert moved is True
+    # Reviewer's empty tail → no spillover → reset-time preserved.
+    assert captured_scheduled_at.get("value") == real_scheduled_at
+
+
+@pytest.mark.asyncio
+async def test_move_limited_session_to_resume_engineer_nonempty_tail_spills_now():
+    """AC scenario: an engineer card with a non-empty tail spills
+    immediately on a limit hit. End-to-end pin: ``scheduled_at`` must
+    be forced to ``None`` at the ``_move_to_resume`` boundary, so the
+    card is dispatch-eligible on the next tick instead of waiting for
+    the limited provider's reset."""
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer", default_provider="minimax",
+        )
+        # Tail explicitly configured: anthropic as the spillover target.
+        await subscription_pool.set_subscription_pool(
+            s, PK, [_entry(provider="anthropic", drempel=0.9)],
+            column="engineer",
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card_with_column(s, PK, "engineer")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await dispatch.list_cards(s, PK)
+        card = next(c for c in cards if c.id == cid)
+
+    captured: dict[str, object] = {}
+    real_scheduled_at = (
+        datetime.now(UTC) + timedelta(hours=1)
+    ).isoformat()
+
+    async def _capture(ks, **kwargs):
+        captured["scheduled_at"] = kwargs.get("scheduled_at")
+        return True
+
+    from _pytest.monkeypatch import MonkeyPatch
+    mp = MonkeyPatch()
+    try:
+        mp.setattr(dispatch, "list_cards", lambda ks, project_key: _async_iter([card]))
+        mp.setattr(dispatch, "_move_to_resume", _capture)
+        mp.setattr(
+            dispatch, "_resume_target_from_cwd",
+            lambda cwd: ("/tmp/fake-project-path", "lim-test"),
+        )
+        mp.setattr(dispatch, "safe_resolve_project_key", lambda _p: PK)
+        moved = await dispatch.move_limited_session_to_resume(
+            "/tmp/fake-project-path/.claude/worktrees/lim-test",
+            scheduled_at=real_scheduled_at,
+        )
+    finally:
+        mp.undo()
+    assert moved is True
+    # Engineer's non-empty tail → spillover → scheduled_at collapsed.
+    assert captured.get("scheduled_at") is None
+
+
+async def _async_iter(items):
+    """Tiny helper: turn a list into an awaitable that returns it,
+    matching ``list_cards``'s async-returning signature for the
+    monkeypatched shim."""
+    return items

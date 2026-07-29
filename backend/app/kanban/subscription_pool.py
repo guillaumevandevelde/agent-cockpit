@@ -437,6 +437,8 @@ def _deserialize_entries(value: str) -> list[PoolEntry] | None:
 
 async def get_subscription_pool(
     session, project_key: str,
+    *,
+    column: str | None = None,
 ) -> list[PoolEntry] | None:
     """Return the subscription pool for ``project_key``, or None when no
     pool is configured.
@@ -444,7 +446,20 @@ async def get_subscription_pool(
     None means "fall through to today's dispatch behaviour" — the
     column-default chain stays authoritative. This is the
     backward-compat clause from the acceptance criteria.
+
+    Kaart b36ca702…: with ``column`` set, the read first consults the
+    column-specific row (``subscription_pool:<project_key>:<column>``)
+    and falls back to the board-wide row when no column-specific row
+    exists. An explicitly empty column-specific row (operator-set
+    ``[]``) is a valid value and reads back as ``[]`` — distinct from
+    "no row", which inherits the board-wide pool. ``column=None`` (the
+    default) keeps the legacy board-wide-only read.
     """
+    if column:
+        col_key = f"{SUBSCRIPTION_POOL_PREFIX}{project_key}:{column}"
+        col_row = await session.get(KanbanMeta, col_key)
+        if col_row is not None:
+            return _deserialize_column_entries(col_row.value)
     row = await session.get(
         KanbanMeta, SUBSCRIPTION_POOL_PREFIX + project_key,
     )
@@ -456,6 +471,8 @@ async def get_subscription_pool(
 async def set_subscription_pool(
     session, project_key: str,
     entries: list[PoolEntry] | None,
+    *,
+    column: str | None = None,
 ) -> None:
     """Persist (or clear, when ``None``) the subscription pool.
 
@@ -473,15 +490,42 @@ async def set_subscription_pool(
     at save time, not at spawn time. The pure ``_validate_entries``
     checks the absent / shape layer; this side-effect check makes sure
     the named endpoint actually exists.
+
+    Kaart b36ca702…: with ``column`` set, the row is written under
+    ``subscription_pool:<project_key>:<column>`` instead of the
+    board-wide key. The per-column validator accepts an empty list
+    ("nooit uitwijken") because an operator-set empty tail is a
+    distinct, deliberate choice — it must be preserved as ``[]`` and
+    not silently fall back to the board-wide pool. Storing ``None``
+    deletes the column-specific row so the column inherits the
+    board-wide pool again. ``column=None`` (default) keeps the legacy
+    board-wide write semantics, including the "empty list rejected"
+    rule that protects the UI from accidentally turning the dispatcher
+    into a no-op while the row still shows the operator's last saved
+    pool (see ``_validate_entries``).
     """
-    key = SUBSCRIPTION_POOL_PREFIX + project_key
+    if column:
+        key = f"{SUBSCRIPTION_POOL_PREFIX}{project_key}:{column}"
+    else:
+        key = SUBSCRIPTION_POOL_PREFIX + project_key
     if entries is None:
         row = await session.get(KanbanMeta, key)
         if row is not None:
             await session.delete(row)
             await session.flush()
         return
-    _validate_entries(entries)
+    if column:
+        # Per-column: empty list is a deliberate "nooit uitwijken"
+        # choice and must round-trip as ``[]``. The board-wide path
+        # still rejects empty lists (see ``_validate_entries``) so a
+        # handler cannot accidentally turn the dispatcher into a
+        # no-op while the row still shows the last saved board-wide
+        # pool. The two paths are intentionally asymmetric: a UI that
+        # forgets to clear its tail on a column is much less harmful
+        # than a UI that forgets to clear its pool globally.
+        _validate_column_entries(entries)
+    else:
+        _validate_entries(entries)
     # Fail-fast at storage: every anthropic-compatible entry's
     # endpoint_name must point at a registered endpoint. Done before
     # serialization so the error message names the project+endpoint
@@ -520,3 +564,79 @@ async def set_subscription_pool(
     else:
         row.value = value
     await session.flush()
+
+
+def _validate_column_entries(entries: list[PoolEntry]) -> None:
+    """Validate a per-column tail (kaart b36ca702…).
+
+    Differs from ``_validate_entries`` in exactly one respect: an empty
+    list is *valid*. The operator-set empty tail is the "nooit
+    uitwijken" sentinel — a deliberate, reviewable choice that must be
+    preserved verbatim through the JSON round-trip. Per-entry rules
+    (provider allow-list, drempel range, compatible-with-endpoint)
+    remain strict so a per-column tail can never smuggle in a typo'd
+    provider; the asymmetry is only on the empty-list branch.
+    """
+    for entry in entries:
+        if entry.provider not in _ALLOWED_POOL_PROVIDERS:
+            raise ValueError(
+                f"unknown provider: {entry.provider!r}; "
+                f"expected one of {_ALLOWED_POOL_PROVIDERS}",
+            )
+        if entry.drempel <= 0 or entry.drempel > 1:
+            raise ValueError(
+                f"subscription pool entry.drempel must be in (0, 1]; "
+                f"got {entry.drempel!r}",
+            )
+        if entry.provider == PROVIDER_COMPATIBLE and not entry.endpoint_name:
+            raise ValueError(
+                "anthropic-compatible pool entry requires endpoint_name; "
+                "configure it via /api/v1/agent-bridge/platforms/endpoints",
+            )
+
+
+def _deserialize_column_entries(value: str) -> list[PoolEntry] | None:
+    """Deserialize a per-column pool row.
+
+    Differs from ``_deserialize_entries`` in exactly one respect: an
+    empty JSON list decodes to ``[]`` (the operator's "nooit
+    uitwijken" sentinel), NOT ``None`` (which the board-wide
+    deserialiser uses as "no row"). Per-entry shape checks remain the
+    same so a corrupt row still degrades gracefully to ``None``.
+    """
+    import json as _json
+    try:
+        parsed = _json.loads(value)
+    except (TypeError, ValueError):
+        logger.warning("corrupt subscription_pool column row; ignoring")
+        return None
+    if not isinstance(parsed, list):
+        return None
+    # Per-column: empty list is a deliberate operator choice, not a
+    # corrupt row. Surface it verbatim so the dispatch path can
+    # distinguish "no tail" from "explicit empty tail".
+    if not parsed:
+        return []
+    out: list[PoolEntry] = []
+    for raw in parsed:
+        if not isinstance(raw, dict):
+            return None
+        cli = raw.get("cli") or DEFAULT_POOL_CLI
+        provider = raw.get("provider")
+        model = raw.get("model")
+        drempel = raw.get("drempel")
+        endpoint_name = raw.get("endpoint_name")
+        if endpoint_name is not None and not isinstance(endpoint_name, str):
+            return None
+        if not isinstance(provider, str):
+            return None
+        if model is not None and not isinstance(model, str):
+            return None
+        if not isinstance(drempel, (int, float)):
+            return None
+        out.append(PoolEntry(
+            cli=cli, provider=provider,
+            model=model, drempel=float(drempel),
+            endpoint_name=endpoint_name,
+        ))
+    return out
