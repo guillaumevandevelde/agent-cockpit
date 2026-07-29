@@ -244,6 +244,13 @@
           "plan_deliverable_id": {
             "title": "Plan Deliverable Id",
             "type": "string"
+          },
+          "plan_refs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Plan Refs",
+            "type": "object"
           }
         },
         "required": [
@@ -3934,6 +3941,17 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "spec_doc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Doc"
           }
         },
         "required": [
@@ -5790,6 +5808,25 @@
         "title": "ContextSnapshot",
         "type": "object"
       },
+      "CorrelatedCardItem": {
+        "description": "A single card that implements (or updates) a ``docs/cockpit/`` doc.\n\nEmbedded in ``DocSpecItem.implemented_by`` so the SPA can render the\n\"implemented by\" chip-list next to each C row and link each chip back\nto the kanban board. Sorted deterministically (by ``card_id``) so the\nrendered chip order is stable across requests.",
+        "properties": {
+          "card_id": {
+            "title": "Card Id",
+            "type": "string"
+          },
+          "card_title": {
+            "title": "Card Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card_id",
+          "card_title"
+        ],
+        "title": "CorrelatedCardItem",
+        "type": "object"
+      },
       "CreateGroupRequest": {
         "properties": {
           "cli": {
@@ -6554,6 +6591,14 @@
       "DocSpecItem": {
         "description": "One row in the C section \u2014 a single ``docs/cockpit/*.md`` file with\nthe H1 parsed as the title. Modified-at is the filesystem mtime so the\nSPA can render a \"recently updated\" sort without a separate API.",
         "properties": {
+          "implemented_by": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CorrelatedCardItem"
+            },
+            "title": "Implemented By",
+            "type": "array"
+          },
           "modified_at": {
             "title": "Modified At",
             "type": "string"
@@ -11013,7 +11058,7 @@
         "type": "object"
       },
       "PlansOverviewResponse": {
-        "description": "Aggregated read-only view of the two real plan/spec stores.\n\nB and C are returned as independent sections. No correlation field\nis added at the top level \u2014 the ``spec_doc`` join is a separate\nfollow-up (kanban card bb1f61aa).",
+        "description": "Aggregated read-only view of the two real plan/spec stores.\n\nB and C are returned as independent top-level sections; the B\u2194C\ncorrelation lives INSIDE each row (``CardPlanItem.spec_doc`` on the\nB side, ``DocSpecItem.implemented_by`` on the C side) so the SPA can\nrender the link without re-reading the card or running its own join.\nSee kanban plan 2026-07-28-plans-b-c-correlation (Task 1) for the\nexact-match semantics; URL/wrong-path ``spec_doc`` values are\nfiltered out and never appear in either side.",
         "properties": {
           "cards": {
             "default": [],
@@ -26701,7 +26746,7 @@
         ]
       },
       "post": {
-        "description": "REST mirror of the MCP `add_plan_attachment` tool.\n\nPersists a plan on a parent card and wires `plan_ref` deliverables to each\nchild. Identical semantics to the MCP version \u2014 same op-log, same\nvalidation (parent existence, parent_mismatch, child_not_found,\ncycle_detected, too_many_children). Use this entry point when the\nkanban MCP layer is unreachable (e.g. its working directory was removed\nout from under it by `worktree-gc.sh`).\n\nReturns the new `plan_deliverable_id` plus the wired child card ids on\nsuccess. On validation failure returns 4xx with the error code in the\n`detail` field (matches the MCP error-dict contract).",
+        "description": "REST mirror of the MCP `add_plan_attachment` tool.\n\nPersists a plan on a parent card and wires `plan_ref` deliverables to each\nchild. Identical semantics to the MCP version \u2014 same op-log, same\nvalidation (parent existence, parent_mismatch, child_not_found,\ncycle_detected, too_many_children). Use this entry point when the\nkanban MCP layer is unreachable (e.g. its working directory was removed\nout from under it by `worktree-gc.sh`).\n\nReturns the new `plan_deliverable_id` plus the wired child card ids on\nsuccess. The `plan_refs` map echoes the freshly wired `plan_ref`\ndeliverable id per child so the caller can verify the write landed\nwithout re-fetching each child (the router-side identity-map shape does\nnot apply here \u2014 the handler uses `s.get()` for the pre-check, the safe\npattern from CLAUDE.md, so there is no `_reload` staleness to chase).\nOn validation failure returns 4xx with the error code in the `detail`\nfield (matches the MCP error-dict contract).",
         "operationId": "add_plan_attachment_api_v1_kanban_cards__cid__plan_attachment_post",
         "parameters": [
           {
@@ -31096,7 +31141,7 @@
     },
     "/api/v1/plans/overview": {
       "get": {
-        "description": "Return the B + C aggregator as two independent sections.\n\nCards (``B``) are scoped to ``project_key``; docs (``C``) are\nrepo-wide because ``docs/cockpit/`` is the platform's SSOT tree\nshared across every project (see the per-section rationale above).",
+        "description": "Return the B + C aggregator as two independent sections.\n\nCards (``B``) are scoped to ``project_key``; docs (``C``) are\nrepo-wide because ``docs/cockpit/`` is the platform's SSOT tree\nshared across every project (see the per-section rationale above).\nThe B\u2194C correlation lives INSIDE each row (``CardPlanItem.spec_doc`` /\n``DocSpecItem.implemented_by``) and is built from the same kanban-DB\nread that powers B, so a single round-trip produces the entire\nresponse \u2014 see ``_list_plan_overview_data`` for the join shape.",
         "operationId": "get_plans_overview_api_v1_plans_overview_get",
         "parameters": [
           {
