@@ -660,29 +660,34 @@ const IMPEDIMENT_PREFIX = "**Impediment:** ";
 // open-gate block above it:
 //
 //   1. Structured options (when `report_impediment(options=[…])` was used) —
-//      rendered as a row of up to 4 buttons inside the control. Agent-supplied
-//      options come first (capped at the first 3 to make room for the Other
-//      filler when ≥4), and any remaining slots are filled by an explicit
-//      "Other (use the text below)" button that selects the textarea as the
-//      source of the answer. The cap of 4 addresses the Revisit note's
-//      complaint about "toevallig 2, 3 of 5" buttons (kaart 4279448c revisit).
+//      rendered as a row of buttons inside the control, one per agent-supplied
+//      option. The backend rejects `report_impediment` calls whose `options`
+//      isn't exactly 4 entries (`mcp_server.report_impediment`), so this row
+//      always shows 4 agent-proposed choices in practice — never a
+//      UI-injected filler. A second Revisit on this card ("ik had graag
+//      gehad dat er steeds 4 opties waren om uit te kiezen") rejected the
+//      original approach of padding a short agent list with an "Other"
+//      button; the fix is that the agent supplies all 4, not the UI. The row
+//      still defensively caps rendering at MAX_CHOICE_BUTTONS in case a gate
+//      predates this validation.
 //   2. A previously-answered structured gate — the recorded choice is shown
 //      as read-only context inside the same panel, and the textarea stays so
 //      the human can add extra information before clicking Resolve.
 //   3. A free-text answer in the textarea (always visible) — the answer is
 //      posted as a durable `**Resolution:**` comment and injected into the
-//      resumed session's `## IMPEDIMENT` prompt section.
+//      resumed session's `## IMPEDIMENT` prompt section. This is the "nog de
+//      optie om wat extra info mee te geven" the human asked for: it's
+//      available regardless of whether a choice button was clicked.
 //
 // Three paths, ONE control, ONE Resolve click. When both a structured pick
 // AND free-text are present, the backend merges them through
 // `dispatch.compose_impediment_answer`: the gate pick is the authoritative
 // decision and the typed text becomes supporting context in the resumed
-// session's `## IMPEDIMENT` block. (kaart 4279448c + revisit: the panel must
-// always show ≤4 buttons, a textarea, and a single Resolve click — never two
-// stacked panels and never a click that "meteen doorgaat, zonder plek voor
-// extra info".)
+// session's `## IMPEDIMENT` block. (kaart 4279448c + two revisits: the panel
+// must always show a textarea and a single Resolve click — never two stacked
+// panels, never a click that "meteen doorgaat, zonder plek voor extra info",
+// and never a synthetic filler button standing in for a 4th agent option.)
 const MAX_CHOICE_BUTTONS = 4;
-const OTHER_OPTION_FILLER = "Other — use the text below";
 
 function ResolveImpedimentControl({
   card,
@@ -706,9 +711,7 @@ function ResolveImpedimentControl({
 }) {
   const [answer, setAnswer] = useState("");
   // Local selection for the structured-options row. `null` = nothing picked
-  // yet; one of the rendered button labels once the operator clicks. The
-  // `__other__` sentinel represents the explicit "Other — use the text below"
-  // filler button (clicked → operator is expected to type in the textarea).
+  // yet; one of the rendered button labels once the operator clicks.
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -726,19 +729,15 @@ function ResolveImpedimentControl({
     ? (question.payload.text as string).slice(IMPEDIMENT_PREFIX.length)
     : null;
 
-  // Cap the visible choice row at MAX_CHOICE_BUTTONS = 4: when the agent
-  // supplied fewer than that, the last slot is the Other filler; when more,
-  // only the first 3 agent options + Other render. With 0 agent options no
-  // choice row renders (just the textarea + Resolve).
+  // One button per agent-supplied option, verbatim — no synthetic filler.
+  // `report_impediment` backend-validates that `options` is exactly 4 entries,
+  // so this is normally all 4; the slice is a defensive cap in case a gate
+  // predates that validation. With 0 agent options no choice row renders
+  // (just the textarea + Resolve).
   const choiceButtons: Array<{ key: string; label: string }> = openGate
-    ? (() => {
-        const opts = openGate.options.slice(0, MAX_CHOICE_BUTTONS - 1);
-        const rendered = opts.map((label) => ({ key: label, label }));
-        if (rendered.length < MAX_CHOICE_BUTTONS) {
-          rendered.push({ key: "__other__", label: OTHER_OPTION_FILLER });
-        }
-        return rendered;
-      })()
+    ? openGate.options
+        .slice(0, MAX_CHOICE_BUTTONS)
+        .map((label) => ({ key: label, label }))
     : [];
 
   const submit = async () => {
@@ -830,11 +829,7 @@ function ResolveImpedimentControl({
                 variant={isSelected ? "default" : "outline"}
                 disabled={submitting}
                 onClick={() => setSelectedOption(b.label)}
-                data-testid={
-                  b.key === "__other__"
-                    ? "impediment-choice-other"
-                    : "impediment-choice-option"
-                }
+                data-testid="impediment-choice-option"
                 data-choice-key={b.key}
               >
                 {b.label}
@@ -845,25 +840,12 @@ function ResolveImpedimentControl({
       )}
       <Textarea
         value={answer}
-        onChange={(e) => {
-          setAnswer(e.target.value);
-          // Typing in the textarea implicitly routes the pick to "Other"
-          // (the textarea is the only place that can carry the actual answer
-          // for a free-form response). The operator can still manually click
-          // a structured option afterwards to override.
-          if (
-            e.target.value.length > 0 &&
-            selectedOption === null &&
-            hasChoiceRow
-          ) {
-            setSelectedOption(OTHER_OPTION_FILLER);
-          }
-        }}
+        onChange={(e) => setAnswer(e.target.value)}
         placeholder={
           hasGateAnswer
             ? "Optional: add extra context for the resumed session."
             : hasChoiceRow
-              ? "Optional: add extra info, or pick 'Other' above and type here."
+              ? "Optional: add extra info alongside your pick above, or leave a pick above unclicked and answer here instead."
               : "Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
         }
         disabled={submitting}

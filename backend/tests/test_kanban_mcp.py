@@ -152,7 +152,7 @@ async def test_report_impediment_with_options_creates_open_gate():
     await m.report_impediment(
         cid,
         "Postgres or SQLite?",
-        options=["Postgres", "SQLite", "Doesn't matter — pick one"],
+        options=["Postgres", "SQLite", "MySQL", "Doesn't matter — pick one"],
     )
 
     async with KanbanSessionLocal() as s:
@@ -164,7 +164,7 @@ async def test_report_impediment_with_options_creates_open_gate():
     assert len(gates) == 1
     gate = gates[0]
     assert gate.question == "Postgres or SQLite?"
-    assert gate.options == ["Postgres", "SQLite", "Doesn't matter — pick one"]
+    assert gate.options == ["Postgres", "SQLite", "MySQL", "Doesn't matter — pick one"]
     assert gate.status == "open"
     assert gate.answer is None
 
@@ -177,10 +177,44 @@ async def test_report_impediment_with_options_releases_claim():
     cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
     result = await m.report_impediment(
-        cid, "Pick A or B", options=["A", "B"],
+        cid, "Pick A or B", options=["A", "B", "C", "D"],
     )
     assert result["claimed_by"] is None
     assert result["column"] == "Impediment"
+
+
+@pytest.mark.asyncio
+async def test_report_impediment_rejects_non_four_option_count():
+    """Kaart 4279448c revisit: the Impediment UI must always show 4
+    agent-proposed buttons, never a UI-injected filler padding a shorter
+    list. The enforcement point is here — `options` must be exactly 4 when
+    supplied, or the call is rejected with no side effects (no move, no
+    comment, no gate, no release)."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.models import KanbanGate
+    from app.kanban.service import card_activity
+
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
+    await m.claim_card(cid, "agent:sess1@devA")
+
+    for bad_options in (["A"], ["A", "B"], ["A", "B", "C"],
+                        ["A", "B", "C", "D", "E"]):
+        result = await m.report_impediment(cid, "Pick one", options=bad_options)
+        assert result.get("error") == "invalid_option_count"
+
+    async with KanbanSessionLocal() as s:
+        card = await m.service.get_card(s, cid)
+        gates = (await s.execute(
+            __import__("sqlalchemy").select(KanbanGate)
+            .where(KanbanGate.card_id == cid)
+        )).scalars().all()
+    assert card.column != "Impediment"
+    assert card.claimed_by is not None
+    assert gates == []
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, cid)
+    assert not any("**Impediment:**" in (o.payload or {}).get("text", "")
+                   for o in ops if o.op_type == "comment")
 
 
 @pytest.mark.asyncio
@@ -220,7 +254,8 @@ async def test_report_impediment_with_options_posts_impediment_comment():
     cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
     await m.report_impediment(
-        cid, "Postgres or SQLite?", options=["Postgres", "SQLite"],
+        cid, "Postgres or SQLite?",
+        options=["Postgres", "SQLite", "MySQL", "MariaDB"],
     )
 
     async with KanbanSessionLocal() as s:
