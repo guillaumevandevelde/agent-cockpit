@@ -154,14 +154,17 @@ def test_rest_fallback_block_documents_list_envelope_create_and_stop_retrying():
     assert "stop retrying" in block
 
 
-def test_rest_fallback_block_documents_plan_attachment_post_cards_and_staleness():
+def test_rest_fallback_block_documents_plan_attachment_post_cards_and_plan_refs():
     """The REST fallback has to cover the analyst decomposition path end-to-end
     (kanban card a254b3111a2340478da726eb8fd015b9): when MCP is down, an analyst
     session still needs ``POST /cards/{id}/plan-attachment`` to wire ``plan_ref``
     onto its children, and ``POST /cards`` has to expose ``parent_card_id`` +
     ``metadata`` so the ``decomposed``-gate accepts the parent's Done-move.
     Without these, the analyst cannot finish decomposition without grepp'ing
-    the router."""
+    the router. Second-iteration update: the endpoint echoes each freshly
+    wired ``plan_ref`` deliverable id back in ``plan_refs``, so the
+    verification round is the response itself — no her-fetch required.
+    """
     class _C:
         title = "Bug"
         description = "Fix the crash"
@@ -183,10 +186,12 @@ def test_rest_fallback_block_documents_plan_attachment_post_cards_and_staleness(
     #    dispatch hold ``awaiting_plan_ref`` silently stalls the child.
     assert "plan_ref" in block
     assert "awaiting_plan_ref" in block
-    # 4. The fallback warns that the plan-attachment response does not echo
-    #    the new plan_ref deliverable back — agents must her-fetch the card
-    #    (router ``_reload`` staleness trap).
-    assert "her-fetch" in block or "GET /cards" in block
+    # 4. The fallback documents that the response echoes the freshly wired
+    #    plan_ref deliverable ids via ``plan_refs`` so the write is
+    #    verifiable from the response itself — no her-fetch required. The
+    #    MCP counterpart must mirror the shape.
+    assert '"plan_refs"' in block
+    assert "MCP" in block and "same shape" in block
 
 
 # --- REST --------------------------------------------------------------------
