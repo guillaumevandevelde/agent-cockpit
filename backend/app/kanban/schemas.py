@@ -595,9 +595,20 @@ class SubscriptionPoolRequest(BaseModel):
     ``pool`` is the ordered list of entries (priority order = list
     order — first entry is the preferred subscription). ``None``
     clears the pool so dispatch falls back to today's per-column
-    behaviour (the backward-compat clause)."""
+    behaviour (the backward-compat clause).
+
+    Kaart b36ca702…: ``column`` selects the per-column tail
+    (``subscription_pool:<project_key>:<column>``) instead of the
+    board-wide pool. ``None`` (default) keeps the legacy board-wide
+    write semantics, including the "empty list rejected" rule that
+    protects the UI from accidentally turning the dispatcher into a
+    no-op while the row still shows the operator's last saved pool.
+    With ``column`` set, an empty ``pool`` list is a valid, distinct
+    value ("nooit uitwijken") — see ``subscription_pool._validate_column_entries``.
+    """
     project_key: str
     pool: list[SubscriptionPoolEntry] | None = None
+    column: str | None = None
 
     @property
     def entries(self) -> list | None:

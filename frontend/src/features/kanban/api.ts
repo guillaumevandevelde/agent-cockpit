@@ -443,33 +443,53 @@ export const kanbanApi = {
    * `null` means the pool is unset and dispatch falls back to today's
    * per-column defaults. Mirrors backend `KanbanMeta` storage; the
    * kanban dispatcher picks the first under-drempel / non-paused entry
-   * and routes onto it. */
+   * and routes onto it.
+   *
+   * Kaart b36ca702…: the optional `column` parameter selects the
+   * per-column tail (`subscription_pool:<project_key>:<column>`).
+   * Without it, the read is board-wide and returns the same shape as
+   * before. With it, the response's `pool` field is the per-column
+   * tail if one is configured (including the explicit-empty `[]`
+   * value), or the board-wide pool when the column has no per-column
+   * row. The selected `column` is echoed back so a UI that re-saves
+   * keeps the round-trip consistent. */
   getSubscriptionPool: (
     projectKey: string,
+    column?: string | null,
   ): Promise<{
     project_key: string;
+    column: string | null;
     pool: PoolEntry[] | null;
-  }> =>
-    apiClient<{
+  }> => {
+    const params = new URLSearchParams({ project_key: projectKey });
+    if (column) params.set("column", column);
+    return apiClient<{
       project_key: string;
+      column: string | null;
       pool: PoolEntry[] | null;
-    }>(
-      `${BASE}/subscription-pool?project_key=${encodeURIComponent(projectKey)}`
-    ),
+    }>(`${BASE}/subscription-pool?${params.toString()}`);
+  },
 
   setSubscriptionPool: (
     projectKey: string,
     pool: PoolEntry[] | null,
+    column?: string | null,
   ): Promise<{
     project_key: string;
+    column: string | null;
     pool: PoolEntry[] | null;
   }> =>
     apiClient<{
       project_key: string;
+      column: string | null;
       pool: PoolEntry[] | null;
     }>(`${BASE}/subscription-pool`, {
       method: "POST",
-      body: JSON.stringify({ project_key: projectKey, pool }),
+      body: JSON.stringify({
+        project_key: projectKey,
+        pool,
+        column: column ?? null,
+      }),
     }),
 
   listGates: (cardId: string): Promise<Gate[]> =>

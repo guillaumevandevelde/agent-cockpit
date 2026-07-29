@@ -29,7 +29,12 @@ import {
   PROVIDER_LABELS,
 } from "../types";
 import type { EndpointResponse } from "@/features/cc-bridge/types";
-import type { PoolEntry } from "../types";
+import type { KanbanColumn, PoolEntry } from "../types";
+
+/** Sentinel for the column <Select> representing the board-wide pool.
+ *  The Radix SelectItem requires a non-empty string; the API expresses
+ *  "no column" as `null`. Kaart b36ca702…. */
+const BOARD_WIDE_VALUE = "__board_wide__";
 
 /** Sentinel value used by the override's provider <Select>. The Radix
  *  SelectItem requires a non-empty string; the API expresses "no override"
@@ -120,10 +125,21 @@ export function SubscriptionPoolDialog({
   // click and fire two competing PUTs.
   const [toggling, setToggling] = useState<Set<string>>(new Set());
 
+  // Kaart b36ca702…: per-column tail selector. ``null`` = board-wide
+  // (the legacy default); a string = the per-column tail. The dialog
+  // shows the chooser once ``columns`` has loaded so the operator can
+  // set a per-persona spillover target like "reviewer: empty tail" or
+  // "engineer: [anthropic]". The override and the manual-pause section
+  // stay board-wide — only the pool is per-column.
+  const [columns, setColumns] = useState<KanbanColumn[] | undefined>(undefined);
+  const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
+
   const reload = useCallback(async () => {
     if (!projectKey) return;
     try {
-      const r = await kanbanApi.getSubscriptionPool(projectKey);
+      const r = await kanbanApi.getSubscriptionPool(
+        projectKey, selectedColumn,
+      );
       // Kaart 8f40d443…: normalise legacy entries without a ``cli`` field
       // (rows persisted before this card round-tripped via the backend's
       // ``DEFAULT_POOL_CLI`` fallback) to ``cli: DEFAULT_POOL_CLI``. Without
@@ -133,7 +149,12 @@ export function SubscriptionPoolDialog({
         ...entry,
         cli: entry.cli ?? DEFAULT_POOL_CLI,
       }));
-      setPool(normalised.length > 0 ? normalised : null);
+      // Kaart b36ca702…: explicit-empty per-column tail reads back as
+      // ``[]`` (the operator's "nooit uitwijken" choice), distinct from
+      // ``null`` (no row). The dialog renders an empty pool editor
+      // for the explicit-empty case so the operator can see the
+      // empty state and add an entry to opt back in.
+      setPool(normalised.length > 0 ? normalised : []);
     } catch {
       setPool(null);
     }
@@ -155,6 +176,34 @@ export function SubscriptionPoolDialog({
     } catch {
       setEndpoints([]);
     }
+  }, [projectKey, selectedColumn]);
+
+  // Columns only need to load once per dialog open — they are not
+  // affected by the column-tail selection. Keep this in its own effect
+  // so the column <Select> becomes interactive as soon as the fetch
+  // returns, without re-running the full reload.
+  useEffect(() => {
+    if (!projectKey) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await kanbanApi.listColumns(projectKey);
+        if (!cancelled) {
+          // Only agent columns (default_agent !== null) participate in
+          // the spillover selector — the fixed lanes (Backlog, Doing,
+          // …) never spawn sessions so their tail is meaningless.
+          const agentColumns = (r.columns ?? []).filter(
+            (c) => c.default_agent !== null,
+          );
+          setColumns(agentColumns);
+        }
+      } catch {
+        if (!cancelled) setColumns([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [projectKey]);
 
   useEffect(() => {
@@ -165,7 +214,8 @@ export function SubscriptionPoolDialog({
     !open ||
     pool === undefined ||
     override === undefined ||
-    endpoints === undefined
+    endpoints === undefined ||
+    columns === undefined
   ) {
     // Render nothing (or the dialog frame) until we've loaded — keeps the
     // precedence rule and lock-state from flashing on every open.
@@ -179,9 +229,17 @@ export function SubscriptionPoolDialog({
   }
 
   const isOverrideActive = override !== null;
-  const isPoolSet = pool !== null;
-  const editable: PoolEntry[] = isPoolSet ? (pool as PoolEntry[]) : [];
+  // Kaart b36ca702…: ``pool === null`` means "no row" (= inherit board-
+  // wide); ``pool === []`` means "explicit empty tail" (= nooit
+  // uitwijken). Both are editable states, only distinguished by the
+  // empty placeholder we render. ``pool === undefined`` is the
+  // pre-load state and is gated above.
+  const hasPool = pool !== null;
+  const editable: PoolEntry[] = pool ?? [];
   const overrideLockedPool = isOverrideActive;
+  const selectedColumnRecord = selectedColumn
+    ? columns!.find((c) => c.name === selectedColumn) ?? null
+    : null;
 
   // -------- Pool mutations (disabled when override is active) -----------
 
@@ -189,19 +247,21 @@ export function SubscriptionPoolDialog({
     if (overrideLockedPool) return;
     setPool(next);
     try {
-      await kanbanApi.setSubscriptionPool(projectKey, next);
+      await kanbanApi.setSubscriptionPool(
+        projectKey, next, selectedColumn,
+      );
       toast.success(
         next === null
-          ? "Subscription pool: cleared (column defaults)"
+          ? `Subscription pool: cleared (${selectedColumn ?? "board-wide"})`
           : `Subscription pool saved (${next.length} entr${next.length === 1 ? "y" : "ies"})`,
       );
       onChanged();
     } catch (err) {
       // Roll back to the previous server value on save failure.
       const fresh = await kanbanApi
-        .getSubscriptionPool(projectKey)
+        .getSubscriptionPool(projectKey, selectedColumn)
         .catch(() => ({ pool: null }));
-      setPool(fresh.pool);
+      setPool(fresh.pool ?? null);
       toast.error(
         err instanceof Error ? err.message : "Failed to save subscription pool",
       );
@@ -431,23 +491,68 @@ export function SubscriptionPoolDialog({
             >
               Subscription pool
             </h3>
-            {!isPoolSet && (
+            {!hasPool && (
               <span className="text-xs text-muted-foreground">
                 Unset — column defaults apply
               </span>
             )}
-            {isPoolSet && editable.length > 0 && (
+            {hasPool && editable.length > 0 && (
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={clearPool}
                 disabled={overrideLockedPool}
                 aria-label="Clear pool"
-                title="Clear the pool — dispatch falls back to column defaults"
+                title={`Clear the pool — ${
+                  selectedColumn
+                    ? `dispatch on column "${selectedColumn}" falls back to board-wide defaults`
+                    : "dispatch falls back to column defaults"
+                }`}
               >
                 Clear pool
               </Button>
             )}
+          </div>
+
+          {/* Kaart b36ca702…: column-tail selector. "Board-wide" sets the
+              *pool for every column* (legacy default); an agent column
+              narrows the scope to that column's spillover tail. The
+              override and manual-pause sections stay board-wide — only
+              the pool is per-column. */}
+          <div className="flex items-center gap-2">
+            <label
+              htmlFor="pool-scope-column"
+              className="text-xs text-muted-foreground whitespace-nowrap"
+            >
+              Spillover for
+            </label>
+            <Select
+              value={selectedColumn ?? BOARD_WIDE_VALUE}
+              onValueChange={(v) =>
+                setSelectedColumn(
+                  v === BOARD_WIDE_VALUE ? null : v,
+                )
+              }
+            >
+              <SelectTrigger
+                id="pool-scope-column"
+                className="h-8 w-[260px]"
+                aria-label="Pool column scope"
+                data-testid="pool-scope-column"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={BOARD_WIDE_VALUE}>
+                  Board-wide (all columns)
+                </SelectItem>
+                {columns!.map((c) => (
+                  <SelectItem key={c.name} value={c.name}>
+                    {c.name} ({c.default_agent ?? "—"})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {overrideLockedPool && (
@@ -463,6 +568,31 @@ export function SubscriptionPoolDialog({
             </p>
           )}
 
+          {/* Kaart b36ca702…: when a column is selected, show its
+              ``column.default_provider`` as a read-only first row so the
+              operator sees that the tail is NOT a routing pin — the
+              implicit head always wins. This is the visual contract for
+              "spillover", distinct from the legacy "first entry wins"
+              behaviour. */}
+          {selectedColumnRecord?.default_provider && (
+            <div
+              className="flex items-center justify-between rounded-md border border-dashed border-border bg-muted/30 px-3 py-2"
+              data-testid="pool-implicit-head"
+              aria-label={`Implicit head for ${selectedColumnRecord.name}`}
+            >
+              <div className="flex flex-col">
+                <span className="text-sm font-medium">
+                  {PROVIDER_LABELS[selectedColumnRecord.default_provider]
+                    ?? selectedColumnRecord.default_provider}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Implicit head — column default, not editable. Tail entries
+                  below act as overflow only.
+                </span>
+              </div>
+            </div>
+          )}
+
           <div
             className={
               "space-y-2 max-h-72 overflow-y-auto pr-1 " +
@@ -473,8 +603,10 @@ export function SubscriptionPoolDialog({
             {editable.length === 0 ? (
               <div className="flex items-center justify-between rounded-md border border-dashed border-border px-3 py-4">
                 <p className="text-sm text-muted-foreground">
-                  No subscription pool configured — dispatch follows
-                  per-column defaults.
+                  {selectedColumn
+                    ? `No spillover configured for "${selectedColumn}" — ` +
+                      `dispatch waits on the reset when the column default hits its limit.`
+                    : "No subscription pool configured — dispatch follows per-column defaults."}
                 </p>
                 <Button
                   size="sm"
