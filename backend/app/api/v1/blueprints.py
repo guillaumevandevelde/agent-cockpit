@@ -120,7 +120,11 @@ async def create_blueprint(payload: BlueprintCreate) -> Blueprint:
             output_style=payload.output_style,
             claudemd=payload.claudemd,
         )
-        return _store().save(blueprint)
+        # overwrite=False is required for the documented 409: the store's
+        # default is overwrite=True, so without this a POST to an existing
+        # name silently REPLACED it and returned 201, and the
+        # BlueprintAlreadyExists handler below was unreachable.
+        return _store().save(blueprint, overwrite=False)
     except BlueprintNameError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except BlueprintAlreadyExists as e:
