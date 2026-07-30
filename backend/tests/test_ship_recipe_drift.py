@@ -67,9 +67,28 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # Slot name stays `ship-merge-$$` (PID-unique), not a fixed name — a
     # fixed slot collides across concurrent dispatched sessions (kanban
     # card c23dfe46).
+    #
+    # Base MUST be local `master`, NOT `origin/master` (kanban card
+    # 5e83b6e0…): on this multi-session box, concurrent agents commit to
+    # local `master` and may not have pushed yet. Basing the throwaway
+    # worktree on `origin/master` strands those not-yet-pushed commits;
+    # basing it on local `master` makes them part of the merge push, so
+    # they reach origin when the merge lands.
     (
         "detached-worktree merge target",
-        'git worktree add --detach "$WT" origin/master',
+        'git worktree add --detach "$WT" master',
+    ),
+    # Local-master divergence guard (kanban card 5e83b6e0…). The negation
+    # of `--is-ancestor origin/master master` catches the "local master is
+    # stale" case (origin has commits local doesn't) and the rarer
+    # diverged case (both sides have new commits). Either state means a
+    # push from local `master` would be rejected as non-fast-forward, so
+    # the ship must fail-fast BEFORE creating the merge worktree. See the
+    # positional test `test_divergence_guard_runs_before_worktree_add`
+    # for the order invariant.
+    (
+        "local-master divergence guard",
+        "git merge-base --is-ancestor origin/master master",
     ),
     # Post-`worktree add` 0-byte-index guard. A crashed/aborted predecessor
     # in the shared gitdir can leave the freshly-created slot's `index` at
@@ -373,6 +392,19 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
         "`HEAD` makes the argument ambiguous and git exits 128, which reads "
         "as a dirty tree and aborts every ship — kanban card 7dd8a3dd…)"
     )
+    # Local-master divergence guard (kanban card 5e83b6e0…). The negation
+    # of `--is-ancestor origin/master master` is the only check that catches
+    # the "origin moved while we were working" case BEFORE the merge
+    # worktree is created; without it the ship either strands local-only
+    # commits (when basing on `origin/master`) or pushes from stale master
+    # (and gets rejected as non-fast-forward).
+    assert any("--is-ancestor origin/master master" in c for c in commands), (
+        "invariants list lost the local-master divergence guard "
+        "`git merge-base --is-ancestor origin/master master` "
+        "(kanban card 5e83b6e0…). Without it a concurrent push to origin "
+        "would either strand our local-only commits or reject the push "
+        "with a spurious non-fast-forward."
+    )
     # Ship-worktree placement + explicit staging (kanban card 7dd8a3dd…).
     # Both are load-bearing against the same incident: an overlapping
     # checkout/admin dir plus a blind `add -A` committed ten of git's own
@@ -462,7 +494,7 @@ def test_drift_detector_fails_when_mirror_loses_a_command() -> None:
     case so the contract is enforced, not assumed.
     """
     fake_mirror = (
-        'git worktree add --detach "$WT" origin/master\n'
+        'git worktree add --detach "$WT" master\n'
         'git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"\n'
         'git -C "$WT" push origin HEAD:master\n'
         'git worktree remove "$WT" --force\n'
@@ -571,22 +603,67 @@ def test_untracked_files_are_advisory_not_blocking(source_name: str) -> None:
         f"untracked files must still be surfaced, just not block the ship."
     )
 
-    # The advisory sits after the blocking `fi`, before `git worktree add`.
+    # The advisory sits after the blocking `fi`, before the divergence guard
+    # (kanban card 5e83b6e0…); the divergence guard itself is a separate
+    # fail-fast that's independently pinned by
+    # `test_divergence_guard_runs_before_worktree_add`. Scope the "advisory
+    # must not abort" check to just the advisory block — counting `exit 1`s
+    # in the whole pre-flight region would now falsely flag the divergence
+    # guard's legitimate `exit 1` (it IS a fail-fast, just not the
+    # advisory's).
     blocking_idx = source_text.index(BLOCKING_PREFLIGHT)
     worktree_add_idx = source_text.index("git worktree add --detach")
-    advisory_region = source_text[blocking_idx:worktree_add_idx]
-    assert "git ls-files --others --exclude-standard" in advisory_region, (
+    full_pre_flight_region = source_text[blocking_idx:worktree_add_idx]
+    assert "git ls-files --others --exclude-standard" in full_pre_flight_region, (
         f"{source_name}: untracked advisory is not between the blocking "
         f"pre-flight and `git worktree add` — it would not run before the merge."
     )
 
-    # Exactly one `exit 1` in the pre-flight region: the blocking condition's.
-    # A second one would mean the advisory became fatal again.
-    assert advisory_region.count("exit 1") == 1, (
-        f"{source_name}: expected exactly 1 `exit 1` in the pre-flight region "
-        f"(the tracked-changes guard), found "
-        f"{advisory_region.count('exit 1')} — the untracked advisory must not "
-        f"abort the ship (kanban card c28e576d…)."
+    # Find the blocking pre-flight's closing `fi` (same indent as the
+    # `if ! git diff --quiet HEAD --` line) — the untracked advisory runs
+    # between that `fi` and the divergence guard's `git fetch origin -q`.
+    # The advisory block must contain ZERO `exit 1`s; the divergence guard
+    # itself has its own (independently-pinned) `exit 1` and is NOT part of
+    # the advisory.
+    blocking_line_start = source_text.rfind("\n", 0, blocking_idx) + 1
+    blocking_line_end = source_text.find("\n", blocking_idx)
+    blocking_line = source_text[blocking_line_start:blocking_line_end]
+    blocking_indent = len(blocking_line) - len(blocking_line.lstrip())
+    # Walk lines after BLOCKING_PREFLIGHT to find the closing `fi` at the
+    # same indent as the `if`-head.
+    cursor = blocking_line_end + 1
+    blocking_fi_idx = -1
+    for raw_line in source_text[cursor:].split("\n"):
+        stripped = raw_line.strip()
+        if stripped == "fi" and (
+            len(raw_line) - len(raw_line.lstrip()) == blocking_indent
+        ):
+            blocking_fi_idx = source_text.find(raw_line, cursor)
+            break
+        cursor += len(raw_line) + 1
+    assert blocking_fi_idx != -1, (
+        f"{source_name}: could not find the blocking pre-flight's closing `fi` "
+        f"at indent {blocking_indent} — the if-block looks malformed"
+    )
+    # The advisory is the region between the dirty-tree `fi` and the start
+    # of the divergence guard (`git fetch origin -q`).
+    divergence_start = source_text.find("git fetch origin -q", blocking_fi_idx)
+    assert divergence_start != -1, (
+        f"{source_name}: could not find the divergence guard's `git fetch "
+        f"origin -q` after the blocking pre-flight — the guard is wired "
+        f"out of order or missing (kanban card 5e83b6e0…)"
+    )
+    advisory_region = source_text[blocking_fi_idx:divergence_start]
+    assert "git ls-files --others --exclude-standard" in advisory_region, (
+        f"{source_name}: untracked advisory is not between the blocking "
+        f"pre-flight's `fi` and the divergence guard — it would not run "
+        f"before the merge."
+    )
+    assert advisory_region.count("exit 1") == 0, (
+        f"{source_name}: found {advisory_region.count('exit 1')} `exit 1` "
+        f"in the untracked advisory block — the advisory must not abort the "
+        f"ship (kanban card c28e576d…). The divergence guard's own "
+        f"`exit 1` is correctly outside this region."
     )
 
 
@@ -602,7 +679,7 @@ def test_blocking_preflight_would_flag_the_old_untracked_shape() -> None:
         'if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then\n'
         "  echo 'ERROR: uncommitted/untracked changes' >&2; exit 1\n"
         "fi\n"
-        'git worktree add --detach "$WT" origin/master\n'
+        'git worktree add --detach "$WT" master\n'
     )
     assert BLOCKING_PREFLIGHT not in old_shape_mirror, (
         "the tracked-changes invariant no longer distinguishes the old "
@@ -867,7 +944,7 @@ def test_carve_out_in_recovery_path_detects_unconditional_exit() -> None:
     with a live negative case so the contract is enforced, not assumed.
     """
     fake_mirror_with_bug = (
-        f'git worktree add --detach "$WT" origin/master\n'
+        f'git worktree add --detach "$WT" master\n'
         f'if ! git -C "$WT" {MERGE_HANDLER} "$BRANCH" -m "Merge $BRANCH"; then\n'
         f'  echo "ERROR: merge conflict" >&2\n'
         f'  exit 1\n'
@@ -1076,7 +1153,7 @@ def test_negative_pins_would_flag_the_pre_fix_recipe() -> None:
     """
     pre_fix_mirror = (
         'WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"\n'
-        'git worktree add --detach "$WT" origin/master\n'
+        'git worktree add --detach "$WT" master\n'
         '"$WT"/scripts/generate-doc-index.py\n'
         'git -C "$WT" add -A\n'
         'git -C "$WT" commit --no-edit\n'
@@ -1221,10 +1298,11 @@ def test_recipe_writing_conventions_doc_does_not_show_add_A_as_good() -> None:
 # must sit in the *executable* path of the detection `if`, not as prose after
 # an `exit 1`: that is the exact `efb8187b…`/`c06a3a2a…` failure shape, one
 # level down.
-WORKTREE_ADD = 'git worktree add --detach "$WT" origin/master'
+WORKTREE_ADD = 'git worktree add --detach "$WT" master'
 INDEX_GUARD_GITDIR = 'WT_GITDIR=$(git -C "$WT" rev-parse --absolute-git-dir)'
 INDEX_GUARD_DETECT = 'if [ ! -s "$WT_GITDIR/index" ]'
 INDEX_GUARD_RECOVER = 'git -C "$WT" read-tree HEAD'
+SHIP_TMP_SETUP = 'WT="$SHIP_TMP/ship-merge-$$"'
 
 
 def _index_guard_is_in_recovery_path(source_text: str) -> tuple[bool, str]:
@@ -1349,4 +1427,185 @@ def test_index_guard_detects_recovery_after_an_exit() -> None:
     assert "unreachable" in reason, (
         f"unexpected failure reason: {reason!r}; expected an unreachable-"
         f"recovery diagnosis."
+    )
+
+
+# Local-master divergence guard positional markers (kanban card 5e83b6e0…).
+# The guard catches the "local master is stale" case (origin has commits
+# local doesn't) before the merge worktree is created; otherwise the ship
+# either strands local-only commits (when basing on `origin/master`) or
+# pushes from stale master (and gets rejected as non-fast-forward). Like
+# the 0-byte-index guard, presence alone is not enough: the guard has to
+# run BEFORE `git worktree add`, and its `exit 1` (or lack thereof) must
+# be the action the merge relies on — not prose below an unconditional
+# exit (the `efb8187b…` shape).
+DIVERGENCE_GUARD = "git merge-base --is-ancestor origin/master master"
+DIVERGENCE_FETCH = "git fetch origin -q"
+
+
+def _divergence_guard_runs_before_worktree_add(source_text: str) -> tuple[bool, str]:
+    """Return ``(ok, reason)``: whether the divergence guard runs BEFORE the
+    throwaway worktree is created.
+
+    Checks, in order:
+
+    1. All three markers are present (`git fetch origin -q`,
+       `git merge-base --is-ancestor origin/master master`, and
+       `git worktree add --detach "$WT" master`).
+    2. Their order is fetch → is-ancestor → worktree-add. A guard after
+       the worktree is created is useless (the worktree has already been
+       checked out at origin/master-equivalent state); a guard before the
+       fetch would compare against stale `origin/master` and silently miss
+       concurrent pushes that happened between step 1 and step 4.
+    3. No UNCONDITIONAL `exit 1` sits between the guard's CLOSING `fi`
+       and the worktree-add. The guard itself IS expected to `exit 1` on
+       failure (that's the point of the guard) — but an unconditional
+       `exit 1` *after* the guard, before the worktree-add, would abort
+       the ship even when the guard passes. The guard's own `exit 1` lives
+       INSIDE its `if`-block and is therefore excluded by this scoping.
+    """
+    fetch_idx = source_text.find(DIVERGENCE_FETCH)
+    guard_idx = source_text.find(DIVERGENCE_GUARD)
+    worktree_idx = source_text.find(WORKTREE_ADD)
+    missing = [
+        name
+        for name, idx in (
+            ("fetch origin", fetch_idx),
+            ("divergence guard", guard_idx),
+            ("worktree add", worktree_idx),
+        )
+        if idx == -1
+    ]
+    if missing:
+        return False, f"missing marker(s): {', '.join(missing)}"
+    if not (fetch_idx < guard_idx < worktree_idx):
+        return False, (
+            f"guard is out of order — expected fetch({fetch_idx}) < "
+            f"guard({guard_idx}) < worktree({worktree_idx}). A guard that "
+            f"runs after `git worktree add` cannot prevent the stale-"
+            f"push or stranded-commit case it exists for."
+        )
+    # Find the closing `fi` of the divergence guard's `if`-block. The
+    # `if`-head is at `guard_idx`; the closing `fi` is the next line at
+    # the same indent. The guard's own `exit 1` (if any) sits INSIDE this
+    # `if`-block and is excluded from the post-fi scan.
+    guard_line_start = source_text.rfind("\n", 0, guard_idx) + 1
+    guard_line_end = source_text.find("\n", guard_idx)
+    guard_line = source_text[guard_line_start:guard_line_end]
+    guard_indent = len(guard_line) - len(guard_line.lstrip())
+    cursor = guard_line_end + 1
+    guard_fi_idx = -1
+    for raw_line in source_text[cursor:].split("\n"):
+        stripped = raw_line.strip()
+        if stripped == "fi" and (
+            len(raw_line) - len(raw_line.lstrip()) == guard_indent
+        ):
+            guard_fi_idx = source_text.find(raw_line, cursor)
+            break
+        cursor += len(raw_line) + 1
+    if guard_fi_idx == -1:
+        return False, (
+            f"could not find the divergence guard's closing `fi` at indent "
+            f"{guard_indent} — the if-block looks malformed"
+        )
+    # Scope: between guard's closing `fi` and worktree-add. The guard's
+    # own `exit 1` is inside the `if`-block (before the `fi`) and is NOT
+    # counted here. An unconditional `exit 1` in this span aborts the ship
+    # even when the guard passes — the efb8187b… failure shape, one
+    # level down.
+    post_guard = source_text[guard_fi_idx:worktree_idx]
+    if "exit 1" in post_guard:
+        return False, (
+            "an unconditional `exit 1` sits between the divergence "
+            "guard's closing `fi` and `git worktree add` — it would "
+            "abort the ship even when the guard passes (kanban card "
+            "`efb8187b…` shape, one level down). The guard's own "
+            "`exit 1` (inside its `if`-block) is fine; this scan only "
+            "catches `exit 1`s placed AFTER the guard."
+        )
+    return True, ""
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_divergence_guard_runs_before_worktree_add(source_name: str) -> None:
+    """The local-master divergence guard must fire BEFORE `git worktree add`.
+
+    Pins the positional invariant from kanban card ``5e83b6e0…``: on this
+    multi-session box, concurrent agents push to ``origin/master`` while
+    this session is running. A divergence guard placed AFTER the merge
+    worktree is too late — the worktree has already been checked out at
+    stale ``origin/master``, the merge has already produced a stale
+    commit, and the subsequent push either silently strands local-only
+    commits or is rejected as non-fast-forward. The guard must therefore
+    fire between ``SHIP_TMP`` setup and ``git worktree add``.
+
+    Companion to the substring invariant ``local-master divergence guard``
+    in ``CORE_RECIPE_INVARIANTS``: presence says "the guard exists";
+    position says "the guard runs in time to matter".
+    """
+    source_text = SOURCES[source_name]()
+    ok, reason = _divergence_guard_runs_before_worktree_add(source_text)
+    assert ok, (
+        f"{source_name}: divergence guard not wired correctly — {reason}"
+    )
+
+
+def test_divergence_guard_detects_post_worktree_add_mirror() -> None:
+    """Live negative case: a guard placed AFTER `git worktree add` is too late.
+
+    Reproduces the silent-stale-push shape: the worktree is created at
+    ``origin/master`` (the old base), the guard detects divergence, but
+    the merge has already been queued. Pin the detector with a live
+    negative case so the positional invariant doesn't rot to a no-op.
+    """
+    post_worktree_mirror = (
+        f'{WORKTREE_ADD}\n'
+        f'{DIVERGENCE_FETCH}\n'
+        f'if ! {DIVERGENCE_GUARD} 2>/dev/null; then\n'
+        f'  echo "ERROR: local master is STALE" >&2\n'
+        f'  exit 1\n'
+        f'fi\n'
+        f'git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"\n'
+    )
+    ok, reason = _divergence_guard_runs_before_worktree_add(post_worktree_mirror)
+    assert not ok, (
+        f"detector did NOT flag a guard placed after `git worktree add`; "
+        f"reason={reason!r}. The positional invariant has rotted — a "
+        f"future regression would no longer trip CI."
+    )
+    assert "out of order" in reason, (
+        f"unexpected failure reason: {reason!r}; expected an out-of-order "
+        f"diagnosis."
+    )
+
+
+def test_divergence_guard_detects_post_fi_exit_shape() -> None:
+    """Live negative case: an unconditional `exit 1` between the guard's
+    closing `fi` and `git worktree add` is the `efb8187b…` shape, one level
+    down — the script aborts unconditionally even when the guard passes.
+
+    The guard's own `exit 1` (inside its `if`-block) is correct behavior:
+    that IS the fail-fast path. The bad shape is an `exit 1` placed AFTER
+    the guard, before the worktree-add — that aborts the ship regardless
+    of whether divergence was detected.
+    """
+    post_fi_exit_mirror = (
+        f'{SHIP_TMP_SETUP}\n'
+        f'{DIVERGENCE_FETCH}\n'
+        f'if ! {DIVERGENCE_GUARD} 2>/dev/null; then\n'
+        f'  echo "ERROR: local master is STALE" >&2\n'
+        f'  exit 1\n'
+        f'fi\n'
+        f'exit 1\n'  # unconditional — aborts the ship even when guard passes
+        f'{WORKTREE_ADD}\n'
+    )
+    ok, reason = _divergence_guard_runs_before_worktree_add(post_fi_exit_mirror)
+    assert not ok, (
+        f"detector did NOT flag an unconditional `exit 1` between the "
+        f"guard's closing `fi` and `git worktree add`; reason={reason!r}. "
+        f"The positional invariant has rotted."
+    )
+    assert "unconditional" in reason, (
+        f"unexpected failure reason: {reason!r}; expected an "
+        f"unconditional-`exit 1` diagnosis."
     )
