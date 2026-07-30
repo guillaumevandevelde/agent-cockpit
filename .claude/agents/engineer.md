@@ -464,6 +464,33 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 
 Volg de `Ship mode` uit je prompt (pull-request vs direct).
 
+### Heropende kaart: `done_summary` en `claimed_by` liegen niet, maar ze misleiden
+
+Pak je een kaart op die eerder al eens Done was (Done → heropend → opnieuw
+gedispatcht), dan lijkt `get_card` te zeggen dat het werk al klaar is. Twee
+velden, twee valstrikken — en samen lezen ze als "er loopt een tweede sessie
+die dit net geshipt heeft" (kaart `51813327…`, geobserveerd op
+`6b67df66…`):
+
+- **`done_summary` / `completed_at` / `deliverables[]` van een vórige
+  levenscyclus.** De `**Summary:**`-comment en de PR/commit-deliverable van de
+  eerste implementatie blijven in de op-log staan — bewust, want dispatch
+  injecteert ze als *prior decision* in de `## REVISIT`-sectie van je prompt.
+  **Check `done_summary_superseded`** in de `get_card`-respons: `true` betekent
+  precies dit — de samenvatting hoort bij een afgesloten, achterhaalde ronde
+  van deze kaart, niet bij de huidige. Ga dan niet op zoek naar wie 'm geshipt
+  heeft; de deliverable is historisch waar maar niet jouw werk.
+- **`claimed_by` / `dispatch_project_folder` met een ándere dispatch-id dan je
+  eigen `resume_project_folder` / `resume_session_id`.** Bij een redispatch of
+  resume krijgt je sessie een nieuwe worktree-/dispatch-naam terwijl de claim
+  nog de vorige naam draagt. Dat is **geen** concurrente claim. Verifieer
+  goedkoop vóór je een collision aanneemt: `dispatch_started_at` op de kaart
+  (staat die vóór jouw sessiestart, dan is het jouw eigen lineage), en
+  eventueel één `tmux capture-pane -p -t <naam> | tail` op de genoemde sessie.
+  Blijkt het écht een levende andere sessie, dan is dat een
+  `report_impediment`-waardige botsing; in alle andere gevallen ga je gewoon
+  door.
+
 ## Product-taal voor `summary` (Done) en `report_impediment`-options
 
 `move_card` naar `Done`/`Impediment` eist een `summary` (zie MCP-tool),

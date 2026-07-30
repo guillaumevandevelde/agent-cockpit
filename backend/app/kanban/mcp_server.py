@@ -68,20 +68,22 @@ PERMISSION_PROMPT_TOOL_NAME = "mcp__cockpit-kanban__permission_prompt"
 
 async def _card_dict(s, card) -> dict:
     """JSON-serialisable dict for a card ORM instance, enriched with the
-    op-log-derived `done_summary` / `completed_at` / `impediment_status`
-    fields so the MCP layer returns the same shape the REST API does
-    (see CardResponse).
+    op-log-derived `done_summary` / `completed_at` / `done_summary_superseded`
+    / `impediment_status` fields so the MCP layer returns the same shape the
+    REST API does (see CardResponse).
 
     All callers have an active session, so we require it as a parameter
     instead of opening a second one. `None` cards short-circuit to the
     `{error: not_found}` payload without touching the session."""
     if card is None:
         return {"error": _NOT_FOUND}
-    done_summary, completed_at = await service.enrich_done_info(s, card.id)
+    done_summary, completed_at, superseded = \
+        await service.enrich_done_info_with_staleness(s, card.id)
     impediment_status = await service.impediment_status_for_card(s, card)
     return CardResponse.model_validate(card).model_copy(update={
         "done_summary": done_summary,
         "completed_at": completed_at,
+        "done_summary_superseded": superseded,
         "impediment_status": impediment_status,
     }).model_dump(mode="json")
 

@@ -4161,6 +4161,11 @@
             ],
             "title": "Done Summary"
           },
+          "done_summary_superseded": {
+            "default": false,
+            "title": "Done Summary Superseded",
+            "type": "boolean"
+          },
           "executor_agent_id": {
             "anyOf": [
               {
