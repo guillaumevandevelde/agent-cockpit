@@ -503,7 +503,22 @@ export default function KanbanPage() {
     }
   };
 
-  if (!projectPath) return <div className="p-6">Select a project first.</div>;
+  // Keep the page heading in the no-project state. Every other page renders
+  // its <h1> unconditionally; Kanban used to drop straight to a bare
+  // "Select a project first." div, so on a backend with no active project the
+  // page had no heading at all — which is both an inconsistency for the
+  // operator and what made the `kanban board loads` e2e smoke test fail on a
+  // fresh CI database (`main h1` simply did not exist).
+  if (!projectPath) {
+    return (
+      <div className="flex flex-col h-full gap-4 overflow-hidden">
+        <div className="flex-shrink-0">
+          <h1 className="text-xl font-semibold">Kanban</h1>
+        </div>
+        <div className="text-muted-foreground">Select a project first.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full gap-4 overflow-hidden">
