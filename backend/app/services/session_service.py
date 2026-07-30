@@ -361,12 +361,22 @@ class SessionService:
         limits *before* parsing any JSONL content. Only the files that will appear
         in the result set are parsed (or served from cache).
         """
+        # Validate the caller-supplied path component BEFORE any filesystem
+        # short-circuit. The traversal guard used to sit after the
+        # ``projects_dir.exists()`` early return, so on a host without
+        # ``~/.claude/projects`` a ``project_folder=../..`` was answered with
+        # an empty 200 instead of being rejected — input validation must never
+        # depend on unrelated filesystem state. (Only visible on CI, where the
+        # directory is absent; every dev box has it, so the guard's own test
+        # passed locally and failed in the pipeline.)
+        if project_folder:
+            self._ensure_safe_path_component(project_folder, "project_folder")
+
         if not self.projects_dir.exists():
             return SessionListResponse(sessions=[], total=0)
 
         # Determine which project folders to scan
         if project_folder:
-            self._ensure_safe_path_component(project_folder, "project_folder")
             folders = [self.projects_dir / project_folder]
         else:
             folders = [f for f in self.projects_dir.iterdir() if f.is_dir()]

@@ -1462,7 +1462,7 @@ async def test_manual_pause_respects_global_subscription_override(project_with_a
 
 
 @pytest.mark.asyncio
-async def test_manual_pause_respects_subscription_pool_choice(project_with_agents):
+async def test_manual_pause_respects_subscription_pool_choice(project_with_agents, monkeypatch):
     """Kaart 0172e94d…: de dispatch-gate moet de resolved provider
     volgen, ongeacht of die van de kolom-default (kop) of van de
     pool-staart komt. Een pauze op de effectieve provider houdt de
@@ -1484,7 +1484,13 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
     from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
     async def _no_snapshots(entries):
         return {}
-    dispatch._gather_pool_usage_snapshots = _no_snapshots
+    # monkeypatch, never a raw module assignment: a bare
+    # ``dispatch._gather_pool_usage_snapshots = _no_snapshots`` is never
+    # undone, so the stub leaked into every later test module in a
+    # full-suite run. ``test_subscription_pool_dispatch.py`` sorts after
+    # this file and calls the real gatherer — it got ``{}`` back and three
+    # of its tests failed on CI while passing in isolation.
+    monkeypatch.setattr(dispatch, "_gather_pool_usage_snapshots", _no_snapshots)
 
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -1526,8 +1532,8 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
     assert held_back.claimed_by is None
 
     # Now unpause bedrock. Pool + kolom-default geven bedrock, gate
-    # laat de spawn door.
-    dispatch._gather_pool_usage_snapshots = _no_snapshots
+    # laat de spawn door. (De stub uit het eerste deel staat er nog —
+    # monkeypatch draait pas terug bij teardown.)
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await dispatch_pause.set_manual_pause(s, "bedrock", False)
@@ -1547,7 +1553,7 @@ async def test_manual_pause_respects_subscription_pool_choice(project_with_agent
 
 
 @pytest.mark.asyncio
-async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_agents):
+async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_agents, monkeypatch):
     """De pool-router (``_pick_pool_choice``) moet de handmatige
     pause-lijst van de operator samenvoegen met de tijdgebonden
     lijst voordat de pool wordt geraadpleegd, zodat de picker weet
@@ -1566,7 +1572,7 @@ async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_
     from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
     async def _no_snapshots(entries):
         return {}
-    dispatch._gather_pool_usage_snapshots = _no_snapshots
+    monkeypatch.setattr(dispatch, "_gather_pool_usage_snapshots", _no_snapshots)
 
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -1603,7 +1609,7 @@ async def test_pick_pool_choice_excludes_manually_paused_providers(project_with_
 
 
 @pytest.mark.asyncio
-async def test_manual_pause_holds_back_queued_memory_retry(project_with_agents):
+async def test_manual_pause_holds_back_queued_memory_retry(project_with_agents, monkeypatch):
     """A card that was queued before the operator paused a subscription
     must NOT spawn on the next memory-available retry tick. FCR-blokkade:
     the previous ``_retry_queued_cards`` only checked column caps before
@@ -1614,7 +1620,7 @@ async def test_manual_pause_holds_back_queued_memory_retry(project_with_agents):
     from app.services.scheduling.pending_queue import pending_queue
     async def _no_snapshots(entries):
         return {}
-    dispatch._gather_pool_usage_snapshots = _no_snapshots
+    monkeypatch.setattr(dispatch, "_gather_pool_usage_snapshots", _no_snapshots)
 
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
@@ -8262,11 +8268,12 @@ async def test_move_limited_session_uses_dispatch_provider_for_spillover(monkeyp
 
     spillover_calls: list[dict] = []
 
-    async def _fake_spillover(session, *, project_key, limited_provider, cli_id):
+    async def _fake_spillover(session, *, project_key, limited_provider, cli_id, column=None):
         spillover_calls.append({
             "project_key": project_key,
             "limited_provider": limited_provider,
             "cli_id": cli_id,
+            "column": column,
         })
         return True  # pretend minimax is available so we exercise the spillover path
 
@@ -8339,8 +8346,8 @@ async def test_move_limited_session_legacy_card_keeps_column_default_behaviour(m
 
     spillover_calls: list[dict] = []
 
-    async def _fake_spillover(session, *, project_key, limited_provider, cli_id):
-        spillover_calls.append({"limited_provider": limited_provider})
+    async def _fake_spillover(session, *, project_key, limited_provider, cli_id, column=None):
+        spillover_calls.append({"limited_provider": limited_provider, "column": column})
         return False  # legacy behaviour: stay on reset-time pause
 
     monkeypatch.setattr(dispatch, "_pool_spillover_available", _fake_spillover)
