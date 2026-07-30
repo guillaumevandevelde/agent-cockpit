@@ -12,8 +12,10 @@ vi.mock('@/features/cc-bridge/api', () => ({
   fetchCCSessions: vi.fn(async () => ({
     sessions: [
       {
-        provider: 'claude-code',
-        provider_display_name: 'Claude Code',
+        cli: 'claude-code',
+        cli_display_name: 'Claude Code',
+        provider: 'anthropic',
+        provider_display_name: 'Anthropic',
         tmux_target: 'main:0.0',
         session_name: 'feature-work',
         window_name: 'main',

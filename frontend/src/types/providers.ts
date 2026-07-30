@@ -1,5 +1,58 @@
 export type AgenticCliId = 'claude-code' | 'codex-cli' | 'copilot-cli' | 'mimo-code' | 'open-code'
 
+/**
+ * Vendor / subscription axis — the upstream API provider a CLI was launched
+ * against (anthropic / minimax / bedrock / opencode / remote / …). Kept
+ * type-distinct from {@link AgenticCliId} so the two axes cannot be silently
+ * cross-referenced (kaart 4c0c7990…): the recent `provider`→`cli` rename
+ * repurposed the same field name onto a different semantic, and the TS
+ * compiler + tests stayed green while three `filter()` predicates read
+ * undefined. The closed union prevents `session.provider === 'claude-code'`
+ * from compiling — the canonical mistake that card caught.
+ *
+ * Runtime note: the backend's `_build_session_info_from_parts`
+ * (backend/app/services/runs/discovery.py:46) may set `provider` to the
+ * `cli_id` itself when classification is uncertain, so any consumer that
+ * compares across axes (e.g. `provider !== cli` to render a separate
+ * "Subscription" badge) **must** use {@link isVendorEqualToCli} rather
+ * than a direct equality — the helper is the documented escape hatch.
+ */
+export const VENDOR_IDS = [
+  'anthropic',
+  'bedrock',
+  'minimax',
+  'anthropic-compatible',
+  'opencode',
+  'opencode-go',
+  'remote',
+] as const
+
+export type VendorId = (typeof VENDOR_IDS)[number]
+
+/** Type guard: narrow an arbitrary `string` to {@link VendorId}. */
+export function isVendorId(value: string): value is VendorId {
+  return (VENDOR_IDS as readonly string[]).includes(value)
+}
+
+/**
+ * Cross-axis equality helper. The type system treats `VendorId` and
+ * `AgenticCliId` as disjoint, so a bare `session.provider === session.cli`
+ * is a TS error — that is the guardrail this module exists for. The badge
+ * renderers in `SessionCard.tsx` and the subtitle in
+ * `useCommandPaletteData.ts` need this check by design, so the helper is
+ * the single, greppable escape hatch.
+ *
+ * Both parameters are typed as `string` (not the disjoint unions) because
+ * the runtime value of `provider` can equal the CLI id when the backend
+ * failed to classify the upstream — see the `VendorId` docblock above.
+ */
+export function isVendorEqualToCli(
+  provider: string,
+  cli: string
+): boolean {
+  return provider === cli
+}
+
 export interface AgenticCliCapabilities {
   config: boolean
   sessions: boolean

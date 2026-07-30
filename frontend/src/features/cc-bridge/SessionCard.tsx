@@ -7,6 +7,7 @@ import { CLICKABLE_CARD } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { fetchSessionGitStatus } from './api'
 import type { CCSession, GitStatusResponse } from './types'
+import { isVendorEqualToCli } from '@/types/providers'
 import type { AttentionKind } from './attention'
 import type { InstanceIdentity } from '@/types/status'
 
@@ -158,7 +159,7 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
           <Badge variant="outline" className="max-w-full truncate">
             {session.cli_display_name}
           </Badge>
-          {session.provider !== session.cli && (
+          {!isVendorEqualToCli(session.provider, session.cli) && (
             <Badge
               variant="secondary"
               className="max-w-full truncate"
