@@ -159,7 +159,7 @@ Elk beslisdocument begint — direct onder de `# Titel`-regel, vóór de eerste
 | **Datum** | `git log --reverse --format=%ad --date=short -- <doc>` wanneer niet in het doc | ja |
 | **Status** | Canonical waarden `besloten` / `herzien` / `voorgesteld`; vrije toevoeging tussen haakjes blijft toegestaan | ja |
 | **Kaart** | `<card-id>` in backticks wanneer beschikbaar; anders `_zie doc — geen hex-id in dit beslisdoc vastgelegd_` (placeholder, refactor-TODO) | ja |
-| **Uitkomst** | Eerste zin van de overeenkomstige register-rij, verbatim. Voor `plans-feature-decision.md` (`⏳ NOG NIET BESLIST`) blijft die tekst expliciet staan. | ja |
+| **Uitkomst** | Eerste zin van de overeenkomstige register-rij, verbatim — ook wanneer die rij (nog) geen go/no-go draagt: een doc dat nog niet beslist is, zet die niet-beslist-tekst letterlijk in `Uitkomst`. Verandert de register-rij later naar een echte uitkomst, dan volgt de header in dezelfde commit. | ja |
 
 **Backfill-volgorde** bij het aanmaken van een nieuw beslisdoc: trek `Datum` uit
 `git log --reverse`, kopieer `Uitkomst` van de register-rij die je zojuist
