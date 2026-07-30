@@ -213,7 +213,30 @@ WT="$SHIP_TMP/ship-merge-$$"
 # rejection against origin/master. `$$` (this process's PID) guarantees a
 # fresh slot per invocation — do NOT simplify back to a fixed name.
 # (kanban card c23dfe46…)
-git worktree add --detach "$WT" origin/master
+# Local-master divergence guard (kanban card 5e83b6e0…). Step 1 already
+# fetched origin, but to be defensive we fetch again here — this worktree
+# may have been running between step 1 and step 4, and a concurrent
+# session could have pushed to origin in that window. The throwaway
+# worktree MUST base on LOCAL `master` (the integration point, not the
+# last-pushed remote state) — otherwise a concurrent session's
+# not-yet-pushed commits would be stranded when we push to origin. The
+# negation of `--is-ancestor origin/master master` catches both "origin
+# ahead" (origin has commits local doesn't) and the rarer "diverged"
+# case (both sides have new commits); in either state, a push from local
+# `master` would be rejected as non-fast-forward. Fail-fast with
+# `report_impediment` and a clear remediation rather than producing a
+# stale merge or a useless "Everything up-to-date" push.
+git fetch origin -q
+if ! git merge-base --is-ancestor origin/master master 2>/dev/null; then
+  BEHIND=$(git rev-list --count origin/master..master 2>/dev/null || echo "?")
+  AHEAD=$(git rev-list --count master..origin/master 2>/dev/null || echo "?")
+  echo "ERROR: local master is STALE — origin/master has commits local doesn't have." >&2
+  echo "  ahead=$AHEAD behind=$BEHIND (master vs origin/master)" >&2
+  echo "  Reconcile: git -C <main-checkout> pull --rebase origin master" >&2
+  echo "  Then re-run the ship from this worktree. report_impediment." >&2
+  exit 1
+fi
+git worktree add --detach "$WT" master
 # 0-byte-index guard. A predecessor that aborted mid-ship in the shared
 # gitdir can leave this slot's `index` truncated to 0 bytes, and
 # `git worktree add` reports success anyway — the corruption only surfaces
