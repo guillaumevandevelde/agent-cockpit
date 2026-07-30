@@ -125,6 +125,7 @@
 - [Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse](./spawn-test-bridge-sessions-analyse.md): type=analysis status=active
 - [Spec-driven development als single source of truth — analyse](./spec-driven-development-analysis.md): type=analysis status=active
 - [Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor](./spike-same-vendor-multi-account-isolation.md): type=analysis status=decided
+- [Analyse — kan het abonnement zichzelf vrijgeven en de sessies herstarten na een limiet?](./subscription-auto-release-analyse.md): type=analysis status=active
 - [Analyse — Flexibel & maximaal gebruik van abonnementen (usage-aware dispatch-routing)](./subscription-flexibiliteit-analyse.md): type=analysis status=active
 - [Analyse — subscription-pool × auto-dispatcher × kolom-toewijzing](./subscription-pool-dispatch-analyse.md): type=analysis status=active
 - [Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)](./subscription-verbruik-inzicht-analyse.md): type=analysis status=active
