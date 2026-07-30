@@ -1,4 +1,4 @@
-import type { AgenticCliId } from '@/types/providers'
+import type { AgenticCliId, VendorId } from '@/types/providers'
 
 export interface AgentSession {
   /** CLI tool running the session (claude-code, codex-cli, …). */
@@ -6,7 +6,7 @@ export interface AgentSession {
   /** Human-readable CLI label (e.g. "Claude Code", "Codex"). */
   cli_display_name: string
   /** Vendor / subscription the session was started with (anthropic, minimax, …). */
-  provider: string
+  provider: VendorId
   /** Human-readable vendor label (e.g. "Anthropic", "MiniMax"). */
   provider_display_name: string
   tmux_target: string
@@ -151,7 +151,7 @@ export interface BridgeAttachment {
   id: number
   target: string
   session_name?: string | null
-  provider?: string | null
+  provider?: VendorId | null
   original_filename?: string | null
   mime_type: string
   size_bytes: number
@@ -203,10 +203,10 @@ export interface RunGroupMember {
 export interface RunGroup {
   team_id: string
   name: string
-  cli: string
+  cli: AgenticCliId
   cli_display_name?: string
   /** Vendor / subscription inherited from the group's lead session. */
-  provider?: string
+  provider?: VendorId
   /** Human-readable vendor label inherited from the lead. */
   provider_display_name?: string
   cwd: string
@@ -224,7 +224,7 @@ export interface RunGroupsResponse {
 
 export interface CreateGroupRequest {
   name: string
-  cli?: string
+  cli?: AgenticCliId
   cwd?: string
   lead_session_name?: string | null
   members: { session_name: string; pane_id?: string | null; tmux_target: string }[]
@@ -233,7 +233,7 @@ export interface CreateGroupRequest {
 export interface CreateGroupResponse {
   team_id: string
   name: string
-  cli: string
+  cli: AgenticCliId
   cwd: string
   is_auto_detected: boolean
   members: RunGroupMember[]
