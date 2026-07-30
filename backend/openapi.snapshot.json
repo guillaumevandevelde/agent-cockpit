@@ -17473,8 +17473,19 @@
         "type": "object"
       },
       "SubscriptionPoolRequest": {
-        "description": "Body for POST /api/v1/kanban/subscription-pool.\n\n``pool`` is the ordered list of entries (priority order = list\norder \u2014 first entry is the preferred subscription). ``None``\nclears the pool so dispatch falls back to today's per-column\nbehaviour (the backward-compat clause).",
+        "description": "Body for POST /api/v1/kanban/subscription-pool.\n\n``pool`` is the ordered list of entries (priority order = list\norder \u2014 first entry is the preferred subscription). ``None``\nclears the pool so dispatch falls back to today's per-column\nbehaviour (the backward-compat clause).\n\nKaart b36ca702\u2026: ``column`` selects the per-column tail\n(``subscription_pool:<project_key>:<column>``) instead of the\nboard-wide pool. ``None`` (default) keeps the legacy board-wide\nwrite semantics, including the \"empty list rejected\" rule that\nprotects the UI from accidentally turning the dispatcher into a\nno-op while the row still shows the operator's last saved pool.\nWith ``column`` set, an empty ``pool`` list is a valid, distinct\nvalue (\"nooit uitwijken\") \u2014 see ``subscription_pool._validate_column_entries``.",
         "properties": {
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
           "pool": {
             "anyOf": [
               {
@@ -28368,7 +28379,7 @@
     },
     "/api/v1/kanban/subscription-pool": {
       "get": {
-        "description": "Read the subscription pool (fase 1b of the analyse).\n\nReturns ``{\"project_key\": ..., \"pool\": <list[PoolEntry]|None>}``.\n``None`` means no pool is configured \u2014 the dispatcher falls back to\ntoday's column-default chain exactly as before. Each ``PoolEntry``\nis shaped as ``{cli, provider, model|null, drempel, endpoint_name}``\nso the frontend can render it verbatim without per-field reshaping.\nKaart 8f40d443\u2026: the per-entry ``cli`` field is again first-class and\nconsumed by the router (it was briefly dropped in kaart 0b3ad6e2\u2026 and\nis now required again to honour the per-CLI quota axis). The default\n``cli`` value (``subscription_pool.DEFAULT_POOL_CLI``,\n``\"claude-code\"``) is back-filled on read for rows that omit it,\nso legacy stored payloads still load.\n\nKaart 27317b4871\u2026 (FCR gap 2): the response also carries each\nentry's ``endpoint_name`` so the POST\u2192GET round-trip is\nidempotent. Previously the GET handler dropped the field, so a\nUI that re-saved the response would silently lose the endpoint\nbinding of an ``anthropic-compatible`` entry \u2014 the storage\nfail-fast check would only catch the misconfiguration at the next\nsave, and the dispatch fail-fast only at the next spawn.",
+        "description": "Read the subscription pool (fase 1b of the analyse).\n\nReturns ``{\"project_key\": ..., \"pool\": <list[PoolEntry]|None>,\n\"column\": <column|null>}``.\n``None`` means no pool is configured \u2014 the dispatcher falls back to\ntoday's column-default chain exactly as before. Each ``PoolEntry``\nis shaped as ``{cli, provider, model|null, drempel, endpoint_name}``\nso the frontend can render it verbatim without per-field reshaping.\nKaart 8f40d443\u2026: the per-entry ``cli`` field is again first-class and\nconsumed by the router (it was briefly dropped in kaart 0b3ad6e2\u2026 and\nis now required again to honour the per-CLI quota axis). The default\n``cli`` value (``subscription_pool.DEFAULT_POOL_CLI``,\n``\"claude-code\"``) is back-filled on read for rows that omit it,\nso legacy stored payloads still load.\n\nKaart 27317b4871\u2026 (FCR gap 2): the response also carries each\nentry's ``endpoint_name`` so the POST\u2192GET round-trip is\nidempotent. Previously the GET handler dropped the field, so a\nUI that re-saved the response would silently lose the endpoint\nbinding of an ``anthropic-compatible`` entry \u2014 the storage\nfail-fast check would only catch the misconfiguration at the next\nsave, and the dispatch fail-fast only at the next spawn.\n\nKaart b36ca702\u2026: the optional ``column`` query parameter selects\nthe per-column tail (``subscription_pool:<project_key>:<column>``).\nWithout it, the read is board-wide and returns the same shape as\nbefore (backwards compatible). With it, the response's ``pool``\nfield is the per-column tail if one is configured (including the\nexplicit-empty ``[]`` value), or the board-wide pool when the\ncolumn has no per-column row. The selected ``column`` is echoed\nback in the response so a UI that re-saves can keep the round-trip\nconsistent without re-reading the URL it just hit.",
         "operationId": "get_subscription_pool_api_v1_kanban_subscription_pool_get",
         "parameters": [
           {
@@ -28378,6 +28389,22 @@
             "schema": {
               "title": "Project Key",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "column",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Column"
             }
           }
         ],
@@ -28407,7 +28434,7 @@
         ]
       },
       "post": {
-        "description": "Set or clear the subscription pool.\n\nPass ``pool: null`` to clear (dispatcher falls back to per-column\ndefaults exactly as today). Otherwise ``pool`` is a non-empty list\nof ``{cli, provider, model?, drempel}`` entries \u2014 providers are\nvalidated against the same allow-list as the active-subscription-\noverride, drempel must be in (0, 1], and ``cli`` must be non-empty.\nInvalid input is rejected with 422 so the caller knows nothing\nlanded.",
+        "description": "Set or clear the subscription pool.\n\nPass ``pool: null`` to clear (dispatcher falls back to per-column\ndefaults exactly as today). Otherwise ``pool`` is a non-empty list\nof ``{cli, provider, model?, drempel}`` entries \u2014 providers are\nvalidated against the same allow-list as the active-subscription-\noverride, drempel must be in (0, 1], and ``cli`` must be non-empty.\nInvalid input is rejected with 422 so the caller knows nothing\nlanded.\n\nKaart b36ca702\u2026: the optional ``column`` field in the request body\nselects the per-column tail. Pass ``column`` + ``pool: []`` to\nrecord an explicit \"nooit uitwijken\" choice (operator-set empty\ntail, distinct from \"no row\" which inherits the board-wide pool).\nPass ``column`` + ``pool: null`` to delete the per-column row and\nfall back to the board-wide pool. Without ``column`` the write is\nboard-wide and the original \"empty list rejected\" rule still\napplies \u2014 that asymmetry protects the board-wide UI from\naccidentally turning the dispatcher into a no-op while the row\nstill shows the operator's last saved pool.\n\nKaart b36ca702\u2026 FCR-F2: when ``column`` is set, validate it\nagainst the project's real ``kanban_columns`` rows before\npersisting. A raw API caller could otherwise write a stray key\n(``subscription_pool:<project_key>:../stray``) that the\ndispatcher would never consult \u2014 same DB but silently orphaned.\nBoth the set (``pool != None``) and clear (``pool: None``) paths\ngate on the same allow-list for symmetry: clearing a phantom\ncolumn has the same blast radius as writing one.",
         "operationId": "set_subscription_pool_api_v1_kanban_subscription_pool_post",
         "requestBody": {
           "content": {

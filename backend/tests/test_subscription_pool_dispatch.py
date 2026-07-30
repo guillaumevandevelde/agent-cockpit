@@ -2029,8 +2029,9 @@ async def _make_card_with_column(s, project_key: str, column: str) -> str:
     """Create a card on ``column`` and return its id. The card starts
     claimed by ``agent:lim-test`` so ``move_limited_session_to_resume``
     recognises it as ours."""
-    from app.kanban.models import KanbanCard
     import uuid as _uuid
+
+    from app.kanban.models import KanbanCard
     cid = str(_uuid.uuid4())
     s.add(KanbanCard(
         id=cid,
