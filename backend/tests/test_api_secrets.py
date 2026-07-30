@@ -29,7 +29,11 @@ def store_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root.mkdir()
 
     def _factory(root=root, passphrase="api-test-pass"):
-        return AGESecretStore(root=root, passphrase=passphrase)
+        # scrypt_log_n=14 (the format minimum) instead of the production 20:
+        # at 20 each put costs seconds, which pushed this file past its
+        # timeout. The cost is stored per file and honoured on read, so this
+        # only makes the fixtures cheaper to write.
+        return AGESecretStore(root=root, passphrase=passphrase, scrypt_log_n=14)
 
     from app.api.v1 import secrets as secrets_api
 
