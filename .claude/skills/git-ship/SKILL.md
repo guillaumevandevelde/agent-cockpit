@@ -387,8 +387,26 @@ gh auth status            # if this fails, see "gh unavailable" below
 git push -u origin HEAD
 gh pr create --draft --base master --fill
 gh pr ready
+
+# Guard: the PR merges the REMOTE tip, not your working copy. If you committed
+# anything after the push above — a review fix, a straggler you spotted while
+# writing the PR body — that commit is invisible to the merge and is silently
+# dropped. Nothing errors; the PR goes green and merges without it. Re-assert
+# the tips match immediately before queueing the merge.
+git fetch origin -q
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo missing)" ]; then
+  echo "Local HEAD is ahead of origin/$BRANCH — pushing stragglers before merge." >&2
+  git push origin HEAD || { echo 'push failed; do NOT merge'; exit 1; }
+fi
+
 gh pr merge --auto --squash
 ```
+
+**Do not commit anything else after this point.** `--auto` merges as soon as
+checks pass, so a commit made afterwards races the merge and loses. If you must
+add a commit, push it and confirm `gh pr view --json headRefOid` matches your
+`git rev-parse HEAD` before the merge lands.
 
 Then **poll until the PR actually merges** — `master` requires the `quality.yml`
 checks to pass, so this can take a few minutes:
@@ -423,7 +441,23 @@ while true; do
 done
 ```
 
-If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), **run the session-end retro**
+If it merged, **first confirm your work is actually in `master`** — "PR merged"
+and "my commits shipped" are not the same statement, and a squash-merge of a
+stale remote tip reports success either way:
+
+```bash
+git fetch origin -q
+git log --oneline origin/master --grep="$(git log -1 --format=%s | head -c 40)" | head -1
+# Non-empty = your final commit's subject is present on master. Empty = the
+# merge did not include your last commit(s); push them and open a follow-up PR
+# rather than reporting Done.
+```
+
+(`git merge-base --is-ancestor HEAD origin/master` is the exact test for a
+merge-commit ship, but returns false for a *squash* merge even when the content
+did land — hence the subject-grep above, which works for both.)
+
+Then: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), **run the session-end retro**
 (invoke the `session-retro` skill — read `.claude/skills/session-retro/SKILL.md` for the
 full procedure: reflect → dedupe → file 0–N `[self-improve]` cards → `comment` on this host
 card), and finally `move_card` to `Done` with a `summary` of the work you did (required —
