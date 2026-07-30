@@ -2438,7 +2438,16 @@ def _build_worktree_safety_callout(
         f"Same rule for shell: don't ``cd {canonical_main}/...`` "
         "and run a write from there — see the persona's *Werkomgeving in "
         "worktree* section for the broader cwd-safety rules. Read paths to "
-        "the canonical checkout are fine; only writes are forbidden.\n"
+        "the canonical checkout are fine; only writes are forbidden.\n\n"
+        "- **Bash-cwd persists between tool-calls.** A compound "
+        "``cd backend && pytest …`` keeps the new cwd into the next "
+        "Bash-call — that call then sees a cwd it doesn't expect and "
+        "fails with ``no such file or directory`` (or runs against the "
+        "wrong paths). Wrap each compound ``cd`` in a subshell "
+        "``( cd backend && … )`` (or use ``git -C <abs-path>``), so the "
+        "cwd change stays scoped to that one command. See the persona's "
+        "*Werkomgeving in worktree* section for the broader cwd-safety "
+        "rules (kaart 1181b6fa…).\n"
     )
 
 
@@ -2748,6 +2757,23 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
     ``backend/tests/test_fcr_prompt_drift.py`` enforces that the prompt
     text stays identical across both mirrors (drift-val: kaart ``d9447e49``).
     """
+    # Subshell-cwd reminder (kaart 1181b6fa…). A compound ``cd backend &&
+    # pytest …`` persists the new cwd into the next Bash-call — that call
+    # then sees a cwd it doesn't expect and fails with ``no such file or
+    # directory`` (or runs against the wrong paths). The worktree-scope
+    # callout above the Session-end workflow also covers this, but the
+    # ship recipe runs many cd-into-backend/frontend-style commands itself
+    # (npm ci, pytest, ruff …), so a one-line reminder right at the top of
+    # this block re-anchors the rule before the agent reaches step 2.
+    subshell_callout = (
+        "**Subshell-cwd reminder (kaart 1181b6fa…):** compound "
+        "``cd backend && pytest …`` keeps the new cwd into the next "
+        "Bash-call. Wrap each compound ``cd`` in a subshell "
+        "``( cd backend && … )`` (or use ``git -C <abs-path>``), so the "
+        "cwd change stays scoped to that one command. See the persona's "
+        "*Werkomgeving in worktree* section for the broader cwd-safety "
+        "rules.\n\n"
+    )
     # Pre-ship: Feature-Compliance-Review (FCR) — reviewed by a fresh-context
     # subagent before the numbered ship workflow begins. The prompt text must
     # stay byte-identical to the engineer.md mirror; update both in lockstep.
@@ -3372,7 +3398,7 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "*producttrade-offs* uit, niet als implementatie-forks.\n"
         )
 
-    return feature_compliance_review + sync + tests + commit + shipping
+    return subshell_callout + feature_compliance_review + sync + tests + commit + shipping
 
 
 def _build_session_retro_step(step_number: int = 6) -> str:
