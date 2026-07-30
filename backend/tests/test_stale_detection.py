@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 
 from app.config import settings
+from app.kanban.hlc import _format as hlc_format
 from app.kanban.models import KanbanCard, KanbanMeta, KanbanOp
 from app.kanban.stale_detection import (
     STALE_COMMENT_PREFIX,
@@ -40,11 +41,20 @@ def _card(cid: str, column: str, *, age_hours: float, key: str = PK) -> KanbanCa
 
 
 def _move_op(oid: str, card_id: str, column: str, *, age_hours: float) -> KanbanOp:
+    seq = int(oid.rsplit(":", 1)[1])
+    created = datetime.now(UTC) - timedelta(hours=age_hours)
     return KanbanOp(
-        op_id=oid, device_id="dev", seq=int(oid.rsplit(":", 1)[1]), hlc=oid,
+        op_id=oid, device_id="dev", seq=seq,
+        # `hlc` must be a real HLC, not the op_id. apply_operation seeds its
+        # clock from the highest hlc in the table (operations._clock_for), and
+        # hlc._physical/_logical int()-parse the first two colon-separated
+        # fields -- so an op_id-shaped value like "dev:1" made any later
+        # apply_operation in the same test raise
+        # ValueError: invalid literal for int() with base 10: 'dev'.
+        hlc=hlc_format(int(created.timestamp() * 1000), seq, "dev"),
         project_key="", entity_type="card", entity_id=card_id,
         op_type="move", payload={"column": column},
-        created_at=datetime.now(UTC) - timedelta(hours=age_hours),
+        created_at=created,
     )
 
 
