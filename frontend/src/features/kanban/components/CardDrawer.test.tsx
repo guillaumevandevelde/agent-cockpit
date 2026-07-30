@@ -2095,3 +2095,121 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(fullArea.contains(title)).toBe(false);
   });
 });
+
+// Acceptance criteria from kanban card c81fb67d:
+//   1) Done card → description appears before the operator-controls in DOM order.
+//   2) Layer 1 (action-required) renders even when layer 3 is collapsed.
+//   3) Layer 3 defaults to closed on a non-agent-claimed card and open on an
+//      agent-claimed card; an auto-selected tab (the Run tab on an agent
+//      claim) must never be hidden behind a collapsed layer 3 — full-area
+//      mode owns the body for that case.
+describe("CardDrawer three-layer reorganization (lees-first)", () => {
+  it("Done card: description precedes the operator controls in DOM order", () => {
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      description: "The reading matter",
+      done_summary: "Done.",
+      completed_at: "2026-07-10T12:00:00Z",
+    };
+
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Locate both anchors with a permissive query so the test does not care
+    // about CSS visibility: the request-review control sits inside the
+    // collapsible "operator & telemetry" section (laag 3), which renders
+    // with `hidden=""` when the collapsible is closed — Testing Library's
+    // `getByTestId` skips hidden elements by default, so use the raw DOM.
+    const scope = document.body;
+    const description = Array.from(scope.querySelectorAll<HTMLElement>("*")).find(
+      (el) => el.textContent === "The reading matter",
+    );
+    expect(description).toBeTruthy();
+
+    const requestReview = scope.querySelector(
+      '[data-testid="request-review-control"]',
+    );
+    expect(requestReview).toBeTruthy();
+
+    // `compareDocumentPosition` returns a bitmask; DOCUMENT_POSITION_FOLLOWING
+    // (0x04) means `requestReview` follows `description` in document order.
+    expect(
+      description!.compareDocumentPosition(requestReview!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("Impediment card: layer 1 (resolve-impediment) renders even when layer 3 is collapsed by default", async () => {
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Which library should we use?" },
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const impedimentCard: Card = { ...baseCard, column: "Impediment" };
+    render(
+      <CardDrawerWithRouter
+        card={impedimentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Layer 1 (action-required) is renderable through the sticky priority
+    // area even though the operator section is in its default-closed state.
+    const control = await screen.findByTestId("resolve-impediment-control");
+    expect(control).toBeTruthy();
+
+    // Sanity check: the operator section IS the default-closed state on a
+    // non-agent-claimed card (claimed_by is undefined for the base card).
+    const operatorContent = screen.getByTestId("operator-section-content");
+    expect(operatorContent.getAttribute("data-state")).toBe("closed");
+  });
+
+  it("non-agent-claimed card: the operator section defaults to closed (data-state=closed)", () => {
+    render(
+      <CardDrawerWithRouter
+        card={baseCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Default tab fills the body, NOT the operator section — verify it's
+    // closed by checking Radix's data-state attribute on the content node.
+    const operatorContent = screen.getByTestId("operator-section-content");
+    expect(operatorContent.getAttribute("data-state")).toBe("closed");
+  });
+
+  it("agent-claimed card: full-area mode owns the body so the auto-selected Run tab is never hidden behind a collapsed layer 3", () => {
+    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
+    render(
+      <CardDrawerWithRouter
+        card={agentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Full-area mode owns the body: the collapsible operator section is not
+    // rendered at all, and the body is replaced by the tabs panel so the
+    // auto-selected Run tab is visible from the start.
+    expect(screen.queryByTestId("operator-section-trigger")).toBeNull();
+    expect(screen.queryByTestId("operator-section-content")).toBeNull();
+    expect(screen.getByTestId("card-drawer-full-area")).toBeTruthy();
+  });
+});
