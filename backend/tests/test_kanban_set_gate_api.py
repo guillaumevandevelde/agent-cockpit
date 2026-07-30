@@ -32,7 +32,12 @@ async def _client():
 async def _create_card(client, title="gated") -> str:
     r = await client.post(
         "/api/v1/kanban/cards",
-        json={"project_key": "P", "title": title, "description": ""},
+        # `confirm_new_project` is required: create_card refuses an unknown
+        # project_key with 404 unknown_project_key (gate from kanban card
+        # 91c85199), and `reset_test_tables()` leaves "P" with no cards or
+        # columns. Without it every test here 404s at setup.
+        json={"project_key": "P", "title": title, "description": "",
+              "confirm_new_project": True},
     )
     assert r.status_code == 201, r.text
     return r.json()["id"]

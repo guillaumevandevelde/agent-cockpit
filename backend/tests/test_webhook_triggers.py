@@ -70,10 +70,16 @@ async def test_github_pr_closed_is_ignored():
         assert r.status_code == 200, r.text
         assert r.json()["triggered"] is False
 
+        # Nothing was created, so "P" is still an unknown project_key and the
+        # list endpoint 404s rather than reporting an empty board -- that guard
+        # is deliberate (kanban card 91c85199: an unknown key used to look
+        # exactly like a valid, empty project). A 404 here is a stronger
+        # statement than `items == []`: not just "no Backlog cards" but "this
+        # project has no cards or columns at all".
         r = await ac.get(
             "/api/v1/kanban/cards", params={"project_key": "P", "column": "Backlog"}
         )
-        assert r.json()["items"] == []
+        assert r.status_code == 404, r.text
 
 
 @pytest.mark.asyncio

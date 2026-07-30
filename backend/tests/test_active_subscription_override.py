@@ -275,11 +275,19 @@ async def test_null_override_is_backward_compatible():
 
 
 @pytest.mark.asyncio
-async def test_global_override_with_no_model_lets_column_default_apply():
-    """The override can set provider only — the model falls through to
-    column.default_model. Same shape as the column-override rule, just one
-    level higher in the precedence (acceptance criteria: provider + model?,
-    model is optional)."""
+async def test_global_override_with_no_model_drops_the_column_model_alias():
+    """A provider-only override does NOT carry `column.default_model` over.
+
+    The original acceptance criterion ("model is optional, falls through to
+    column.default_model") predates the 2026-07-23 spillover decision
+    (spillover-per-kolom-decision.md / kaart 2688bf80), which filed exactly
+    that fall-through as a latent defect: a column model alias like `sonnet`
+    or `opus` is Anthropic-shaped and leaks into a non-Anthropic spawn.
+    `_resolve_effective_model` now drops the column alias whenever a higher
+    layer pinned a provider that differs from the column's, so a
+    provider-only override spawns on the provider's own default model rather
+    than an alias it may not understand.
+    """
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await service.create_column(
@@ -297,7 +305,7 @@ async def test_global_override_with_no_model_lets_column_default_apply():
         await s.commit()
     assert len(transport.calls) == 1
     assert transport.calls[0]["provider"] == "bedrock"
-    assert transport.calls[0]["model"] == "sonnet"
+    assert transport.calls[0]["model"] is None
 
 
 @pytest.mark.asyncio

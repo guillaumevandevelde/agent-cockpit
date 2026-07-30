@@ -130,13 +130,31 @@ def test_get_blueprint_returns_stored(client, store_dir):
 
 
 def test_get_blueprint_not_found_returns_404(client):
-    r = client.get("/api/v1/blueprints/__missing__")
+    r = client.get("/api/v1/blueprints/absent-blueprint")
     assert r.status_code == 404
 
 
 def test_get_blueprint_invalid_name_returns_400(client):
-    r = client.get("/api/v1/blueprints/with%2Fslash")
+    """An invalid-but-routable name reaches validate_name and 400s.
+
+    Uppercase violates the store's `^[a-z0-9][a-z0-9._-]{0,63}$` slug pattern.
+    Note a name has to be *routable* to reach validation at all — see
+    test_get_blueprint_encoded_slash_is_rejected for why %2F cannot be used.
+    """
+    r = client.get("/api/v1/blueprints/NotALowercaseSlug")
     assert r.status_code == 400
+
+
+def test_get_blueprint_encoded_slash_is_rejected(client):
+    """A %2F traversal attempt never resolves to a blueprint.
+
+    Starlette decodes %2F to a literal `/` before matching, so this never
+    matches `/blueprints/{name}` and is refused at routing (404) rather than
+    by `validate_name` (400). Either way it must not reach the store; assert
+    the rejection without pinning which layer catches it.
+    """
+    r = client.get("/api/v1/blueprints/with%2Fslash")
+    assert r.status_code in (400, 404)
 
 
 # -- update -----------------------------------------------------------------
@@ -180,7 +198,7 @@ def test_update_blueprint_clear_list_with_empty(client, store_dir):
 
 
 def test_update_blueprint_not_found_returns_404(client):
-    r = client.put("/api/v1/blueprints/__missing__", json={"description": "x"})
+    r = client.put("/api/v1/blueprints/absent-blueprint", json={"description": "x"})
     assert r.status_code == 404
 
 
@@ -198,7 +216,7 @@ def test_delete_blueprint(client, store_dir):
 
 
 def test_delete_blueprint_not_found_returns_404(client):
-    r = client.delete("/api/v1/blueprints/__missing__")
+    r = client.delete("/api/v1/blueprints/absent-blueprint")
     assert r.status_code == 404
 
 
@@ -277,7 +295,7 @@ def test_apply_blueprint_force_overwrites(client, store_dir, tmp_path):
 
 def test_apply_blueprint_unknown_name_returns_404(client):
     r = client.post(
-        "/api/v1/blueprints/__missing__/apply",
+        "/api/v1/blueprints/absent-blueprint/apply",
         json={"project_path": "/tmp/does-not-matter"},
     )
     assert r.status_code == 404

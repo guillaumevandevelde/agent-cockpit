@@ -229,9 +229,13 @@ async def test_dispatch_project_renders_question_only_when_no_resolution():
     prompt = transport.calls[0]["prompt"]
     assert "## IMPEDIMENT" in prompt
     assert "Which library?" in prompt
-    # No authoritative answer — the prompt frames it as an open question.
-    assert "authoritative" not in prompt
-    assert "clarify what's needed" in prompt
+    # Scope the negative assertion to the IMPEDIMENT section. "authoritative"
+    # legitimately appears elsewhere in the prompt (the ship recipe's
+    # "authoritative scope" step), so a whole-prompt `not in` check tests the
+    # rest of the prompt rather than this section's framing.
+    section = prompt.split("## IMPEDIMENT", 1)[1].split("\n## ", 1)[0]
+    assert "authoritative" not in section, section
+    assert "clarify what's needed" in section
 
 
 @pytest.mark.asyncio

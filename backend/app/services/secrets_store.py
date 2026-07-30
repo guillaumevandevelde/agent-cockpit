@@ -169,6 +169,10 @@ _SALT_LEN = 32
 _NONCE_LEN = 12
 _HEADER_LEN = _MAGIC_LEN + _SCRYPT_COST_LEN + _SALT_LEN + _NONCE_LEN  # 51
 _DEFAULT_SCRYPT_LOG_N = 20  # ~1s derivation on a modern x86 server; tune via env later
+# Accepted cost range. Mirrors the bounds `_decrypt` enforces on the header
+# byte, so anything we agree to write is also something we agree to read.
+_MIN_SCRYPT_LOG_N = 14
+_MAX_SCRYPT_LOG_N = 22
 
 
 def _derive_key(passphrase: str, salt: bytes, log_n: int) -> bytes:
@@ -177,11 +181,25 @@ def _derive_key(passphrase: str, salt: bytes, log_n: int) -> bytes:
     return kdf.derive(passphrase.encode("utf-8"))
 
 
-def _encrypt(plaintext: bytes, passphrase: str) -> bytes:
-    """Encrypt + frame ``plaintext`` under ``passphrase``."""
+def _encrypt(
+    plaintext: bytes, passphrase: str, log_n: int = _DEFAULT_SCRYPT_LOG_N
+) -> bytes:
+    """Encrypt + frame ``plaintext`` under ``passphrase``.
+
+    ``log_n`` is the scrypt cost. It is written into the header, and
+    ``_decrypt`` reads it back from there, so files encrypted at different
+    costs stay mutually readable — lowering it only weakens the files written
+    while it is lowered. Production leaves it at the default; the test suite
+    drops it (see ``AGESecretStore(scrypt_log_n=...)``) because at cost 20 a
+    single put costs ~2-4.5s, which put tests/test_secrets_store.py past a
+    300s timeout.
+    """
+    if not _MIN_SCRYPT_LOG_N <= log_n <= _MAX_SCRYPT_LOG_N:
+        raise ValueError(
+            f"scrypt log_n must be {_MIN_SCRYPT_LOG_N}..{_MAX_SCRYPT_LOG_N}, got {log_n}"
+        )
     salt = os.urandom(_SALT_LEN)
     nonce = os.urandom(_NONCE_LEN)
-    log_n = _DEFAULT_SCRYPT_LOG_N
     key = _derive_key(passphrase, salt, log_n)
     aad = _MAGIC + bytes([log_n]) + salt + nonce
     cipher = ChaCha20Poly1305(key)
@@ -194,7 +212,7 @@ def _decrypt(blob: bytes, passphrase: str) -> bytes:
     if len(blob) < _HEADER_LEN or blob[:_MAGIC_LEN] != _MAGIC:
         raise AuthenticationError("file is not an AGESecretStore blob")
     log_n = blob[_MAGIC_LEN]
-    if not 14 <= log_n <= 22:
+    if not _MIN_SCRYPT_LOG_N <= log_n <= _MAX_SCRYPT_LOG_N:
         raise AuthenticationError(f"invalid scrypt cost in file: {log_n}")
     salt = blob[_MAGIC_LEN + _SCRYPT_COST_LEN : _MAGIC_LEN + _SCRYPT_COST_LEN + _SALT_LEN]
     nonce = blob[_MAGIC_LEN + _SCRYPT_COST_LEN + _SALT_LEN : _HEADER_LEN]
@@ -235,6 +253,7 @@ class AGESecretStore(SecretStore):
         *,
         passphrase: str | None = None,
         passphrase_resolver: Any = None,
+        scrypt_log_n: int = _DEFAULT_SCRYPT_LOG_N,
     ) -> None:
         """Construct the store.
 
@@ -246,11 +265,17 @@ class AGESecretStore(SecretStore):
         omitted, ``passphrase_resolver`` is called on first use; if
         neither is given, ``resolve_passphrase()`` is used (env-var +
         keyring fallback).
+
+        ``scrypt_log_n`` is the KDF cost used for *writes*; reads always honour
+        the cost recorded in each file's header. Leave it at the default in
+        production — only the test suite lowers it, to keep a put under a few
+        milliseconds instead of seconds.
         """
         if root is None:
             root = Path.home() / ".claude-registry" / "secrets"
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        self._scrypt_log_n = scrypt_log_n
         # Lock per project_key so concurrent callers don't interleave
         # read-modify-write on the JSON body. threading.Lock (not
         # asyncio.Lock) because the store is fully sync; async callers
@@ -307,7 +332,7 @@ class AGESecretStore(SecretStore):
         """Encrypt ``payload`` and write it atomically to the project's file."""
         path = self._path_for(project_key)
         plaintext = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
-        blob = _encrypt(plaintext, self._get_passphrase())
+        blob = _encrypt(plaintext, self._get_passphrase(), self._scrypt_log_n)
 
         # Atomic write: encrypt -> tempfile in same dir -> chmod 600
         # -> os.replace. Same-dir so os.replace is atomic on the same FS.

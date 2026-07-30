@@ -77,7 +77,7 @@ async def test_provider_cli_disallowed_command_returns_contract_error(monkeypatc
 
     class FakeExecutor:
         binary_path = "/usr/bin/codex"
-        provider = SimpleNamespace(display_name="Codex")
+        cli = SimpleNamespace(display_name="Codex", id="codex-cli")
         cli_id = "codex-cli"
         ALLOWED_COMMANDS = ["doctor"]
 
@@ -104,7 +104,7 @@ async def test_provider_cli_missing_binary_returns_contract_error(monkeypatch):
 
     class FakeExecutor:
         binary_path = None
-        provider = SimpleNamespace(display_name="Codex")
+        cli = SimpleNamespace(display_name="Codex", id="codex-cli")
         cli_id = "codex-cli"
         ALLOWED_COMMANDS = ["doctor"]
 

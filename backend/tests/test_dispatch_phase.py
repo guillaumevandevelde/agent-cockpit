@@ -206,7 +206,8 @@ async def test_run_card_skips_plan_context_for_legacy_cards(monkeypatch):
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
+    def fake_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                       provider="anthropic", model=None, **_extra):
         captured["prompt"] = prompt
         captured["session_name"] = session_name
         return {"session": session_name, "prompt": prompt}
@@ -263,7 +264,8 @@ async def test_run_card_prepends_plan_context_for_child_with_parent(monkeypatch)
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
+    def fake_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                       provider="anthropic", model=None, **_extra):
         captured["prompt"] = prompt
         captured["session_name"] = session_name
         return {"session": session_name, "prompt": prompt}
@@ -317,7 +319,8 @@ async def test_run_card_prepends_placeholder_for_child_with_missing_plan(monkeyp
 
     captured = {}
 
-    def fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
+    def fake_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                       provider="anthropic", model=None, **_extra):
         captured["prompt"] = prompt
         return {"session": session_name, "prompt": prompt}
 
@@ -1133,8 +1136,16 @@ async def test_run_card_explicit_valid_card_agent_overrides_work_type_fallback(m
 # stubs the previous review flagged.
 
 
-def _fake_transport(directory, prompt, session_name, cli_id, provider, model=None):
-    """No-op transport that returns a minimal result dict."""
+def _fake_transport(*, directory, prompt, session_name, cli_id="claude-code",
+                    provider="anthropic", model=None, **_extra):
+    """No-op transport that returns a minimal result dict.
+
+    Mirrors the `SpawnTransport` Protocol in dispatch.py: keyword-only, and
+    `**_extra` absorbs the params these tests don't assert on (endpoint_*,
+    card_id, column_name). Without the catch-all, every additive change to the
+    Protocol breaks this stub with an opaque
+    "unexpected keyword argument" TypeError rather than a real assertion.
+    """
     return {"session_name": session_name, "transport": "worktree"}
 
 

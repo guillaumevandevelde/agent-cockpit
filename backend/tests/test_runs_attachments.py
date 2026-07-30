@@ -54,7 +54,10 @@ def attachment_boundaries(monkeypatch, tmp_path):
             {
                 "tmux_target": "snazzyemail:0.0",
                 "session_name": "snazzyemail",
-                "provider": "claude-code",
+                # Real `discover_agent_sessions` emits "cli" (see
+                # runs/discovery.py), and the service reads session["cli"].
+                # A stub keyed "provider" silently yielded cli=None.
+                "cli": "claude-code",
             }
         ],
     )
@@ -78,7 +81,9 @@ async def test_upload_image_attachment_persists_metadata_and_file(client, db):
     assert response.status_code == 200
     body = response.json()
     assert body["target"] == "snazzyemail:0.0"
-    assert body["provider"] == "claude-code"
+    # BridgeAttachmentResponse calls this `cli`, not `provider` — part of the
+    # wider provider->cli rename (cli_id, ClaudeCodeCli, ...).
+    assert body["cli"] == "claude-code"
     assert body["mime_type"] == "image/png"
     assert body["original_filename"] == "../../screen.png"
     assert "\n" not in body["prompt_text"]

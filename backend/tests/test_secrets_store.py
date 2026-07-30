@@ -26,8 +26,19 @@ from app.services.secrets_store import (
 PASSPHRASE = "test-passphrase-1234"
 
 
+# Lowest cost the format accepts. At the production default (log_n=20) a single
+# put costs ~2-4.5s on this box -- one scrypt derivation to read the existing
+# file plus one to write it back -- so these 17 tests blew past a 300s timeout
+# and looked like a hang. The cost is recorded per file and honoured on read, so
+# dropping it here changes only how expensive the test fixtures are to produce,
+# not what the code paths do.
+_TEST_SCRYPT_LOG_N = 14
+
+
 def _make_store(tmp_path: Path) -> AGESecretStore:
-    return AGESecretStore(root=tmp_path, passphrase=PASSPHRASE)
+    return AGESecretStore(
+        root=tmp_path, passphrase=PASSPHRASE, scrypt_log_n=_TEST_SCRYPT_LOG_N,
+    )
 
 
 # -- happy path -------------------------------------------------------------
@@ -111,11 +122,13 @@ def test_get_for_brand_new_project_raises(tmp_path: Path) -> None:
 
 def test_wrong_passphrase_raises(tmp_path: Path) -> None:
     """A file encrypted with passphrase A cannot be read with passphrase B."""
-    writer = AGESecretStore(root=tmp_path, passphrase="passphrase-A")
+    writer = AGESecretStore(root=tmp_path, passphrase="passphrase-A",
+                            scrypt_log_n=_TEST_SCRYPT_LOG_N)
     writer.put("git:github.com/foo/bar", "TOK", "v")
     # Force-close the file handle and wait for any async work (none here, but
     # be explicit about the sequencing).
-    reader = AGESecretStore(root=tmp_path, passphrase="passphrase-B")
+    reader = AGESecretStore(root=tmp_path, passphrase="passphrase-B",
+                            scrypt_log_n=_TEST_SCRYPT_LOG_N)
     with pytest.raises(SecretStoreError):
         reader.get("git:github.com/foo/bar", "TOK")
 
@@ -162,7 +175,8 @@ def test_concurrent_writes_to_same_project_key(tmp_path: Path) -> None:
     Without per-project locking this can either lose writes (last writer
     wins on read-modify-write) or leave a corrupt half-written file.
     """
-    store = AGESecretStore(root=tmp_path, passphrase=PASSPHRASE)
+    store = AGESecretStore(root=tmp_path, passphrase=PASSPHRASE,
+                           scrypt_log_n=_TEST_SCRYPT_LOG_N)
     project_key = "git:github.com/foo/bar"
     n = 20
 

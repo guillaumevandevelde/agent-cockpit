@@ -138,7 +138,7 @@ def _reset_kanban_clock():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_usage_service_projects_dir(tmp_path, monkeypatch):
+def _isolate_usage_service_projects_dir(tmp_path_factory, monkeypatch):
     """Pin ``UsageService.projects_dir`` to a per-test empty dir.
 
     Without this, ``UsageService(db=...)`` reads ``get_claude_projects_dir``
@@ -166,8 +166,14 @@ def _isolate_usage_service_projects_dir(tmp_path, monkeypatch):
     function-scoped, so the test's override is applied after this
     autouse fixture's setup and wins.
     """
-    empty_projects_dir = tmp_path / "usage_service_projects"
-    empty_projects_dir.mkdir()
+    # Deliberately NOT `tmp_path / "usage_service_projects"`. This fixture is
+    # autouse, so putting the dir inside the test's own `tmp_path` planted a
+    # phantom entry in every test that enumerates `tmp_path` — it broke
+    # test_api_projects_response_models (expected ['alpha','beta'], got a third
+    # 'usage_service_projects') and test_blueprint_store the same way.
+    # `tmp_path_factory` puts it in a sibling dir, still unique per test and
+    # still auto-cleaned, but invisible to anything walking `tmp_path`.
+    empty_projects_dir = tmp_path_factory.mktemp("usage_service_projects")
     monkeypatch.setattr(
         "app.services.usage_service.get_claude_projects_dir",
         lambda: empty_projects_dir,

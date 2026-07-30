@@ -325,8 +325,12 @@ def _require_provider_binary(executor: AgenticCliExecutor, operation: str) -> No
     raise _provider_error(
         500,
         "provider_binary_missing",
-        f"{executor.provider.display_name} binary not found in PATH.",
-        provider_id=executor.provider_id,
+        # `AgenticCliExecutor` exposes `cli` (an AgenticCli, with id +
+        # display_name) and `cli_id` — it has never had `provider` /
+        # `provider_id`. Reading those raised AttributeError instead of this
+        # 500 contract error on the one path that matters: a missing binary.
+        f"{executor.cli.display_name} binary not found in PATH.",
+        provider_id=executor.cli_id,
         operation=operation,
     )
 

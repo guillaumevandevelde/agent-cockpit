@@ -229,6 +229,42 @@ async def _client():
         yield ac
 
 
+async def _bare_move_to_impediment(project_key: str, cid: str) -> None:
+    """Put a card on Impediment WITHOUT posting an `**Impediment:**` comment.
+
+    MCP `move_card` can't do this: `_SUMMARY_REQUIRED_COLUMNS` makes `summary`
+    mandatory for Impediment and posts it as `**Impediment:** <summary>`, which
+    `impediment_status_for_card` reads as an open question. So a "bare move" —
+    the `no_question` state, and what `dispatch._move_to_impediment_after_
+    repeated_failures` does — is only reachable via a raw move op, which is
+    what this helper emits.
+    """
+    async with TestSessionLocal()() as s:
+        await apply_operation(
+            s, op_type="move", entity_type="card",
+            project_key=project_key, entity_id=cid,
+            payload={"column": "Impediment"},
+        )
+        await s.commit()
+
+
+async def _comment(project_key: str, cid: str, text: str) -> None:
+    """Persist a comment op through a properly scoped, committed session.
+
+    These call sites used to pass `TestSessionLocal()()` straight into
+    `apply_operation`: never entered as a context manager, never committed,
+    never closed. Two consequences — the comment was invisible to the
+    assertions that followed it, and the leaked connection kept a SQLite write
+    lock that surfaced as "database is locked" in whichever test ran next.
+    """
+    async with TestSessionLocal()() as s:
+        await apply_operation(
+            s, op_type="comment", entity_type="comment",
+            project_key=project_key, entity_id=cid, payload={"text": text},
+        )
+        await s.commit()
+
+
 @pytest.mark.asyncio
 async def test_get_card_includes_impediment_status_dispatch_failed(_client):
     """`GET /cards/{cid}` surfaces `impediment_status` for an Impediment card
@@ -236,15 +272,13 @@ async def test_get_card_includes_impediment_status_dispatch_failed(_client):
     from app.kanban import mcp_server as m
 
     cid = (await m.create_card("IMP-HTTP-1", "t", "", confirm_new_project=True))["id"]
-    await m.move_card(cid, "Impediment")
-    # Simulate the auto-move comment + a successor move (same effect as
-    # _move_to_impediment_after_repeated_failures produces in production).
-    await apply_operation(
-        TestSessionLocal()(), op_type="comment", entity_type="comment",
-        project_key="IMP-HTTP-1", entity_id=cid,
-        payload={"text":
-                 "[dispatch-failure] Session `k-zzz` failed to dispatch 3 "
-                 "times in a row — moved to Impediment instead of retrying."},
+    # Bare move + the auto-move comment: exactly what
+    # _move_to_impediment_after_repeated_failures produces in production.
+    await _bare_move_to_impediment("IMP-HTTP-1", cid)
+    await _comment(
+        "IMP-HTTP-1", cid,
+        "[dispatch-failure] Session `k-zzz` failed to dispatch 3 "
+        "times in a row — moved to Impediment instead of retrying.",
     )
 
     r = await _client.get(f"/api/v1/kanban/cards/{cid}")
@@ -258,12 +292,10 @@ async def test_get_card_includes_impediment_status_needs_answer(_client):
     from app.kanban import mcp_server as m
 
     cid = (await m.create_card("IMP-HTTP-2", "t", "", confirm_new_project=True))["id"]
-    await m.move_card(cid, "Impediment")
-    await apply_operation(
-        TestSessionLocal()(), op_type="comment", entity_type="comment",
-        project_key="IMP-HTTP-2", entity_id=cid,
-        payload={"text": "**Impediment:** which DB?"},
-    )
+    _moved = await m.move_card(cid, "Impediment", summary="which DB?")
+    assert "error" not in _moved, _moved
+    # move_card already posted "**Impediment:** which DB?" for us — the summary
+    # gate makes that the normal way a question reaches the feed.
 
     r = await _client.get(f"/api/v1/kanban/cards/{cid}")
     assert r.json()["impediment_status"] == "needs_answer"
@@ -275,14 +307,10 @@ async def test_list_cards_includes_impediment_status_per_card(_client):
     from app.kanban import mcp_server as m
 
     no_q_id = (await m.create_card("IMP-LIST", "bare", "", confirm_new_project=True))["id"]
-    await m.move_card(no_q_id, "Impediment")
+    await _bare_move_to_impediment("IMP-LIST", no_q_id)
     ask_id = (await m.create_card("IMP-LIST", "ask", "", confirm_new_project=True))["id"]
-    await m.move_card(ask_id, "Impediment")
-    await apply_operation(
-        TestSessionLocal()(), op_type="comment", entity_type="comment",
-        project_key="IMP-LIST", entity_id=ask_id,
-        payload={"text": "**Impediment:** pick A or B"},
-    )
+    _moved = await m.move_card(ask_id, "Impediment", summary="pick A or B")
+    assert "error" not in _moved, _moved
     back_id = (await m.create_card("IMP-LIST", "back", "", confirm_new_project=True))["id"]
     # Stays on Backlog.
 
@@ -301,14 +329,12 @@ async def test_mcp_list_cards_includes_impediment_status_per_card():
     from app.kanban import mcp_server as m
 
     no_q_id = (await m.create_card("MCP-IMP-LIST", "bare", "", confirm_new_project=True))["id"]
-    await m.move_card(no_q_id, "Impediment")
+    await _bare_move_to_impediment("MCP-IMP-LIST", no_q_id)
     fail_id = (await m.create_card("MCP-IMP-LIST", "fail", "", confirm_new_project=True))["id"]
-    await m.move_card(fail_id, "Impediment")
-    await apply_operation(
-        TestSessionLocal()(), op_type="comment", entity_type="comment",
-        project_key="MCP-IMP-LIST", entity_id=fail_id,
-        payload={"text":
-                 "[dispatch-failure] Session `k-aaaa` failed to dispatch 3 times in a row."},
+    await _bare_move_to_impediment("MCP-IMP-LIST", fail_id)
+    await _comment(
+        "MCP-IMP-LIST", fail_id,
+        "[dispatch-failure] Session `k-aaaa` failed to dispatch 3 times in a row.",
     )
 
     cards = {c["id"]: c for c in await m.list_cards("MCP-IMP-LIST")}

@@ -4,6 +4,7 @@ Intentionally independent from app.database: the board is portable and
 sync-able, whereas app.database holds device-local data (tmux targets,
 absolute paths, scheduled deliveries).
 """
+import logging
 from pathlib import Path
 
 from sqlalchemy import event
@@ -16,6 +17,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import PROJECT_ROOT, settings
+
+logger = logging.getLogger(__name__)
 
 
 class KanbanBase(DeclarativeBase):
@@ -241,11 +244,18 @@ async def _ensure_column_table(conn) -> None:
 
 
 async def _ensure_work_type_mapping_table(conn) -> None:
-    """Create kanban_work_type_mappings if it doesn't exist.
+    """Ensure kanban_work_type_mappings exists AND is uniquely keyed.
 
     One row per (project_key, work_type); persona is the routing target. The
-    (project_key, work_type) pair is unique so we can upsert via
+    (project_key, work_type) pair must be unique so we can upsert via
     ``INSERT ... ON CONFLICT`` from the service layer.
+
+    Two paths, because `create_all` (see `init_kanban_db`) runs before this and
+    creates the table from the ORM model. The CREATE TABLE branch below is
+    therefore effectively dead on a fresh DB and kept only for a hand-dropped
+    table; the uniqueness that actually matters comes from the model's
+    ``__table_args__``. The second branch repairs DBs created while the model
+    was still missing that constraint.
     """
     tables = (await conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
     table_names = {r[0] for r in tables}
@@ -266,4 +276,53 @@ async def _ensure_work_type_mapping_table(conn) -> None:
             "CREATE INDEX ix_kanban_work_type_mappings_project_key "
             "ON kanban_work_type_mappings (project_key)"
         )
+        return
+
+    # The table already exists — in practice always, because `create_all` runs
+    # before us. Any DB created while the model lacked its UniqueConstraint has
+    # a constraint-less table, and SQLite cannot add a table constraint via
+    # ALTER. A UNIQUE INDEX satisfies ON CONFLICT's target just as well, so
+    # create one if no uniqueness on (project_key, work_type) is present.
+    if await _has_unique_on_project_work_type(conn):
+        return
+    dupes = (await conn.exec_driver_sql(
+        "SELECT COUNT(*) FROM (SELECT 1 FROM kanban_work_type_mappings "
+        "GROUP BY project_key, work_type HAVING COUNT(*) > 1)"
+    )).scalar()
+    if dupes:
+        # Cannot build the index without losing rows; leave the table as-is and
+        # let the upsert keep failing loudly rather than silently drop data.
+        logger.error(
+            "kanban_work_type_mappings has %s duplicate (project_key, work_type) "
+            "group(s); cannot add the unique index that INSERT ... ON CONFLICT "
+            "needs. Deduplicate the table manually, then restart.", dupes,
+        )
+        return
+    await conn.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "uq_kanban_work_type_mappings_project_work_type "
+        "ON kanban_work_type_mappings (project_key, work_type)"
+    )
+
+
+async def _has_unique_on_project_work_type(conn) -> bool:
+    """True if (project_key, work_type) already has a UNIQUE constraint/index.
+
+    Covers both shapes: a table-level UNIQUE constraint (which SQLite exposes
+    as an auto-index, `origin='u'`) and a standalone CREATE UNIQUE INDEX
+    (`origin='c'`). Either one is a valid ON CONFLICT target.
+    """
+    indexes = (await conn.exec_driver_sql(
+        "PRAGMA index_list(kanban_work_type_mappings)"
+    )).fetchall()
+    for row in indexes:
+        name, is_unique = row[1], row[2]
+        if not is_unique:
+            continue
+        info = (await conn.exec_driver_sql(
+            f"PRAGMA index_info({name})"
+        )).fetchall()
+        if {r[2] for r in info} == {"project_key", "work_type"}:
+            return True
+    return False
 

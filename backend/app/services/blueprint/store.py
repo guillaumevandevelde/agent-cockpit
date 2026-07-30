@@ -138,7 +138,14 @@ class BlueprintStore:
 
         now = datetime.now(UTC)
         if blueprint.created_at is None:
-            blueprint = blueprint.model_copy(update={"created_at": now})
+            # "First save" means the first save of this *name*, not of this
+            # in-memory object. Callers that update via REST build a fresh
+            # Blueprint from the request body, so `created_at` is None on every
+            # update; trusting it would re-stamp `created_at` each time and lose
+            # the original. Recover it from the record already on disk.
+            blueprint = blueprint.model_copy(
+                update={"created_at": self._stored_created_at(path) or now}
+            )
         blueprint = blueprint.model_copy(update={"updated_at": now})
 
         # Atomic write: temp file in the same directory, fsync, rename.
@@ -176,3 +183,22 @@ class BlueprintStore:
     def _read(path: Path) -> Blueprint:
         data = json.loads(path.read_text(encoding="utf-8"))
         return Blueprint.model_validate(data)
+
+    @staticmethod
+    def _stored_created_at(path: Path) -> datetime | None:
+        """`created_at` of the record already at `path`, or None.
+
+        Best-effort by design: a missing, unreadable, or corrupt file must not
+        block a save — the caller falls back to stamping the current time.
+        """
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        raw = data.get("created_at")
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            return None

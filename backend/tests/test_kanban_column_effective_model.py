@@ -219,11 +219,23 @@ async def test_resolve_column_effective_model_global_override_provider_only_drop
 async def test_resolve_column_effective_model_pool_provider_only_drops_column_model():
     """Same drop via a subscription-pool/spillover choice: a pool entry
     {provider: minimax, model: None} that switches the provider away from the
-    column default (anthropic/opus) drops the column model alias."""
+    column default drops the column model alias.
+
+    The column deliberately sets `default_model` WITHOUT `default_provider`.
+    Under vorm B (decision 2026-07-23, spillover-per-kolom-decision.md /
+    kaart 2688bf80) a column's `default_provider` becomes the *implicit head*
+    of the spillover chain and therefore wins over the pool — see the sibling
+    `test_resolve_column_effective_model_pool_wins`. With no default_provider
+    there is no head, so the pool entry is what the router lands on, which is
+    the only way this UI path reaches a provider switch at all
+    (`_column_settings_pool_picker` passes no usage and no pauses, so a head
+    can never fall away here). The `opus`-leaks-into-a-MiniMax-spawn defect
+    that same decision filed is what the drop below prevents.
+    """
     async with KanbanSessionLocal() as s:
         await create_column(
             s, project_key=PK, name="analyst", default_agent="analyst",
-            default_provider="anthropic", default_model="opus",
+            default_model="opus",
         )
         await subscription_pool.set_subscription_pool(
             s, PK, _make_pool([
