@@ -7412,14 +7412,30 @@ async def dispatch_impediment_card(
     # and started a fresh session per resolved card — see the kaart's
     # "te veel sessies naast mekaar" complaint.
     #
-    # `claimed_by` is intentionally NOT touched here: a card on Backlog that
-    # already carries an `agent:` claim is invisible to `_next_card` (it
-    # filters `not c.claimed_by`) and would silently never get dispatched.
-    # `report_impediment` already released the claim before parking the card
-    # on Impediment (see mcp_server.report_impediment), so this branch
-    # never has a stale claim to clear. If a future caller invokes this
-    # function with a still-claimed card, the upstream 409 / reaper path
-    # owns the cleanup — not this helper.
+    # `claimed_by` is cleared here for agent:* claims only — see below for
+    # why this is load-bearing. `report_impediment` already released the
+    # claim before parking the card on Impediment (see mcp_server.report_impediment)
+    # for the normal path, so the typical input has nothing to clear. The
+    # fixed→fixed case (Impediment → Backlog) is the gap the operations.py
+    # agent→fixed guard never covers — both source and destination columns
+    # are fixed, so the materialize path's guard does not fire. Without an
+    # explicit release here, a card claimed by an agent while it sat on
+    # Impediment (claim_card MCP against an Impediment card) lands on
+    # Backlog still claimed and `_next_card` filters `not c.claimed_by`,
+    # silently stranding the card. Kaart acc8f578… documents the incident.
+    #
+    # Human `me@ui` reservations are deliberately preserved: a deliberate
+    # hold (operator clicked Reserve before resolving the Impediment) is an
+    # intentional reservation, and stripping it on resolve would surprise
+    # the operator who later noticed the card was already in flight. This
+    # mirrors the operations.py:327-333 carve-out for non-agent claimants —
+    # the guard also leaves `me@ui` claims alone because the stale-claim
+    # reaper skips fixed columns on purpose.
+    if card.claimed_by and card.claimed_by.startswith(CLAIMANT_PREFIX):
+        await apply_operation(
+            session, op_type="release", entity_type="card",
+            project_key=card.project_key, entity_id=card.id, payload={},
+        )
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=card.project_key,
         entity_id=card.id, payload={"column": "Backlog"},
