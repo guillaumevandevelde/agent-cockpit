@@ -21,6 +21,7 @@ import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
 import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
+import { reorderColumnByFilteredTarget } from "./reorder";
 import type { Card, KanbanColumn } from "./types";
 
 const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]);
@@ -464,16 +465,23 @@ export default function KanbanPage() {
     }
   };
 
-  const reorderWithin = async (cardId: string, column: string, index: number) => {
+  const reorderWithin = async (cardId: string, column: string, dropBeforeId: string | null) => {
     const colCards = cards.filter((c) => c.column === column);
-    const oldIndex = colCards.findIndex((c) => c.id === cardId);
-    if (oldIndex === -1) return;
+    if (!colCards.some((c) => c.id === cardId)) return;
 
-    const without = colCards.filter((c) => c.id !== cardId);
-    const insertAt = index > oldIndex ? index - 1 : index;
-    without.splice(insertAt, 0, colCards[oldIndex]);
+    // Kanban card e9089ecad8e64b19a25bdf59804b70de: the drag target is
+    // expressed in the filtered view the operator is looking at, so we
+    // hand BOTH the unfiltered column list and the filtered subset to
+    // the helper — the helper maps `dropBeforeId` back to the right
+    // position in `colCards` and produces `orderedIds` that preserves
+    // the relative order of non-matching cards. Pre-fix code took the
+    // filtered index as if it were an unfiltered index and reordered
+    // the whole queue on every gesture.
+    const visibleCards = filteredCards.filter((c) => c.column === column);
+    const without = reorderColumnByFilteredTarget(colCards, visibleCards, cardId, dropBeforeId);
     const orderedIds = without.map((c) => c.id);
-    if (orderedIds.every((id, i) => id === colCards[i].id)) return;
+    const originalIds = colCards.map((c) => c.id);
+    if (orderedIds.every((id, i) => id === originalIds[i])) return;
 
     const width = Math.max(4, String(orderedIds.length).length);
     const rankOf = new Map(orderedIds.map((id, i) => [id, String(i).padStart(width, "0")]));
@@ -493,12 +501,14 @@ export default function KanbanPage() {
     }
   };
 
-  const onDropCardAt = (cardId: string, column: string, index: number) => {
+  const onDropCardAt = (cardId: string, column: string, dropBeforeId: string | null) => {
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
     if (card.column === column) {
-      void reorderWithin(cardId, column, index);
+      void reorderWithin(cardId, column, dropBeforeId);
     } else {
+      // Cross-column move does not honour the drop position — it just
+      // appends to the target column.
       void onMove(cardId, column);
     }
   };
