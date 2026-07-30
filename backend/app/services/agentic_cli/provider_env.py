@@ -56,6 +56,34 @@ CLAUDE_CODE_CLI_ID = "claude-code"
 CODEX_CLI_ID = "codex-cli"
 OPEN_CODE_CLI_ID = "open-code"
 
+# Env every Claude Code spawn gets regardless of provider — CLI behaviour,
+# not endpoint routing, so it lands in ``build_spawn_env`` (which sees both
+# the agent-bridge and the legacy CC-bridge path) rather than in
+# ``build_provider_env`` (which returns ``{}`` for plain Anthropic and so
+# would miss most spawns).
+#
+# ``CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL``: the bundled ``claude-api`` skill
+# inlines its entire multi-language reference tree — 64 files, ~780 KB,
+# ~212k tokens — into a *single* tool result, and its trigger fires on any
+# prompt naming ``claude-*``/``anthropic``/``Opus``/``Sonnet``/``Haiku``.
+# In this repo that matches nearly every card (any card mentioning
+# CLAUDE.md does it), so a dispatched session invokes it on turn one and
+# the next request dies with ``invalid_request: Prompt is too long``
+# before any work happens — all six real prompt-too-long errors in the
+# session history sit directly behind a ``Skill(claude-api)`` call.
+# Disabling costs nothing here: this repo talks to CLIs and
+# Anthropic-compatible endpoints over env vars and has no Anthropic SDK
+# dependency at all (no ``anthropic`` / ``@anthropic-ai/sdk`` import in
+# backend or frontend), which is the only thing that skill is for.
+# The CLI gates registration on this var at startup
+# (``if(!truthy(process.env.CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL)) registerClaudeApiSkill()``),
+# so it must be in the spawned process's env — a ``.claude/settings.json``
+# ``env`` block is applied later in boot and is not guaranteed to beat
+# skill registration.
+CLAUDE_CODE_BASELINE_ENV: dict[str, str] = {
+    "CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL": "1",
+}
+
 # ``OPENCODE_CONFIG_CONTENT`` is OpenCode's own inline-config env var (see
 # https://opencode.ai/docs/config — "allowing runtime overrides without
 # modifying config files"). This is the *only* mechanism the endpoint
@@ -90,6 +118,22 @@ MINIMAX_BASE_URL_CHINA = "https://api.minimaxi.com/anthropic"
 # below, so the suffix is both redundant and breaking — keep this bare.
 MINIMAX_DEFAULT_MODEL = "MiniMax-M3"
 MINIMAX_AUTO_COMPACT_WINDOW = "1000000"
+# MiniMax-M3 serves a 1M context. Claude Code will not use it unless it is
+# told so *twice*, because the two env vars do different jobs and only one
+# of them can raise the ceiling:
+#
+#   CLAUDE_CODE_MAX_CONTEXT_TOKENS — the model's max. Honoured only for a
+#     model id that does not start with ``claude-`` (ours doesn't), else
+#     the CLI falls back to a hardcoded 200_000 for any model it doesn't
+#     recognise.
+#   CLAUDE_CODE_AUTO_COMPACT_WINDOW — where auto-compact kicks in, applied
+#     as ``min(model_max, value)``. It can only ever *lower* the window.
+#
+# So ``AUTO_COMPACT_WINDOW=1000000`` on its own was a no-op: it clamped to
+# the unrecognised-model default and every MiniMax session silently ran on
+# 200k. Both must be set, and they must agree. Confirmed against the
+# installed CLI (2.1.220) and with the operator on M3's real window.
+MINIMAX_MAX_CONTEXT_TOKENS = "1000000"
 
 
 def _clean(value: str | None) -> str | None:
@@ -244,7 +288,10 @@ def build_provider_env(
         resolved_token = _clean(minimax_api_key)
         return _build_endpoint_env(
             cli_id, resolved_base_url, resolved_model, resolved_token,
-            extra_claude_env={"CLAUDE_CODE_AUTO_COMPACT_WINDOW": MINIMAX_AUTO_COMPACT_WINDOW},
+            extra_claude_env={
+                "CLAUDE_CODE_AUTO_COMPACT_WINDOW": MINIMAX_AUTO_COMPACT_WINDOW,
+                "CLAUDE_CODE_MAX_CONTEXT_TOKENS": MINIMAX_MAX_CONTEXT_TOKENS,
+            },
         )
 
     if provider == PROVIDER_COMPATIBLE:
@@ -311,17 +358,26 @@ def build_spawn_env(
     extra_env: dict[str, str] | None,
     project_key: str | None,
     runtime: str | None,
+    cli_id: str = CLAUDE_CODE_CLI_ID,
 ) -> SpawnEnv:
     """Merge every explicit-env input into one canonical dict.
 
-    Precedence on collision: ``extras < provider_env < cockpit_*``. The
-    caller-supplied extras (today a dict; once follow-up #4 lands this is
-    where ``SecretStore.get(project_key, ...)`` results land) lose to the
-    provider's own env — a stale project secret must never downgrade the
-    CLI's own configuration (Bedrock region, MiniMax base URL, etc.).
-    The ``COCKPIT_*`` vars win over everything because the runtime's
-    project context is the single source of truth for an agent's
+    Precedence on collision: ``cli baseline < extras < provider_env <
+    cockpit_*``. The caller-supplied extras (today a dict; once follow-up
+    #4 lands this is where ``SecretStore.get(project_key, ...)`` results
+    land) lose to the provider's own env — a stale project secret must
+    never downgrade the CLI's own configuration (Bedrock region, MiniMax
+    base URL, etc.). The ``COCKPIT_*`` vars win over everything because the
+    runtime's project context is the single source of truth for an agent's
     identity.
+
+    ``cli_id`` selects the per-CLI baseline (``CLAUDE_CODE_BASELINE_ENV``
+    for Claude Code, nothing for the others) — CLI behaviour that every
+    spawn of that CLI needs regardless of which provider it routes to. It
+    sits at the bottom of the precedence chain so a caller can still
+    override any of it through ``extra_env``. Defaults to Claude Code
+    because the legacy CC-bridge (``cc_spawn.py``) only ever spawns that
+    CLI and has no provider abstraction to thread an id through.
 
     The backend's ``os.environ`` is **never** merged in — every var must
     come from an explicit, auditable input. The whole point of the
@@ -335,7 +391,11 @@ def build_spawn_env(
     """
     cleaned_extras = _clean_extra_env(extra_env)
     merged: dict[str, str] = {}
-    # extras first; provider env overwrites on collision (collision
+    # CLI baseline first — lowest precedence, so extras/provider env can
+    # still override any of it.
+    if cli_id == CLAUDE_CODE_CLI_ID:
+        merged.update(CLAUDE_CODE_BASELINE_ENV)
+    # extras next; provider env overwrites on collision (collision
     # semantics: a stale secret must never downgrade CLI config).
     merged.update(cleaned_extras)
     merged.update(provider_env)

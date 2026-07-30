@@ -1130,6 +1130,7 @@ def _build_env(*, cli_id: str, provider: str, model: str | None,
     spawn_env = build_spawn_env(
         provider_env=provider_env, extra_env=None,
         project_key=project_key, runtime="headless",
+        cli_id=cli_id,
     )
     return dict(spawn_env.env)
 

@@ -152,6 +152,7 @@ def test_minimax_minimal_uses_international_defaults():
         MINIMAX_AUTO_COMPACT_WINDOW,
         MINIMAX_BASE_URL_INTERNATIONAL,
         MINIMAX_DEFAULT_MODEL,
+        MINIMAX_MAX_CONTEXT_TOKENS,
         PROVIDER_MINIMAX,
         build_provider_env,
     )
@@ -161,6 +162,7 @@ def test_minimax_minimal_uses_international_defaults():
         "ANTHROPIC_BASE_URL": MINIMAX_BASE_URL_INTERNATIONAL,
         "ANTHROPIC_MODEL": MINIMAX_DEFAULT_MODEL,
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW": MINIMAX_AUTO_COMPACT_WINDOW,
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS": MINIMAX_MAX_CONTEXT_TOKENS,
     }
 
 

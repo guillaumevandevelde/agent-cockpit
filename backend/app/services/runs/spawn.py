@@ -246,6 +246,7 @@ def spawn_session(
         extra_env=extra_env,
         project_key=project_key,
         runtime=effective_runtime,
+        cli_id=cli.id,
     )
 
     env_flags: list[str] = []
