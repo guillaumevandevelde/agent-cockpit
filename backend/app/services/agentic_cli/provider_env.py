@@ -30,6 +30,16 @@ PROVIDER_BEDROCK = "bedrock"
 PROVIDER_MINIMAX = "minimax"
 PROVIDER_COMPATIBLE = "anthropic-compatible"
 
+# Every provider selection this module understands. `build_provider_env` treats
+# anything it doesn't recognise as Anthropic (no env vars), which makes a typo'd
+# provider silently spawn on the wrong backend instead of failing — so API
+# surfaces that accept a provider from a client should validate against this set
+# first. Lives here, next to the constants, so it can be consumed from any layer
+# without importing the kanban package.
+KNOWN_PROVIDERS = frozenset({
+    PROVIDER_ANTHROPIC, PROVIDER_BEDROCK, PROVIDER_MINIMAX, PROVIDER_COMPATIBLE,
+})
+
 # OpenCode's own hosted-subscription providers — built into the
 # OpenCode CLI's catalog (https://opencode.ai/docs/go, /docs/zen);
 # authenticated via ``~/.local/share/opencode/auth.json`` or

@@ -39,6 +39,7 @@ from app.models.schemas import (
 )
 from app.services.agentic_cli import get_agentic_cli
 from app.services.agentic_cli.base import SpawnCommandOptions
+from app.services.agentic_cli.provider_env import KNOWN_PROVIDERS
 from app.services.host_service import HostNotFoundError
 from app.services.runs import git_status as git_status_service
 from app.services.runs import groups as groups_service
@@ -778,6 +779,19 @@ def bulk_resume_endpoint(request: BulkResumeRequest):
         get_agentic_cli(request.cli)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # `provider` was accepted as a bare string and never validated, while `cli`
+    # right above it was. `build_provider_env` emits no env vars for a provider
+    # it doesn't recognise, so a typo like "anthropc" silently spawned every
+    # session in the batch on plain Anthropic instead of failing. Reject it up
+    # front, same 400 shape as the cli check.
+    if request.provider not in KNOWN_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"unknown provider: {request.provider!r}; expected one of "
+                f"{sorted(KNOWN_PROVIDERS)}"
+            ),
+        )
 
     results: list[BulkResumeResult] = []
     for item in request.sessions:
