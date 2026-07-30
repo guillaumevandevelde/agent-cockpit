@@ -127,6 +127,10 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Remote-branch sweeper (vangnet voor merged-maar-niet-verwijderde branches op `origin`; volgt op de direct-mode ship-recipe fix uit kanban-kaart `3027671c…` — advisory; --strict = exit 1; JSON op stdout; nudge vanuit `cockpit.sh start`)
 ./scripts/sweep_merged_remote_branches.py      # Flag refs/remotes/<remote>/* branches die `git cherry <base> <ref>` met 0 `+`-regels beantwoorden (volledig gemerged)
 
+# Merged-maar-open kaarten (vangnet voor een ship die wél merged maar de `move_card → Done` niet haalde: de kaart blijft dispatchbaar en auto-dispatch verbrandt een volledige duplicaat-sessie op werk dat al op master staat — kaart `9c88422a…` — advisory; --strict = exit 1; JSON op stdout)
+./scripts/sweep_merged_but_open_cards.py                      # Flag niet-Done kaarten met een `commit`/`branch`-deliverable die al in `origin/master` zit (`merge-base --is-ancestor` voor een sha, `git cherry` voor een branch); `dispatchable`-vlag per rij scheidt de sessie-verspillers van bewust geparkeerde kaarten (intake/Impediment/Awaiting Subtasks)
+./scripts/sweep_merged_but_open_cards.py --dispatchable-only  # Alleen de kaarten die auto-dispatch écht opnieuw oppakt (Backlog/To Resume/agent-lane)
+
 # Lint
 cd frontend && npm run lint      # ESLint
 
