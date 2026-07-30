@@ -58,13 +58,14 @@ def test_claude_code_unknown_provider_returns_empty():
 
 def test_claude_code_minimax_sets_anthropic_env_and_compact_window():
     """Claude-Code keeps the existing MiniMax contract — ANTHROPIC_* plus
-    CLAUDE_CODE_AUTO_COMPACT_WINDOW. This is the regression guard for
+    both context-window vars. This is the regression guard for
     "existing claude behavior stays exactly the same".
     """
     from app.services.agentic_cli.provider_env import (
         MINIMAX_AUTO_COMPACT_WINDOW,
         MINIMAX_BASE_URL_INTERNATIONAL,
         MINIMAX_DEFAULT_MODEL,
+        MINIMAX_MAX_CONTEXT_TOKENS,
         PROVIDER_MINIMAX,
         build_provider_env,
     )
@@ -73,7 +74,40 @@ def test_claude_code_minimax_sets_anthropic_env_and_compact_window():
         "ANTHROPIC_BASE_URL": MINIMAX_BASE_URL_INTERNATIONAL,
         "ANTHROPIC_MODEL": MINIMAX_DEFAULT_MODEL,
         "CLAUDE_CODE_AUTO_COMPACT_WINDOW": MINIMAX_AUTO_COMPACT_WINDOW,
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS": MINIMAX_MAX_CONTEXT_TOKENS,
     }
+
+
+def test_claude_code_minimax_raises_the_ceiling_not_just_the_compact_point():
+    """``AUTO_COMPACT_WINDOW`` alone cannot reach M3's 1M context.
+
+    The CLI resolves the window as ``min(model_max, AUTO_COMPACT_WINDOW)``
+    and falls back to a hardcoded 200_000 for a model it doesn't
+    recognise, so the compact-window var can only ever *lower* the
+    ceiling. ``CLAUDE_CODE_MAX_CONTEXT_TOKENS`` is the one that raises
+    ``model_max`` (honoured for non-``claude-`` model ids). Dropping it
+    silently puts every MiniMax session back on 200k — invisible until a
+    long session dies on ``invalid_request: Prompt is too long``.
+    """
+    from app.services.agentic_cli.provider_env import (
+        MINIMAX_AUTO_COMPACT_WINDOW,
+        MINIMAX_DEFAULT_MODEL,
+        MINIMAX_MAX_CONTEXT_TOKENS,
+        PROVIDER_MINIMAX,
+        build_provider_env,
+    )
+
+    env = build_provider_env(PROVIDER_MINIMAX, cli_id="claude-code")
+    assert env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "1000000"
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == MINIMAX_AUTO_COMPACT_WINDOW
+    assert int(MINIMAX_AUTO_COMPACT_WINDOW) <= int(MINIMAX_MAX_CONTEXT_TOKENS), (
+        "auto-compact must not sit above the declared model max, or the CLI's "
+        "min() silently discards it"
+    )
+    assert not env["ANTHROPIC_MODEL"].startswith("claude-"), (
+        f"the CLI only honours CLAUDE_CODE_MAX_CONTEXT_TOKENS for non-claude- "
+        f"model ids; {MINIMAX_DEFAULT_MODEL!r} must keep its bare MiniMax form"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +144,7 @@ def test_minimax_never_leaks_claude_compact_window_to_opencode():
     from app.services.agentic_cli.provider_env import PROVIDER_MINIMAX, build_provider_env
     env = build_provider_env(PROVIDER_MINIMAX, cli_id="open-code")
     assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in env
+    assert "CLAUDE_CODE_MAX_CONTEXT_TOKENS" not in env
 
 
 @pytest.mark.parametrize("cli_id", ["copilot-cli", "mimo-code"])

@@ -214,7 +214,9 @@ def spawn_session(
     # entry point lives in ``provider_env.build_spawn_env`` — shares the
     # extras-cleaning + cockpit-injection contract with the agent-bridge
     # ``spawn.py`` so a security fix lands in both. No provider env here
-    # (the legacy CC-bridge doesn't have a provider abstraction).
+    # (the legacy CC-bridge doesn't have a provider abstraction), but the
+    # ``cli_id`` default is ``claude-code`` — the only CLI this path ever
+    # spawns — so ``CLAUDE_CODE_BASELINE_ENV`` still applies.
     effective_runtime = runtime if runtime is not None else _DEFAULT_RUNTIME
     spawn_env = build_spawn_env(
         provider_env={},
