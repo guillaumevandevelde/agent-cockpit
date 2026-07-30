@@ -126,6 +126,11 @@ export interface RestoreOptions {
   skip_plugins?: boolean;
   skip_skills?: boolean;
   skip_mcp_servers?: boolean;
+  // Destructive-item opt-in: when true (the default), the restore
+  // leaves the live kanban-DB alone. Operators who actually want to
+  // roll the board back to the snapshot explicitly set this to false.
+  // See kanban card 18984c63a… for the original bug.
+  skip_kanban_db?: boolean;
 }
 
 export interface DependencyInstallStatus {

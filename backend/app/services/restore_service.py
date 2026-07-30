@@ -342,6 +342,22 @@ class RestoreService:
                     result.files_skipped += 1
                     continue
 
+                # Skip the kanban DB if requested. The DB lives at the
+                # canonical home-relative path ``.claude-registry/kanban.db``
+                # (the snapshot is renamed to that arcname in the ZIP
+                # via ``backup_service.path_renames``). The destructive
+                # item is protected by default — overwriting it silently
+                # rolls the live board back to the snapshot's state and
+                # leaves a stale -wal/-shm sidecar pair, the failure
+                # mode kanban card 18984c63a… flagged. Operators who
+                # want to roll back set ``skip_kanban_db=False``
+                # explicitly.
+                if options.skip_kanban_db and member.endswith(
+                    ".claude-registry/kanban.db"
+                ):
+                    result.files_skipped += 1
+                    continue
+
                 # Determine the full target path
                 member_target = target_path / member
 
