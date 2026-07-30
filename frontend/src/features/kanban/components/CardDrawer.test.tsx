@@ -1669,6 +1669,49 @@ describe("CardDrawer Subtasks section", () => {
     expect(section.textContent).toMatch(/Completed/);
   });
 
+  it("forwards gatedOn to the subtask ReadyStateBadge so the operator sees the trigger string", () => {
+    // kanban card 960d8038…: the subtask ReadyStateBadge must receive the
+    // child's gatedOn (mirrors CardItem's badge — Column.tsx:12). Without
+    // it, a gated child leaks only the generic "card is gated" tooltip
+    // and the operator has to click into the child to see WHAT it waits on.
+    const parent: Card = { ...baseCard, id: "parent-1" };
+    const gatedChild: Card = {
+      ...baseCard,
+      id: "child-gated",
+      title: "Gated child",
+      parent_card_id: "parent-1",
+      column: "Backlog",
+    };
+
+    const cardMeta = new Map([
+      [
+        "child-gated",
+        {
+          readyState: "gated" as const,
+          blockerTitles: [],
+          gatedOn: "second-executor-provider-onboarded",
+        },
+      ],
+    ]);
+
+    render(
+      <CardDrawerWithRouter
+        card={parent}
+        projectPath="/proj"
+        cards={[parent, gatedChild]}
+        cardMeta={cardMeta}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const badge = screen.getByText("Gated");
+    expect(badge.getAttribute("data-ready-state")).toBe("gated");
+    expect(badge.getAttribute("title")).toContain(
+      "second-executor-provider-onboarded",
+    );
+  });
+
   it("navigates to the clicked child card via the ?card= deep-link", async () => {
     const parent: Card = { ...baseCard, id: "parent-1" };
     const child: Card = {
