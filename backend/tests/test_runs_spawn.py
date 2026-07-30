@@ -251,14 +251,22 @@ def test_anthropic_platform_adds_no_env_flags(monkeypatch, tmp_path):
     # anthropic is the native provider, so it contributes NO provider-specific
     # env vars (contrast Bedrock/MiniMax). It is not "no env flags at all":
     # spawn.py always injects the COCKPIT_* vars (see 9233b8d4 and
-    # test_runs_spawn_env_isolation.py), so assert on the provider vars only.
+    # test_runs_spawn_env_isolation.py) plus the per-CLI baseline
+    # (CLAUDE_CODE_BASELINE_ENV — behaviour every Claude Code spawn needs
+    # regardless of provider), so assert on the provider vars only.
+    from app.services.agentic_cli.provider_env import CLAUDE_CODE_BASELINE_ENV
+
     injected = {
         arg.split("=", 1)[0]
         for prev, arg in zip(argv, argv[1:], strict=False)
         if prev == "-e"
     }
-    assert all(k.startswith("COCKPIT_") for k in injected), (
-        f"anthropic must add no provider env vars, got: {sorted(injected)}"
+    non_provider = {
+        k for k in injected
+        if k.startswith("COCKPIT_") or k in CLAUDE_CODE_BASELINE_ENV
+    }
+    assert injected == non_provider, (
+        f"anthropic must add no provider env vars, got: {sorted(injected - non_provider)}"
     )
     assert spawn.get_spawned_sessions()["repo-abcd"]["provider"] == "anthropic"
 
