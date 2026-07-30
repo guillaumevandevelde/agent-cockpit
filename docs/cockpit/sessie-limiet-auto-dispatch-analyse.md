@@ -450,6 +450,15 @@ elke `agent:`-claimed kaart met de vorige observatie, post één "stilstaand"-co
 `PROGRESS_LIVENESS_ACTION_SECONDS=60min`. Sandcastle / headless transports behouden hun
 eigen liveness-bron (carve-out in de skip-set).
 
+> ⚠️ **Correctie (2026-07-30, kaart `9935076c…`):** dit vangnet vuurt in de praktijk
+> **nooit**. De skip-set bevat naast sandcastle/headless óók `live_sessions` (de
+> tmux-momentopname, `dispatch.py:6535`) — en een gelimiteerde `claude` exit niet, dus
+> hij staat altijd in die set. De carve-out sluit daarmee precies de verzameling uit
+> waarvoor R3 gebouwd is. Gemeten: **0** `progress-liveness`-logregels over de volledige
+> historie, tegenover ~16 000 limiet-detecties. Zie
+> [`subscription-auto-release-analyse.md` §4](./subscription-auto-release-analyse.md)
+> en vervolgkaart `01bde6e9…`.
+
 ### R4 — Maak de pane-detector veilig (kaart C5)
 
 Zodra R1 er is, hoeft de pane-substring-scan alleen nog het geval te dekken waarvoor hij

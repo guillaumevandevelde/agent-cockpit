@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 111 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 112 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -191,7 +191,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Upstream verwijderde Docker-support — overnemen? Trade-off + beslissing](./upstream-docker-removal-decision.md) | 🔵 decided |
 | [Upstream verwijderde Presence — overnemen? Trade-off + beslissing](./upstream-presence-removal-decision.md) | 🔵 decided |
 
-### Analysis (34)
+### Analysis (35)
 
 | Document | Status |
 |---|---|
@@ -224,6 +224,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse](./spawn-test-bridge-sessions-analyse.md) | 🟢 active |
 | [Spec-driven development als single source of truth — analyse](./spec-driven-development-analysis.md) | 🟢 active |
 | [Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor](./spike-same-vendor-multi-account-isolation.md) | 🔵 decided |
+| [Analyse — kan het abonnement zichzelf vrijgeven en de sessies herstarten na een limiet?](./subscription-auto-release-analyse.md) | 🟢 active |
 | [Analyse — Flexibel & maximaal gebruik van abonnementen (usage-aware dispatch-routing)](./subscription-flexibiliteit-analyse.md) | 🟢 active |
 | [Analyse — subscription-pool × auto-dispatcher × kolom-toewijzing](./subscription-pool-dispatch-analyse.md) | 🟢 active |
 | [Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)](./subscription-verbruik-inzicht-analyse.md) | 🟢 active |
