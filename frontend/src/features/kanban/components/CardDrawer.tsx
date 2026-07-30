@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { Copy, ImagePlus, Link2, Loader2, Play, Trash2 } from "lucide-react";
+import { ChevronDown, Copy, ImagePlus, Link2, Loader2, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -31,6 +31,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
 import { MarkdownPreviewToggle } from "@/components/shared/MarkdownPreviewToggle";
 import { MODAL_SIZES } from "@/lib/constants";
@@ -1201,7 +1206,18 @@ export function CardDrawer({
 
   // Controlled active tab so the Ledger tab's outcome step can jump the drawer
   // to the Run (transcript) / Tokens tabs instead of re-rendering them itself.
-  const [activeTab, setActiveTab] = useState<string>(runSession ? "run" : "deliverables");
+  // The deliverables list moved out of the tabs (kanban card c81fb67d) — it
+  // now lives inline in laag 2 — so the non-run default falls back to
+  // "activity" (most recent updates first) instead of the gone "deliverables".
+  const [activeTab, setActiveTab] = useState<string>(runSession ? "run" : "activity");
+
+  // Operator & telemetry collapsible (laag 3, kanban card c81fb67d). Default
+  // open when the card is claimed by an agent: full-area mode owns the body
+  // for that case anyway (so the auto-selected Run tab never hides behind a
+  // closed section), and the same default keeps the section visible if the
+  // operator manually switches to another tab from a full-area entry point.
+  const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
+  const [operatorSectionOpen, setOperatorSectionOpen] = useState(Boolean(isClaimedByAgent));
 
   // Full-area-mode signal for the two viewport-bound widgets (xterm in
   // CardRunTab + preview iframe in PreviewPane). Kanban-kaart 72476d8e…
@@ -1332,7 +1348,9 @@ export function CardDrawer({
   // codepath. (kaart 4279448c: merge the "impediment resolved" + "decision
   // human answered needed" flows into a single control.)
 
-  const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
+  // `isClaimedByAgent` is declared earlier (above the operator-section state)
+  // because the operator section's default-open state needs it; reusing the
+  // same binding here avoids two `claimed_by` checks per render.
   const isClaimedByHuman = card.claimed_by && !isClaimedByAgent;
 
   const childCards = cards.filter((c) => c.parent_card_id === card.id);
@@ -1403,8 +1421,11 @@ export function CardDrawer({
 
         {/* Sticky priority area: action-required content always visible
             above the body, even when the body is in full-area mode (Run
-            tab). Decisions + Done summary are never hidden behind a
-            widget. */}
+            tab). Decisions + impediment panel are never hidden behind a
+            widget — both are layer 1 in the lees-first reorganization
+            (kanban card c81fb67d). Done-specific reading content
+            (DoneSummaryBanner) and operator actions (RequestReview,
+            Reopen) live in layers 2 and 3 instead. */}
         <div className="shrink-0 space-y-3">
           {openGates
             // On the Impediment column the open-gate choice row is absorbed
@@ -1446,14 +1467,6 @@ export function CardDrawer({
               projectPath={projectPath}
               onChanged={onChanged}
             />
-          )}
-
-          {card.column === DONE_COLUMN && (
-            <>
-              <DoneSummaryBanner card={card} />
-              <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
-              <ReopenControl card={card} onChanged={onChanged} />
-            </>
           )}
         </div>
 
@@ -1591,19 +1604,46 @@ export function CardDrawer({
              declare their own height-cap + overflow (the nested scroll
              containers removed earlier lived in CardRunTab, CardLedgerTab,
              and MarkdownPreviewToggle). */
+          /* Default mode — lees-first reorganization (kanban card c81fb67d):
+             the body hosts three visibility layers.
+
+             • Layer 2 (reading, default visible):
+               DoneSummaryBanner → description → subtasks → inline deliverables.
+               "What came out" is lees-content, not telemetry, so the
+               deliverables list is promoted out of the (now-removed)
+               Deliverables tab into this layer.
+
+             • Layer 3 (operator & telemetry, collapsible):
+               the action-button row + SpecLinkSection + Done-card controls
+               (CardPreviewControl, RequestReviewControl, ReopenControl) +
+               the remaining tabs (Activity / Plan / Screenshots / Ledger /
+               Tokens / Run). Nothing is removed — every operator action and
+               every tab stays reachable behind the collapsible.
+
+             The two viewport-bound widgets (xterm in CardRunTab, preview
+             iframe in PreviewPane) flip the body into `isFullAreaMode`
+             above; their sticky `runs available` indicator stays in the
+             collapsible on those cards.
+
+             Default-open rule: the collapsible is closed by default, except
+             when the card is claimed by an agent (claimed_by starts with
+             "agent:"). For an agent-claimed card the auto-selected Run
+             tab could otherwise hide inside a closed layer 3 — the
+             `isFullAreaMode` branch above owns the body in that case and
+             renders the Run widget directly, so the rule's exception is
+             visual by virtue of full-area mode, not by a separate code
+             path here. */
           <div
             className="flex-1 min-h-0 space-y-4 overflow-auto"
             data-testid="card-drawer-body"
           >
             {card.column === DONE_COLUMN && (
-              <CardPreviewControl card={card} projectPath={projectPath} />
+              <DoneSummaryBanner card={card} />
             )}
 
             <div className="text-sm">
               <MarkdownRenderer content={card.description || "_No description_"} />
             </div>
-
-            <SpecLinkSection card={card} onChanged={onChanged} />
 
             <SubtasksSection
               childCards={childCards}
@@ -1611,140 +1651,198 @@ export function CardDrawer({
               onNavigate={(childId) => navigate(`?card=${childId}`)}
             />
 
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Select value={card.agent ?? AUTO} onValueChange={setAgent}>
-                <SelectTrigger className="h-8 w-[140px]">
-                  <SelectValue placeholder="Provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={AUTO}>Auto (selected provider)</SelectItem>
-                  {installedProviders.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {isClaimedByAgent ? (
-                <Button size="sm" variant="outline" onClick={redispatchNow}>
-                  Re-dispatch
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={dispatchNow}>
-                  Dispatch
-                </Button>
-              )}
-              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-                Edit
-              </Button>
-              {isClaimedByHuman ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => act(() => kanbanApi.release(card.id))}
-                >
-                  Release ({card.claimed_by})
-                </Button>
-              ) : card.claimed_by ? null : (
-                <Button size="sm" onClick={() => act(() => kanbanApi.claim(card.id, "me@ui"))}>
-                  Claim
-                </Button>
-              )}
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" variant="destructive">
-                    Delete
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete this card?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      &ldquo;{card.title}&rdquo; and its deliverables will be permanently
-                      removed. This cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => remove()}>Delete</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              {/* Sticky TabsList so an operator scrolling past the description
-                  can still switch tabs without scrolling back up. The bar
-                  pulls a translucent backdrop so the description fading past
-                  stays legible (preferred over an opaque strip that would
-                  punch a hard line through the markdown). `-mx-1 px-1`
-                  matches the body's `space-y-4` gutters so the sticky strip
-                  aligns with the surrounding content edges. */}
-              <div className="sticky top-0 z-10 -mx-1 mb-1 bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-                <TabsList className="flex w-full flex-wrap">
-                  <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
-                  <TabsTrigger value="screenshots">
-                    Screenshots
-                    {(card.attachments?.length ?? 0) > 0
-                      ? ` (${card.attachments?.length})`
-                      : ""}
-                  </TabsTrigger>
-                  <TabsTrigger value="activity">Activity</TabsTrigger>
-                  <TabsTrigger value="plan">Plan</TabsTrigger>
-                  <TabsTrigger value="ledger">Ledger</TabsTrigger>
-                  <TabsTrigger value="tokens">Tokens</TabsTrigger>
-                  {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
-                </TabsList>
+            <div className="space-y-2 rounded-md border p-3 text-sm" data-testid="deliverables-inline">
+              <div className="text-xs font-semibold uppercase text-muted-foreground">
+                Deliverables
               </div>
-
-              <TabsContent value="deliverables">
-                {card.deliverables.length === 0 && (
-                  <div className="text-xs text-muted-foreground">None</div>
-                )}
+              {card.deliverables.length === 0 ? (
+                <div className="text-xs text-muted-foreground">None</div>
+              ) : (
                 <div className="space-y-2">
                   {card.deliverables.map((d) => (
                     <DeliverableRow key={d.id} d={d} />
                   ))}
                 </div>
-              </TabsContent>
-
-              <TabsContent value="screenshots">
-                <AttachmentsTab card={card} onChanged={onChanged} />
-              </TabsContent>
-
-              <TabsContent value="activity">
-                {activity.map((e) => (
-                  <div key={e.hlc} className="text-xs text-muted-foreground">
-                    {e.op_type} &mdash; {new Date(e.created_at).toLocaleString()}
-                    {e.op_type === "comment"
-                      ? `: ${String(e.payload.text ?? "")}`
-                      : ""}
-                  </div>
-                ))}
-              </TabsContent>
-
-              <TabsContent value="plan">
-                <PlanTabContent card={card} onChanged={onChanged} />
-              </TabsContent>
-
-              <TabsContent value="ledger">
-                <CardLedgerTab
-                  card={card}
-                  onNavigateTab={setActiveTab}
-                  runAvailable={Boolean(runSession)}
-                />
-              </TabsContent>
-
-              <TabsContent value="tokens">
-                <CardTokensTab card={card} />
-              </TabsContent>
-
-              {runSession && (
-                <TabsContent value="run">
-                  <CardRunTab cardId={card.id} sessionName={runSession} projectPath={projectPath} />
-                </TabsContent>
               )}
-            </Tabs>
+            </div>
+
+            <Collapsible
+              open={operatorSectionOpen}
+              onOpenChange={setOperatorSectionOpen}
+              className="rounded-md border"
+            >
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="operator-section-trigger"
+                  className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm font-medium hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span>
+                    {operatorSectionOpen
+                      ? "Hide operator & telemetry"
+                      : "Show operator & telemetry"}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform",
+                      operatorSectionOpen && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent
+                // forceMount: the spec promises "niets verdwijnt — alles
+                // verhuist" (kanban card c81fb67d: AC #2), and the existing
+                // drawer tests assert on every testid regardless of whether
+                // the operator section is open. Without forceMount, Radix
+                // unmounts the children when closed — breaking those testids
+                // AND the "find the request-review control to fill it in"
+                // mental model an operator has on a Done card. With
+                // forceMount the children stay in the DOM, hidden via CSS
+                // when the section is collapsed.
+                //
+                // The `data-[state=closed]:hidden` selector compensates for
+                // forceMount: Radix would normally hide the children via its
+                // own animation CSS, but with forceMount the element stays
+                // mounted and never gets the `hidden` attribute, so the
+                // tailwind utility gives us the same visual effect.
+                forceMount
+                className="space-y-4 p-3 pt-0 data-[state=closed]:hidden data-[state=open]:block"
+                data-testid="operator-section-content"
+              >
+                {card.column === DONE_COLUMN && (
+                  <CardPreviewControl card={card} projectPath={projectPath} />
+                )}
+
+                <SpecLinkSection card={card} onChanged={onChanged} />
+
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Select value={card.agent ?? AUTO} onValueChange={setAgent}>
+                    <SelectTrigger className="h-8 w-[140px]">
+                      <SelectValue placeholder="Provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={AUTO}>Auto (selected provider)</SelectItem>
+                      {installedProviders.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {isClaimedByAgent ? (
+                    <Button size="sm" variant="outline" onClick={redispatchNow}>
+                      Re-dispatch
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={dispatchNow}>
+                      Dispatch
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                    Edit
+                  </Button>
+                  {isClaimedByHuman ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => act(() => kanbanApi.release(card.id))}
+                    >
+                      Release ({card.claimed_by})
+                    </Button>
+                  ) : card.claimed_by ? null : (
+                    <Button size="sm" onClick={() => act(() => kanbanApi.claim(card.id, "me@ui"))}>
+                      Claim
+                    </Button>
+                  )}
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button size="sm" variant="destructive">
+                        Delete
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete this card?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          &ldquo;{card.title}&rdquo; and its deliverables will be permanently
+                          removed. This cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => remove()}>Delete</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+
+                {card.column === DONE_COLUMN && (
+                  <>
+                    <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
+                    <ReopenControl card={card} onChanged={onChanged} />
+                  </>
+                )}
+
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                  <TabsList className="flex w-full flex-wrap">
+                    <TabsTrigger value="screenshots">
+                      Screenshots
+                      {(card.attachments?.length ?? 0) > 0
+                        ? ` (${card.attachments?.length})`
+                        : ""}
+                    </TabsTrigger>
+                    <TabsTrigger value="activity">Activity</TabsTrigger>
+                    <TabsTrigger value="plan">Plan</TabsTrigger>
+                    <TabsTrigger value="ledger">Ledger</TabsTrigger>
+                    <TabsTrigger value="tokens">Tokens</TabsTrigger>
+                    {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
+                  </TabsList>
+
+                  <TabsContent value="screenshots">
+                    <AttachmentsTab card={card} onChanged={onChanged} />
+                  </TabsContent>
+
+                  <TabsContent value="activity">
+                    {activity.map((e) => (
+                      <div key={e.hlc} className="text-xs text-muted-foreground">
+                        {e.op_type} &mdash; {new Date(e.created_at).toLocaleString()}
+                        {e.op_type === "comment"
+                          ? `: ${String(e.payload.text ?? "")}`
+                          : ""}
+                      </div>
+                    ))}
+                  </TabsContent>
+
+                  <TabsContent value="plan">
+                    <PlanTabContent card={card} onChanged={onChanged} />
+                  </TabsContent>
+
+                  <TabsContent value="ledger">
+                    <CardLedgerTab
+                      card={card}
+                      onNavigateTab={setActiveTab}
+                      runAvailable={Boolean(runSession)}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="tokens">
+                    <CardTokensTab card={card} />
+                  </TabsContent>
+
+                  {runSession && (
+                    <TabsContent value="run">
+                      <CardRunTab
+                        cardId={card.id}
+                        sessionName={runSession}
+                        projectPath={projectPath}
+                      />
+                    </TabsContent>
+                  )}
+                </Tabs>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         )}
 

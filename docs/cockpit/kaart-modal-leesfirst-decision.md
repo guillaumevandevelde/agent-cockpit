@@ -156,3 +156,7 @@ component te herdefiniëren.
 De afhankelijkheid is een echt contract, geen volgorde-voorkeur: kaart 2 plaatst zijn
 lagen *binnen* de body-container die kaart 1 introduceert, en de "volvlak"-modus voor de
 Run-tab uit kaart 2 bestaat alleen als kaart 1's scroll-contract er is.
+
+## 6. Status
+
+✅ Kaart 2 geïmplementeerd (kaart `c81fb67d`): `CardDrawer.tsx` herstructureerd in de drie lagen uit §4; laag 3 achter een `Collapsible` met `forceMount` (zodat alle bestaande `data-testid`-hooks queryable blijven wanneer de operator-sectie ingeklapt is); default-open-regel volgt `card.claimed_by?.startsWith("agent:")`; bestaande `CardDrawer.test.tsx`-tests (57) blijven groen, plus 4 nieuwe tests in `describe("CardDrawer three-layer reorganization (lees-first)")`.
