@@ -146,7 +146,11 @@ describe("Board lane collapsing", () => {
     fireEvent.drop(rail, {
       dataTransfer: { getData: () => "a" },
     });
-    expect(onDropCardAt).toHaveBeenCalledWith("a", "reviewer", 0);
+    // Kanban card e9089ecad8e64b19a25bdf59804b70de: drop target is now
+    // an id-or-null (the card above which to drop), not a numeric index.
+    // null here means "after the last visible card" — the rail has zero
+    // visible cards, so it collapses to "append at end of the column".
+    expect(onDropCardAt).toHaveBeenCalledWith("a", "reviewer", null);
   });
 });
 
@@ -216,6 +220,9 @@ describe("Board lanes for columns without a kanban_columns row", () => {
     fireEvent.drop(screen.getByTestId("kanban-column-Backlog"), {
       dataTransfer: { getData: () => "b" },
     });
-    expect(onDropCardAt).toHaveBeenCalledWith("b", "Backlog", 0);
+    // Same drop-target-by-id contract as above — null here because the
+    // test fires drop without a preceding dragOver (no card id to land
+    // on), so the helper receives "end of filtered view".
+    expect(onDropCardAt).toHaveBeenCalledWith("b", "Backlog", null);
   });
 });

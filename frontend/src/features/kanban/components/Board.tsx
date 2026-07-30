@@ -39,7 +39,10 @@ export function Board({
   columns: KanbanColumn[];
   cards: Card[];
   onOpen: (c: Card) => void;
-  onDropCardAt: (cardId: string, column: string, index: number) => void;
+  // `dropBeforeId` is the id of the card above which a drop would land;
+  // null = after the last visible card. Resolved against the unfiltered
+  // column list in KanbanPage so the drag survives the active filter.
+  onDropCardAt: (cardId: string, column: string, dropBeforeId: string | null) => void;
   onReorderColumns?: (sourceId: string, targetId: string) => void;
   cardMeta?: Map<string, CardMeta>;
   subtaskCounts?: Map<string, SubtaskSummary>;
