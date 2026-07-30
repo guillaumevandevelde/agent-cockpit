@@ -36,7 +36,11 @@ const PK = "git:example.com/me/repo";
 
 async function flushLoads() {
   await waitFor(() => {
-    expect(kanbanApi.getSubscriptionPool).toHaveBeenCalledWith(PK);
+    // Per-column tails (kaart b36ca702…): the dialog reads the pool for the
+    // selected column; these tests never pick one, so the argument is the
+    // board-wide `null`. Asserting it explicitly keeps the exact-args match
+    // honest instead of loosening it to `expect.anything()`.
+    expect(kanbanApi.getSubscriptionPool).toHaveBeenCalledWith(PK, null);
     expect(kanbanApi.getActiveSubscriptionOverride).toHaveBeenCalledWith(PK);
   });
 }
@@ -231,7 +235,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
           endpoint_name: null,
           drempel: 0.9,
         },
-      ]),
+      ], null),
     );
   });
 
@@ -294,7 +298,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
           endpoint_name: null,
           drempel: 0.9,
         },
-      ]),
+      ], null),
     );
   });
 
@@ -352,7 +356,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
     const clearBtn = screen.getByRole("button", { name: /^clear pool$/i });
     fireEvent.click(clearBtn);
     await waitFor(() =>
-      expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, null),
+      expect(kanbanApi.setSubscriptionPool).toHaveBeenCalledWith(PK, null, null),
     );
     expect(toast.success).toHaveBeenCalledWith(
       expect.stringMatching(/pool.*cleared/i),
@@ -459,7 +463,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
           endpoint_name: "groq-free",
           drempel: 0.9,
         },
-      ]),
+      ], null),
     );
   });
 
@@ -522,7 +526,7 @@ describe("SubscriptionPoolDialog — pool section", () => {
           endpoint_name: null,
           drempel: 0.9,
         },
-      ]),
+      ], null),
     );
     expect(
       screen.queryByRole("combobox", { name: "Endpoint for pool entry 1" }),

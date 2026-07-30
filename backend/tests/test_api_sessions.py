@@ -90,6 +90,33 @@ async def test_list_sessions_rejects_path_traversal_in_project_folder():
 
 
 @pytest.mark.asyncio
+async def test_list_sessions_rejects_path_traversal_even_without_projects_dir(monkeypatch, tmp_path):
+    """The traversal guard must not depend on ``~/.claude/projects`` existing.
+
+    It used to: the ``projects_dir.exists()`` early return sat *above* the
+    guard, so on a host without that directory a ``../..`` was answered with
+    an empty 200. Every dev box has the directory, so the test above passed
+    locally and only went red on CI — which is exactly the shape of bug that
+    survives for weeks. Pin the ordering here so a future refactor that moves
+    the guard back down fails on any machine.
+    """
+    from app.services import session_service as svc
+
+    monkeypatch.setattr(
+        svc, "get_claude_projects_dir", lambda: tmp_path / "does-not-exist",
+    )
+    async with _client() as ac:
+        r = await ac.get("/api/v1/sessions", params={"project_folder": "../.."})
+        assert r.status_code == 500, r.text
+        # Sanity: the same absent directory answers a normal call with an
+        # empty 200, so the 500 above really is the guard and not the
+        # missing directory itself.
+        ok = await ac.get("/api/v1/sessions")
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["sessions"] == []
+
+
+@pytest.mark.asyncio
 async def test_pending_queue_happy_path():
     async with _client() as ac:
         r = await ac.get("/api/v1/sessions/pending-queue")
