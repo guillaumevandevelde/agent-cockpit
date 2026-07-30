@@ -72,6 +72,12 @@ export function RestoreWizard({
   const [installDependencies, setInstallDependencies] = useState(true);
   const [skipPlugins, setSkipPlugins] = useState(false);
   const [skipSkills, setSkipSkills] = useState(false);
+  // The kanban DB is the destructive item: overwriting it silently
+  // rolls the live board back to the snapshot's state and leaves a
+  // stale -wal/-shm sidecar pair (kanban card 18984c63a…). Default
+  // to skip so a "click-through Restore" can never lose the board;
+  // operators who actually want to roll back opt in explicitly.
+  const [skipKanbanDb, setSkipKanbanDb] = useState(true);
   const [dryRun, setDryRun] = useState(false);
 
   const fetchRestorePlan = useCallback(async () => {
@@ -117,6 +123,7 @@ export function RestoreWizard({
     setInstallDependencies(true);
     setSkipPlugins(false);
     setSkipSkills(false);
+    setSkipKanbanDb(true);
     setDryRun(false);
   };
 
@@ -171,6 +178,7 @@ export function RestoreWizard({
         dry_run: dryRun,
         skip_plugins: skipPlugins,
         skip_skills: skipSkills,
+        skip_kanban_db: skipKanbanDb,
       };
 
       const result = await apiClient<RestoreResult>(
@@ -286,10 +294,12 @@ export function RestoreWizard({
             selectedFiles={selectedFiles}
             skipSkills={skipSkills}
             skipPlugins={skipPlugins}
+            skipKanbanDb={skipKanbanDb}
             onSelectAllFiles={handleSelectAllFiles}
             onFileToggle={handleFileToggle}
             onSkipSkillsChange={setSkipSkills}
             onSkipPluginsChange={setSkipPlugins}
+            onSkipKanbanDbChange={setSkipKanbanDb}
           />
         );
 
@@ -313,6 +323,7 @@ export function RestoreWizard({
             selectedFiles={selectedFiles}
             skipSkills={skipSkills}
             skipPlugins={skipPlugins}
+            skipKanbanDb={skipKanbanDb}
             installDependencies={installDependencies}
             dryRun={dryRun}
             onDryRunChange={setDryRun}
