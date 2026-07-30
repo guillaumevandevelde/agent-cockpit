@@ -1151,6 +1151,7 @@ function SubtasksSection({
                   state={meta.readyState}
                   blockerTitles={meta.blockerTitles}
                   missingDepIds={meta.missingDepIds}
+                  gatedOn={meta.gatedOn}
                 />
               )}
             </button>
