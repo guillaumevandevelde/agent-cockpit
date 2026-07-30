@@ -361,12 +361,23 @@ class SessionService:
         limits *before* parsing any JSONL content. Only the files that will appear
         in the result set are parsed (or served from cache).
         """
+        # Validate BEFORE the projects_dir existence check, matching
+        # `get_session_detail`. With the order reversed, a host without
+        # ~/.claude/projects returned an empty 200 for a traversal attempt while
+        # a host with it returned an error — so whether the guard ran at all
+        # depended on unrelated filesystem state. Not exploitable (there is
+        # nothing to read when the directory is absent), but a validation guard
+        # that only fires on some machines is one that can't be tested, and it
+        # is exactly why test_list_sessions_rejects_path_traversal_in_project_folder
+        # passed locally and failed on the CI runner.
+        if project_folder:
+            self._ensure_safe_path_component(project_folder, "project_folder")
+
         if not self.projects_dir.exists():
             return SessionListResponse(sessions=[], total=0)
 
         # Determine which project folders to scan
         if project_folder:
-            self._ensure_safe_path_component(project_folder, "project_folder")
             folders = [self.projects_dir / project_folder]
         else:
             folders = [f for f in self.projects_dir.iterdir() if f.is_dir()]
