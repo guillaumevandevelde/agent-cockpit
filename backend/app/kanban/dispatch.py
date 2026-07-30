@@ -1183,6 +1183,7 @@ async def _pick_pool_choice(
 
 async def _pool_spillover_available(
     session, *, project_key: str, limited_provider: str, cli_id: str,
+    column: str | None = None,
 ) -> bool:
     """Fase 2 (analyse §4 Optie B / §5): can the just-limited card spill
     over onto another subscription in the pool instead of waiting for
@@ -1207,7 +1208,7 @@ async def _pool_spillover_available(
     caller sets the pause *after* this check — the just-hit provider is
     unavailable regardless of write ordering.
     """
-    entries = await get_subscription_pool(session, project_key)
+    entries = await get_subscription_pool(session, project_key, column=column)
     if not entries:
         return False
     paused = await _paused_providers_for_pool(session, project_key=project_key)
@@ -1547,7 +1548,16 @@ async def resolve_effective_provider_and_model(
     override_provider = column_override.get("provider") or None
     override_model = column_override.get("model") or None
     global_override = await get_active_subscription_override(session, project_key)
-    pool_entries = await get_subscription_pool(session, project_key)
+    # Kaart b36ca702…: the per-column tail takes precedence over the
+    # board-wide pool when one is configured for ``target_agent``.
+    # ``get_subscription_pool(..., column=...)`` returns the column-
+    # specific tail if present (including an explicit empty ``[]``),
+    # or falls back to the board-wide pool otherwise. ``column=None``
+    # preserves the legacy board-wide-only read (used by tests that
+    # don't exercise column context).
+    pool_entries = await get_subscription_pool(
+        session, project_key, column=target_agent,
+    )
     column_default_provider = await get_column_default_provider(session, project_key, target_agent)
     # Spillover-keten (kaart 0172e94d…): ``[kolom-default-head] ++
     # [pool-entries minus de matchende head]``. Wanneer er geen pool
@@ -6242,6 +6252,14 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
         )
         spillover = False
         if limited_provider is not None:
+            # Kaart b36ca702…: the per-column spillover tail lives
+            # under ``subscription_pool:<project_key>:<column>``. We
+            # pass ``card.column`` so the spillover check consults
+            # the same tail the dispatch resolver will, not the
+            # board-wide pool — matching the acceptance criterion
+            # "reviewer met lege staart blijft bij een limiet op
+            # To Resume met de reset-tijd staan; engineer met staart
+            # [anthropic] wordt direct herdispatchbaar".
             spillover = await _pool_spillover_available(
                 ks, project_key=project_key,
                 limited_provider=limited_provider,
@@ -6249,6 +6267,7 @@ async def move_limited_session_to_resume(cwd: str, *, scheduled_at: str | None =
                     card, phase=resolve_phase(card),
                     known_clis=_known_cli_ids(),
                 ),
+                column=card.column,
             )
         effective_scheduled_at = None if spillover else scheduled_at
 

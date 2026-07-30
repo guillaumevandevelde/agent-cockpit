@@ -430,3 +430,203 @@ async def test_pool_and_override_coexist():
         pool = await subscription_pool.get_subscription_pool(s, PK)
     assert override == {"provider": "minimax", "model": None, "endpoint_name": None}
     assert pool == _valid_pool()
+
+
+# ---- per-column spillover tail (kaart b36ca702…) ---------------------------
+#
+# Per-column tails live under ``subscription_pool:<project_key>:<column>``
+# with the board-wide key as fallback. An *explicitly empty* column tail is
+# a valid, distinct value ("nooit uitwijken") — distinguishable from
+# "geen rij" (= erf de bord-brede staart). The acceptance criterion
+# ``reviewer met lege staart blijft bij een limiet op To Resume met de
+# reset-tijd staan; engineer met staart [anthropic] wordt direct
+# herdispatchbaar`` is pinned end-to-end in
+# ``test_subscription_pool_dispatch.py::test_*_per_column_*``.
+
+
+@pytest.mark.asyncio
+async def test_get_subscription_pool_without_column_returns_board_wide():
+    """``get_subscription_pool(s, pk)`` (no column argument) returns the
+    board-wide pool — backwards-compatible with kaart 8f40d443… callers."""
+    entries = _valid_pool()
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, entries)
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        got = await subscription_pool.get_subscription_pool(s, PK)
+    assert got == entries
+
+
+@pytest.mark.asyncio
+async def test_get_subscription_pool_with_column_falls_back_to_board_wide():
+    """Reading per-column with no column-specific row → fall back to the
+    board-wide pool. This is the "erf de bord-brede staart" path."""
+    entries = _valid_pool()
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, entries)
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        got = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+    assert got == entries
+
+
+@pytest.mark.asyncio
+async def test_set_and_get_pool_with_column_round_trips():
+    """Per-column pool lives under
+    ``subscription_pool:<project_key>:<column>`` and round-trips through
+    KanbanMeta without touching the board-wide key."""
+    col_entries = [
+        subscription_pool.PoolEntry(
+            provider="anthropic", model=None, drempel=0.9,
+        ),
+    ]
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(
+            s, PK, col_entries, column="reviewer",
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        got = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+    assert got == col_entries
+
+
+@pytest.mark.asyncio
+async def test_get_subscription_pool_per_column_does_not_leak_board_wide():
+    """A project with only a board-wide pool returns that pool for any
+    column that has no column-specific row; the column argument does
+    NOT add a column filter on top."""
+    board = [subscription_pool.PoolEntry(
+        provider="minimax", model=None, drempel=0.9,
+    )]
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, board)
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        a = await subscription_pool.get_subscription_pool(s, PK, column="analyst")
+        e = await subscription_pool.get_subscription_pool(s, PK, column="engineer")
+        r = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+    assert a == board
+    assert e == board
+    assert r == board
+
+
+@pytest.mark.asyncio
+async def test_per_column_pool_overrides_board_wide_for_that_column():
+    """A column with its own pool reads its own value; other columns
+    still see the board-wide pool."""
+    board = [subscription_pool.PoolEntry(
+        provider="minimax", model=None, drempel=0.9,
+    )]
+    col = [subscription_pool.PoolEntry(
+        provider="anthropic", model=None, drempel=0.9,
+    )]
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, board)
+        await subscription_pool.set_subscription_pool(s, PK, col, column="reviewer")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        reviewer = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+        engineer = await subscription_pool.get_subscription_pool(s, PK, column="engineer")
+        board_pool = await subscription_pool.get_subscription_pool(s, PK)
+    assert reviewer == col
+    assert engineer == board
+    assert board_pool == board
+
+
+@pytest.mark.asyncio
+async def test_set_per_column_pool_to_none_clears_only_that_column():
+    """``set_subscription_pool(s, pk, None, column=...)`` deletes only
+    the column-specific row — the board-wide row stays intact. After
+    clearing, the column inherits the board-wide pool again."""
+    board = [subscription_pool.PoolEntry(
+        provider="minimax", model=None, drempel=0.9,
+    )]
+    col = [subscription_pool.PoolEntry(
+        provider="anthropic", model=None, drempel=0.9,
+    )]
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, board)
+        await subscription_pool.set_subscription_pool(s, PK, col, column="reviewer")
+        await subscription_pool.set_subscription_pool(s, PK, None, column="reviewer")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        reviewer = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+        board_pool = await subscription_pool.get_subscription_pool(s, PK)
+    assert reviewer == board
+    assert board_pool == board
+
+
+@pytest.mark.asyncio
+async def test_set_per_column_pool_to_empty_list_is_valid_and_distinguishable():
+    """The acceptance criterion: an *explicitly empty* column tail is a
+    valid value ("nooit uitwijken"), distinct from "geen rij" (which
+    inherits the board-wide tail). The board-wide validator still
+    rejects ``[]`` — the per-column path uses a separate validator
+    branch so an operator can record "I considered this and said no
+    spillover" without losing the inherited board-wide default."""
+    async with KanbanSessionLocal() as s:
+        # Should NOT raise — empty per-column is the "no spillover"
+        # operator choice.
+        await subscription_pool.set_subscription_pool(
+            s, PK, [], column="reviewer",
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        # Explicit empty → reads back as [], NOT None.
+        got = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+    assert got == []
+    # And distinguishable from "no row": setting to None clears it,
+    # which would make the reader fall back to the board-wide pool.
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, None, column="reviewer")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cleared = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+    assert cleared is None
+
+
+@pytest.mark.asyncio
+async def test_set_per_column_empty_inherits_board_wide_when_only_board_set():
+    """When only the board-wide pool is set, an explicit-empty column
+    row is still a valid empty tail — *not* inherited from the
+    board-wide tail. The operator's "no spillover for reviewer"
+    choice is preserved verbatim, even when a board-wide pool exists."""
+    board = [subscription_pool.PoolEntry(
+        provider="minimax", model=None, drempel=0.9,
+    )]
+    async with KanbanSessionLocal() as s:
+        await subscription_pool.set_subscription_pool(s, PK, board)
+        await subscription_pool.set_subscription_pool(s, PK, [], column="reviewer")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        reviewer = await subscription_pool.get_subscription_pool(s, PK, column="reviewer")
+        engineer = await subscription_pool.get_subscription_pool(s, PK, column="engineer")
+    assert reviewer == []  # explicit empty wins
+    assert engineer == board  # other columns inherit
+
+
+@pytest.mark.asyncio
+async def test_per_column_pool_still_validates_entries():
+    """Per-column validation keeps the same per-entry rules as the
+    board-wide validator: unknown provider, drempel out of range, or
+    compatible-without-endpoint are still rejected. Only the "empty
+    list" branch is widened — the per-entry allow-list stays strict
+    so a per-column tail can never smuggle in a typo'd provider."""
+    async with KanbanSessionLocal() as s:
+        with pytest.raises(ValueError):
+            await subscription_pool.set_subscription_pool(
+                s, PK,
+                [subscription_pool.PoolEntry(
+                    provider="openai", model=None, drempel=0.9,
+                )],
+                column="reviewer",
+            )
+    async with KanbanSessionLocal() as s:
+        with pytest.raises(ValueError):
+            await subscription_pool.set_subscription_pool(
+                s, PK,
+                [subscription_pool.PoolEntry(
+                    provider="anthropic", model=None, drempel=1.5,
+                )],
+                column="reviewer",
+            )

@@ -1747,10 +1747,14 @@ async def set_subscription_override(payload: ActiveSubscriptionOverrideRequest):
 
 
 @router.get("/subscription-pool")
-async def get_subscription_pool(project_key: str = Query(...)):
+async def get_subscription_pool(
+    project_key: str = Query(...),
+    column: str | None = Query(None),
+):
     """Read the subscription pool (fase 1b of the analyse).
 
-    Returns ``{"project_key": ..., "pool": <list[PoolEntry]|None>}``.
+    Returns ``{"project_key": ..., "pool": <list[PoolEntry]|None>,
+    "column": <column|null>}``.
     ``None`` means no pool is configured — the dispatcher falls back to
     today's column-default chain exactly as before. Each ``PoolEntry``
     is shaped as ``{cli, provider, model|null, drempel, endpoint_name}``
@@ -1768,14 +1772,27 @@ async def get_subscription_pool(project_key: str = Query(...)):
     UI that re-saved the response would silently lose the endpoint
     binding of an ``anthropic-compatible`` entry — the storage
     fail-fast check would only catch the misconfiguration at the next
-    save, and the dispatch fail-fast only at the next spawn."""
+    save, and the dispatch fail-fast only at the next spawn.
+
+    Kaart b36ca702…: the optional ``column`` query parameter selects
+    the per-column tail (``subscription_pool:<project_key>:<column>``).
+    Without it, the read is board-wide and returns the same shape as
+    before (backwards compatible). With it, the response's ``pool``
+    field is the per-column tail if one is configured (including the
+    explicit-empty ``[]`` value), or the board-wide pool when the
+    column has no per-column row. The selected ``column`` is echoed
+    back in the response so a UI that re-saves can keep the round-trip
+    consistent without re-reading the URL it just hit."""
     from app.kanban import subscription_pool as pool_mod
     async with KanbanSessionLocal() as s:
-        entries = await pool_mod.get_subscription_pool(s, project_key)
+        entries = await pool_mod.get_subscription_pool(
+            s, project_key, column=column,
+        )
     if entries is None:
-        return {"project_key": project_key, "pool": None}
+        return {"project_key": project_key, "pool": None, "column": column}
     return {
         "project_key": project_key,
+        "column": column,
         "pool": [
             {"cli": e.cli, "provider": e.provider,
              "model": e.model, "drempel": e.drempel,
@@ -1795,18 +1812,55 @@ async def set_subscription_pool(payload: SubscriptionPoolRequest):
     validated against the same allow-list as the active-subscription-
     override, drempel must be in (0, 1], and ``cli`` must be non-empty.
     Invalid input is rejected with 422 so the caller knows nothing
-    landed."""
+    landed.
+
+    Kaart b36ca702…: the optional ``column`` field in the request body
+    selects the per-column tail. Pass ``column`` + ``pool: []`` to
+    record an explicit "nooit uitwijken" choice (operator-set empty
+    tail, distinct from "no row" which inherits the board-wide pool).
+    Pass ``column`` + ``pool: null`` to delete the per-column row and
+    fall back to the board-wide pool. Without ``column`` the write is
+    board-wide and the original "empty list rejected" rule still
+    applies — that asymmetry protects the board-wide UI from
+    accidentally turning the dispatcher into a no-op while the row
+    still shows the operator's last saved pool.
+
+    Kaart b36ca702… FCR-F2: when ``column`` is set, validate it
+    against the project's real ``kanban_columns`` rows before
+    persisting. A raw API caller could otherwise write a stray key
+    (``subscription_pool:<project_key>:../stray``) that the
+    dispatcher would never consult — same DB but silently orphaned.
+    Both the set (``pool != None``) and clear (``pool: None``) paths
+    gate on the same allow-list for symmetry: clearing a phantom
+    column has the same blast radius as writing one."""
     from app.kanban import subscription_pool as pool_mod
+    from app.kanban.models import KanbanColumn
     async with KanbanSessionLocal() as s:
+        if payload.column:
+            col_row = await s.execute(
+                select(KanbanColumn.id).where(
+                    KanbanColumn.project_key == payload.project_key,
+                    KanbanColumn.name == payload.column,
+                )
+            )
+            if col_row.scalar_one_or_none() is None:
+                raise HTTPException(
+                    422,
+                    f"unknown column {payload.column!r} for project "
+                    f"{payload.project_key!r}; only configured "
+                    f"kanban_columns are valid per-column pool scopes",
+                )
         try:
             await pool_mod.set_subscription_pool(
                 s, payload.project_key, payload.entries,
+                column=payload.column,
             )
         except ValueError as e:
             raise HTTPException(422, str(e))
         await s.commit()
     return {
         "project_key": payload.project_key,
+        "column": payload.column,
         "pool": payload.pool,
     }
 
