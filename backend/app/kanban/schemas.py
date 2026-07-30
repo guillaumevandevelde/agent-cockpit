@@ -328,6 +328,15 @@ class CardResponse(BaseModel):
     # in Done). Both null when no such op exists. See service.enrich_done_info.
     done_summary: str | None = None
     completed_at: datetime | None = None
+    # True when that summary belongs to an *earlier* lifecycle of the card:
+    # it was written, and afterwards the card moved back into an active
+    # column (reopen, impediment, redispatch). The text stays on the wire
+    # (it is still historically true, and dispatch quotes it as the prior
+    # decision) but this flag says it is not the card's current state — so a
+    # resuming session doesn't read a stale done_summary + deliverable as
+    # "a concurrent session already shipped this". False when no summary
+    # exists. See service.enrich_done_info_with_staleness (kaart 51813327…).
+    done_summary_superseded: bool = False
     # Classification of *why* the card is in the Impediment column, so the
     # board UI can render a different affordance per cause (operator needs
     # to know "needs an answer" vs. "needs a Redispatch" vs. "no question
