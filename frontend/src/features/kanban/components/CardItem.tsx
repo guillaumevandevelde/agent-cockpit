@@ -7,6 +7,7 @@ import {
   Rocket,
   type LucideProps,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Card as UiCard } from "@/components/ui/card";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
@@ -269,6 +270,19 @@ export function CardItem({
   // picks up the new session name when the call returns; toast surfaces the
   // success/failure so the operator gets immediate feedback either way.
   const [redispatching, setRedispatching] = useState(false);
+  const navigate = useNavigate();
+  // Impediment cards bypass the drawer entirely: clicking one navigates
+  // straight to the dedicated `/kanban/impediment/<id>` page, where the
+  // long-form `**Impediment:**` question and the action surface live in
+  // parallel columns instead of stacked inside a 1152px × 85vh modal
+  // (kaart 626e05e3… — "impediment kaart niet leesbaar, kan niet scrollen").
+  const openOrResolve = () => {
+    if (card.column === "Impediment") {
+      navigate(`/kanban/impediment/${card.id}`);
+      return;
+    }
+    onOpen(card);
+  };
   const redispatch = async (e: React.MouseEvent | React.KeyboardEvent) => {
     // Stop the click/keypress from bubbling up to the card's onOpen / onKeyDown
     // — a Redispatch button inside a clickable card must NOT open the drawer.
@@ -292,11 +306,11 @@ export function CardItem({
       className={`${CLICKABLE_CARD} p-2 mb-1.5`}
       role="button"
       tabIndex={0}
-      onClick={() => onOpen(card)}
+      onClick={() => openOrResolve()}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpen(card);
+          openOrResolve();
         }
       }}
       data-card-id={card.id}

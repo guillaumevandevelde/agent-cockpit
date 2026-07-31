@@ -2,6 +2,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+// CardItem now calls useNavigate() for Impediment cards (kaart 626e05e3…).
+// The CardItem tests render the component in isolation without a Router,
+// so we stub useNavigate to a no-op. The Impediment-specific navigation
+// path is covered by ImpedimentPage.test.tsx; these tests focus on the
+// card-surface rendering and the non-Impediment onClick → onOpen flow.
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+  };
+});
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));

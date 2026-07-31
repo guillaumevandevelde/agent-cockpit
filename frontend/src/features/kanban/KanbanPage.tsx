@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -39,6 +39,7 @@ export default function KanbanPage() {
   const [cardsLoaded, setCardsLoaded] = useState(false);
   const [open, setOpen] = useState<Card | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const [editingColumns, setEditingColumns] = useState(false);
   const [editingWorkTypeMappings, setEditingWorkTypeMappings] = useState(false);
@@ -89,8 +90,19 @@ export default function KanbanPage() {
   // card always pushes a history entry so browser-back closes the drawer
   // instead of leaving the kanban page; closing replaces the entry so it
   // doesn't leave a forward-navigation ghost.
+  //
+  // Impediment cards are special-cased: they no longer open the drawer at
+  // all (kaart 626e05e3… — the modal couldn't fit the long question + the
+  // action surface on most viewports). The dedicated page at
+  // `/kanban/impediment/<id>` is the single entry point for resolving one;
+  // we replace the current history entry so the back button returns to the
+  // board, not to a `?card=<id>` URL the drawer can't service anymore.
   const openCard = useCallback(
     (card: Card) => {
+      if (card.column === "Impediment") {
+        navigate(`/kanban/impediment/${card.id}`, { replace: true });
+        return;
+      }
       setOpen(card);
       setSearchParams(
         (prev) => {
@@ -101,7 +113,7 @@ export default function KanbanPage() {
         { replace: false }
       );
     },
-    [setSearchParams]
+    [navigate, setSearchParams]
   );
 
   const closeCard = useCallback(() => {
@@ -134,6 +146,14 @@ export default function KanbanPage() {
 
     const local = cards.find((c) => c.id === cardParam);
     if (local) {
+      // Impediment cards redirect to the dedicated page (kaart 626e05e3…);
+      // the drawer can no longer service them. We replace the current entry
+      // so the back button returns to the board, not back to the dead
+      // `?card=<id>` URL.
+      if (local.column === "Impediment") {
+        navigate(`/kanban/impediment/${local.id}`, { replace: true });
+        return;
+      }
       setOpen(local);
       return;
     }
@@ -145,7 +165,12 @@ export default function KanbanPage() {
     kanbanApi
       .getCard(cardParam)
       .then((card) => {
-        if (!cancelled) setOpen(card);
+        if (cancelled) return;
+        if (card.column === "Impediment") {
+          navigate(`/kanban/impediment/${card.id}`, { replace: true });
+          return;
+        }
+        setOpen(card);
       })
       .catch(() => {
         if (cancelled) return;
@@ -162,7 +187,7 @@ export default function KanbanPage() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams, cards, cardsLoaded, open, setSearchParams]);
+  }, [searchParams, cards, cardsLoaded, open, setSearchParams, navigate]);
 
   useEffect(() => {
     void reload();
