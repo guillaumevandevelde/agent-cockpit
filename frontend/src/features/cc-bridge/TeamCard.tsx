@@ -15,6 +15,7 @@ interface TeamCardProps {
   onToggleTarget: (target: string) => void
   onKillSession: (session: CCSession) => void
   onRename: (session: CCSession, newName: string) => Promise<void>
+  onOpenCard?: (cardId: string) => void
   attentionByPane: Map<string, AttentionKind>
   instance?: InstanceIdentity | null
 }
@@ -25,6 +26,7 @@ export function TeamCard({
   onToggleTarget,
   onKillSession,
   onRename,
+  onOpenCard,
   attentionByPane,
   instance,
 }: TeamCardProps) {
@@ -89,6 +91,7 @@ export function TeamCard({
                       onClick={() => onToggleTarget(session.tmux_target)}
                       onKill={onKillSession}
                       onRename={onRename}
+                      onOpenCard={onOpenCard}
                       attention={session.pane_id ? attentionByPane.get(session.pane_id) ?? null : null}
                       instance={instance}
                     />
