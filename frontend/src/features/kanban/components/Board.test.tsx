@@ -226,3 +226,40 @@ describe("Board lanes for columns without a kanban_columns row", () => {
     expect(onDropCardAt).toHaveBeenCalledWith("b", "Backlog", null);
   });
 });
+
+// Kanban card e9089ecad8e64b19a25bdf59804b70de revisitation. The drag-reorder
+// fix (commit 1a76980f) switched the end-of-column indicator from a numeric
+// `dropIndex === cards.length` check to `dropBeforeId === null`. The new
+// condition is also the rest state, so every populated column rendered a
+// permanent blue strip — the board looked broken in its idle state. The fix
+// adds a `dragOver` gate in Column.tsx; these tests pin the rest-state
+// behaviour so the regression cannot silently come back.
+describe("Board drop-strip in rest state", () => {
+  it("renders no end-of-column strip when no drag is in progress", () => {
+    // Populated column (cards.length > 0 fulfils the population gate; the
+    // strip must still NOT render because dragOver is false).
+    renderBoard([card("a", "Backlog"), card("b", "Backlog")]);
+    expect(screen.queryByTestId("kanban-column-drop-strip-Backlog")).toBeNull();
+  });
+
+  it("renders the strip only on a column that has at least one card", () => {
+    // Backlog has cards, reviewer does not. Before the fix, the strip
+    // appeared on Backlog (the populated column) because `dropBeforeId ===
+    // null && cards.length > 0` was satisfied at rest. The fix tightens
+    // that to `dragOver && dropBeforeId === null && cards.length > 0`,
+    // which is false at rest → no strip on either column.
+    renderBoard([card("a", "Backlog")]);
+    expect(screen.queryByTestId("kanban-column-drop-strip-Backlog")).toBeNull();
+    expect(screen.queryByTestId("kanban-column-drop-strip-reviewer")).toBeNull();
+  });
+
+  it("treats every populated column the same — no column-wide permanent strip", () => {
+    // Regression-shaped assertion: render the board with a card in each
+    // configured lane, then count the rest-state strips. The pre-fix code
+    // rendered one per populated column ⇒ 1 here. The fix must render 0.
+    renderBoard([card("a", "Backlog"), card("b", "reviewer")]);
+    expect(
+      document.querySelectorAll('[data-testid^="kanban-column-drop-strip-"]').length,
+    ).toBe(0);
+  });
+});

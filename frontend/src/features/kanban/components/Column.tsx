@@ -245,12 +245,18 @@ export function Column({
             </div>
           );
         })}
-        {/* "End of filtered view" indicator: shown only when the column has
-            at least one card (otherwise there is nothing to mark after) and
-            the drop target is null, meaning a release would land after the
-            last visible card. */}
-        {dropBeforeId === null && cards.length > 0 && (
-          <div className="h-0.5 bg-primary rounded mb-2" />
+        {/* "End of filtered view" indicator: shown only while a drag is in
+            progress (dragOver) and the drop target is null, meaning a
+            release would land after the last visible card. The `dragOver`
+            gate is load-bearing — `dropBeforeId === null` is also the rest
+            state, so without it every populated column would render a
+            permanent strip in its idle state. Kanban card
+            e9089ecad8e64b19a25bdf59804b70de revisitation. */}
+        {dragOver && dropBeforeId === null && cards.length > 0 && (
+          <div
+            data-testid={`kanban-column-drop-strip-${column}`}
+            className="h-0.5 bg-primary rounded mb-2"
+          />
         )}
       </div>
         </>
