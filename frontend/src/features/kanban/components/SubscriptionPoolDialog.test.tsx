@@ -999,3 +999,238 @@ describe("SubscriptionPoolDialog — spillover status surface", () => {
     ).toHaveTextContent(/no tail/);
   });
 });
+
+// ---- Chain refresh after mutation (kaart 7411d25e… revisit) ---------------
+//
+// The dialog promises — via `aria-live="polite"` on the headline
+// status — that the chain is live. The previous wiring only refreshed
+// the per-column chain on the initial `[projectKey]` effect, so any
+// mutation (save pool, change override, toggle pause) showed a stale
+// chain until the dialog was closed and reopened. The fix calls
+// `refreshChainByColumn()` after every successful `onChanged()`; the
+// tests below pin that contract so a regression can't silently come
+// back: the FIRST chain fetch is the "before" snapshot, the SECOND
+// is the "after" snapshot the operator should be able to see without
+// re-opening the dialog.
+
+interface ColumnChainFixture {
+  columnId: string;
+  columnName: string;
+  defaultAgent: string;
+  /**
+   * Chain returned by the Nth call to `getColumnEffectiveModel` for
+   * this column. The fixture cycles per-column so each mutation
+   * produces a verifiable shape change. Use a function to mutate
+   * based on a call counter.
+   */
+  chainsByCallIndex: (callIndex: number) => string[];
+}
+
+/** Each call returns the chain configured for the call index of the
+ *  specific column. The mock uses a Map keyed by column id so multiple
+ *  columns refetch independently. */
+function makePerColumnChainMock(
+  columns: ColumnChainFixture[],
+): ReturnType<typeof vi.fn> {
+  const counters = new Map<string, number>();
+  return vi.fn(async (columnId: string) => {
+    const col = columns.find((c) => c.columnId === columnId);
+    if (!col) throw new Error(`unexpected column id ${columnId} in test`);
+    const counter = counters.get(columnId) ?? 0;
+    counters.set(columnId, counter + 1);
+    const chain = col.chainsByCallIndex(counter);
+    return {
+      provider: chain[0],
+      model: null,
+      provider_source: "column_default",
+      model_source: "column_default",
+      global_override: null,
+      pool_choice: null,
+      column_default_provider: chain[0],
+      column_default_model: null,
+      persona_model: null,
+      spillover_chain: chain,
+    };
+  });
+}
+
+describe("SubscriptionPoolDialog — chain refresh after mutation", () => {
+  it("refreshes the per-column chain after a pool save (kaart 7411d25e… revisit)", async () => {
+    mockUnsetPoolAndOverride();
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [
+        makeColumnRow("col-analyst", "analyst", "analyst"),
+      ],
+    });
+    (kanbanApi.setSubscriptionPool as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({
+        project_key: PK,
+        pool: [{ provider: "minimax", model: null, drempel: 0.9 }],
+      });
+    // First call: column-default only. Second call (after save): column
+    // default + the new pool entry = full spillover chain. The dialog
+    // must surface the second call's result without a re-open.
+    (kanbanApi.getColumnEffectiveModel as ReturnType<typeof vi.fn>)
+      = makePerColumnChainMock([
+        {
+          columnId: "col-analyst",
+          columnName: "analyst",
+          defaultAgent: "analyst",
+          chainsByCallIndex: (i) =>
+            i === 0 ? ["anthropic"] : ["anthropic", "minimax"],
+        },
+      ]);
+
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("per-column-chain-row-analyst"),
+      ).toHaveTextContent(/anthropic/i),
+    );
+    // Initial state: column default only, no tail.
+    expect(
+      screen.getByTestId("per-column-chain-status-analyst"),
+    ).toHaveTextContent(/no tail/);
+
+    // Save a pool entry — this should trigger the chain refresh.
+    fireEvent.click(
+      screen.getByRole("button", { name: /add first subscription/i }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("per-column-chain-row-analyst"),
+      ).toHaveTextContent(/anthropic.*→.*minimax/i),
+    );
+    expect(
+      screen.getByTestId("per-column-chain-status-analyst"),
+    ).toHaveTextContent(/1 tail/);
+  });
+
+  it("refreshes the per-column chain after an override change (kaart 7411d25e… revisit)", async () => {
+    mockUnsetPoolAndOverride();
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [
+        makeColumnRow("col-analyst", "analyst", "analyst"),
+      ],
+    });
+    (kanbanApi.setActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({
+        project_key: PK,
+        override: { provider: "minimax", model: null },
+      });
+    // First call: column default + pool tail. Second call (after
+    // override): the chain still reflects the column default + pool
+    // tail (the override is independent of the chain map), but the
+    // important thing is that the dialog re-fetches — proving the
+    // mutation handler calls `refreshChainByColumn()`.
+    (kanbanApi.getColumnEffectiveModel as ReturnType<typeof vi.fn>)
+      = makePerColumnChainMock([
+        {
+          columnId: "col-analyst",
+          columnName: "analyst",
+          defaultAgent: "analyst",
+          chainsByCallIndex: (i) =>
+            i === 0
+              ? ["anthropic"]
+              : ["anthropic", "minimax"],
+        },
+      ]);
+
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(kanbanApi.getColumnEffectiveModel).toHaveBeenCalledTimes(1),
+    );
+
+    // Change the override via the select.
+    const overrideSelect = screen.getByRole("combobox", {
+      name: /active subscription override provider/i,
+    });
+    fireEvent.click(overrideSelect);
+    fireEvent.click(
+      screen.getByRole("option", { name: /subscription: MiniMax/i }),
+    );
+
+    // A second chain fetch must land — proving the override handler
+    // wired up the refresh.
+    await waitFor(() =>
+      expect(kanbanApi.getColumnEffectiveModel).toHaveBeenCalledTimes(2),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("per-column-chain-row-analyst"),
+      ).toHaveTextContent(/anthropic.*→.*minimax/i),
+    );
+  });
+
+  it("refreshes the per-column chain after a manual pause toggle (kaart 7411d25e… revisit)", async () => {
+    mockUnsetPoolAndOverride();
+    (kanbanApi.listColumns as ReturnType<typeof vi.fn>).mockResolvedValue({
+      columns: [
+        makeColumnRow("col-analyst", "analyst", "analyst"),
+      ],
+    });
+    (kanbanApi.setSubscriptionPause as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({
+        provider: "anthropic",
+        paused: true,
+        manually_paused_providers: ["anthropic"],
+      });
+    // First call: column default + pool tail. Second call (after
+    // pause): same chain shape — the pause is independent of the
+    // chain map, but the mutation handler must still re-fetch.
+    (kanbanApi.getColumnEffectiveModel as ReturnType<typeof vi.fn>)
+      = makePerColumnChainMock([
+        {
+          columnId: "col-analyst",
+          columnName: "analyst",
+          defaultAgent: "analyst",
+          chainsByCallIndex: (i) =>
+            i === 0
+              ? ["anthropic"]
+              : ["anthropic", "minimax"],
+        },
+      ]);
+
+    render(
+      <SubscriptionPoolDialog
+        open
+        projectKey={PK}
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(kanbanApi.getColumnEffectiveModel).toHaveBeenCalledTimes(1),
+    );
+
+    // Pause the Anthropic subscription.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Pause dispatch on Anthropic" }),
+    );
+    await waitFor(() =>
+      expect(kanbanApi.setSubscriptionPause).toHaveBeenCalledWith(
+        "anthropic",
+        true,
+      ),
+    );
+    // Second chain fetch must land — proving the pause handler wired
+    // up the refresh.
+    await waitFor(() =>
+      expect(kanbanApi.getColumnEffectiveModel).toHaveBeenCalledTimes(2),
+    );
+  });
+});
