@@ -1527,7 +1527,22 @@ export function CardDrawer({
              Other drawer content (description, spec, subtasks, buttons) is
              intentionally hidden — the user picked the Run tab to focus
              on the live session, and Radix only renders the active
-             TabsContent anyway. */
+             TabsContent anyway.
+
+             **No Deliverables trigger here.** The deliverables list was
+             promoted out of the tab row into inline laag 2 (kanban card
+             c81fb67d), so the default mode has no TabsContent
+             value="deliverables" either. A Deliverables trigger in this
+             TabsList would let the operator click it from the Run tab,
+             flip activeTab → "deliverables", drop isFullAreaMode to false
+             (since that flag is `activeTab === "run" && runSession`), and
+             re-render the default body — which has no matching TabsContent
+             for Radix to select, leaving an empty tab plane. Removing the
+             trigger here is the human's chosen answer: "wie de run
+             verlaat ziet de deliverables meteen inline; geen dood tabblad
+             meer, één plek voor 'wat is er uitgekomen'." Anyone leaving
+             the run for any other tab still sees the inline deliverables
+             panel above the operator section in the default body. */
           <Tabs
             value={activeTab}
             onValueChange={setActiveTab}
@@ -1535,7 +1550,6 @@ export function CardDrawer({
             data-testid="card-drawer-full-area"
           >
             <TabsList className="shrink-0">
-              <TabsTrigger value="deliverables">Deliverables</TabsTrigger>
               <TabsTrigger value="screenshots">
                 Screenshots
                 {(card.attachments?.length ?? 0) > 0
@@ -1548,23 +1562,6 @@ export function CardDrawer({
               <TabsTrigger value="tokens">Tokens</TabsTrigger>
               {runSession && <TabsTrigger value="run">Run</TabsTrigger>}
             </TabsList>
-
-            <TabsContent
-              value="deliverables"
-              className={cn(
-                "flex-1 min-h-0 mt-2",
-                tab === "deliverables" && "overflow-auto",
-              )}
-            >
-              {card.deliverables.length === 0 && (
-                <div className="text-xs text-muted-foreground">None</div>
-              )}
-              <div className="space-y-2">
-                {card.deliverables.map((d) => (
-                  <DeliverableRow key={d.id} d={d} />
-                ))}
-              </div>
-            </TabsContent>
 
             <TabsContent
               value="screenshots"
