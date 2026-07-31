@@ -96,10 +96,7 @@ async def test_report_impediment_via_mcp_fires_cleanup(monkeypatch):
     cid = card["id"]
     await m.claim_card(cid, "agent:k-test-1234")
 
-    await m.report_impediment(
-        cid, "Which API key should I use?",
-        options=["Project key", "Personal key", "Ask ops", "Skip the call"],
-    )
+    await m.report_impediment(cid, "Which API key should I use?")
     await _wait_for_cleanup(called)
 
     assert called == [(cid, "git:test/repo")], called

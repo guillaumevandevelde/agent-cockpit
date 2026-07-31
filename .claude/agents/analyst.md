@@ -313,11 +313,7 @@ apart workflow-systeem dat je output parseert:
 - `report_impediment` — als je écht vastloopt tijdens analyse (bijv. de kaart is
   onduidelijk of de scope is te groot), **óf** als je een menselijke beslissing nodig
   hebt: verplaats de parent naar `Impediment` met een concrete, actionable
-  `question` en **verplicht `options: list[str]` met precies 4** kandidaat-antwoorden
-  (kaart 4279448c: de UI toont altijd 4 keuze-knoppen; weglaten wordt geweigerd met
-  `options_required`, een ander aantal met `invalid_option_count`). Heb je er minder,
-  vul zelf aan — ook een bewust zwakkere optie mag; de mens kan sowieso alle 4
-  negeren en vrij tekst typen in het veld dat altijd náást de knoppen staat. De
+  `question` en (bij voorkeur) `options: list[str]` met kandidaat-antwoorden. De
   claim wordt vrijgegeven en de sessie eindigt direct — geen blokkerende poll, geen
   open sessie. Dit is de standaard vraagflow, **en** dit is de vierde uitgang voor
   een echte onopgeloste product-fork die geen Done-move zou moeten zijn. Een

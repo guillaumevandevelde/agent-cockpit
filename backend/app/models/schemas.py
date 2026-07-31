@@ -1501,15 +1501,6 @@ class RestoreOptions(BaseModel):
     skip_plugins: bool = False
     skip_skills: bool = False
     skip_mcp_servers: bool = False
-    # The kanban-DB ZIP entry is the destructive item in the archive:
-    # overwriting it silently rolls the live board back to the
-    # snapshot's state and leaves a stale -wal/-shm sidecar pair,
-    # which is the failure mode kanban card 18984c63a… flagged. The
-    # other ``skip_*`` flags default to False because overwriting
-    # them is benign; the kanban DB is the one entry whose default
-    # must protect the operator, not assume intent. Override with
-    # ``skip_kanban_db=False`` to opt into the rollback path.
-    skip_kanban_db: bool = True
 
 
 class DependencyInstallStatus(BaseModel):

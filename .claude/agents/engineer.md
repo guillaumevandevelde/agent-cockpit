@@ -85,23 +85,6 @@ altijd door.
    opgelost is) en ga direct naar stap 6 (Kaart bijwerken → `Done`).
 2. **Codebase verkennen**: Welke bestanden en patronen zijn relevant? Welke dependencies?
 3. **Tests eerst** (TDD): schrijf de failing test die het gedrag vastlegt.
-
-   **Layout-chain-regel — mock nooit de component wiens layout-keten je
-   toetst** (kaart `41a75826…`). Raakt je kaart een layout-afhankelijke prop
-   (`fillArea`, `flexibleHeight`, en soortgelijke die erop rekenen dat
-   `flex-1 min-h-0` van de container tot aan de widget doorloopt), dan moet
-   minstens één test die keten écht aflopen. Een `vi.mock("./Child", () => ({
-   Child: () => null }))` op precies die child maakt elke keten-assertie
-   vacuüm: de test blijft groen terwijl de productie-keten halverwege breekt
-   (concreet: CardRunTab's root was `space-y-2` in plaats van
-   `flex-1 min-h-0 flex flex-col`, de scroll-contract-test zag niets, en
-   alleen de FCR ving het). Stub in plaats daarvan de **leaves** die jsdom
-   niet aankan (xterm's `TerminalView`, pollende hooks) en assert de
-   className-keten hop voor hop op de echte component. Voorbeeld:
-   `CardDrawer.test.tsx` → describe "CardRunTab layout chain" (opt-out-stub
-   via `vi.hoisted`) en `CardRunTab.test.tsx` → "fillArea layout contract".
-   Verifieer dat de test niet vacuüm is door de bug eenmalig terug te zetten
-   en de test te zien falen.
 4. **Implementeren**: minimale code die de test groen maakt, conform projectconventies.
 5. **Verifiëren**: draai de geraakte test-files gericht
    (`scripts/run-single-test.sh tests/test_x.py[::test_y]` of een targeted
@@ -464,19 +447,14 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 - `comment` — log voortgang of beslissingen op de kaart.
 - `attach_deliverable` — koppel je PR/branch/commit (`kind`: pr|branch|commit|link|note).
 - `report_impediment` — als je écht vastloopt: geef verplicht een concrete, actionable
-  `question` mee **én verplicht een `options: list[str]` met precies 4
-  kandidaat-antwoorden**. De Impediment-UI toont steeds 4 keuze-knoppen,
-  allemaal agent-voorgesteld (kaart 4279448c, mens-beslissing "altijd 4
-  knoppen"). `mcp_server.report_impediment` weigert de call met
-  `error: "invalid_option_count"` bij 0-3 of 5+ opties en met
-  `error: "options_required"` als je `options` helemaal weglaat — in beide
-  gevallen zonder effect (geen move, geen comment, geen gate, geen release).
-  Vul zelf aan tot 4 als je er minder hebt; ook een bewust zwakkere optie mag.
-  **Een open vraag is geen uitzondering** — de mens zit nooit vast aan jouw 4:
-  de UI toont altijd een vrij tekstveld náást de knoppen, dus hij kan alle
-  opties negeren en zelf antwoorden (of een knop kiezen én er extra info bij
-  typen). Je 4 opties zijn een startpunt, geen gesloten stembiljet.
-  Verplaatst naar `Impediment` en geeft de claim vrij — de
+  `question` mee en (bij voorkeur) een `options: list[str]` met kandidaat-antwoorden.
+  **Geef je `options` mee, dan moet het er precies 4 zijn** — de Impediment-UI
+  toont steeds 4 keuze-knoppen, allemaal agent-voorgesteld (kaart 4279448c
+  revisit: een UI-filler die een kortere lijst opvulde met een "Other"-knop
+  werd afgekeurd). `mcp_server.report_impediment` valideert dit en weigert de
+  call met `error: "invalid_option_count"` bij 1-3 opties — vul zelf aan tot 4
+  (ook een bewust zwakkere optie mag), of laat `options` helemaal weg voor een
+  vrije-tekstvraag. Verplaatst naar `Impediment` en geeft de claim vrij — de
   sessie eindigt hier direct. De mens kiest later (via de UI) één van de
   opties of typt een eigen antwoord in de activiteit-feed; een hervattende
   sessie leest het resultaat via dezelfde `impediment_question`-pipeline. Dit
@@ -485,40 +463,6 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
   als 'dood' reaperen).
 
 Volg de `Ship mode` uit je prompt (pull-request vs direct).
-
-### Heropende kaart: `done_summary` en `claimed_by` liegen niet, maar ze misleiden
-
-Pak je een kaart op die eerder al eens Done was (Done → heropend → opnieuw
-gedispatcht), dan lijkt `get_card` te zeggen dat het werk al klaar is. Twee
-velden, twee valstrikken — en samen lezen ze als "er loopt een tweede sessie
-die dit net geshipt heeft" (kaart `51813327…`, geobserveerd op
-`6b67df66…`):
-
-- **`done_summary` / `completed_at` / `deliverables[]` van een vórige
-  levenscyclus.** De `**Summary:**`-comment en de PR/commit-deliverable van de
-  eerste implementatie blijven in de op-log staan — bewust, want dispatch
-  injecteert ze als *prior decision* in de `## REVISIT`-sectie van je prompt.
-  **Check `done_summary_superseded`** in de `get_card`-respons: `true` betekent
-  precies dit — de samenvatting hoort bij een afgesloten, achterhaalde ronde
-  van deze kaart, niet bij de huidige. Ga dan niet op zoek naar wie 'm geshipt
-  heeft; de deliverable is historisch waar maar niet jouw werk.
-- **`claimed_by` / `dispatch_project_folder` met een ándere dispatch-id dan je
-  bestaande `resume_project_folder` / worktree.** Bij resume mint `_run_card`
-  een **verse tmux-/claimnaam**, maar `make_resume_transport` start
-  `claude --resume` in de **bestaande** worktree en conversatie uit
-  `resume_project_folder`. Een volledige verse dispatch-prompt in die bestaande
-  conversatie is daarom geen bewijs van een tweede agent. Ook
-  `dispatch_started_at` springt terecht vooruit; er vond werkelijk een nieuwe
-  resume-dispatch plaats. Extra val: `dispatch_project_folder` wordt momenteel
-  afgeleid van de verse naam, niet van de door resume opgeloste cwd, en kan dus
-  een map noemen die nooit bestond. Verifieer de lineage via de backendregel
-  `Spawned ... in <dir> (mode=resume)`, `resume_project_folder` en de aanwezige
-  `~/.claude/projects/<folder>`. Neem pas een collision aan bij een extra
-  claim/release-cyclus én twee levende tmux/processen. Geobserveerd op kaart
-  `21047ce2…`: claim `k-resolve-imped-1198` hervatte worktree/transcript
-  `k-resolve-imped-e371` zonder reaper-event. Blijken er echt twee levende
-  processen op dezelfde kaart, dan is dat een `report_impediment`-waardige
-  botsing.
 
 ## Product-taal voor `summary` (Done) en `report_impediment`-options
 

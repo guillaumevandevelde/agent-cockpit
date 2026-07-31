@@ -67,28 +67,9 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # Slot name stays `ship-merge-$$` (PID-unique), not a fixed name — a
     # fixed slot collides across concurrent dispatched sessions (kanban
     # card c23dfe46).
-    #
-    # Base MUST be local `master`, NOT `origin/master` (kanban card
-    # 5e83b6e0…): on this multi-session box, concurrent agents commit to
-    # local `master` and may not have pushed yet. Basing the throwaway
-    # worktree on `origin/master` strands those not-yet-pushed commits;
-    # basing it on local `master` makes them part of the merge push, so
-    # they reach origin when the merge lands.
     (
         "detached-worktree merge target",
-        'git worktree add --detach "$WT" master',
-    ),
-    # Local-master divergence guard (kanban card 5e83b6e0…). The negation
-    # of `--is-ancestor origin/master master` catches the "local master is
-    # stale" case (origin has commits local doesn't) and the rarer
-    # diverged case (both sides have new commits). Either state means a
-    # push from local `master` would be rejected as non-fast-forward, so
-    # the ship must fail-fast BEFORE creating the merge worktree. See the
-    # positional test `test_divergence_guard_runs_before_worktree_add`
-    # for the order invariant.
-    (
-        "local-master divergence guard",
-        "git merge-base --is-ancestor origin/master master",
+        'git worktree add --detach "$WT" origin/master',
     ),
     # Post-`worktree add` 0-byte-index guard. A crashed/aborted predecessor
     # in the shared gitdir can leave the freshly-created slot's `index` at
@@ -131,41 +112,6 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     (
         "remote branch cleanup",
         'git push origin --delete "$BRANCH"',
-    ),
-    # Post-push local-master sync (kanban card 5e83b6e0…, third iteration).
-    # Without this, a successful `git push origin HEAD:master` from the
-    # throwaway worktree leaves `refs/heads/master` in the SHARED gitdir
-    # pointing at the pre-merge tip, so every subsequent ship on this
-    # multi-session box trips the divergence guard (`master..origin/master
-    # = N > 0`) even though the divergence is fully explained by *our*
-    # push. `git -C "$MAIN_CHECKOUT" pull --ff-only origin master` is the
-    # PRIMARY sync: it fast-forwards the local master ref AND updates
-    # the index + working tree in one step, so the dev-stack
-    # (`cockpit.sh`) keeps running against the latest tree. The
-    # `update-ref` fallback (below) only fires if `pull --ff-only`
-    # refuses on a conflicting dirty state — the typical case keeps the
-    # main checkout fully current; the edge case preserves the user's
-    # edits and only updates the ref. The throwaway `$WT` is detached
-    # HEAD and cannot update master itself, which is why both run
-    # against `$MAIN_CHECKOUT` where master is actually checked out.
-    # Pin presence; positionality (both must live inside the
-    # `if push; then` branch — not after, not before) is covered by
-    # `test_post_push_sync_runs_only_after_push_success`.
-    #
-    # The `MAIN_CHECKOUT` path is set up differently in the two mirrors:
-    # the SKILL.md is self-discovering via `dirname $(git rev-parse
-    # --git-common-dir)` (it must work without the dispatch prompt),
-    # while `_build_ship_instructions` inlines `project_path` pre-quoted
-    # via `shlex.quote`. The `git -C "$MAIN_CHECKOUT" …` prefix on the
-    # two commands below is the load-bearing pin that BOTH mirrors
-    # must carry.
-    (
-        "post-push pull-ff-only primary sync",
-        'git -C "$MAIN_CHECKOUT" pull --ff-only origin master',
-    ),
-    (
-        "post-push update-ref fallback (pull --ff-only refused on dirty state)",
-        'git -C "$MAIN_CHECKOUT" update-ref refs/heads/master origin/master',
     ),
     # Pre-flight: the detached worktree only sees COMMITTED state, so an
     # uncommitted/untracked branch would merge as a silent no-op. This guard
@@ -427,19 +373,6 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
         "`HEAD` makes the argument ambiguous and git exits 128, which reads "
         "as a dirty tree and aborts every ship — kanban card 7dd8a3dd…)"
     )
-    # Local-master divergence guard (kanban card 5e83b6e0…). The negation
-    # of `--is-ancestor origin/master master` is the only check that catches
-    # the "origin moved while we were working" case BEFORE the merge
-    # worktree is created; without it the ship either strands local-only
-    # commits (when basing on `origin/master`) or pushes from stale master
-    # (and gets rejected as non-fast-forward).
-    assert any("--is-ancestor origin/master master" in c for c in commands), (
-        "invariants list lost the local-master divergence guard "
-        "`git merge-base --is-ancestor origin/master master` "
-        "(kanban card 5e83b6e0…). Without it a concurrent push to origin "
-        "would either strand our local-only commits or reject the push "
-        "with a spurious non-fast-forward."
-    )
     # Ship-worktree placement + explicit staging (kanban card 7dd8a3dd…).
     # Both are load-bearing against the same incident: an overlapping
     # checkout/admin dir plus a blind `add -A` committed ten of git's own
@@ -485,35 +418,6 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     assert any("push origin --delete" in c for c in commands), (
         "invariants list lost the remote branch cleanup command"
     )
-    # Post-push local-master sync (kanban card 5e83b6e0…, second iteration).
-    # Without it every ship leaves local `master` stale relative to
-    # `origin/master`, so the divergence guard fires on every subsequent
-    # ship on this multi-session box even when divergence is fully
-    # explained by the previous push.
-    # The `update-ref` form IS still in the invariants list (third
-    # iteration uses it as a deliberate FALLBACK inside the
-    # `pull --ff-only` failure branch) — what changed is the PRIMARY
-    # is now `pull --ff-only`. Pin BOTH: a recipe without
-    # `pull --ff-only` regressed to the second-iteration ref-only
-    # shape, and a recipe without the `update-ref` fallback loses
-    # the fail-open path that keeps the divergence guard from
-    # tripping on a concurrent agent's dirty edit.
-    assert any('pull --ff-only origin master' in c for c in commands), (
-        "invariants list lost the post-push `pull --ff-only` primary "
-        "sync (kanban card 5e83b6e0…, third iteration). The "
-        "second-iteration shape used `update-ref refs/heads/master "
-        "origin/master` as primary, which left index + working tree "
-        "stale in the main checkout (the 74-staged-deletions bug). "
-        "If this assertion fires after the third-iteration migration, "
-        "the primary is regressing back to ref-only."
-    )
-    assert any("update-ref refs/heads/master origin/master" in c for c in commands), (
-        "invariants list lost the post-push `update-ref` fallback "
-        "(kanban card 5e83b6e0…, third iteration). The fallback fires "
-        "only when `pull --ff-only` refuses on a conflicting dirty "
-        "state — without it, local master stays behind origin/master "
-        "and the divergence guard trips on every subsequent ship."
-    )
     # 0-byte-index guard (kanban card 608e2a27…). Without it, a slot whose
     # index was truncated by an aborted predecessor kills the merge with
     # `index file smaller than expected` and needs a manual
@@ -558,7 +462,7 @@ def test_drift_detector_fails_when_mirror_loses_a_command() -> None:
     case so the contract is enforced, not assumed.
     """
     fake_mirror = (
-        'git worktree add --detach "$WT" master\n'
+        'git worktree add --detach "$WT" origin/master\n'
         'git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"\n'
         'git -C "$WT" push origin HEAD:master\n'
         'git worktree remove "$WT" --force\n'
@@ -667,67 +571,22 @@ def test_untracked_files_are_advisory_not_blocking(source_name: str) -> None:
         f"untracked files must still be surfaced, just not block the ship."
     )
 
-    # The advisory sits after the blocking `fi`, before the divergence guard
-    # (kanban card 5e83b6e0…); the divergence guard itself is a separate
-    # fail-fast that's independently pinned by
-    # `test_divergence_guard_runs_before_worktree_add`. Scope the "advisory
-    # must not abort" check to just the advisory block — counting `exit 1`s
-    # in the whole pre-flight region would now falsely flag the divergence
-    # guard's legitimate `exit 1` (it IS a fail-fast, just not the
-    # advisory's).
+    # The advisory sits after the blocking `fi`, before `git worktree add`.
     blocking_idx = source_text.index(BLOCKING_PREFLIGHT)
     worktree_add_idx = source_text.index("git worktree add --detach")
-    full_pre_flight_region = source_text[blocking_idx:worktree_add_idx]
-    assert "git ls-files --others --exclude-standard" in full_pre_flight_region, (
+    advisory_region = source_text[blocking_idx:worktree_add_idx]
+    assert "git ls-files --others --exclude-standard" in advisory_region, (
         f"{source_name}: untracked advisory is not between the blocking "
         f"pre-flight and `git worktree add` — it would not run before the merge."
     )
 
-    # Find the blocking pre-flight's closing `fi` (same indent as the
-    # `if ! git diff --quiet HEAD --` line) — the untracked advisory runs
-    # between that `fi` and the divergence guard's `git fetch origin -q`.
-    # The advisory block must contain ZERO `exit 1`s; the divergence guard
-    # itself has its own (independently-pinned) `exit 1` and is NOT part of
-    # the advisory.
-    blocking_line_start = source_text.rfind("\n", 0, blocking_idx) + 1
-    blocking_line_end = source_text.find("\n", blocking_idx)
-    blocking_line = source_text[blocking_line_start:blocking_line_end]
-    blocking_indent = len(blocking_line) - len(blocking_line.lstrip())
-    # Walk lines after BLOCKING_PREFLIGHT to find the closing `fi` at the
-    # same indent as the `if`-head.
-    cursor = blocking_line_end + 1
-    blocking_fi_idx = -1
-    for raw_line in source_text[cursor:].split("\n"):
-        stripped = raw_line.strip()
-        if stripped == "fi" and (
-            len(raw_line) - len(raw_line.lstrip()) == blocking_indent
-        ):
-            blocking_fi_idx = source_text.find(raw_line, cursor)
-            break
-        cursor += len(raw_line) + 1
-    assert blocking_fi_idx != -1, (
-        f"{source_name}: could not find the blocking pre-flight's closing `fi` "
-        f"at indent {blocking_indent} — the if-block looks malformed"
-    )
-    # The advisory is the region between the dirty-tree `fi` and the start
-    # of the divergence guard (`git fetch origin -q`).
-    divergence_start = source_text.find("git fetch origin -q", blocking_fi_idx)
-    assert divergence_start != -1, (
-        f"{source_name}: could not find the divergence guard's `git fetch "
-        f"origin -q` after the blocking pre-flight — the guard is wired "
-        f"out of order or missing (kanban card 5e83b6e0…)"
-    )
-    advisory_region = source_text[blocking_fi_idx:divergence_start]
-    assert "git ls-files --others --exclude-standard" in advisory_region, (
-        f"{source_name}: untracked advisory is not between the blocking "
-        f"pre-flight's `fi` and the divergence guard — it would not run "
-        f"before the merge."
-    )
-    assert advisory_region.count("exit 1") == 0, (
-        f"{source_name}: found {advisory_region.count('exit 1')} `exit 1` "
-        f"in the untracked advisory block — the advisory must not abort the "
-        f"ship (kanban card c28e576d…). The divergence guard's own "
-        f"`exit 1` is correctly outside this region."
+    # Exactly one `exit 1` in the pre-flight region: the blocking condition's.
+    # A second one would mean the advisory became fatal again.
+    assert advisory_region.count("exit 1") == 1, (
+        f"{source_name}: expected exactly 1 `exit 1` in the pre-flight region "
+        f"(the tracked-changes guard), found "
+        f"{advisory_region.count('exit 1')} — the untracked advisory must not "
+        f"abort the ship (kanban card c28e576d…)."
     )
 
 
@@ -743,7 +602,7 @@ def test_blocking_preflight_would_flag_the_old_untracked_shape() -> None:
         'if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then\n'
         "  echo 'ERROR: uncommitted/untracked changes' >&2; exit 1\n"
         "fi\n"
-        'git worktree add --detach "$WT" master\n'
+        'git worktree add --detach "$WT" origin/master\n'
     )
     assert BLOCKING_PREFLIGHT not in old_shape_mirror, (
         "the tracked-changes invariant no longer distinguishes the old "
@@ -997,336 +856,6 @@ def test_branch_delete_guard_detects_unconditional_delete() -> None:
     )
 
 
-# Post-push local-master sync positional invariant (kanban card 5e83b6e0…,
-# third iteration). The PRIMARY sync — `git -C "$MAIN_CHECKOUT" pull
-# --ff-only origin master` — must live INSIDE the
-# `if git -C "$WT" push origin HEAD:master; then` success branch.
-# Running it unconditionally would update local master to whatever
-# `origin/master` is, even when the push was rejected (turning a
-# recoverable rejection into a wrong-state local ref). Running it
-# BEFORE the push is also wrong (the merge commit hasn't landed yet,
-# so local would be set to the *pre-merge* `origin/master` and we'd
-# strand our own commit). Mirrors the branch-delete positional pattern
-# (kanban card 3027671c…).
-POST_PUSH_SYNC = 'git -C "$MAIN_CHECKOUT" pull --ff-only origin master'
-
-
-def _post_push_sync_is_inside_push_success(source_text: str) -> tuple[bool, str]:
-    """Return ``(ok, reason)``: whether the post-push local-master sync sits
-    inside the ``if push; then`` success branch.
-
-    Reuses the same ``PUSH_CONDITIONAL`` anchor as
-    ``_branch_delete_is_guarded_by_push_success``: the push-to-master is the
-    if-condition, the sync must sit before the closing ``else``/``fi`` at
-    the same indent.
-    """
-    push_idx = source_text.find(PUSH_HANDLER)
-    sync_idx = source_text.find(POST_PUSH_SYNC)
-    if push_idx == -1:
-        return False, f"missing push handler ({PUSH_HANDLER!r})"
-    if sync_idx == -1:
-        return False, f"missing post-push sync ({POST_PUSH_SYNC!r})"
-    if sync_idx < push_idx:
-        return False, (
-            f"post-push sync ({sync_idx}) appears BEFORE the push to master "
-            f"({push_idx}) — local master would be set to the pre-merge "
-            f"origin/master and strand our own commit"
-        )
-    cond_idx = source_text.find(PUSH_CONDITIONAL)
-    if cond_idx == -1:
-        return False, (
-            f"push-to-master is not used as an if-condition "
-            f"({PUSH_CONDITIONAL!r} not found) — an unconditional "
-            f"pull --ff-only would fire when the push is REJECTED, "
-            f"leaving local master on origin/master instead of the "
-            f"merge tip"
-        )
-    cond_line_start = source_text.rfind("\n", 0, cond_idx) + 1
-    cond_indent = _line_indent(source_text[cond_line_start:cond_idx + len(PUSH_CONDITIONAL)])
-    cursor = source_text.find("\n", cond_idx) + 1
-    close_idx = -1
-    for raw_line in source_text[cursor:].split("\n"):
-        stripped = raw_line.strip()
-        if stripped in ("else", "fi") and _line_indent(raw_line) == cond_indent:
-            close_idx = source_text.find(raw_line, cursor)
-            break
-        cursor += len(raw_line) + 1
-    if close_idx == -1:
-        return False, (
-            f"could not find the `else`/`fi` closing the push-conditional "
-            f"at indent {cond_indent} — the if-block looks malformed"
-        )
-    if not (cond_idx < sync_idx < close_idx):
-        return False, (
-            f"post-push sync ({sync_idx}) is NOT inside the push-success "
-            f"branch (condition at {cond_idx}, closed at {close_idx}) — it "
-            f"would update local master even when the push is rejected"
-        )
-    return True, ""
-
-
-@pytest.mark.parametrize("source_name", sorted(SOURCES))
-def test_post_push_sync_runs_only_after_push_success(source_name: str) -> None:
-    """The post-push local-master sync must fire only inside `if push; then`.
-
-    Pins the positional invariant from kanban card ``5e83b6e0…`` (third
-    iteration): ``git -C "$MAIN_CHECKOUT" pull --ff-only origin master``
-    fast-forwards the local master ref AND updates the index + working
-    tree in the main checkout. If it fires unconditionally (no
-    if-condition), a push rejection would still pull main to
-    origin/master — turning a recoverable rejection into a wrong-state
-    local checkout. If it fires before the push, local master would be
-    set to the pre-merge ``origin/master`` and we'd strand our own
-    commit. Only inside the push-success branch is it semantically
-    equivalent to "the merge just landed, sync the main checkout".
-    """
-    source_text = SOURCES[source_name]()
-    ok, reason = _post_push_sync_is_inside_push_success(source_text)
-    assert ok, f"{source_name}: post-push sync not guarded by push success — {reason}"
-
-
-def test_post_push_sync_detects_unconditional_shape() -> None:
-    """Live negative case: an unconditional pull must trip the invariant.
-
-    Builds a mirror where the post-push sync runs OUTSIDE the
-    ``if push; then`` branch (right after a bare push). If this stops
-    failing, the positional invariant has rotted.
-    """
-    naive_mirror = (
-        f'{PUSH_HANDLER}\n'
-        f'{POST_PUSH_SYNC} || echo "WARN: lokale master stale"\n'
-        f'git push origin --delete "$BRANCH"\n'
-        f'git worktree remove --force "$WT"\n'
-    )
-    ok, reason = _post_push_sync_is_inside_push_success(naive_mirror)
-    assert not ok, (
-        f"guard did NOT flag an unconditional post-push sync; reason={reason!r}. "
-        f"The positional invariant has rotted."
-    )
-    assert "if-condition" in reason, (
-        f"unexpected failure reason: {reason!r}; expected a missing "
-        f"if-condition diagnosis."
-    )
-
-
-# Anti-pattern pins (kanban card 5e83b6e0…, third iteration). The
-# PREVIOUS form — `git update-ref refs/heads/master origin/master` as
-# the PRIMARY post-push sync (no `pull --ff-only` first), second
-# iteration — is the exact bug this iteration replaces: it updates
-# only the ref, leaving index + working tree stale, so the main
-# checkout shows 74 files as staged deletions (observed in the
-# impediment on this card). The third iteration keeps `update-ref`
-# as a deliberate FALLBACK for the `pull --ff-only` failure path
-# (concurrent edits on a file the merge also touches), so the
-# anti-pattern is the old *primary* shape, not the substring itself:
-# `update-ref` MUST be preceded by a `pull --ff-only` in the same
-# post-push-sync block. Both mirrors' COMMENTS may mention the old
-# form (that's the point of the comments — the next editor needs to
-# know why it was rejected), so the assertion scopes to executable
-# lines only.
-ANTI_PATTERN_OLD_PRIMARY_SHAPE = (
-    'git update-ref refs/heads/master origin/master'
-)
-
-
-@pytest.mark.parametrize("source_name", sorted(SOURCES))
-def test_post_push_sync_does_not_use_update_ref_as_primary(source_name: str) -> None:
-    """The post-push sync must use `pull --ff-only` as primary, not `update-ref`.
-
-    Pins kanban card ``5e83b6e0…`` (third iteration): the
-    second-iteration PRIMARY form ``git update-ref refs/heads/master
-    origin/master`` only updates the ref, leaving index + working
-    tree stale in the main checkout — the exact bug this iteration
-    replaces. The third iteration's PRIMARY is `git -C
-    "$MAIN_CHECKOUT" pull --ff-only origin master`; `update-ref` is
-    only allowed as a deliberate FALLBACK inside the pull-failure
-    branch. A future regression that puts `update-ref` back as the
-    primary (i.e. drops `pull --ff-only` and goes back to ref-only)
-    must trip this test on the next CI run, with a clear failure
-    message pointing at the `pull --ff-only` requirement.
-    """
-    source_text = _executable_lines(SOURCES[source_name]())
-    has_pull = "pull --ff-only origin master" in source_text
-    has_update_ref = ANTI_PATTERN_OLD_PRIMARY_SHAPE in source_text
-    assert has_pull, (
-        f"{source_name}: post-push sync is missing the primary "
-        f"`pull --ff-only origin master`. The third-iteration recipe "
-        f"replaces the second-iteration `update-ref`-only primary "
-        f"(which left index + working tree stale, the 74-staged-"
-        f"deletions bug) with a `pull --ff-only` that updates both "
-        f"ref and working tree in one step. `update-ref` is now "
-        f"ONLY a deliberate fallback for the `pull --ff-only` "
-        f"refusal path (kanban card 5e83b6e0…, third iteration)."
-    )
-    if has_update_ref and not has_pull:
-        raise AssertionError(
-            f"{source_name}: post-push sync regressed to the "
-            f"second-iteration `update-ref`-only primary shape "
-            f"({ANTI_PATTERN_OLD_PRIMARY_SHAPE!r}). That form updates "
-            f"only the ref, leaving index + working tree stale, so "
-            f"the main checkout shows 74 files as staged deletions "
-            f"(kanban card 5e83b6e0…, second/third iteration). Add "
-            f"the `pull --ff-only` primary path; `update-ref` is "
-            f"only allowed as a fallback inside the pull-failure "
-            f"branch."
-        )
-
-
-def test_update_ref_as_primary_shape_is_rejected() -> None:
-    """Live negative case: a recipe with `update-ref` as the only post-push
-    sync (no `pull --ff-only` first) must trip the anti-pattern.
-
-    Builds a fake mirror that uses the old `update-ref`-only primary
-    shape — exactly what the third iteration's anti-pattern rejects.
-    If this ever stops failing-on-purpose, the anti-pattern invariant
-    has rotted.
-    """
-    fake_mirror = (
-        f'if {PUSH_HANDLER}; then\n'
-        f'  {ANTI_PATTERN_OLD_PRIMARY_SHAPE} || echo "WARN: stale"\n'
-        f'fi\n'
-    )
-    executable = _executable_lines(fake_mirror)
-    has_pull = "pull --ff-only origin master" in executable
-    has_update_ref = ANTI_PATTERN_OLD_PRIMARY_SHAPE in executable
-    assert has_update_ref and not has_pull, (
-        "the second-iteration primary-shape fixture no longer matches "
-        "the expected pattern (update-ref present, pull --ff-only "
-        "absent) — the anti-pattern's fixture has rotted"
-    )
-
-
-def test_post_push_sync_falls_back_to_update_ref_when_working_tree_dirty(
-    tmp_path: Path,
-) -> None:
-    """When `pull --ff-only` refuses on conflicting dirty state, fall back
-    to `git update-ref refs/heads/master origin/master` (ref-only).
-
-    Pins the fail-open contract from the third-iteration recipe:
-    `pull --ff-only` REFUSES on a working tree that has changes
-    conflicting with the merge (a concurrent agent editing a file the
-    merge also touches). In that case the recipe falls back to
-    `update-ref`, which writes the ref directly and bypasses git's
-    "refusing to fetch into a checked-out branch" check. The
-    fallback is the EXACT same `update-ref` form that the second
-    iteration used as its primary — and that the third iteration
-    rejected — but here it ONLY fires when the working tree is
-    already in a state we can't safely overwrite. A regression that
-    either drops the fallback (silent divergence) or uses `fetch
-    origin master:master` instead (which refuses when master is
-    checked out) would fail this test.
-    """
-    main, worktree, _ = _setup_main_checkout_with_branch(tmp_path)
-
-    # Run the ship part (merge + push) in a throwaway detached
-    # worktree (the recipe's $WT shape). Has to come BEFORE we dirty
-    # the main checkout, otherwise the throwaway worktree's
-    # `git worktree add --detach … feature` would see the dirty main
-    # checkout as a problem.
-    ship_wt = worktree.parent / "ship"
-    _run(
-        [
-            "git", "-C", str(main), "worktree", "add", "--detach",
-            str(ship_wt), "feature",
-        ]
-    )
-    _run(
-        [
-            "git", "-C", str(ship_wt), "merge", "--no-ff", "feature",
-            "-m", "Merge feature",
-        ]
-    )
-    _run(["git", "-C", str(ship_wt), "push", "origin", "HEAD:master"])
-
-    # Now dirty the main checkout's working tree with a CONFLICTING
-    # change — modify a file the merge also touches (b.txt). This
-    # forces `git pull --ff-only` to refuse, exercising the
-    # `update-ref` fallback. A non-conflicting dirty change would
-    # let `pull --ff-only` succeed and skip the fallback — a valid
-    # happy path but not what this test covers.
-    (main / "b.txt").write_text("CONFLICTING local edit\n")
-    _run(["git", "-C", str(main), "add", "b.txt"])  # stage it
-
-    # The recipe's primary branch refuses on conflicting dirty state.
-    pull_proc = subprocess.run(
-        ["git", "-C", str(main), "pull", "--ff-only", "origin", "master"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert pull_proc.returncode != 0, (
-        "expected `git pull --ff-only` to refuse on a conflicting "
-        "main-checkout working tree; if it now succeeds, this test no "
-        "longer covers the fallback path"
-    )
-
-    # Confirm that `git fetch origin master:master` (an alternative
-    # ref-only fallback) is NOT what the recipe should use — git
-    # refuses it when master is checked out in the main checkout,
-    # which is exactly our situation.
-    fetch_proc = subprocess.run(
-        ["git", "-C", str(main), "fetch", "origin", "master:master"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert fetch_proc.returncode != 0, (
-        "expected `git fetch origin master:master` to refuse when "
-        "master is checked out in the main checkout; if git now "
-        "allows it, the recipe could use it instead of `update-ref` "
-        "as a cleaner ref-only fallback (and this test should be "
-        "updated to match)"
-    )
-    assert "refusing to fetch" in fetch_proc.stderr, (
-        f"unexpected fetch failure mode: stderr={fetch_proc.stderr!r}. "
-        f"The recipe relies on git's 'refusing to fetch into a checked-"
-        f"out branch' guard to motivate the `update-ref` fallback."
-    )
-
-    # The actual fallback: `git update-ref refs/heads/master origin/master`.
-    # This is the EXACT same command the second iteration used as its
-    # primary — and that the third iteration rejected — but here it's
-    # a deliberate fallback that only fires when the working tree is
-    # in a state we can't safely overwrite.
-    _run(
-        [
-            "git", "-C", str(main), "update-ref",
-            "refs/heads/master", "origin/master",
-        ]
-    )
-
-    # Local master ref should now be at origin/master (so the next
-    # ship's divergence guard passes)…
-    main_master = _run(
-        ["git", "-C", str(main), "rev-parse", "master"]
-    ).stdout.strip()
-    origin_master = _run(
-        ["git", "-C", str(main), "rev-parse", "origin/master"]
-    ).stdout.strip()
-    assert main_master == origin_master, (
-        f"after the `update-ref refs/heads/master origin/master` "
-        f"fallback, local master ({main_master}) is still behind "
-        f"origin/master ({origin_master}). The fallback's whole "
-        f"point is to keep the divergence guard from tripping on "
-        f"the next ship; if these don't match the recipe has "
-        f"regressed (kanban card 5e83b6e0…, third iteration)"
-    )
-
-    # …but the main checkout's working tree still has the conflicting
-    # local edit (the user/agent has uncommitted work we MUST NOT
-    # clobber). The merged b.txt content is NOT on disk — the user
-    # resolves the conflict and runs `git pull --ff-only` by hand
-    # once their work is in.
-    on_disk = (main / "b.txt").read_text()
-    assert on_disk == "CONFLICTING local edit\n", (
-        f"main checkout's conflicting b.txt was clobbered by the "
-        f"fallback (on-disk={on_disk!r}). The fallback's whole point "
-        f"is fail-open: never clobber uncommitted work, just keep "
-        f"the ref in sync so the divergence guard doesn't trip "
-        f"(kanban card 5e83b6e0…, third iteration)"
-    )
-
-
 def test_carve_out_in_recovery_path_detects_unconditional_exit() -> None:
     """Demonstrate the positional invariant catches the original bug shape.
 
@@ -1338,7 +867,7 @@ def test_carve_out_in_recovery_path_detects_unconditional_exit() -> None:
     with a live negative case so the contract is enforced, not assumed.
     """
     fake_mirror_with_bug = (
-        f'git worktree add --detach "$WT" master\n'
+        f'git worktree add --detach "$WT" origin/master\n'
         f'if ! git -C "$WT" {MERGE_HANDLER} "$BRANCH" -m "Merge $BRANCH"; then\n'
         f'  echo "ERROR: merge conflict" >&2\n'
         f'  exit 1\n'
@@ -1547,7 +1076,7 @@ def test_negative_pins_would_flag_the_pre_fix_recipe() -> None:
     """
     pre_fix_mirror = (
         'WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"\n'
-        'git worktree add --detach "$WT" master\n'
+        'git worktree add --detach "$WT" origin/master\n'
         '"$WT"/scripts/generate-doc-index.py\n'
         'git -C "$WT" add -A\n'
         'git -C "$WT" commit --no-edit\n'
@@ -1692,11 +1221,10 @@ def test_recipe_writing_conventions_doc_does_not_show_add_A_as_good() -> None:
 # must sit in the *executable* path of the detection `if`, not as prose after
 # an `exit 1`: that is the exact `efb8187b…`/`c06a3a2a…` failure shape, one
 # level down.
-WORKTREE_ADD = 'git worktree add --detach "$WT" master'
+WORKTREE_ADD = 'git worktree add --detach "$WT" origin/master'
 INDEX_GUARD_GITDIR = 'WT_GITDIR=$(git -C "$WT" rev-parse --absolute-git-dir)'
 INDEX_GUARD_DETECT = 'if [ ! -s "$WT_GITDIR/index" ]'
 INDEX_GUARD_RECOVER = 'git -C "$WT" read-tree HEAD'
-SHIP_TMP_SETUP = 'WT="$SHIP_TMP/ship-merge-$$"'
 
 
 def _index_guard_is_in_recovery_path(source_text: str) -> tuple[bool, str]:
@@ -1821,429 +1349,4 @@ def test_index_guard_detects_recovery_after_an_exit() -> None:
     assert "unreachable" in reason, (
         f"unexpected failure reason: {reason!r}; expected an unreachable-"
         f"recovery diagnosis."
-    )
-
-
-# Local-master divergence guard positional markers (kanban card 5e83b6e0…).
-# The guard catches the "local master is stale" case (origin has commits
-# local doesn't) before the merge worktree is created; otherwise the ship
-# either strands local-only commits (when basing on `origin/master`) or
-# pushes from stale master (and gets rejected as non-fast-forward). Like
-# the 0-byte-index guard, presence alone is not enough: the guard has to
-# run BEFORE `git worktree add`, and its `exit 1` (or lack thereof) must
-# be the action the merge relies on — not prose below an unconditional
-# exit (the `efb8187b…` shape).
-DIVERGENCE_GUARD = "git merge-base --is-ancestor origin/master master"
-DIVERGENCE_FETCH = "git fetch origin -q"
-
-
-def _divergence_guard_runs_before_worktree_add(source_text: str) -> tuple[bool, str]:
-    """Return ``(ok, reason)``: whether the divergence guard runs BEFORE the
-    throwaway worktree is created.
-
-    Checks, in order:
-
-    1. All three markers are present (`git fetch origin -q`,
-       `git merge-base --is-ancestor origin/master master`, and
-       `git worktree add --detach "$WT" master`).
-    2. Their order is fetch → is-ancestor → worktree-add. A guard after
-       the worktree is created is useless (the worktree has already been
-       checked out at origin/master-equivalent state); a guard before the
-       fetch would compare against stale `origin/master` and silently miss
-       concurrent pushes that happened between step 1 and step 4.
-    3. No UNCONDITIONAL `exit 1` sits between the guard's CLOSING `fi`
-       and the worktree-add. The guard itself IS expected to `exit 1` on
-       failure (that's the point of the guard) — but an unconditional
-       `exit 1` *after* the guard, before the worktree-add, would abort
-       the ship even when the guard passes. The guard's own `exit 1` lives
-       INSIDE its `if`-block and is therefore excluded by this scoping.
-    """
-    fetch_idx = source_text.find(DIVERGENCE_FETCH)
-    guard_idx = source_text.find(DIVERGENCE_GUARD)
-    worktree_idx = source_text.find(WORKTREE_ADD)
-    missing = [
-        name
-        for name, idx in (
-            ("fetch origin", fetch_idx),
-            ("divergence guard", guard_idx),
-            ("worktree add", worktree_idx),
-        )
-        if idx == -1
-    ]
-    if missing:
-        return False, f"missing marker(s): {', '.join(missing)}"
-    if not (fetch_idx < guard_idx < worktree_idx):
-        return False, (
-            f"guard is out of order — expected fetch({fetch_idx}) < "
-            f"guard({guard_idx}) < worktree({worktree_idx}). A guard that "
-            f"runs after `git worktree add` cannot prevent the stale-"
-            f"push or stranded-commit case it exists for."
-        )
-    # Find the closing `fi` of the divergence guard's `if`-block. The
-    # `if`-head is at `guard_idx`; the closing `fi` is the next line at
-    # the same indent. The guard's own `exit 1` (if any) sits INSIDE this
-    # `if`-block and is excluded from the post-fi scan.
-    guard_line_start = source_text.rfind("\n", 0, guard_idx) + 1
-    guard_line_end = source_text.find("\n", guard_idx)
-    guard_line = source_text[guard_line_start:guard_line_end]
-    guard_indent = len(guard_line) - len(guard_line.lstrip())
-    cursor = guard_line_end + 1
-    guard_fi_idx = -1
-    for raw_line in source_text[cursor:].split("\n"):
-        stripped = raw_line.strip()
-        if stripped == "fi" and (
-            len(raw_line) - len(raw_line.lstrip()) == guard_indent
-        ):
-            guard_fi_idx = source_text.find(raw_line, cursor)
-            break
-        cursor += len(raw_line) + 1
-    if guard_fi_idx == -1:
-        return False, (
-            f"could not find the divergence guard's closing `fi` at indent "
-            f"{guard_indent} — the if-block looks malformed"
-        )
-    # Scope: between guard's closing `fi` and worktree-add. The guard's
-    # own `exit 1` is inside the `if`-block (before the `fi`) and is NOT
-    # counted here. An unconditional `exit 1` in this span aborts the ship
-    # even when the guard passes — the efb8187b… failure shape, one
-    # level down.
-    post_guard = source_text[guard_fi_idx:worktree_idx]
-    if "exit 1" in post_guard:
-        return False, (
-            "an unconditional `exit 1` sits between the divergence "
-            "guard's closing `fi` and `git worktree add` — it would "
-            "abort the ship even when the guard passes (kanban card "
-            "`efb8187b…` shape, one level down). The guard's own "
-            "`exit 1` (inside its `if`-block) is fine; this scan only "
-            "catches `exit 1`s placed AFTER the guard."
-        )
-    return True, ""
-
-
-@pytest.mark.parametrize("source_name", sorted(SOURCES))
-def test_divergence_guard_runs_before_worktree_add(source_name: str) -> None:
-    """The local-master divergence guard must fire BEFORE `git worktree add`.
-
-    Pins the positional invariant from kanban card ``5e83b6e0…``: on this
-    multi-session box, concurrent agents push to ``origin/master`` while
-    this session is running. A divergence guard placed AFTER the merge
-    worktree is too late — the worktree has already been checked out at
-    stale ``origin/master``, the merge has already produced a stale
-    commit, and the subsequent push either silently strands local-only
-    commits or is rejected as non-fast-forward. The guard must therefore
-    fire between ``SHIP_TMP`` setup and ``git worktree add``.
-
-    Companion to the substring invariant ``local-master divergence guard``
-    in ``CORE_RECIPE_INVARIANTS``: presence says "the guard exists";
-    position says "the guard runs in time to matter".
-    """
-    source_text = SOURCES[source_name]()
-    ok, reason = _divergence_guard_runs_before_worktree_add(source_text)
-    assert ok, (
-        f"{source_name}: divergence guard not wired correctly — {reason}"
-    )
-
-
-def test_divergence_guard_detects_post_worktree_add_mirror() -> None:
-    """Live negative case: a guard placed AFTER `git worktree add` is too late.
-
-    Reproduces the silent-stale-push shape: the worktree is created at
-    ``origin/master`` (the old base), the guard detects divergence, but
-    the merge has already been queued. Pin the detector with a live
-    negative case so the positional invariant doesn't rot to a no-op.
-    """
-    post_worktree_mirror = (
-        f'{WORKTREE_ADD}\n'
-        f'{DIVERGENCE_FETCH}\n'
-        f'if ! {DIVERGENCE_GUARD} 2>/dev/null; then\n'
-        f'  echo "ERROR: local master is STALE" >&2\n'
-        f'  exit 1\n'
-        f'fi\n'
-        f'git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"\n'
-    )
-    ok, reason = _divergence_guard_runs_before_worktree_add(post_worktree_mirror)
-    assert not ok, (
-        f"detector did NOT flag a guard placed after `git worktree add`; "
-        f"reason={reason!r}. The positional invariant has rotted — a "
-        f"future regression would no longer trip CI."
-    )
-    assert "out of order" in reason, (
-        f"unexpected failure reason: {reason!r}; expected an out-of-order "
-        f"diagnosis."
-    )
-
-
-def test_divergence_guard_detects_post_fi_exit_shape() -> None:
-    """Live negative case: an unconditional `exit 1` between the guard's
-    closing `fi` and `git worktree add` is the `efb8187b…` shape, one level
-    down — the script aborts unconditionally even when the guard passes.
-
-    The guard's own `exit 1` (inside its `if`-block) is correct behavior:
-    that IS the fail-fast path. The bad shape is an `exit 1` placed AFTER
-    the guard, before the worktree-add — that aborts the ship regardless
-    of whether divergence was detected.
-    """
-    post_fi_exit_mirror = (
-        f'{SHIP_TMP_SETUP}\n'
-        f'{DIVERGENCE_FETCH}\n'
-        f'if ! {DIVERGENCE_GUARD} 2>/dev/null; then\n'
-        f'  echo "ERROR: local master is STALE" >&2\n'
-        f'  exit 1\n'
-        f'fi\n'
-        f'exit 1\n'  # unconditional — aborts the ship even when guard passes
-        f'{WORKTREE_ADD}\n'
-    )
-    ok, reason = _divergence_guard_runs_before_worktree_add(post_fi_exit_mirror)
-    assert not ok, (
-        f"detector did NOT flag an unconditional `exit 1` between the "
-        f"guard's closing `fi` and `git worktree add`; reason={reason!r}. "
-        f"The positional invariant has rotted."
-    )
-    assert "unconditional" in reason, (
-        f"unexpected failure reason: {reason!r}; expected an "
-        f"unconditional-`exit 1` diagnosis."
-    )
-
-
-# --- Layout-chain test guard (kanban card 41a75826…) ------------------------
-# A `vi.mock` on the very component whose layout chain is under test makes the
-# assertion vacuous: the mocked child renders nothing, so a broken production
-# chain (CardRunTab's root lost `flex-1 min-h-0 flex flex-col`) never shows up.
-# The guard lives in three prompt surfaces an engineer session may read; this
-# test keeps them from drifting apart.
-LAYOUT_CHAIN_GUARD_MARKERS: list[tuple[str, str]] = [
-    ("guard heading", "Layout-chain guard"),
-    ("the forbidden shape", "wiens layout-keten in scope is"),
-    ("the prescribed alternative", "leaves"),
-]
-
-LAYOUT_CHAIN_GUARD_SOURCES: dict[str, callable[[], str]] = {
-    "dispatch._build_ship_instructions('direct')": _dispatch_direct_prompt,
-    ".claude/skills/git-ship/SKILL.md": _skill_md_direct_recipe,
-}
-
-
-@pytest.mark.parametrize("source_name", sorted(LAYOUT_CHAIN_GUARD_SOURCES))
-@pytest.mark.parametrize(
-    "marker_label,marker",
-    LAYOUT_CHAIN_GUARD_MARKERS,
-    ids=[label for label, _ in LAYOUT_CHAIN_GUARD_MARKERS],
-)
-def test_layout_chain_guard_present_in_every_ship_mirror(
-    source_name: str, marker_label: str, marker: str
-) -> None:
-    """The layout-chain mock guard must appear in every ship-prompt mirror.
-
-    Dropping it from one mirror means a dispatched session gets different
-    testing guidance than a session that reads the skill by hand — exactly
-    the silent inconsistency the ship-recipe drift guard exists for.
-    """
-    source_text = LAYOUT_CHAIN_GUARD_SOURCES[source_name]()
-    assert marker in source_text, (
-        f"{source_name} missing layout-chain guard {marker_label}: {marker!r}. "
-        f"Update every mirror in the same commit (kanban card 41a75826…)."
-    )
-
-
-def test_engineer_persona_carries_the_layout_chain_rule() -> None:
-    """The engineer persona is the third surface carrying this rule.
-
-    It is not in ``LAYOUT_CHAIN_GUARD_SOURCES`` because the persona phrases
-    the rule as a TDD step (step 3) rather than a ship-gate note, so only the
-    load-bearing shape is pinned here.
-    """
-    persona = _engineer_md_worktree_pattern()
-    assert "Layout-chain-regel" in persona, (
-        "engineer.md lost the layout-chain TDD rule (kanban card 41a75826…)"
-    )
-    assert "wiens layout-keten je" in persona or "wiens layout-keten in scope is" in persona, (
-        "engineer.md's layout-chain rule no longer names the forbidden shape "
-        "(mocking the component whose layout chain is under test)"
-    )
-
-
-# --- Post-push local-master sync — fixture-based integration test (kanban ---
-# card 5e83b6e0…, third iteration). String-presence tests above only check
-# that the recipe is *written*; this section proves the recipe *works* —
-# the whole point of the third iteration, and the failure mode the human
-# caught in the second iteration: a `git update-ref`-only approach that
-# leaves index + working tree stale in the main checkout.
-#
-# The fixture is intentionally minimal: a bare remote, a main checkout
-# with `master` checked out, and a branch worktree with one new commit.
-# After "shipping" (fast-forward the branch into a merge commit on master
-# in the worktree, then push to origin) the post-push sync block from
-# the recipe must bring the main checkout fully into sync — ref, index,
-# AND working tree. The previous `update-ref`-only shape fails the
-# working-tree half of that contract; this test would have caught it.
-
-import subprocess  # noqa: E402  (placed at use site for clarity)
-
-
-def _run(
-    args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess and return the completed process, raising on non-zero.
-
-    Centralised so the fixture tests read like scripts rather than plumbing.
-    Uses ``text=True`` + ``capture_output=True`` so failures are diagnosable
-    from the assert message without re-running.
-    """
-    proc = subprocess.run(
-        args,
-        cwd=cwd,
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise AssertionError(
-            f"command {args!r} (cwd={cwd}) failed with exit "
-            f"{proc.returncode}: stdout={proc.stdout!r} stderr={proc.stderr!r}"
-        )
-    return proc
-
-
-def _setup_main_checkout_with_branch(
-    tmp_path: Path,
-) -> tuple[Path, Path, Path]:
-    """Build the minimal fixture: bare remote + main checkout + branch worktree.
-
-    Returns ``(main_checkout, worktree, remote)``. The main checkout has
-    ``master`` checked out and is set up as a worktree-linkable repo
-    (the canonical shape the ship recipe operates against). The branch
-    worktree sits at a sibling directory and has one commit ahead of
-    master; that's the "branch to ship" state.
-
-    Deliberately uses ``git init --bare`` + manual clones rather than
-    `git clone --bare` so the fixture is robust against git version
-    differences and works without a network. The point of the test is
-    the post-push sync block, not the initial setup.
-    """
-    remote = tmp_path / "origin.git"
-    main = tmp_path / "main"
-    worktree_dir = tmp_path / "worktrees"
-    worktree_dir.mkdir()
-
-    _run(["git", "init", "--bare", "--initial-branch=master", str(remote)])
-    _run(["git", "clone", str(remote), str(main)])
-    # Set up a commit on master so the main checkout has a real tip.
-    _run(["git", "-C", str(main), "config", "user.email", "test@test.local"])
-    _run(["git", "-C", str(main), "config", "user.name", "Test"])
-    (main / "a.txt").write_text("initial\n")
-    _run(["git", "-C", str(main), "add", "a.txt"])
-    _run(["git", "-C", str(main), "commit", "-m", "initial"])
-    _run(["git", "-C", str(main), "push", "-u", "origin", "master"])
-
-    # Create a branch worktree on a sibling directory with one new commit
-    # — this is the "branch to ship" state a dispatched session would have.
-    _run(["git", "-C", str(main), "worktree", "add", str(worktree_dir / "branch"), "-b", "feature"])
-    _run(["git", "-C", str(worktree_dir / "branch"), "config", "user.email", "test@test.local"])
-    _run(["git", "-C", str(worktree_dir / "branch"), "config", "user.name", "Test"])
-    (worktree_dir / "branch" / "b.txt").write_text("new\n")
-    _run(["git", "-C", str(worktree_dir / "branch"), "add", "b.txt"])
-    _run(["git", "-C", str(worktree_dir / "branch"), "commit", "-m", "feature"])
-
-    return main, worktree_dir / "branch", remote
-
-
-def _run_ship_recipe(branch_worktree: Path, main_checkout: Path) -> None:
-    """Run the post-push local-master sync block from the recipe.
-
-    Reproduces exactly what the third-iteration ship recipe does AFTER
-    the push-to-master succeeds: in the main checkout, run
-    ``git pull --ff-only origin master`` (with the `fetch master:master`
-    fallback if the working tree is dirty). Uses the SAME shell
-    fragment the recipe would emit, so a regression in the recipe
-    itself (e.g. someone deletes the `pull --ff-only` and reverts to
-    `update-ref`) would fail this fixture test.
-
-    The merge + push are done in a throwaway detached worktree (the
-    shape the recipe uses for $WT — see kanban card 7dd8a3dd… for why
-    the ship worktree must be detached and not on master); only the
-    post-push sync block is under test here.
-    """
-    # Build a throwaway detached worktree from the branch worktree
-    # (which has the feature branch). The ship recipe's $WT is
-    # `git worktree add --detach $WT master` — detached HEAD so it
-    # can do the merge without conflicting with master's checkout in
-    # the main checkout. We use the branch worktree as the source
-    # because master is checked out in the main checkout and we can't
-    # check it out anywhere else.
-    ship_wt = branch_worktree.parent / "ship"
-    _run(
-        [
-            "git", "-C", str(main_checkout), "worktree", "add", "--detach",
-            str(ship_wt), "feature",
-        ]
-    )
-    # Merge feature into master in the throwaway worktree (the actual
-    # ship step). `--no-ff` so master history shows a real merge commit.
-    _run(
-        [
-            "git", "-C", str(ship_wt), "merge", "--no-ff", "feature",
-            "-m", "Merge feature",
-        ]
-    )
-    _run(["git", "-C", str(ship_wt), "push", "origin", "HEAD:master"])
-
-    # Now run the recipe's post-push sync block. MAIN_CHECKOUT is the
-    # path the recipe would pass via $MAIN_CHECKOUT (skill uses
-    # `dirname $(git rev-parse --git-common-dir)`; dispatch uses
-    # `project_path` inlined — both end up at `main_checkout` here).
-    _run(["git", "-C", str(main_checkout), "pull", "--ff-only", "origin", "master"])
-
-
-def test_post_push_sync_updates_working_tree_in_main_checkout(tmp_path: Path) -> None:
-    """The post-push sync must bring the main checkout's working tree in sync.
-
-    Live pin for kanban card ``5e83b6e0…`` (third iteration). The fixture
-    reproduces the exact shape the recipe runs against: a main checkout
-    where `master` is checked out, plus a branch worktree. After the
-    ship (merge into master in the worktree + push to origin), the
-    recipe's post-push sync block must leave the main checkout fully
-    consistent — the new ``b.txt`` file present on disk, the index
-    matching HEAD, and `git status` clean.
-
-    The second-iteration ``update-ref``-only shape (the bug this
-    replaces) would fail this test: the ref would be at the merge
-    tip, but `b.txt` would NOT be on disk in the main checkout,
-    and `git status` would show the new file as a deletion against
-    the old ref. Replacing `pull --ff-only` with `update-ref` in
-    the recipe breaks this test, with a clear message naming the
-    file the ref was supposed to bring along.
-    """
-    main, worktree, _ = _setup_main_checkout_with_branch(tmp_path)
-    _run_ship_recipe(worktree, main)
-
-    # Main checkout should be at the same commit as origin/master.
-    main_head = _run(["git", "-C", str(main), "rev-parse", "HEAD"]).stdout.strip()
-    origin_master = _run(
-        ["git", "-C", str(main), "rev-parse", "origin/master"]
-    ).stdout.strip()
-    assert main_head == origin_master, (
-        f"main checkout HEAD ({main_head}) is NOT at origin/master "
-        f"({origin_master}); the post-push sync didn't fast-forward "
-        f"local master (kanban card 5e83b6e0…, third iteration)"
-    )
-
-    # The new file from the branch must be on disk in the main checkout.
-    assert (main / "b.txt").exists(), (
-        "main checkout working tree is missing b.txt from the merged "
-        "branch — `git update-ref` alone would leave the working tree "
-        "stale (the exact bug this iteration replaces, kanban card "
-        "5e83b6e0… third iteration). The `pull --ff-only` primary "
-        "sync must update the working tree, not just the ref."
-    )
-    assert (main / "b.txt").read_text() == "new\n"
-
-    # Working tree must be clean — no staged or unstaged changes.
-    status = _run(["git", "-C", str(main), "status", "--porcelain"]).stdout.strip()
-    assert status == "", (
-        f"main checkout working tree is dirty after post-push sync: "
-        f"{status!r}. The primary `pull --ff-only` should have updated "
-        f"the index AND working tree; if this is non-empty the recipe "
-        f"regressed to the `update-ref`-only shape (kanban card "
-        f"5e83b6e0…, second/third iteration)"
     )

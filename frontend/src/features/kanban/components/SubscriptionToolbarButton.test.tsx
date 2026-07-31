@@ -126,34 +126,4 @@ describe("SubscriptionToolbarButton", () => {
       expect(screen.getByRole("dialog")).toBeInTheDocument()
     );
   });
-
-  it("tooltip mentions spillover is OFF when no pool is configured (kaart 7411d25e…)", async () => {
-    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>)
-      .mockResolvedValue({ project_key: PK, pool: null });
-    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
-      .mockResolvedValue({ project_key: PK, override: null });
-    render(<SubscriptionToolbarButton projectKey={PK} />);
-    await flushLoads();
-    const btn = screen.getByRole("button", { name: /subscriptions/i });
-    // Tooltip surfaces the spillover signal without forcing the operator
-    // to open the dialog — the answer to "why is my card stuck?" lives
-    // in this title attribute.
-    expect(btn.getAttribute("title")).toMatch(/spillover.*off/i);
-  });
-
-  it("tooltip mentions spillover is ON when a pool is configured (kaart 7411d25e…)", async () => {
-    (kanbanApi.getSubscriptionPool as ReturnType<typeof vi.fn>)
-      .mockResolvedValue({
-        project_key: PK,
-        pool: [
-          { provider: "minimax", model: null, drempel: 0.9 },
-        ],
-      });
-    (kanbanApi.getActiveSubscriptionOverride as ReturnType<typeof vi.fn>)
-      .mockResolvedValue({ project_key: PK, override: null });
-    render(<SubscriptionToolbarButton projectKey={PK} />);
-    await flushLoads();
-    const btn = screen.getByRole("button", { name: /pool \(1\)/i });
-    expect(btn.getAttribute("title")).toMatch(/spillover.*on/i);
-  });
 });

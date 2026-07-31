@@ -48,12 +48,7 @@ export function Column({
   kanbanColumn?: KanbanColumn;
   cards: Card[];
   onOpen: (c: Card) => void;
-  // `dropBeforeId` is the id of the card above which the drop would
-  // land; null = after the last visible card (= end of the filtered
-  // view). KanbanPage resolves it against the *unfiltered* column so
-  // the drag survives the active filter — see reorder.ts and kanban
-  // card e9089ecad8e64b19a25bdf59804b70de.
-  onDropCardAt: (cardId: string, column: Col, dropBeforeId: string | null) => void;
+  onDropCardAt: (cardId: string, column: Col, index: number) => void;
   onDragStartColumn?: (columnId: string) => void;
   onDropColumn?: (targetColumnId: string) => void;
   cardMeta?: Map<string, CardMeta>;
@@ -79,21 +74,13 @@ export function Column({
   unconfigured?: boolean;
 }) {
   const [dragOver, setDragOver] = useState(false);
-  // Id of the card above which a drop would land; null = "after the last
-  // visible card" (= end of the filtered view). Kanban card
-  // e9089ecad8e64b19a25bdf59804b70de: the previous version tracked a
-  // numeric `dropIndex` over the filtered list, which `reorderWithin`
-  // then mis-applied to the unfiltered column — drop-after-card-1 in a
-  // 2-of-9 view landed the dragged card at index 0 of the full list.
-  // The id is resolved against the *unfiltered* list in KanbanPage so
-  // the visible reorder survives the map.
-  const [dropBeforeId, setDropBeforeId] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
 
   const unconfiguredHint = `"${column}" heeft geen kolomrij — deze ${cards.length} kaart(en) horen bij geen enkele ingestelde lane. Maak de kolom aan via Columns of versleep de kaarten naar een bestaande lane.`;
 
   const clearDrag = () => {
     setDragOver(false);
-    setDropBeforeId(null);
+    setDropIndex(null);
   };
 
   return (
@@ -132,7 +119,7 @@ export function Column({
             onDropColumn?.(kanbanColumn.id);
           }
         } else if (data) {
-          onDropCardAt(data, column, dropBeforeId);
+          onDropCardAt(data, column, dropIndex ?? cards.length);
         }
         clearDrag();
       }}
@@ -221,15 +208,10 @@ export function Column({
                 e.preventDefault();
                 const rect = e.currentTarget.getBoundingClientRect();
                 const after = e.clientY - rect.top > rect.height / 2;
-                // "before this card" or "after this card (= before next, or
-                // null for the tail)". Storing the target as an id — not a
-                // filtered-list index — is what makes the drop survive the
-                // active filter; KanbanPage maps it back to the unfiltered
-                // column list before sending `orderedIds` to the backend.
-                setDropBeforeId(after ? cards[i + 1]?.id ?? null : c.id);
+                setDropIndex(after ? i + 1 : i);
               }}
             >
-              {dropBeforeId === c.id && <div className="h-0.5 bg-primary rounded mb-2" />}
+              {dropIndex === i && <div className="h-0.5 bg-primary rounded mb-2" />}
               <CardItem
                 card={c}
                 onOpen={onOpen}
@@ -245,19 +227,7 @@ export function Column({
             </div>
           );
         })}
-        {/* "End of filtered view" indicator: shown only while a drag is in
-            progress (dragOver) and the drop target is null, meaning a
-            release would land after the last visible card. The `dragOver`
-            gate is load-bearing — `dropBeforeId === null` is also the rest
-            state, so without it every populated column would render a
-            permanent strip in its idle state. Kanban card
-            e9089ecad8e64b19a25bdf59804b70de revisitation. */}
-        {dragOver && dropBeforeId === null && cards.length > 0 && (
-          <div
-            data-testid={`kanban-column-drop-strip-${column}`}
-            className="h-0.5 bg-primary rounded mb-2"
-          />
-        )}
+        {dropIndex === cards.length && <div className="h-0.5 bg-primary rounded mb-2" />}
       </div>
         </>
       )}

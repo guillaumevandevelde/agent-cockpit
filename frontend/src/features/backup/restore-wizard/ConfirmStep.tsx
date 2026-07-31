@@ -10,7 +10,6 @@ interface ConfirmStepProps {
   selectedFiles: Set<string>;
   skipSkills: boolean;
   skipPlugins: boolean;
-  skipKanbanDb: boolean;
   installDependencies: boolean;
   dryRun: boolean;
   onDryRunChange: (v: boolean) => void;
@@ -23,7 +22,6 @@ export function ConfirmStep({
   selectedFiles,
   skipSkills,
   skipPlugins,
-  skipKanbanDb,
   installDependencies,
   dryRun,
   onDryRunChange,
@@ -50,10 +48,6 @@ export function ConfirmStep({
         <div className="flex justify-between">
           <span className="text-muted-foreground">Skip plugins:</span>
           <span className="font-medium">{skipPlugins ? "Yes" : "No"}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-muted-foreground">Skip kanban board:</span>
-          <span className="font-medium">{skipKanbanDb ? "Yes" : "No"}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Install deps:</span>

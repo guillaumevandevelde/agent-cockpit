@@ -84,39 +84,3 @@ describe("CardRunTab take-over", () => {
     });
   });
 });
-
-// --- fillArea layout contract (kanban card 41a75826…) ---------------------
-// `fillArea` exists so the drawer's full-area mode can hand the terminal a
-// bounded, growing box. That only works if the chain `flex-1 min-h-0` runs
-// from CardRunTab's own root down to the xterm container — a wrapper that
-// forgets `flex flex-col` silently collapses the terminal to zero height.
-describe("CardRunTab fillArea layout contract", () => {
-  it("fillArea: the root is a growing flex column and the terminal box grows inside it", () => {
-    mockSessions = [{ session_name: "k-hl-0001", tmux_target: "k-hl-0001:0.0" }];
-    render(
-      <CardRunTab cardId="card-1" sessionName="k-hl-0001" projectPath="/repo" fillArea />,
-    );
-
-    const root = screen.getByTestId("card-run-tab-root");
-    expect(root.className).toMatch(/\bflex-1\b/);
-    expect(root.className).toMatch(/\bmin-h-0\b/);
-    expect(root.className).toMatch(/\bflex-col\b/);
-
-    const terminalBox = screen.getByTestId("terminal-view").parentElement as HTMLElement;
-    expect(root.contains(terminalBox)).toBe(true);
-    expect(terminalBox.className).toMatch(/\bflex-1\b/);
-    expect(terminalBox.className).toMatch(/\bmin-h-0\b/);
-  });
-
-  it("without fillArea: the root stays a plain stack and the terminal keeps its fixed viewport height", () => {
-    mockSessions = [{ session_name: "k-hl-0001", tmux_target: "k-hl-0001:0.0" }];
-    render(<CardRunTab cardId="card-1" sessionName="k-hl-0001" projectPath="/repo" />);
-
-    const root = screen.getByTestId("card-run-tab-root");
-    expect(root.className).not.toMatch(/\bflex-col\b/);
-    expect(root.className).not.toMatch(/\bflex-1\b/);
-
-    const terminalBox = screen.getByTestId("terminal-view").parentElement as HTMLElement;
-    expect(terminalBox.className).toMatch(/h-\[60vh\]/);
-  });
-});

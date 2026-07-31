@@ -15,7 +15,7 @@ export type ReadyState =
   // green "Ready" (kanban-pro-analyse.md §4.1).
   | "awaiting_plan_ref"
   // Card carries a non-empty `metadata.gated_on` business trigger. The
-  // dispatcher holds these until a human clears the gate; red tier
+  // dispatcher holds these until a human clears the gate; amber tier
   // signals "permanent, human-actionable" alongside `missing_dep`.
   | "gated"
   // Child whose `parent_card_id` points at a deleted card. Distinct from

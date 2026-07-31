@@ -48,8 +48,8 @@ komt hier terug),
    Dat is een echte, afgebakende verbetering. Zie §4.1.
 5. **Tweede les:** Lemma's approval-model draait een goedgekeurde tool-call opnieuw
    **onder de autoriteit van de gebruiker in plaats van die van de agent**
-   (privilege-scheiding). Onze gates zijn kaart-niveau: `report_impediment`
-   beëindigt de sessie, `open_gate` blokkeert inline. Zie §4.2.
+   (privilege-scheiding). Onze gates zijn kaart-niveau en beëindigen de sessie.
+   Zie §4.2.
 6. **Aanbeveling:** geen strategische koerswijziging. Drie scoped follow-up-kaarten
    (§7), waarvan één een comment op een bestaande kaart wordt. Lemma is geen
    concurrent om in te halen — het is een goed uitgevoerde buur waarvan we twee

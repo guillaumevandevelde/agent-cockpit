@@ -113,11 +113,7 @@ async def test_reviewer_reject_restores_return_agent():
     # Route it through the gate to set up the reviewer + return-agent state.
     await m.move_card(cid, "Done", summary="built it")
     # Now the reviewer rejects it.
-    result = await m.report_impediment(
-        cid, "Requirement 2 is not implemented.",
-        options=["Implement it now", "Split to a follow-up card",
-                 "Drop the requirement", "Ship as-is, document the gap"],
-    )
+    result = await m.report_impediment(cid, "Requirement 2 is not implemented.")
     assert result["column"] == "Impediment"
     assert result["agent"] == "engineer"
 

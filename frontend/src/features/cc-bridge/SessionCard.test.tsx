@@ -83,48 +83,6 @@ describe('SessionCard CLI/vendor badge contract', () => {
     expect(secondary.getAttribute('title')).toBe('Subscription: MiniMax')
   })
 
-  it('renders the kanban-card link when the session carries a card_id, and clicking it does not toggle the pane', () => {
-    // The affordance is a kanban-card navigate button: when the backend
-    // enriched the session with a card_id, the user can jump from the
-    // bridge list straight to /kanban?card=<id>. The click must not also
-    // fire the card's primary `onClick` (which toggles the pane grid),
-    // so the handler chain stops propagation. See kanban-kaart
-    // cade1e9b919944258c442d273c1dcfd7.
-    const onOpenCard = vi.fn()
-    render(
-      <SessionCard
-        session={{
-          ...baseSession,
-          card_id: 'abc123',
-          card_project_key: 'git:github.com/example/repo',
-        }}
-        gridPosition={null}
-        onClick={() => {}}
-        onKill={() => {}}
-        onRename={async () => {}}
-        onOpenCard={onOpenCard}
-      />,
-    )
-    const link = screen.getByRole('button', { name: /view kanban card/i })
-    expect(link).not.toBeNull()
-    link.click()
-    expect(onOpenCard).toHaveBeenCalledTimes(1)
-    expect(onOpenCard).toHaveBeenCalledWith('abc123')
-  })
-
-  it('omits the kanban-card link when the session has no card_id', () => {
-    render(
-      <SessionCard
-        session={baseSession}
-        gridPosition={null}
-        onClick={() => {}}
-        onKill={() => {}}
-        onRename={async () => {}}
-      />,
-    )
-    expect(screen.queryByRole('button', { name: /view kanban card/i })).toBeNull()
-  })
-
   it('omits the secondary badge when the backend reports provider equal to CLI (coalesce)', () => {
     // Codex-on-Anthropic-style scenario the card description calls out:
     // provider == cli means rendering a second badge with the same label is

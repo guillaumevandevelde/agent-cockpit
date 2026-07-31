@@ -47,33 +47,6 @@ status: decided
   toegevoegd; AC-scenario (reviewer met lege staart blijft pauzeren op limiet,
   engineer met `[anthropic]`-staart wijkt onmiddellijk uit) is gedekt.
 
-✅ **Geïmplementeerd** in 2026-07-31 (kaart `7411d25e…`):
-- `resolve_effective_provider_and_model` geeft nu `spillover_chain` terug
-  (geordende `[head] ++ [tail]`); de UI bouwt die niet langer zelf.
-- `SubscriptionPoolDialog` toont een spillover-statusregel (geen pool /
-  staart met N entries / board-wide pool) en een per-kolom-ketenlijst met
-  "tail set" / "no tail"-badges, plus de precedence-tekst die de nieuwe
-  keten-semantiek beschrijft (kop = kolom-default, staart = pool,
-  `global_override` erbovenop) i.p.v. de oude `pool > column defaults`-regel.
-- `SubscriptionToolbarButton`-tooltip meldt expliciet "Spillover: ON/OFF"
-  zodat het signaal bereikbaar is zonder de dialoog te openen.
-- 5 backend-tests in `test_kanban_column_effective_model.py` (chain-vorm
-  per scenario) + 5 frontend-tests in `SubscriptionPoolDialog.test.tsx` en
-  `SubscriptionToolbarButton.test.tsx` dekken de drie toestanden + de
-  per-kolom-ketenregel.
-- **Revisit (kaart 7411d25e… impediment-resolved):** de keten werd alleen
-  in de `[projectKey]`-effect opgehaald, dus `savePool` / override-wijziging
-  / pause-toggle lieten de per-kolom-lijst + de headline-regel op de
-  verouderde staat staan tot sluiten + heropenen. Fix: chain-refresh
-  verplaatst naar een `useCallback` (`refreshChainByColumn`) die de
-  mutation-handlers na elke `onChanged()` aanroepen. Cost: één extra
-  `getColumnEffectiveModel` per agent-kolom per mutatie — aanvaard als
-  prijs voor de `aria-live="polite"`-belofte van de headline-regel.
-  Theme (light + dark) gecontroleerd via
-  [`isolated-component-preview.md`](./isolated-component-preview.md);
-  screenshots op `/tmp/preview-light.png` en `/tmp/preview-dark.png`
-  (verwijderd na verificatie).
-
 **Trigger:** kanban-kaart `2688bf80…` "[analyse] Spillover vs. per-persona provider — de pool
 overrulet stilzwijgend elke kolom-default", kind van
 [`sessie-limiet-auto-dispatch-analyse.md`](./sessie-limiet-auto-dispatch-analyse.md) §4.

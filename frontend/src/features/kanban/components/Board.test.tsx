@@ -8,35 +8,8 @@
 // an explicit operator choice always wins over that default.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-
-// CardItem now calls useNavigate() for Impediment cards (kaart 626e05e3…).
-// The Board tests render CardItem in isolation (some through `renderBoard`
-// wrapped in a MemoryRouter, others directly). Stub useNavigate so the
-// Impediment-specific navigation path doesn't blow up in either shape —
-// the navigation behaviour itself is covered by ImpedimentPage.test.tsx
-// and the CardItem Impediment click test.
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom",
-  );
-  const StubMemoryRouter = ({ children }: { children: React.ReactNode }) => children;
-  const StubLink = ({
-    children,
-    to,
-  }: {
-    children: React.ReactNode;
-    to: string;
-  }) => <a href={typeof to === "string" ? to : "#"}>{children}</a>;
-  return {
-    ...actual,
-    MemoryRouter: StubMemoryRouter,
-    Link: StubLink,
-    useNavigate: () => vi.fn(),
-  };
-});
 
 vi.mock("../api", async (importOriginal) => {
   const actual = (await importOriginal()) as { kanbanApi: Record<string, unknown> };
@@ -77,13 +50,8 @@ const card = (id: string, column: string): Card => ({
 const columns = [col("c1", "Backlog"), col("c2", "reviewer")];
 
 function renderBoard(cards: Card[]) {
-  // CardItem now calls useNavigate() for Impediment cards (kaart 626e05e3…),
-  // so the test tree must provide a Router. MemoryRouter keeps the URL
-  // pinned to "/" so a navigate() call is a no-op for non-impediment tests.
   return render(
-    <MemoryRouter>
-      <Board columns={columns} cards={cards} onOpen={() => {}} onDropCardAt={() => {}} />
-    </MemoryRouter>,
+    <Board columns={columns} cards={cards} onOpen={() => {}} onDropCardAt={() => {}} />,
   );
 }
 
@@ -178,11 +146,7 @@ describe("Board lane collapsing", () => {
     fireEvent.drop(rail, {
       dataTransfer: { getData: () => "a" },
     });
-    // Kanban card e9089ecad8e64b19a25bdf59804b70de: drop target is now
-    // an id-or-null (the card above which to drop), not a numeric index.
-    // null here means "after the last visible card" — the rail has zero
-    // visible cards, so it collapses to "append at end of the column".
-    expect(onDropCardAt).toHaveBeenCalledWith("a", "reviewer", null);
+    expect(onDropCardAt).toHaveBeenCalledWith("a", "reviewer", 0);
   });
 });
 
@@ -252,46 +216,6 @@ describe("Board lanes for columns without a kanban_columns row", () => {
     fireEvent.drop(screen.getByTestId("kanban-column-Backlog"), {
       dataTransfer: { getData: () => "b" },
     });
-    // Same drop-target-by-id contract as above — null here because the
-    // test fires drop without a preceding dragOver (no card id to land
-    // on), so the helper receives "end of filtered view".
-    expect(onDropCardAt).toHaveBeenCalledWith("b", "Backlog", null);
-  });
-});
-
-// Kanban card e9089ecad8e64b19a25bdf59804b70de revisitation. The drag-reorder
-// fix (commit 1a76980f) switched the end-of-column indicator from a numeric
-// `dropIndex === cards.length` check to `dropBeforeId === null`. The new
-// condition is also the rest state, so every populated column rendered a
-// permanent blue strip — the board looked broken in its idle state. The fix
-// adds a `dragOver` gate in Column.tsx; these tests pin the rest-state
-// behaviour so the regression cannot silently come back.
-describe("Board drop-strip in rest state", () => {
-  it("renders no end-of-column strip when no drag is in progress", () => {
-    // Populated column (cards.length > 0 fulfils the population gate; the
-    // strip must still NOT render because dragOver is false).
-    renderBoard([card("a", "Backlog"), card("b", "Backlog")]);
-    expect(screen.queryByTestId("kanban-column-drop-strip-Backlog")).toBeNull();
-  });
-
-  it("renders the strip only on a column that has at least one card", () => {
-    // Backlog has cards, reviewer does not. Before the fix, the strip
-    // appeared on Backlog (the populated column) because `dropBeforeId ===
-    // null && cards.length > 0` was satisfied at rest. The fix tightens
-    // that to `dragOver && dropBeforeId === null && cards.length > 0`,
-    // which is false at rest → no strip on either column.
-    renderBoard([card("a", "Backlog")]);
-    expect(screen.queryByTestId("kanban-column-drop-strip-Backlog")).toBeNull();
-    expect(screen.queryByTestId("kanban-column-drop-strip-reviewer")).toBeNull();
-  });
-
-  it("treats every populated column the same — no column-wide permanent strip", () => {
-    // Regression-shaped assertion: render the board with a card in each
-    // configured lane, then count the rest-state strips. The pre-fix code
-    // rendered one per populated column ⇒ 1 here. The fix must render 0.
-    renderBoard([card("a", "Backlog"), card("b", "reviewer")]);
-    expect(
-      document.querySelectorAll('[data-testid^="kanban-column-drop-strip-"]').length,
-    ).toBe(0);
+    expect(onDropCardAt).toHaveBeenCalledWith("b", "Backlog", 0);
   });
 });

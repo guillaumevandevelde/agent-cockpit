@@ -1669,17 +1669,6 @@ async def resolve_effective_provider_and_model(
         "column_default_model": column_default_model,
         "persona_model": persona_model,
         "endpoint_name": endpoint_name,
-        # Kaart 7411d25e…: ordered list of providers in the resolved
-        # spillover chain for this column (``[head] ++ [tail]``). The
-        # ``SubscriptionPoolDialog`` renders this verbatim so an operator
-        # can see the full chain without re-deriving it client-side.
-        # Always non-empty: ``_build_spillover_candidates`` emits a
-        # synthetic ``anthropic`` head when there is no column default
-        # AND no pool, so the chain stays list-shaped — the UI treats
-        # a length-1 chain as 'no spillover configured, waiting on the
-        # reset' rather than re-implementing the runtime chain-end
-        # default.
-        "spillover_chain": [e.provider for e in chain_candidates],
     }
 
 
@@ -2240,12 +2229,7 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
         "Work autonomously to completion, following your role instructions above. "
         "Use the `cockpit-kanban` MCP tools (`move_card`, `attach_deliverable`, "
         "`comment`) to update the card exactly as those instructions direct. If you are "
-        "blocked, use `report_impediment` with a clear question explaining what you need "
-        "plus a required `options` list of exactly 4 candidate answers — the Impediment "
-        "card always shows the human a row of choice buttons, so a call without options "
-        "is rejected (`options_required`). If you have fewer than 4 real alternatives, "
-        "propose plausible ones anyway; the human can ignore all 4 and type a free-text "
-        "answer in the field the UI always shows alongside the buttons."
+        "blocked, use `report_impediment` with a clear question explaining what you need."
         f"\n\n{mcp_fallback_instructions}"
         f"\n\n{problem_flag_instructions}"
         f"\n\n{worktree_safety_callout}"
@@ -2454,16 +2438,7 @@ def _build_worktree_safety_callout(
         f"Same rule for shell: don't ``cd {canonical_main}/...`` "
         "and run a write from there — see the persona's *Werkomgeving in "
         "worktree* section for the broader cwd-safety rules. Read paths to "
-        "the canonical checkout are fine; only writes are forbidden.\n\n"
-        "- **Bash-cwd persists between tool-calls.** A compound "
-        "``cd backend && pytest …`` keeps the new cwd into the next "
-        "Bash-call — that call then sees a cwd it doesn't expect and "
-        "fails with ``no such file or directory`` (or runs against the "
-        "wrong paths). Wrap each compound ``cd`` in a subshell "
-        "``( cd backend && … )`` (or use ``git -C <abs-path>``), so the "
-        "cwd change stays scoped to that one command. See the persona's "
-        "*Werkomgeving in worktree* section for the broader cwd-safety "
-        "rules (kaart 1181b6fa…).\n"
+        "the canonical checkout are fine; only writes are forbidden.\n"
     )
 
 
@@ -2773,23 +2748,6 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
     ``backend/tests/test_fcr_prompt_drift.py`` enforces that the prompt
     text stays identical across both mirrors (drift-val: kaart ``d9447e49``).
     """
-    # Subshell-cwd reminder (kaart 1181b6fa…). A compound ``cd backend &&
-    # pytest …`` persists the new cwd into the next Bash-call — that call
-    # then sees a cwd it doesn't expect and fails with ``no such file or
-    # directory`` (or runs against the wrong paths). The worktree-scope
-    # callout above the Session-end workflow also covers this, but the
-    # ship recipe runs many cd-into-backend/frontend-style commands itself
-    # (npm ci, pytest, ruff …), so a one-line reminder right at the top of
-    # this block re-anchors the rule before the agent reaches step 2.
-    subshell_callout = (
-        "**Subshell-cwd reminder (kaart 1181b6fa…):** compound "
-        "``cd backend && pytest …`` keeps the new cwd into the next "
-        "Bash-call. Wrap each compound ``cd`` in a subshell "
-        "``( cd backend && … )`` (or use ``git -C <abs-path>``), so the "
-        "cwd change stays scoped to that one command. See the persona's "
-        "*Werkomgeving in worktree* section for the broader cwd-safety "
-        "rules.\n\n"
-    )
     # Pre-ship: Feature-Compliance-Review (FCR) — reviewed by a fresh-context
     # subagent before the numbered ship workflow begins. The prompt text must
     # stay byte-identical to the engineer.md mirror; update both in lockstep.
@@ -2945,15 +2903,6 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
     # metacharacters, so ``shlex.quote`` produces an equivalent result.
     nm_q = shlex.quote(nm_path)
     bin_q = shlex.quote(bin_path)
-    # Main-checkout path for the post-push local-master sync (kanban card
-    # 5e83b6e0…, third iteration). The dispatcher inlines `project_path` =
-    # the canonical checkout where `master` is checked out, pre-quoted via
-    # ``shlex.quote`` (kaart a962b209… blocker C: single-quote-wrapped
-    # paths survive spaces, ``$``, embedded quotes, and backslashes; a
-    # bare double-quote wrapper still lets ``$``/``\```/``"`` through).
-    # The legacy ``project_path=None`` fallback uses the hardcoded meta
-    # project root, matching the frontend_root behaviour above.
-    main_checkout_q = shlex.quote(frontend_root)
     tests = (
         "2. **Run frontend checks yourself before shipping (only when the branch "
         "touches ``frontend/``)** — there is no pre-push gate; nothing blocks a "
@@ -3016,18 +2965,6 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
         "work may already be merged — it is not a substitute for checking the "
         "frontend yourself first.  If a frontend check fails, fix it, re-run, and "
         "only ship once green.  Never ship a known-red frontend check.\n"
-        "\n"
-        "   **Layout-chain guard (kaart 41a75826…):** raakt je diff een "
-        "layout-afhankelijke prop (``fillArea``, ``flexibleHeight``, of iets "
-        "anders dat erop rekent dat ``flex-1 min-h-0`` van de container tot aan "
-        "de widget doorloopt), mock dan **niet de component wiens layout-keten "
-        "in scope is** — een ``vi.mock(\"./Child\", () => ({ Child: () => null "
-        "}))`` op precies die child maakt elke keten-assertie vacuüm: de test "
-        "blijft groen terwijl de productie-keten halverwege breekt.  Stub in "
-        "plaats daarvan de *leaves* die jsdom niet aankan (xterm's "
-        "``TerminalView``, pollende hooks) en assert de className-keten hop "
-        "voor hop op de echte component; zet de bug eenmalig terug om te zien "
-        "dat de test écht faalt.\n"
     )
     commit = (
         "3. **Commit your work** — "
@@ -3140,59 +3077,7 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "   SHIP_TMP=\"${HOME}/.cache/cockpit-ship\"\n"
             "   mkdir -p \"$SHIP_TMP\"\n"
             "   WT=\"$SHIP_TMP/ship-merge-$$\"\n"
-            "   # Main-checkout path discovery (kanban card 5e83b6e0…, third "
-            "iteration). The ship-worktree is a detached checkout that "
-            "cannot update `master` itself — only the canonical checkout "
-            "where `master` is checked out can do that. The dispatcher "
-            "inlines `project_path` (= the main-checkout path) into the "
-            "prompt (same source as the `<project-root>` used for the "
-            "node_modules symlink), so we reuse it here. The skill mirror "
-            "in `.claude/skills/git-ship/SKILL.md` is self-discovering via "
-            "`dirname $(git rev-parse --git-common-dir)` because the skill "
-            "must work without the dispatch prompt.\n"
-            "   MAIN_CHECKOUT=\"<main-checkout>\"\n"
-            "   # Local-master divergence guard (kanban card 5e83b6e0…). Step 1 "
-            "already fetched origin, but to be defensive we fetch again here — "
-            "this worktree may have been running between step 1 and step 4, and "
-            "a concurrent session could have pushed to origin in that window. "
-            "The throwaway worktree MUST base on LOCAL `master` (the "
-            "integration point, not the last-pushed remote state) — otherwise "
-            "a concurrent session's not-yet-pushed commits would be stranded "
-            "when we push to origin. The negation of "
-            "`--is-ancestor origin/master master` catches both \"origin ahead\" "
-            "(origin has commits local doesn't) and the rarer \"diverged\" "
-            "case (both sides have new commits); in either state, a push from "
-            "local `master` would be rejected as non-fast-forward. Fail-fast "
-            "with `report_impediment` and a clear remediation rather than "
-            "producing a stale merge or a useless \"Everything up-to-date\" "
-            "push.\n"
-            "   git fetch origin -q\n"
-            "   if ! git merge-base --is-ancestor origin/master master "
-            "2>/dev/null; then\n"
-            "     # Label semantics (kanban card 5e83b6e0…, second "
-            "iteration): in `git rev-list --count A..B`, A..B enumerates "
-            "commits reachable from B but NOT from A — i.e. commits B has "
-            "that A doesn't. So `master..origin/master` = commits "
-            "`origin/master` has that local `master` doesn't = how far "
-            "local is BEHIND; and `origin/master..master` = the symmetric "
-            "AHEAD count. The previous wiring had the two swapped, which "
-            "printed `ahead=2 behind=0` while local master was actually 2 "
-            "BEHIND origin. Don't swap them back.\n"
-            "     BEHIND=$(git rev-list --count master..origin/master "
-            "2>/dev/null || echo \"?\")\n"
-            "     AHEAD=$(git rev-list --count origin/master..master "
-            "2>/dev/null || echo \"?\")\n"
-            "     echo \"ERROR: local master is STALE — origin/master has "
-            "commits local doesn't have.\" >&2\n"
-            "     echo \"  ahead=$AHEAD behind=$BEHIND (master vs "
-            "origin/master)\" >&2\n"
-            "     echo \"  Reconcile: git -C <main-checkout> pull --rebase "
-            "origin master\" >&2\n"
-            "     echo \"  Then re-run the ship from this worktree. "
-            "report_impediment.\" >&2\n"
-            "     exit 1\n"
-            "   fi\n"
-            "   git worktree add --detach \"$WT\" master\n"
+            "   git worktree add --detach \"$WT\" origin/master\n"
             "   # 0-byte-index guard. A predecessor that aborted mid-ship in "
             "the shared gitdir can leave this slot's `index` truncated to 0 "
             "bytes, and `git worktree add` reports success anyway — the "
@@ -3317,64 +3202,6 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "     git -C \"$WT\" commit --no-edit\n"
             "   fi\n"
             "   if git -C \"$WT\" push origin HEAD:master; then\n"
-            "     # Post-push local-master sync (kanban card 5e83b6e0…, "
-            "third iteration). The divergence guard above bases on local "
-            "`master`, so a successful push that doesn't also move local "
-            "`master` leaves the guard tripped on every subsequent ship on "
-            "this multi-session box — even though the divergence is fully "
-            "explained by *our own* push. The cleanest way to sync the main "
-            "checkout is `git -C \"$MAIN_CHECKOUT\" pull --ff-only origin "
-            "master`, which in one step (a) fast-forwards the local master "
-            "ref and (b) updates the index AND working tree in the main "
-            "checkout — so the dev-stack (`cockpit.sh`) keeps running "
-            "against the latest tree. The throwaway `$WT` is detached HEAD "
-            "and cannot update master itself, which is why the sync runs "
-            "against `$MAIN_CHECKOUT` where master is actually checked out.\n"
-            "     # `git pull --ff-only` REFUSES if the main checkout's "
-            "working tree has changes that would be overwritten by the "
-            "merge (e.g. a concurrent agent editing a file the merge "
-            "also touches) — that is the right default, we do not want "
-            "to clobber in-flight edits. In that case we fall back to "
-            "`git update-ref refs/heads/master origin/master`, which "
-            "updates only the ref and at least keeps the divergence "
-            "guard from tripping on the next ship. The main checkout's "
-            "working tree stays on the user's conflicting edits (they "
-            "are preserved; the merged files are not on disk yet) until "
-            "someone resolves the conflict and runs `git pull --ff-only` "
-            "by hand — but the push still landed, that's what matters. "
-            "Fail-open in both cases: a successful push must NEVER be "
-            "reverted by a local-sync error.\n"
-            "     # Why `update-ref` here and not `git fetch origin "
-            "master:master`? The fetch refspec `master:master` is "
-            "exactly what we need, but git REFUSES to update a ref "
-            "that's currently checked out in another worktree "
-            "(\"refusing to fetch into branch 'refs/heads/master' "
-            "checked out at …\"). `update-ref` writes the ref directly "
-            "and bypasses that check — at the cost of leaving the "
-            "working tree stale. That's the trade-off we accept in the "
-            "fallback: the TYPICAL case is a clean main checkout, where "
-            "`pull --ff-only` keeps it fully current; the EDGE case (a "
-            "concurrent agent editing a file the merge also touches) "
-            "gets a ref-only update, the working tree stays on the "
-            "user's edits, and the next person to resolve the conflict "
-            "runs `git pull --ff-only` themselves. `update-ref` was "
-            "rejected as the SECOND-iteration PRIMARY path because it "
-            "left a clean main checkout stale (the 74-staged-deletions "
-            "bug, observed in the impediment on this card); here it's a "
-            "deliberate fallback that ONLY fires when the working tree "
-            "is already in a state we can't safely overwrite.\n"
-            "     if ! git -C \"$MAIN_CHECKOUT\" pull --ff-only origin "
-            "master 2>/dev/null; then\n"
-            "       if ! git -C \"$MAIN_CHECKOUT\" update-ref refs/heads/"
-            "master origin/master 2>/dev/null; then\n"
-            "         echo \"WARN: kon lokale master in hoofd-checkout "
-            "niet bijwerken naar origin/master — volgende ship kan op "
-            "de divergentie-guard lopen, herstel handmatig met 'git "
-            "-C \\\"$MAIN_CHECKOUT\\\" pull --ff-only origin master' (en "
-            "los eventuele conflicten op die de working tree vuil "
-            "houden).\" >&2\n"
-            "       fi\n"
-            "     fi\n"
             "     # Merge landed on master — delete the now-dead remote "
             "branch. GitHub's `delete_branch_on_merge` (enabled 2026-07-07) "
             "only fires when a *PR* merges; this route closes no PR, so "
@@ -3513,21 +3340,7 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "*producttrade-offs* uit, niet als implementatie-forks.\n"
         )
 
-    # ``<main-checkout>`` is a placeholder for the canonical checkout where
-    # ``master`` is checked out — interpolated from ``project_path`` above
-    # via the pre-quoted ``main_checkout_q``. The skill mirror in
-    # ``.claude/skills/git-ship/SKILL.md`` is self-discovering via
-    # ``dirname $(git rev-parse --git-common-dir)`` because the skill
-    # must work without the dispatch prompt. Both forms end up identical
-    # on the meta project (``/home/vdvgu/claude-cockpit``).
-    return (
-        subshell_callout
-        + feature_compliance_review
-        + sync
-        + tests
-        + commit
-        + shipping
-    ).replace("<main-checkout>", main_checkout_q)
+    return feature_compliance_review + sync + tests + commit + shipping
 
 
 def _build_session_retro_step(step_number: int = 6) -> str:
@@ -7599,30 +7412,14 @@ async def dispatch_impediment_card(
     # and started a fresh session per resolved card — see the kaart's
     # "te veel sessies naast mekaar" complaint.
     #
-    # `claimed_by` is cleared here for agent:* claims only — see below for
-    # why this is load-bearing. `report_impediment` already released the
-    # claim before parking the card on Impediment (see mcp_server.report_impediment)
-    # for the normal path, so the typical input has nothing to clear. The
-    # fixed→fixed case (Impediment → Backlog) is the gap the operations.py
-    # agent→fixed guard never covers — both source and destination columns
-    # are fixed, so the materialize path's guard does not fire. Without an
-    # explicit release here, a card claimed by an agent while it sat on
-    # Impediment (claim_card MCP against an Impediment card) lands on
-    # Backlog still claimed and `_next_card` filters `not c.claimed_by`,
-    # silently stranding the card. Kaart acc8f578… documents the incident.
-    #
-    # Human `me@ui` reservations are deliberately preserved: a deliberate
-    # hold (operator clicked Reserve before resolving the Impediment) is an
-    # intentional reservation, and stripping it on resolve would surprise
-    # the operator who later noticed the card was already in flight. This
-    # mirrors the operations.py:327-333 carve-out for non-agent claimants —
-    # the guard also leaves `me@ui` claims alone because the stale-claim
-    # reaper skips fixed columns on purpose.
-    if card.claimed_by and card.claimed_by.startswith(CLAIMANT_PREFIX):
-        await apply_operation(
-            session, op_type="release", entity_type="card",
-            project_key=card.project_key, entity_id=card.id, payload={},
-        )
+    # `claimed_by` is intentionally NOT touched here: a card on Backlog that
+    # already carries an `agent:` claim is invisible to `_next_card` (it
+    # filters `not c.claimed_by`) and would silently never get dispatched.
+    # `report_impediment` already released the claim before parking the card
+    # on Impediment (see mcp_server.report_impediment), so this branch
+    # never has a stale claim to clear. If a future caller invokes this
+    # function with a still-claimed card, the upstream 409 / reaper path
+    # owns the cleanup — not this helper.
     await apply_operation(
         session, op_type="move", entity_type="card", project_key=card.project_key,
         entity_id=card.id, payload={"column": "Backlog"},

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, Trash2, GripVertical, Pause, Play } from "lucide-react";
@@ -133,25 +133,6 @@ export function SubscriptionPoolDialog({
   // stay board-wide — only the pool is per-column.
   const [columns, setColumns] = useState<KanbanColumn[] | undefined>(undefined);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
-  // Kaart 7411d25e…: per-column spillover chain, loaded from the
-  // effective-model endpoint once columns are available. Used to render
-  // the "Spillover status" line + the per-column summary list so an
-  // operator can see the chain for every agent column without opening
-  // the column-settings dialog. Optional / partial: a column whose
-  // fetch failed simply stays absent — the UI renders the others.
-  const [chainByColumn, setChainByColumn] = useState<
-    Record<string, string[]>
-  >({});
-  // Mirror of `columns` for reads inside async callbacks. A ref is
-  // required here: `setColumns` callbacks are not synchronously
-  // evaluated in React's concurrent mode, so reading the latest
-  // columns state from a helper scheduled inside a mutation handler
-  // can't rely on `setColumns((current) => …)` to hand the value
-  // back before the helper's first `await`.
-  const columnsRef = useRef<KanbanColumn[]>([]);
-  useEffect(() => {
-    columnsRef.current = columns ?? [];
-  }, [columns]);
 
   const reload = useCallback(async () => {
     if (!projectKey) return;
@@ -197,90 +178,25 @@ export function SubscriptionPoolDialog({
     }
   }, [projectKey, selectedColumn]);
 
-  // Fetch the chains for the already-loaded agent columns. Called on
-  // initial mount AND after every mutation that might change what the
-  // dispatcher routes to (savePool, setOverride, setSubscriptionPause):
-  // the chains are derived server-side from the same state the
-  // dispatcher consults, so the in-dialog summary must refresh
-  // in lock-step with the save success — otherwise the operator sees
-  // "analyst: Anthropic [no tail]" stay put while the underlying pool
-  // just gained a spillover entry, and concludes the save was a no-op.
-  //
-  // Kaart 7411d25e… (impediment: dialog toont verouderde waarheid na
-  // mutatie): the previous code only fired this in the columns effect
-  // (dep-array `[projectKey]`), so mutations only triggered `onChanged()`
-  // — the toolbar-button reload, but NOT the chain map. The fix is to
-  // extract the chain fan-out into `refreshChainByColumn` and call it
-  // alongside `onChanged()` in every mutation handler. Cost: a handful
-  // of cheap reads per edit (one DB read per agent column per
-  // mutation), accepted as the cost of the headline-status promise
-  // (`aria-live="polite"`).
-  const refreshChainByColumn = useCallback(async () => {
-    // Read the columns snapshot via the ref so the helper doesn't
-    // capture a stale closure or rely on synchronous setState
-    // evaluation (the latter is unreliable across React render
-    // transitions). The ref is updated by an effect above, so any
-    // prior mutation that finished rendering will be visible here.
-    const columnsSnapshot = columnsRef.current;
-    if (columnsSnapshot.length === 0) return;
-    const next: Record<string, string[]> = {};
-    await Promise.all(
-      columnsSnapshot.map(async (c) => {
-        try {
-          const info = await kanbanApi.getColumnEffectiveModel(c.id);
-          if (Array.isArray(info.spillover_chain)) {
-            next[c.name] = info.spillover_chain;
-          }
-        } catch {
-          // 404 / network hiccup — leave this column absent rather
-          // than rendering an empty/broken chain row.
-        }
-      }),
-    );
-    setChainByColumn(next);
-  }, []);
-
   // Columns only need to load once per dialog open — they are not
-  // affected by the column-tail selection. Fetch the list, then fan
-  // out the chain lookups. Keep the two concerns in one effect so the
-  // initial paint shows both at once.
+  // affected by the column-tail selection. Keep this in its own effect
+  // so the column <Select> becomes interactive as soon as the fetch
+  // returns, without re-running the full reload.
   useEffect(() => {
     if (!projectKey) return;
     let cancelled = false;
     (async () => {
       try {
         const r = await kanbanApi.listColumns(projectKey);
-        if (cancelled) return;
-        // Only agent columns (default_agent !== null) participate in
-        // the spillover selector — the fixed lanes (Backlog, Doing,
-        // …) never spawn sessions so their tail is meaningless.
-        const agentColumns = (r.columns ?? []).filter(
-          (c) => c.default_agent !== null,
-        );
-        if (cancelled) return;
-        setColumns(agentColumns);
-        // Kaart 7411d25e…: fan out the cheap effective-model
-        // resolution across every agent column so the dialog can
-        // show the resolved spillover chain per persona. The
-        // endpoint is one DB read per column (no spawn, no CLI
-        // probes), so even a 10-column board is fine to load in
-        // parallel. Failures are absorbed — a missing entry just
-        // stays absent from the per-column summary list.
-        const next: Record<string, string[]> = {};
-        await Promise.all(
-          agentColumns.map(async (c) => {
-            try {
-              const info = await kanbanApi.getColumnEffectiveModel(c.id);
-              if (!cancelled && Array.isArray(info.spillover_chain)) {
-                next[c.name] = info.spillover_chain;
-              }
-            } catch {
-              // 404 / network hiccup — leave this column absent
-              // rather than rendering an empty/broken chain row.
-            }
-          }),
-        );
-        if (!cancelled) setChainByColumn(next);
+        if (!cancelled) {
+          // Only agent columns (default_agent !== null) participate in
+          // the spillover selector — the fixed lanes (Backlog, Doing,
+          // …) never spawn sessions so their tail is meaningless.
+          const agentColumns = (r.columns ?? []).filter(
+            (c) => c.default_agent !== null,
+          );
+          setColumns(agentColumns);
+        }
       } catch {
         if (!cancelled) setColumns([]);
       }
@@ -340,12 +256,6 @@ export function SubscriptionPoolDialog({
           : `Subscription pool saved (${next.length} entr${next.length === 1 ? "y" : "ies"})`,
       );
       onChanged();
-      // Refresh the per-column chain map so the in-dialog summary
-      // reflects the new tail length/scope. The toolbar button
-      // (which onChanged() drives) only knows about the pool length
-      // for board-wide; the per-column chain detail needs its own
-      // fetch.
-      void refreshChainByColumn();
     } catch (err) {
       // Roll back to the previous server value on save failure.
       const fresh = await kanbanApi
@@ -411,7 +321,6 @@ export function SubscriptionPoolDialog({
         await kanbanApi.setActiveSubscriptionOverride(projectKey, null);
         toast.success("Active subscription override: cleared");
         onChanged();
-        void refreshChainByColumn();
       } catch {
         setOverride(prev);
         toast.error("Failed to clear override");
@@ -426,7 +335,6 @@ export function SubscriptionPoolDialog({
         `Active subscription override: ${PROVIDER_LABELS[next] ?? next}`,
       );
       onChanged();
-      void refreshChainByColumn();
     } catch {
       setOverride(prev);
       toast.error("Failed to set subscription override");
@@ -440,7 +348,6 @@ export function SubscriptionPoolDialog({
       await kanbanApi.setActiveSubscriptionOverride(projectKey, null);
       toast.success("Active subscription override: cleared");
       onChanged();
-      void refreshChainByColumn();
     } catch {
       setOverride(prev);
       toast.error("Failed to clear override");
@@ -472,7 +379,6 @@ export function SubscriptionPoolDialog({
           : `Resumed dispatch on ${PROVIDER_LABELS[provider] ?? provider}`,
       );
       onChanged();
-      void refreshChainByColumn();
     } catch (err) {
       setManuallyPaused(prev);
       toast.error(
@@ -685,40 +591,6 @@ export function SubscriptionPoolDialog({
                 </span>
               </div>
             </div>
-          )}
-
-          {/* Kaart 7411d25e…: spillover status line. Makes the chain
-              visible for the CURRENT selection (board-wide or a
-              specific column) without forcing the operator to read the
-              per-column list below. The chain itself comes from the
-              backend's effective-model resolution so the dialog
-              never re-derives it client-side — board-wide + a column
-              default + a per-column tail are all handled there. */}
-          <SpilloverStatusLine
-            selectedColumn={selectedColumn}
-            selectedColumnDefaultProvider={selectedColumnRecord?.default_provider ?? null}
-            // When the operator has selected a specific column, surface
-            // THAT column's chain; when board-wide, surface the dialog's
-            // own tail length (board-wide has no single chain — the
-            // per-column list below is the per-column view).
-            selectedColumnChain={
-              selectedColumn ? chainByColumn[selectedColumn] ?? null : null
-            }
-            boardWideTailLength={hasPool ? editable.length : 0}
-          />
-
-          {/* Kaart 7411d25e…: per-column chain summary, sourced from
-              ``spillover_chain`` on the effective-model response. Always
-              visible while the dialog is open so the operator can
-              compare chains across personas without scrolling the
-              column-settings dialog. Empty when there are no agent
-              columns (a board-wide-only project). */}
-          {columns!.length > 0 && (
-            <PerColumnChainList
-              columns={columns!}
-              chains={chainByColumn}
-              selectedColumn={selectedColumn}
-            />
           )}
 
           <div
@@ -1041,190 +913,5 @@ export function SubscriptionPoolDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/** One-line spillover status that lives directly below the column-tail
- *  selector. Surfaces the chain for the CURRENT selection so an operator
- *  doesn't have to scroll to the per-column summary to see what their
- *  pool will do.
- *
- *  Three shapes:
- *  - **No pool / empty tail** (effective chain length === 1): the head
- *    is alone — there is nowhere to spill to, a card that hits its
- *    limit waits on the reset.
- *  - **Tail configured** (chain length > 1): show "head → tail → …"
- *    using ``PROVIDER_LABELS`` for the display.
- *  - **Board-wide with no column selected**: report the board-wide
- *    tail length so the operator can tell at a glance whether the
- *    pool itself is empty (``No spillover configured``) or has
- *    entries (``Board-wide pool: N entries``). The per-column chains
- *    live in the section below; this line is the board-wide summary.
- *
- *  Kaart 7411d25e… — makes the answer to "why is my card stuck?"
- *  visible in the toolbar dialog without a second click. */
-function SpilloverStatusLine({
-  selectedColumn,
-  selectedColumnDefaultProvider,
-  selectedColumnChain,
-  boardWideTailLength,
-}: {
-  selectedColumn: string | null;
-  selectedColumnDefaultProvider: string | null;
-  selectedColumnChain: string[] | null;
-  boardWideTailLength: number;
-}) {
-  const labelFor = (provider: string) =>
-    PROVIDER_LABELS[provider] ?? provider;
-  const formatChain = (chain: string[]) =>
-    chain.map(labelFor).join(" → ");
-
-  let body: { text: string; tone: "muted" | "active" };
-  if (selectedColumn) {
-    // Per-column view: chain comes from the backend so this matches
-    // exactly what the dispatcher will consult.
-    if (selectedColumnChain && selectedColumnChain.length > 0) {
-      const chain = selectedColumnChain;
-      if (chain.length === 1) {
-        body = {
-          text: `Spillover: ${labelFor(chain[0])} only — no tail configured, a card that hits its limit waits until the reset.`,
-          tone: "muted",
-        };
-      } else {
-        body = {
-          text: `Spillover chain: ${formatChain(chain)}`,
-          tone: "active",
-        };
-      }
-    } else {
-      // Chain fetch not back yet (or failed). Don't render a misleading
-      // line — fall through to a neutral placeholder so the layout
-      // doesn't jump when the response lands.
-      body = {
-        text: "Spillover chain: loading…",
-        tone: "muted",
-      };
-    }
-  } else {
-    // Board-wide view: there's no single chain because each column
-    // combines its own default with the board-wide tail. Surface the
-    // tail length so the operator knows whether the pool is empty.
-    if (boardWideTailLength === 0) {
-      body = {
-        text:
-          "No spillover configured — a card that hits its column-default limit waits until the reset. " +
-          (selectedColumnDefaultProvider
-            ? `(Per-column chains below.)`
-            : ""),
-        tone: "muted",
-      };
-    } else {
-      body = {
-        text: `Board-wide pool: ${boardWideTailLength} entr${boardWideTailLength === 1 ? "y" : "ies"} (per-column chains below).`,
-        tone: "muted",
-      };
-    }
-  }
-
-  return (
-    <p
-      data-testid="spillover-status"
-      data-selected-column={selectedColumn ?? ""}
-      className={
-        "rounded-md border px-3 py-2 text-xs " +
-        (body.tone === "active"
-          ? "border-primary/40 bg-primary/5 text-foreground"
-          : "border-border bg-muted/30 text-muted-foreground")
-      }
-      aria-live="polite"
-    >
-      {body.text}
-    </p>
-  );
-}
-
-/** Per-column summary list — kaart 7411d25e… acceptance: "Per agent-kolom
- *  is de effectieve keten zichtbaar (bv. `analyst: anthropic → minimax`).
- *  … als de volledige keten daar niet uit volgt, wordt die response
- *  uitgebreid in plaats van de keten in de frontend te herbouwen."
- *  The backend now returns ``spillover_chain`` per column; this section
- *  renders one row per agent column with that chain, plus a single
- *  status badge ("tail set" / "no tail") so an empty chain reads as a
- *  deliberate operator choice (kaart b36ca702…: "nooit uitwijken"),
- *  not as "didn't fetch yet". */
-function PerColumnChainList({
-  columns,
-  chains,
-  selectedColumn,
-}: {
-  columns: KanbanColumn[];
-  chains: Record<string, string[]>;
-  selectedColumn: string | null;
-}) {
-  if (columns.length === 0) return null;
-  const labelFor = (provider: string) =>
-    PROVIDER_LABELS[provider] ?? provider;
-  return (
-    <div
-      className="rounded-md border border-border bg-background p-2 space-y-1"
-      data-testid="per-column-chain-list"
-    >
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground px-1">
-        Effective spillover per column
-      </div>
-      {columns.map((c) => {
-        const chain = chains[c.name];
-        const hasData = Array.isArray(chain);
-        const chainText = hasData
-          ? chain!.map(labelFor).join(" → ")
-          : "loading…";
-        const tailCount = hasData ? Math.max(0, chain!.length - 1) : null;
-        const isSelected = c.name === selectedColumn;
-        return (
-          <div
-            key={c.id}
-            data-testid={`per-column-chain-row-${c.name}`}
-            className={
-              "flex items-center justify-between gap-2 rounded px-2 py-1 text-xs " +
-              (isSelected
-                ? "bg-primary/5 border border-primary/30"
-                : "hover:bg-muted/40")
-            }
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{c.name}</span>
-              {c.default_agent && (
-                <span className="text-muted-foreground">
-                  ({c.default_agent})
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 font-mono">
-              <span>{chainText}</span>
-              {hasData && (
-                <span
-                  className={
-                    "rounded-full px-2 py-0.5 text-[10px] font-sans " +
-                    (tailCount && tailCount > 0
-                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                      : "bg-amber-500/10 text-amber-700 dark:text-amber-400")
-                  }
-                  title={
-                    tailCount && tailCount > 0
-                      ? "Tail configured — cards spill over when the head is paused or above threshold."
-                      : "No tail — a card that hits its limit waits until the reset."
-                  }
-                  data-testid={`per-column-chain-status-${c.name}`}
-                >
-                  {tailCount && tailCount > 0
-                    ? `${tailCount} tail`
-                    : "no tail"}
-                </span>
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { MonitorPlay, Monitor } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useCCSessions } from './useCCSessions'
@@ -46,7 +46,6 @@ export function CCBridgePage() {
   const { teams, ungrouped, loading: teamsLoading, refresh: refreshTeams } = useTeams()
   const attentionByPane = useAttentionByPane()
   const [searchParams, setSearchParams] = useSearchParams()
-  const navigate = useNavigate()
   const [activeTargets, setActiveTargets] = useState<string[]>([])
   const [fullscreenTarget, setFullscreenTarget] = useState<string | null>(null)
   const [focusedTarget, setFocusedTarget] = useState<string | null>(null)
@@ -205,19 +204,6 @@ export function CCBridgePage() {
     refreshTeams()
   }
 
-  // Navigate from an agent-bridge session to the kanban card that
-  // dispatched it. The KanbanPage already supports a `?card=<id>` deep-link
-  // (card-references-analysis §2.4/§D2) and falls back to a project-agnostic
-  // `getCard` lookup when the active project doesn't carry that card, so we
-  // don't need to switch the active project here — passing the card id alone
-  // is enough.
-  const handleOpenCard = useCallback(
-    (cardId: string) => {
-      navigate(`/kanban?card=${encodeURIComponent(cardId)}`)
-    },
-    [navigate]
-  )
-
   const gridCols = activeTargets.length <= 1 ? 'grid-cols-1' : 'grid-cols-2'
   const showLeaderHint = leaderHintTarget !== null && displayedTargets.includes(leaderHintTarget)
 
@@ -274,7 +260,6 @@ export function CCBridgePage() {
               onNewSession={() => setNewSessionOpen(true)}
               onKillSession={setKillSession}
               onRename={handleRename}
-              onOpenCard={handleOpenCard}
               providerFilter={providerFilter}
               canCreateSession={canCreateSession}
               createDisabledReason={canCreateSession ? null : createDisabledReason}

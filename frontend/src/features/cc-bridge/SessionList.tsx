@@ -22,7 +22,6 @@ interface SessionListProps {
   onNewSession: () => void
   onKillSession: (session: CCSession) => void
   onRename: (session: CCSession, newName: string) => Promise<void>
-  onOpenCard?: (cardId: string) => void
   providerFilter: ProviderFilter
   canCreateSession: boolean
   createDisabledReason: string | null
@@ -42,7 +41,6 @@ export function SessionList({
   onNewSession,
   onKillSession,
   onRename,
-  onOpenCard,
   providerFilter,
   canCreateSession,
   createDisabledReason,
@@ -116,7 +114,6 @@ export function SessionList({
             onToggleTarget={onToggleTarget}
             onKillSession={onKillSession}
             onRename={onRename}
-            onOpenCard={onOpenCard}
             attentionByPane={attentionByPane}
             instance={instance}
           />
@@ -133,7 +130,6 @@ export function SessionList({
               onClick={() => onToggleTarget(session.tmux_target)}
               onKill={onKillSession}
               onRename={onRename}
-              onOpenCard={onOpenCard}
               attention={session.pane_id ? attentionByPane.get(session.pane_id) ?? null : null}
               instance={instance}
             />

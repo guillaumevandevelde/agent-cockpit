@@ -291,12 +291,6 @@ export interface Card {
   // the CardDrawer shows a banner only when both are set.
   done_summary?: string | null;
   completed_at?: string | null;
-  // True when `done_summary`/`completed_at` belong to an *earlier* lifecycle:
-  // the card was Done, got reopened, and is being reworked. Both fields stay
-  // populated (the history is real, and dispatch quotes it as the prior
-  // decision), so this flag is what distinguishes "finished" from
-  // "was finished once". See service.enrich_done_info_with_staleness.
-  done_summary_superseded?: boolean;
   // Impediment-lane classification. Populated by
   // `service.impediment_status_for_card` from open KanbanGate rows + the
   // op-log comment feed; `null` for cards outside the Impediment column.

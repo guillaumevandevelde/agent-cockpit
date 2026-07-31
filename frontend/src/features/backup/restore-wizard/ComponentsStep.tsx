@@ -3,7 +3,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
-import { AlertTriangle, KanbanSquare, Package, Puzzle } from "lucide-react";
+import { Package, Puzzle } from "lucide-react";
 import { type RestorePlan } from "@/types/backup";
 
 interface ComponentsStepProps {
@@ -12,12 +12,10 @@ interface ComponentsStepProps {
   selectedFiles: Set<string>;
   skipSkills: boolean;
   skipPlugins: boolean;
-  skipKanbanDb: boolean;
   onSelectAllFiles: (checked: boolean) => void;
   onFileToggle: (file: string) => void;
   onSkipSkillsChange: (v: boolean) => void;
   onSkipPluginsChange: (v: boolean) => void;
-  onSkipKanbanDbChange: (v: boolean) => void;
 }
 
 export function ComponentsStep({
@@ -26,20 +24,11 @@ export function ComponentsStep({
   selectedFiles,
   skipSkills,
   skipPlugins,
-  skipKanbanDb,
   onSelectAllFiles,
   onFileToggle,
   onSkipSkillsChange,
   onSkipPluginsChange,
-  onSkipKanbanDbChange,
 }: ComponentsStepProps) {
-  // The board snapshot only rides along on project/full scope. If the
-  // archive has no kanban-DB entry the toggle is irrelevant — hide it
-  // instead of dangling as a no-op.
-  const archiveHasKanbanDb = plan?.files_to_restore.some((f) =>
-    f.endsWith(".claude-registry/kanban.db")
-  );
-
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
@@ -81,32 +70,6 @@ export function ComponentsStep({
             onCheckedChange={(checked) => onSkipPluginsChange(!checked)}
           />
         </div>
-
-        {archiveHasKanbanDb && (
-          <div className="flex items-center justify-between p-3 border rounded-lg">
-            <div className="flex items-center gap-2">
-              <KanbanSquare className="h-4 w-4 text-indigo-600" />
-              <span>Kanban board</span>
-              <Badge variant="outline">1</Badge>
-            </div>
-            <Switch
-              checked={!skipKanbanDb}
-              onCheckedChange={(checked) => onSkipKanbanDbChange(!checked)}
-            />
-          </div>
-        )}
-
-        {archiveHasKanbanDb && !skipKanbanDb && (
-          <div className="flex items-start gap-2 p-3 bg-destructive/10 rounded-lg">
-            <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-            <span className="text-sm text-destructive">
-              The live kanban board will be replaced with the snapshot
-              from this backup. Every active card, comment, deliverable
-              and dependency graph on the current board will be lost
-              unless it was already part of this snapshot.
-            </span>
-          </div>
-        )}
       </div>
 
       {!selectAll && (

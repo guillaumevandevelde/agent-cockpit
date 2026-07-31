@@ -4,7 +4,6 @@ Discovery, spawn, and the pty relay now live in ``app.services.runs``; this
 module is a wire-format compat shim for the legacy ``/api/v1/cc-bridge`` URL
 prefix. The frontend card removes the route.
 """
-import asyncio
 import logging
 import secrets
 import time
@@ -14,9 +13,7 @@ from fastapi import APIRouter, HTTPException, WebSocket
 from pydantic import BaseModel
 
 from app.config import settings
-from app.kanban.db import KanbanSessionLocal
 from app.services.runs.cc_legacy import capture_pane_preview, discover_cc_sessions
-from app.services.runs.discovery import enrich_sessions_with_cards
 from app.services.runs.pty_relay import PtyRelay
 
 logger = logging.getLogger(__name__)
@@ -37,24 +34,9 @@ class SpawnRequest(BaseModel):
 
 
 @router.get("/sessions")
-async def list_sessions():
-    """List all discovered Claude Code sessions in tmux.
-
-    The synchronous tmux ``list-panes`` subprocess is offloaded to a worker
-    thread so the FastAPI event loop is never blocked on a slow ``tmux``
-    invocation. After discovery, each session is enriched with the
-    ``card_id`` + ``card_project_key`` of the kanban card that dispatched it
-    (if any) so the Agent Bridge UI can render a navigate-to-card
-    affordance — see kanban card cade1e9b919944258c442d273c1dcfd7.
-    """
-    sessions = await asyncio.to_thread(discover_cc_sessions)
-    try:
-        async with KanbanSessionLocal() as ks:
-            await enrich_sessions_with_cards(sessions, ks)
-    except Exception:
-        # Kanban DB unavailable (sqlite locked, schema mismatch) must not
-        # blank the session list — log and return unenriched sessions.
-        logger.exception("session→card enrichment failed; returning unenriched sessions")
+def list_sessions():
+    """List all discovered Claude Code sessions in tmux."""
+    sessions = discover_cc_sessions()
     return {"sessions": sessions, "count": len(sessions)}
 
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import type { Card } from "../types";
@@ -33,57 +33,8 @@ vi.mock("../api", async (importOriginal) => {
 // poll live endpoints. None of that is under test here — stub it so an
 // agent-claimed card (which defaults the drawer to the Run tab) doesn't fire
 // real network polls during these unit tests.
-//
-// The stub is opt-OUT per test (kanban card 41a75826…): mocking the very
-// component whose layout chain is in scope makes a layout assertion
-// vacuous — the drawer's full-area mode depends on CardRunTab's own root
-// being `flex-1 min-h-0 flex flex-col`, and a null-rendering stub satisfies
-// every "no scroll container" assertion without ever traversing that chain
-// (a real production bug shipped past exactly this gap). Flip
-// `runTabMock.real = true` in a test to render the REAL CardRunTab; its
-// canvas-bound leaf (TerminalView) and its polling hooks are stubbed below,
-// so jsdom stays happy while the production className chain stays intact.
-// See the "CardRunTab layout chain" describe at the bottom of this file.
-const runTabMock = vi.hoisted(() => ({ real: false }));
-
-vi.mock("./CardRunTab", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./CardRunTab")>();
-  return {
-    CardRunTab: (props: ComponentProps<typeof actual.CardRunTab>) =>
-      runTabMock.real ? <actual.CardRunTab {...props} /> : null,
-  };
-});
-
-// Leaf stubs used only when the real CardRunTab renders: xterm.js needs a
-// canvas jsdom can't provide, and the session/transcript hooks poll live
-// endpoints. Stubbing the LEAVES instead of CardRunTab itself is what keeps
-// the layout chain under test.
-const ccSessions = vi.hoisted(() => ({
-  list: [] as { session_name: string; tmux_target: string }[],
-}));
-
-vi.mock("@/features/cc-bridge/TerminalView", () => ({
-  TerminalView: () => <div data-testid="terminal-view" />,
-}));
-
-// Partial mock: CardEditDialog imports `fetchEndpoints` from this same
-// module, so a full replacement would strip an export other tests rely on.
-vi.mock("@/features/cc-bridge/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/features/cc-bridge/api")>();
-  return { ...actual, fetchResumableSessions: vi.fn(async () => ({ sessions: [] })) };
-});
-
-vi.mock("@/features/cc-bridge/useCCSessions", () => ({
-  useCCSessions: () => ({
-    sessions: ccSessions.list,
-    refresh: vi.fn(async () => {}),
-  }),
-}));
-
-vi.mock("@/hooks/useSessionsApi", () => ({
-  useSessionsApi: () => ({
-    getSessionDetail: vi.fn(async () => ({ session: null, total_pages: 1 })),
-  }),
+vi.mock("./CardRunTab", () => ({
+  CardRunTab: () => null,
 }));
 
 vi.mock("../appsApi", () => {
@@ -474,6 +425,442 @@ describe("CardDrawer reopen control", () => {
   });
 });
 
+describe("CardDrawer resolve impediment control", () => {
+  it("does not render the resolve-impediment control when the card is not in Impediment", () => {
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+
+    render(
+      <CardDrawerWithRouter
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("resolve-impediment-control")).toBeNull();
+  });
+
+  it("surfaces the impediment question and submits the answer via resolveImpediment", async () => {
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Which library should we use?" },
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
+    resolveMock.mockResolvedValue({ ...baseCard, column: "Doing" });
+
+    const impedimentCard: Card = { ...baseCard, column: "Impediment" };
+    const onChanged = vi.fn();
+
+    render(
+      <CardDrawerWithRouter
+        card={impedimentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    expect(control).not.toBeNull();
+
+    // The agent's question is surfaced for context.
+    await waitFor(() =>
+      expect(screen.getByTestId("impediment-question").textContent).toMatch(
+        /Which library should we use\?/,
+      ),
+    );
+
+    const textarea = screen.getByTestId("resolve-impediment-answer") as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "Use library B." } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+    });
+
+    await waitFor(() => expect(resolveMock).toHaveBeenCalled());
+    const [cardId, projectPath, answer] = resolveMock.mock.calls[0];
+    expect(cardId).toBe("card-1");
+    expect(projectPath).toBe("/proj");
+    expect(answer).toBe("Use library B.");
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("shows the recorded gate choice + always-visible textarea for extra context", async () => {
+    // The merged control: when a gate has been answered, the recorded choice
+    // is shown as read-only context AND the textarea stays so the human can
+    // add extra instructions before clicking Resolve. No separate "impediment
+    // resolved pending" panel — both the "impediment resolved" path (gate
+    // answered) and the "decision human answered needed" path (free-text)
+    // live in the same control now (kaart 4279448c).
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "answered",
+        answer: "Postgres",
+        created_at: "2026-07-10T10:00:00Z",
+        answered_at: "2026-07-10T10:01:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Postgres or SQLite?" },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
+    resolveMock.mockResolvedValue({ ...baseCard, column: "Doing" });
+
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    // Recorded choice is surfaced inside the merged control.
+    await waitFor(() =>
+      expect(control.textContent).toMatch(/Postgres/),
+    );
+    expect(control.textContent).toMatch(/Choice recorded|Choice:/);
+    // The textarea stays — it's the "extra info" extra for the operator.
+    const textarea = screen.getByTestId("resolve-impediment-answer") as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+
+    // The legacy separate panel is gone.
+    expect(screen.queryByTestId("impediment-resolved-pending")).toBeNull();
+  });
+
+  it("forwards the textarea as the answer when no gate answer exists", async () => {
+    // No gate at all — the human answers via the textarea only. The merged
+    // control must still let the textarea's content reach resolveImpediment.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Should we deploy on Friday?" },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
+    resolveMock.mockResolvedValue({ ...baseCard, column: "Doing" });
+
+    const onChanged = vi.fn();
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    const textarea = (await screen.findByTestId(
+      "resolve-impediment-answer",
+    )) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "Yes, deploy Friday." } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+    });
+
+    await waitFor(() => expect(resolveMock).toHaveBeenCalled());
+    const [, , answer] = resolveMock.mock.calls[0];
+    expect(answer).toBe("Yes, deploy Friday.");
+  });
+
+  it("renders exactly the agent's 4 options — no synthetic filler", async () => {
+    // Second Revisit on this card: "ik had graag gehad dat er steeds 4
+    // opties waren om uit te kiezen" — the first fix padded a shorter
+    // agent-supplied list with a UI-injected "Other" button, which the human
+    // rejected. The fix is enforced backend-side instead: `report_impediment`
+    // rejects any `options` call that isn't exactly 4 entries
+    // (test_kanban_mcp.py::test_report_impediment_rejects_non_four_option_count),
+    // so the frontend only ever needs to render what the gate carries,
+    // verbatim, with no filler.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Which database?",
+        options: ["Postgres", "SQLite", "MySQL", "MariaDB"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Which database?" },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    // All 4 of the agent's options appear inside the unified control.
+    expect(control.textContent).toMatch(/Postgres/);
+    expect(control.textContent).toMatch(/SQLite/);
+    expect(control.textContent).toMatch(/MySQL/);
+    expect(control.textContent).toMatch(/MariaDB/);
+    // No "Other" filler button anywhere in the control.
+    expect(
+      within(control).queryByRole("button", { name: /Other/i }),
+    ).toBeNull();
+    // Exactly 4 choice buttons — all agent-proposed.
+    const choiceButtons = within(control).getAllByTestId(
+      "impediment-choice-option",
+    );
+    expect(choiceButtons).toHaveLength(4);
+
+    // The textarea + single Resolve button are both visible inside the same
+    // unified control.
+    const textarea = screen.getByTestId(
+      "resolve-impediment-answer",
+    ) as HTMLTextAreaElement;
+    expect(textarea).toBeTruthy();
+    expect(
+      screen.getByTestId("resolve-impediment-submit"),
+    ).toBeTruthy();
+
+    // The previous separate "impediment-resolved-pending" panel and the old
+    // pre-answer "Decision needed — pick one to unblock" gate block must NOT
+    // render — both flows collapse into the single unified control now.
+    expect(screen.queryByTestId("impediment-resolved-pending")).toBeNull();
+    expect(screen.queryByText(/pick one to unblock/i)).toBeNull();
+  });
+
+  it("defensively caps the choice row at 4 for a legacy gate with 5+ options", async () => {
+    // The backend now rejects any new `report_impediment(options=...)` call
+    // that isn't exactly 4 entries, but a gate created before that
+    // validation shipped could still carry more. The frontend keeps a
+    // defensive cap so such a legacy row can't blow past 4 buttons — no
+    // filler is added, the extra options are simply not rendered.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Pick a stack",
+        options: ["Rails", "Django", "Express", "FastAPI", "Flask"], // 5 options
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Pick a stack" },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    const choiceButtons = within(control).getAllByTestId(
+      "impediment-choice-option",
+    );
+    expect(choiceButtons).toHaveLength(4);
+    // Beyond-cap option (Flask, the 5th) is NOT rendered.
+    expect(screen.queryByRole("button", { name: "Flask" })).toBeNull();
+  });
+
+  it("single click on a structured option + textarea content resolves both in one call", async () => {
+    // The user-visible complaint: "je klikt eerst een knop (die meteen
+    // doorgaat, zonder plek voor extra info) en pas daarna verschijnt het vak
+    // waar je context kunt toevoegen". The unified control must collapse both
+    // interactions into a single Resolve click: pick the option, type the
+    // extra context, click Resolve once → backend receives both the gate
+    // answer and the free-text resolution in one action.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Postgres or SQLite?" },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    const answerGateMock = kanbanApi.answerGate as ReturnType<typeof vi.fn>;
+    answerGateMock.mockResolvedValue({
+      id: "gate-1",
+      card_id: "card-1",
+      project_key: "proj-1",
+      question: "Postgres or SQLite?",
+      options: ["Postgres", "SQLite"],
+      status: "answered",
+      answer: "Postgres",
+      created_at: "2026-07-10T10:00:00Z",
+      answered_at: "2026-07-10T10:01:00Z",
+    });
+    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
+    resolveMock.mockResolvedValue({ ...baseCard, column: "Backlog" });
+
+    const onChanged = vi.fn();
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={onChanged}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    // Pick "Postgres" by clicking the option button (NOT a button that
+    // navigates/opens a separate panel — it just stages the local selection).
+    const postgresButton = within(control).getByRole("button", {
+      name: "Postgres",
+    });
+    await act(async () => {
+      fireEvent.click(postgresButton);
+    });
+
+    // Type the free-text extra context into the textarea (always visible).
+    const textarea = screen.getByTestId(
+      "resolve-impediment-answer",
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, {
+        target: { value: "Use the managed PG instance" },
+      });
+    });
+
+    // A single Resolve click must commit BOTH the gate answer and the text.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+    });
+
+    // Backend received both: the gate answer ("Postgres") and the text.
+    await waitFor(() => expect(answerGateMock).toHaveBeenCalledTimes(1));
+    expect(answerGateMock.mock.calls[0][0]).toBe("gate-1");
+    expect(answerGateMock.mock.calls[0][1]).toBe("Postgres");
+    await waitFor(() => expect(resolveMock).toHaveBeenCalledTimes(1));
+    const [, , freeText] = resolveMock.mock.calls[0];
+    expect(freeText).toBe("Use the managed PG instance");
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("typing in the textarea without clicking an option resolves via free text alone", async () => {
+    // With the "Other" filler button removed, the free-text path is simply:
+    // don't click any option, type in the always-visible textarea, and
+    // Resolve. No gate answer is submitted in this case — `answerGate` must
+    // not be called at all.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Which?",
+        options: ["A", "B", "C", "D"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Which?" },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    const answerGateMock = kanbanApi.answerGate as ReturnType<typeof vi.fn>;
+    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
+    resolveMock.mockResolvedValue({ ...baseCard, column: "Backlog" });
+
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    // No "Other" button exists — only the 4 real options.
+    expect(
+      within(control).queryByRole("button", { name: /Other/i }),
+    ).toBeNull();
+
+    const textarea = screen.getByTestId(
+      "resolve-impediment-answer",
+    ) as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(textarea, { target: { value: "Use MariaDB instead" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
+    });
+
+    await waitFor(() => expect(resolveMock).toHaveBeenCalledTimes(1));
+    const [, , freeText] = resolveMock.mock.calls[0];
+    expect(freeText).toBe("Use MariaDB instead");
+    expect(answerGateMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("CardDrawer deliverables tab per-kind rendering", () => {
   it("renders each deliverable kind with its own icon and ref formatting", () => {
     const card: Card = {
@@ -688,6 +1075,136 @@ describe("CardDrawer edit dialog round-trip", () => {
       analyst_agent_id: "claude-code",
       executor_agent_id: "open-code",
     });
+  });
+});
+
+// --- Impediment + structured-options gate rendering -----------------------
+// Acceptance criterion: when a card lands in Impediment carrying a
+// `report_impediment(options=...)` gate, the CardDrawer must (a) render the
+// choice buttons while the gate is unanswered, and (b) once the human picks
+// an option, surface the recorded choice AND the free-text textarea inside
+// the unified resolve-impediment-control (no separate "impediment resolved"
+// panel). The free-text path (no gate) renders the same control by itself.
+// See report_impediment in /mcp_server.py + the POST
+// /cards/{cid}/resolve-impediment contract in router.py. (kaart 4279448c:
+// merge the "impediment resolved" + "decision human answered needed" flows
+// into a single control.)
+
+const impCard: Card = { ...baseCard, column: "Impediment" };
+
+describe("CardDrawer Impediment column: structured-options gate", () => {
+  it("renders the open-gate choice buttons inside the unified resolve control", async () => {
+    // The Revisit note's "twee panelen boven elkaar" complaint is fixed: on
+    // an Impediment card, the open-gate choice buttons live inside the
+    // unified resolve-impediment-control, NOT in a separate panel above it.
+    // The legacy "pick one to unblock" header is gone — the unified control
+    // already says "Impediment — needs a human answer" and owns the choice
+    // row. (kaart 4279448c revisit.)
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The unified control owns the choice row. Wait for the polled gate
+    // fetch before asserting so we don't race the initial state.
+    const control = await screen.findByTestId("resolve-impediment-control");
+    await waitFor(() =>
+      expect(within(control).getByRole("button", { name: "Postgres" })).toBeTruthy(),
+    );
+    expect(within(control).getByRole("button", { name: "SQLite" })).toBeTruthy();
+    // Legacy separate gate header is gone.
+    expect(screen.queryByText(/pick one to unblock/i)).toBeNull();
+  });
+
+  it("open-gate option buttons stay visible only while the gate is unanswered", async () => {
+    // While a structured gate is still open, the "recorded choice" panel must
+    // NOT render — there's no answer yet. The choice buttons stay visible
+    // (inside the unified control) and guide the human to pick an option.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Postgres or SQLite?",
+        options: ["Postgres", "SQLite"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Wait for the polled gate fetch to land before asserting. Without this,
+    // the assertion runs while gates=[] (initial state) and our panel would
+    // not yet have been evaluated against the polled state.
+    const control = await screen.findByTestId("resolve-impediment-control");
+    await waitFor(() =>
+      expect(within(control).getByRole("button", { name: "Postgres" })).toBeTruthy(),
+    );
+    // While the gate is open, the "Choice recorded" panel inside the
+    // unified control must NOT render — the human hasn't picked yet. The
+    // choice buttons + textarea are still rendered.
+    expect(control.textContent).not.toMatch(/Choice recorded/);
+    // The textarea is always available.
+    expect(screen.getByTestId("resolve-impediment-answer")).toBeTruthy();
+  });
+
+  it("Resolve control is hidden outside the Impediment column", async () => {
+    // The merged Resolve control is Impediment-column specific — a Doing card
+    // must never expose it, even when a gate answer happens to exist.
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Stray gate question",
+        options: ["A", "B"],
+        status: "answered",
+        answer: "A",
+        created_at: "2026-07-10T10:00:00Z",
+        answered_at: "2026-07-10T10:01:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+    render(
+      <CardDrawerWithRouter
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId("resolve-impediment-control")).toBeNull();
   });
 });
 
@@ -1152,49 +1669,6 @@ describe("CardDrawer Subtasks section", () => {
     expect(section.textContent).toMatch(/Completed/);
   });
 
-  it("forwards gatedOn to the subtask ReadyStateBadge so the operator sees the trigger string", () => {
-    // kanban card 960d8038…: the subtask ReadyStateBadge must receive the
-    // child's gatedOn (mirrors CardItem's badge — Column.tsx:12). Without
-    // it, a gated child leaks only the generic "card is gated" tooltip
-    // and the operator has to click into the child to see WHAT it waits on.
-    const parent: Card = { ...baseCard, id: "parent-1" };
-    const gatedChild: Card = {
-      ...baseCard,
-      id: "child-gated",
-      title: "Gated child",
-      parent_card_id: "parent-1",
-      column: "Backlog",
-    };
-
-    const cardMeta = new Map([
-      [
-        "child-gated",
-        {
-          readyState: "gated" as const,
-          blockerTitles: [],
-          gatedOn: "second-executor-provider-onboarded",
-        },
-      ],
-    ]);
-
-    render(
-      <CardDrawerWithRouter
-        card={parent}
-        projectPath="/proj"
-        cards={[parent, gatedChild]}
-        cardMeta={cardMeta}
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    const badge = screen.getByText("Gated");
-    expect(badge.getAttribute("data-ready-state")).toBe("gated");
-    expect(badge.getAttribute("title")).toContain(
-      "second-executor-provider-onboarded",
-    );
-  });
-
   it("navigates to the clicked child card via the ?card= deep-link", async () => {
     const parent: Card = { ...baseCard, id: "parent-1" };
     const child: Card = {
@@ -1576,263 +2050,5 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
 
     const title = screen.getByRole("heading", { name: "Test card" });
     expect(fullArea.contains(title)).toBe(false);
-  });
-});
-
-// Acceptance criteria from kanban card c81fb67d:
-//   1) Done card → description appears before the operator-controls in DOM order.
-//   2) Layer 1 (action-required) renders even when layer 3 is collapsed.
-//   3) Layer 3 defaults to closed on a non-agent-claimed card and open on an
-//      agent-claimed card; an auto-selected tab (the Run tab on an agent
-//      claim) must never be hidden behind a collapsed layer 3 — full-area
-//      mode owns the body for that case.
-describe("CardDrawer three-layer reorganization (lees-first)", () => {
-  it("Done card: description precedes the operator controls in DOM order", () => {
-    const doneCard: Card = {
-      ...baseCard,
-      column: "Done",
-      description: "The reading matter",
-      done_summary: "Done.",
-      completed_at: "2026-07-10T12:00:00Z",
-    };
-
-    render(
-      <CardDrawerWithRouter
-        card={doneCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // Locate both anchors with a permissive query so the test does not care
-    // about CSS visibility: the request-review control sits inside the
-    // collapsible "operator & telemetry" section (laag 3), which renders
-    // with `hidden=""` when the collapsible is closed — Testing Library's
-    // `getByTestId` skips hidden elements by default, so use the raw DOM.
-    const scope = document.body;
-    const description = Array.from(scope.querySelectorAll<HTMLElement>("*")).find(
-      (el) => el.textContent === "The reading matter",
-    );
-    expect(description).toBeTruthy();
-
-    const requestReview = scope.querySelector(
-      '[data-testid="request-review-control"]',
-    );
-    expect(requestReview).toBeTruthy();
-
-    // `compareDocumentPosition` returns a bitmask; DOCUMENT_POSITION_FOLLOWING
-    // (0x04) means `requestReview` follows `description` in document order.
-    expect(
-      description!.compareDocumentPosition(requestReview!) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it("Impediment card: layer 1 (drawer pointer to resolve page) renders even when layer 3 is collapsed by default", async () => {
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Which library should we use?" },
-        created_at: "2026-01-01T00:00:00Z",
-      },
-    ]);
-
-    const impedimentCard: Card = { ...baseCard, column: "Impediment" };
-    render(
-      <CardDrawerWithRouter
-        card={impedimentCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // Layer 1 (action-required) is renderable through the sticky priority
-    // area even though the operator section is in its default-closed state.
-    // For Impediment cards the layer-1 control is now a pointer to the
-    // dedicated `/kanban/impediment/<id>` page (kaart 626e05e3…) — the
-    // drawer no longer hosts the resolve flow itself.
-    const pointer = await screen.findByTestId("impediment-drawer-pointer");
-    expect(pointer).toBeTruthy();
-    const openButton = screen.getByTestId("impediment-open-page");
-    expect(openButton).toBeTruthy();
-
-    // Sanity check: the operator section IS the default-closed state on a
-    // non-agent-claimed card (claimed_by is undefined for the base card).
-    const operatorContent = screen.getByTestId("operator-section-content");
-    expect(operatorContent.getAttribute("data-state")).toBe("closed");
-  });
-
-  it("non-agent-claimed card: the operator section defaults to closed (data-state=closed)", () => {
-    render(
-      <CardDrawerWithRouter
-        card={baseCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // Default tab fills the body, NOT the operator section — verify it's
-    // closed by checking Radix's data-state attribute on the content node.
-    const operatorContent = screen.getByTestId("operator-section-content");
-    expect(operatorContent.getAttribute("data-state")).toBe("closed");
-  });
-
-  it("agent-claimed card: full-area mode owns the body so the auto-selected Run tab is never hidden behind a collapsed layer 3", () => {
-    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
-    render(
-      <CardDrawerWithRouter
-        card={agentCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // Full-area mode owns the body: the collapsible operator section is not
-    // rendered at all, and the body is replaced by the tabs panel so the
-    // auto-selected Run tab is visible from the start.
-    expect(screen.queryByTestId("operator-section-trigger")).toBeNull();
-    expect(screen.queryByTestId("operator-section-content")).toBeNull();
-    expect(screen.getByTestId("card-drawer-full-area")).toBeTruthy();
-  });
-
-  // Impediment fix (kanban card c81fb67d revisit): the previous commit
-  // promoted the deliverables list out of the default-mode TabsList into
-  // the inline laag 2 panel, but left a Deliverables TabsTrigger in the
-  // full-area TabsList. Clicking it from the Run tab flipped activeTab to
-  // "deliverables", dropped isFullAreaMode to false, and re-rendered the
-  // default body — which has no TabsContent value="deliverables" — leaving
-  // Radix with no panel to select. The human's answer: remove the
-  // Deliverables trigger from the full-area TabsList as well, so the
-  // operator leaves the run for any other tab and sees the inline
-  // deliverables panel above the operator section. These two tests pin
-  // that contract: the trigger is gone, and the broken click path cannot
-  // be reached.
-  it("agent-claimed card: the full-area TabsList has no Deliverables trigger (deliverables live inline in laag 2)", () => {
-    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
-    render(
-      <CardDrawerWithRouter
-        card={agentCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // The TabsList inside card-drawer-full-area must not advertise a
-    // Deliverables trigger — the deliverables list is now laag 2 content,
-    // not telemetry, and exposing it here would re-introduce the empty-
-    // tab-plane click path (activeTab="deliverables" → isFullAreaMode
-    // → false → default body → no matching TabsContent).
-    expect(
-      screen.queryByRole("tab", { name: "Deliverables" }),
-    ).toBeNull();
-
-    // For good measure: the run-tab trigger is the only one allowed to
-    // depend on the agent claim, and it must still be present so the
-    // operator can navigate back to the live terminal.
-    expect(screen.getByRole("tab", { name: "Run" })).toBeTruthy();
-  });
-
-  it("agent-claimed card: no tab plane can be left empty — the full-area TabsList never offers a value the body cannot render", () => {
-    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
-    render(
-      <CardDrawerWithRouter
-        card={agentCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // Enumerate every TabsTrigger in the full-area TabsList. The default
-    // body's TabsList is a different element (only rendered outside
-    // full-area mode), so `card-drawer-full-area` is the right scope.
-    const fullArea = screen.getByTestId("card-drawer-full-area");
-    const triggerValues = Array.from(
-      fullArea.querySelectorAll<HTMLElement>('[role="tab"]'),
-    ).map((t) => t.getAttribute("data-value") ?? t.getAttribute("value") ?? "");
-
-    // Every value advertised by a trigger must also have a TabsContent
-    // rendered inside the same Tabs root. A value with a trigger but no
-    // TabsContent is the precise shape of the bug we just fixed (Radix
-    // would render the TabsContent branch but find no panel to select).
-    const panelValues = Array.from(
-      fullArea.querySelectorAll<HTMLElement>('[role="tabpanel"]'),
-    ).map((p) => p.getAttribute("data-value") ?? p.getAttribute("value") ?? "");
-
-    for (const v of triggerValues) {
-      if (!v) continue;
-      expect(panelValues, `trigger "${v}" has no matching TabsContent`).toContain(v);
-    }
-  });
-});
-
-// --- CardRunTab layout chain (kanban card 41a75826…) ----------------------
-// The scroll-contract tests above render CardRunTab as a null stub, which is
-// right for their purpose but structurally blind to the layout chain: the
-// drawer's full-area mode only works if `flex-1 min-h-0` survives every hop
-// from the dialog body down to the xterm container. That chain broke once in
-// production (CardRunTab's outer wrapper was a plain `space-y-2`, so the
-// terminal collapsed to zero height) while the stubbed contract test stayed
-// green — the mock had no child to contradict it.
-//
-// This block renders the REAL CardRunTab (leaves stubbed, see the top of the
-// file) and asserts each link of the production chain:
-//
-//   card-drawer-full-area → [role=tabpanel] → card-run-tab-root → terminal box
-describe("CardRunTab layout chain — full-area mode reaches the terminal widget", () => {
-  afterEach(() => {
-    runTabMock.real = false;
-    ccSessions.list = [];
-  });
-
-  it("agent-claimed card with a live session: every hop keeps flex-1 min-h-0 and the run-tab root is a flex column", () => {
-    runTabMock.real = true;
-    ccSessions.list = [{ session_name: "sess-1", tmux_target: "sess-1:0.0" }];
-
-    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
-    render(
-      <CardDrawerWithRouter
-        card={agentCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // Hop 1 — the drawer body in full-area mode.
-    const fullArea = screen.getByTestId("card-drawer-full-area");
-    expect(fullArea.className).toMatch(/\bflex\b/);
-    expect(fullArea.className).toMatch(/\bflex-col\b/);
-
-    // Hop 3 — CardRunTab's own root. This is the link that regressed: with a
-    // bare `space-y-2` wrapper the class chain dies here and the terminal
-    // never gets a height, no matter what the drawer does.
-    const runTabRoot = screen.getByTestId("card-run-tab-root");
-    expect(runTabRoot.className).toMatch(/\bflex-1\b/);
-    expect(runTabRoot.className).toMatch(/\bmin-h-0\b/);
-    expect(runTabRoot.className).toMatch(/\bflex-col\b/);
-
-    // Hop 2 — the active tab panel between them (Radix TabsContent).
-    const tabPanel = runTabRoot.closest('[role="tabpanel"]') as HTMLElement | null;
-    expect(tabPanel).not.toBeNull();
-    expect(fullArea.contains(tabPanel!)).toBe(true);
-    expect(tabPanel!.className).toMatch(/\bflex-1\b/);
-    expect(tabPanel!.className).toMatch(/\bmin-h-0\b/);
-    expect(tabPanel!.className).toMatch(/\bflex-col\b/);
-
-    // Hop 4 — the xterm container, and proof the widget actually mounted
-    // (a null stub would make every assertion above vacuous).
-    const terminalContainer = screen.getByTestId("terminal-view")
-      .parentElement as HTMLElement;
-    expect(runTabRoot.contains(terminalContainer)).toBe(true);
-    expect(terminalContainer.className).toMatch(/\bflex-1\b/);
-    expect(terminalContainer.className).toMatch(/\bmin-h-0\b/);
   });
 });

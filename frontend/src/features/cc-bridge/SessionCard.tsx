@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, GitBranch, Pencil, Trash2, KanbanSquare } from 'lucide-react'
+import { ArrowDown, ArrowUp, GitBranch, Pencil, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -17,17 +17,11 @@ interface SessionCardProps {
   onClick: () => void
   onKill: (session: CCSession) => void
   onRename: (session: CCSession, newName: string) => Promise<void>
-  /**
-   * Open the kanban card the dispatcher associated with this session. Only
-   * present when `session.card_id` is set; the SessionCard only renders the
-   * affordance in that case.
-   */
-  onOpenCard?: (cardId: string) => void
   attention?: AttentionKind | null
   instance?: InstanceIdentity | null
 }
 
-export function SessionCard({ session, gridPosition, onClick, onKill, onRename, onOpenCard, attention, instance }: SessionCardProps) {
+export function SessionCard({ session, gridPosition, onClick, onKill, onRename, attention, instance }: SessionCardProps) {
   const projectName = session.cwd.split('/').pop() || session.cwd
   const isActive = gridPosition !== null
 
@@ -128,25 +122,6 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
           </div>
           {!editing && (
             <div className="flex items-center gap-1.5 shrink-0">
-              {session.card_id && onOpenCard && (
-                <button
-                  type="button"
-                  aria-label="View kanban card"
-                  className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-primary transition-colors"
-                  onClick={(e) => {
-                    // The card root toggles the pane grid; without
-                    // stopPropagation the bridge would also attach this
-                    // pane the moment the operator clicks through to
-                    // the kanban board.
-                    e.stopPropagation()
-                    onOpenCard(session.card_id!)
-                  }}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  title="View kanban card"
-                >
-                  <KanbanSquare className="h-3 w-3" />
-                </button>
-              )}
               <button
                 type="button"
                 aria-label="Rename session"

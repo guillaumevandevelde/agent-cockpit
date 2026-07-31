@@ -378,21 +378,7 @@ async def enrich_done_info(session, card_id: str) -> tuple[str | None, datetime 
     between columns without the summary field going stale. The op-log
     stays the source of truth, and a rematerialize rebuild reproduces the
     same answer because the comment op itself is what carries the text.
-
-    Deliberately column-blind: a card that was moved *away* from Done
-    still surfaces its summary, because the history is what dispatch's
-    `## REVISIT` section and `request_review` need (both quote it as the
-    *prior* decision). Callers that render the pair as the card's
-    **current** state want `enrich_done_info_with_staleness` instead.
     """
-    op = await _latest_done_summary_op(session, card_id)
-    if op is None:
-        return None, None
-    text = op.payload.get("text") or ""
-    return text[len(_DONE_SUMMARY_PREFIX):], op.created_at
-
-
-async def _latest_done_summary_op(session, card_id: str):
     stmt = (
         select(KanbanOp)
         .where(KanbanOp.entity_id == card_id)
@@ -401,45 +387,11 @@ async def _latest_done_summary_op(session, card_id: str):
         .order_by(KanbanOp.hlc.desc())
         .limit(1)
     )
-    return (await session.execute(stmt)).scalar_one_or_none()
-
-
-async def enrich_done_info_with_staleness(
-    session, card_id: str,
-) -> tuple[str | None, datetime | None, bool]:
-    """`enrich_done_info` + a third element: is that summary *superseded*?
-
-    A card that goes Done → reopened → active keeps its `**Summary:**`
-    comment (and its deliverables) in the op-log, so the pair above keeps
-    returning them. Mid-rework that reads as "this card is finished, and
-    someone else shipped it" — the exact false signal that cost a resuming
-    session several tool calls on kaart `6b67df66…` before it dared to
-    merge (kaart `51813327…`). The text stays available; the third element
-    says out loud that it belongs to an earlier lifecycle.
-
-    Superseded == a `move` op into a non-preserving column happened *after*
-    the summary was written. `mcp_server.move_card` applies its move op
-    **before** posting the Summary comment, so the move that accompanies a
-    Done lands with a lower HLC and never flags its own summary — that
-    ordering is load-bearing and pinned by
-    `test_staleness_false_for_parent_parked_in_awaiting_subtasks`.
-    """
-    op = await _latest_done_summary_op(session, card_id)
+    op = (await session.execute(stmt)).scalar_one_or_none()
     if op is None:
-        return None, None, False
+        return None, None
     text = op.payload.get("text") or ""
-    stmt = (
-        select(KanbanOp.payload)
-        .where(KanbanOp.entity_id == card_id)
-        .where(KanbanOp.op_type == "move")
-        .where(KanbanOp.hlc > op.hlc)
-    )
-    later_columns = (await session.execute(stmt)).scalars().all()
-    superseded = any(
-        (payload or {}).get("column") not in _SUMMARY_PRESERVING_COLUMNS
-        for payload in later_columns
-    )
-    return text[len(_DONE_SUMMARY_PREFIX):], op.created_at, superseded
+    return text[len(_DONE_SUMMARY_PREFIX):], op.created_at
 
 
 # Markers used by `impediment_status_for_card` to classify why an Impediment
@@ -803,18 +755,6 @@ REVIEWER_COLUMN = "reviewer"
 # card is redirected into the reviewer column so a rejection routes the resume
 # back to that persona (the engineer) instead of re-running the reviewer.
 REVIEW_RETURN_AGENT_KEY = "review_return_agent"
-
-# Columns a card can arrive in *after* its `**Summary:**` comment without that
-# summary becoming stale — the finished/parked side of the board. `Done` is the
-# obvious one; `Awaiting Subtasks` is parent-parking (a Done move that waits on
-# children) and `reviewer` is the pre-Done review gate — both are reached *by*
-# the Done move itself, not by a reopen. Every other column (Backlog, intake,
-# Impediment, To Resume, any agent column) means work resumed after the summary
-# was written, so the summary describes a superseded lifecycle. Consumed by
-# `enrich_done_info_with_staleness` above (kaart `51813327…`).
-_SUMMARY_PRESERVING_COLUMNS = frozenset({
-    "Done", "Awaiting Subtasks", REVIEWER_COLUMN,
-})
 
 
 async def reviewer_column_exists(session, project_key: str) -> bool:

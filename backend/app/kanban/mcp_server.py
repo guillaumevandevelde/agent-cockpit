@@ -68,22 +68,20 @@ PERMISSION_PROMPT_TOOL_NAME = "mcp__cockpit-kanban__permission_prompt"
 
 async def _card_dict(s, card) -> dict:
     """JSON-serialisable dict for a card ORM instance, enriched with the
-    op-log-derived `done_summary` / `completed_at` / `done_summary_superseded`
-    / `impediment_status` fields so the MCP layer returns the same shape the
-    REST API does (see CardResponse).
+    op-log-derived `done_summary` / `completed_at` / `impediment_status`
+    fields so the MCP layer returns the same shape the REST API does
+    (see CardResponse).
 
     All callers have an active session, so we require it as a parameter
     instead of opening a second one. `None` cards short-circuit to the
     `{error: not_found}` payload without touching the session."""
     if card is None:
         return {"error": _NOT_FOUND}
-    done_summary, completed_at, superseded = \
-        await service.enrich_done_info_with_staleness(s, card.id)
+    done_summary, completed_at = await service.enrich_done_info(s, card.id)
     impediment_status = await service.impediment_status_for_card(s, card)
     return CardResponse.model_validate(card).model_copy(update={
         "done_summary": done_summary,
         "completed_at": completed_at,
-        "done_summary_superseded": superseded,
         "impediment_status": impediment_status,
     }).model_dump(mode="json")
 
@@ -790,39 +788,30 @@ async def release_card(card_id: str) -> dict:
 async def report_impediment(card_id: str, question: str,
                             options: list[str] | None = None) -> dict:
     """Report an impediment on a card. Moves it to Impediment column with a clear
-    question and exactly 4 structured candidate answers.
+    question and (optionally) structured candidate answers.
 
     Use this when you need a human decision: you provide a `question`, plus an
-    `options` list of exactly 4 structured choices the human can pick from in
-    the UI. The card is moved to Impediment and the claim is released — this
-    tool does NOT block on an answer; the session ends here. The dispatch loop
-    will pick the card back up later; the resume prompt will receive the chosen
-    option via the existing `**Impediment:**` comment + `impediment_question`
-    channel (dispatch.build_card_prompt + router.resolve_impediment).
+    optional `options` list of structured choices the human can pick from in the
+    UI. The card is moved to Impediment and the claim is released — this tool
+    does NOT block on an answer; the session ends here. The dispatch loop will
+    pick the card back up later; the resume prompt will receive the chosen
+    option (or the raw question when no options were supplied) via the existing
+    `**Impediment:**` comment + `impediment_question` channel
+    (dispatch.build_card_prompt + router.resolve_impediment).
 
-    `options` is **required** and must contain exactly 4 entries, all of them
-    your own proposed answers. The Impediment UI always renders a row of
-    choice buttons, so a call without options would show the human a card with
-    no choices at all — the complaint that drove kaart 4279448c through three
-    rounds. Two earlier variants were both rejected by the human: a UI-injected
-    "Other" filler padding a shorter list (revisit 1), and allowing `options`
-    to be omitted for a free-text question (revisit 2). If you have fewer than
-    4 genuine alternatives, add plausible ones yourself — a deliberately weaker
-    option is fine. Supplying 1-3 (or 5+) is rejected with
-    `error: "invalid_option_count"`; omitting `options` is rejected with
-    `error: "options_required"`. Both reject with no side effects: no move, no
-    comment, no gate, no release — retry with exactly 4.
+    When supplied, `options` must contain exactly 4 entries — the Impediment
+    UI always renders 4 choice buttons, and all 4 must be your own proposed
+    answers (kaart 4279448c revisit: a UI-injected "Other" filler used to pad
+    a shorter list, which the human rejected). If you have fewer than 4
+    genuine alternatives, add plausible ones yourself (even a deliberately
+    weaker one) to reach 4, or omit `options` entirely to ask a free-text
+    question instead. Supplying 1-3 options is rejected with
+    `error: "invalid_option_count"` and the call has no effect — retry with
+    exactly 4 or none.
 
-    An open-ended question is not an exception to this. The human is never
-    boxed in by your 4: the UI shows a free-text field *alongside* the buttons,
-    so they can ignore every option and type their own answer (and when they
-    do pick one, they can still add extra context in the same field —
-    `dispatch.compose_impediment_answer` merges both into the resumed prompt).
-    Your 4 options are a starting point for the human, not a closed ballot.
-
-    A KanbanGate row is created in status="open" so the kanban UI can render
-    the choice buttons on the card in the Impediment column. The chosen answer
-    replaces the question in the resumed prompt.
+    When `options` is supplied a KanbanGate row is also created in status="open",
+    so the kanban UI can render choice buttons on the card in the Impediment
+    column. The chosen answer replaces the question in the resumed prompt.
 
     This is the **standard question flow for all agents** — every human-decision
     request goes here, not through the blocking `open_gate` tool, which would
@@ -837,36 +826,11 @@ async def report_impediment(card_id: str, question: str,
     scheduler-trap op?") dan het techniek-fork ("Welke scheduler
     kiezen we?"). De product-taal-conventie volledig: lees
     `docs/cockpit/kanban-conventions.md` §5.
+
+    Backwards compatible: omitting `options` keeps the legacy free-text path
+    (no KanbanGate created).
     """
-    # `options` is mandatory and must be exactly 4 (kaart 4279448c, human
-    # decision "altijd 4 knoppen"). Validated here rather than by making the
-    # parameter required in the signature on purpose: a missing required
-    # parameter is rejected at the MCP protocol layer as -32602, which agents
-    # are instructed to read as "MCP handshake race → retry → fall back to
-    # REST" — i.e. the one error that would push a caller onto the very path
-    # that bypasses this gate. Keeping the parameter optional in the schema
-    # means a forgetful call lands here instead and gets an actionable,
-    # self-correctable message. Mirrors move_card's `outcome_required` /
-    # `invalid_outcome` pair, which gates on the same terms for the same
-    # reason.
-    if options is None:
-        logger.info("report_impediment: %s rejected — options missing", card_id)
-        return {
-            "error": "options_required",
-            "message": (
-                f"options is required and must contain exactly "
-                f"{_IMPEDIMENT_OPTION_COUNT} agent-proposed choices. Every "
-                "Impediment card shows the human a row of choice buttons; a "
-                "call without options would leave them with none. If the "
-                "question is genuinely open-ended, propose "
-                f"{_IMPEDIMENT_OPTION_COUNT} plausible answers anyway (a "
-                "deliberately weaker option is fine) — the human can still "
-                "ignore all of them and type a free-text answer, which the "
-                "UI always offers alongside the buttons."
-            ),
-            "card_id": card_id,
-        }
-    if len(options) != _IMPEDIMENT_OPTION_COUNT:
+    if options is not None and len(options) != _IMPEDIMENT_OPTION_COUNT:
         logger.info(
             "report_impediment: %s rejected — options=%d (need exactly %d)",
             card_id, len(options), _IMPEDIMENT_OPTION_COUNT,
@@ -876,10 +840,8 @@ async def report_impediment(card_id: str, question: str,
             "message": (
                 f"options must contain exactly {_IMPEDIMENT_OPTION_COUNT} "
                 f"entries (got {len(options)}). Supply "
-                f"{_IMPEDIMENT_OPTION_COUNT} agent-proposed choices — if you "
-                "have fewer genuine alternatives, add plausible ones yourself "
-                "(even a deliberately weaker one) to reach "
-                f"{_IMPEDIMENT_OPTION_COUNT}."
+                f"{_IMPEDIMENT_OPTION_COUNT} agent-proposed choices, or omit "
+                "`options` entirely to ask a free-text question instead."
             ),
             "card_id": card_id,
         }

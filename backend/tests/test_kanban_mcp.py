@@ -123,11 +123,7 @@ async def test_attach_deliverable_not_found():
 
 @pytest.mark.asyncio
 async def test_report_impediment_not_found():
-    # `options` is validated before the card lookup (cheap arg-check first),
-    # so a well-formed 4-option call is what surfaces `not_found`.
-    result = await m.report_impediment(
-        "nonexistent-id", "What should I do?", options=["A", "B", "C", "D"],
-    )
+    result = await m.report_impediment("nonexistent-id", "What should I do?")
     assert result.get("error") == "not_found"
 
 
@@ -201,7 +197,7 @@ async def test_report_impediment_rejects_non_four_option_count():
     cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
 
-    for bad_options in ([], ["A"], ["A", "B"], ["A", "B", "C"],
+    for bad_options in (["A"], ["A", "B"], ["A", "B", "C"],
                         ["A", "B", "C", "D", "E"]):
         result = await m.report_impediment(cid, "Pick one", options=bad_options)
         assert result.get("error") == "invalid_option_count"
@@ -222,41 +218,27 @@ async def test_report_impediment_rejects_non_four_option_count():
 
 
 @pytest.mark.asyncio
-async def test_report_impediment_without_options_is_rejected():
-    """Kaart 4279448c, tweede revisit + human decision "altijd 4 knoppen":
-    omitting `options` used to be the *advised* escape hatch for an open
-    question, which meant the product owner could still land on an Impediment
-    card with zero choice buttons — exactly the complaint the 4-option gate
-    was meant to end. Omitting is now rejected on the same no-side-effects
-    terms as a wrong count: no move, no comment, no gate, no release.
-
-    The error is distinct from `invalid_option_count` (mirroring
-    `move_card`'s `outcome_required` vs `invalid_outcome` pair) so the agent
-    can tell "you forgot options entirely" from "you supplied the wrong
-    number"."""
+async def test_report_impediment_without_options_still_works():
+    """Backwards compat: omitting options keeps the legacy free-text path —
+    no KanbanGate is created, no exceptions, comment + move + release only.
+    Mirrors the existing call site in engineer.md / analyst.md that pass
+    only `question`."""
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.models import KanbanGate
-    from app.kanban.service import card_activity
 
     cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     await m.claim_card(cid, "agent:sess1@devA")
     result = await m.report_impediment(cid, "Need a human, please answer in chat.")
 
-    assert result.get("error") == "options_required"
+    assert result["claimed_by"] is None
+    assert result["column"] == "Impediment"
 
     async with KanbanSessionLocal() as s:
-        card = await m.service.get_card(s, cid)
         gates = (await s.execute(
             __import__("sqlalchemy").select(KanbanGate)
             .where(KanbanGate.card_id == cid)
         )).scalars().all()
-    assert card.column != "Impediment"
-    assert card.claimed_by is not None
     assert gates == []
-    async with KanbanSessionLocal() as s:
-        ops = await card_activity(s, cid)
-    assert not any("**Impediment:**" in (o.payload or {}).get("text", "")
-                   for o in ops if o.op_type == "comment")
 
 
 @pytest.mark.asyncio

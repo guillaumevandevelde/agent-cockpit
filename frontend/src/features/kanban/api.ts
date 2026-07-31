@@ -563,10 +563,6 @@ export const kanbanApi = {
     column_default_provider: string | null;
     column_default_model: string | null;
     persona_model: string | null;
-    // Kaart 7411d25e…: ordered list of providers in the resolved
-    // spillover chain (``[head] ++ [tail]``). Always non-empty (length
-    // 1 = 'no spillover configured'; >1 = a real tail exists).
-    spillover_chain: string[];
   }> =>
     apiClient<{
       provider: string;
@@ -578,7 +574,6 @@ export const kanbanApi = {
       column_default_provider: string | null;
       column_default_model: string | null;
       persona_model: string | null;
-      spillover_chain: string[];
     }>(`${BASE}/columns/${columnId}/effective-model`),
 
   updatePlanAttachment: (

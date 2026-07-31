@@ -7,10 +7,9 @@ should send. The credential (API key / bearer token) is **never** stored
 here — ``provider_env.build_provider_env`` keeps its long-standing
 contract of never resolving secrets, and this module reinforces that by
 referencing credentials by name only (``credential_name``); the actual
-value lookup is the caller's job, resolved below in
-``resolve_compatible_endpoint`` (``Settings.minimax_api_key`` for the
-legacy MiniMax slot, ``SecretStore.get(project_key, credential_name)``
-for everything else).
+value lookup is the caller's job (today: ``Settings`` for the
+hardcoded MiniMax key; tomorrow: ``SecretStore.get(project_key,
+credential_name)`` once follow-up #4 lands).
 
 The shape mirrors the project's existing per-project key/value table
 convention (``KanbanMeta``); the key prefix ``endpoint:<project_key>:``
@@ -285,8 +284,10 @@ async def resolve_compatible_endpoint(
         pass
     elif endpoint.credential_name == "minimax":
         # MVP credential resolution: only MiniMax's legacy ``.env``-
-        # backed key is recognised here; the SecretStore-backed path
-        # for every other credential lives just below.
+        # backed key is recognised. ``SecretStore``-backed lookup
+        # lands in a follow-up card (see dispatch-vendor-koppeling-
+        # analyse.md §3 G1 + the SecretStore follow-up referenced
+        # from ``provider_env.py``).
         from app.config import settings
         auth_token = settings.minimax_api_key
         # kaart 27317b4871… (FCR gap 5): without this check the dispatch

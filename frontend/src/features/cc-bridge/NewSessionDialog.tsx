@@ -417,14 +417,6 @@ export function NewSessionDialog({ open, onOpenChange, onSpawned, initialProvide
           ...(isBedrock && bedrockModel.trim() && { bedrock_model: bedrockModel.trim() }),
           ...(isMinimax && { provider: 'minimax' as const }),
           ...(isMinimax && minimaxBaseUrl.trim() && { minimax_base_url: minimaxBaseUrl.trim() }),
-          // ``anthropic-compatible`` was missing here, so a "Custom endpoint"
-          // pick silently fell back to plain Anthropic on resume. The
-          // non-resume SpawnSessionRequest block below carries the same
-          // fields, so resume now mirrors it (kaart 7ab0fc0038c…).
-          ...(isCompatible && selectedEndpoint && {
-            provider: 'anthropic-compatible' as const,
-            endpoint_name: selectedEndpoint.name,
-          }),
         })
         for (const item of result.results) {
           if (item.ok && item.tmux_target) onSpawned(item.tmux_target)

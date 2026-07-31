@@ -454,30 +454,13 @@ class BackupService:
         scope: str,
         extra_files: dict[str, str] | None = None,
         provider_inventory: dict[str, Any] | None = None,
-        path_renames: dict[Path, str] | None = None,
     ) -> BackupManifest:
-        """Generate a backup manifest with all dependency information.
-
-        ``path_renames`` is applied when computing the arcname listed
-        in ``contents.files`` so the manifest's index matches the
-        arcname that actually lands in the ZIP. The kanban snapshot
-        path (``kanban.db.snap-<ts>-<id>.db``) is renamed to the
-        canonical ``<home>/.claude-registry/kanban.db`` — the manifest
-        must list the canonical arcname, not the ephemeral snapshot
-        source. Without this, manifest consumers that index by name
-        (kanban card 18984c63a…) hit a path that isn't in the archive
-        while the actual ZIP entry is the one the manifest doesn't list.
-        """
+        """Generate a backup manifest with all dependency information."""
         contents = BackupManifestContents()
 
         # Track files
         home = get_user_home()
         for path in paths:
-            if path_renames and path in path_renames:
-                # Honor the same arcname the ZIP will use; otherwise
-                # the manifest would leak the snapshot source path.
-                contents.files.append(path_renames[path])
-                continue
             try:
                 rel_path = str(path.relative_to(home))
             except ValueError:
@@ -582,13 +565,7 @@ class BackupService:
         archive_path = get_backup_storage_dir() / archive_name
 
         # Generate manifest
-        manifest = self._generate_manifest(
-            paths,
-            scope,
-            extra_files,
-            provider_inventory,
-            path_renames=path_renames,
-        )
+        manifest = self._generate_manifest(paths, scope, extra_files, provider_inventory)
 
         with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
             # Add manifest.json first

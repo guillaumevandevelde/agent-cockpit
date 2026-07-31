@@ -59,17 +59,6 @@ export function SubscriptionToolbarButton({ projectKey }: { projectKey: string }
       ? `Pool (${pool.length})`
       : "Subscriptions";
 
-  // Kaart 7411d25e…: spillover status surfaces in the tooltip so an
-  // operator can answer "why is my card stuck?" without opening the
-  // dialog. The pool is a spillover chain with the column-default as
-  // the implicit head, so a configured pool always means spillover is
-  // ON; the dialog adds the per-column chain detail once opened.
-  const tooltip = override
-    ? `Board-wide subscription pin: ${PROVIDER_LABELS[override.provider] ?? override.provider} (pool is bypassed)`
-    : pool && pool.length > 0
-      ? `Spillover: ON — pool has ${pool.length} entr${pool.length === 1 ? "y" : "ies"}; cards spill over when their column default is paused or above its threshold`
-      : "Spillover: OFF — no pool configured, a card that hits its column-default limit waits until the reset";
-
   return (
     <>
       <Button
@@ -81,7 +70,13 @@ export function SubscriptionToolbarButton({ projectKey }: { projectKey: string }
             ? "border-primary text-primary font-medium"
             : undefined
         }
-        title={tooltip}
+        title={
+          override
+            ? `Board-wide subscription pin: ${PROVIDER_LABELS[override.provider] ?? override.provider} (pool is bypassed)`
+            : pool && pool.length > 0
+              ? `Subscription pool: ${pool.length} entries`
+              : "Subscriptions (column defaults)"
+        }
       >
         {label}
       </Button>

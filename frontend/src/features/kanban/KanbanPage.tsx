@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useProjectContext } from "@/contexts/ProjectContext";
 import { useProviderContext } from "@/contexts/ProviderContext";
@@ -21,7 +21,6 @@ import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
 import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
-import { reorderColumnByFilteredTarget } from "./reorder";
 import type { Card, KanbanColumn } from "./types";
 
 const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]);
@@ -39,7 +38,6 @@ export default function KanbanPage() {
   const [cardsLoaded, setCardsLoaded] = useState(false);
   const [open, setOpen] = useState<Card | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const [editingColumns, setEditingColumns] = useState(false);
   const [editingWorkTypeMappings, setEditingWorkTypeMappings] = useState(false);
@@ -90,19 +88,8 @@ export default function KanbanPage() {
   // card always pushes a history entry so browser-back closes the drawer
   // instead of leaving the kanban page; closing replaces the entry so it
   // doesn't leave a forward-navigation ghost.
-  //
-  // Impediment cards are special-cased: they no longer open the drawer at
-  // all (kaart 626e05e3… — the modal couldn't fit the long question + the
-  // action surface on most viewports). The dedicated page at
-  // `/kanban/impediment/<id>` is the single entry point for resolving one;
-  // we replace the current history entry so the back button returns to the
-  // board, not to a `?card=<id>` URL the drawer can't service anymore.
   const openCard = useCallback(
     (card: Card) => {
-      if (card.column === "Impediment") {
-        navigate(`/kanban/impediment/${card.id}`, { replace: true });
-        return;
-      }
       setOpen(card);
       setSearchParams(
         (prev) => {
@@ -113,7 +100,7 @@ export default function KanbanPage() {
         { replace: false }
       );
     },
-    [navigate, setSearchParams]
+    [setSearchParams]
   );
 
   const closeCard = useCallback(() => {
@@ -146,14 +133,6 @@ export default function KanbanPage() {
 
     const local = cards.find((c) => c.id === cardParam);
     if (local) {
-      // Impediment cards redirect to the dedicated page (kaart 626e05e3…);
-      // the drawer can no longer service them. We replace the current entry
-      // so the back button returns to the board, not back to the dead
-      // `?card=<id>` URL.
-      if (local.column === "Impediment") {
-        navigate(`/kanban/impediment/${local.id}`, { replace: true });
-        return;
-      }
       setOpen(local);
       return;
     }
@@ -165,12 +144,7 @@ export default function KanbanPage() {
     kanbanApi
       .getCard(cardParam)
       .then((card) => {
-        if (cancelled) return;
-        if (card.column === "Impediment") {
-          navigate(`/kanban/impediment/${card.id}`, { replace: true });
-          return;
-        }
-        setOpen(card);
+        if (!cancelled) setOpen(card);
       })
       .catch(() => {
         if (cancelled) return;
@@ -187,7 +161,7 @@ export default function KanbanPage() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams, cards, cardsLoaded, open, setSearchParams, navigate]);
+  }, [searchParams, cards, cardsLoaded, open, setSearchParams]);
 
   useEffect(() => {
     void reload();
@@ -490,23 +464,16 @@ export default function KanbanPage() {
     }
   };
 
-  const reorderWithin = async (cardId: string, column: string, dropBeforeId: string | null) => {
+  const reorderWithin = async (cardId: string, column: string, index: number) => {
     const colCards = cards.filter((c) => c.column === column);
-    if (!colCards.some((c) => c.id === cardId)) return;
+    const oldIndex = colCards.findIndex((c) => c.id === cardId);
+    if (oldIndex === -1) return;
 
-    // Kanban card e9089ecad8e64b19a25bdf59804b70de: the drag target is
-    // expressed in the filtered view the operator is looking at, so we
-    // hand BOTH the unfiltered column list and the filtered subset to
-    // the helper — the helper maps `dropBeforeId` back to the right
-    // position in `colCards` and produces `orderedIds` that preserves
-    // the relative order of non-matching cards. Pre-fix code took the
-    // filtered index as if it were an unfiltered index and reordered
-    // the whole queue on every gesture.
-    const visibleCards = filteredCards.filter((c) => c.column === column);
-    const without = reorderColumnByFilteredTarget(colCards, visibleCards, cardId, dropBeforeId);
+    const without = colCards.filter((c) => c.id !== cardId);
+    const insertAt = index > oldIndex ? index - 1 : index;
+    without.splice(insertAt, 0, colCards[oldIndex]);
     const orderedIds = without.map((c) => c.id);
-    const originalIds = colCards.map((c) => c.id);
-    if (orderedIds.every((id, i) => id === originalIds[i])) return;
+    if (orderedIds.every((id, i) => id === colCards[i].id)) return;
 
     const width = Math.max(4, String(orderedIds.length).length);
     const rankOf = new Map(orderedIds.map((id, i) => [id, String(i).padStart(width, "0")]));
@@ -526,14 +493,12 @@ export default function KanbanPage() {
     }
   };
 
-  const onDropCardAt = (cardId: string, column: string, dropBeforeId: string | null) => {
+  const onDropCardAt = (cardId: string, column: string, index: number) => {
     const card = cards.find((c) => c.id === cardId);
     if (!card) return;
     if (card.column === column) {
-      void reorderWithin(cardId, column, dropBeforeId);
+      void reorderWithin(cardId, column, index);
     } else {
-      // Cross-column move does not honour the drop position — it just
-      // appends to the target column.
       void onMove(cardId, column);
     }
   };

@@ -16,14 +16,6 @@ export interface AgentSession {
   cwd: string
   pid: string
   status: string
-  /** Kanban card id that dispatched this session, if any. Lets the Agent Bridge
-   *  surface a "view kanban card" affordance that deep-links to
-   *  `/kanban?card=<id>`. Populated by the backend enrichment in
-   *  `app.services.runs.discovery.enrich_sessions_with_cards`. */
-  card_id?: string
-  /** Project key the card above lives on; needed so the deep-link can pick
-   *  the right kanban board. Mirrors the kanban-card API's `project_key`. */
-  card_project_key?: string
 }
 
 export type CCSession = AgentSession
@@ -105,16 +97,11 @@ export interface BulkResumeRequest {
   directory?: string
   sessions: { session_id: string; project_folder: string }[]
   skip_permissions?: boolean
-  // Mirrors ``SpawnSessionRequest``: ``'anthropic-compatible'`` was missing,
-  // which made the resume batch silently fall back to plain Anthropic when
-  // the user picked "Custom endpoint" in the NewSessionDialog
-  // (kaart 7ab0fc0038c…).
-  provider?: 'anthropic' | 'bedrock' | 'minimax' | 'anthropic-compatible'
+  provider?: 'anthropic' | 'bedrock' | 'minimax'
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
   minimax_base_url?: string
-  endpoint_name?: string
 }
 
 export interface BulkResumeResult {

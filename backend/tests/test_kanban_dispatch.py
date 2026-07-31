@@ -5806,15 +5806,7 @@ class TestBuildShipInstructions:
         # Merge happens through a throwaway detached worktree, not `git checkout
         # master` (which deterministically fails in a linked worktree — see the
         # [self-improve] card that motivated this recipe).
-        # Base MUST be local `master`, NOT `origin/master` (kanban card
-        # 5e83b6e0…): on this multi-session box, concurrent agents commit to
-        # local `master` and may not have pushed yet — basing on origin/master
-        # strands those commits. The divergence guard above catches the
-        # "origin moved while we worked" case before the merge worktree is
-        # created.
-        assert "git worktree add --detach \"$WT\" master" in instructions
-        assert "git worktree add --detach \"$WT\" origin/master" not in instructions
-        assert "git merge-base --is-ancestor origin/master master" in instructions
+        assert "git worktree add --detach \"$WT\" origin/master" in instructions
         assert "git checkout master" not in instructions
         assert "merge --no-ff" in instructions
         assert "push origin HEAD:master" in instructions
