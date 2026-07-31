@@ -843,6 +843,14 @@ function ResolveImpedimentControl({
                 onClick={() => setSelectedOption(b.label)}
                 data-testid="impediment-choice-option"
                 data-choice-key={b.key}
+                // `min-w-0` lets the button shrink inside the `grid-cols-2`
+                // cell; the wrap utilities override the shared Button
+                // primitive's `whitespace-nowrap` so a long agent-proposed
+                // option (e.g. a multi-sentence "Corrigeer de tekst én
+                // laat het endpoint de gewíreď plan_ref-deliverables …")
+                // breaks across lines inside the button instead of running
+                // past the modal edge. Card da7716e54f51437a972d99d6d18c2a6f.
+                className="min-w-0 whitespace-normal break-words text-left"
               >
                 {b.label}
               </Button>

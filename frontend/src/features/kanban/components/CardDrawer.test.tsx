@@ -957,6 +957,67 @@ describe("CardDrawer resolve impediment control", () => {
     expect(await screen.findByTestId("resolve-impediment-answer")).toBeTruthy();
     expect(await screen.findByTestId("resolve-impediment-submit")).toBeTruthy();
   });
+
+  it("wraps a long choice label inside the button (no horizontal overflow)", async () => {
+    // Card da7716e54f51437a972d99d6d18c2a6f: when an agent's impediment
+    // option is long enough to exceed the button's natural width, the
+    // shared <Button> primitive's `whitespace-nowrap` makes the label run
+    // off the modal. Verify each choice button carries a wrap-friendly
+    // override (so the label breaks across lines inside the button)
+    // while the existing 4-button contract and the "no synthetic filler"
+    // invariant are preserved.
+    const longLabel =
+      "Corrigeer de tekst én laat het endpoint de gewíreď plan_ref-deliverables zelf teruggeven, zodat de verificatie-rondgang helemaal wegvalt. Beter voor elke toekomstige analyst, maar raakt het response-pad: extra veld `deliverables: []` toevoegen aan het antwoord (bestaande handlers negeren overschot).";
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Welke aanpak kies je?",
+        options: [longLabel, "Kort label 2", "Kort label 3", "Kort label 4"],
+        status: "open",
+        answer: null,
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Impediment:** Welke aanpak kies je?" },
+        created_at: "2026-07-10T10:00:00Z",
+      },
+    ]);
+
+    render(
+      <CardDrawerWithRouter
+        card={impCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const control = await screen.findByTestId("resolve-impediment-control");
+    // Existing contract: exactly 4 agent-proposed buttons, no filler.
+    const choiceButtons = within(control).getAllByTestId(
+      "impediment-choice-option",
+    );
+    expect(choiceButtons).toHaveLength(4);
+
+    const longButton = choiceButtons[0];
+    // The button text is preserved verbatim — the override wraps the
+    // existing label, it does not change what the operator reads.
+    expect(longButton.textContent).toBe(longLabel);
+
+    // Wrap-friendly Tailwind utility: removes the Button primitive's
+    // inherited `whitespace-nowrap` and forces word breaks inside the
+    // button. `min-w-0` lets the button shrink within its grid cell.
+    expect(longButton.className).toMatch(/\bwhitespace-normal\b/);
+    expect(longButton.className).toMatch(/\bbreak-words\b/);
+    expect(longButton.className).toMatch(/\bmin-w-0\b/);
+  });
 });
 
 describe("CardDrawer deliverables tab per-kind rendering", () => {
