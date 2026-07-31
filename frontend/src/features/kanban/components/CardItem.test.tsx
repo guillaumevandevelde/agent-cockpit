@@ -2,6 +2,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+// Stub useNavigate so CardItem's "Impediment cards navigate to the dedicated
+// page" branch (kaart 626e05e3…) doesn't crash inside these isolation tests —
+// the navigate behaviour itself is covered by ImpedimentPage.test.tsx and the
+// integration smoke tests, not by CardItem's per-component suite.
+const navigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  };
+});
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -34,6 +49,7 @@ const baseCard: Card = {
 
 afterEach(() => {
   cleanup();
+  navigate.mockClear();
 });
 
 describe("CardItem work_type badge", () => {
