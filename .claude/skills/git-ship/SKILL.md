@@ -213,7 +213,48 @@ WT="$SHIP_TMP/ship-merge-$$"
 # rejection against origin/master. `$$` (this process's PID) guarantees a
 # fresh slot per invocation — do NOT simplify back to a fixed name.
 # (kanban card c23dfe46…)
-git worktree add --detach "$WT" origin/master
+# Main-checkout path discovery (kanban card 5e83b6e0…, fourth iteration).
+# The ship-worktree is a detached checkout that cannot update `master`
+# itself — only the canonical checkout where `master` is checked out can
+# do that. `git rev-parse --git-common-dir` returns the SHARED gitdir
+# (e.g. `/…/main-checkout/.git`), and `dirname` strips `.git` to give
+# the main-checkout path. This is robust regardless of where the
+# dispatched worktree sits on the filesystem and doesn't require the
+# dispatcher to inline a project_root (the skill must be
+# self-discovering when an agent reads it without the dispatch prompt).
+MAIN_CHECKOUT="$(dirname "$(git rev-parse --git-common-dir)")"
+# Local-master divergence guard (kanban card 5e83b6e0…). Step 1 already
+# fetched origin, but to be defensive we fetch again here — this worktree
+# may have been running between step 1 and step 4, and a concurrent
+# session could have pushed to origin in that window. The throwaway
+# worktree MUST base on LOCAL `master` (the integration point, not the
+# last-pushed remote state) — otherwise a concurrent session's
+# not-yet-pushed commits would be stranded when we push to origin. The
+# negation of `--is-ancestor origin/master master` catches both "origin
+# ahead" (origin has commits local doesn't) and the rarer "diverged"
+# case (both sides have new commits); in either state, a push from local
+# `master` would be rejected as non-fast-forward. Fail-fast with
+# `report_impediment` and a clear remediation rather than producing
+# a stale merge or a useless "Everything up-to-date" push.
+git fetch origin -q
+if ! git merge-base --is-ancestor origin/master master 2>/dev/null; then
+  # Label semantics (kanban card 5e83b6e0…, second iteration): in
+  # `git rev-list --count A..B`, A..B enumerates commits reachable from B
+  # but NOT from A — i.e. commits B has that A doesn't. So
+  # `master..origin/master` = commits `origin/master` has that local
+  # `master` doesn't = how far local is BEHIND; and
+  # `origin/master..master` = the symmetric AHEAD count. The previous
+  # wiring had the two swapped, which printed `ahead=2 behind=0` while
+  # local master was actually 2 BEHIND origin. Don't swap them back.
+  BEHIND=$(git rev-list --count master..origin/master 2>/dev/null || echo "?")
+  AHEAD=$(git rev-list --count origin/master..master 2>/dev/null || echo "?")
+  echo "ERROR: local master is STALE — origin/master has commits local doesn't have." >&2
+  echo "  ahead=$AHEAD behind=$BEHIND (master vs origin/master)" >&2
+  echo "  Reconcile: git -C \"$MAIN_CHECKOUT\" pull --rebase origin master" >&2
+  echo "  Then re-run the ship from this worktree. report_impediment." >&2
+  exit 1
+fi
+git worktree add --detach "$WT" master
 # 0-byte-index guard. A predecessor that aborted mid-ship in the shared
 # gitdir can leave this slot's `index` truncated to 0 bytes, and
 # `git worktree add` reports success anyway — the corruption only surfaces
@@ -316,6 +357,38 @@ if git -C "$WT" push origin HEAD:master; then
   # must not kill the ship. Only the REMOTE branch goes; the local branch
   # stays, so redispatch/resume off it still works.
   git push origin --delete "$BRANCH" || echo "WARN: kon origin/$BRANCH niet verwijderen (al weg?)"
+  # Post-push main-checkout sync (kanban card 5e83b6e0…, fourth iteration).
+  # The divergence guard above bases on local `master`, so a successful
+  # push that doesn't also move local `master` in the main checkout leaves
+  # the guard tripped on every subsequent ship on this multi-session box —
+  # even though the divergence is fully explained by *our own* push. The
+  # cleanest way to sync the main checkout is
+  # `git -C "$MAIN_CHECKOUT" pull --ff-only origin master`, which in one
+  # step (a) fast-forwards the local master ref AND (b) updates the index
+  # AND working tree in the main checkout — so the dev-stack (`cockpit.sh`)
+  # keeps running against the latest tree. The throwaway `$WT` is
+  # detached HEAD and cannot update master itself, which is why the sync
+  # runs against `$MAIN_CHECKOUT` where master is actually checked out.
+  #
+  # `git pull --ff-only` REFUSES if the main checkout's working tree has
+  # changes that would be overwritten by the merge (e.g. a concurrent
+  # agent editing a file the merge also touches) — that is the right
+  # default, we do not want to clobber in-flight edits. Skip-with-WARN
+  # is the chosen trade-off (kanban card 5e83b6e0…, human decision on
+  # round 3): the push already landed on origin, so the only thing the
+  # guard sees is the next ship; the operator runs
+  # `git -C "$MAIN_CHECKOUT" pull --ff-only origin master` by hand once
+  # the in-flight edits are committed or stashed. The earlier
+  # `update-ref refs/heads/master origin/master` fallback quietly
+  # bypassed this WARN (it almost always succeeded, moving the ref
+  # without the visible warning) — the human-visible drift stayed, but
+  # the signal vanished. Removing the `update-ref` fallback makes the
+  # WARN visible every time the sync is skipped, and accepts the
+  # trade-off that the divergence guard will trip on the next ship
+  # until the operator reconciles.
+  if ! git -C "$MAIN_CHECKOUT" pull --ff-only origin master 2>/dev/null; then
+    echo "WARN: kon lokale master in hoofd-checkout niet bijwerken — working tree is vuil of pull weigert. Sync overgeslagen; volgende ship kan op de divergentie-guard lopen. Herstel handmatig met 'git -C \"$MAIN_CHECKOUT\" pull --ff-only origin master' (los eerst eventuele conflicten op die de working tree vuil houden)." >&2
+  fi
 else
   # Push rejected (master moved / protected). Keep `origin/$BRANCH` alive —
   # the pull-request fallback below needs it. Deleting here would strand the

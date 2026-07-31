@@ -2903,6 +2903,35 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
     # metacharacters, so ``shlex.quote`` produces an equivalent result.
     nm_q = shlex.quote(nm_path)
     bin_q = shlex.quote(bin_path)
+    # Main-checkout path for the post-push local-master sync (kanban card
+    # 5e83b6e0… fourth iteration). The dispatcher inlines ``project_path`` =
+    # the canonical checkout where ``master`` is checked out, pre-quoted via
+    # ``shlex.quote`` (kaart a962b209… blocker C: single-quote-wrapped paths
+    # survive spaces, ``$``, ``\```, embedded quotes, and backslashes; a bare
+    # double-quote wrapper would still let ``$``/``\```/``"`` through).
+    # Critical: the bash snippet in the rendered prompt MUST consume the
+    # pre-quoted form *bare* — no surrounding double quotes —
+    # ``MAIN_CHECKOUT={main_checkout_q}`` renders as
+    # ``MAIN_CHECKOUT='/home/vdvgu/claude-cockpit'`` (single quotes
+    # stripped by the shell parser, leaving the path as the variable's
+    # value). The previous (reverted) implementation inlined the
+    # pre-quoted value inside literal double quotes —
+    # ``MAIN_CHECKOUT="<main-checkout>"`` rendered as
+    # ``MAIN_CHECKOUT="'/home/vdvgu/claude-cockpit'"``, and the shell
+    # assigned the literal string ``'/home/vdvgu/claude-cockpit'`` (with
+    # attached quotes) to the variable. Every downstream
+    # ``git -C "$MAIN_CHECKOUT" …`` then died with
+    # ``fatal: cannot change to ``'/home/vdvgu/claude-cockpit'``: No such
+    # file or directory``. The fail-open ``2>/dev/null`` on the post-push
+    # sync meant the bug was silent — the push landed, the ref-update
+    # fired, but the main checkout stayed on the old tree. The
+    # ``test_direct_mode_main_checkout_path_is_properly_shlex_quoted`` and
+    # ``test_direct_mode_post_push_sync_uses_main_checkout_var`` tests in
+    # ``backend/tests/test_kanban_dispatch.py`` pin both the safe form and
+    # the broken form (as absent) so a future editor can't toggle back.
+    # The legacy ``project_path=None`` fallback uses the hardcoded meta
+    # project root, matching the ``frontend_root`` behaviour above.
+    main_checkout_q = shlex.quote(frontend_root)
     tests = (
         "2. **Run frontend checks yourself before shipping (only when the branch "
         "touches ``frontend/``)** — there is no pre-push gate; nothing blocks a "
@@ -3077,7 +3106,66 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "   SHIP_TMP=\"${HOME}/.cache/cockpit-ship\"\n"
             "   mkdir -p \"$SHIP_TMP\"\n"
             "   WT=\"$SHIP_TMP/ship-merge-$$\"\n"
-            "   git worktree add --detach \"$WT\" origin/master\n"
+            "   # Main-checkout path discovery (kanban card 5e83b6e0…,\n"
+            "fourth iteration). The ship-worktree is a detached checkout\n"
+            "that cannot update `master` itself — only the canonical\n"
+            "checkout where `master` is checked out can do that. The\n"
+            "dispatcher inlines `project_path` (= the main-checkout path)\n"
+            "into the prompt (same source as the `<project-root>` used\n"
+            "for the node_modules symlink), pre-quoted via `shlex.quote`\n"
+            "(kaart a962b209… blocker C: single-quote-wrapped paths\n"
+            "survive spaces, `$`, embedded quotes, and backslashes).\n"
+            "Consumed bare — no surrounding double quotes — so the shell\n"
+            "strips the single quotes during assignment and `git -C\n"
+            "\"$MAIN_CHECKOUT\" …` resolves `$MAIN_CHECKOUT` to the path\n"
+            "itself. The skill mirror in `.claude/skills/git-ship/SKILL.md`\n"
+            "is self-discovering via `dirname $(git rev-parse\n"
+            "--git-common-dir)` because the skill must work without the\n"
+            "dispatch prompt. Both forms end up identical on the meta\n"
+            "project.\n"
+            "   MAIN_CHECKOUT=<main-checkout>\n"
+            "   # Local-master divergence guard (kanban card 5e83b6e0…).\n"
+            "Step 1 already fetched origin, but to be defensive we fetch\n"
+            "again here — this worktree may have been running between step\n"
+            "1 and step 4, and a concurrent session could have pushed to\n"
+            "origin in that window. The throwaway worktree MUST base on\n"
+            "LOCAL `master` (the integration point, not the last-pushed\n"
+            "remote state) — otherwise a concurrent session's not-yet-pushed\n"
+            "commits would be stranded when we push to origin. The negation\n"
+            "of `--is-ancestor origin/master master` catches both \"origin\n"
+            "ahead\" (origin has commits local doesn't) and the rarer\n"
+            "\"diverged\" case (both sides have new commits); in either state,\n"
+            "a push from local `master` would be rejected as non-fast-forward.\n"
+            "Fail-fast with `report_impediment` and a clear remediation\n"
+            "rather than producing a stale merge or a useless \"Everything\n"
+            "up-to-date\" push.\n"
+            "   git fetch origin -q\n"
+            "   if ! git merge-base --is-ancestor origin/master master\n"
+            "2>/dev/null; then\n"
+            "     # Label semantics (kanban card 5e83b6e0…, second\n"
+            "iteration): in `git rev-list --count A..B`, A..B enumerates\n"
+            "commits reachable from B but NOT from A — i.e. commits B has\n"
+            "that A doesn't. So `master..origin/master` = commits\n"
+            "`origin/master` has that local `master` doesn't = how far\n"
+            "local is BEHIND; and `origin/master..master` = the symmetric\n"
+            "AHEAD count. The previous wiring had the two swapped, which\n"
+            "printed `ahead=2 behind=0` while local master was actually 2\n"
+            "BEHIND origin. Don't swap them back.\n"
+            "     BEHIND=$(git rev-list --count master..origin/master\n"
+            "2>/dev/null || echo \"?\")\n"
+            "     AHEAD=$(git rev-list --count origin/master..master\n"
+            "2>/dev/null || echo \"?\")\n"
+            "     echo \"ERROR: local master is STALE — origin/master has\n"
+            "commits local doesn't have.\" >&2\n"
+            "     echo \"  ahead=$AHEAD behind=$BEHIND (master vs\n"
+            "origin/master)\" >&2\n"
+            "     echo \"  Reconcile: git -C <main-checkout> pull --rebase\n"
+            "origin master\" >&2\n"
+            "     echo \"  Then re-run the ship from this worktree.\n"
+            "report_impediment.\" >&2\n"
+            "     exit 1\n"
+            "   fi\n"
+            "   git worktree add --detach \"$WT\" master\n"
             "   # 0-byte-index guard. A predecessor that aborted mid-ship in "
             "the shared gitdir can leave this slot's `index` truncated to 0 "
             "bytes, and `git worktree add` reports success anyway — the "
@@ -3212,6 +3300,46 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "local branch stays, so redispatch/resume off it still works.\n"
             "     git push origin --delete \"$BRANCH\" || echo \"WARN: kon "
             "origin/$BRANCH niet verwijderen (al weg?)\"\n"
+            "     # Post-push main-checkout sync (kanban card 5e83b6e0…, "
+            "fourth iteration). The divergence guard above bases on "
+            "local `master`, so a successful push that doesn't also move "
+            "local `master` in the main checkout leaves the guard tripped "
+            "on every subsequent ship on this multi-session box — even "
+            "though the divergence is fully explained by *our own* push. "
+            "The cleanest way to sync the main checkout is "
+            "`git -C \"$MAIN_CHECKOUT\" pull --ff-only origin master`, "
+            "which in one step (a) fast-forwards the local master ref AND "
+            "(b) updates the index AND working tree in the main checkout "
+            "— so the dev-stack (`cockpit.sh`) keeps running against the "
+            "latest tree. The throwaway `$WT` is detached HEAD and cannot "
+            "update master itself, which is why the sync runs against "
+            "`$MAIN_CHECKOUT` where master is actually checked out.\n"
+            "     # `git pull --ff-only` REFUSES if the main checkout's "
+            "working tree has changes that would be overwritten by the "
+            "merge (e.g. a concurrent agent editing a file the merge "
+            "also touches) — that is the right default, we do not want "
+            "to clobber in-flight edits. Skip-with-WARN is the chosen "
+            "trade-off (kanban card 5e83b6e0…, human decision on round 3): "
+            "the push already landed on origin, so the only thing the "
+            "guard sees is the next ship; the operator runs `git -C "
+            "\"$MAIN_CHECKOUT\" pull --ff-only origin master` by hand "
+            "once the in-flight edits are committed or stashed. The "
+            "earlier round-3 `update-ref`-based fallback quietly bypassed "
+            "this WARN (the ref-update almost always succeeded, moving the "
+            "ref without the visible warning) — the human-visible drift "
+            "stayed, but the signal vanished. Removing the ref-update "
+            "fallback makes the WARN visible every time the sync is "
+            "skipped, and accepts the trade-off that the divergence guard "
+            "will trip on the next ship until the operator reconciles.\n"
+            "     if ! git -C \"$MAIN_CHECKOUT\" pull --ff-only origin "
+            "master 2>/dev/null; then\n"
+            "       echo \"WARN: kon lokale master in hoofd-checkout "
+            "niet bijwerken — working tree is vuil of pull weigert. "
+            "Sync overgeslagen; volgende ship kan op de divergentie-guard "
+            "lopen. Herstel handmatig met 'git -C \\\"$MAIN_CHECKOUT\\\" "
+            "pull --ff-only origin master' (los eerst eventuele "
+            "conflicten op die de working tree vuil houden).\" >&2\n"
+            "     fi\n"
             "   else\n"
             "     # Push rejected (master moved / protected). Keep "
             "`origin/$BRANCH` alive — the pull-request fallback needs it. "
@@ -3340,7 +3468,16 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "*producttrade-offs* uit, niet als implementatie-forks.\n"
         )
 
-    return feature_compliance_review + sync + tests + commit + shipping
+    # ``<main-checkout>`` is a placeholder for the canonical checkout where
+    # ``master`` is checked out — interpolated from ``project_path`` above
+    # via the pre-quoted ``main_checkout_q``. The skill mirror in
+    # ``.claude/skills/git-ship/SKILL.md`` is self-discovering via
+    # ``dirname $(git rev-parse --git-common-dir)`` because the skill
+    # must work without the dispatch prompt. Both forms end up identical
+    # on the meta project (``/home/vdvgu/claude-cockpit``).
+    return (
+        feature_compliance_review + sync + tests + commit + shipping
+    ).replace("<main-checkout>", main_checkout_q)
 
 
 def _build_session_retro_step(step_number: int = 6) -> str:
