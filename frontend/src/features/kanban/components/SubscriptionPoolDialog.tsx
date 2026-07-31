@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, Trash2, GripVertical, Pause, Play } from "lucide-react";
@@ -142,6 +142,16 @@ export function SubscriptionPoolDialog({
   const [chainByColumn, setChainByColumn] = useState<
     Record<string, string[]>
   >({});
+  // Mirror of `columns` for reads inside async callbacks. A ref is
+  // required here: `setColumns` callbacks are not synchronously
+  // evaluated in React's concurrent mode, so reading the latest
+  // columns state from a helper scheduled inside a mutation handler
+  // can't rely on `setColumns((current) => …)` to hand the value
+  // back before the helper's first `await`.
+  const columnsRef = useRef<KanbanColumn[]>([]);
+  useEffect(() => {
+    columnsRef.current = columns ?? [];
+  }, [columns]);
 
   const reload = useCallback(async () => {
     if (!projectKey) return;
@@ -187,47 +197,90 @@ export function SubscriptionPoolDialog({
     }
   }, [projectKey, selectedColumn]);
 
+  // Fetch the chains for the already-loaded agent columns. Called on
+  // initial mount AND after every mutation that might change what the
+  // dispatcher routes to (savePool, setOverride, setSubscriptionPause):
+  // the chains are derived server-side from the same state the
+  // dispatcher consults, so the in-dialog summary must refresh
+  // in lock-step with the save success — otherwise the operator sees
+  // "analyst: Anthropic [no tail]" stay put while the underlying pool
+  // just gained a spillover entry, and concludes the save was a no-op.
+  //
+  // Kaart 7411d25e… (impediment: dialog toont verouderde waarheid na
+  // mutatie): the previous code only fired this in the columns effect
+  // (dep-array `[projectKey]`), so mutations only triggered `onChanged()`
+  // — the toolbar-button reload, but NOT the chain map. The fix is to
+  // extract the chain fan-out into `refreshChainByColumn` and call it
+  // alongside `onChanged()` in every mutation handler. Cost: a handful
+  // of cheap reads per edit (one DB read per agent column per
+  // mutation), accepted as the cost of the headline-status promise
+  // (`aria-live="polite"`).
+  const refreshChainByColumn = useCallback(async () => {
+    // Read the columns snapshot via the ref so the helper doesn't
+    // capture a stale closure or rely on synchronous setState
+    // evaluation (the latter is unreliable across React render
+    // transitions). The ref is updated by an effect above, so any
+    // prior mutation that finished rendering will be visible here.
+    const columnsSnapshot = columnsRef.current;
+    if (columnsSnapshot.length === 0) return;
+    const next: Record<string, string[]> = {};
+    await Promise.all(
+      columnsSnapshot.map(async (c) => {
+        try {
+          const info = await kanbanApi.getColumnEffectiveModel(c.id);
+          if (Array.isArray(info.spillover_chain)) {
+            next[c.name] = info.spillover_chain;
+          }
+        } catch {
+          // 404 / network hiccup — leave this column absent rather
+          // than rendering an empty/broken chain row.
+        }
+      }),
+    );
+    setChainByColumn(next);
+  }, []);
+
   // Columns only need to load once per dialog open — they are not
-  // affected by the column-tail selection. Keep this in its own effect
-  // so the column <Select> becomes interactive as soon as the fetch
-  // returns, without re-running the full reload.
+  // affected by the column-tail selection. Fetch the list, then fan
+  // out the chain lookups. Keep the two concerns in one effect so the
+  // initial paint shows both at once.
   useEffect(() => {
     if (!projectKey) return;
     let cancelled = false;
     (async () => {
       try {
         const r = await kanbanApi.listColumns(projectKey);
-        if (!cancelled) {
-          // Only agent columns (default_agent !== null) participate in
-          // the spillover selector — the fixed lanes (Backlog, Doing,
-          // …) never spawn sessions so their tail is meaningless.
-          const agentColumns = (r.columns ?? []).filter(
-            (c) => c.default_agent !== null,
-          );
-          setColumns(agentColumns);
-          // Kaart 7411d25e…: fan out the cheap effective-model
-          // resolution across every agent column so the dialog can
-          // show the resolved spillover chain per persona. The
-          // endpoint is one DB read per column (no spawn, no CLI
-          // probes), so even a 10-column board is fine to load in
-          // parallel. Failures are absorbed — a missing entry just
-          // stays absent from the per-column summary list.
-          const next: Record<string, string[]> = {};
-          await Promise.all(
-            agentColumns.map(async (c) => {
-              try {
-                const info = await kanbanApi.getColumnEffectiveModel(c.id);
-                if (Array.isArray(info.spillover_chain)) {
-                  next[c.name] = info.spillover_chain;
-                }
-              } catch {
-                // 404 / network hiccup — leave this column absent
-                // rather than rendering an empty/broken chain row.
+        if (cancelled) return;
+        // Only agent columns (default_agent !== null) participate in
+        // the spillover selector — the fixed lanes (Backlog, Doing,
+        // …) never spawn sessions so their tail is meaningless.
+        const agentColumns = (r.columns ?? []).filter(
+          (c) => c.default_agent !== null,
+        );
+        if (cancelled) return;
+        setColumns(agentColumns);
+        // Kaart 7411d25e…: fan out the cheap effective-model
+        // resolution across every agent column so the dialog can
+        // show the resolved spillover chain per persona. The
+        // endpoint is one DB read per column (no spawn, no CLI
+        // probes), so even a 10-column board is fine to load in
+        // parallel. Failures are absorbed — a missing entry just
+        // stays absent from the per-column summary list.
+        const next: Record<string, string[]> = {};
+        await Promise.all(
+          agentColumns.map(async (c) => {
+            try {
+              const info = await kanbanApi.getColumnEffectiveModel(c.id);
+              if (!cancelled && Array.isArray(info.spillover_chain)) {
+                next[c.name] = info.spillover_chain;
               }
-            }),
-          );
-          if (!cancelled) setChainByColumn(next);
-        }
+            } catch {
+              // 404 / network hiccup — leave this column absent
+              // rather than rendering an empty/broken chain row.
+            }
+          }),
+        );
+        if (!cancelled) setChainByColumn(next);
       } catch {
         if (!cancelled) setColumns([]);
       }
@@ -287,6 +340,12 @@ export function SubscriptionPoolDialog({
           : `Subscription pool saved (${next.length} entr${next.length === 1 ? "y" : "ies"})`,
       );
       onChanged();
+      // Refresh the per-column chain map so the in-dialog summary
+      // reflects the new tail length/scope. The toolbar button
+      // (which onChanged() drives) only knows about the pool length
+      // for board-wide; the per-column chain detail needs its own
+      // fetch.
+      void refreshChainByColumn();
     } catch (err) {
       // Roll back to the previous server value on save failure.
       const fresh = await kanbanApi
@@ -352,6 +411,7 @@ export function SubscriptionPoolDialog({
         await kanbanApi.setActiveSubscriptionOverride(projectKey, null);
         toast.success("Active subscription override: cleared");
         onChanged();
+        void refreshChainByColumn();
       } catch {
         setOverride(prev);
         toast.error("Failed to clear override");
@@ -366,6 +426,7 @@ export function SubscriptionPoolDialog({
         `Active subscription override: ${PROVIDER_LABELS[next] ?? next}`,
       );
       onChanged();
+      void refreshChainByColumn();
     } catch {
       setOverride(prev);
       toast.error("Failed to set subscription override");
@@ -379,6 +440,7 @@ export function SubscriptionPoolDialog({
       await kanbanApi.setActiveSubscriptionOverride(projectKey, null);
       toast.success("Active subscription override: cleared");
       onChanged();
+      void refreshChainByColumn();
     } catch {
       setOverride(prev);
       toast.error("Failed to clear override");
@@ -410,6 +472,7 @@ export function SubscriptionPoolDialog({
           : `Resumed dispatch on ${PROVIDER_LABELS[provider] ?? provider}`,
       );
       onChanged();
+      void refreshChainByColumn();
     } catch (err) {
       setManuallyPaused(prev);
       toast.error(

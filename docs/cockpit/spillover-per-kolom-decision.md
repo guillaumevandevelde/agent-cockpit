@@ -61,6 +61,18 @@ status: decided
   per scenario) + 5 frontend-tests in `SubscriptionPoolDialog.test.tsx` en
   `SubscriptionToolbarButton.test.tsx` dekken de drie toestanden + de
   per-kolom-ketenregel.
+- **Revisit (kaart 7411d25e… impediment-resolved):** de keten werd alleen
+  in de `[projectKey]`-effect opgehaald, dus `savePool` / override-wijziging
+  / pause-toggle lieten de per-kolom-lijst + de headline-regel op de
+  verouderde staat staan tot sluiten + heropenen. Fix: chain-refresh
+  verplaatst naar een `useCallback` (`refreshChainByColumn`) die de
+  mutation-handlers na elke `onChanged()` aanroepen. Cost: één extra
+  `getColumnEffectiveModel` per agent-kolom per mutatie — aanvaard als
+  prijs voor de `aria-live="polite"`-belofte van de headline-regel.
+  Theme (light + dark) gecontroleerd via
+  [`isolated-component-preview.md`](./isolated-component-preview.md);
+  screenshots op `/tmp/preview-light.png` en `/tmp/preview-dark.png`
+  (verwijderd na verificatie).
 
 **Trigger:** kanban-kaart `2688bf80…` "[analyse] Spillover vs. per-persona provider — de pool
 overrulet stilzwijgend elke kolom-default", kind van
