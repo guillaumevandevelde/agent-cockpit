@@ -16,6 +16,14 @@ export interface AgentSession {
   cwd: string
   pid: string
   status: string
+  /** Kanban card id that dispatched this session, if any. Lets the Agent Bridge
+   *  surface a "view kanban card" affordance that deep-links to
+   *  `/kanban?card=<id>`. Populated by the backend enrichment in
+   *  `app.services.runs.discovery.enrich_sessions_with_cards`. */
+  card_id?: string
+  /** Project key the card above lives on; needed so the deep-link can pick
+   *  the right kanban board. Mirrors the kanban-card API's `project_key`. */
+  card_project_key?: string
 }
 
 export type CCSession = AgentSession

@@ -5,10 +5,14 @@ import logging
 import subprocess
 from typing import Any
 
+from sqlalchemy import select
+
+from app.kanban.models import KanbanCard
 from app.models.constants import SessionStatus
 from app.services.agentic_cli import get_agentic_cli, get_agentic_clis
 from app.services.agentic_cli.base import AgenticCli
 from app.services.agentic_cli.provider_detect import detect_session_provider
+from app.utils.path_utils import convert_path_to_folder_name
 
 logger = logging.getLogger(__name__)
 
@@ -110,4 +114,65 @@ def capture_pane_preview(target: str) -> str:
         return result.stdout if result.returncode == 0 else ""
     except Exception:
         return ""
+
+
+async def enrich_sessions_with_cards(
+    sessions: list[dict[str, Any]],
+    kanban_session: Any,
+) -> None:
+    """Attach ``card_id`` + ``card_project_key`` to sessions the kanban dispatched.
+
+    A live tmux pane whose ``cwd`` is a Claude worktree (e.g.
+    ``/home/dev/proj/.claude/worktrees/k-foo-1234``) was almost certainly
+    spawned by the kanban dispatcher. The dispatcher stamps the parent
+    ``KanbanCard`` with ``dispatch_project_folder`` — the Claude hyphen-encoded
+    form of the worktree path. The Agent Bridge page surfaces a "view kanban
+    card" affordance when the link resolves, so this enrichment turns a
+    plain session list into a navigable one without an extra round-trip.
+
+    Why we don't expose ``dispatch_session_id`` instead: that's a Claude Code
+    session UUID discovered *after* the JSONL lands on disk
+    (``services.dispatch_usage_service.find_dispatch_session_id``), and it
+    races the first user click on the bridge list. The worktree folder is
+    known the moment the card is dispatched, so the link is reliable from t=0.
+
+    When multiple cards share a worktree (re-dispatch after re-dispatch, or a
+    re-routed merge), the **most recently created** card wins — the live work
+    matters more than a stale Done card the operator can still reach from
+    the board's Backlog/Done columns.
+    """
+    if not sessions:
+        return
+    folders: set[str] = set()
+    cwd_by_folder: dict[str, str] = {}
+    for s in sessions:
+        cwd = s.get("cwd")
+        if not cwd:
+            continue
+        folder = convert_path_to_folder_name(cwd)
+        folders.add(folder)
+        cwd_by_folder[folder] = cwd
+    if not folders:
+        return
+
+    result = await kanban_session.execute(
+        select(KanbanCard.id, KanbanCard.project_key, KanbanCard.dispatch_project_folder)
+        .where(KanbanCard.dispatch_project_folder.in_(folders))
+        .order_by(KanbanCard.created_at.desc())
+    )
+    folder_to_card: dict[str, tuple[str, str]] = {}
+    for card_id, project_key, folder in result.all():
+        # First row per folder wins; the SQL ORDER BY puts newest first.
+        if folder not in folder_to_card:
+            folder_to_card[folder] = (card_id, project_key)
+
+    for s in sessions:
+        cwd = s.get("cwd")
+        if not cwd:
+            continue
+        folder = convert_path_to_folder_name(cwd)
+        match = folder_to_card.get(folder)
+        if match is None:
+            continue
+        s["card_id"], s["card_project_key"] = match
 
