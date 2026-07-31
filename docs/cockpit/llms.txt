@@ -72,6 +72,7 @@
 - [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md): type=decision status=decided
 - [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md): type=decision status=decided
 - [LiteLLM als sidecar — lifecycle, faalgedrag en scope van het kritieke pad](./litellm-sidecar-lifecycle-decision.md): type=decision status=decided
+- [MCP-config in worktree-transport — repo-root fallback](./mcp-worktree-fallback-decision.md): type=decision status=decided
 - [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md): type=decision status=decided
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided
 - [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md): type=decision status=decided

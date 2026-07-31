@@ -6,8 +6,11 @@ status: decided
 
 # MCP-config in worktree-transport — repo-root fallback
 
-> **Kaart:** `[problem] Extern product-project in worktree-transport heeft géén cockpit-kanban MCP` (`3672c0730b1b4b7ea31a52c414d17729`)
->
+**Datum:** 2026-07-31
+**Status:** besloten
+**Kaart:** `3672c0730b1b4b7ea31a52c414d17729` (kaart is intussen van het bord verwijderd; de hex-id is hier nog wel de canonieke verwijzing naar de oorspronkelijke beslissing — `decisions.md` Kaart-kolom houdt dezelfde id)
+**Uitkomst:** **Route 2 verplicht:** gebruik de repo-root `--mcp-config`-fallback via `SpawnCommandOptions.repo_path`; route 1 (worktree-copy) is afgewezen omdat `Authorization: Bearer <api_token>` via git-recovery in de klant-repo-historie kan lekken.
+
 > **Besluit:** kies **route 2** (repo-root `--mcp-config`-fallback via `SpawnCommandOptions.repo_path`); kies **niet route 1** (een `.mcp.json` naar de worktree kopiëren).
 
 ## Waarom route 2 verplicht is
