@@ -796,6 +796,16 @@ function ResolveImpedimentControl({
   const hasChoiceRow = choiceButtons.length > 0;
 
   return (
+    // Two-column layout on lg+: the long question scrolls on the left while
+    // the action surface (choices + textarea + Resolve) anchors on the right.
+    // The previous single-column stack made the Resolve button unreachable on
+    // shorter viewports — a tall `**Impediment:**` markdown question pushed
+    // the recorded-choice + 4 choice buttons + textarea + button ~420px past
+    // the 85vh modal. Splitting horizontally puts both halves in parallel so
+    // the operator sees the question AND the action surface simultaneously.
+    // On viewports narrower than `lg` the grid falls back to a single column
+    // (current behaviour) so laptop users aren't regressed. Kaart
+    // 626e05e3… (impediment kaart niet leesbaar).
     <div
       className="rounded-md border-2 border-orange-500/40 bg-orange-50 p-3 text-sm space-y-2 dark:bg-orange-950/30"
       data-testid="resolve-impediment-control"
@@ -803,14 +813,6 @@ function ResolveImpedimentControl({
       <div className="text-xs font-semibold uppercase text-orange-700 dark:text-orange-400">
         Impediment — needs a human answer
       </div>
-      {questionText && (
-        <div
-          className="max-h-[40vh] overflow-y-auto text-foreground whitespace-pre-wrap"
-          data-testid="impediment-question"
-        >
-          {questionText}
-        </div>
-      )}
       {hasGateAnswer && (
         <div
           className="rounded-md border border-emerald-600/40 bg-emerald-50/60 p-2 dark:bg-emerald-950/20"
@@ -827,63 +829,92 @@ function ResolveImpedimentControl({
           </div>
         </div>
       )}
-      {hasChoiceRow && (
+      {/* Split layout: question on the left (flex-1 so it eats the leftover
+          horizontal space), action surface on the right (fixed min/max width
+          so the Resolve button is always easy to hit). Both columns scroll
+          internally if their content outgrows the modal height — `min-h-0`
+          is the load-bearing flex-child rule that lets `overflow-y-auto`
+          actually clip instead of expanding the column past its parent. */}
+      <div
+        className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)]"
+        data-testid="impediment-split-layout"
+      >
         <div
-          className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
-          data-testid="impediment-choice-row"
+          className="min-h-0 lg:max-h-[55vh] lg:overflow-y-auto lg:overscroll-contain"
+          data-testid="impediment-question-column"
         >
-          {choiceButtons.map((b) => {
-            const isSelected = selectedOption === b.label;
-            return (
-              <Button
-                key={b.key}
-                size="sm"
-                variant={isSelected ? "default" : "outline"}
-                disabled={submitting}
-                onClick={() => setSelectedOption(b.label)}
-                data-testid="impediment-choice-option"
-                data-choice-key={b.key}
-                // `min-w-0` lets the button shrink inside the `grid-cols-2`
-                // cell; the wrap utilities override the shared Button
-                // primitive's `whitespace-nowrap` so a long agent-proposed
-                // option (e.g. a multi-sentence "Corrigeer de tekst én
-                // laat het endpoint de gewíreď plan_ref-deliverables …")
-                // breaks across lines inside the button instead of running
-                // past the modal edge. `h-auto py-1.5` neutralises the
-                // `size="sm"` `h-8` frame so the button actually grows with
-                // its wrapped text — without it the label paints outside
-                // the 32px box on narrow viewports. Card
-                // da7716e54f51437a972d99d6d18c2a6f.
-                className="min-w-0 h-auto whitespace-normal break-words px-3 py-1.5 text-left"
-              >
-                {b.label}
-              </Button>
-            );
-          })}
+          {questionText && (
+            <div
+              className="text-foreground whitespace-pre-wrap"
+              data-testid="impediment-question"
+            >
+              {questionText}
+            </div>
+          )}
         </div>
-      )}
-      <Textarea
-        value={answer}
-        onChange={(e) => setAnswer(e.target.value)}
-        placeholder={
-          hasGateAnswer
-            ? "Optional: add extra context for the resumed session."
-            : hasChoiceRow
-              ? "Optional: add extra info alongside your pick above, or leave a pick above unclicked and answer here instead."
-              : "Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
-        }
-        disabled={submitting}
-        data-testid="resolve-impediment-answer"
-      />
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          onClick={submit}
-          disabled={submitting}
-          data-testid="resolve-impediment-submit"
+        <div
+          className="flex min-h-0 flex-col gap-2"
+          data-testid="impediment-action-column"
         >
-          {submitting ? "Resolving…" : "Resolve impediment"}
-        </Button>
+          {hasChoiceRow && (
+            <div
+              className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
+              data-testid="impediment-choice-row"
+            >
+              {choiceButtons.map((b) => {
+                const isSelected = selectedOption === b.label;
+                return (
+                  <Button
+                    key={b.key}
+                    size="sm"
+                    variant={isSelected ? "default" : "outline"}
+                    disabled={submitting}
+                    onClick={() => setSelectedOption(b.label)}
+                    data-testid="impediment-choice-option"
+                    data-choice-key={b.key}
+                    // `min-w-0` lets the button shrink inside the `grid-cols-2`
+                    // cell; the wrap utilities override the shared Button
+                    // primitive's `whitespace-nowrap` so a long agent-proposed
+                    // option (e.g. a multi-sentence "Corrigeer de tekst én
+                    // laat het endpoint de gewíreď plan_ref-deliverables …")
+                    // breaks across lines inside the button instead of running
+                    // past the modal edge. `h-auto py-1.5` neutralises the
+                    // `size="sm"` `h-8` frame so the button actually grows with
+                    // its wrapped text — without it the label paints outside
+                    // the 32px box on narrow viewports. Card
+                    // da7716e54f51437a972d99d6d18c2a6f.
+                    className="min-w-0 h-auto whitespace-normal break-words px-3 py-1.5 text-left"
+                  >
+                    {b.label}
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+          <Textarea
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder={
+              hasGateAnswer
+                ? "Optional: add extra context for the resumed session."
+                : hasChoiceRow
+                  ? "Optional: add extra info alongside your pick above, or leave a pick above unclicked and answer here instead."
+                  : "Your answer/decision — it's injected into the resumed session's prompt so the agent acts on it."
+            }
+            disabled={submitting}
+            data-testid="resolve-impediment-answer"
+          />
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              onClick={submit}
+              disabled={submitting}
+              data-testid="resolve-impediment-submit"
+            >
+              {submitting ? "Resolving…" : "Resolve impediment"}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
