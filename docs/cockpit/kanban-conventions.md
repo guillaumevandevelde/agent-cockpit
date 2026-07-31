@@ -114,7 +114,7 @@ de prefix exact zoals hieronder of de consumer ziet je comment als ruis.
 | Prefix | Consumer | Wanneer gepost | Trigger op |
 |---|---|---|---|
 | `**Summary:** ` | `enrich_done_info` (`service.py:103`) | `mcp_server.move_card` met `column="Done"` (vereist `summary`) | `op.payload.text LIKE '**Summary:** %'` — поверх de comment-tekst **minus** de prefix wordt `CardResponse.done_summary`. |
-| `**Impediment:** ` | `impediment_status_for_card` (`service.py:139`) | `mcp_server.report_impediment` (zonder `options`) | Eerste comment met deze prefix zonder latere `**Resolution:**` → `impediment_status = "needs_answer"`. |
+| `**Impediment:** ` | `impediment_status_for_card` (`service.py:139`) | `mcp_server.report_impediment` (die sinds kaart 4279448c altijd 4 `options` vereist) of een handmatige `move_card` naar `Impediment` | Eerste comment met deze prefix zonder latere `**Resolution:**` → `impediment_status = "needs_answer"`. |
 | `**Resolution:** ` | `impediment_status_for_card` | Mens-antwoord op een Impediment-vraag (UI `/resolve-impediment`) | Nieuwste comment met deze prefix → `impediment_status = "resolved"`. |
 | `**Gate:** ` | Frontend (board chrome) | `mcp_server.open_gate` | Visuele indicator dat er een open `KanbanGate` is; niet server-side gelezen. |
 | `**Promoted to project:** ` | (geen) | `services/inception_service.py:247` post ook een `**Summary:**` met dezelfde info; deze prefix is puur documentatie voor de activity-feed. | Wordt door `enrich_done_info` **niet** gematcht — `done_summary` blijft `None`. |
@@ -136,7 +136,7 @@ de prefix exact zoals hieronder of de consumer ziet je comment als ruis.
 - **`[dispatch-failure]` voor een handmatige move naar Impediment** → de UI zal
   de kaart als `dispatch_failed` classificeren en een "Redispatch"-knop tonen
   in plaats van de vraag. Menselijke Impediment-moves moeten via
-  `report_impediment` (met of zonder `options`) of een gewone `move_card` met
+  `report_impediment` (dat verplicht 4 `options` meekrijgt) of een gewone `move_card` met
   `column="Impediment"` + `summary="<vraag>"` — beide produceren automatisch
   de juiste prefix intern.
 
@@ -522,18 +522,28 @@ Twee schrijfregels, beide even hard:
   > Usage-pagina. Implementeert via nieuwe `/usage/subscription`-endpoint
   > en `SubscriptionUsageCard.tsx`; 4 unit tests toegevoegd.
 
-**Impediment-`options`:**
+**Impediment-`options`:** (altijd precies 4 — `report_impediment` weigert een
+ander aantal met `invalid_option_count` en een ontbrekende lijst met
+`options_required`; kaart 4279448c)
 
-- ❌ Vóór (implementatie-fork):
+- ❌ Vóór (implementatie-fork, en te weinig opties):
   > Hoe lossen we de scheduler-trap op?
   > A. APScheduler in-process
   > B. Celery worker
-- ✅ Na (producttrade):
+- ✅ Na (producttrade, 4 keuzes):
   > Hoe lossen we de scheduler-trap op?
   > A. Snel live (1-2 sprints), daarna meer onderhoud aan in-process
   >    scheduler naarmate features groeien
   > B. Trager live (~4 sprints setup), daarna schaalbaar zonder
   >    refactor-terugslag
+  > C. Nu niets bouwen — handmatig triggeren tot de vraag groter is
+  > D. Externe scheduler-dienst inkopen: direct live, maandelijkse kost
+  >    en een externe afhankelijkheid
+
+Heb je minder dan 4 échte alternatieven? Vul aan met plausibele varianten —
+ook een bewust zwakkere optie (zoals C hierboven) is een geldig antwoord, en
+de mens kan alle 4 negeren en vrij tekst typen in het veld dat de UI altijd
+náást de knoppen toont.
 
 ### 5c. Waar wordt het afgedwongen?
 

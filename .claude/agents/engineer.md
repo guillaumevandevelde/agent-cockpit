@@ -464,14 +464,19 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 - `comment` — log voortgang of beslissingen op de kaart.
 - `attach_deliverable` — koppel je PR/branch/commit (`kind`: pr|branch|commit|link|note).
 - `report_impediment` — als je écht vastloopt: geef verplicht een concrete, actionable
-  `question` mee en (bij voorkeur) een `options: list[str]` met kandidaat-antwoorden.
-  **Geef je `options` mee, dan moet het er precies 4 zijn** — de Impediment-UI
-  toont steeds 4 keuze-knoppen, allemaal agent-voorgesteld (kaart 4279448c
-  revisit: een UI-filler die een kortere lijst opvulde met een "Other"-knop
-  werd afgekeurd). `mcp_server.report_impediment` valideert dit en weigert de
-  call met `error: "invalid_option_count"` bij 1-3 opties — vul zelf aan tot 4
-  (ook een bewust zwakkere optie mag), of laat `options` helemaal weg voor een
-  vrije-tekstvraag. Verplaatst naar `Impediment` en geeft de claim vrij — de
+  `question` mee **én verplicht een `options: list[str]` met precies 4
+  kandidaat-antwoorden**. De Impediment-UI toont steeds 4 keuze-knoppen,
+  allemaal agent-voorgesteld (kaart 4279448c, mens-beslissing "altijd 4
+  knoppen"). `mcp_server.report_impediment` weigert de call met
+  `error: "invalid_option_count"` bij 0-3 of 5+ opties en met
+  `error: "options_required"` als je `options` helemaal weglaat — in beide
+  gevallen zonder effect (geen move, geen comment, geen gate, geen release).
+  Vul zelf aan tot 4 als je er minder hebt; ook een bewust zwakkere optie mag.
+  **Een open vraag is geen uitzondering** — de mens zit nooit vast aan jouw 4:
+  de UI toont altijd een vrij tekstveld náást de knoppen, dus hij kan alle
+  opties negeren en zelf antwoorden (of een knop kiezen én er extra info bij
+  typen). Je 4 opties zijn een startpunt, geen gesloten stembiljet.
+  Verplaatst naar `Impediment` en geeft de claim vrij — de
   sessie eindigt hier direct. De mens kiest later (via de UI) één van de
   opties of typt een eigen antwoord in de activiteit-feed; een hervattende
   sessie leest het resultaat via dezelfde `impediment_question`-pipeline. Dit
