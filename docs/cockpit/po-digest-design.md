@@ -38,6 +38,13 @@ project `git:github.com/guillaumevandevelde/claude-cockpit`, venster 2026-07-18 
 Reproductie: `python3 scripts/po-digest-source.py --since 2026-07-18 --until 2026-07-25`
 zodra kaart K1 (§8) geland is; tot dan de queries in §3.1 direct tegen de op-log.
 
+✅ Geïmplementeerd (kaart `6811916c…`): `scripts/po-digest-source.py` met bash-harness
+[`test_po_digest_source.sh`](../../scripts/test_po_digest_source.sh); venster-normalisatie
+tussen tz-aware CLI-bounds en SQLAlchemy's `DateTime(timezone=True)`-opslag
+(spatie-separator, geen offset, microseconden) is vastgelegd door
+`scripts/po-digest-source.py::_sqlite_datetime_bound` en een boundary-regressie-assert
+in Task 2/Task 7.
+
 130 afgeronde kaarten en 13 richtingsbeslissingen per week is precies de orde-grootte
 waar één mens op kaart-hoogte op stukloopt. De digest moet dat terugbrengen naar
 **één pagina die in vijf minuten te lezen is** — dus cureren en clusteren, niet lijsten.

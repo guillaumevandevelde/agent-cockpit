@@ -89,6 +89,7 @@ cd frontend && npm run build     # Same as above
 > itself.
 bash backend/test_commands_api.sh                         # Curl-based API tests
 ls scripts/test_*.sh     # family-level reference — check-test-harness-coverage.sh (kaart 5e988e4e, glob-form uit 8c7cfc14) dekt het hele scripts/test_*.sh spectrum
+bash scripts/test_po_digest_source.sh                  # PO-digest collector (mechanische helft)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
