@@ -8,8 +8,6 @@ cc-bridge route runs after `discover_agent_sessions()`.
 """
 from __future__ import annotations
 
-from sqlalchemy import select
-
 from app.kanban.models import KanbanCard
 from app.kanban.operations import apply_operation
 from app.utils.path_utils import convert_path_to_folder_name
