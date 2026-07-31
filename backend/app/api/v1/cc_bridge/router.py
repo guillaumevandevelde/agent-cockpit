@@ -3,9 +3,15 @@
 Discovery, spawn, and the pty relay now live in ``app.services.runs``; this
 module is a wire-format compat shim for the legacy ``/api/v1/cc-bridge`` URL
 prefix. The frontend card removes the route.
+
+Session→card enrichment for the Agent Bridge UI lives on the live
+``/api/v1/agent-bridge/sessions`` endpoint (``runs/router.py::list_sessions``)
+only — there is no frontend consumer of this legacy route, so enriching here
+would just be dead work that risks drift from the canonical implementation
+(kanban card cade1e9b919944258c442d273c1dcfd7, human decision on the
+impediment: single enrichment site, code outside the original card scope).
 """
 import asyncio
-import logging
 import secrets
 import time
 from urllib.parse import urlparse
@@ -14,12 +20,8 @@ from fastapi import APIRouter, HTTPException, WebSocket
 from pydantic import BaseModel
 
 from app.config import settings
-from app.kanban.db import KanbanSessionLocal
 from app.services.runs.cc_legacy import capture_pane_preview, discover_cc_sessions
-from app.services.runs.discovery import enrich_sessions_with_cards
 from app.services.runs.pty_relay import PtyRelay
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -42,19 +44,14 @@ async def list_sessions():
 
     The synchronous tmux ``list-panes`` subprocess is offloaded to a worker
     thread so the FastAPI event loop is never blocked on a slow ``tmux``
-    invocation. After discovery, each session is enriched with the
-    ``card_id`` + ``card_project_key`` of the kanban card that dispatched it
-    (if any) so the Agent Bridge UI can render a navigate-to-card
-    affordance — see kanban card cade1e9b919944258c442d273c1dcfd7.
+    invocation.
+
+    Note: this legacy route does NOT enrich sessions with kanban-card
+    metadata — that's the live endpoint's job
+    (``runs/router.py::list_sessions`` → ``enrich_sessions_with_cards``).
+    See the module docstring for the rationale.
     """
     sessions = await asyncio.to_thread(discover_cc_sessions)
-    try:
-        async with KanbanSessionLocal() as ks:
-            await enrich_sessions_with_cards(sessions, ks)
-    except Exception:
-        # Kanban DB unavailable (sqlite locked, schema mismatch) must not
-        # blank the session list — log and return unenriched sessions.
-        logger.exception("session→card enrichment failed; returning unenriched sessions")
     return {"sessions": sessions, "count": len(sessions)}
 
 

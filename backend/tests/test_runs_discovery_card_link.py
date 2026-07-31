@@ -210,3 +210,48 @@ async def test_enrich_handles_empty_session_list():
         # Must not raise; must leave the list untouched.
         await enrich_sessions_with_cards(sessions, s)
     assert sessions == []
+
+
+async def test_legacy_cc_bridge_sessions_route_does_not_enrich(monkeypatch):
+    """The legacy ``/api/v1/cc-bridge/sessions`` route MUST NOT enrich sessions.
+
+    The Agent Bridge frontend reads from ``/api/v1/agent-bridge/sessions``
+    only — the ``cc-bridge`` URL prefix is a dead wire scheduled for removal
+    (see ``cc_bridge/router.py`` module docstring). Enrichment at both sites
+    is duplicate work that risks drift from the canonical implementation
+    (kanban card cade1e9b919944258c442d273c1dcfd7, human decision on the
+    impediment: single enrichment site).
+
+    This test pins that invariant. If a future PR re-adds the enrichment to
+    the legacy route, ``card_id`` will appear on the response and this test
+    fails — a loud signal to revert rather than ship the duplicate.
+    """
+    await _reset()
+    cwd = "/home/dev/projects/foo/.claude/worktrees/k-foo-1234"
+    # Seed a card whose dispatch_project_folder would match if the legacy
+    # route still ran enrichment — the test passes only when enrichment is
+    # absent, so we get a positive failure signal the moment it's restored.
+    await _seed_card(
+        project_key="git:github.com/example/repo",
+        column="engineer",
+        dispatch_project_folder=convert_path_to_folder_name(cwd),
+    )
+
+    from app.api.v1.cc_bridge import router as cc_bridge_api
+
+    discovered = [{"cwd": cwd, "session_name": "k-foo-1234"}]
+
+    def fake_discover_cc_sessions():
+        return discovered
+
+    monkeypatch.setattr(cc_bridge_api, "discover_cc_sessions", fake_discover_cc_sessions)
+
+    response = await cc_bridge_api.list_sessions()
+
+    session = response["sessions"][0]
+    assert "card_id" not in session, (
+        "legacy cc-bridge route re-enriched sessions — enrichment belongs "
+        "on the live agent-bridge route only (kanban card "
+        "cade1e9b919944258c442d273c1dcfd7)"
+    )
+    assert "card_project_key" not in session
