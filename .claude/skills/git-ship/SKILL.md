@@ -25,12 +25,12 @@ When you run a Bash tool-call, the cwd **persists into the next call**. A
 compound `cd backend && pytest …` therefore leaks the new cwd: the next
 call lands in `backend/`, and a follow-up `cd docs/cockpit` fails with
 `no such file or directory` (or runs against the wrong paths). The
-ship recipe below uses several compound `cd backend`/`cd frontend`
-shells of its own; the same rule applies — wrap each in a subshell, or
-use `git -C <abs-path>`, so the cwd change stays scoped to that one
-command. See the engineer persona's *Werkomgeving in worktree* section
-in `CLAUDE.md` for the broader cwd-safety rules (writes to the canonical
-checkout, `git -C` for absolute repo-root operations, the
+same rule applies — wrap each `cd` in a subshell (the frontend-check
+block above already does), or use `git -C <abs-path>` for the rest of
+the recipe, so the cwd change stays scoped to that one command. See the
+engineer persona's *Werkomgeving in worktree* section in
+`.claude/agents/engineer.md` for the broader cwd-safety rules (writes to
+the canonical checkout, `git -C` for absolute repo-root operations, the
 `$HOME/.cache/cockpit-ship/ship-merge-$$` scratch-worktree location, …).
 
 ## 1. Sync
