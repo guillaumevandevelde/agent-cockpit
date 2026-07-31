@@ -1609,3 +1609,60 @@ def test_divergence_guard_detects_post_fi_exit_shape() -> None:
         f"unexpected failure reason: {reason!r}; expected an "
         f"unconditional-`exit 1` diagnosis."
     )
+
+
+# --- Layout-chain test guard (kanban card 41a75826…) ------------------------
+# A `vi.mock` on the very component whose layout chain is under test makes the
+# assertion vacuous: the mocked child renders nothing, so a broken production
+# chain (CardRunTab's root lost `flex-1 min-h-0 flex flex-col`) never shows up.
+# The guard lives in three prompt surfaces an engineer session may read; this
+# test keeps them from drifting apart.
+LAYOUT_CHAIN_GUARD_MARKERS: list[tuple[str, str]] = [
+    ("guard heading", "Layout-chain guard"),
+    ("the forbidden shape", "wiens layout-keten in scope is"),
+    ("the prescribed alternative", "leaves"),
+]
+
+LAYOUT_CHAIN_GUARD_SOURCES: dict[str, callable[[], str]] = {
+    "dispatch._build_ship_instructions('direct')": _dispatch_direct_prompt,
+    ".claude/skills/git-ship/SKILL.md": _skill_md_direct_recipe,
+}
+
+
+@pytest.mark.parametrize("source_name", sorted(LAYOUT_CHAIN_GUARD_SOURCES))
+@pytest.mark.parametrize(
+    "marker_label,marker",
+    LAYOUT_CHAIN_GUARD_MARKERS,
+    ids=[label for label, _ in LAYOUT_CHAIN_GUARD_MARKERS],
+)
+def test_layout_chain_guard_present_in_every_ship_mirror(
+    source_name: str, marker_label: str, marker: str
+) -> None:
+    """The layout-chain mock guard must appear in every ship-prompt mirror.
+
+    Dropping it from one mirror means a dispatched session gets different
+    testing guidance than a session that reads the skill by hand — exactly
+    the silent inconsistency the ship-recipe drift guard exists for.
+    """
+    source_text = LAYOUT_CHAIN_GUARD_SOURCES[source_name]()
+    assert marker in source_text, (
+        f"{source_name} missing layout-chain guard {marker_label}: {marker!r}. "
+        f"Update every mirror in the same commit (kanban card 41a75826…)."
+    )
+
+
+def test_engineer_persona_carries_the_layout_chain_rule() -> None:
+    """The engineer persona is the third surface carrying this rule.
+
+    It is not in ``LAYOUT_CHAIN_GUARD_SOURCES`` because the persona phrases
+    the rule as a TDD step (step 3) rather than a ship-gate note, so only the
+    load-bearing shape is pinned here.
+    """
+    persona = _engineer_md_worktree_pattern()
+    assert "Layout-chain-regel" in persona, (
+        "engineer.md lost the layout-chain TDD rule (kanban card 41a75826…)"
+    )
+    assert "wiens layout-keten je" in persona or "wiens layout-keten in scope is" in persona, (
+        "engineer.md's layout-chain rule no longer names the forbidden shape "
+        "(mocking the component whose layout chain is under test)"
+    )
