@@ -5806,7 +5806,13 @@ class TestBuildShipInstructions:
         # Merge happens through a throwaway detached worktree, not `git checkout
         # master` (which deterministically fails in a linked worktree — see the
         # [self-improve] card that motivated this recipe).
-        assert "git worktree add --detach \"$WT\" origin/master" in instructions
+        # Local-`master` base (kanban card 5e83b6e0…): the multi-session box
+        # routinely has local master N commits ahead of origin/master; basing
+        # the merge on `origin/master` would strand those commits on every
+        # ship. The integration point is local master, the push is the
+        # synchronisation moment.
+        assert "git worktree add --detach \"$WT\" master" in instructions
+        assert "git worktree add --detach \"$WT\" origin/master" not in instructions
         assert "git checkout master" not in instructions
         assert "merge --no-ff" in instructions
         assert "push origin HEAD:master" in instructions
@@ -5818,6 +5824,184 @@ class TestBuildShipInstructions:
         assert 'move_card' in instructions
         assert '"Done"' in instructions
         assert "gh pr create" not in instructions
+
+    def test_direct_mode_includes_local_master_divergence_guard(self):
+        """Basing on local `master` requires a divergence guard.
+
+        A successful push from local `master` requires origin/master to be
+        *behind* local master (i.e. the merge is a fast-forward). When
+        origin/master has commits local doesn't — another agent pushed first,
+        or origin was reset — a push from local master would be rejected as
+        non-fast-forward, or worse silently no-op. The guard must fail-fast
+        with a clear remediation before the merge worktree is created, so the
+        agent has a chance to reconcile first.
+        """
+        instructions = dispatch._build_ship_instructions("direct")
+        # The guard itself: origin/master must be an ancestor of master.
+        assert "git merge-base --is-ancestor origin/master master" in instructions
+        # Error message + remediation hint: an agent staring at this needs
+        # to know what to do next. The remediation interpolates the absolute
+        # path of the main checkout (the legacy fallback uses the hardcoded
+        # meta-project root, so the rendered form is `git -C
+        # /home/vdvgu/claude-cockpit pull --rebase origin master`). The
+        # bash continuation in the source spans two physical lines, so check
+        # the joined substring across the line break.
+        assert "ERROR: local master is STALE" in instructions
+        joined = " ".join(line.strip() for line in instructions.splitlines())
+        assert "pull --rebase origin master" in joined
+        # The legendary two-labels-swap regression — pin the labels as
+        # ordered so the BEHIND/AHEAD log can't silently flip back.
+        assert "ahead=" in instructions and "behind=" in instructions
+        assert "BEHIND=$(git rev-list --count master..origin/master" in instructions
+        assert "AHEAD=$(git rev-list --count origin/master..master" in instructions
+
+    def test_direct_mode_includes_post_push_main_checkout_sync(self):
+        """The post-push main-checkout sync must fast-forward the canonical
+        checkout where `master` is actually checked out.
+
+        The throwaway worktree is detached HEAD — it cannot update `master`
+        itself. Without a sync of the main checkout, every subsequent ship
+        on this multi-session box trips the divergence guard above (the
+        ship pushed, but the local master ref didn't move), even though the
+        divergence is fully explained by our own push. The sync must:
+
+        1. Run ONLY after a successful push (the next guarded `git push`).
+        2. Try `git -C "$MAIN_CHECKOUT" pull --ff-only origin master` to
+           fast-forward the local master ref AND update the working tree.
+        3. Skip-with-WARN when the pull refuses (dirty working tree from a
+           concurrent agent's edit, or non-fast-forward) — the chosen
+           trade-off (kanban card 5e83b6e0… round 3): the push already
+           landed on origin, only the next ship will see the divergence.
+        4. NOT fall back to `git update-ref refs/heads/master origin/master`.
+           The earlier implementation tried that as a fallback, but
+           `update-ref` almost always succeeds — which silenced the WARN
+           the human decision explicitly required. With the trade-off
+           accepted (the divergence guard will trip on the next ship
+           until the operator reconciles), the visible signal is more
+           valuable than a hidden ref-update.
+        """
+        instructions = dispatch._build_ship_instructions("direct")
+        # (1) the sync is inside the `if git -C "$WT" push origin HEAD:master`
+        # branch — place-anchored by looking at the slice after the push.
+        push_idx = instructions.index("push origin HEAD:master")
+        post_push = instructions[push_idx:]
+        # (2) fast-forward pull against the main checkout.
+        assert "pull --ff-only origin master" in post_push
+        # (3) WARN — the human-recognisable signal that the sync was skipped.
+        # Specifically tied to the pull failure (the WARN is inside the
+        # `if ! git -C "$MAIN_CHECKOUT" pull --ff-only origin master`
+        # branch), not just a stray "WARN" anywhere in the post-push
+        # block. Pins the "skip-with-WARN" semantics — a future editor
+        # who accidentally demotes the WARN to prose inside a comment
+        # (the `efb8187b…` / `c06a3a2a…` failure shape) is caught here.
+        pull_branch_idx = post_push.index(
+            'git -C "$MAIN_CHECKOUT" pull --ff-only origin master'
+        )
+        # The first line after the pull command's `if` opener must be the
+        # WARN's `echo` — that's the shape that ties the WARN to the pull
+        # failure (the WARN sits inside the `if ! git … pull --ff-only`,
+        # not in some unrelated branch). A future editor who demotes the
+        # WARN to prose-after-an-exit (the `efb8187b…` shape) trips here.
+        first_line_after_pull = post_push[pull_branch_idx:].split("\n", 1)[0]
+        assert "pull --ff-only" in first_line_after_pull, (
+            "sanity: post-push sync must START with the pull --ff-only "
+            "command. Got: " + repr(first_line_after_pull)
+        )
+        # Slice everything after the pull opener (the `if ! git …` line is
+        # itself multi-line; the WARN lives inside the `if`/`fi` block).
+        # Walk to the next `fi` at the same indentation level to land on
+        # the closing brace of the pull's failure branch.
+        post_pull_block = post_push[pull_branch_idx:]
+        # The WARN echo must live inside the pull's failure branch —
+        # anywhere between the `if ! git … pull` and the matching `fi`.
+        block_idx = post_pull_block.index("pull --ff-only origin master")
+        warn_after_pull = post_pull_block[block_idx:]
+        assert "WARN" in warn_after_pull, (
+            "post-push sync must emit a visible WARN when the pull fails "
+            "(kanban card 5e83b6e0… round 3 blocker 1). The WARN must be "
+            "tied to the pull failure, not just present anywhere in the "
+            "post-push block."
+        )
+        # (4) the broken `update-ref` fallback must not appear. The previous
+        # implementation inlined it; it succeeded silently and bypassed the
+        # WARN, which is the exact opposite of the human's decision.
+        assert "update-ref refs/heads/master origin/master" not in post_push, (
+            "post-push sync must NOT fall back to `update-ref` — the "
+            "fallback silently bypassed the WARN the human decision "
+            "explicitly required (kanban card 5e83b6e0… round 3 blocker 1). "
+            "The trade-off (divergence guard trips on next ship until the "
+            "operator reconciles) is explicitly accepted."
+        )
+
+    def test_direct_mode_main_checkout_path_is_properly_shlex_quoted(self):
+        """The ``MAIN_CHECKOUT`` interpolation must use ``shlex.quote``'s output
+        bare — no surrounding double quotes (kanban card 5e83b6e0… blocker).
+
+        The pre-quoted form already wraps the path in single quotes (only
+        when the path actually contains shell metacharacters — for a clean
+        path like ``/home/vdvgu/claude-cockpit`` with no spaces, ``$``,
+        backtick, or embedded double-quote, ``shlex.quote`` returns the
+        path bare, no quotes needed). Wrapping the pre-quoted value in
+        literal double quotes
+        inside the bash interpolation produces
+        ``MAIN_CHECKOUT="'/path with spaces'"`` for a path WITH spaces —
+        the shell sees literal single quotes inside the double-quoted
+        assignment, and ``$MAIN_CHECKOUT`` expands to ``'/path with
+        spaces'`` (with the single quotes still attached), breaking every
+        downstream ``git -C "$MAIN_CHECKOUT" …`` with
+        ``fatal: cannot change to ``'/path with spaces'``: No such file or
+        directory``. The fail-open ``2>/dev/null`` on the post-push sync
+        meant the bug was silent — the push landed, the ref-update fired,
+        but the main checkout stayed on the old tree (the 74-staged-deletions
+        shape, kanban card 5e83b6e0… round 3).
+
+        Pin the safe form for the legacy fallback path (no metacharacters,
+        so shlex.quote returns the path bare) and the broken form as
+        absent. The path-with-metacharacters case is covered by
+        ``test_quote_safety_path_with_spaces`` /
+        ``test_quote_safety_path_with_dollar`` in
+        ``test_kanban_dispatch.py`` — the same shlex.quote contract powers
+        both checks.
+        """
+        instructions = dispatch._build_ship_instructions("direct")
+        # Safe form: `MAIN_CHECKOUT=` followed by the path (bare, no quotes
+        # because the legacy fallback path has no metacharacters). The
+        # broken form would show `MAIN_CHECKOUT="/home/vdvgu/claude-cockpit"`
+        # (double-quoted) — assert that shape is absent.
+        assert "MAIN_CHECKOUT=/home/vdvgu/claude-cockpit" in instructions, (
+            "expected the safe rendered form `MAIN_CHECKOUT=/home/vdvgu/claude-cockpit` "
+            "(shlex.quote output used bare, no surrounding double quotes). "
+            "The current form is the broken double-quoted variant from "
+            "kanban card 5e83b6e0… round 3."
+        )
+        bad_double_quoted = 'MAIN_CHECKOUT="/home/vdvgu/claude-cockpit"'
+        assert bad_double_quoted not in instructions, (
+            "MAIN_CHECKOUT is rendered with literal double quotes around "
+            "the path — this is the blocker from kanban card 5e83b6e0… "
+            "round 3. shlex.quote already wraps the path in single quotes "
+            "when needed; wrapping it again in double quotes makes "
+            "`$MAIN_CHECKOUT` expand to the literal string `'<path>'` (with "
+            "attached quotes). Use the pre-quoted form bare: "
+            "`MAIN_CHECKOUT={main_checkout_q}`."
+        )
+
+    def test_direct_mode_post_push_sync_uses_main_checkout_var(self):
+        """The post-push sync must target ``$MAIN_CHECKOUT``, not hardcode a
+        concrete path. The dispatch prompt inlines ``project_path`` via
+        ``shlex.quote`` so the path is portable across meta + product
+        projects (kaart a962b209… blocker C). A hardcoded
+        ``/home/vdvgu/claude-cockpit`` would silently break every non-meta
+        project — the same class of bug as the original double-quoting bug,
+        just a different surface.
+        """
+        instructions = dispatch._build_ship_instructions("direct")
+        # The sync must reference the variable, not the literal path.
+        push_idx = instructions.index("push origin HEAD:master")
+        post_push = instructions[push_idx:]
+        assert "git -C \"$MAIN_CHECKOUT\"" in post_push
+        # And the legacy escape (echoing the path in prose) must not also
+        # appear, so a future editor can't have both forms.
+        assert "git -C \"/home/vdvgu/claude-cockpit\"" not in post_push
 
     def test_pull_request_mode_includes_gh_commands(self):
         instructions = dispatch._build_ship_instructions("pull-request")

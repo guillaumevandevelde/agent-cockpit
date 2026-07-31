@@ -67,10 +67,64 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # Slot name stays `ship-merge-$$` (PID-unique), not a fixed name — a
     # fixed slot collides across concurrent dispatched sessions (kanban
     # card c23dfe46).
+    #
+    # `master` (local), NOT `origin/master`: kanban card 5e83b6e0… fourth
+    # iteration. On a multi-session box local master routinely has N commits
+    # ahead of origin/master (other agents' pushes in flight). Basing the
+    # merge on `origin/master` would strand those commits on every ship —
+    # the merge would silently fast-forward to origin/master and miss the
+    # local commits. The integration point is local master; the push to
+    # `origin` is the synchronisation moment. The divergence guard below
+    # makes the push fail-fast if origin/master has raced ahead.
     (
         "detached-worktree merge target",
-        'git worktree add --detach "$WT" origin/master',
+        'git worktree add --detach "$WT" master',
     ),
+    # Divergence guard, paired with the local-master base above (kanban card
+    # 5e83b6e0…). `--is-ancestor origin/master master` returns 0 when
+    # origin/master is reachable from local master — i.e. when local master
+    # is a strict superset of origin/master (the case where a push from
+    # local master would be a fast-forward). In every other shape (origin
+    # ahead, or diverged) the guard fails-fast with `report_impediment`
+    # rather than producing a stale merge or a useless "Everything
+    # up-to-date" push.
+    (
+        "local-master divergence guard",
+        "git merge-base --is-ancestor origin/master master",
+    ),
+    # Main-checkout path discovery (kanban card 5e83b6e0…). The post-push
+    # sync runs against the canonical checkout where `master` is actually
+    # checked out — the throwaway detached worktree cannot update `master`
+    # itself. The dispatch mirror inlines `project_path` via `shlex.quote`
+    # (kaart a962b209… blocker C: single-quote-wrapped paths survive spaces,
+    # `$`, `, embedded quotes, and backslashes); the skill mirror is
+    # self-discovering via `git rev-parse --git-common-dir` because the
+    # skill must work without the dispatch prompt. Both forms end up
+    # identical on the meta project; the safety property is that the
+    # referenced path is the main checkout, not the worktree.
+    (
+        "main-checkout path discovery",
+        "MAIN_CHECKOUT",
+    ),
+    # Post-push main-checkout sync (kanban card 5e83b6e0…). After a
+    # successful push the local master ref in the main checkout must move
+    # too, or the divergence guard above trips on every subsequent ship on
+    # this multi-session box — even though the divergence is fully explained
+    # by our own push. `git pull --ff-only origin master` in one step
+    # fast-forwards the local master ref AND updates the index + working
+    # tree in the main checkout (so the dev-stack keeps running against the
+    # latest tree). The `--ff-only` refusal on a dirty working tree is the
+    # right default — we don't want to clobber in-flight edits.
+    (
+        "post-push main-checkout fast-forward",
+        "git -C \"$MAIN_CHECKOUT\" pull --ff-only origin master",
+    ),
+    # Skip-with-WARN on a failed pull (kanban card 5e83b6e0… round 3
+    # decision). The absent `update-ref` fallback is pinned by a dedicated
+    # absence test below — `test_post_push_sync_must_not_use_update_ref_fallback`
+    # — rather than as a presence-assertion in the drift invariant list
+    # (this list is presence-only by design). Keeping the explanation here
+    # so a future editor of this file knows where the absence-pin lives.
     # Post-`worktree add` 0-byte-index guard. A crashed/aborted predecessor
     # in the shared gitdir can leave the freshly-created slot's `index` at
     # 0 bytes; `git worktree add` reports success anyway, and the very next
@@ -580,13 +634,38 @@ def test_untracked_files_are_advisory_not_blocking(source_name: str) -> None:
         f"pre-flight and `git worktree add` — it would not run before the merge."
     )
 
-    # Exactly one `exit 1` in the pre-flight region: the blocking condition's.
-    # A second one would mean the advisory became fatal again.
-    assert advisory_region.count("exit 1") == 1, (
-        f"{source_name}: expected exactly 1 `exit 1` in the pre-flight region "
-        f"(the tracked-changes guard), found "
-        f"{advisory_region.count('exit 1')} — the untracked advisory must not "
-        f"abort the ship (kanban card c28e576d…)."
+    # The untracked advisory block itself must NOT be fatal. Slice from the
+    # `if [ -n "$UNTRACKED" ]` open to the matching `fi` close and assert
+    # no `exit 1` lives inside. (Previously this test counted `exit 1` in
+    # the whole pre-flight region as a proxy, but kanban card 5e83b6e0…
+    # added the divergence guard between the blocking pre-flight and
+    # `git worktree add`, which legitimately carries its own `exit 1` —
+    # the count proxy can't tell the difference between the divergence
+    # guard's `exit 1` and a regressed advisory-fatal shape.)
+    #
+    # Walk the line stream and match the FIRST `fi` at the same indentation
+    # level as the `if [ -n "$UNTRACKED" ]` opener. dispatch.py indents
+    # the closing `fi` with 3 spaces (matching the opener); SKILL.md
+    # indents it with 2 — the historical whitespace differs across
+    # mirrors, so the bookkeeping has to be indentation-agnostic.
+    untracked_open = source_text.index('if [ -n "$UNTRACKED" ]')
+    line_start = source_text.rfind("\n", 0, untracked_open) + 1
+    opener_indent = len(source_text[line_start:untracked_open]) - len(
+        source_text[line_start:untracked_open].lstrip()
+    )
+    untracked_close = untracked_open + len('if [ -n "$UNTRACKED" ]')
+    for line in source_text[untracked_close:].splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped == "fi\n" or stripped == "fi":
+            indent = len(line) - len(stripped)
+            if indent == opener_indent:
+                untracked_close = source_text.index(line, untracked_close) + len(line)
+                break
+    untracked_block = source_text[untracked_open:untracked_close]
+    assert "exit 1" not in untracked_block, (
+        f"{source_name}: untracked-files advisory contains an `exit 1` — "
+        f"the advisory must be non-fatal (kanban card c28e576d…). Found: "
+        f"{untracked_block!r}"
     )
 
 
@@ -1221,7 +1300,13 @@ def test_recipe_writing_conventions_doc_does_not_show_add_A_as_good() -> None:
 # must sit in the *executable* path of the detection `if`, not as prose after
 # an `exit 1`: that is the exact `efb8187b…`/`c06a3a2a…` failure shape, one
 # level down.
-WORKTREE_ADD = 'git worktree add --detach "$WT" origin/master'
+#
+# Local-`master` base (kanban card 5e83b6e0…): the previous
+# `origin/master` base stranded concurrent-session local commits on every
+# ship (the integration point is local master, the push is the
+# synchronisation moment). The base is now local `master` — paired with
+# the divergence guard + post-push main-checkout sync invariants below.
+WORKTREE_ADD = 'git worktree add --detach "$WT" master'
 INDEX_GUARD_GITDIR = 'WT_GITDIR=$(git -C "$WT" rev-parse --absolute-git-dir)'
 INDEX_GUARD_DETECT = 'if [ ! -s "$WT_GITDIR/index" ]'
 INDEX_GUARD_RECOVER = 'git -C "$WT" read-tree HEAD'
