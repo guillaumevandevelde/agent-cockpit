@@ -58,7 +58,8 @@ def test_transports_tuple_includes_headless():
 # docs/cockpit/spawn-test-bridge-sessions-analyse.md bevinding 5.
 
 
-def test_headless_transport_raises_with_counter_ceiling_message(monkeypatch):
+@pytest.mark.asyncio
+async def test_headless_transport_raises_with_counter_ceiling_message(monkeypatch):
     """When the in-process counter is the binding constraint, the headless
     transport must not lead the error message with memory figures.
 
@@ -90,7 +91,7 @@ def test_headless_transport_raises_with_counter_ceiling_message(monkeypatch):
     ))
 
     with pytest.raises(MemoryLimitExceeded) as ei:
-        hr.headless_transport(
+        await hr.headless_transport(
             directory="/tmp/proj", prompt="hi", session_name="k-hl-0001",
         )
 
@@ -586,6 +587,78 @@ async def test_full_dispatch_cycle_no_reap_loop(monkeypatch, tmp_path, capsys):
     assert rc == 0
     assert "k-fixture-1" not in hr.live_headless_sessions()
     assert parsed == ["system", "assistant", "result"]
+
+
+@pytest.mark.asyncio
+async def test_headless_transport_waits_for_clean_init(monkeypatch, tmp_path):
+    ready_seen = False
+
+    monkeypatch.setattr(hr.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(hr, "_safe_resolve_project_key", lambda path: "pk")
+    monkeypatch.setattr(hr.session_registry, "can_add_session", lambda: True)
+    monkeypatch.setattr(hr.session_registry, "reserve_external", lambda name: None)
+
+    async def fake_run_headless(**kwargs):
+        nonlocal ready_seen
+        startup_future = kwargs["startup_future"]
+        assert not startup_future.done()
+        startup_future.set_result(None)
+        ready_seen = True
+        return {"exit_code": 0}
+
+    monkeypatch.setattr(hr, "run_headless", fake_run_headless)
+
+    result = await hr.headless_transport(
+        directory=str(tmp_path), prompt="ok", session_name="k-ready",
+    )
+
+    assert ready_seen is True
+    assert result == {
+        "session_name": "k-ready", "transport": "headless", "status": "started",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_headless_rejects_init_mcp_server_errors(monkeypatch, tmp_path):
+    """A skipped MCP config entry prevents startup and preserves its details."""
+    import os
+    import sys as stdlib_sys
+
+    pidfile = tmp_path / "fake_cli.pid"
+    fake_cli = tmp_path / "fake_claude.py"
+    fake_cli.write_text(
+        "import json, os, sys, time\n"
+        f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        "payload = {'type':'system','subtype':'init','session_id':'sess-mcp-bad',"
+        "'cwd':'.','model':'claude-opus-4-8','permissionMode':'acceptEdits',"
+        "'mcp_server_errors':[{'name':'cockpit-kanban','type':'invalid_config',"
+        "'message':'Skipped — invalid MCP server config for cockpit-kanban: command: expected string, received undefined'}]}\n"
+        "sys.stdout.write(json.dumps(payload) + '\\n'); sys.stdout.flush()\n"
+        "time.sleep(60)\n"
+    )
+    wrapper = tmp_path / "fake_claude.sh"
+    wrapper.write_text(
+        f"#!/bin/sh\nexec {stdlib_sys.executable} '{fake_cli}' \"$@\"\n"
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setattr(hr, "resolve_cli_executable", lambda cli_id: str(wrapper))
+    startup_future = asyncio.get_running_loop().create_future()
+
+    with pytest.raises(hr.McpServerConfigError) as exc_info:
+        await hr.run_headless(
+            cli_id="claude-code", directory=str(tmp_path), prompt="ok",
+            session_name="k-mcp-bad", skip_permissions=True,
+            provider="anthropic", model=None, startup_future=startup_future,
+        )
+
+    message = str(exc_info.value)
+    assert "cockpit-kanban" in message
+    assert "invalid_config" in message
+    assert "expected string, received undefined" in message
+    pid = int(pidfile.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+    assert "k-mcp-bad" not in hr._headless_processes
 
 
 # ---- AC 2 + AC 4: single unmapped event must not orphan the subprocess ----

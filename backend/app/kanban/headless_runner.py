@@ -94,6 +94,27 @@ from app.services.scheduling.session_registry import session_registry
 logger = logging.getLogger("app.kanban.headless_runner")
 
 
+class McpServerConfigError(RuntimeError):
+    """Claude Code skipped one or more MCP entries during startup."""
+
+
+def _mcp_server_config_error(
+    payload: Mapping[str, Any],
+) -> McpServerConfigError | None:
+    errors = payload.get("mcp_server_errors")
+    if not errors:
+        return None
+    details = "; ".join(
+        f"{item.get('name', '<unknown>')} ({item.get('type', 'unknown')}): "
+        f"{item.get('message', 'no message')}"
+        for item in errors
+        if isinstance(item, Mapping)
+    )
+    return McpServerConfigError(
+        f"Claude Code skipped MCP server configuration: {details or errors!r}"
+    )
+
+
 # Module-level registry of in-flight headless subprocesses, keyed by session
 # name. Populated by :func:`run_headless` (after spawn) and by
 # :func:`adopt_headless_runs` (at backend startup, when the in-memory cache
@@ -628,7 +649,7 @@ def resolve_cli_executable(cli_id: str) -> str:
     return cli_id
 
 
-def headless_transport(*, directory: str, prompt: str, session_name: str,
+async def headless_transport(*, directory: str, prompt: str, session_name: str,
                        cli_id: str = "claude-code", provider: str = "anthropic",
                        model: str | None = None,
                        endpoint_name: str | None = None,
@@ -705,56 +726,41 @@ def headless_transport(*, directory: str, prompt: str, session_name: str,
     project_key = _safe_resolve_project_key(repo)
     skip_permissions = True  # read from project meta in a follow-up
 
-    # Async-context dispatch path: schedule without blocking. A sync caller
-    # (none today — dispatcher always runs in a loop) would run inline.
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop is not None:
-        task = loop.create_task(
-            run_headless(
-                cli_id=cli_id,
-                directory=worktree_path,
-                prompt=prompt,
-                session_name=session_name,
-                skip_permissions=skip_permissions,
-                provider=provider,
-                model=model,
-                endpoint_name=endpoint_name,
-                endpoint_base_url=endpoint_base_url,
-                endpoint_auth_token=endpoint_auth_token,
-                project_key=project_key,
-            )
-        )
-        # Strong reference so the task can't be GC'd before it runs (same
-        # pattern as _sandcastle_start_tasks in dispatch.py). The done
-        # callback ALSO logs the task's exception if it has one — the
-        # previous ``_headless_start_tasks.discard`` callback silently
-        # dropped exceptions, which is what the card calls out (AC 3).
-        _headless_start_tasks.add(task)
-        task.add_done_callback(_headless_task_done_callback)
-
-        return {
-            "session_name": session_name,
-            "transport": "headless",
-            "status": "started",
-        }
-
-    # Sync fallback: run inline (the result-dict shape mirrors what async mode
-    # would have returned if it had blocked).
-    return asyncio.run(
+    startup_future = asyncio.get_running_loop().create_future()
+    task = asyncio.create_task(
         run_headless(
-            cli_id=cli_id, directory=worktree_path, prompt=prompt,
-            session_name=session_name, skip_permissions=skip_permissions,
-            provider=provider, model=model,
+            cli_id=cli_id,
+            directory=worktree_path,
+            prompt=prompt,
+            session_name=session_name,
+            skip_permissions=skip_permissions,
+            provider=provider,
+            model=model,
             endpoint_name=endpoint_name,
             endpoint_base_url=endpoint_base_url,
             endpoint_auth_token=endpoint_auth_token,
             project_key=project_key,
-        )
+            startup_future=startup_future,
+        ),
+        name=f"headless-run-{session_name}",
     )
+    _headless_start_tasks.add(task)
+    task.add_done_callback(_headless_task_done_callback)
+
+    done, _ = await asyncio.wait(
+        {startup_future, task}, return_when=asyncio.FIRST_COMPLETED,
+    )
+    if startup_future in done:
+        startup_future.result()
+    else:
+        await task
+        raise RuntimeError(f"headless {session_name} exited before session init")
+
+    return {
+        "session_name": session_name,
+        "transport": "headless",
+        "status": "started",
+    }
 
 
 # Strong references to in-flight headless start tasks. asyncio only keeps weak
@@ -838,6 +844,7 @@ async def run_headless(
     endpoint_base_url: str | None = None,
     endpoint_auth_token: str | None = None,
     project_key: str | None = None,
+    startup_future: asyncio.Future[None] | None = None,
 ) -> dict:
     """Spawn the headless subprocess and consume its event stream.
 
@@ -927,6 +934,7 @@ async def run_headless(
             record=record,
             log_writer=log_writer,
             stop_event=stop_event,
+            startup_future=startup_future,
         ),
         name=f"headless-tail-{session_name}",
     )
@@ -1144,6 +1152,7 @@ async def _consume_log_file(
     record: HeadlessRunRecord,
     log_writer: EventLogWriter,
     stop_event: asyncio.Event,
+    startup_future: asyncio.Future[None] | None = None,
 ) -> int:
     """Tail the on-disk event log, parse each line, dispatch via ``_on_event``.
 
@@ -1202,7 +1211,9 @@ async def _consume_log_file(
                     offset = f.tell()
                     text = line.decode("utf-8", errors="replace").strip()
                     if text:
-                        await _dispatch_log_line(text, session_name, provider)
+                        await _dispatch_log_line(
+                            text, session_name, provider, startup_future=startup_future,
+                        )
                     line = f.readline()
                 record.last_read_offset = offset
                 _write_pidfile(record)
@@ -1225,7 +1236,9 @@ async def _consume_log_file(
                 offset = f.tell()
                 text = line.decode("utf-8", errors="replace").strip()
                 if text:
-                    await _dispatch_log_line(text, session_name, provider)
+                    await _dispatch_log_line(
+                        text, session_name, provider, startup_future=startup_future,
+                    )
                 line = f.readline()
 
             # Persist the new offset so a crash here doesn't lose
@@ -1264,7 +1277,13 @@ async def _consume_log_file(
     return proc.returncode if proc is not None else 0
 
 
-async def _dispatch_log_line(text: str, session_name: str, provider: str) -> None:
+async def _dispatch_log_line(
+    text: str,
+    session_name: str,
+    provider: str,
+    *,
+    startup_future: asyncio.Future[None] | None = None,
+) -> None:
     """Parse one log-file line and dispatch the resulting event.
 
     Async so the tailer awaits ``_on_event`` per line — keeps the
@@ -1288,6 +1307,11 @@ async def _dispatch_log_line(text: str, session_name: str, provider: str) -> Non
             session_name, text[:200],
         )
         return
+    is_init = payload.get("type") == "system" and payload.get("subtype") == "init"
+    if is_init:
+        config_error = _mcp_server_config_error(payload)
+        if config_error is not None:
+            raise config_error
     try:
         structured = parse_structured_event(map_stream_event(payload))
     except (
@@ -1299,6 +1323,8 @@ async def _dispatch_log_line(text: str, session_name: str, provider: str) -> Non
             session_name, payload, type(exc).__name__, exc,
         )
         return
+    if is_init and startup_future is not None and not startup_future.done():
+        startup_future.set_result(None)
     await _on_event(structured, session_name=session_name, provider=provider)
 
 
