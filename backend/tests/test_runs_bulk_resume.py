@@ -6,12 +6,18 @@ from httpx import ASGITransport, AsyncClient
 import app.api.v1.runs.router as bridge_router
 from app.database import Base, engine
 from app.main import app
+from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def _tables():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Anthropic-compatible endpoint rows live in the kanban DB
+    # (``kanban_meta`` table) — keep its schema in sync so the resume
+    # handler can resolve ``endpoint_name`` like the non-bulk spawn
+    # path does.
+    await reset_test_tables()
     yield
 
 
@@ -94,3 +100,81 @@ async def test_bulk_resume_rejects_unknown_provider():
             json={"provider": "nope", "sessions": [{"session_id": "s1", "project_folder": "-a"}]},
         )
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_bulk_resume_propagates_anthropic_compatible_endpoint(monkeypatch):
+    """AC (kaart 7ab0fc0038c…): a bulk-resume with
+    ``provider="anthropic-compatible"`` + ``endpoint_name`` must
+    resolve the endpoint like the non-bulk spawn path does and thread
+    ``endpoint_base_url`` + ``endpoint_auth_token`` into the per-item
+    ``SpawnCommandOptions``. Without this, the resumed sessions silently
+    fall back to plain Anthropic — the bug this card fixes.
+
+    The resolver is monkeypatched to a fake so the test stays in-process
+    and doesn't depend on the (separate) kanban DB; the contract under
+    test is the handler's *use* of the resolver's return shape, not
+    resolver semantics (covered by test_provider_endpoints)."""
+    from app.services.agentic_cli import endpoints as endpoints_mod
+
+    async def fake_resolve(session, project_key, endpoint_name, **kwargs):
+        return {
+            "name": endpoint_name,
+            "base_url": "https://api.groq.example/anthropic",
+            "auth_token": None,  # ambient credential
+            "model": "claude-sonnet-4-6",
+        }
+
+    monkeypatch.setattr(endpoints_mod, "resolve_compatible_endpoint", fake_resolve)
+
+    spawned: list = []
+
+    def fake_spawn(cli_id, options, session_name=None):
+        spawned.append(options)
+        return {"tmux_target": f"{options.session_id}:0.0", "session_name": options.session_id}
+
+    monkeypatch.setattr(bridge_router, "spawn_session", fake_spawn)
+
+    payload = {
+        "provider": "anthropic-compatible",
+        "endpoint_name": "groq-resume",
+        "sessions": [
+            {"session_id": "s1", "project_folder": "-a"},
+            {"session_id": "s2", "project_folder": "-b"},
+        ],
+    }
+    async with _client() as ac:
+        r = await ac.post("/api/v1/agent-bridge/sessions/bulk-resume", json=payload)
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["spawned"] == 2 and body["failed"] == 0
+    assert all(res["ok"] for res in body["results"])
+    # Both items got the resolved base_url + auth_token threaded into
+    # SpawnCommandOptions so the provider-env builder can stamp
+    # ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN on the spawned CLI.
+    assert len(spawned) == 2
+    for opts in spawned:
+        assert opts.provider == "anthropic-compatible"
+        assert opts.endpoint_name == "groq-resume"
+        assert opts.endpoint_base_url == "https://api.groq.example/anthropic"
+        # ambient credential_name=None → auth_token stays None
+        assert opts.endpoint_auth_token is None
+        # mode stays "resume" for every item in the batch
+        assert opts.mode == "resume"
+
+
+@pytest.mark.asyncio
+async def test_bulk_resume_rejects_anthropic_compatible_without_endpoint_name(monkeypatch):
+    """Symmetric to the non-bulk spawn path: a bulk-resume that picks
+    the ``anthropic-compatible`` vendor without an ``endpoint_name`` is
+    a configuration error and must surface as a clean 400 naming the
+    missing field, instead of silently spawning on plain Anthropic."""
+    payload = {
+        "provider": "anthropic-compatible",
+        "sessions": [{"session_id": "s1", "project_folder": "-a"}],
+    }
+    async with _client() as ac:
+        r = await ac.post("/api/v1/agent-bridge/sessions/bulk-resume", json=payload)
+    assert r.status_code == 400
+    assert "endpoint_name" in r.text
