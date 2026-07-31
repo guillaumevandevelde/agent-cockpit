@@ -235,6 +235,122 @@ check "pipe → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every do
 check "pipe → NO WARNING line emitted" '! echo "$out" | grep -qE "WARNING:"'
 
 # ----------------------------------------------------------------------------
+echo "Task 16: --check-headers picks the row whose Kaart matches the doc's Kaart, not the first link"
+# Two rows in the register point to the SAME doc but carry DIFFERENT Kaart
+# columns and DIFFERENT Uitkomst cells. The doc's Kaart field is `bbbb2222…`,
+# so the script must pick the second row's Uitkomst — not the first row's,
+# which would also match the doc link. This is the regression that motivated
+# kanban-kaart 9a2c47b1…: the previous "first-link" picker silently matched
+# the wrong row the moment a doc accumulated a revision row in the register.
+kaartdir="$TMP/kaart"; mkdir -p "$kaartdir"
+{
+  echo '# reg'
+  echo
+  echo '| d | v | **Original.** | [`a-decision.md`](./a-decision.md) | `aaaa1111` |'
+  echo '| d | v | **Revision.** | [`a-decision.md`](./a-decision.md) | `bbbb2222` |'
+} > "$kaartdir/decisions.md"
+cat > "$kaartdir/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `bbbb2222`
+**Uitkomst:** **Revision.**
+EOF
+out=$(DECISIONS_DIR="$kaartdir" bash "$SUT" --check-headers 2>&1); rc=$?
+check "kaart-match → exit 0" '[ "$rc" -eq 0 ]'
+# CLAUDE.md gotcha: assert the EXACT clean-state line, not a permissive "^OK:|WARNING:"
+# alternation that passes in both broken and fixed states.
+check "kaart-match → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
+check "kaart-match → NO WARNING line emitted" '! echo "$out" | grep -qE "WARNING:"'
+# Now flip the doc's Kaart to the first row's id; the script must now pick
+# the FIRST row's Uitkomst — confirming the match is by Kaart, not
+# accidental row-order stability.
+cat > "$kaartdir/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `aaaa1111`
+**Uitkomst:** **Original.**
+EOF
+out=$(DECISIONS_DIR="$kaartdir" bash "$SUT" --check-headers 2>&1); rc=$?
+check "kaart-match (first row) → exit 0" '[ "$rc" -eq 0 ]'
+check "kaart-match (first row) → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
+check "kaart-match (first row) → NO WARNING line emitted" '! echo "$out" | grep -qE "WARNING:"'
+
+# ----------------------------------------------------------------------------
+echo "Task 17: --check-headers falls back to first-link match when doc has no real Kaart (placeholder)"
+# The "_zie doc — geen hex-id …" placeholder is the canonical form for
+# legacy decisions that pre-date the four-field header convention (kaart
+# 7edc5e26…). The script must NOT pick a row by some empty-prefix accident
+# of the Kaart cell — it should fall through to the legacy first-link
+# picker and match the first (and only) row.
+nokaart="$TMP/nokaart"; mkdir -p "$nokaart"
+{
+  echo '# reg'
+  echo
+  echo '| d | v | **First.** | [`a-decision.md`](./a-decision.md) | `aaaa1111` |'
+  echo '| d | v | **Second.** | [`a-decision.md`](./a-decision.md) | `bbbb2222` |'
+} > "$nokaart/decisions.md"
+cat > "$nokaart/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** _zie doc — geen hex-id in dit beslisdoc vastgelegd_
+**Uitkomst:** **First.**
+EOF
+out=$(DECISIONS_DIR="$nokaart" bash "$SUT" --check-headers 2>&1); rc=$?
+check "nokaart → exit 0" '[ "$rc" -eq 0 ]'
+check "nokaart → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
+
+# ----------------------------------------------------------------------------
+echo "Task 18: --check-headers falls back to first-link match when doc's Kaart has no matching register row"
+# Edge case: a future register-merge drops the row that owned the doc's
+# Kaart, but the doc itself still has a header pointing at it. The script
+# must NOT crash and NOT spuriously match a different row's Kaart — fall
+# back to the legacy first-link picker so the operator sees a real Uitkomst
+# mismatch (warning line) instead of a silent skip.
+orphan="$TMP/orphan"; mkdir -p "$orphan"
+{
+  echo '# reg'
+  echo
+  echo '| d | v | **First.** | [`a-decision.md`](./a-decision.md) | `aaaa1111` |'
+} > "$orphan/decisions.md"
+cat > "$orphan/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `ffff9999`
+**Uitkomst:** **First.** (legacy fallback — doc's Kaart is ffff9999, register has only aaaa1111)
+EOF
+out=$(DECISIONS_DIR="$orphan" bash "$SUT" --check-headers 2>&1); rc=$?
+check "orphan → exit 0 (advisory)" '[ "$rc" -eq 0 ]'
+check "orphan → fallback found a row (no Kaart-row match, so it warns on Uitkomst mismatch)" 'echo "$out" | grep -qE "WARNING.*Uitkomst"'
+
+# ----------------------------------------------------------------------------
+echo "Task 19: --check-headers Kaart 8-char prefix is taken from a full-hex id (no truncation marker)"
+# Some docs carry a 32-char hex id in their Kaart field with no `…` marker
+# (the `1fafd87c19e54ef1aa48936e8759ce06` style in the real tree). The
+# Kaart-prefix extractor must take the first 8 hex chars regardless of
+# whether the rest of the id is `…` or more hex. Regression: if the
+# extractor hard-codes "expect `…` after 8 chars", full-hex docs break.
+fullhexdir="$TMP/fullhex"; mkdir -p "$fullhexdir"
+{
+  echo '# reg'
+  echo
+  echo '| d | v | **Fullhex match.** | [`a-decision.md`](./a-decision.md) | `abcdef0123456789abcdef0123456789` |'
+} > "$fullhexdir/decisions.md"
+cat > "$fullhexdir/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** `abcdef0123456789abcdef0123456789`
+**Uitkomst:** **Fullhex match.**
+EOF
+out=$(DECISIONS_DIR="$fullhexdir" bash "$SUT" --check-headers 2>&1); rc=$?
+check "fullhex → exit 0" '[ "$rc" -eq 0 ]'
+check "fullhex → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
