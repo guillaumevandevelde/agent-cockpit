@@ -90,6 +90,34 @@ async def test_enrich_attaches_card_id_when_dispatch_project_folder_matches_cwd(
     assert sessions[0]["card_project_key"] == "git:github.com/example/repo"
 
 
+async def test_agent_bridge_sessions_response_includes_matching_card(monkeypatch):
+    """The endpoint used by Agent Bridge exposes the card navigation fields."""
+    await _reset()
+    cwd = "/home/dev/projects/foo/.claude/worktrees/k-foo-1234"
+    card_id = await _seed_card(
+        project_key="git:github.com/example/repo",
+        column="engineer",
+        dispatch_project_folder=convert_path_to_folder_name(cwd),
+    )
+
+    from app.api.v1.runs import router as agent_bridge_api
+
+    discovered = [{"cwd": cwd, "session_name": "k-foo-1234"}]
+    discover_calls: list[str | None] = []
+
+    def fake_discover(cli: str | None = None):
+        discover_calls.append(cli)
+        return discovered
+
+    monkeypatch.setattr(agent_bridge_api, "discover_agent_sessions", fake_discover)
+
+    response = await agent_bridge_api.list_sessions(cli="claude-code")
+
+    assert discover_calls == ["claude-code"]
+    assert response["sessions"][0]["card_id"] == card_id
+    assert response["sessions"][0]["card_project_key"] == "git:github.com/example/repo"
+
+
 async def test_enrich_leaves_session_untouched_when_no_match():
     """A session whose cwd doesn't match any card stays un-enriched —
     the SessionCard renders no link in that case."""

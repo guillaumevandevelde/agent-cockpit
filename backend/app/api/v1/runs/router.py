@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.kanban.db import KanbanSessionLocal
 from app.models.schemas import (
     BridgeAttachmentDeleteResponse,
     BridgeAttachmentListResponse,
@@ -45,7 +46,11 @@ from app.services.runs import git_status as git_status_service
 from app.services.runs import groups as groups_service
 from app.services.runs import minimax_credentials
 from app.services.runs.attachments import run_attachment_service
-from app.services.runs.discovery import capture_pane_preview, discover_agent_sessions
+from app.services.runs.discovery import (
+    capture_pane_preview,
+    discover_agent_sessions,
+    enrich_sessions_with_cards,
+)
 from app.services.runs.pty_relay import PtyRelay, is_target_interactive
 from app.services.runs.resumable import list_resumable_sessions
 from app.services.runs.spawn import kill_session, rename_session, spawn_session
@@ -94,11 +99,16 @@ class SpawnRequest(BaseModel):
 
 
 @router.get("/sessions")
-def list_sessions(cli: str | None = Query(default=None)):
+async def list_sessions(cli: str | None = Query(default=None)):
     try:
         sessions = discover_agent_sessions(cli)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    try:
+        async with KanbanSessionLocal() as ks:
+            await enrich_sessions_with_cards(sessions, ks)
+    except Exception:
+        logger.exception("session→card enrichment failed; returning unenriched sessions")
     return {"sessions": sessions, "count": len(sessions)}
 
 

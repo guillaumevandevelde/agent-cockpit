@@ -21,7 +21,7 @@ async def test_provider_registry_smoke_exposes_claude_and_codex_statuses():
     assert codex_status["capabilities"]["usage"] is False
 
 
-def test_agent_bridge_session_filter_smoke(monkeypatch):
+async def test_agent_bridge_session_filter_smoke(monkeypatch):
     from app.api.v1.runs import router as agent_bridge_api
 
     calls = []
@@ -38,8 +38,8 @@ def test_agent_bridge_session_filter_smoke(monkeypatch):
 
     monkeypatch.setattr(agent_bridge_api, "discover_agent_sessions", fake_discover)
 
-    all_response = agent_bridge_api.list_sessions(cli=None)
-    codex_response = agent_bridge_api.list_sessions(cli="codex-cli")
+    all_response = await agent_bridge_api.list_sessions(cli=None)
+    codex_response = await agent_bridge_api.list_sessions(cli="codex-cli")
 
     assert calls == [None, "codex-cli"]
     assert all_response["count"] == 1
