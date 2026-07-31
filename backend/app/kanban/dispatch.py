@@ -2945,6 +2945,15 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
     # metacharacters, so ``shlex.quote`` produces an equivalent result.
     nm_q = shlex.quote(nm_path)
     bin_q = shlex.quote(bin_path)
+    # Main-checkout path for the post-push local-master sync (kanban card
+    # 5e83b6e0…, third iteration). The dispatcher inlines `project_path` =
+    # the canonical checkout where `master` is checked out, pre-quoted via
+    # ``shlex.quote`` (kaart a962b209… blocker C: single-quote-wrapped
+    # paths survive spaces, ``$``, embedded quotes, and backslashes; a
+    # bare double-quote wrapper still lets ``$``/``\```/``"`` through).
+    # The legacy ``project_path=None`` fallback uses the hardcoded meta
+    # project root, matching the frontend_root behaviour above.
+    main_checkout_q = shlex.quote(frontend_root)
     tests = (
         "2. **Run frontend checks yourself before shipping (only when the branch "
         "touches ``frontend/``)** — there is no pre-push gate; nothing blocks a "
@@ -3131,6 +3140,17 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "   SHIP_TMP=\"${HOME}/.cache/cockpit-ship\"\n"
             "   mkdir -p \"$SHIP_TMP\"\n"
             "   WT=\"$SHIP_TMP/ship-merge-$$\"\n"
+            "   # Main-checkout path discovery (kanban card 5e83b6e0…, third "
+            "iteration). The ship-worktree is a detached checkout that "
+            "cannot update `master` itself — only the canonical checkout "
+            "where `master` is checked out can do that. The dispatcher "
+            "inlines `project_path` (= the main-checkout path) into the "
+            "prompt (same source as the `<project-root>` used for the "
+            "node_modules symlink), so we reuse it here. The skill mirror "
+            "in `.claude/skills/git-ship/SKILL.md` is self-discovering via "
+            "`dirname $(git rev-parse --git-common-dir)` because the skill "
+            "must work without the dispatch prompt.\n"
+            "   MAIN_CHECKOUT=\"<main-checkout>\"\n"
             "   # Local-master divergence guard (kanban card 5e83b6e0…). Step 1 "
             "already fetched origin, but to be defensive we fetch again here — "
             "this worktree may have been running between step 1 and step 4, and "
@@ -3298,25 +3318,63 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "   fi\n"
             "   if git -C \"$WT\" push origin HEAD:master; then\n"
             "     # Post-push local-master sync (kanban card 5e83b6e0…, "
-            "second iteration). The divergence guard above bases on local "
+            "third iteration). The divergence guard above bases on local "
             "`master`, so a successful push that doesn't also move local "
             "`master` leaves the guard tripped on every subsequent ship on "
             "this multi-session box — even though the divergence is fully "
-            "explained by *our own* push. `git fetch origin master:master` "
-            "would do the same job, but it refuses when `master` is checked "
-            "out in another worktree (which is exactly the situation here — "
-            "the dispatched session sits in a worktree, master is checked "
-            "out in the main checkout). `git update-ref` writes the ref "
-            "directly and bypasses that check. Fail-open: a stale local "
-            "`master` is a nuisance (the next ship trips the guard with a "
-            "clear remediation message), but a successful push must NEVER "
-            "be reverted by a local-sync error — the merge is on `origin`, "
-            "that's what matters.\n"
-            "     git update-ref refs/heads/master origin/master || echo "
-            "\"WARN: kon lokale master niet bijwerken naar origin/master — "
-            "volgende ship kan op de divergentie-guard lopen, herstel "
-            "handmatig met 'git fetch origin master:master' in de "
-            "hoofd-checkout.\" >&2\n"
+            "explained by *our own* push. The cleanest way to sync the main "
+            "checkout is `git -C \"$MAIN_CHECKOUT\" pull --ff-only origin "
+            "master`, which in one step (a) fast-forwards the local master "
+            "ref and (b) updates the index AND working tree in the main "
+            "checkout — so the dev-stack (`cockpit.sh`) keeps running "
+            "against the latest tree. The throwaway `$WT` is detached HEAD "
+            "and cannot update master itself, which is why the sync runs "
+            "against `$MAIN_CHECKOUT` where master is actually checked out.\n"
+            "     # `git pull --ff-only` REFUSES if the main checkout's "
+            "working tree has changes that would be overwritten by the "
+            "merge (e.g. a concurrent agent editing a file the merge "
+            "also touches) — that is the right default, we do not want "
+            "to clobber in-flight edits. In that case we fall back to "
+            "`git update-ref refs/heads/master origin/master`, which "
+            "updates only the ref and at least keeps the divergence "
+            "guard from tripping on the next ship. The main checkout's "
+            "working tree stays on the user's conflicting edits (they "
+            "are preserved; the merged files are not on disk yet) until "
+            "someone resolves the conflict and runs `git pull --ff-only` "
+            "by hand — but the push still landed, that's what matters. "
+            "Fail-open in both cases: a successful push must NEVER be "
+            "reverted by a local-sync error.\n"
+            "     # Why `update-ref` here and not `git fetch origin "
+            "master:master`? The fetch refspec `master:master` is "
+            "exactly what we need, but git REFUSES to update a ref "
+            "that's currently checked out in another worktree "
+            "(\"refusing to fetch into branch 'refs/heads/master' "
+            "checked out at …\"). `update-ref` writes the ref directly "
+            "and bypasses that check — at the cost of leaving the "
+            "working tree stale. That's the trade-off we accept in the "
+            "fallback: the TYPICAL case is a clean main checkout, where "
+            "`pull --ff-only` keeps it fully current; the EDGE case (a "
+            "concurrent agent editing a file the merge also touches) "
+            "gets a ref-only update, the working tree stays on the "
+            "user's edits, and the next person to resolve the conflict "
+            "runs `git pull --ff-only` themselves. `update-ref` was "
+            "rejected as the SECOND-iteration PRIMARY path because it "
+            "left a clean main checkout stale (the 74-staged-deletions "
+            "bug, observed in the impediment on this card); here it's a "
+            "deliberate fallback that ONLY fires when the working tree "
+            "is already in a state we can't safely overwrite.\n"
+            "     if ! git -C \"$MAIN_CHECKOUT\" pull --ff-only origin "
+            "master 2>/dev/null; then\n"
+            "       if ! git -C \"$MAIN_CHECKOUT\" update-ref refs/heads/"
+            "master origin/master 2>/dev/null; then\n"
+            "         echo \"WARN: kon lokale master in hoofd-checkout "
+            "niet bijwerken naar origin/master — volgende ship kan op "
+            "de divergentie-guard lopen, herstel handmatig met 'git "
+            "-C \\\"$MAIN_CHECKOUT\\\" pull --ff-only origin master' (en "
+            "los eventuele conflicten op die de working tree vuil "
+            "houden).\" >&2\n"
+            "       fi\n"
+            "     fi\n"
             "     # Merge landed on master — delete the now-dead remote "
             "branch. GitHub's `delete_branch_on_merge` (enabled 2026-07-07) "
             "only fires when a *PR* merges; this route closes no PR, so "
@@ -3455,7 +3513,21 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "*producttrade-offs* uit, niet als implementatie-forks.\n"
         )
 
-    return subshell_callout + feature_compliance_review + sync + tests + commit + shipping
+    # ``<main-checkout>`` is a placeholder for the canonical checkout where
+    # ``master`` is checked out — interpolated from ``project_path`` above
+    # via the pre-quoted ``main_checkout_q``. The skill mirror in
+    # ``.claude/skills/git-ship/SKILL.md`` is self-discovering via
+    # ``dirname $(git rev-parse --git-common-dir)`` because the skill
+    # must work without the dispatch prompt. Both forms end up identical
+    # on the meta project (``/home/vdvgu/claude-cockpit``).
+    return (
+        subshell_callout
+        + feature_compliance_review
+        + sync
+        + tests
+        + commit
+        + shipping
+    ).replace("<main-checkout>", main_checkout_q)
 
 
 def _build_session_retro_step(step_number: int = 6) -> str:
