@@ -9,6 +9,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+// Stub useNavigate so CardItem's "Impediment cards navigate to the dedicated
+// page" branch (kaart 626e05e3…) doesn't crash when these isolation tests
+// render an Impediment card through Board. The navigate behaviour itself
+// lives in ImpedimentPage.test.tsx; here we only exercise the lane-width
+// budget.
+const navigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  };
+});
+
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock("../api", async (importOriginal) => {
@@ -61,6 +77,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  navigate.mockClear();
 });
 
 describe("Board lane collapsing", () => {

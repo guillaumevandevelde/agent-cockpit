@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import type { Card } from "../types";
@@ -425,8 +425,12 @@ describe("CardDrawer reopen control", () => {
   });
 });
 
-describe("CardDrawer resolve impediment control", () => {
-  it("does not render the resolve-impediment control when the card is not in Impediment", () => {
+describe("CardDrawer Impediment pointer", () => {
+  // Impediment resolution moved to a dedicated `/kanban/impediment/:cardId`
+  // page (kaart 626e05e3…). The drawer is no longer the entry point — it
+  // shows a small "Open resolve page" pointer for the rare stale-tab case
+  // so the operator isn't stranded without an action surface.
+  it("does not render the Impediment pointer when the card is not in Impediment", () => {
     const doingCard: Card = { ...baseCard, column: "Doing" };
 
     render(
@@ -438,426 +442,43 @@ describe("CardDrawer resolve impediment control", () => {
       />,
     );
 
-    expect(screen.queryByTestId("resolve-impediment-control")).toBeNull();
+    expect(screen.queryByTestId("impediment-drawer-pointer")).toBeNull();
   });
 
-  it("surfaces the impediment question and submits the answer via resolveImpediment", async () => {
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Which library should we use?" },
-        created_at: "2026-01-01T00:00:00Z",
-      },
-    ]);
-    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
-    resolveMock.mockResolvedValue({ ...baseCard, column: "Doing" });
-
+  it("renders the Impediment pointer with an Open resolve page button when the card is in Impediment", () => {
     const impedimentCard: Card = { ...baseCard, column: "Impediment" };
-    const onChanged = vi.fn();
 
     render(
       <CardDrawerWithRouter
         card={impedimentCard}
         projectPath="/proj"
         onClose={() => {}}
-        onChanged={onChanged}
+        onChanged={() => {}}
       />,
     );
 
-    const control = await screen.findByTestId("resolve-impediment-control");
-    expect(control).not.toBeNull();
-
-    // The agent's question is surfaced for context.
-    await waitFor(() =>
-      expect(screen.getByTestId("impediment-question").textContent).toMatch(
-        /Which library should we use\?/,
-      ),
-    );
-
-    const textarea = screen.getByTestId("resolve-impediment-answer") as HTMLTextAreaElement;
-    await act(async () => {
-      fireEvent.change(textarea, { target: { value: "Use library B." } });
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
-    });
-
-    await waitFor(() => expect(resolveMock).toHaveBeenCalled());
-    const [cardId, projectPath, answer] = resolveMock.mock.calls[0];
-    expect(cardId).toBe("card-1");
-    expect(projectPath).toBe("/proj");
-    expect(answer).toBe("Use library B.");
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    const pointer = screen.getByTestId("impediment-drawer-pointer");
+    const button = screen.getByTestId("impediment-open-page");
+    expect(pointer).toBeTruthy();
+    expect(button.textContent).toMatch(/open resolve page/i);
   });
 
-  it("shows the recorded gate choice + always-visible textarea for extra context", async () => {
-    // The merged control: when a gate has been answered, the recorded choice
-    // is shown as read-only context AND the textarea stays so the human can
-    // add extra instructions before clicking Resolve. No separate "impediment
-    // resolved pending" panel — both the "impediment resolved" path (gate
-    // answered) and the "decision human answered needed" path (free-text)
-    // live in the same control now (kaart 4279448c).
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Postgres or SQLite?",
-        options: ["Postgres", "SQLite"],
-        status: "answered",
-        answer: "Postgres",
-        created_at: "2026-07-10T10:00:00Z",
-        answered_at: "2026-07-10T10:01:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Postgres or SQLite?" },
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-
-    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
-    resolveMock.mockResolvedValue({ ...baseCard, column: "Doing" });
+  it("does not render the old inline resolve-impediment-control in the drawer", () => {
+    // Regression for the old control — once it lives on the page, the
+    // drawer must not re-render it under any column (the route redirect
+    // in KanbanPage.openCard handles the navigation).
+    const impedimentCard: Card = { ...baseCard, column: "Impediment" };
 
     render(
       <CardDrawerWithRouter
-        card={impCard}
+        card={impedimentCard}
         projectPath="/proj"
         onClose={() => {}}
         onChanged={() => {}}
       />,
     );
 
-    const control = await screen.findByTestId("resolve-impediment-control");
-    // Recorded choice is surfaced inside the merged control.
-    await waitFor(() =>
-      expect(control.textContent).toMatch(/Postgres/),
-    );
-    expect(control.textContent).toMatch(/Choice recorded|Choice:/);
-    // The textarea stays — it's the "extra info" extra for the operator.
-    const textarea = screen.getByTestId("resolve-impediment-answer") as HTMLTextAreaElement;
-    expect(textarea).toBeTruthy();
-
-    // The legacy separate panel is gone.
-    expect(screen.queryByTestId("impediment-resolved-pending")).toBeNull();
-  });
-
-  it("forwards the textarea as the answer when no gate answer exists", async () => {
-    // No gate at all — the human answers via the textarea only. The merged
-    // control must still let the textarea's content reach resolveImpediment.
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Should we deploy on Friday?" },
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-
-    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
-    resolveMock.mockResolvedValue({ ...baseCard, column: "Doing" });
-
-    const onChanged = vi.fn();
-    render(
-      <CardDrawerWithRouter
-        card={impCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={onChanged}
-      />,
-    );
-
-    const textarea = (await screen.findByTestId(
-      "resolve-impediment-answer",
-    )) as HTMLTextAreaElement;
-    await act(async () => {
-      fireEvent.change(textarea, { target: { value: "Yes, deploy Friday." } });
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
-    });
-
-    await waitFor(() => expect(resolveMock).toHaveBeenCalled());
-    const [, , answer] = resolveMock.mock.calls[0];
-    expect(answer).toBe("Yes, deploy Friday.");
-  });
-
-  it("renders exactly the agent's 4 options — no synthetic filler", async () => {
-    // Second Revisit on this card: "ik had graag gehad dat er steeds 4
-    // opties waren om uit te kiezen" — the first fix padded a shorter
-    // agent-supplied list with a UI-injected "Other" button, which the human
-    // rejected. The fix is enforced backend-side instead: `report_impediment`
-    // rejects any `options` call that isn't exactly 4 entries
-    // (test_kanban_mcp.py::test_report_impediment_rejects_non_four_option_count),
-    // so the frontend only ever needs to render what the gate carries,
-    // verbatim, with no filler.
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Which database?",
-        options: ["Postgres", "SQLite", "MySQL", "MariaDB"],
-        status: "open",
-        answer: null,
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Which database?" },
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-
-    render(
-      <CardDrawerWithRouter
-        card={impCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    const control = await screen.findByTestId("resolve-impediment-control");
-    // All 4 of the agent's options appear inside the unified control.
-    expect(control.textContent).toMatch(/Postgres/);
-    expect(control.textContent).toMatch(/SQLite/);
-    expect(control.textContent).toMatch(/MySQL/);
-    expect(control.textContent).toMatch(/MariaDB/);
-    // No "Other" filler button anywhere in the control.
-    expect(
-      within(control).queryByRole("button", { name: /Other/i }),
-    ).toBeNull();
-    // Exactly 4 choice buttons — all agent-proposed.
-    const choiceButtons = within(control).getAllByTestId(
-      "impediment-choice-option",
-    );
-    expect(choiceButtons).toHaveLength(4);
-
-    // The textarea + single Resolve button are both visible inside the same
-    // unified control.
-    const textarea = screen.getByTestId(
-      "resolve-impediment-answer",
-    ) as HTMLTextAreaElement;
-    expect(textarea).toBeTruthy();
-    expect(
-      screen.getByTestId("resolve-impediment-submit"),
-    ).toBeTruthy();
-
-    // The previous separate "impediment-resolved-pending" panel and the old
-    // pre-answer "Decision needed — pick one to unblock" gate block must NOT
-    // render — both flows collapse into the single unified control now.
-    expect(screen.queryByTestId("impediment-resolved-pending")).toBeNull();
-    expect(screen.queryByText(/pick one to unblock/i)).toBeNull();
-  });
-
-  it("defensively caps the choice row at 4 for a legacy gate with 5+ options", async () => {
-    // The backend now rejects any new `report_impediment(options=...)` call
-    // that isn't exactly 4 entries, but a gate created before that
-    // validation shipped could still carry more. The frontend keeps a
-    // defensive cap so such a legacy row can't blow past 4 buttons — no
-    // filler is added, the extra options are simply not rendered.
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Pick a stack",
-        options: ["Rails", "Django", "Express", "FastAPI", "Flask"], // 5 options
-        status: "open",
-        answer: null,
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Pick a stack" },
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-
-    render(
-      <CardDrawerWithRouter
-        card={impCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    const control = await screen.findByTestId("resolve-impediment-control");
-    const choiceButtons = within(control).getAllByTestId(
-      "impediment-choice-option",
-    );
-    expect(choiceButtons).toHaveLength(4);
-    // Beyond-cap option (Flask, the 5th) is NOT rendered.
-    expect(screen.queryByRole("button", { name: "Flask" })).toBeNull();
-  });
-
-  it("single click on a structured option + textarea content resolves both in one call", async () => {
-    // The user-visible complaint: "je klikt eerst een knop (die meteen
-    // doorgaat, zonder plek voor extra info) en pas daarna verschijnt het vak
-    // waar je context kunt toevoegen". The unified control must collapse both
-    // interactions into a single Resolve click: pick the option, type the
-    // extra context, click Resolve once → backend receives both the gate
-    // answer and the free-text resolution in one action.
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Postgres or SQLite?",
-        options: ["Postgres", "SQLite"],
-        status: "open",
-        answer: null,
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Postgres or SQLite?" },
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-
-    const answerGateMock = kanbanApi.answerGate as ReturnType<typeof vi.fn>;
-    answerGateMock.mockResolvedValue({
-      id: "gate-1",
-      card_id: "card-1",
-      project_key: "proj-1",
-      question: "Postgres or SQLite?",
-      options: ["Postgres", "SQLite"],
-      status: "answered",
-      answer: "Postgres",
-      created_at: "2026-07-10T10:00:00Z",
-      answered_at: "2026-07-10T10:01:00Z",
-    });
-    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
-    resolveMock.mockResolvedValue({ ...baseCard, column: "Backlog" });
-
-    const onChanged = vi.fn();
-    render(
-      <CardDrawerWithRouter
-        card={impCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={onChanged}
-      />,
-    );
-
-    const control = await screen.findByTestId("resolve-impediment-control");
-    // Pick "Postgres" by clicking the option button (NOT a button that
-    // navigates/opens a separate panel — it just stages the local selection).
-    const postgresButton = within(control).getByRole("button", {
-      name: "Postgres",
-    });
-    await act(async () => {
-      fireEvent.click(postgresButton);
-    });
-
-    // Type the free-text extra context into the textarea (always visible).
-    const textarea = screen.getByTestId(
-      "resolve-impediment-answer",
-    ) as HTMLTextAreaElement;
-    await act(async () => {
-      fireEvent.change(textarea, {
-        target: { value: "Use the managed PG instance" },
-      });
-    });
-
-    // A single Resolve click must commit BOTH the gate answer and the text.
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
-    });
-
-    // Backend received both: the gate answer ("Postgres") and the text.
-    await waitFor(() => expect(answerGateMock).toHaveBeenCalledTimes(1));
-    expect(answerGateMock.mock.calls[0][0]).toBe("gate-1");
-    expect(answerGateMock.mock.calls[0][1]).toBe("Postgres");
-    await waitFor(() => expect(resolveMock).toHaveBeenCalledTimes(1));
-    const [, , freeText] = resolveMock.mock.calls[0];
-    expect(freeText).toBe("Use the managed PG instance");
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
-  });
-
-  it("typing in the textarea without clicking an option resolves via free text alone", async () => {
-    // With the "Other" filler button removed, the free-text path is simply:
-    // don't click any option, type in the always-visible textarea, and
-    // Resolve. No gate answer is submitted in this case — `answerGate` must
-    // not be called at all.
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Which?",
-        options: ["A", "B", "C", "D"],
-        status: "open",
-        answer: null,
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        hlc: "1",
-        op_type: "comment",
-        entity_type: "comment",
-        payload: { text: "**Impediment:** Which?" },
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-
-    const answerGateMock = kanbanApi.answerGate as ReturnType<typeof vi.fn>;
-    const resolveMock = kanbanApi.resolveImpediment as ReturnType<typeof vi.fn>;
-    resolveMock.mockResolvedValue({ ...baseCard, column: "Backlog" });
-
-    render(
-      <CardDrawerWithRouter
-        card={impCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    const control = await screen.findByTestId("resolve-impediment-control");
-    // No "Other" button exists — only the 4 real options.
-    expect(
-      within(control).queryByRole("button", { name: /Other/i }),
-    ).toBeNull();
-
-    const textarea = screen.getByTestId(
-      "resolve-impediment-answer",
-    ) as HTMLTextAreaElement;
-    await act(async () => {
-      fireEvent.change(textarea, { target: { value: "Use MariaDB instead" } });
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("resolve-impediment-submit"));
-    });
-
-    await waitFor(() => expect(resolveMock).toHaveBeenCalledTimes(1));
-    const [, , freeText] = resolveMock.mock.calls[0];
-    expect(freeText).toBe("Use MariaDB instead");
-    expect(answerGateMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("resolve-impediment-control")).toBeNull();
   });
 });
 
@@ -1078,135 +699,13 @@ describe("CardDrawer edit dialog round-trip", () => {
   });
 });
 
-// --- Impediment + structured-options gate rendering -----------------------
-// Acceptance criterion: when a card lands in Impediment carrying a
-// `report_impediment(options=...)` gate, the CardDrawer must (a) render the
-// choice buttons while the gate is unanswered, and (b) once the human picks
-// an option, surface the recorded choice AND the free-text textarea inside
-// the unified resolve-impediment-control (no separate "impediment resolved"
-// panel). The free-text path (no gate) renders the same control by itself.
-// See report_impediment in /mcp_server.py + the POST
-// /cards/{cid}/resolve-impediment contract in router.py. (kaart 4279448c:
-// merge the "impediment resolved" + "decision human answered needed" flows
-// into a single control.)
-
-const impCard: Card = { ...baseCard, column: "Impediment" };
-
-describe("CardDrawer Impediment column: structured-options gate", () => {
-  it("renders the open-gate choice buttons inside the unified resolve control", async () => {
-    // The Revisit note's "twee panelen boven elkaar" complaint is fixed: on
-    // an Impediment card, the open-gate choice buttons live inside the
-    // unified resolve-impediment-control, NOT in a separate panel above it.
-    // The legacy "pick one to unblock" header is gone — the unified control
-    // already says "Impediment — needs a human answer" and owns the choice
-    // row. (kaart 4279448c revisit.)
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Postgres or SQLite?",
-        options: ["Postgres", "SQLite"],
-        status: "open",
-        answer: null,
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-
-    render(
-      <CardDrawerWithRouter
-        card={impCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // The unified control owns the choice row. Wait for the polled gate
-    // fetch before asserting so we don't race the initial state.
-    const control = await screen.findByTestId("resolve-impediment-control");
-    await waitFor(() =>
-      expect(within(control).getByRole("button", { name: "Postgres" })).toBeTruthy(),
-    );
-    expect(within(control).getByRole("button", { name: "SQLite" })).toBeTruthy();
-    // Legacy separate gate header is gone.
-    expect(screen.queryByText(/pick one to unblock/i)).toBeNull();
-  });
-
-  it("open-gate option buttons stay visible only while the gate is unanswered", async () => {
-    // While a structured gate is still open, the "recorded choice" panel must
-    // NOT render — there's no answer yet. The choice buttons stay visible
-    // (inside the unified control) and guide the human to pick an option.
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Postgres or SQLite?",
-        options: ["Postgres", "SQLite"],
-        status: "open",
-        answer: null,
-        created_at: "2026-07-10T10:00:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-
-    render(
-      <CardDrawerWithRouter
-        card={impCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    // Wait for the polled gate fetch to land before asserting. Without this,
-    // the assertion runs while gates=[] (initial state) and our panel would
-    // not yet have been evaluated against the polled state.
-    const control = await screen.findByTestId("resolve-impediment-control");
-    await waitFor(() =>
-      expect(within(control).getByRole("button", { name: "Postgres" })).toBeTruthy(),
-    );
-    // While the gate is open, the "Choice recorded" panel inside the
-    // unified control must NOT render — the human hasn't picked yet. The
-    // choice buttons + textarea are still rendered.
-    expect(control.textContent).not.toMatch(/Choice recorded/);
-    // The textarea is always available.
-    expect(screen.getByTestId("resolve-impediment-answer")).toBeTruthy();
-  });
-
-  it("Resolve control is hidden outside the Impediment column", async () => {
-    // The merged Resolve control is Impediment-column specific — a Doing card
-    // must never expose it, even when a gate answer happens to exist.
-    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
-      {
-        id: "gate-1",
-        card_id: "card-1",
-        project_key: "proj-1",
-        question: "Stray gate question",
-        options: ["A", "B"],
-        status: "answered",
-        answer: "A",
-        created_at: "2026-07-10T10:00:00Z",
-        answered_at: "2026-07-10T10:01:00Z",
-      },
-    ]);
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-
-    const doingCard: Card = { ...baseCard, column: "Doing" };
-    render(
-      <CardDrawerWithRouter
-        card={doingCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    expect(screen.queryByTestId("resolve-impediment-control")).toBeNull();
-  });
-});
+// --- Impediment pointer on the drawer ------------------------------------
+// Impediment resolution moved to a dedicated `/kanban/impediment/:cardId`
+// page (kaart 626e05e3…). The drawer is no longer the entry point — it now
+// shows only a small "Open resolve page" pointer so a stale tab landing on
+// `?card=<impediment-id>` still surfaces an action. The full structured-options
+// flow (open gate, recorded choice, free-text) moved to the page; see
+// `ImpedimentPage.test.tsx` for that surface.
 
 describe("CardDrawer spec link", () => {
   it("shows the linked spec doc path from metadata.spec_doc", () => {
