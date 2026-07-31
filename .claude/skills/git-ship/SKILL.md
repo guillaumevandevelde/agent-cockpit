@@ -230,6 +230,16 @@ fi
 SHIP_TMP="${HOME}/.cache/cockpit-ship"
 mkdir -p "$SHIP_TMP"
 WT="$SHIP_TMP/ship-merge-$$"
+# Main-checkout path discovery (kanban card 5e83b6e0…, third iteration).
+# The ship-worktree is a detached checkout that cannot update `master`
+# itself — only the canonical checkout where `master` is checked out can
+# do that. `git rev-parse --git-common-dir` returns the SHARED gitdir
+# (e.g. `/…/main-checkout/.git`), and `dirname` strips `.git` to give
+# the main-checkout path. This is robust regardless of where the
+# dispatched worktree sits on the filesystem and doesn't require the
+# dispatcher to inline a project_root (the skill must be
+# self-discovering when an agent reads it without the dispatch prompt).
+MAIN_CHECKOUT="$(dirname "$(git rev-parse --git-common-dir)")"
 # Slot name MUST be unique per session: git derives the `.git/worktrees/<name>`
 # entry from the path's basename, so a fixed name (e.g. `ship-merge`) collides
 # under concurrent dispatched sessions — both target the same gitdir slot, and
@@ -364,20 +374,56 @@ if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
   git -C "$WT" commit --no-edit
 fi
 if git -C "$WT" push origin HEAD:master; then
-  # Post-push local-master sync (kanban card 5e83b6e0…, second iteration).
+  # Post-push local-master sync (kanban card 5e83b6e0…, third iteration).
   # The divergence guard above bases on local `master`, so a successful
   # push that doesn't also move local `master` leaves the guard tripped
-  # on every subsequent ship on this multi-session box — even though the
-  # divergence is fully explained by *our own* push. `git fetch origin
-  # master:master` would do the same job, but it refuses when `master` is
-  # checked out in another worktree (which is exactly the situation here
-  # — the dispatched session sits in a worktree, master is checked out in
-  # the main checkout). `git update-ref` writes the ref directly and
-  # bypasses that check. Fail-open: a stale local `master` is a nuisance
-  # (the next ship trips the guard with a clear remediation message),
-  # but a successful push must NEVER be reverted by a local-sync error —
-  # the merge is on `origin`, that's what matters.
-  git update-ref refs/heads/master origin/master || echo "WARN: kon lokale master niet bijwerken naar origin/master — volgende ship kan op de divergentie-guard lopen, herstel handmatig met 'git fetch origin master:master' in de hoofd-checkout." >&2
+  # on every subsequent ship on this multi-session box — even though
+  # the divergence is fully explained by *our own* push. The cleanest
+  # way to sync the main checkout is `git -C "$MAIN_CHECKOUT" pull
+  # --ff-only origin master`, which in one step (a) fast-forwards the
+  # local master ref and (b) updates the index AND working tree in the
+  # main checkout — so the dev-stack (`cockpit.sh`) keeps running
+  # against the latest tree. The throwaway `$WT` is detached HEAD and
+  # cannot update master itself, which is why the sync runs against
+  # `$MAIN_CHECKOUT` where master is actually checked out.
+  #
+  # `git pull --ff-only` REFUSES if the main checkout's working tree
+  # has changes that would be overwritten by the merge (e.g. a
+  # concurrent agent editing a file the merge also touches) — that
+  # is the right default, we do not want to clobber in-flight edits.
+  # In that case we fall back to `git update-ref refs/heads/master
+  # origin/master`, which updates only the ref and at least keeps
+  # the divergence guard from tripping on the next ship. The main
+  # checkout's working tree stays on the user's conflicting edits
+  # (they are preserved; the merged files are not on disk yet) until
+  # someone resolves the conflict and runs `git pull --ff-only` by
+  # hand — but the push still landed, that's what matters.
+  # Fail-open in both cases: a successful push must NEVER be reverted
+  # by a local-sync error.
+  #
+  # Why `update-ref` here and not `git fetch origin master:master`?
+  # The fetch refspec `master:master` is exactly what we need, but
+  # git REFUSES to update a ref that's currently checked out in
+  # another worktree ("refusing to fetch into branch 'refs/heads/
+  # master' checked out at …"). `update-ref` writes the ref
+  # directly and bypasses that check — at the cost of leaving the
+  # working tree stale. That's the trade-off we accept in the
+  # fallback: the TYPICAL case is a clean main checkout, where
+  # `pull --ff-only` keeps it fully current; the EDGE case (a
+  # concurrent agent editing a file the merge also touches) gets
+  # a ref-only update, the working tree stays on the user's edits,
+  # and the next person to resolve the conflict runs
+  # `git pull --ff-only` themselves. `update-ref` was rejected as
+  # the SECOND-iteration PRIMARY path because it left a clean main
+  # checkout stale (the 74-staged-deletions bug, observed in the
+  # impediment on this card); here it's a deliberate fallback that
+  # ONLY fires when the working tree is already in a state we can't
+  # safely overwrite.
+  if ! git -C "$MAIN_CHECKOUT" pull --ff-only origin master 2>/dev/null; then
+    if ! git -C "$MAIN_CHECKOUT" update-ref refs/heads/master origin/master 2>/dev/null; then
+      echo "WARN: kon lokale master in hoofd-checkout niet bijwerken naar origin/master — volgende ship kan op de divergentie-guard lopen, herstel handmatig met 'git -C \"$MAIN_CHECKOUT\" pull --ff-only origin master' (en los eventuele conflicten op die de working tree vuil houden)." >&2
+    fi
+  fi
   # Merge landed on master — delete the now-dead remote branch. GitHub's
   # `delete_branch_on_merge` (enabled 2026-07-07) only fires when a *PR*
   # merges; this route closes no PR, so without this line every shipped card
