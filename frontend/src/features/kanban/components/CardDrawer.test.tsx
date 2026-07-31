@@ -958,6 +958,100 @@ describe("CardDrawer resolve impediment control", () => {
     expect(await screen.findByTestId("resolve-impediment-submit")).toBeTruthy();
   });
 
+  it("lays out the question and action surface in two columns on lg+ so the Resolve button stays reachable for long questions (kaart 626e05e3…)", async () => {
+    // Bug: the previous single-column stack made the Resolve button
+    // unreachable for tall `**Impediment:**` markdown questions: on
+    // 1920×1080 the button fell 45px below the modal, on 1440×900 126px
+    // below, and on 1536×864 142px below with the textarea fully clipped.
+    // The fix splits the priority area horizontally on lg+: the question
+    // scrolls on the left (flex-1), and the choice buttons + textarea +
+    // Resolve button anchor on the right (fixed min/max width). On
+    // narrower viewports (<lg) the grid collapses to a single column so
+    // laptop users see the same flow as before.
+    //
+    // jsdom does not compute layout, so we can't measure pixel offsets —
+    // we assert the structural contract instead: the split-layout grid
+    // exists, the question is in its left column, the action surface
+    // (choice row + textarea + submit) is in its right column, and the
+    // right column anchors the submit button at its bottom (flex flex-col)
+    // so the button is always last and never pushed off-screen by a tall
+    // textarea. `closest('[class*="lg:grid-cols"]')` is robust to the
+    // exact Tailwind class name (the substring `lg:grid-cols` is unique
+    // to this split-layout grid).
+    const longQuestion = "A long question. ".repeat(120);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: `**Impediment:** ${longQuestion}` },
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gate-1",
+        card_id: "card-1",
+        project_key: "proj-1",
+        question: "Which direction?",
+        options: ["Option A", "Option B", "Option C", "Option D"],
+        status: "open",
+        answer: null,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const impedimentCard: Card = { ...baseCard, column: "Impediment" };
+    render(
+      <CardDrawerWithRouter
+        card={impedimentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The split-layout grid is present.
+    const splitLayout = await screen.findByTestId("impediment-split-layout");
+    expect(splitLayout.className).toMatch(/lg:grid-cols/);
+
+    // Question lives in the left column; Resolve button + textarea live
+    // in the right column. `closest('[data-testid=...]')` walks up the
+    // tree until it finds the named ancestor — that proves the elements
+    // are siblings in the split-layout grid (not stacked vertically
+    // outside it).
+    const question = await screen.findByTestId("impediment-question");
+    const questionColumn = await screen.findByTestId(
+      "impediment-question-column",
+    );
+    expect(questionColumn.contains(question)).toBe(true);
+
+    const submit = await screen.findByTestId("resolve-impediment-submit");
+    const textarea = await screen.findByTestId("resolve-impediment-answer");
+    const choiceRow = await screen.findByTestId("impediment-choice-row");
+    const actionColumn = await screen.findByTestId(
+      "impediment-action-column",
+    );
+    expect(actionColumn.contains(choiceRow)).toBe(true);
+    expect(actionColumn.contains(textarea)).toBe(true);
+    expect(actionColumn.contains(submit)).toBe(true);
+
+    // The action column anchors the submit button at the bottom via
+    // `flex flex-col` so the button is always the last child and the
+    // textarea + button never push the button past the column boundary.
+    // The class assertion is structural (Tailwind compiles to CSS, but
+    // the className attribute preserves the source tokens); if a future
+    // refactor flattens the column back to a single block, this fails.
+    expect(actionColumn.className).toMatch(/flex/);
+    expect(actionColumn.className).toMatch(/flex-col/);
+
+    // Question column carries an internal scroll guard so the long
+    // question text scrolls WITHIN its own bounds (not the modal's) —
+    // same invariant as the previous fix, now anchored on the column
+    // wrapper instead of the question div itself.
+    expect(questionColumn.className).toMatch(/overflow-y-auto/);
+  });
+
   it("wraps a long choice label inside the button (no horizontal overflow)", async () => {
     // Card da7716e54f51437a972d99d6d18c2a6f: when an agent's impediment
     // option is long enough to exceed the button's natural width, the
