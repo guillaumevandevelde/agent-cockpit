@@ -76,11 +76,17 @@ async def test_resolve_impediment_forwards_gate_answer_as_impediment_answer(
 
 
 @pytest.mark.asyncio
-async def test_resolve_impediment_legacy_free_text_question_path(
+async def test_resolve_impediment_gateless_question_path(
         monkeypatch, _client):
-    """Backwards compat: a card in Impediment with NO gate (the legacy free-text
-    path) must still work — the raw `**Impediment:**` question is forwarded
-    and `impediment_answer` is None."""
+    """A card in Impediment with NO gate must still resolve — the raw
+    `**Impediment:**` question is forwarded and `impediment_answer` is None.
+
+    `report_impediment` can no longer produce this state (it now requires 4
+    options, so it always opens a gate — kaart 4279448c), but the state is
+    still reachable two ways and must keep working: a human moving a card to
+    Impediment through the REST/UI override path, and gates predating the
+    options requirement. Constructed here through the human path — move +
+    comment — precisely because the agent path is now gated."""
     from app.kanban import dispatch as dispatch_mod
 
     captured: dict = {}
@@ -97,8 +103,10 @@ async def test_resolve_impediment_legacy_free_text_question_path(
     card = await m.create_card("P", "blocked", "details", agent="engineer", confirm_new_project=True)
     cid = card["id"]
     await m.claim_card(cid, "agent:sess")
-    # Legacy call — no options. No KanbanGate is created.
-    await m.report_impediment(cid, "I need a schema review.")
+    # Human/REST override path: move to Impediment + the `**Impediment:**`
+    # comment, without ever opening a gate.
+    await m.move_card(cid, "Impediment", summary="parked for a human")
+    await m.comment(cid, "**Impediment:** I need a schema review.")
 
     r = await _client.post(
         f"/api/v1/kanban/cards/{cid}/resolve-impediment",

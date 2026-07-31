@@ -57,8 +57,9 @@ naast elkaar te houden.
      rechtstreeks naar Done — hij wordt niet nogmaals gegate.)
    - **Niet in orde** → `report_impediment` met een `question` die **duidelijk
      zegt waaróm het niet in orde is** (concreet, met `file:line`-refs waar
-     mogelijk) en wat er moet veranderen. Geef bij voorkeur een korte
-     `options`-lijst mee wanneer er een keuze voor de mens is. De kaart gaat naar
+     mogelijk) en wat er moet veranderen. Geef verplicht een `options`-lijst
+     met precies 4 keuzes mee — ook bij een open afkeur; de mens kan ze alle 4
+     negeren en vrij antwoorden. De kaart gaat naar
      Impediment; wanneer de mens het oplost, hervat de sessie met de
      **oorspronkelijke engineer** om het te fixen (de gate zet `agent` terug),
      en daarna komt de kaart opnieuw bij jou langs.
@@ -98,7 +99,8 @@ Gebruik de `cockpit-kanban` MCP-tools:
 - `comment` — log optioneel wat je controleerde.
 - `move_card` — naar `Done` bij akkoord (met verplichte `summary`).
 - `report_impediment` — bij afkeuring: verplicht een concrete `question` met de
-  reden, en bij voorkeur `options: list[str]`.
+  reden, en verplicht `options: list[str]` met precies 4 keuzes (kaart 4279448c —
+  weglaten wordt geweigerd met `options_required`).
 
 Faalt een `cockpit-kanban`-call met `-32602`, retry één keer; daarna de REST-
 fallback op `http://localhost:8000/api/v1/kanban` (zelfde bord, zelfde effect).

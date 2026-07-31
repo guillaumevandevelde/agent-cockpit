@@ -664,17 +664,20 @@ const IMPEDIMENT_PREFIX = "**Impediment:** ";
 // all three affordances into ONE panel so the operator never sees a separate
 // open-gate block above it:
 //
-//   1. Structured options (when `report_impediment(options=[…])` was used) —
-//      rendered as a row of buttons inside the control, one per agent-supplied
-//      option. The backend rejects `report_impediment` calls whose `options`
-//      isn't exactly 4 entries (`mcp_server.report_impediment`), so this row
-//      always shows 4 agent-proposed choices in practice — never a
-//      UI-injected filler. A second Revisit on this card ("ik had graag
-//      gehad dat er steeds 4 opties waren om uit te kiezen") rejected the
-//      original approach of padding a short agent list with an "Other"
-//      button; the fix is that the agent supplies all 4, not the UI. The row
-//      still defensively caps rendering at MAX_CHOICE_BUTTONS in case a gate
-//      predates this validation.
+//   1. Structured options — rendered as a row of buttons inside the control,
+//      one per agent-supplied option. `report_impediment` *requires* `options`
+//      and rejects anything other than exactly 4 entries
+//      (`mcp_server.report_impediment`: `options_required` /
+//      `invalid_option_count`), so every agent-parked card shows 4
+//      agent-proposed choices — never a UI-injected filler, and never zero.
+//      Two revisits on this card drove that: the first rejected padding a
+//      short agent list with an "Other" button, the second rejected letting
+//      the agent omit `options` altogether ("ik had graag gehad dat er steeds
+//      4 opties waren om uit te kiezen"). The fix is that the agent supplies
+//      all 4, not the UI. The row still renders 0 buttons for a card a human
+//      moved to Impediment via the REST/UI override (no gate exists), and
+//      still defensively caps at MAX_CHOICE_BUTTONS for gates predating the
+//      validation.
 //   2. A previously-answered structured gate — the recorded choice is shown
 //      as read-only context inside the same panel, and the textarea stays so
 //      the human can add extra information before clicking Resolve.
@@ -735,10 +738,11 @@ function ResolveImpedimentControl({
     : null;
 
   // One button per agent-supplied option, verbatim — no synthetic filler.
-  // `report_impediment` backend-validates that `options` is exactly 4 entries,
-  // so this is normally all 4; the slice is a defensive cap in case a gate
-  // predates that validation. With 0 agent options no choice row renders
-  // (just the textarea + Resolve).
+  // `report_impediment` requires `options` and backend-validates it as exactly
+  // 4 entries, so an agent-parked card always carries 4; the slice is a
+  // defensive cap for gates predating that validation. No gate at all (0
+  // buttons, just textarea + Resolve) means a human parked the card through
+  // the REST/UI override rather than an agent.
   const choiceButtons: Array<{ key: string; label: string }> = openGate
     ? openGate.options
         .slice(0, MAX_CHOICE_BUTTONS)
