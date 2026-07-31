@@ -2465,6 +2465,77 @@ describe("CardDrawer three-layer reorganization (lees-first)", () => {
     expect(screen.queryByTestId("operator-section-content")).toBeNull();
     expect(screen.getByTestId("card-drawer-full-area")).toBeTruthy();
   });
+
+  // Impediment fix (kanban card c81fb67d revisit): the previous commit
+  // promoted the deliverables list out of the default-mode TabsList into
+  // the inline laag 2 panel, but left a Deliverables TabsTrigger in the
+  // full-area TabsList. Clicking it from the Run tab flipped activeTab to
+  // "deliverables", dropped isFullAreaMode to false, and re-rendered the
+  // default body — which has no TabsContent value="deliverables" — leaving
+  // Radix with no panel to select. The human's answer: remove the
+  // Deliverables trigger from the full-area TabsList as well, so the
+  // operator leaves the run for any other tab and sees the inline
+  // deliverables panel above the operator section. These two tests pin
+  // that contract: the trigger is gone, and the broken click path cannot
+  // be reached.
+  it("agent-claimed card: the full-area TabsList has no Deliverables trigger (deliverables live inline in laag 2)", () => {
+    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
+    render(
+      <CardDrawerWithRouter
+        card={agentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // The TabsList inside card-drawer-full-area must not advertise a
+    // Deliverables trigger — the deliverables list is now laag 2 content,
+    // not telemetry, and exposing it here would re-introduce the empty-
+    // tab-plane click path (activeTab="deliverables" → isFullAreaMode
+    // → false → default body → no matching TabsContent).
+    expect(
+      screen.queryByRole("tab", { name: "Deliverables" }),
+    ).toBeNull();
+
+    // For good measure: the run-tab trigger is the only one allowed to
+    // depend on the agent claim, and it must still be present so the
+    // operator can navigate back to the live terminal.
+    expect(screen.getByRole("tab", { name: "Run" })).toBeTruthy();
+  });
+
+  it("agent-claimed card: no tab plane can be left empty — the full-area TabsList never offers a value the body cannot render", () => {
+    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
+    render(
+      <CardDrawerWithRouter
+        card={agentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Enumerate every TabsTrigger in the full-area TabsList. The default
+    // body's TabsList is a different element (only rendered outside
+    // full-area mode), so `card-drawer-full-area` is the right scope.
+    const fullArea = screen.getByTestId("card-drawer-full-area");
+    const triggerValues = Array.from(
+      fullArea.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ).map((t) => t.getAttribute("data-value") ?? t.getAttribute("value") ?? "");
+
+    // Every value advertised by a trigger must also have a TabsContent
+    // rendered inside the same Tabs root. A value with a trigger but no
+    // TabsContent is the precise shape of the bug we just fixed (Radix
+    // would render the TabsContent branch but find no panel to select).
+    const panelValues = Array.from(
+      fullArea.querySelectorAll<HTMLElement>('[role="tabpanel"]'),
+    ).map((p) => p.getAttribute("data-value") ?? p.getAttribute("value") ?? "");
+
+    for (const v of triggerValues) {
+      if (!v) continue;
+      expect(panelValues, `trigger "${v}" has no matching TabsContent`).toContain(v);
+    }
+  });
 });
 
 // --- CardRunTab layout chain (kanban card 41a75826…) ----------------------
