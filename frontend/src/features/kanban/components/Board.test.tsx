@@ -8,8 +8,35 @@
 // an explicit operator choice always wins over that default.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+// CardItem now calls useNavigate() for Impediment cards (kaart 626e05e3…).
+// The Board tests render CardItem in isolation (some through `renderBoard`
+// wrapped in a MemoryRouter, others directly). Stub useNavigate so the
+// Impediment-specific navigation path doesn't blow up in either shape —
+// the navigation behaviour itself is covered by ImpedimentPage.test.tsx
+// and the CardItem Impediment click test.
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+  const StubMemoryRouter = ({ children }: { children: React.ReactNode }) => children;
+  const StubLink = ({
+    children,
+    to,
+  }: {
+    children: React.ReactNode;
+    to: string;
+  }) => <a href={typeof to === "string" ? to : "#"}>{children}</a>;
+  return {
+    ...actual,
+    MemoryRouter: StubMemoryRouter,
+    Link: StubLink,
+    useNavigate: () => vi.fn(),
+  };
+});
 
 vi.mock("../api", async (importOriginal) => {
   const actual = (await importOriginal()) as { kanbanApi: Record<string, unknown> };
@@ -50,8 +77,13 @@ const card = (id: string, column: string): Card => ({
 const columns = [col("c1", "Backlog"), col("c2", "reviewer")];
 
 function renderBoard(cards: Card[]) {
+  // CardItem now calls useNavigate() for Impediment cards (kaart 626e05e3…),
+  // so the test tree must provide a Router. MemoryRouter keeps the URL
+  // pinned to "/" so a navigate() call is a no-op for non-impediment tests.
   return render(
-    <Board columns={columns} cards={cards} onOpen={() => {}} onDropCardAt={() => {}} />,
+    <MemoryRouter>
+      <Board columns={columns} cards={cards} onOpen={() => {}} onDropCardAt={() => {}} />
+    </MemoryRouter>,
   );
 }
 
