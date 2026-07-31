@@ -908,6 +908,55 @@ describe("CardDrawer resolve impediment control", () => {
     expect(freeText).toBe("Use MariaDB instead");
     expect(answerGateMock).not.toHaveBeenCalled();
   });
+
+  it("Impediment card with a long question: the question text scrolls within its own bounds so the Resolve button stays reachable", async () => {
+    // Bug: when the agent's `**Impediment:**` question is long (multi-paragraph
+    // markdown with code fences, like the screenshot that filed this card),
+    // the question div grew unboundedly and pushed the choice buttons +
+    // textarea + "Resolve impediment" button below the visible modal
+    // viewport. The modal's `overflow-hidden` clipped them, and there was
+    // no scrollbar on the question itself, so the operator could not reach
+    // the Resolve button — the card was effectively unresolvable from the
+    // UI. Fix: the question text element gets its own `overflow-y-auto`
+    // (plus a max-height) so it scrolls internally and the action surface
+    // below it stays in the DOM.
+    const longQuestion = "A long question. ".repeat(100);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: `**Impediment:** ${longQuestion}` },
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const impedimentCard: Card = { ...baseCard, column: "Impediment" };
+    render(
+      <CardDrawerWithRouter
+        card={impedimentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const question = await screen.findByTestId("impediment-question");
+    // The question text element itself (or a wrapper around it) must carry
+    // an `overflow-y-auto` utility so it scrolls within its own bounds.
+    // Pick the nearest scrollable ancestor so the test stays robust if the
+    // fix lands on a wrapper div instead of the question div directly.
+    const scrollableAncestor = question.closest<HTMLElement>(
+      '[class*="overflow-y-auto"]',
+    );
+    expect(scrollableAncestor).toBeTruthy();
+
+    // The action surface beneath the question (textarea + Resolve button)
+    // is still in the DOM — the question scroll lets the operator reach
+    // them without leaving the modal.
+    expect(await screen.findByTestId("resolve-impediment-answer")).toBeTruthy();
+    expect(await screen.findByTestId("resolve-impediment-submit")).toBeTruthy();
+  });
 });
 
 describe("CardDrawer deliverables tab per-kind rendering", () => {

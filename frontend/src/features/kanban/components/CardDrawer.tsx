@@ -804,7 +804,10 @@ function ResolveImpedimentControl({
         Impediment — needs a human answer
       </div>
       {questionText && (
-        <div className="text-foreground whitespace-pre-wrap" data-testid="impediment-question">
+        <div
+          className="max-h-[40vh] overflow-y-auto text-foreground whitespace-pre-wrap"
+          data-testid="impediment-question"
+        >
           {questionText}
         </div>
       )}
