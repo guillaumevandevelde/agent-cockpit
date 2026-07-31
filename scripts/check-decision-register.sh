@@ -66,43 +66,132 @@ fi
 # Pass 1: register-row discovery for each *-decision.md. Each row's Uitkomst
 # cell is what the header check compares against the doc's **Uitkomst:** field.
 #
-# Emits TSV on stdout:  docbasename<TAB>uitkomst-cell
-#
-# Pipe-table cells can contain `|`; the doc-link cell reliably ends with a
-# `./<doc>-decision.md)` reference, so we use the doc-link's position to
-# anchor the Uitkomst slice rather than splitting on every `|`.
+# Two passes:
+#   1. Kaart match — when the doc has a Kaart hex id (the canonical case
+#      after the four-field backfill, kanban card 9a2c47b1…), find the row
+#      whose Kaart column starts with that 8-char prefix and return its
+#      Uitkomst. This is the load-bearing path: when a doc accumulates
+#      revision rows in the register (a new row every time the decision is
+#      re-opened + re-closed), only the row whose Kaart matches the doc's
+#      own Kaart field describes that doc. Earlier this script picked the
+#      *first* row containing the doc link, which broke as soon as a second
+#      row was added (and required the `#8-bis`-anchor workaround in
+#      `decisions.md` rows 42-43 to keep the gate green — anchor-based
+#      selection, undocumented and not load-bearing in any normal sense).
+#   2. First-link fallback — when the doc has no Kaart hex (the placeholder
+#      "_zie doc — geen hex-id …" for older decisions), or when the
+#      Kaart-prefix yields no row, return the Uitkomst of the first row
+#      that contains a link to the doc. Legacy behaviour for docs that
+#      pre-date the four-field header convention.
 register_uitkomst_for() {
   # $1 = doc basename (e.g. "acp-transport-decision.md")
-  awk -v target="$1" '
+  # $2 = doc Kaart 8-char prefix (e.g. "3abcd501"), or empty for fallback
+  local target="$1"
+  local kaart_prefix="$2"
+
+  if [ -n "$kaart_prefix" ]; then
+    # Pass 1: Kaart match. The Kaart column is the LAST `|`-separated cell
+    # in the row; its text is a backtick-wrapped hex id, optionally followed
+    # by `…` (truncation marker), a quoted title, or a "(review: …)" tag.
+    # We strip the leading backtick, take the leading hex run (8 chars),
+    # and compare against the doc's own 8-char prefix.
+    local kaart_match
+    kaart_match=$(awk -v target="$target" -v kaart="$kaart_prefix" '
+      function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+      function kaart_cell(line,    last, i, c, end) {
+        # Find the position of the last non-empty cell. Markdown pipe-tables
+        # end the row with a trailing `|`, so the literal last `|`
+        # demarcates an empty cell — we need the SECOND-to-last `|`. If the
+        # line has no trailing `|` (older rows in the register), fall back
+        # to the last one.
+        end = length(line)
+        while (end > 0 && substr(line, end, 1) == " ") end--
+        if (end > 0 && substr(line, end, 1) == "|") end--
+        last = 0
+        for (i = 1; i <= end; i++) {
+          c = substr(line, i, 1)
+          if (c == "|") last = i
+        }
+        if (last == 0) return ""
+        return trim(substr(line, last + 1))
+      }
+      function cell_prefix_matches(cell, prefix,    s, hex, c) {
+        if (cell == "" || prefix == "") return 0
+        s = cell
+        if (substr(s, 1, 1) == "`") s = substr(s, 2)
+        hex = ""
+        while (length(s) > 0) {
+          c = substr(s, 1, 1)
+          if (c ~ /[0-9a-f]/) {
+            hex = hex c
+            s = substr(s, 2)
+          } else {
+            break
+          }
+        }
+        return (length(hex) >= 8 && substr(hex, 1, 8) == prefix) ? 1 : 0
+      }
+      function uitkomst_of(line, target,    link, i, n, parts, k, cell) {
+        # Anchor on the doc-link so a Uitkomst cell containing its own `|`
+        # is not truncated by an over-eager split (kaart 225a77e8…).
+        link = "(./" target ")"
+        i = index(line, link)
+        if (i == 0) return ""
+        # substr ends 3 chars before `(` — leaves the cell prefix
+        # `[\`<name>` as a discardable fragment; we rejoin parts[4..n-1] as
+        # Uitkomst so an internal `|` survives.
+        n = split(substr(line, 1, i - 3), parts, "|")
+        if (n < 4) return ""
+        cell = parts[4]
+        for (k = 5; k < n; k++) cell = cell "|" parts[k]
+        return trim(cell)
+      }
+      {
+        if (cell_prefix_matches(kaart_cell($0), kaart)) {
+          print uitkomst_of($0, target)
+          exit
+        }
+      }
+    ' "$REGISTER")
+    if [ -n "$kaart_match" ]; then
+      printf '%s' "$kaart_match"
+      return
+    fi
+  fi
+
+  # Pass 2: first-link fallback. Identical to the original implementation;
+  # kept separate so the Kaart-path can be reasoned about (and tested) in
+  # isolation. |head -1| guards against the unlikely case of two plain-link
+  # rows for the same doc (the current register has none, but a future
+  # revision that forgets the #8-bis lesson might re-introduce them).
+  awk -v target="$target" '
     function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     {
-      # Find the markdown link reference `./<name>)` in the row. We anchor on
-      # the link so a Uitkomst cell containing its own `|` is not truncated
-      # by an over-eager split (kaart 225a77e8…).
       link = "(./" target ")"
       i = index($0, link)
       if (i == 0) next
-      # substr ends 3 chars before `(` — for a `*.md`-named doc that lands on
-      # the last `d` of `a-decision.md` (i.e., still inside the link text),
-      # so the substring includes the cell prefix `[\`a-decision.md` and the
-      # trailing `\`](` is cut. We drop that cell prefix as parts[n] in the
-      # join loop below; the offset is therefore not "lands on the cell
-      # boundary" but "leaves the cell prefix as a discardable fragment".
-      uitkomst = substr($0, 1, i - 3)
-      # Split on `|` to find cell boundaries. parts[1] is empty (pre-`|`);
-      # parts[2..3] are Datum/Vraag; parts[4..n-1] are Uitkomst (rejoined with
-      # `|` so an internal `|` survives); parts[n] is the partial doc-link
-      # cell start, which we drop. This used to take only parts[4], silently
-      # truncating any Uitkomst containing `|` (kaart 225a77e8…).
-      n = split(uitkomst, parts, "|")
+      n = split(substr($0, 1, i - 3), parts, "|")
       if (n < 4) next
       cell = parts[4]
-      for (k = 5; k < n; k++) {
-        cell = cell "|" parts[k]
-      }
+      for (k = 5; k < n; k++) cell = cell "|" parts[k]
       print trim(cell)
     }
-  ' "$REGISTER"
+  ' "$REGISTER" | head -1
+}
+
+# Extract the 8-char hex prefix from a doc's Kaart field. Empty when the
+# field has no hex (e.g. the "_zie doc — geen hex-id …" placeholder).
+kaart_prefix_for() {
+  # $1 = Kaart field value (e.g. "3abcd501…", "3672c0730b1b4b7ea31a52c414d17729",
+  #     "1fafd87c19e54ef1aa48936e8759ce06", or "_zie doc — geen hex-id …")
+  printf '%s' "$1" | awk '
+    {
+      s = $0
+      while (length(s) > 0 && substr(s, 1, 1) !~ /[0-9a-f]/) s = substr(s, 2)
+      if (length(s) >= 8) print substr(s, 1, 8)
+      else if (length(s) > 0) print s
+    }
+  '
 }
 
 # ---
@@ -179,9 +268,15 @@ while IFS= read -r -d '' f; do
       problems+=("Datum:not-a-date")
     fi
 
-    # Uitkomst must match the register row (whitespace-normalized prefix)
+    # Uitkomst must match the register row (whitespace-normalized prefix).
+    # Pass the doc's Kaart 8-char prefix so register_uitkomst_for can pick
+    # the row whose Kaart column matches — without it, the script would
+    # fall back to the first-link match, which silently picks the wrong
+    # row once a doc accumulates revisions in the register (kanban-kaart
+    # 9a2c47b1…).
     if [ -n "${val_Uitkomst:-}" ]; then
-      reg_uitkomst="$(register_uitkomst_for "$base")"
+      kaart_prefix="$(kaart_prefix_for "${val_Kaart:-}")"
+      reg_uitkomst="$(register_uitkomst_for "$base" "$kaart_prefix")"
       if [ -n "$reg_uitkomst" ]; then
         doc_norm="$(hdr_normalize "$val_Uitkomst")"
         reg_norm="$(hdr_normalize "$reg_uitkomst")"
