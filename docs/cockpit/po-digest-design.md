@@ -9,7 +9,11 @@ status: active
 **Datum:** 2026-07-25
 **Kaart:** `4e69915f65724125bb8579c6051976cf` (kind van `75c0952f…`)
 **Bron:** [`product-owner-volgbaarheid-analyse.md`](./product-owner-volgbaarheid-analyse.md) §4.1 (kaart A) + §5
-**Status:** ontwerp vastgelegd; twee vervolgkaarten gefiled (§8)
+**Status:** ontwerp vastgelegd; collector en redactionele keten geïmplementeerd (§8)
+
+✅ Geïmplementeerd (kaart `a6344a0d…`): de `po-digest`-skill, het duurzame
+weekarchief met eerste echte digest en de wekelijkse chain-of-one-shots-trigger zijn
+opgeleverd volgens §§3–7.
 
 Dit doc beantwoordt de vier vragen die de kaart openliet: **welke secties**, **welke
 bronnen per sectie**, **welk taalregister**, en **waar de output landt**. Het bouwt
