@@ -9,6 +9,7 @@ and retried automatically when resources become available.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import re
@@ -3602,7 +3603,7 @@ class SpawnTransport(Protocol):
                  endpoint_base_url: str | None = None,
                  endpoint_auth_token: str | None = None,
                  card_id: str | None = None,
-                 column_name: str | None = None) -> dict: ...
+                 column_name: str | None = None) -> dict | Awaitable[dict]: ...
 
 
 def _known_cli_ids() -> set[str]:
@@ -5957,6 +5958,8 @@ async def _run_card(
                                  # use them (resume, sandcastle, headless).
                                  card_id=card.id, column_name=target_agent,
                                  **endpoint_kwargs)
+        if inspect.isawaitable(spawned):
+            spawned = await spawned
     except Exception as exc:
         await apply_operation(
             session, op_type="release", entity_type="card", project_key=project_key,

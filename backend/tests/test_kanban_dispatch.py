@@ -6723,6 +6723,47 @@ async def test_repeated_synchronous_spawn_failures_move_to_impediment():
 
 
 @pytest.mark.asyncio
+async def test_awaitable_spawn_failure_uses_dispatch_failure_path():
+    class AsyncFailingTransport(RecordingTransport):
+        def __call__(self, **kwargs):
+            self.calls.append(kwargs)
+
+            async def fail():
+                raise RuntimeError(
+                    "Claude Code skipped MCP server configuration: "
+                    "cockpit-kanban (invalid_config): expected string"
+                )
+
+            return fail()
+
+    transport = AsyncFailingTransport()
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="async-mcp-fails", column="To Resume")
+        await s.commit()
+
+    for _ in range(dispatch.MAX_DISPATCH_FAILURES):
+        async with KanbanSessionLocal() as s:
+            with pytest.raises(RuntimeError, match="cockpit-kanban"):
+                await dispatch.dispatch_project(
+                    s, project_key=PK, project_path="/p", transport=transport,
+                )
+            await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, cid)
+    assert card.column == "Impediment"
+    assert card.claimed_by is None
+    comments = [
+        op.payload["text"] for op in activity
+        if op.op_type == "comment"
+        and op.payload["text"].startswith("[dispatch-failure]")
+    ]
+    assert comments
+    assert "cockpit-kanban" in comments[-1]
+
+
+@pytest.mark.asyncio
 async def test_synchronous_spawn_failure_comment_includes_last_error():
     """When a synchronous spawn exception (str(exc)) trips
     MAX_DISPATCH_FAILURES, the auto-move comment must include the actual
