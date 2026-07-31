@@ -83,7 +83,10 @@ export function CardRunTab({
   const effectiveView = view ?? (isLive ? "live" : "transcript");
 
   return (
-    <div className={cn(fillArea ? "flex-1 min-h-0 flex flex-col space-y-2" : "space-y-2")}>
+    <div
+      data-testid="card-run-tab-root"
+      className={cn(fillArea ? "flex-1 min-h-0 flex flex-col space-y-2" : "space-y-2")}
+    >
       <div className="flex items-center gap-2">
         <Button
           size="sm"

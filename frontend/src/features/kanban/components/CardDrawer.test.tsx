@@ -33,8 +33,57 @@ vi.mock("../api", async (importOriginal) => {
 // poll live endpoints. None of that is under test here — stub it so an
 // agent-claimed card (which defaults the drawer to the Run tab) doesn't fire
 // real network polls during these unit tests.
-vi.mock("./CardRunTab", () => ({
-  CardRunTab: () => null,
+//
+// The stub is opt-OUT per test (kanban card 41a75826…): mocking the very
+// component whose layout chain is in scope makes a layout assertion
+// vacuous — the drawer's full-area mode depends on CardRunTab's own root
+// being `flex-1 min-h-0 flex flex-col`, and a null-rendering stub satisfies
+// every "no scroll container" assertion without ever traversing that chain
+// (a real production bug shipped past exactly this gap). Flip
+// `runTabMock.real = true` in a test to render the REAL CardRunTab; its
+// canvas-bound leaf (TerminalView) and its polling hooks are stubbed below,
+// so jsdom stays happy while the production className chain stays intact.
+// See the "CardRunTab layout chain" describe at the bottom of this file.
+const runTabMock = vi.hoisted(() => ({ real: false }));
+
+vi.mock("./CardRunTab", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./CardRunTab")>();
+  return {
+    CardRunTab: (props: ComponentProps<typeof actual.CardRunTab>) =>
+      runTabMock.real ? <actual.CardRunTab {...props} /> : null,
+  };
+});
+
+// Leaf stubs used only when the real CardRunTab renders: xterm.js needs a
+// canvas jsdom can't provide, and the session/transcript hooks poll live
+// endpoints. Stubbing the LEAVES instead of CardRunTab itself is what keeps
+// the layout chain under test.
+const ccSessions = vi.hoisted(() => ({
+  list: [] as { session_name: string; tmux_target: string }[],
+}));
+
+vi.mock("@/features/cc-bridge/TerminalView", () => ({
+  TerminalView: () => <div data-testid="terminal-view" />,
+}));
+
+// Partial mock: CardEditDialog imports `fetchEndpoints` from this same
+// module, so a full replacement would strip an export other tests rely on.
+vi.mock("@/features/cc-bridge/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/cc-bridge/api")>();
+  return { ...actual, fetchResumableSessions: vi.fn(async () => ({ sessions: [] })) };
+});
+
+vi.mock("@/features/cc-bridge/useCCSessions", () => ({
+  useCCSessions: () => ({
+    sessions: ccSessions.list,
+    refresh: vi.fn(async () => {}),
+  }),
+}));
+
+vi.mock("@/hooks/useSessionsApi", () => ({
+  useSessionsApi: () => ({
+    getSessionDetail: vi.fn(async () => ({ session: null, total_pages: 1 })),
+  }),
 }));
 
 vi.mock("../appsApi", () => {
@@ -2211,5 +2260,69 @@ describe("CardDrawer three-layer reorganization (lees-first)", () => {
     expect(screen.queryByTestId("operator-section-trigger")).toBeNull();
     expect(screen.queryByTestId("operator-section-content")).toBeNull();
     expect(screen.getByTestId("card-drawer-full-area")).toBeTruthy();
+  });
+});
+
+// --- CardRunTab layout chain (kanban card 41a75826…) ----------------------
+// The scroll-contract tests above render CardRunTab as a null stub, which is
+// right for their purpose but structurally blind to the layout chain: the
+// drawer's full-area mode only works if `flex-1 min-h-0` survives every hop
+// from the dialog body down to the xterm container. That chain broke once in
+// production (CardRunTab's outer wrapper was a plain `space-y-2`, so the
+// terminal collapsed to zero height) while the stubbed contract test stayed
+// green — the mock had no child to contradict it.
+//
+// This block renders the REAL CardRunTab (leaves stubbed, see the top of the
+// file) and asserts each link of the production chain:
+//
+//   card-drawer-full-area → [role=tabpanel] → card-run-tab-root → terminal box
+describe("CardRunTab layout chain — full-area mode reaches the terminal widget", () => {
+  afterEach(() => {
+    runTabMock.real = false;
+    ccSessions.list = [];
+  });
+
+  it("agent-claimed card with a live session: every hop keeps flex-1 min-h-0 and the run-tab root is a flex column", () => {
+    runTabMock.real = true;
+    ccSessions.list = [{ session_name: "sess-1", tmux_target: "sess-1:0.0" }];
+
+    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
+    render(
+      <CardDrawerWithRouter
+        card={agentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    // Hop 1 — the drawer body in full-area mode.
+    const fullArea = screen.getByTestId("card-drawer-full-area");
+    expect(fullArea.className).toMatch(/\bflex\b/);
+    expect(fullArea.className).toMatch(/\bflex-col\b/);
+
+    // Hop 3 — CardRunTab's own root. This is the link that regressed: with a
+    // bare `space-y-2` wrapper the class chain dies here and the terminal
+    // never gets a height, no matter what the drawer does.
+    const runTabRoot = screen.getByTestId("card-run-tab-root");
+    expect(runTabRoot.className).toMatch(/\bflex-1\b/);
+    expect(runTabRoot.className).toMatch(/\bmin-h-0\b/);
+    expect(runTabRoot.className).toMatch(/\bflex-col\b/);
+
+    // Hop 2 — the active tab panel between them (Radix TabsContent).
+    const tabPanel = runTabRoot.closest('[role="tabpanel"]') as HTMLElement | null;
+    expect(tabPanel).not.toBeNull();
+    expect(fullArea.contains(tabPanel!)).toBe(true);
+    expect(tabPanel!.className).toMatch(/\bflex-1\b/);
+    expect(tabPanel!.className).toMatch(/\bmin-h-0\b/);
+    expect(tabPanel!.className).toMatch(/\bflex-col\b/);
+
+    // Hop 4 — the xterm container, and proof the widget actually mounted
+    // (a null stub would make every assertion above vacuous).
+    const terminalContainer = screen.getByTestId("terminal-view")
+      .parentElement as HTMLElement;
+    expect(runTabRoot.contains(terminalContainer)).toBe(true);
+    expect(terminalContainer.className).toMatch(/\bflex-1\b/);
+    expect(terminalContainer.className).toMatch(/\bmin-h-0\b/);
   });
 });

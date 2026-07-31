@@ -85,6 +85,23 @@ altijd door.
    opgelost is) en ga direct naar stap 6 (Kaart bijwerken → `Done`).
 2. **Codebase verkennen**: Welke bestanden en patronen zijn relevant? Welke dependencies?
 3. **Tests eerst** (TDD): schrijf de failing test die het gedrag vastlegt.
+
+   **Layout-chain-regel — mock nooit de component wiens layout-keten je
+   toetst** (kaart `41a75826…`). Raakt je kaart een layout-afhankelijke prop
+   (`fillArea`, `flexibleHeight`, en soortgelijke die erop rekenen dat
+   `flex-1 min-h-0` van de container tot aan de widget doorloopt), dan moet
+   minstens één test die keten écht aflopen. Een `vi.mock("./Child", () => ({
+   Child: () => null }))` op precies die child maakt elke keten-assertie
+   vacuüm: de test blijft groen terwijl de productie-keten halverwege breekt
+   (concreet: CardRunTab's root was `space-y-2` in plaats van
+   `flex-1 min-h-0 flex flex-col`, de scroll-contract-test zag niets, en
+   alleen de FCR ving het). Stub in plaats daarvan de **leaves** die jsdom
+   niet aankan (xterm's `TerminalView`, pollende hooks) en assert de
+   className-keten hop voor hop op de echte component. Voorbeeld:
+   `CardDrawer.test.tsx` → describe "CardRunTab layout chain" (opt-out-stub
+   via `vi.hoisted`) en `CardRunTab.test.tsx` → "fillArea layout contract".
+   Verifieer dat de test niet vacuüm is door de bug eenmalig terug te zetten
+   en de test te zien falen.
 4. **Implementeren**: minimale code die de test groen maakt, conform projectconventies.
 5. **Verifiëren**: draai de geraakte test-files gericht
    (`scripts/run-single-test.sh tests/test_x.py[::test_y]` of een targeted

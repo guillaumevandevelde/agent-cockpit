@@ -2991,6 +2991,18 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
         "work may already be merged — it is not a substitute for checking the "
         "frontend yourself first.  If a frontend check fails, fix it, re-run, and "
         "only ship once green.  Never ship a known-red frontend check.\n"
+        "\n"
+        "   **Layout-chain guard (kaart 41a75826…):** raakt je diff een "
+        "layout-afhankelijke prop (``fillArea``, ``flexibleHeight``, of iets "
+        "anders dat erop rekent dat ``flex-1 min-h-0`` van de container tot aan "
+        "de widget doorloopt), mock dan **niet de component wiens layout-keten "
+        "in scope is** — een ``vi.mock(\"./Child\", () => ({ Child: () => null "
+        "}))`` op precies die child maakt elke keten-assertie vacuüm: de test "
+        "blijft groen terwijl de productie-keten halverwege breekt.  Stub in "
+        "plaats daarvan de *leaves* die jsdom niet aankan (xterm's "
+        "``TerminalView``, pollende hooks) en assert de className-keten hop "
+        "voor hop op de echte component; zet de bug eenmalig terug om te zien "
+        "dat de test écht faalt.\n"
     )
     commit = (
         "3. **Commit your work** — "
