@@ -97,11 +97,16 @@ export interface BulkResumeRequest {
   directory?: string
   sessions: { session_id: string; project_folder: string }[]
   skip_permissions?: boolean
-  provider?: 'anthropic' | 'bedrock' | 'minimax'
+  // Mirrors ``SpawnSessionRequest``: ``'anthropic-compatible'`` was missing,
+  // which made the resume batch silently fall back to plain Anthropic when
+  // the user picked "Custom endpoint" in the NewSessionDialog
+  // (kaart 7ab0fc0038c…).
+  provider?: 'anthropic' | 'bedrock' | 'minimax' | 'anthropic-compatible'
   aws_region?: string
   aws_profile?: string
   bedrock_model?: string
   minimax_base_url?: string
+  endpoint_name?: string
 }
 
 export interface BulkResumeResult {

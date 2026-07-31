@@ -754,6 +754,11 @@ class BulkResumeRequest(BaseModel):
     aws_profile: str | None = None
     bedrock_model: str | None = None
     minimax_base_url: str | None = None
+    # ``anthropic-compatible`` carrier — symmetric with the non-bulk
+    # ``SpawnRequest`` schema on line 85. Previously absent, which let
+    # the frontend silently spawn a "Custom endpoint" choice on plain
+    # Anthropic when ``mode == 'resume'`` (kaart 7ab0fc0038c…).
+    endpoint_name: str | None = None
 
 
 class BulkResumeResult(BaseModel):
@@ -772,7 +777,11 @@ class BulkResumeResponse(BaseModel):
 
 
 @router.post("/sessions/bulk-resume", response_model=BulkResumeResponse)
-def bulk_resume_endpoint(request: BulkResumeRequest):
+async def bulk_resume_endpoint(
+    request: BulkResumeRequest,
+    project_key: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     if not request.sessions:
         raise HTTPException(status_code=400, detail="No sessions provided")
     try:
@@ -793,6 +802,47 @@ def bulk_resume_endpoint(request: BulkResumeRequest):
             ),
         )
 
+    # Resolve the named Anthropic-compatible endpoint into the
+    # base_url + auth_token the provider-env builder expects. Same
+    # helper the non-bulk spawn path uses (see line 660), so the
+    # frontend's "Custom endpoint" choice lands on the same wire shape
+    # whether it picks plain mode, worktree mode, or resume-batch.
+    # Kaart 7ab0fc0038c… — previously this branch was missing, so a
+    # bulk-resume with ``provider='anthropic-compatible'`` silently
+    # spawned on plain Anthropic (no ANTHROPIC_BASE_URL /
+    # ANTHROPIC_AUTH_TOKEN).
+    endpoint_base_url: str | None = None
+    endpoint_auth_token: str | None = None
+    endpoint_name = request.endpoint_name
+    if request.provider == "anthropic-compatible":
+        if not endpoint_name:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "anthropic-compatible provider requires endpoint_name; "
+                    "configure one via /api/v1/agent-bridge/platforms/endpoints"
+                ),
+            )
+        from app.services.agentic_cli.endpoints import (
+            DEFAULT_PROJECT_KEY,
+        )
+        from app.services.agentic_cli.endpoints import (
+            resolve_compatible_endpoint as _resolve_compatible,
+        )
+        try:
+            resolved = await _resolve_compatible(
+                db, project_key or DEFAULT_PROJECT_KEY, endpoint_name,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if resolved is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"unknown endpoint {endpoint_name!r}",
+            )
+        endpoint_base_url = resolved["base_url"]
+        endpoint_auth_token = resolved["auth_token"]
+
     results: list[BulkResumeResult] = []
     for item in request.sessions:
         # Each session resolves its own launch directory from its project_folder,
@@ -808,6 +858,9 @@ def bulk_resume_endpoint(request: BulkResumeRequest):
             aws_profile=request.aws_profile,
             bedrock_model=request.bedrock_model,
             minimax_base_url=request.minimax_base_url,
+            endpoint_name=endpoint_name,
+            endpoint_base_url=endpoint_base_url,
+            endpoint_auth_token=endpoint_auth_token,
         )
         try:
             spawned = spawn_session(request.cli, options)
