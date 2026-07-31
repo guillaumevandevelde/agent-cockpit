@@ -849,8 +849,12 @@ function ResolveImpedimentControl({
                 // option (e.g. a multi-sentence "Corrigeer de tekst én
                 // laat het endpoint de gewíreď plan_ref-deliverables …")
                 // breaks across lines inside the button instead of running
-                // past the modal edge. Card da7716e54f51437a972d99d6d18c2a6f.
-                className="min-w-0 whitespace-normal break-words text-left"
+                // past the modal edge. `h-auto py-1.5` neutralises the
+                // `size="sm"` `h-8` frame so the button actually grows with
+                // its wrapped text — without it the label paints outside
+                // the 32px box on narrow viewports. Card
+                // da7716e54f51437a972d99d6d18c2a6f.
+                className="min-w-0 h-auto whitespace-normal break-words px-3 py-1.5 text-left"
               >
                 {b.label}
               </Button>
