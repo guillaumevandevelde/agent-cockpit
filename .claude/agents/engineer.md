@@ -503,15 +503,22 @@ die dit net geshipt heeft" (kaart `51813327…`, geobserveerd op
   van deze kaart, niet bij de huidige. Ga dan niet op zoek naar wie 'm geshipt
   heeft; de deliverable is historisch waar maar niet jouw werk.
 - **`claimed_by` / `dispatch_project_folder` met een ándere dispatch-id dan je
-  eigen `resume_project_folder` / `resume_session_id`.** Bij een redispatch of
-  resume krijgt je sessie een nieuwe worktree-/dispatch-naam terwijl de claim
-  nog de vorige naam draagt. Dat is **geen** concurrente claim. Verifieer
-  goedkoop vóór je een collision aanneemt: `dispatch_started_at` op de kaart
-  (staat die vóór jouw sessiestart, dan is het jouw eigen lineage), en
-  eventueel één `tmux capture-pane -p -t <naam> | tail` op de genoemde sessie.
-  Blijkt het écht een levende andere sessie, dan is dat een
-  `report_impediment`-waardige botsing; in alle andere gevallen ga je gewoon
-  door.
+  bestaande `resume_project_folder` / worktree.** Bij resume mint `_run_card`
+  een **verse tmux-/claimnaam**, maar `make_resume_transport` start
+  `claude --resume` in de **bestaande** worktree en conversatie uit
+  `resume_project_folder`. Een volledige verse dispatch-prompt in die bestaande
+  conversatie is daarom geen bewijs van een tweede agent. Ook
+  `dispatch_started_at` springt terecht vooruit; er vond werkelijk een nieuwe
+  resume-dispatch plaats. Extra val: `dispatch_project_folder` wordt momenteel
+  afgeleid van de verse naam, niet van de door resume opgeloste cwd, en kan dus
+  een map noemen die nooit bestond. Verifieer de lineage via de backendregel
+  `Spawned ... in <dir> (mode=resume)`, `resume_project_folder` en de aanwezige
+  `~/.claude/projects/<folder>`. Neem pas een collision aan bij een extra
+  claim/release-cyclus én twee levende tmux/processen. Geobserveerd op kaart
+  `21047ce2…`: claim `k-resolve-imped-1198` hervatte worktree/transcript
+  `k-resolve-imped-e371` zonder reaper-event. Blijken er echt twee levende
+  processen op dezelfde kaart, dan is dat een `report_impediment`-waardige
+  botsing.
 
 ## Product-taal voor `summary` (Done) en `report_impediment`-options
 
