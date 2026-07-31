@@ -11,11 +11,13 @@
 #
 # Tasks covered (mapped to the card's acceptance criteria):
 #
+#   0.  The pycheck helper rejects a false bare expression; otherwise later
+#       assertions could print `ok` without validating their condition.
 #   1.  --help runs without error and lists the four real flags (--since, --until,
 #       --project-key, --kanban-db) plus the synopsis.
-#   2.  A minimal kanban DB with a single `**Summary:**` op in the window → the JSON
-#       has `shipped` containing the card-id, the title from the create-op, and the
-#       new-comment text.
+#   2.  A minimal kanban DB with `**Summary:**` ops in the window and exactly
+#       on the since-boundary → the JSON has `shipped` containing both card-ids,
+#       titles from the create-ops, and the new-comment text.
 #   3.  A card that was DELETED but still has a Summary-op in the window → the entry
 #       surfaces in `shipped` with the create-op title (no kanban_cards row needed).
 #   4.  Window fallback when --since is omitted → no docs/cockpit/po-digest/ then
@@ -63,9 +65,13 @@ check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 pycheck() {
   local expr="$1"
   echo "$out" | python3 -c "
-import json, sys, textwrap
+import ast, json, sys, textwrap
 d = json.loads(sys.stdin.read())
-exec(textwrap.dedent('''$expr'''))
+source = textwrap.dedent('''$expr''')
+tree = ast.parse(source)
+if tree.body and isinstance(tree.body[-1], ast.Expr):
+    tree.body[-1] = ast.Assert(test=tree.body[-1].value, msg=None)
+exec(compile(ast.fix_missing_locations(tree), '<pycheck>', 'exec'))
 " 2>&1
 }
 
@@ -147,6 +153,15 @@ run_collector() {
 }
 
 # ----------------------------------------------------------------------------
+echo "Task 0: pycheck rejects false bare expressions"
+out='{"ok":false}'
+if pycheck 'd["ok"]' >/dev/null 2>&1; then
+  bad "pycheck → false expression fails"
+else
+  ok "pycheck → false expression fails"
+fi
+
+# ----------------------------------------------------------------------------
 echo "Task 1: --help runs and lists the real flags"
 out=$(python3 "$SUT" --help 2>&1); rc=$?
 check "--help exits 0"          '[ "$rc" -eq 0 ]'
@@ -157,15 +172,18 @@ check "--help mentions --project-key" 'echo "$out" | grep -qE "\-\-project-key"'
 check "--help mentions --kanban-db"   'echo "$out" | grep -qE "\-\-kanban-db"'
 
 # ----------------------------------------------------------------------------
-echo "Task 2: a Summary-op in the window surfaces under shipped with title from create-op"
+echo "Task 2: Summary-ops in the window and on the since-boundary surface under shipped"
 db1="$TMP/t2.db"; seed_db "$db1"
-# Card created at t0, Summary posted 1 hour later — both inside the window.
-op "$db1" "op1" "card-A" "create" '{"title":"Card A title","project_key":"pk"}' "2026-07-25T10:00:00+00:00"
-op "$db1" "op2" "card-A" "comment" '{"text":"**Summary:** shipped A."}' "2026-07-25T11:00:00+00:00"
+# Match SQLAlchemy's SQLite DateTime storage: space separator, no UTC offset.
+op "$db1" "op1" "card-A" "create" '{"title":"Card A title","project_key":"pk"}' "2026-07-25 10:00:00.000000"
+op "$db1" "op2" "card-A" "comment" '{"text":"**Summary:** shipped A."}' "2026-07-25 11:00:00.000000"
+op "$db1" "op-boundary-create" "card-boundary" "create" '{"title":"Boundary card"}' "2026-07-20 00:00:00.000000"
+op "$db1" "op-boundary-summary" "card-boundary" "comment" '{"text":"**Summary:** boundary shipped."}' "2026-07-20 00:00:00.000000"
 out=$(run_collector "$db1" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
 check "shipped → exit 0"           '[ "$?" -eq 0 ]'
 check "shipped → valid JSON"       'echo "$out" | python3 -c "import json,sys; json.loads(sys.stdin.read())"'
 check "shipped → has card-A"       'pycheck "any(x[\"card_id\"]==\"card-A\" for x in d[\"shipped\"])"'
+check "shipped → includes exact since-boundary" 'pycheck "assert any(x[\"card_id\"]==\"card-boundary\" for x in d[\"shipped\"]), d[\"shipped\"]"'
 check "shipped → title from create-op" 'pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-A\")[\"title\"]==\"Card A title\""'
 check "shipped → summary text"     'pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-A\")[\"summary\"]==\"shipped A.\""'
 
@@ -173,8 +191,8 @@ check "shipped → summary text"     'pycheck "next(x for x in d[\"shipped\"] if
 echo "Task 3: a DELETED card (no kanban_cards row) still surfaces via the create-op"
 db2="$TMP/t3.db"; seed_db "$db2"
 # No kanban_cards row for card-B — but the create-op is in the op-log.
-op "$db2" "op3" "card-B" "create" '{"title":"Card B title (deleted later)"}' "2026-07-25T10:00:00+00:00"
-op "$db2" "op4" "card-B" "comment" '{"text":"**Summary:** shipped B."}' "2026-07-25T11:00:00+00:00"
+op "$db2" "op3" "card-B" "create" '{"title":"Card B title (deleted later)"}' "2026-07-25 10:00:00.000000"
+op "$db2" "op4" "card-B" "comment" '{"text":"**Summary:** shipped B."}' "2026-07-25 11:00:00.000000"
 out=$(run_collector "$db2" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
 check "deleted card → exit 0"        '[ "$?" -eq 0 ]'
 check "deleted card → survives in shipped" 'pycheck "any(x[\"card_id\"]==\"card-B\" for x in d[\"shipped\"])"'
@@ -184,7 +202,7 @@ check "deleted card → title from create-op" 'pycheck "next(x for x in d[\"ship
 echo "Task 4: window fallback when --since is omitted — no prior week file, since = now - 7d"
 # An op 2 days ago must fall INSIDE the now-7d window.
 db3="$TMP/t3.db"
-RECENT_TS=$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"))')
+RECENT_TS=$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S.%f"))')
 op "$db3" "op5" "card-C" "create" '{"title":"Card C"}' "$RECENT_TS"
 op "$db3" "op6" "card-C" "comment" '{"text":"**Summary:** recent."}' "$RECENT_TS"
 # Empty PO_DIGEST_DIR so the fallback path is "no prior file".
@@ -218,11 +236,11 @@ EOF
 # An op dated 2026-07-22 (between the prior's until and a fresh 'now') must
 # fall inside the recovered window.
 db4="$TMP/t5.db"; seed_db "$db4"
-op "$db4" "op7" "card-D" "create" '{"title":"Card D"}' "2026-07-22T10:00:00+00:00"
-op "$db4" "op8" "card-D" "comment" '{"text":"**Summary:** mid-week."}' "2026-07-22T11:00:00+00:00"
+op "$db4" "op7" "card-D" "create" '{"title":"Card D"}' "2026-07-22 10:00:00.000000"
+op "$db4" "op8" "card-D" "comment" '{"text":"**Summary:** mid-week."}' "2026-07-22 11:00:00.000000"
 # And an op dated 2026-07-10 (before the prior's since) must NOT fall inside.
-op "$db4" "op9" "card-E" "create" '{"title":"Card E"}' "2026-07-10T10:00:00+00:00"
-op "$db4" "op10" "card-E" "comment" '{"text":"**Summary:** too old."}' "2026-07-10T11:00:00+00:00"
+op "$db4" "op9" "card-E" "create" '{"title":"Card E"}' "2026-07-10 10:00:00.000000"
+op "$db4" "op10" "card-E" "comment" '{"text":"**Summary:** too old."}' "2026-07-10 11:00:00.000000"
 out=$(PO_DIGEST_DIR="$TMP/po-digest" python3 "$SUT" --kanban-db "$db4" --project-key "pk" --until "2026-07-26T00:00:00Z" 2>&1)
 check "prior-file → exit 0"       '[ "$?" -eq 0 ]'
 check "prior-file → since = prior.until" 'pycheck "d[\"window\"][\"since\"].startswith(\"2026-07-20\")"'
@@ -298,13 +316,18 @@ assert any(\"id2\" in m[\"row\"] for m in matches), (matches, d[\"course_changes
 check "course_changes → reversal row NOT under decisions" 'pycheck "
 assert not [x for x in d[\"decisions\"] if \"herzien\" in x.get(\"row\",\"\")], d[\"decisions\"]
 "'
-# Outcome-comment path
+# Outcome and reopen paths use the exact since-boundary in backend-native storage form.
 db7="$TMP/t7.db"; seed_db "$db7"
-op "$db7" "opoc1" "card-X" "create" '{"title":"Card X"}' "2026-07-25T10:00:00+00:00"
-op "$db7" "opoc2" "card-X" "comment" '{"text":"**Outcome:** not_feasible — explained."}' "2026-07-25T11:00:00+00:00"
+op "$db7" "opoc1" "card-X" "create" '{"title":"Card X"}' "2026-07-20 00:00:00.000000"
+op "$db7" "opoc2" "card-X" "comment" '{"text":"**Outcome:** not_feasible — explained."}' "2026-07-20 00:00:00.000000"
+op "$db7" "opreopen" "card-R" "reopen" '{}' "2026-07-20 00:00:00.000000"
 out=$(python3 "$SUT" --kanban-db "$db7" --repo-root "$REPO7" --project-key "pk" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
-check "course_changes → not_feasible Outcome surfaced" 'pycheck "
+check "course_changes → exact-boundary not_feasible Outcome surfaced" 'pycheck "
 matches=[x for x in d[\"course_changes\"] if x.get(\"kind\")==\"outcome_not_feasible\" and x[\"card_id\"]==\"card-X\"]
+assert matches, d[\"course_changes\"]
+"'
+check "course_changes → exact-boundary reopen surfaced" 'pycheck "
+matches=[x for x in d[\"course_changes\"] if x.get(\"kind\")==\"reopen\" and x[\"card_id\"]==\"card-R\"]
 assert matches, d[\"course_changes\"]
 "'
 

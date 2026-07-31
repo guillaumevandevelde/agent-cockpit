@@ -304,13 +304,22 @@ def _format_iso(dt: str) -> str:
     return dt.replace(" ", "T")
 
 
+def _sqlite_datetime_bound(dt: datetime) -> str:
+    """Match SQLAlchemy's UTC-naive SQLite ``DateTime`` storage format."""
+    return dt.astimezone(UTC).replace(tzinfo=None).isoformat(sep=" ")
+
+
 def _query_shipped(conn: sqlite3.Connection, since: datetime, until: datetime) -> list[dict]:
     """Per card-id the newest ``**Summary:**`` comment in the window + the
     title from the create-op (or kanban_cards if the create-op is gone).
     """
     cur = conn.execute(
         _SUMMARY_OPS_SQL,
-        {"prefix": SUMMARY_PREFIX + "%", "since": since.isoformat(), "until": until.isoformat()},
+        {
+            "prefix": SUMMARY_PREFIX + "%",
+            "since": _sqlite_datetime_bound(since),
+            "until": _sqlite_datetime_bound(until),
+        },
     )
     # Newest per entity_id
     newest: dict[str, tuple[str, str]] = {}
@@ -361,8 +370,8 @@ def _query_course_changes(conn: sqlite3.Connection, since: datetime, until: date
         {
             "out_a": OUTCOME_NOT_FEASIBLE + "%",
             "out_b": OUTCOME_NO_ACTION + "%",
-            "since": since.isoformat(),
-            "until": until.isoformat(),
+            "since": _sqlite_datetime_bound(since),
+            "until": _sqlite_datetime_bound(until),
         },
     )
     for entity_id, text, created_at in cur.fetchall():
@@ -381,7 +390,10 @@ def _query_course_changes(conn: sqlite3.Connection, since: datetime, until: date
 
     cur = conn.execute(
         _REOPEN_OPS_SQL,
-        {"since": since.isoformat(), "until": until.isoformat()},
+        {
+            "since": _sqlite_datetime_bound(since),
+            "until": _sqlite_datetime_bound(until),
+        },
     )
     for entity_id, created_at in cur.fetchall():
         out.append({
