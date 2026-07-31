@@ -3374,6 +3374,17 @@
             "title": "Directory",
             "type": "string"
           },
+          "endpoint_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint Name"
+          },
           "minimax_base_url": {
             "anyOf": [
               {
@@ -19316,6 +19327,24 @@
     "/api/v1/agent-bridge/sessions/bulk-resume": {
       "post": {
         "operationId": "bulk_resume_endpoint_api_v1_agent_bridge_sessions_bulk_resume_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -23026,7 +23055,7 @@
     },
     "/api/v1/cc-bridge/sessions": {
       "get": {
-        "description": "List all discovered Claude Code sessions in tmux.",
+        "description": "List all discovered Claude Code sessions in tmux.\n\nThe synchronous tmux ``list-panes`` subprocess is offloaded to a worker\nthread so the FastAPI event loop is never blocked on a slow ``tmux``\ninvocation. After discovery, each session is enriched with the\n``card_id`` + ``card_project_key`` of the kanban card that dispatched it\n(if any) so the Agent Bridge UI can render a navigate-to-card\naffordance \u2014 see kanban card cade1e9b919944258c442d273c1dcfd7.",
         "operationId": "list_sessions_api_v1_cc_bridge_sessions_get",
         "responses": {
           "200": {
