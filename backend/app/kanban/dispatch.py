@@ -1669,6 +1669,17 @@ async def resolve_effective_provider_and_model(
         "column_default_model": column_default_model,
         "persona_model": persona_model,
         "endpoint_name": endpoint_name,
+        # Kaart 7411d25e…: ordered list of providers in the resolved
+        # spillover chain for this column (``[head] ++ [tail]``). The
+        # ``SubscriptionPoolDialog`` renders this verbatim so an operator
+        # can see the full chain without re-deriving it client-side.
+        # Always non-empty: ``_build_spillover_candidates`` emits a
+        # synthetic ``anthropic`` head when there is no column default
+        # AND no pool, so the chain stays list-shaped — the UI treats
+        # a length-1 chain as 'no spillover configured, waiting on the
+        # reset' rather than re-implementing the runtime chain-end
+        # default.
+        "spillover_chain": [e.provider for e in chain_candidates],
     }
 
 

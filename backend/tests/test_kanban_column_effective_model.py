@@ -321,6 +321,134 @@ async def test_resolve_column_effective_model_global_override_dominates_pool():
     assert info["model_source"] == "global_override"
 
 
+# ---- spillover_chain (kaart 7411d25e…) --------------------------------------
+#
+# The UI surfaces the full spillover chain (``[head] ++ [tail]``) so an
+# operator can answer "why is my card stuck?" without reading the dispatch
+# resolver source. These tests pin the chain shape on every resolve path
+# so a future chain-rewrite (new layer, re-order, dedup change) is caught
+# at the unit-test layer, not as a silent "spillover UI says empty" in
+# production.
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_column_default_only():
+    """No pool → the chain is just the column-default head (length 1).
+    The UI renders a length-1 chain as 'no spillover configured'."""
+    async with KanbanSessionLocal() as s:
+        await create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="minimax", default_model="MiniMax-M3",
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="engineer", project_path="/p",
+        )
+    assert info["spillover_chain"] == ["minimax"]
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_with_pool_dedupes_head():
+    """A pool that *also* lists the column-default provider dedupes the
+    head — the tail never re-contains the column default."""
+    async with KanbanSessionLocal() as s:
+        await create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic", default_model="sonnet",
+        )
+        await subscription_pool.set_subscription_pool(
+            s, PK, _make_pool([
+                # First entry matches the column default — must NOT appear
+                # in the tail (otherwise the chain reads "anthropic → anthropic → …").
+                {"provider": "anthropic", "model": "haiku", "drempel": 0.9},
+                {"provider": "minimax", "model": "MiniMax-M3", "drempel": 0.95},
+            ]),
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="engineer", project_path="/p",
+        )
+    assert info["spillover_chain"] == ["anthropic", "minimax"]
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_no_column_default_uses_pool_head():
+    """When the column has no ``default_provider`` the pool's first
+    entry becomes the implicit head, deduped against the tail (the
+    shape mirrors ``_build_spillover_candidates``)."""
+    async with KanbanSessionLocal() as s:
+        await create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+        )
+        await subscription_pool.set_subscription_pool(
+            s, PK, _make_pool([
+                {"provider": "anthropic", "model": None, "drempel": 0.9},
+                {"provider": "minimax", "model": "MiniMax-M3", "drempel": 0.95},
+            ]),
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="engineer", project_path="/p",
+        )
+    assert info["spillover_chain"] == ["anthropic", "minimax"]
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_no_column_default_no_pool_synthetic_head():
+    """No default + no pool → synthetic anthropic head so the chain is
+    non-empty. The UI's length-1 branch is the visual contract for
+    'no spillover configured', so a length-0 chain would break the
+    per-column row rendering."""
+    async with KanbanSessionLocal() as s:
+        await create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="engineer", project_path="/p",
+        )
+    # Synthetic head from ``_build_spillover_candidates`` — anthropic is the
+    # chain-end default for the resolver, so an empty column/pool produces
+    # ``["anthropic"]`` rather than ``[]``.
+    assert info["spillover_chain"] == ["anthropic"]
+
+
+@pytest.mark.asyncio
+async def test_spillover_chain_preserved_under_global_override():
+    """A board-wide override pins the *winner* but the chain itself is a
+    routing-topology artifact, not a routing-decision artifact — it must
+    remain visible so an operator can still see 'if I drop the override,
+    my column will spill to minimax'. The UI relies on this in the
+    'override active, pool greyed out' state."""
+    async with KanbanSessionLocal() as s:
+        await create_column(
+            s, project_key=PK, name="engineer", default_agent="engineer",
+            default_provider="anthropic", default_model="sonnet",
+        )
+        await subscription_pool.set_subscription_pool(
+            s, PK, _make_pool([
+                {"provider": "minimax", "model": "MiniMax-M3", "drempel": 0.95},
+            ]),
+        )
+        await s.commit()
+    from app.kanban.dispatch import set_active_subscription_override
+    async with KanbanSessionLocal() as s:
+        await set_active_subscription_override(
+            s, project_key=PK, override={"provider": "bedrock", "model": None},
+        )
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        info = await dispatch.resolve_column_effective_model(
+            s, project_key=PK, column_name="engineer", project_path="/p",
+        )
+    assert info["provider"] == "bedrock"
+    assert info["spillover_chain"] == ["anthropic", "minimax"]
+
+
 # ---- minimax model discovery ------------------------------------------------
 
 
