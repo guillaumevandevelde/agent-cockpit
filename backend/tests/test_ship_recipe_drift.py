@@ -132,6 +132,23 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "remote branch cleanup",
         'git push origin --delete "$BRANCH"',
     ),
+    # Post-push local-master sync (kanban card 5e83b6e0…, second iteration).
+    # Without this, a successful `git push origin HEAD:master` from the
+    # throwaway worktree leaves `refs/heads/master` in the SHARED gitdir
+    # pointing at the pre-merge tip, so every subsequent ship on this
+    # multi-session box trips the divergence guard (`master..origin/master
+    # # = N > 0`) even though the divergence is fully explained by *our*
+    # push. `git fetch origin master:master` would also work but refuses
+    # when `master` is checked out in another worktree (which is always
+    # the case here — the dispatched session sits in a worktree, master is
+    # in the main checkout); `git update-ref` writes the ref directly and
+    # bypasses that check. Pin presence; positionality (it must live
+    # inside the `if push; then` branch — not after, not before) is
+    # covered by `test_post_push_sync_runs_only_after_push_success`.
+    (
+        "post-push local-master sync",
+        'git update-ref refs/heads/master origin/master',
+    ),
     # Pre-flight: the detached worktree only sees COMMITTED state, so an
     # uncommitted/untracked branch would merge as a silent no-op. This guard
     # catches that before `git worktree add` runs.
@@ -449,6 +466,14 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     # route leaks a merged branch onto `origin` on every single ship.
     assert any("push origin --delete" in c for c in commands), (
         "invariants list lost the remote branch cleanup command"
+    )
+    # Post-push local-master sync (kanban card 5e83b6e0…, second iteration).
+    # Without it every ship leaves local `master` stale relative to
+    # `origin/master`, so the divergence guard fires on every subsequent
+    # ship on this multi-session box even when divergence is fully
+    # explained by the previous push.
+    assert any("update-ref refs/heads/master origin/master" in c for c in commands), (
+        "invariants list lost the post-push local-master sync command"
     )
     # 0-byte-index guard (kanban card 608e2a27…). Without it, a slot whose
     # index was truncated by an aborted predecessor kills the merge with
@@ -926,6 +951,115 @@ def test_branch_delete_guard_detects_unconditional_delete() -> None:
     assert not ok, (
         f"guard did NOT flag an unconditional delete after a bare push; "
         f"reason={reason!r}. The positional invariant has rotted."
+    )
+    assert "if-condition" in reason, (
+        f"unexpected failure reason: {reason!r}; expected a missing "
+        f"if-condition diagnosis."
+    )
+
+
+# Post-push local-master sync positional invariant (kanban card 5e83b6e0…,
+# second iteration). The `git update-ref refs/heads/master origin/master`
+# command must live INSIDE the `if git -C "$WT" push origin HEAD:master;
+# then` success branch — running it unconditionally would update local
+# master to whatever `origin/master` is, even when the push was rejected
+# (turning a recoverable rejection into a wrong-state local ref). Running
+# it BEFORE the push is also wrong (the merge commit hasn't landed yet,
+# so local would be set to the *pre-merge* `origin/master` and we'd
+# strand our own commit). Mirrors the branch-delete positional pattern
+# (kanban card 3027671c…).
+POST_PUSH_SYNC = 'git update-ref refs/heads/master origin/master'
+
+
+def _post_push_sync_is_inside_push_success(source_text: str) -> tuple[bool, str]:
+    """Return ``(ok, reason)``: whether the post-push local-master sync sits
+    inside the ``if push; then`` success branch.
+
+    Reuses the same ``PUSH_CONDITIONAL`` anchor as
+    ``_branch_delete_is_guarded_by_push_success``: the push-to-master is the
+    if-condition, the sync must sit before the closing ``else``/``fi`` at
+    the same indent.
+    """
+    push_idx = source_text.find(PUSH_HANDLER)
+    sync_idx = source_text.find(POST_PUSH_SYNC)
+    if push_idx == -1:
+        return False, f"missing push handler ({PUSH_HANDLER!r})"
+    if sync_idx == -1:
+        return False, f"missing post-push sync ({POST_PUSH_SYNC!r})"
+    if sync_idx < push_idx:
+        return False, (
+            f"post-push sync ({sync_idx}) appears BEFORE the push to master "
+            f"({push_idx}) — local master would be set to the pre-merge "
+            f"origin/master and strand our own commit"
+        )
+    cond_idx = source_text.find(PUSH_CONDITIONAL)
+    if cond_idx == -1:
+        return False, (
+            f"push-to-master is not used as an if-condition "
+            f"({PUSH_CONDITIONAL!r} not found) — an unconditional "
+            f"update-ref would fire when the push is REJECTED, leaving "
+            f"local master on origin/master instead of the merge tip"
+        )
+    cond_line_start = source_text.rfind("\n", 0, cond_idx) + 1
+    cond_indent = _line_indent(source_text[cond_line_start:cond_idx + len(PUSH_CONDITIONAL)])
+    cursor = source_text.find("\n", cond_idx) + 1
+    close_idx = -1
+    for raw_line in source_text[cursor:].split("\n"):
+        stripped = raw_line.strip()
+        if stripped in ("else", "fi") and _line_indent(raw_line) == cond_indent:
+            close_idx = source_text.find(raw_line, cursor)
+            break
+        cursor += len(raw_line) + 1
+    if close_idx == -1:
+        return False, (
+            f"could not find the `else`/`fi` closing the push-conditional "
+            f"at indent {cond_indent} — the if-block looks malformed"
+        )
+    if not (cond_idx < sync_idx < close_idx):
+        return False, (
+            f"post-push sync ({sync_idx}) is NOT inside the push-success "
+            f"branch (condition at {cond_idx}, closed at {close_idx}) — it "
+            f"would update local master even when the push is rejected"
+        )
+    return True, ""
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_post_push_sync_runs_only_after_push_success(source_name: str) -> None:
+    """The post-push local-master sync must fire only inside `if push; then`.
+
+    Pins the positional invariant from kanban card ``5e83b6e0…`` (second
+    iteration): ``git update-ref refs/heads/master origin/master`` updates
+    the shared gitdir's master ref to whatever origin/master currently is.
+    If it fires unconditionally (no if-condition), a push rejection would
+    still set local master to origin/master — turning a recoverable
+    rejection into a wrong-state local ref. If it fires before the push,
+    local master would be set to the pre-merge ``origin/master`` and we'd
+    strand our own commit. Only inside the push-success branch is it
+    semantically equivalent to "the merge just landed, sync local".
+    """
+    source_text = SOURCES[source_name]()
+    ok, reason = _post_push_sync_is_inside_push_success(source_text)
+    assert ok, f"{source_name}: post-push sync not guarded by push success — {reason}"
+
+
+def test_post_push_sync_detects_unconditional_shape() -> None:
+    """Live negative case: an unconditional update-ref must trip the invariant.
+
+    Builds a mirror where the post-push sync runs OUTSIDE the
+    ``if push; then`` branch (right after a bare push). If this stops
+    failing, the positional invariant has rotted.
+    """
+    naive_mirror = (
+        f'{PUSH_HANDLER}\n'
+        f'{POST_PUSH_SYNC} || echo "WARN: lokale master stale"\n'
+        f'git push origin --delete "$BRANCH"\n'
+        f'git worktree remove --force "$WT"\n'
+    )
+    ok, reason = _post_push_sync_is_inside_push_success(naive_mirror)
+    assert not ok, (
+        f"guard did NOT flag an unconditional post-push sync; reason={reason!r}. "
+        f"The positional invariant has rotted."
     )
     assert "if-condition" in reason, (
         f"unexpected failure reason: {reason!r}; expected a missing "

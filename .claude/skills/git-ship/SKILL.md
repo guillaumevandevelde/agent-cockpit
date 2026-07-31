@@ -253,8 +253,16 @@ WT="$SHIP_TMP/ship-merge-$$"
 # stale merge or a useless "Everything up-to-date" push.
 git fetch origin -q
 if ! git merge-base --is-ancestor origin/master master 2>/dev/null; then
-  BEHIND=$(git rev-list --count origin/master..master 2>/dev/null || echo "?")
-  AHEAD=$(git rev-list --count master..origin/master 2>/dev/null || echo "?")
+  # Label semantics (kanban card 5e83b6e0…, second iteration): in
+  # `git rev-list --count A..B`, A..B enumerates commits reachable from B
+  # but NOT from A — i.e. commits B has that A doesn't. So
+  # `master..origin/master` = commits `origin/master` has that local
+  # `master` doesn't = how far local is BEHIND; and
+  # `origin/master..master` = the symmetric AHEAD count. The previous
+  # wiring had the two swapped, which printed `ahead=2 behind=0` while
+  # local master was actually 2 BEHIND origin. Don't swap them back.
+  BEHIND=$(git rev-list --count master..origin/master 2>/dev/null || echo "?")
+  AHEAD=$(git rev-list --count origin/master..master 2>/dev/null || echo "?")
   echo "ERROR: local master is STALE — origin/master has commits local doesn't have." >&2
   echo "  ahead=$AHEAD behind=$BEHIND (master vs origin/master)" >&2
   echo "  Reconcile: git -C <main-checkout> pull --rebase origin master" >&2
@@ -356,6 +364,20 @@ if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then
   git -C "$WT" commit --no-edit
 fi
 if git -C "$WT" push origin HEAD:master; then
+  # Post-push local-master sync (kanban card 5e83b6e0…, second iteration).
+  # The divergence guard above bases on local `master`, so a successful
+  # push that doesn't also move local `master` leaves the guard tripped
+  # on every subsequent ship on this multi-session box — even though the
+  # divergence is fully explained by *our own* push. `git fetch origin
+  # master:master` would do the same job, but it refuses when `master` is
+  # checked out in another worktree (which is exactly the situation here
+  # — the dispatched session sits in a worktree, master is checked out in
+  # the main checkout). `git update-ref` writes the ref directly and
+  # bypasses that check. Fail-open: a stale local `master` is a nuisance
+  # (the next ship trips the guard with a clear remediation message),
+  # but a successful push must NEVER be reverted by a local-sync error —
+  # the merge is on `origin`, that's what matters.
+  git update-ref refs/heads/master origin/master || echo "WARN: kon lokale master niet bijwerken naar origin/master — volgende ship kan op de divergentie-guard lopen, herstel handmatig met 'git fetch origin master:master' in de hoofd-checkout." >&2
   # Merge landed on master — delete the now-dead remote branch. GitHub's
   # `delete_branch_on_merge` (enabled 2026-07-07) only fires when a *PR*
   # merges; this route closes no PR, so without this line every shipped card
