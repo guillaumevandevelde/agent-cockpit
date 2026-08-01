@@ -6,7 +6,12 @@ status: active
 
 # Structured events / `headless_run` — ACP-isomorf event-schema
 
-**Status:** geïmplementeerd (schema-fundament). Bron: [`acp-transport-decision.md`](./acp-transport-decision.md) §6 kaart 2.
+**Status:** geïmplementeerd (schema-fundament, plus `context_usage`-variant uit
+[`acp-transport-opencode-go-nogo.md`](./acp-transport-opencode-go-nogo.md) §4).
+Bron: [`acp-transport-decision.md`](./acp-transport-decision.md) §6 kaart 2.
+✅ Geïmplementeerd (kaart `edbb8b91…`): `context_usage`-variant toegevoegd aan het
+ACP-isomorfe event-model voor de mid-turn `session/update` → `usage_update` van ACP
+(gemeten tegen OpenCode 1.18.8).
 **Voorwaarde voor:** kaart 3 (prototype headless `claude -p --output-format stream-json`-transport achter `SpawnTransport`).
 
 Deze kaart legt **twee** dingen vast: (1) een `headless_run`-capability in de
@@ -40,7 +45,7 @@ stream-json) volgt in kaart 3.
 
 Gedefinieerd in
 [`backend/app/services/agentic_cli/structured_events.py`](../../backend/app/services/agentic_cli/structured_events.py)
-als Pydantic-modellen met een discriminated union op `type`. Acht varianten — zes ACP-isomorf
+als Pydantic-modellen met een discriminated union op `type`. Negen varianten — zeven ACP-isomorf
 plus twee gedocumenteerde **super-set**-uitbreidingen (zie §2.1):
 
 | `type`                 | ACP-tegenhanger                                                     |
@@ -51,6 +56,7 @@ plus twee gedocumenteerde **super-set**-uitbreidingen (zie §2.1):
 | `permission_request`   | `session/request_permission` (request)                             |
 | `usage_result`         | `session/prompt`-result (`stopReason`) + usage                     |
 | `error`                | JSON-RPC 2.0 error-object                                          |
+| `context_usage`        | `session/update` → `usage_update` (mid-turn)                        |
 | `rate_limit`           | *(geen — gedocumenteerde super-set; zie §2.1)*                      |
 | `session_init`         | *(geen — gedocumenteerde super-set; zie §2.1)*                      |
 
@@ -80,6 +86,14 @@ ACP-adapter doet — de *structuur en semantiek* zijn 1-op-1. Elk event draagt e
 - **`session_init`** — `session_id` (verplicht — het is de readiness-handle), `cwd`, `model`,
   `permission_mode`. Verdere velden die `stream-json` in de toekomst toevoegt worden getolereerd
   door optioneel te zijn.
+- **`context_usage`** — `used` (verplicht), `size` (verplicht), `cost` (optioneel; sub-object met
+  `amount` en `currency`). Mid-turn contextvenster-signaal, niet terminaal — leeft naast
+  `usage_result` (dat de terminal `session/prompt`-samenvatting draagt). Gemeten payload tegen
+  OpenCode 1.18.8:
+  `{"used":29108,"size":200000,"cost":{"amount":0,"currency":"USD"}}`
+  ([`acp-transport-opencode-go-nogo.md`](./acp-transport-opencode-go-nogo.md) §4). De
+  bestaande claude-code stream-json-transport emitteert deze variant niet (Claude's stream-json
+  heeft geen equivalent mid-turn signaal); dat is geen bug.
 
 ### Parsen
 

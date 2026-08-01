@@ -281,20 +281,24 @@ mapping vast; hier is ze naast de **gemeten** OpenCode-events:
 | `tool_call` / `tool_call_update` | `tool_call` | ✅ — `status`, `kind`, `raw_input`, `raw_output` zijn alle vier aanwezig in de payload |
 | `session/request_permission` | `permission_request` | ✅ — inclusief `options[].optionId` ↔ `PermissionOption.option_id` |
 | `session/prompt` result (`stopReason` + `usage`) | `usage_result` | ✅ |
-| **`usage_update`** (mid-turn) | — | ❌ **geen counterpart** |
+| **`usage_update`** (mid-turn) | `context_usage` | ✅ — variant toegevoegd in kaart `edbb8b91…` |
 | **`available_commands_update`** | — | ❌ **geen counterpart** |
 | *(niet waargenomen)* `plan` | `plan_update` | ⚠️ niet gemeten — de probe-taak was te klein voor een plan |
 
-**Vier van de zes gemapte varianten zijn gemeten en kloppen.** Het model draagt de ACP-events
+**Vijf van de zes gemapte varianten zijn gemeten en kloppen.** Het model draagt de ACP-events
 zonder aanpassing; de casing (`camelCase` → `snake_case`) is inderdaad de enige vertaling, zoals
 de docstring beweert.
 
-De twee gaten zijn echt maar klein. `usage_update` (`{"used":29108,"size":200000,"cost":{…}}`) is
-een **mid-turn** contextvenster-signaal — Cockpit heeft daar geen event voor, terwijl het precies
-het soort signaal is waar `rate_limit` voor claude-code voor bestaat (vroegtijdig pauzeren i.p.v.
-achteraf een 429 rapen). Dat is een concrete uitbreiding, geen ontwerpfout: het model documenteert
-`rate_limit`/`session_init` al expliciet als bewuste ACP-superset, dus een derde
-CLI-specifieke variant past in dezelfde lijn.
+Het ene overgebleven gat is `available_commands_update` — voor kaart 2 (de ACP-transport zelf)
+wel relevant, maar geen model-uitbreiding: een ACP-adapter kan dit intern als `message_chunk`
+met een vast stramien doorgeven zonder dat het schema ervoor open moet. `usage_update`
+(`{"used":29108,"size":200000,"cost":{…}}`) is een **mid-turn** contextvenster-signaal — Cockpit
+had daar geen event voor, terwijl het precies het soort signaal is waar `rate_limit` voor
+claude-code voor bestaat (vroegtijdig pauzeren i.p.v. achteraf een 429 rapen). ✅ Geïmplementeerd
+in kaart `edbb8b91…` als `context_usage`-variant: de bestaande `usage_result` (terminaal) en de
+nieuwe `context_usage` (mid-turn) lezen dezelfde wire-velden maar betekenen verschillende dingen,
+dus krijgen ze verschillende variants. De bestaande claude-code stream-json-mapper emitteert
+`context_usage` niet (geen equivalent mid-turn signaal in Claude's stream); dat is geen bug.
 
 ## 5. Verdict
 
@@ -303,7 +307,7 @@ CLI-specifieke variant past in dezelfde lijn.
 - **Wel:** een vierde transport naast `worktree`, `sandcastle` en `headless`, die `opencode acp`
   als subprocess spawnt, de JSON-RPC-stream naar `StructuredEvent` mapt, en
   `session/request_permission` als gate-haak aanbiedt.
-- **Wel:** hergebruik van `structured_events.py` ongewijzigd, plus één nieuwe variant voor
+- **Wel:** hergebruik van `structured_events.py` met één nieuwe variant (`context_usage`) voor
   `usage_update`.
 - **Niet:** vervanging van de claude-code stream-json-transport. Die blijft.
 - **Niet:** een uitspraak dat ACP nu het universele transport voor alle vendors is (§3.5).

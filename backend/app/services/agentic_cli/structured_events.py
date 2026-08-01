@@ -25,8 +25,9 @@ casing is the only translation a future ACP adapter performs. The mapping:
 | ``error``                 | JSON-RPC 2.0 error object                          |
 | ``rate_limit``            | *(none — deliberate ACP super-set; see below)*     |
 | ``session_init``          | *(none — deliberate ACP super-set; see below)*     |
+| ``context_usage``         | ``session/update`` → ``usage_update`` (mid-turn)   |
 
-The last two (``rate_limit``, ``session_init``) are **deliberately outside ACP's
+The middle two (``rate_limit``, ``session_init``) are **deliberately outside ACP's
 ``session/update`` vocabulary** — they're a conscious super-set of ACP, not an
 oversight. ACP has no quota/rate-limit notification (it's a CLI-side concern,
 not a transport concern) and no session-init notification either (ACP's
@@ -36,6 +37,15 @@ counterpart is the ``session/new`` *response*, not a ``session/update``).
 (`docs/cockpit/headless-stream-json-transport-spike.md` §4.1). A future
 ACP-backed transport is allowed to leave them empty without that being a bug
 — they exist here so the first (Claude) transport has somewhere to put them.
+
+The last one (``context_usage``) is an ACP-isomorphic variant for the
+``session/update`` → ``usage_update`` *mid-turn* notification (measured against
+OpenCode 1.18.8 in ``docs/cockpit/acp-transport-opencode-go-nogo.md`` §4).
+It is NOT a super-set like ``rate_limit`` and ``session_init`` — it is the
+ACP-native counterpart for a real ACP event, included here so a future
+ACP-backed transport has a first-class variant to emit it under. The
+existing claude-code stream-json mapper does not emit one (Claude's native
+event is terminal usage, mapped to ``usage_result``), and that is not a bug.
 
 Every event carries an optional ``session_id`` so a multiplexed transport can
 attribute events to the originating headless run.
@@ -51,8 +61,9 @@ from pydantic import BaseModel, Field, TypeAdapter
 class StructuredEventType(StrEnum):
     """The event kinds a headless run may emit.
 
-    The first six are ACP-isomorphic; ``rate_limit`` and ``session_init`` are
-    documented super-set additions (see module docstring).
+    The first six are ACP-isomorphic; ``context_usage`` is the ACP counterpart
+    for the mid-turn ``usage_update`` notification; ``rate_limit`` and
+    ``session_init`` are documented super-set additions (see module docstring).
     """
 
     MESSAGE_CHUNK = "message_chunk"
@@ -63,6 +74,7 @@ class StructuredEventType(StrEnum):
     ERROR = "error"
     RATE_LIMIT = "rate_limit"
     SESSION_INIT = "session_init"
+    CONTEXT_USAGE = "context_usage"
 
 
 class MessageRole(StrEnum):
@@ -272,6 +284,50 @@ class SessionInitEvent(_StructuredEventBase):
     permission_mode: str | None = None
 
 
+class ContextUsageCost(BaseModel):
+    """The ``cost`` sub-object carried by an ACP ``usage_update`` notification.
+
+    ACP vendors (e.g. OpenCode 1.18.8) emit ``{"amount": <number>,
+    "currency": "USD"}`` as the cost block; the snake_case translation in this
+    model preserves the structure (no flattening into ``cost_usd``) so a
+    future change in either field is a one-line edit, not a round of
+    migration across consumers.
+    """
+
+    amount: float
+    currency: str
+
+
+class ContextUsageEvent(_StructuredEventBase):
+    """A mid-turn context-window signal (ACP ``session/update`` →
+    ``usage_update``).
+
+    This is the ACP-native counterpart for an ACP event the model did not
+    previously carry (``docs/cockpit/acp-transport-opencode-go-nogo.md`` §4).
+    It is intentionally distinct from :class:`UsageResultEvent` — that one
+    maps the *terminal* ``session/prompt`` result (``stopReason`` + usage),
+    while this one carries a *mid-turn* notification about how full the
+    context window is. The two read from the same wire field but mean
+    different things, so they get different variants.
+
+    Like :class:`RateLimitEvent`, the operational use is to pause **before**
+    you hit a limit instead of scraping for an error after the fact. The
+    measured payload from OpenCode 1.18.8 was
+    ``{"used":29108,"size":200000,"cost":{"amount":0,"currency":"USD"}}``;
+    ``cost`` is optional because not every ACP vendor includes the cost
+    block — absence is not a malformed payload.
+
+    The existing claude-code stream-json transport does not emit this
+    variant (Claude's stream-json has no equivalent mid-turn usage signal,
+    only a terminal usage block). That is not a bug.
+    """
+
+    type: Literal[StructuredEventType.CONTEXT_USAGE] = StructuredEventType.CONTEXT_USAGE
+    used: int
+    size: int
+    cost: ContextUsageCost | None = None
+
+
 StructuredEvent = Annotated[
     MessageChunkEvent
     | ToolCallEvent
@@ -280,7 +336,8 @@ StructuredEvent = Annotated[
     | UsageResultEvent
     | ErrorEvent
     | RateLimitEvent
-    | SessionInitEvent,
+    | SessionInitEvent
+    | ContextUsageEvent,
     Field(discriminator="type"),
 ]
 
