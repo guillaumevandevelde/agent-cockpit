@@ -4,13 +4,20 @@
 #
 # Sweeps kanban_cards WHERE column='Done' AND (work_type='analysis' OR
 # agent='analyst') and reports each card that doesn't carry at least one of
-# the three outcome witnesses defined by
-# docs/cockpit/analysis-outcome-contract-decision.md §5:
+# the four outcome witnesses defined by
+# docs/cockpit/analysis-outcome-contract-decision.md §5 + §9:
 #
 #   1. **Outcome:** <value> — <summary>  activity-feed comment (the gate's
-#      primary neerslag — backend/app/kanban/mcp_server.py:394-396)
+#      primary neerslag — backend/app/kanban/mcp_server.py:394-414).
+#      For `filed_standalone` the **Outcome:** comment is the only neerslag
+#      (no label is set; the §9 decision explicitly keeps label-vocabulary
+#      for outcome-taxonomy values like `not-feasible`/`no-action-needed`).
 #   2. labels contains 'not-feasible' or 'no-action-needed'
 #   3. ≥1 child card (parent_card_id == card.id)
+#   4. card.metadata.filed_card_ids is a non-empty list resolving to real
+#      cards in the same project_key (the `filed_standalone` analogue of #3
+#      for cadence-trigger runs whose findings deliberately carry no
+#      `parent_card_id` to the trigger — recurring-cadence-proposal.md §4.3)
 #
 # A card missing all three is a "verdampte analyse" — exactly the failure mode
 # the gate was built to prevent (decision §1). This script is the vangnet
@@ -118,7 +125,8 @@ try:
     con.row_factory = sqlite3.Row
     cards = con.execute(
         """
-        SELECT id, title, labels, work_type, agent, parent_card_id, created_at
+        SELECT id, title, labels, work_type, agent, parent_card_id,
+               created_at, project_key, metadata
           FROM kanban_cards
          WHERE column = 'Done'
            AND (work_type IN (?, ?) OR agent IN (?, ?))
@@ -132,13 +140,19 @@ except sqlite3.Error as e:
 for c in cards:
     try:
         # `Outcome:` activity-feed comment — the gate's primary neerslag
-        # (backend/app/kanban/mcp_server.py:394-396).
+        # (backend/app/kanban/mcp_server.py:394-414). We accept any of the
+        # four canonical values, including `filed_standalone` from §9.
         has_outcome_comment = con.execute(
             """
             SELECT 1 FROM kanban_ops
              WHERE entity_type = 'comment'
                AND entity_id = ?
-               AND json_extract(payload, '$.text') LIKE '**Outcome:**%'
+               AND (
+                    json_extract(payload, '$.text') LIKE '**Outcome:** decomposed%'
+                 OR json_extract(payload, '$.text') LIKE '**Outcome:** not_feasible%'
+                 OR json_extract(payload, '$.text') LIKE '**Outcome:** no_action_needed%'
+                 OR json_extract(payload, '$.text') LIKE '**Outcome:** filed_standalone%'
+               )
              LIMIT 1
             """,
             (c["id"],),
@@ -160,6 +174,45 @@ for c in cards:
             "SELECT 1 FROM kanban_cards WHERE parent_card_id = ? LIMIT 1",
             (c["id"],),
         ).fetchone() is not None
+
+        # `filed_standalone` analogue of `has_children`: the analysis card
+        # recorded ≥1 id in `metadata.filed_card_ids` resolving to a real
+        # card in its own project_key. We project-scope the resolution so
+        # an id from a foreign project_key can't satisfy the witness —
+        # mirrors mcp_server.move_card's same-project check (decision §9).
+        # A corrupt JSON bag (or missing key) is treated as no-evidence —
+        # same posture as the labels parse above. The production schema has
+        # only one metadata column (`metadata`); older code paths that
+        # referenced `meta` were migrated alongside the column rename and
+        # we no longer carry the legacy alias here.
+        meta_raw = c["metadata"]
+        meta_list = []
+        if meta_raw is not None and meta_raw != "null":
+            try:
+                parsed_meta = json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
+            except json.JSONDecodeError:
+                parsed_meta = None
+            if isinstance(parsed_meta, dict):
+                filed_ids_raw = parsed_meta.get("filed_card_ids")
+                if isinstance(filed_ids_raw, list):
+                    meta_list = [x for x in filed_ids_raw if isinstance(x, str) and x]
+        if meta_list:
+            placeholders = ",".join("?" * len(meta_list))
+            try:
+                row = con.execute(
+                    f"""
+                    SELECT 1 FROM kanban_cards
+                     WHERE id IN ({placeholders})
+                       AND project_key = ?
+                     LIMIT 1
+                    """,
+                    (*meta_list, c["project_key"]),
+                ).fetchone()
+                has_filed_standalone = row is not None
+            except sqlite3.Error:
+                has_filed_standalone = False
+        else:
+            has_filed_standalone = False
     except sqlite3.Error as e:
         # A schema mismatch (e.g. a fixture without kanban_ops, or a
         # migration in flight) should not silently turn into "OK" — surface
@@ -167,9 +220,10 @@ for c in cards:
         print(f"ERROR: per-card query failed for {c['id']}: {e}", file=sys.stderr)
         sys.exit(2)
 
-    # Card is a hit only if ALL three witnesses are absent — anything else
+    # Card is a hit only if ALL witnesses are absent — anything else
     # means the analysis did produce *some* outcome, even if partial.
-    if has_outcome_comment or has_outcome_label or has_children:
+    if (has_outcome_comment or has_outcome_label
+            or has_children or has_filed_standalone):
         continue
 
     # Historic = card created before the threshold (default: gate commit
@@ -182,7 +236,11 @@ for c in cards:
     # title may contain tabs/newlines (rare, but possible) — flatten so the
     # bash awk below stays column-anchored.
     title = (c["title"] or "").replace("\t", " ").replace("\n", " ")
-    print(f'{c["id"]}\t{title}\t{created}\toutcome-comment,label,children\t{historic}')
+    # Witness list order tracks the four-witness taxonomy introduced in
+    # `analysis-outcome-contract-decision.md` §9 (commit-mode split —
+    # pre-§9 cards only carry the first three; new cards may have any
+    # subset, with the missing-CSV reflecting only what was *absent*).
+    print(f'{c["id"]}\t{title}\t{created}\toutcome-comment,label,children,filed_standalone\t{historic}')
 con.close()
 PY
 )" || PY_RC=$?
@@ -228,10 +286,14 @@ printf '%s\n' "$HIT_TSV" | awk -F'\t' '
 echo "" >&2
 echo "A Done analysis must carry at least ONE of:" >&2
 echo "  - a **Outcome:** <value> — <summary> activity-feed comment" >&2
+echo "    (any of: decomposed / not_feasible / no_action_needed / filed_standalone)" >&2
 echo "  - a 'not-feasible' or 'no-action-needed' label" >&2
 echo "  - ≥1 child follow-up card (parent_card_id == card.id)" >&2
+echo "  - ≥1 id in metadata.filed_card_ids resolving to a real card" >&2
+echo "    in the same project_key (filed_standalone analogue — analysis-" >&2
+echo "    outcome-contract-decision.md §9)" >&2
 echo "" >&2
-echo "See docs/cockpit/analysis-outcome-contract-decision.md §5." >&2
+echo "See docs/cockpit/analysis-outcome-contract-decision.md §5 + §9." >&2
 
 if [ "$STRICT" -eq 1 ]; then
   exit 1

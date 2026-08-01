@@ -367,11 +367,21 @@ _SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary", "Impediment": "Impediment"}
 # The fourth exit — "input needed" — is `report_impediment`, not a Done
 # move; the gate intentionally doesn't try to model it (decision §5
 # "waarom no_action_needed geen achterdeur is").
-_OUTCOMES = frozenset({"decomposed", "not_feasible", "no_action_needed"})
+_OUTCOMES = frozenset({
+    "decomposed",        # child cards exist (parent_card_id == card.id); uses parent-parking
+    "not_feasible",      # canonical label `not-feasible`; conclude "do not build"
+    "no_action_needed",  # canonical label `no-action-needed`; decision/steering artefact
+    "filed_standalone",  # trigger-card filed N Backlog kaarten WITHOUT parentage
+                          # (recurring-cadence-proposal.md §4); verified against
+                          # metadata.filed_card_ids (analysis-outcome-contract-decision.md §9)
+})
 
-# Label keys for the two path-labelling outcomes. Keep them lowercase kebab,
+# Label keys for the path-labelling outcomes. Keep them lowercase kebab,
 # matching the project's existing free-form label vocabulary. See
 # `docs/cockpit/kanban-conventions.md` §2 for the comment-prefix contract.
+# `filed_standalone` is intentionally absent — it's a *card-relationship*
+# outcome, not an outcome taxonomy, so it gets no extra label. The
+# `**Outcome:** …` activity-feed comment is its only neerslag (decision §9).
 _OUTCOME_LABELS = {
     "not_feasible": "not-feasible",
     "no_action_needed": "no-action-needed",
@@ -403,16 +413,22 @@ async def move_card(card_id: str, column: str,
 
     For analysis cards (`work_type='analysis'` or `agent='analyst'`) moving to
     `Done`, `outcome` is also required and must be one of:
-    ``decomposed`` (verified against ≥1 child card), ``not_feasible``
-    (canonical label `not-feasible` is appended), or ``no_action_needed`
-    (canonical label `no-action-needed` is appended). A `**Outcome:** <value> — <summary>`
-    comment is posted in every case. Failure modes are refused without moving
-    the card and return one of `{"error": "outcome_required"}`,
-    `{"error": "invalid_outcome", "allowed": [...]}` or
-    `{"error": "no_children"}`. Backwards-compatible for non-analysis
-    cards — `outcome` is ignored unless both the column is `Done` and
-    `service.is_analyst_leaf_spike(card)` is true. See
-    `docs/cockpit/analysis-outcome-contract-decision.md` for the rationale.
+    ``decomposed`` (verified against ≥1 child card with
+    `parent_card_id == card.id`), ``not_feasible`` (canonical label
+    `not-feasible` is appended), ``no_action_needed`` (canonical label
+    `no-action-needed` is appended), or ``filed_standalone`` (a cadence
+    trigger that filed Backlog cards WITHOUT parentage — verified against
+    `card.metadata.filed_card_ids`; see §9 of the decision doc below).
+    A `**Outcome:** <value> — <summary>` comment is posted in every case;
+    `not_feasible` and `no_action_needed` additionally append a canonical
+    label. Failure modes are refused without moving the card and return
+    one of `{"error": "outcome_required"}`,
+    `{"error": "invalid_outcome", "allowed": [...]}`,
+    `{"error": "no_children"}` or `{"error": "no_filed_cards"}`.
+    Backwards-compatible for non-analysis cards — `outcome` is ignored
+    unless both the column is `Done` and `service.is_analyst_leaf_spike(card)`
+    is true. See `docs/cockpit/analysis-outcome-contract-decision.md` for
+    the rationale.
 
     Parent-parking: any card (not just analysis cards) moving to `Done`
     while it has ≥1 child card (`parent_card_id == card.id`) lands in
@@ -454,14 +470,17 @@ async def move_card(card_id: str, column: str,
                     "message": (
                         "An analysis card (work_type='analysis' or agent='analyst') "
                         "moving to Done must declare an explicit outcome. Pick one of "
-                        "the three values from the closed enum: `decomposed` (the "
-                        "analysis produced ≥1 child follow-up cards), `not_feasible` "
-                        "(the analysis concludes: do not build this), or "
-                        "`no_action_needed` (decision/steering artefact only, no "
-                        "subtasks). The chosen value lands as a `**Outcome:** …` "
-                        "comment in the activity feed; `not_feasible` and "
-                        "`no_action_needed` also append a canonical label. For an "
-                        "unresolved product fork instead, use `report_impediment`."
+                        "the four values from the closed enum: `decomposed` (the "
+                        "analysis produced ≥1 child follow-up cards with "
+                        "`parent_card_id` set), `not_feasible` (the analysis concludes: "
+                        "do not build this), `no_action_needed` (decision/steering "
+                        "artefact only, no subtasks), or `filed_standalone` (a "
+                        "recurring-cadance trigger that filed ≥1 Backlog cards without "
+                        "parentage — verified against `metadata.filed_card_ids`). The "
+                        "chosen value lands as a `**Outcome:** …` comment in the "
+                        "activity feed; `not_feasible` and `no_action_needed` also "
+                        "append a canonical label. For an unresolved product fork "
+                        "instead, use `report_impediment`."
                     ),
                 }
             if outcome_clean not in _OUTCOMES:
@@ -493,7 +512,99 @@ async def move_card(card_id: str, column: str,
                             "first, then retry the move. If the analysis truly "
                             "produced no follow-up work, pick "
                             "`no_action_needed` instead (and justify in "
+                            "`summary`). For a cadence trigger that filed "
+                            "Standalone Backlog cards (no parentage on purpose), "
+                            "pick `filed_standalone` and seed "
+                            "`metadata.filed_card_ids` first."
+                        ),
+                    }
+            # `filed_standalone` is the cadence-trigger companion of
+            # `decomposed`: same intent (this run produced follow-up cards),
+            # different *card-relationship* — the new cards deliberately do
+            # NOT carry `parent_card_id` because they have to outlive the
+            # trigger (recurring-cadence-proposal.md §4.3 /
+            # analysis-outcome-contract-decision.md §9). Verification reads
+            # `card.meta["filed_card_ids"]`, requires ≥1 entry, and confirms
+            # every id resolves to a card in the same project. The check is
+            # DB-sterk (no FK, but the id must exist) — same shape as
+            # `no_children`, same refusal UX.
+            elif outcome_clean == "filed_standalone":
+                # `card.meta` is a free-form JSON bag; tolerate either a plain
+                # Python list (in-process) or a stringified JSON column value
+                # (depending on how the column was loaded). Empty bag/missing
+                # key → empty list.
+                filed_ids_raw = (card.meta or {}).get("filed_card_ids")
+                if isinstance(filed_ids_raw, str):
+                    try:
+                        filed_ids = json.loads(filed_ids_raw)
+                    except (ValueError, TypeError):
+                        filed_ids = None
+                else:
+                    filed_ids = filed_ids_raw
+                if not isinstance(filed_ids, list) or not filed_ids:
+                    return {
+                        "error": "no_filed_cards",
+                        "message": (
+                            "`outcome='filed_standalone'` requires the analysis "
+                            "card to declare ≥1 id in "
+                            "`metadata.filed_card_ids`. The cadence run must "
+                            "record the ids it filed (e.g. by appending to "
+                            "`card.metadata['filed_card_ids']` after each "
+                            "`create_card` call) before the Done-move — same "
+                            "shape as `metadata.filed_card_ids=[\"<id>\", …]`. "
+                            "If the run truly produced no follow-up cards, "
+                            "pick `no_action_needed` instead (and justify in "
                             "`summary`)."
+                        ),
+                    }
+                # Every declared id must resolve to a real card in the same
+                # project — defends against typos in metadata while keeping
+                # the verification cheap (no FK, no parent_card_id).
+                # Coerce + dedupe defensive (the field is operator-controlled
+                # via the op-log; a stray duplicate should not blow up the
+                # verification but also should not slip past silently).
+                cleaned_ids = []
+                seen = set()
+                for x in filed_ids:
+                    if not isinstance(x, str) or not x:
+                        continue
+                    if x in seen:
+                        continue
+                    seen.add(x)
+                    cleaned_ids.append(x)
+                if not cleaned_ids:
+                    return {
+                        "error": "no_filed_cards",
+                        "message": (
+                            "`metadata.filed_card_ids` contained no non-empty "
+                            "string ids — refusing to record a `filed_standalone` "
+                            "with nothing filed. Pick `no_action_needed` instead, "
+                            "or record real ids."
+                        ),
+                    }
+                # Same-project check is implicit (`kanban_cards.project_key`
+                # is the only key we have); a card from a different project
+                # would still match the id, so scope the query to the
+                # analysis card's project.
+                rows = (await s.execute(
+                    select(KanbanCard.id)
+                    .where(
+                        KanbanCard.id.in_(cleaned_ids),
+                        KanbanCard.project_key == card.project_key,
+                    )
+                )).scalars().all()
+                resolved = set(rows)
+                missing = [i for i in cleaned_ids if i not in resolved]
+                if missing:
+                    return {
+                        "error": "no_filed_cards",
+                        "message": (
+                            f"`outcome='filed_standalone'` references "
+                            f"{len(missing)} id(s) not found in the card's "
+                            f"project_key (`{card.project_key}`): "
+                            f"{missing[:5]}{'…' if len(missing) > 5 else ''}. "
+                            f"Either correct `metadata.filed_card_ids` or pick "
+                            f"`no_action_needed` instead."
                         ),
                     }
 

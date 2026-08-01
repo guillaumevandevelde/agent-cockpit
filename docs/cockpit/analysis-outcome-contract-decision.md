@@ -219,3 +219,46 @@ faken.
 is de sweeper het vangnet, geen garantie. En de poort beoordeelt geen *kwaliteit* — vier
 slechte kind-kaarten passeren net zo goed als vier goede. Dat blijft mensenwerk, en hoort
 dat te blijven.
+
+---
+
+## 9. Aanvulling 2026-08-01 — `filed_standalone` voor cadans-trigger-kaarten
+
+**Aanleiding.** De cadans-trigger-kaart uit [`recurring-cadence-proposal.md`](./recurring-cadence-proposal.md) §4 (wekelijkse market-research-sweep, id `210e5042…` / `d2f3a10d…`; spiegel: po-digest `a6344a0d…`) heeft een analyse-flow die **standaard losgekoppeld** is van wat ze vindt: de bevindingen (Backlog-kaarten) moeten de trigger-kaart overleven, want volgende week start een nieuwe run die de bevindingen opnieuw moet kunnen zien — kind-kaarten met `parent_card_id = <trigger>` zouden die view vervuilen of, erger, bij elke parent-Done-move in `Awaiting Subtasks` parkeren tot alles klaar is (zie §6 + `analyse-levenscyclus-decision.md` §3).
+
+De drie bestaande uitkomsten passen daar niet op:
+
+- `decomposed` → claim geverifieerd tegen `parent_card_id == card.id` → **weigert** met `no_children` zodra de bevindingen standalone zijn gefiled (de bug die kaart `5770d3db…` fileide).
+- `no_action_needed` → passeert de poort maar **ligt**: een wekelijkse run die wél degelijke Backlog-kaarten opleverde, labelen als "geen actie nodig" is een audittrail-leugen die `scripts/check-analysis-outcomes.sh` vervolgens meet als "verdampte analyse".
+- `not_feasible` → betekent "niet doen" — semantisch onzin voor een run die al klaar is.
+
+Twee afgewezen routes:
+
+- **Parent-parking overslaan voor kaarten met `recurring`-label** (route #2 in de kaart). Lost het parent-parking-pad op maar niet het `no_children`-pad wanneer kinderen bewust standalone zijn gefiled — twee carve-outs voor één faalklasse is een teken dat de enum te smal is.
+- **`decomposed` met een zachtere relatie dan `parent_card_id`** (bv. tag of metadata-link). Houdt hetzelfde verificatie-vlak als voorheen, maar breekt het principe "de eerlijke route is de makkelijke route" uit §5: een trigger-kaart kan nu beweren dat hij drie kaarten filete zonder dat de DB een FK-relatie afdwingt.
+
+**Beslissing — vierde uitkomst `filed_standalone`.**
+
+| `outcome` (nieuw) | Betekenis | Verificatie | Neerslag |
+|---|---|---|---|
+| `filed_standalone` | De trigger leverde ≥1 nieuwe of verrijkte Backlog-kaart op **zonder ouderschap** — typisch een cadans-trigger-run | `card.metadata.filed_card_ids: list[str]` is niet leeg en elke id verwijst naar een bestaande kaart in dezelfde `project_key` (sterke DB-check, géén FK-vereiste) | Geen extra label (het label-vocabulaire blijft bij de drie echte uitkomst-taxonomieën); `**Outcome:**`-comment zoals de andere drie |
+
+`metadata.filed_card_ids` is geen nieuwe kolom — `KanbanCard.meta` is een vrije JSON-bag (`models.py` §2.2) en wordt al door `mcp_server.update_card` geschreven. De gedispatchte trigger-sessie zet dit veld tijdens Step 5/6 van `market-research`/`po-digest` (bijv. na elke `create_card`-call een append). De verificatie leest het metadata-veld, query'dt de kinderen op bestaan-in-zelfde-project, en weigert met `{"error": "no_filed_cards", ...}` bij een lege lijst of een onbekende id — dezelfde foutvorm als `no_children`, zelfde UX.
+
+**Waarom dit veiliger is dan `no_action_needed`:** het label blijft eerlijk. Een wekelijkse trigger-run die 3 nieuwe kaarten filete staat nu met een `**Outcome:** filed_standalone — 3 new cards filed` op het bord — geen audit-trail-leugen meer, en `scripts/check-analysis-outcomes.sh` (zie §7 #4 + de update in §9-bis hieronder) telt 'm nu als *productief* in plaats van *verdampt*. De activiteit-feed `create_card`-events voor de gefilede ids zijn sowieso al in `kanban_ops` — het run-narratief klopt.
+
+**Waarom geen parent-FK-relatie wordt afgedwongen:** zie `recurring-cadence-proposal.md` §4.3: het resultaat moet de trigger-kaart overleven, en kinderen met `parent_card_id = trigger` zouden ofwel (a) in `Awaiting Subtasks` parkeren of (b) bij zorgvuldige kind-Done-moves de trigger elke week opnieuw naar `Awaiting Subtasks` trekken — precies de twee bugs die deze enum-waarde bestaat te voorkomen.
+
+**Scope.** De nieuwe waarde past uitsluitend op analyse-kaarten (de bestaande gating `is_analyst_leaf_spike(card)` blijft de trigger). Voor niet-analyse-kaarten blijft `outcome` genegeerd (backwards-compatible, §5). Implementatie hangt af van sessie-context: een niet-trigger analyse-kaart kan `filed_standalone` technisch claimen maar heeft typisch geen reden — dat is geen fout, alleen ruis; `check-analysis-outcomes.sh` blijft `filed_standalone` als geldig signal accepteren.
+
+**Wijzigingen.**
+
+1. `backend/app/kanban/mcp_server.py` `_OUTCOMES` += `"filed_standalone"`. Verificatie-tak leest `card.meta["filed_card_ids"]`, weigert met `no_filed_cards` bij lege lijst of niet-resolverende id.
+2. `scripts/check-analysis-outcomes.sh`: voegt `**Outcome:**` matching op `filed_standalone` toe aan de `OUTCOME_LABELS`-set als vierde witness (naast `not-feasible`/`no-action-needed`).
+3. `.claude/skills/market-research/SKILL.md` Step 5/6 + `.claude/skills/po-digest/SKILL.md` Step 4/5: korte regel die de trigger-flow instrueert `card.meta["filed_card_ids"]` bij te houden tijdens het filen.
+4. Trigger-card `description` blijft ongewijzigd — de skill weet dit al, en een nieuwe gemeenschappelijke §7 in de recurrency-proposal linkt 'm in (`recurring-cadence-proposal.md` §4.1).
+
+**Carve-outs (ter heropening):**
+
+- Een trigger-flow die om een of andere reden toch kinderen met `parent_card_id = trigger` filete (oudere skill-versie, multi-card decompositie), krijgt op `outcome='decomposed'` de huidige parent-parking-blokkade. Dat is een **andere** route dan deze — heropenen zodra iemand die ook wil ondersteunen. Tot dan is `filed_standalone` de canonieke cadans-uitkomst.
+- Een REST-caller (UI-drag, scripted PATCH) omzeilt de poort zoals altijd (§5); de sweeper blijft het vangnet. Geen nieuw oppervlak, geen nieuwe aanvals-vector.

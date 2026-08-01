@@ -10,8 +10,8 @@
 #   1.  arg parsing — `--help` works and mentions the four real flags.
 #   2.  clean case — every Done analysis carries an outcome witness → exit 0
 #       and "OK".
-#   3.  bare Done analysis (work_type='analysis') → hit, reports all three
-#       missing witnesses (outcome-comment, label, children).
+#   3.  bare Done analysis (work_type='analysis') → hit, reports all four
+#       missing witnesses (outcome-comment, label, children, filed_standalone).
 #   4.  analysis with child card (parent_card_id) → NOT a hit, even though
 #       label + comment are missing.
 #   5.  analysis with `**Outcome:**` comment → NOT a hit, even without label
@@ -32,6 +32,15 @@
 #       emits the clean-state OK line (not the loose "OK or WARNING"
 #       tautology that an earlier shape of this task masked — see
 #       self-improve card e5136a3f959d4886a7757b85e9d31f55).
+#  17.  analysis with `metadata.filed_card_ids` resolving to a real card
+#       in the same project_key → NOT a hit (the §9 `filed_standalone`
+#       witness is accepted; canonical use-case for cadence triggers).
+#  18.  analysis with `metadata.filed_card_ids` referencing ids from a
+#       different project_key → still a hit (same-project check rejects
+#       foreign ids — mirrors `mcp_server.move_card`).
+#  19.  analysis with `**Outcome:** filed_standalone` comment → NOT a hit
+#       (the §9 outcome value is among the four accepted comment shapes
+#       in the SQL LIKE chain).
 
 set -u
 
@@ -144,6 +153,21 @@ con.commit(); con.close()
 PY
 }
 
+# Update one card's metadata column directly (the SUT reads metadata for
+# the §9 filed_standalone witness). Args: db, card_id, project_key, metadata_json.
+set_meta() {
+  python3 - "$@" <<'PY'
+import sqlite3, sys
+db, cid, proj_key, meta_json = sys.argv[1:]
+con = sqlite3.connect(db)
+con.execute(
+    "UPDATE kanban_cards SET metadata = ?, project_key = ? WHERE id = ?",
+    (meta_json, proj_key, cid),
+)
+con.commit(); con.close()
+PY
+}
+
 # Run the SUT with KANBAN_DB pointed at the fixture. Extra args go on the
 # command line. Echoes stdout+stderr, captures exit code.
 run() {
@@ -176,7 +200,7 @@ out=$(run "$clean" --strict); rc=$?
 check "clean + --strict → exit 0"    '[ "$rc" -eq 0 ]'
 
 # ----------------------------------------------------------------------------
-echo "Task 3: bare Done analysis (work_type='analysis') → hit, all 3 missing"
+echo "Task 3: bare Done analysis (work_type='analysis') → hit, all 4 missing"
 bare="$TMP/bare.db"; seed_db "$bare"
 card "$bare" "BARE0001" "Bare historic analysis" "Done" "null" "analysis" "engineer" "" "2026-07-10 10:00:00"
 out=$(run "$bare"); rc=$?
@@ -186,6 +210,7 @@ check "bare → names the card"        'echo "$out" | grep -qF "BARE0001"'
 check "bare → reports outcome-comment" 'echo "$out" | grep -qF "outcome-comment"'
 check "bare → reports label"         'echo "$out" | grep -qF "label"'
 check "bare → reports children"      'echo "$out" | grep -qF "children"'
+check "bare → reports filed_standalone" 'echo "$out" | grep -qF "filed_standalone"'
 out=$(run "$bare" --strict); rc=$?
 check "bare + --strict → exit 1"     '[ "$rc" -eq 1 ]'
 
@@ -334,4 +359,46 @@ fi
 # ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
+
+# ----------------------------------------------------------------------------
+echo "Task 17: filed_standalone witness — analysis with metadata.filed_card_ids resolving to a real card"
+fsa="$TMP/fsa.db"; seed_db "$fsa"
+card "$fsa" "FSA00001" "Cadence trigger with filed ids" "Done" "null" "analysis" "engineer" "" "2026-08-01 10:00:00"
+card "$fsa" "FIND001A" "  filed finding A"            "Backlog" "null" "feature" "engineer" "" "2026-08-01 10:01:00"
+# Same project_key ('proj') so the section 9 same-project check passes.
+set_meta "$fsa" "FSA00001" "proj" '{"filed_card_ids":["FIND001A"]}'
+out=$(run "$fsa"); rc=$?
+check "fsa -> exit 0 (clean)"         '[ "$rc" -eq 0 ]'
+check "fsa -> prints OK"              'echo "$out" | grep -qE "^OK:"'
+check "fsa -> does NOT name the trigger" '! echo "$out" | grep -qF "FSA00001"'
+
+# ----------------------------------------------------------------------------
+echo "Task 18: filed_standalone witness - foreign project_key is rejected"
+fsax="$TMP/fsax.db"; seed_db "$fsax"
+card "$fsax" "FSAX0001" "Trigger referencing foreign ids" "Done" "null" "analysis" "engineer" "" "2026-08-01 10:00:00"
+card "$fsax" "FOREIGN1" "  card from another project"    "Backlog" "null" "feature" "engineer" "" "2026-08-01 10:01:00"
+# Trigger belongs to project 'proj', but the only filed id lives in 'other'.
+python3 - "$fsax" "FOREIGN1" <<'PY'
+import sqlite3, sys
+db, cid = sys.argv[1], sys.argv[2]
+con = sqlite3.connect(db)
+con.execute("UPDATE kanban_cards SET project_key = 'other' WHERE id = ?", (cid,))
+con.commit(); con.close()
+PY
+set_meta "$fsax" "FSAX0001" "proj" '{"filed_card_ids":["FOREIGN1"]}'
+out=$(run "$fsax"); rc=$?
+check "fsax -> exit 0 (advisory)"     '[ "$rc" -eq 0 ]'
+check "fsax -> names the trigger"     'echo "$out" | grep -qF "FSAX0001"'
+check "fsax -> reports filed_standalone as missing" 'echo "$out" | grep -qF "filed_standalone"'
+
+# ----------------------------------------------------------------------------
+echo "Task 19: **Outcome:** filed_standalone comment -> NOT a hit (any outcome comment counts)"
+fsc="$TMP/fsc.db"; seed_db "$fsc"
+card "$fsc" "FSC00001" "Trigger with filed_standalone comment" "Done" "null" "analysis" "engineer" "" "2026-08-01 10:00:00"
+op    "$fsc" "op-fsc1"  "FSC00001" "comment" '{"text":"**Outcome:** filed_standalone - 3 Backlog kaarten gefiled"}' "2026-08-01 10:00:00"
+out=$(run "$fsc"); rc=$?
+check "fsc -> exit 0 (clean)"         '[ "$rc" -eq 0 ]'
+check "fsc -> prints OK"              'echo "$out" | grep -qE "^OK:"'
+check "fsc -> does NOT name the card" '! echo "$out" | grep -qF "FSC00001"'
+
 [ "$FAIL" -eq 0 ]

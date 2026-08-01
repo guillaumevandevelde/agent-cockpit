@@ -394,15 +394,21 @@ async def test_move_analyst_agent_card_to_done_without_outcome_is_rejected():
 
 @pytest.mark.asyncio
 async def test_move_analysis_card_to_done_with_invalid_outcome_is_rejected():
-    """Unknown outcome values fail closed with the allowed-set echoed back."""
+    """Unknown outcome values fail closed with the allowed-set echoed back.
+
+    The three-value check predates analysis-outcome-contract-decision.md §9;
+    §9 adds `filed_standalone` for cadence triggers whose findings are filed
+    standalone. Companion assertion below (`…_with_invalid_outcome_lists_four_allowed`)
+    pins the four-value set explicitly; this one stays backwards-compatible
+    with a subset check (the old three are a subset of the new four)."""
     cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Done",
                                 summary="analysis done",
                                 outcome="finished")
     assert result.get("error") == "invalid_outcome"
-    assert set(result.get("allowed", [])) == {
-        "decomposed", "not_feasible", "no_action_needed",
-    }
+    # Subset check: the three legacy enums must remain in `allowed` (nothing
+    # got renamed); the full-set counterpart lives in the next test.
+    assert {"decomposed", "not_feasible", "no_action_needed"} <= set(result.get("allowed", []))
     card = await m.get_card(cid)
     assert card["column"] != "Done"
 
@@ -533,6 +539,149 @@ async def test_move_card_to_other_columns_ignores_outcome():
     cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
     moved = await m.move_card(cid, "Doing", outcome="decomposed")
     assert moved["column"] == "Doing"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_with_invalid_outcome_lists_four_allowed():
+    """`test_move_analysis_card_to_done_with_invalid_outcome_is_rejected`
+    (above) is the original three-value variant. This is the §9 follow-up:
+    a bogus value echoes the FOUR allowed enums back, including
+    `filed_standalone`, so the gate's surface matches the gate's contract
+    (analysis-outcome-contract-decision.md §9)."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Done",
+                                summary="x",
+                                outcome="not_a_real_outcome")
+    assert result.get("error") == "invalid_outcome"
+    assert set(result.get("allowed", [])) == {
+        "decomposed", "not_feasible", "no_action_needed", "filed_standalone",
+    }
+
+
+# --- filed_standalone (analysis-outcome-contract-decision.md §9) ---
+#
+# Companion of the three enum values for cadence triggers whose findings
+# deliberately carry no parent_card_id to the trigger
+# (`recurring-cadence-proposal.md` §4.3). Verification reads
+# `card.metadata.filed_card_ids`, requires ≥1 entry, and confirms every
+# id resolves to a real card in the same project_key.
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_filed_standalone_without_metadata_is_rejected():
+    """`filed_standalone` without `metadata.filed_card_ids` is refused —
+    same shape as `no_children` for `decomposed`, same UX
+    (analysis-outcome-contract-decision.md §9). Without this gate, an
+    agent could silently mislabel a `no-op` run as productive; that is
+    exactly the failure mode the decision doc describes
+    (`no_action_needed` would let a productive run lie)."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Done",
+                                summary="filed 3 cards this week",
+                                outcome="filed_standalone")
+    assert result.get("error") == "no_filed_cards"
+    card = await m.get_card(cid)
+    assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_filed_standalone_with_empty_list_is_rejected():
+    """An empty `filed_card_ids` list passes the type check (it's a list)
+    but fails the cardinality check — refuse, don't pretend."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import apply_operation
+
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid,
+            payload={"metadata": {"filed_card_ids": []}})
+        await s.commit()
+    result = await m.move_card(cid, "Done",
+                                summary="empty filed list",
+                                outcome="filed_standalone")
+    assert result.get("error") == "no_filed_cards"
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_filed_standalone_with_unknown_ids_is_rejected():
+    """Typo'd ids or foreign-project ids must not satisfy the witness —
+    same posture as `decomposed`'s `parent_card_id == card.id` check, but
+    scoped via `card.metadata` instead of a FK."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import apply_operation
+
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=cid,
+            payload={"metadata": {"filed_card_ids": ["made-up-id-xyz"]}})
+        await s.commit()
+    result = await m.move_card(cid, "Done",
+                                summary="typo'd id",
+                                outcome="filed_standalone")
+    assert result.get("error") == "no_filed_cards"
+    # The error message lists the missing ids so the agent can self-correct.
+    assert "made-up-id-xyz" in result.get("message", "")
+
+
+@pytest.mark.asyncio
+async def test_move_analysis_card_to_done_filed_standalone_with_real_ids_succeeds():
+    """The happy path: trigger card filed N real cards in the same
+    project, no parent_card_id (that's the whole point of the new
+    outcome — survives the trigger without polluting Awaiting-Subtasks
+    parking). Lands in Done with `**Outcome:**` comment; no extra label
+    is set (decision §9: it's a card-relationship outcome, not an
+    outcome taxonomy)."""
+    trigger = (await m.create_card("P", "trigger",
+                                    work_type="analysis",
+                                    confirm_new_project=True))["id"]
+    filed_a = (await m.create_card("P", "finding-a", ""))["id"]
+    filed_b = (await m.create_card("P", "finding-b", ""))["id"]
+    # Note: NO `parent_card_id` — the filed cards deliberately don't
+    # back-link to the trigger (recurring-cadence-proposal §4.3).
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.operations import apply_operation
+
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="update", entity_type="card",
+            project_key="", entity_id=trigger,
+            payload={"metadata": {"filed_card_ids": [filed_a, filed_b]}})
+        await s.commit()
+    result = await m.move_card(trigger, "Done",
+                                summary="filed 2 standalone findings",
+                                outcome="filed_standalone")
+    assert result["column"] == "Done"
+    # No labels should be appended — that's the §9 design.
+    labels = result.get("labels") or []
+    assert "filed-standalone" not in labels
+    assert "not-feasible" not in labels
+    assert "no-action-needed" not in labels
+    # Outcome comment lands verbatim.
+    from app.kanban.service import card_activity
+    async with KanbanSessionLocal() as s:
+        ops = await card_activity(s, trigger)
+    outcome_comments = [
+        o for o in ops
+        if o.op_type == "comment"
+        and "**Outcome:** filed_standalone — filed 2 standalone findings"
+            in (o.payload.get("text") or "")
+    ]
+    assert len(outcome_comments) == 1
+
+
+@pytest.mark.asyncio
+async def test_outcome_required_message_mentions_filed_standalone():
+    """A missing outcome on an analysis-Done-move must list all four
+    allowed enums, including the new one — otherwise the gate's error
+    message becomes a contract gap (decision §9 / §1 'instructies
+    zonder verificatie zijn een verzoek, geen contract')."""
+    cid = (await m.create_card("P", "analyse", "", work_type="analysis", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Done", summary="analysis done")
+    assert result.get("error") == "outcome_required"
+    msg = result.get("message", "")
+    for value in ("decomposed", "not_feasible", "no_action_needed",
+                  "filed_standalone"):
+        assert value in msg, f"{value} missing from message: {msg!r}"
 
 
 # --- Awaiting Subtasks parent-parking (analyse-levenscyclus-decision §3) --
