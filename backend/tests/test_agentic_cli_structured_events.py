@@ -8,6 +8,8 @@ from app.services.agentic_cli.capabilities import (
     normalize_capability_matrix,
 )
 from app.services.agentic_cli.structured_events import (
+    ContextUsageCost,
+    ContextUsageEvent,
     ErrorEvent,
     MessageChunkEvent,
     MessageRole,
@@ -62,7 +64,7 @@ def test_headless_run_declared_explicitly_for_all_known_clis():
 
 # --- ACP-isomorphic event model ---------------------------------------------
 
-def test_event_type_enum_covers_the_eight_variants():
+def test_event_type_enum_covers_the_nine_variants():
     assert {t.value for t in StructuredEventType} == {
         "message_chunk",
         "tool_call",
@@ -72,6 +74,7 @@ def test_event_type_enum_covers_the_eight_variants():
         "error",
         "rate_limit",
         "session_init",
+        "context_usage",
     }
 
 
@@ -243,3 +246,81 @@ def test_discriminator_dispatches_rate_limit_and_session_init():
         }
     )
     assert isinstance(parsed_si, SessionInitEvent)
+
+
+# --- ACP mid-turn usage-update super-set (context_usage) -------------------
+#
+# ACP `session/update` → `usage_update` is a mid-turn context-window signal,
+# not a terminal result — that's why `usage_result` cannot carry it. The
+# measured payload from OpenCode 1.18.8 was
+# `{"used":29108,"size":200000,"cost":{"amount":0,"currency":"USD"}}`; see
+# docs/cockpit/acp-transport-opencode-go-nogo.md §4.
+#
+# Documented as a deliberate ACP super-set (same line as `rate_limit` /
+# `session_init`): the model carries the event so a future ACP transport can
+# emit it; the existing claude-code stream-json mapper does not, and that's
+# not a bug.
+
+
+def test_context_usage_roundtrip():
+    event = ContextUsageEvent(
+        session_id="s1",
+        used=29108,
+        size=200000,
+        cost=ContextUsageCost(amount=0.0, currency="USD"),
+    )
+    parsed = parse_structured_event(event.model_dump(mode="json"))
+    assert isinstance(parsed, ContextUsageEvent)
+    assert parsed.used == 29108
+    assert parsed.size == 200000
+    assert parsed.cost is not None
+    assert parsed.cost.amount == 0.0
+    assert parsed.cost.currency == "USD"
+    assert parsed.session_id == "s1"
+
+
+def test_context_usage_roundtrip_from_measured_acp_payload():
+    # The literal payload as observed against OpenCode 1.18.8; the camelCase→snake_case
+    # translation the model prescribes is the only thing an ACP adapter does on top of
+    # the wire format, so the parsed result should match the recorded measurement
+    # one-to-one.
+    parsed = parse_structured_event(
+        {
+            "type": "context_usage",
+            "used": 29108,
+            "size": 200000,
+            "cost": {"amount": 0, "currency": "USD"},
+        }
+    )
+    assert isinstance(parsed, ContextUsageEvent)
+    assert parsed.used == 29108
+    assert parsed.size == 200000
+    assert parsed.cost == ContextUsageCost(amount=0.0, currency="USD")
+
+
+def test_context_usage_optional_cost_omitted():
+    # ACP vendors may report just used/size without a cost block; the model
+    # must accept that without rejecting the payload.
+    parsed = parse_structured_event(
+        {"type": "context_usage", "used": 1024, "size": 200000}
+    )
+    assert isinstance(parsed, ContextUsageEvent)
+    assert parsed.used == 1024
+    assert parsed.size == 200000
+    assert parsed.cost is None
+
+
+def test_context_usage_required_fields():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        parse_structured_event({"type": "context_usage", "size": 200000})
+    with pytest.raises(ValidationError):
+        parse_structured_event({"type": "context_usage", "used": 1024})
+
+
+def test_discriminator_dispatches_context_usage():
+    parsed = parse_structured_event(
+        {"type": "context_usage", "used": 1, "size": 100}
+    )
+    assert isinstance(parsed, ContextUsageEvent)
