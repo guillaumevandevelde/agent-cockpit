@@ -85,7 +85,11 @@ AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "doctor": capability("read_only", "Doctor", "Codex doctor diagnostics are available read-only."),
         "backup": capability("read_only", "Backup", "Codex export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic Codex restore is refused without a stable provider-owned restore API."),
-        "headless_run": capability("supported", "Headless Structured Events", "Codex exposes a headless JSONL event stream via `codex exec --json`, mappable onto the ACP-isomorphic event model."),
+        "headless_run": capability(
+            "supported",
+            "Headless Structured Events",
+            "Claimed `codex exec --json` exposes a headless JSONL event stream mappable onto the ACP-isomorphic event model, but the Codex CLI was not on PATH on this host during the 2026-07-28 audit (see kaart 470d0a90…) — this row remains **unverified**. To upgrade, reproduce `codex --version` + `codex exec --json \"Reply with exactly: OK\"` on a non-TTY pipe against an installed Codex build.",
+        ),
     },
     "mimo-code": {
         "config": capability("write_capable", "Configuration", "MiMoCode configuration files can be viewed and edited."),
@@ -131,7 +135,11 @@ AGENTIC_CLI_CAPABILITY_MATRIX: dict[str, dict[str, dict[str, str]]] = {
         "doctor": capability("unsupported", "Doctor", "OpenCode does not expose provider doctor diagnostics."),
         "backup": capability("read_only", "Backup", "OpenCode export-only backups are available."),
         "restore": capability("unsupported", "Restore", "Automatic OpenCode restore is refused without a stable provider-owned restore API."),
-        "headless_run": capability("supported", "Headless Structured Events", "OpenCode exposes a headless event stream via its `opencode serve` event API, mappable onto the ACP-isomorphic event model."),
+        "headless_run": capability(
+            "supported",
+            "Headless Structured Events",
+            "OpenCode exposes a headless structured-event stream via its first-party ACP server (`opencode acp`, a top-level command since ≥1.18.x); a full `initialize` → `session/new` → `session/prompt` cycle was measured end-to-end against a non-TTY stdio pipe (see docs/cockpit/acp-transport-opencode-go-nogo.md §2 / §3.2). The alternative `opencode run --format json` route was measured to produce zero bytes on a non-TTY pipe within a 30 s timeout with empty stderr (same doc, §2.5 / §3.4) and is **not** the mechanism the spawn transport uses. (`opencode serve` ships as a separate HTTP/SSE server and is not the pipe-based headless mechanism.)",
+        ),
     },
     "copilot-cli": {
         "config": capability("unsupported", "Configuration", "Copilot CLI configuration is detected but not editable in this build."),

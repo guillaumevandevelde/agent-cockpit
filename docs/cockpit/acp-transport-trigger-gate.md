@@ -78,7 +78,7 @@ kandidatenlijst is al geklasseerd (`capabilities.py`, `headless_run`):
 |---|---|---|
 | `claude-code` | supported | `claude -p --output-format stream-json` |
 | `codex-cli` | supported | `codex exec --json` |
-| `open-code` | supported | `opencode serve` event-API |
+| `open-code` | supported | `opencode acp` (first-party ACP over stdio, measured); native `opencode run --format json` produced 0 bytes in non-TTY subprocess and is **not** used for transport |
 | `mimo-code` | unknown | niet geverifieerd |
 | `copilot-cli` | unsupported | geen gedocumenteerde headless-modus |
 

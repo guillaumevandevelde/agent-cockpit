@@ -254,6 +254,14 @@ Voor de transportkeuze is dat genoeg: de route die aantoonbaar werkt in de doelc
 route die dat niet doet. Voor de capability-tabel is het níét genoeg om `headless_run` op
 `unsupported` te zetten — daarom is dat een aparte kaart (§6) en geen conclusie hier.
 
+✅ **Geïmplementeerd (kaart `470d0a90…`)** — `capabilities.py:134` is bijgewerkt zodat de
+`headless_run`-beschrijving voor `open-code` (a) `opencode acp` als first-party ACP-server noemt,
+(b) de `opencode run --format json`-route expliciet als 0-byte gemarkeerd laat, en (c) `opencode
+serve` los benoemt als HTTP/SSE-pad in plaats van de pipe-gebaseerde headless-route. De
+`codex-cli`-rij (`capabilities.py:88`) is in dezelfde commit als **ongemeten** gemarkeerd omdat de
+Codex-CLI op deze host niet op PATH stond — alleen de prior-tekst blijft staan tot een reproduce
+de claim verifieert.
+
 ### 3.5 Waarom vraag B (N vendors) open blijft
 
 `acp-transport-decision.md` §6 zette ACP's belofte scherp: *één integratie voor meerdere vendors*.
