@@ -1134,3 +1134,117 @@ async def test_create_card_second_card_for_known_project_needs_no_confirm():
     second = await m.create_card("ALREADY-KNOWN", "Second", "")
     assert "error" not in second
     assert second["id"] != first["id"]
+
+
+# --- scheduled_at: kanban card `c7367319b9d245bdbd4cdc2ddc93e134` ---------
+#
+# The MCP `create_card` wrapper used to silently drop `scheduled_at`, so a
+# cadence-chain successor created via MCP landed immediately dispatchable
+# instead of sleeping until its intended time. The REST POST already accepts
+# the field; the MCP surface now mirrors it. The test below pins both halves
+# of the acceptance criterion: (a) the field round-trips, and (b) an
+# unparseable value is rejected with a clear error rather than silently
+# mis-routed.
+
+@pytest.mark.asyncio
+async def test_create_card_with_scheduled_at_round_trips_and_is_not_due():
+    """An MCP `create_card(scheduled_at=...)` stores the value on the card
+    AND keeps it out of the auto-dispatch pool (dep_resolver.is_due must
+    report False for a not-yet-reached future time).
+
+    Both halves matter independently:
+      - Without round-trip, the field is a silent no-op (the original bug).
+      - Without the dispatch hold, the field lands but the next 10s tick
+        claims it and re-runs the sweep — the recurring-loop half of the
+        incident in kanban card `c7367319b9d245bdbd4cdc2ddc93e134`.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dep_resolver import is_due as dep_is_due
+
+    # Far-future timestamp: far enough to dodge the 2-second resume-race
+    # guard that `set_resume` may stamp on freshly-created cards, and far
+    # enough to never trip the "now" half of is_due in a slow CI runner.
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+
+    card = await m.create_card(
+        "SCHED", "Cadence successor", "",
+        work_type="analysis",
+        scheduled_at=future,
+        confirm_new_project=True,
+    )
+    assert "error" not in card, card
+    assert card["scheduled_at"] == future, (
+        f"MCP create_card dropped scheduled_at — got {card.get('scheduled_at')!r}"
+    )
+
+    # Read back through the ORM and confirm the dispatch hold takes effect.
+    async with KanbanSessionLocal() as s:
+        from app.kanban.service import get_card as service_get_card
+        row = await service_get_card(s, card["id"])
+        assert row.scheduled_at == future
+        assert dep_is_due(row) is False, (
+            "card with future scheduled_at must NOT be dispatchable yet "
+            "(dep_resolver.is_due returned True)"
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_card_with_unparseable_scheduled_at_is_rejected():
+    """A non-ISO-8601 `scheduled_at` is refused with a clear error, not
+    silently coerced to None / stored verbatim / left to dep_resolver's
+    fail-open (which would make the cadence-successor bug bite again).
+
+    Acceptance criterion 2 of kanban card `c7367319b9d245bdbd4cdc2ddc93e134`:
+    "Een ongeldige/niet-parseerbare waarde wordt geweigerd met een duidelijke
+    fout in plaats van stil genegeerd." The MCP layer must surface this so
+    the operator notices; dep_resolver.is_due's fail-open stays in place for
+    legacy rows, but new writes cannot introduce fresh garbage."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.service import get_card as service_get_card
+
+    result = await m.create_card(
+        "SCHED-BAD", "Bad schedule", "",
+        scheduled_at="not-a-date",
+        confirm_new_project=True,
+    )
+    assert result.get("error") == "invalid_scheduled_at", (
+        f"MCP create_card accepted a non-ISO-8601 scheduled_at: {result!r}"
+    )
+    msg = result.get("message", "")
+    assert "scheduled_at" in msg, (
+        f"error message must name the offending field; got: {msg!r}"
+    )
+
+    # And nothing was created on the refused call — the failed validation
+    # must not have leaked a half-built card into the Backlog.
+    async with KanbanSessionLocal() as s:
+        leaked = await service_get_card(s, result.get("card_id", ""))
+        assert leaked is None, (
+            "rejected create_card must not persist a card "
+            f"(found row id={result.get('card_id')!r})"
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_card_without_scheduled_at_remains_due():
+    """The omitted case stays untouched — no scheduled_at → dep_resolver
+    returns True, so a plain `create_card` keeps its existing dispatch
+    behaviour. Guards against an over-broad validator breaking the default
+    path."""
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.dep_resolver import is_due as dep_is_due
+
+    card = await m.create_card(
+        "NO-SCHED", "Plain card", "",
+        work_type="analysis",
+        confirm_new_project=True,
+    )
+    assert "error" not in card
+    assert card.get("scheduled_at") is None
+
+    async with KanbanSessionLocal() as s:
+        from app.kanban.service import get_card as service_get_card
+        row = await service_get_card(s, card["id"])
+        assert dep_is_due(row) is True

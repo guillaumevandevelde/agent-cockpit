@@ -192,6 +192,7 @@ async def create_card(project: str, title: str, description: str = "",
                       depends_on: list[str] | None = None,
                       labels: list[str] | None = None,
                       metadata: dict | None = None,
+                      scheduled_at: str | None = None,
                       confirm_new_project: bool = False) -> dict:
     """Create a new card (agents may decompose work into subtask cards).
 
@@ -235,6 +236,18 @@ async def create_card(project: str, title: str, description: str = "",
     (`schemas.py:179`) and round-trips through the create op-log the same
     way `depends_on` does.
 
+    `scheduled_at` is an optional ISO-8601 timestamp (UTC or with offset,
+    e.g. ``"2026-08-04T07:00:00+00:00"``); when set, auto-dispatch ignores
+    the card until that time (see `dep_resolver.is_due`). This is the
+    cadence-chain "successor must sleep until next Monday" knob — without
+    it, a `create_card`-followed-by-`PATCH` workflow used to silently land
+    the successor as immediately dispatchable (kanban card
+    `c7367319b9d245bdbd4cdc2ddc93e134`). An unparseable value is rejected
+    with `{"error": "invalid_scheduled_at", "message": …, "card_id": None}`
+    so a typo can't reintroduce the bug. Same shape as `CardCreate.scheduled_at`
+    in `backend/app/kanban/schemas.py:355`; round-trips through `apply_operation`
+    to the `KanbanCard.scheduled_at` column.
+
     `metadata` is a free-form key/value bag (JSON-serialized) for
     integration-specific data that doesn't deserve its own field — external
     IDs, workflow provenance, last-seen upstream commit sha, etc. Stored as
@@ -245,6 +258,30 @@ async def create_card(project: str, title: str, description: str = "",
             known = await service.known_project_keys(s)
             if project not in known:
                 return await _unknown_project_key_error(s, project, for_create=True)
+        # `scheduled_at` validation — the REST `CardCreate` schema only types
+        # it as `str | None`, so a typo would otherwise land verbatim and be
+        # silently fail-opened by dep_resolver.is_due (which treats an
+        # unparseable timestamp as "due now"). That's exactly the half of the
+        # cadence-chain incident that motivated this gate (kanban card
+        # `c7367319b9d245bdbd4cdc2ddc93e134`): a session that read the create
+        # response never noticed the field had been dropped, and the dispatch
+        # tick claimed the successor within 10s. We catch it here so the
+        # caller sees the error before the card is even created.
+        if scheduled_at is not None:
+            from datetime import datetime as _dt
+            try:
+                _dt.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            except (ValueError, TypeError, AttributeError):
+                logger.info("create_card: rejected invalid scheduled_at=%r in %s",
+                            scheduled_at, project)
+                return {
+                    "error": "invalid_scheduled_at",
+                    "message": (
+                        f"scheduled_at must be an ISO-8601 timestamp "
+                        f"(e.g. '2026-08-04T07:00:00+00:00'); got {scheduled_at!r}"
+                    ),
+                    "card_id": None,
+                }
         # Auto-fill `agent` from the work_type mapping so MCP-created cards
         # don't recreate the regression from kanban card 9cf106e7 ("Card with
         # analysis work type got picked up by an engineer"): without this, a
@@ -273,7 +310,8 @@ async def create_card(project: str, title: str, description: str = "",
                      "parent_card_id": parent_card_id,
                      "depends_on": depends_on,
                      "labels": labels,
-                     "metadata": metadata})
+                     "metadata": metadata,
+                     "scheduled_at": scheduled_at})
         await s.commit()
         card = await service.get_card(s, cid)
         logger.info("create_card: %s in %s (%s, work_type=%s, agent=%s)",
