@@ -121,6 +121,31 @@ For each actionable, non-duplicate finding, create exactly one card.
 Target: **1–3 cards per run**. More than that means the filter is too loose;
 zero means the run was a no-op (also legitimate — see Step 3).
 
+**Important — link the run to its findings (kanban card `5770d3db…`).**
+Backlog cards from a cadence trigger are filed **standalone** (no
+`parent_card_id` to the trigger — they have to outlive it; see
+`recurring-cadence-proposal.md` §4.3). To still verify the run's
+contribution when you move your host card to Done
+(`outcome='filed_standalone'`), append each id to the **host card's own
+metadata** so the new outcome-`moved_card` -> Done step can prove N cards
+were filed, not zero:
+
+```
+created_id = create_card(project=<key>, title=…, description=…,
+                          column="Backlog")["id"]
+# After every successful create_card, append created_id to the host card's
+# metadata.filed_card_ids via `update_card`:
+update_card(card_id=<host_id>, metadata={"filed_card_ids":
+    [*(host_meta.get("filed_card_ids") or []), created_id]})
+# (Merge, don't overwrite — the host card may already carry ids from
+# earlier in the same run.)
+```
+
+If the run files zero Backlog cards, leave `metadata.filed_card_ids` as-is
+(or omit it entirely) and pick `outcome='no_action_needed'` on the
+Done-move instead of `filed_standalone`. Lying about either route is
+what the analysis-outcome-contract gate exists to prevent.
+
 `create_card(project=<resolved key>, column="Backlog", title=..., description=...)`
 
 - **title**: `[research] <one-line summary>` — short, specific, searchable.
