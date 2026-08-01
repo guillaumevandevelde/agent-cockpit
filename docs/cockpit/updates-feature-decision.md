@@ -88,6 +88,7 @@ Ja, met een kleine documentatiebijwerking. Drie onafhankelijke redenen:
    `git pull && npm run build && pkill -f uvicorn && ./scripts/cockpit.sh start`. De
    healthcheck + `git reset --hard` rollback maken het veiliger dan een handmatige `git
    pull`, die de gebruiker half in een kapotte staat kan achterlaten.
+   - *Opmerking (kaart `90a61175…`):* de `pkill -f uvicorn`-vorm in dat voorbeeld blijft riskant op deze gedeelde box — het patroon matcht op de cmdline van élke `uvicorn`-dragende agent- of dev-sessie. Buiten een gedispatchte context is het nog steeds onschadelijk, maar een veiliger variant is `pkill -f "scripts/cockpit.sh"` (de supervisor) of een bewaarde `BACKEND_PID` uit `cockpit.sh`'s pidfile — vermijd het generieke `-f uvicorn`.
 
 2. **De worktree-kanban-flow neemt dit niet over.** Engineers werken in
    `.claude/worktrees/` (zie `docs/cockpit/kanban-dispatch-spec.md`), en hun werk
