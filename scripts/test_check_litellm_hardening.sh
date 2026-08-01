@@ -397,7 +397,17 @@ echo "Task 14: service_callbacks is a phantom flag — must not appear in check 
 out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_OK" --config-yaml "$TMP/clean.yaml" 2>&1); rc=$?
 check "clean → rc 0"                                       '[ "$rc" -eq 0 ]'
 check "service_callbacks is not in PASS message"           '! echo "$out" | sanitize | grep -qF "service_callbacks"'
-check "service_callbacks is not in fix note"               '! echo "$out" | sanitize | grep -qF "service_callbacks"'
+# The fix-note under a prompt-mutation:FAIL must explicitly explain why
+# `service_callbacks` is NOT checked here — per `docs/cockpit/9router-
+# integratie-analyse.md` §11.2 the note exists so an operator who trusted
+# the public litellm_settings reference docs understands why their
+# `service_callbacks:` entry is silently ignored. Reuse the dirty config
+# from Task 12 (it triggers prompt-mutation:FAIL) — the clean run never
+# produces a fix-note, so checking it here would be tautological
+# (kaart `c1e31cc0…`; cf. self-improve-kaart `e5136a3f…`).
+out=$(bash "$SUT" --url "http://127.0.0.1:$PORT_OK" --config-yaml "$TMP/dirty_litellm_settings_guardrails.yaml" --strict 2>&1); rc=$?
+check "fix-note explains service_callbacks phantom flag" \
+  'echo "$out" | sanitize | grep -qF "service_callbacks"'
 
 # And a config that *would* have been flagged if the check trusted the docs:
 # the operator adds `service_callbacks: ["sentry"]` expecting monitoring, but
