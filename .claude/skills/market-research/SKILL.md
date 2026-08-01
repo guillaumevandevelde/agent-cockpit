@@ -196,15 +196,9 @@ otherwise the chain dies and the next week has to be re-seeded by hand.
    with no link back to the cadence proposal and the audit trail in the
    kanban activity feed is broken.
 
-   **Trap: the `create_card` MCP tool has no `scheduled_at` parameter.**
-   It silently creates the successor with `scheduled_at: null`, which is
-   not a harmless omission — an unscheduled Backlog card with
-   `work_type=analysis` is immediately dispatchable, so the chain can
-   re-fire the sweep within the next 10 s tick instead of next Monday.
-   Set it in a second call right after creating the card:
-   `PATCH /api/v1/kanban/cards/<new-id>` with
-   `{"scheduled_at": "<next_scheduled_at>"}`, then verify the response
-   echoes the value back.
+   Pass `scheduled_at` directly to `create_card` (MCP exposes the field
+   since kanban card `c7367319b9d245bdbd4cdc2ddc93e134`; an unparseable
+   value is rejected with `{"error": "invalid_scheduled_at", …}`).
 4. The successor's `description` is a verbatim copy of the host card's
    description (which already includes the "Step 7 — schedule the next run"
    instruction). One typo and the chain dies — copy carefully, or build the
