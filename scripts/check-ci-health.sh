@@ -274,9 +274,8 @@ if [ "${#RUN_IDS[@]}" -eq 0 ] || [ -z "${RUN_IDS[0]%%|*}" ]; then
   exit 0
 fi
 
-infra_warned=0
 master_red_streak=0
-checked_for_streak=0
+streak_open=1
 consecutive_red_warned=0
 
 # Walk runs NEWEST-FIRST. `gh run list --limit N` returns JSON with the
@@ -295,28 +294,15 @@ consecutive_red_warned=0
 #
 # Streak semantics (newest-first walk):
 #   - master failure       → streak += 1 (continue)
-#   - master non-failure   → streak = 0; BREAK (true streak boundary —
-#                             a green master is conclusive evidence
-#                             that "the last N pushes" were not all red)
-#   - non-master ANYTHING   → streak = 0; BREAK. A dependabot or
-#                             feature-branch push doesn't count toward
-#                             the master streak (task 10's contract);
-#                             the previous shape treated it as a
-#                             boundary for the same reason — but that
-#                             also erased an already-reached threshold
-#                             when an older non-master run sat below
-#                             the reds. We pair "break on non-master"
-#                             with an inline threshold check (below)
-#                             so a streak that already fired at index
-#                             N-1 isn't dropped by a later reset at
-#                             index N. See task 17.
+#   - master non-failure   → streak = 0; close streak check
+#   - non-master ANYTHING  → streak = 0; close streak check. A dependabot or
+#                            feature-branch run remains a boundary under task
+#                            10's contract.
 #   - in-flight / queued   → SKIP (empty `conclusion`).
 #
-# Threshold check fires INLINE the moment the streak reaches the limit,
-# not after the loop. If we waited until after the loop, a later
-# master-green or run-limit break could reset the streak to 0 and
-# silently drop the warning we'd otherwise emit at index N-1 of the
-# current run.
+# Closing the streak check never ends the loop: check 1 independently scans
+# every fetched master/main run for infrastructure failures. The threshold
+# check still fires inline before any later boundary can reset the streak.
 for ((i=0; i<${#RUN_IDS[@]}; i++)); do
   spec="${RUN_IDS[$i]}"
   IFS='|' read -r rid conc branch wf_id <<<"$spec"
@@ -342,43 +328,35 @@ for ((i=0; i<${#RUN_IDS[@]}; i++)); do
     case "$sig" in
       infra*)
         warn "CI didn't actually run on $branch run #${rid} (${sig#infra|}) — conclusion=failure with no steps executed; this is an infrastructure/billing signal, NOT a test failure."
-        infra_warned=1
         ;;
     esac
   fi
 
   # Check 2 — consecutive red on master (walk newest→oldest; see
-  # semantics table above).
-  if [ "$branch" = "master" ] || [ "$branch" = "main" ]; then
-    if [ "$conc" = "failure" ]; then
-      master_red_streak=$((master_red_streak + 1))
-      checked_for_streak=$((checked_for_streak + 1))
+  # semantics table above). A streak boundary closes only this check; check 1
+  # must keep scanning older master runs past interleaved PR runs.
+  if [ "$streak_open" -eq 1 ]; then
+    if [ "$branch" = "master" ] || [ "$branch" = "main" ]; then
+      if [ "$conc" = "failure" ]; then
+        master_red_streak=$((master_red_streak + 1))
+      else
+        master_red_streak=0
+        streak_open=0
+      fi
     else
-      # Master green (or any non-failure master conclusion) is a true
-      # streak boundary — no point scanning further back.
+      # Non-master runs remain a boundary for the master streak (task 10),
+      # but not for the independent infrastructure scan above.
       master_red_streak=0
-      break
+      streak_open=0
     fi
-  else
-    # Non-master run: doesn't count toward the master streak, and the
-    # older test 10 contract is that this is also a boundary. Pair with
-    # the inline threshold check below so a streak that already fired
-    # at index N-1 isn't dropped by this reset.
-    master_red_streak=0
-    break
-  fi
 
-  # Inline threshold check. Fires the moment the streak reaches
-  # --red-threshold, regardless of what older runs we still have to
-  # walk past. `consecutive_red_warned` keeps it to one warning per
-  # run, even if the streak keeps growing.
-  if [ "$master_red_streak" -ge "$RED_THRESHOLD" ] && [ "$consecutive_red_warned" -eq 0 ]; then
-    warn "last $master_red_streak consecutive $WORKFLOW run(s) on master all concluded failure — \"CI will catch it\" is no longer a safe assumption; investigate before shipping more."
-    consecutive_red_warned=1
-  fi
-
-  if [ "$checked_for_streak" -ge "$LIMIT" ]; then
-    break
+    # Inline threshold check. Fires the moment the streak reaches
+    # --red-threshold, regardless of what older runs we still have to
+    # scan for infrastructure failures.
+    if [ "$master_red_streak" -ge "$RED_THRESHOLD" ] && [ "$consecutive_red_warned" -eq 0 ]; then
+      warn "last $master_red_streak consecutive $WORKFLOW run(s) on master all concluded failure — \"CI will catch it\" is no longer a safe assumption; investigate before shipping more."
+      consecutive_red_warned=1
+    fi
   fi
 done
 

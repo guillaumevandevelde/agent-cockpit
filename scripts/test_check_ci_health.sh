@@ -50,6 +50,10 @@
 #       was structurally red.
 #  18.  live-order edge: green-then-billing-block. Infra warning fires;
 #       no consecutive-red (only 1 failure, on top of a green boundary).
+#  19.  newest non-master run does not hide billing-blocked master runs below
+#       it, whether the PR run itself is green or billing-blocked.
+#  20.  cockpit-doctor check #9 surfaces reproduction B as a CI-health WARN
+#       and never prints the misleading "CI health clean" PASS.
 
 set -u
 
@@ -392,6 +396,53 @@ check "live4 → flags infra" \
   'echo "$OUT" | grep -qiE "infrastructure|billing|empty[- ]steps|did not (run|execute)"'
 check "live4 → does NOT flag consecutive-red (only 1 failure on top of green)" \
   '! echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+
+# ----------------------------------------------------------------------------
+echo "Task 19: newest PR run does not hide billing-blocked master runs below"
+pr_green="$TMP/pr-green"
+write_fixtures "$pr_green" \
+  "9001|success|k-feature-x|46" \
+  "9002|failure|master|3" \
+  "9003|failure|master|3" \
+  "9004|failure|master|3"
+out=$(CI_HEALTH_FIXTURES_DIR="$pr_green" bash "$SUT" 2>&1); rc=$?
+check "green PR above billing-blocked master → emits infrastructure warning" \
+  'echo "$OUT" | grep -qiE "infrastructure|billing|empty[- ]steps|did not (run|execute)"'
+check "green PR above billing-blocked master → names first master run (#9002)" \
+  'echo "$OUT" | grep -qE "#?9002"'
+check "green PR remains a streak boundary" \
+  '! echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+
+pr_blocked="$TMP/pr-blocked"
+write_fixtures "$pr_blocked" \
+  "9101|failure|k-feature-x|3" \
+  "9102|failure|master|3" \
+  "9103|failure|master|3" \
+  "9104|failure|master|3"
+out=$(CI_HEALTH_FIXTURES_DIR="$pr_blocked" bash "$SUT" 2>&1); rc=$?
+check "blocked PR above billing-blocked master → emits infrastructure warning" \
+  'echo "$OUT" | grep -qiE "infrastructure|billing|empty[- ]steps|did not (run|execute)"'
+check "blocked PR above billing-blocked master → names first master run (#9102)" \
+  'echo "$OUT" | grep -qE "#?9102"'
+check "blocked PR remains a streak boundary" \
+  '! echo "$OUT" | grep -qiE "consecutive|streak|in a row"'
+
+# ----------------------------------------------------------------------------
+echo "Task 20: cockpit-doctor check #9 does not call reproduction B clean"
+GH_BIN="$TMP/fake-gh-bin"
+mkdir -p "$GH_BIN"
+cat > "$GH_BIN/gh" <<'EOF'
+#!/usr/bin/env bash
+[ "${1:-}" = "auth" ] && exit 0
+exit 0
+EOF
+chmod +x "$GH_BIN/gh"
+out=$(CI_HEALTH_FIXTURES_DIR="$pr_blocked" PATH="$GH_BIN:$PATH" \
+  bash "$SCRIPT_DIR/cockpit-doctor.sh" 2>&1); rc=$?
+check "doctor reproduction B → emits CI health warning" \
+  'echo "$OUT" | sed -E '\''s/\x1b\[[0-9;]*[a-zA-Z]//g'\'' | grep -qE "WARN.*CI health"'
+check "doctor reproduction B → does NOT say CI health clean" \
+  '! echo "$OUT" | grep -qE "CI health clean"'
 
 # ----------------------------------------------------------------------------
 echo ""
