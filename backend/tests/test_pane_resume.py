@@ -203,6 +203,53 @@ async def test_try_pane_resume_schedules_nudge_when_pane_alive(tmp_path, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_try_pane_resume_clamps_a_past_reset_time(tmp_path, monkeypatch):
+    """A reset time that already passed must still schedule a deliverable nudge.
+
+    The dated weekly-limit wording ("resets Aug 3, 7pm") is parsed as a real
+    date, so a limit detected *after* its reset — a session that sat idle over
+    the weekend, or a backend restart replaying an old transcript tail — hands
+    try_pane_resume a past reset_time. Left unclamped, fire_at lands beyond
+    APScheduler's misfire_grace_time, the job is dropped, and the card stays
+    stuck on `pane_resume_pending=True` forever (every later detection takes
+    the "nudge still in flight" no-op branch).
+    """
+    session_name = "k-panepast-0001"
+    repo, _projects_dir, _transcript = _build_worktree_transcript(tmp_path, session_name, [])
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    _patch_auto_resume(monkeypatch)
+    add_job_mock, _remove_job_mock = _add_job_mock(monkeypatch)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="pane-past-reset")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
+        )
+        await s.commit()
+
+    reset_time = datetime.now(UTC) - timedelta(days=2)
+
+    with patch(
+        "app.services.scheduling.session_resolver.resolve_target",
+        return_value=f"{session_name}:0.0",
+    ):
+        ok = await dispatch.try_pane_resume(
+            cwd=str(repo / ".claude" / "worktrees" / session_name),
+            reset_time=reset_time,
+            message="Continue where you left off.",
+        )
+    assert ok is True
+    fire_at = add_job_mock.call_args.kwargs["trigger"].run_date
+    now = datetime.now(UTC)
+    assert fire_at >= now - timedelta(seconds=5), "past nudge would be dropped as a misfire"
+    assert fire_at <= now + timedelta(seconds=dispatch.PANE_RESUME_MARGIN_S + 5)
+
+
+@pytest.mark.asyncio
 async def test_try_pane_resume_returns_false_when_pane_gone(tmp_path, monkeypatch):
     """Pane gone → try_pane_resume is a clean no-op so the caller can fall
     back to the existing kill+To Resume path. No metadata, no scheduled nudge."""

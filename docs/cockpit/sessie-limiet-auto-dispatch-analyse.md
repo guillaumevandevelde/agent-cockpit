@@ -316,6 +316,28 @@ op fout: te lang wachten (verloren capaciteit) of te vroeg herstarten (opnieuw t
 muur). Dezelfde regex is ook aan `"hit your session limit"` gekoppeld en zou de
 weekly-vorm uit 3.1 dus sowieso niet parsen.
 
+**3.3 De weekly-vorm mét datum parste niet (gefixt 2026-08-03).** Nadat 3.1/3.2 gefixt
+waren bleef één vorm over: de weekly-limiet zet een **datum** vóór de klok-tijd omdat de
+reset dagen weg kan liggen — `"You've hit your weekly limit · resets Aug 3, 7pm
+(Europe/Brussels)"` (waargenomen: `Jul 27`, `Aug 3`). De regex verwachtte de tijd direct
+na `resets`, dus dit viel terug op de blinde `FALLBACK_PAUSE_HOURS = 5`-gok. Gemeten
+gevolg op 2026-08-01: kaarten `efdc8f4f…` en `dfac67d3…` werden bij de backend-herstart
+van 2026-08-03 20:39 door de reaper geparkeerd tot 01:40 — terwijl hun echte reset
+(3 aug 19:00) op dat moment al **anderhalf uur voorbij** was.
+
+Drie wijzigingen:
+
+1. `_LIMIT_PATTERN` heeft een optionele `(?P<month>…)\s+(?P<day>…),` groep; `_resolve_year`
+   kiest het jaar dat het dichtst bij `now` ligt (Dec 31 ↔ Jan 1).
+2. Een **gedateerde** reset rolt niet door naar morgen als hij in het verleden ligt — dat
+   verleden-tijdstip is juist het signaal "de limiet is al opgeheven, dispatch nu". Alleen
+   de ongedateerde vorm houdt de `+1 dag`-regel, want daar is de datum echt onbekend.
+3. De reaper gokte per definitie (`reap_stale_claims` zag alleen pane-content). Hij leest
+   nu eerst het transcript van de dode sessie via `_transcript_reset_time` en gebruikt de
+   `FALLBACK_PAUSE_HOURS`-gok alleen nog als daar geen parsebare reset-tijd in staat.
+   `try_pane_resume` clampt een reset in het verleden naar `now + 1s`, anders dropt
+   APScheduler de nudge als misfire en blijft de kaart op `pane_resume_pending` hangen.
+
 ---
 
 ## 4. De spillover is dode code (geen pool geconfigureerd)

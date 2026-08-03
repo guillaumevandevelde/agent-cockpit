@@ -5040,10 +5040,12 @@ async def test_reaper_moves_resumable_dead_session_to_to_resume():
 
 @pytest.mark.asyncio
 async def test_reaper_move_to_resume_sets_fallback_scheduled_at():
-    """The reaper never has a parsed reset time (only tmux pane content, no
-    Notification message) -- it must fall back to now + FALLBACK_PAUSE_HOURS so
-    the card doesn't get immediately re-picked up by the next dispatch tick
-    while the rate limit is still in effect."""
+    """With no transcript to read a reset time from, the reaper falls back to
+    now + FALLBACK_PAUSE_HOURS so the card doesn't get immediately re-picked up
+    by the next dispatch tick while the rate limit is still in effect.
+
+    The dead session's transcript takes precedence when it carries a parseable
+    reset time -- see test_reaper_prefers_transcript_reset_time_over_guess."""
     import unittest.mock as mock
     from datetime import UTC, datetime, timedelta
 
@@ -5078,6 +5080,65 @@ async def test_reaper_move_to_resume_sets_fallback_scheduled_at():
     fire_at = datetime.fromisoformat(card.scheduled_at)
     assert before + timedelta(hours=FALLBACK_PAUSE_HOURS) <= fire_at
     assert fire_at <= after + timedelta(hours=FALLBACK_PAUSE_HOURS)
+
+
+@pytest.mark.asyncio
+async def test_reaper_prefers_transcript_reset_time_over_guess(tmp_path):
+    """A dead session's transcript usually still holds the limit message that
+    killed it. When that message carries a parseable reset time, the reaper
+    must schedule the resume for *that* moment instead of the blind
+    now + FALLBACK_PAUSE_HOURS guess -- guessing parks a card for 5h even when
+    the real reset is minutes away (or already passed).
+    """
+    import json
+    import unittest.mock as mock
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from app.kanban import session_recovery
+
+    tz = ZoneInfo("Europe/Brussels")
+    reset_day = datetime.now(tz) + timedelta(days=1)
+    message = (
+        "You've hit your weekly limit · resets "
+        f"{reset_day.strftime('%b %-d')}, 7pm (Europe/Brussels)"
+    )
+    transcript = tmp_path / "sess-tr.jsonl"
+    transcript.write_text(json.dumps({
+        "type": "assistant",
+        "isApiErrorMessage": True,
+        "message": {"role": "assistant", "content": [{"type": "text", "text": message}]},
+    }) + "\n")
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="resumable-dead-transcript", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-0007"},
+        )
+        await s.commit()
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", return_value=("sess-tr", "proj-folder"),
+    ):
+        with mock.patch.object(
+            session_recovery, "_resolve_transcript_file", return_value=transcript,
+        ) as resolve_transcript:
+            with mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+                async with KanbanSessionLocal() as s:
+                    reaped = await dispatch.reap_stale_claims(
+                        s, project_key=PK, cards=await list_cards(s, PK),
+                        live_sessions=set(), project_path="/p",
+                    )
+                    await s.commit()
+                    card = await get_card(s, cid)
+
+    assert reaped == 1
+    assert resolve_transcript.called, "reaper never looked at the transcript"
+    assert card.column == "To Resume"
+    fire_at = datetime.fromisoformat(card.scheduled_at).astimezone(tz)
+    assert (fire_at.month, fire_at.day) == (reset_day.month, reset_day.day)
+    assert (fire_at.hour, fire_at.minute) == (19, 0)
 
 
 @pytest.mark.asyncio
