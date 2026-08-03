@@ -436,6 +436,13 @@ function RequestReviewControl({
         placeholder="Describe your doubt about this implementation…"
         disabled={submitting}
         data-testid="request-review-note"
+        // Compact in the sticky priority area so the body underneath keeps
+        // enough vertical room to show the Deliverables / TabsContent (kaart
+        // d4012bd1: Done-kaart body bottom-clipped). The default 80px min-h
+        // is fine for free-standing forms, but here two of them stack above a
+        // single-scroll body and consume half the 85vh modal.
+        rows={2}
+        className="min-h-[40px]"
       />
       <div className="flex justify-end">
         <Button
@@ -500,6 +507,13 @@ function ReopenControl({
         placeholder="Weerleg deze beslissing — de kaart gaat terug naar Backlog en een nieuwe sessie pakt hem op met jouw tegengewicht in de prompt."
         disabled={submitting}
         data-testid="reopen-note"
+        // Same compactness rationale as the request-review Textarea above
+        // (kaart d4012bd1). Both textareas live in the sticky priority area
+        // for Done cards; doubling them at the default 80px min-h is what
+        // pushed the body to the "scroll-past-Deliverables-to-see-anything"
+        // state captured in the screenshot.
+        rows={2}
+        className="min-h-[40px]"
       />
       <div className="flex justify-end">
         <Button
