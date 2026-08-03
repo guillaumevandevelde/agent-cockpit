@@ -29,6 +29,7 @@ from app.services.agentic_cli.structured_events import (
     PermissionOption,
     PermissionRequestEvent,
     PlanUpdateEvent,
+    StructuredEventType,
     ToolCallEvent,
     ToolCallStatus,
     UsageResultEvent,
@@ -689,3 +690,150 @@ async def test_acp_transport_full_turn(monkeypatch, tmp_path):
     # Pidfile is gone in the finally block (we completed cleanly).
     assert "k-acp-e2e" not in acp._acp_processes
     assert not (worktree / acp._ACP_PIDFILE_NAME).exists()
+
+
+@pytest.mark.asyncio
+async def test_permission_gate_fires_over_jsonrpc_wire(monkeypatch, tmp_path):
+    """Wire-level proof that the ``session/request_permission`` gate is
+    load-bearing (brondoc §2.4 / §3.3, AC bullet 4).
+
+    The fake server emits a ``session/request_permission`` request during
+    the prompt turn. The transport must:
+
+    1. Emit a ``permission_request`` structured event (so downstream
+       consumers see the gate firing).
+    2. Send back a JSON-RPC ``result`` selecting the first ``allow_once``
+       option, so the turn can proceed without blocking.
+
+    The unit tests already pin the handler logic in isolation
+    (``test_permission_request_response_uses_allow_once_option`` +
+    ``test_permission_request_response_falls_back_to_first_when_no_allow_once``),
+    but the AC explicitly demands "een test die aantoont dat de gate
+    daadwerkelijk aangeroepen wordt" — i.e. the gate's wire path, not just
+    the helper. A regression here (handler no longer wired, response shape
+    drifted, request id mismatch) would pass every isolated test and still
+    break the production flow.
+    """
+    import app.kanban.acp_transport as acp
+
+    # The responses are captured via FAKE_ACP_RESPONSES_PATH — the fake
+    # server writes the response shape to that file when the transport
+    # sends back the answer to request_permission id=99.
+    request_log = tmp_path / "requests.jsonl"
+    fake_acp = tmp_path / "fake_acp.py"
+    fake_acp.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys, os\n"
+        f"LOG = open({str(request_log)!r}, 'a', buffering=1)\n"
+        "def _read_message():\n"
+        "    line = sys.stdin.readline()\n"
+        "    if not line:\n"
+        "        return None\n"
+        "    return json.loads(line)\n"
+        "def _send(msg):\n"
+        "    sys.stdout.write(json.dumps(msg) + '\\n')\n"
+        "    sys.stdout.flush()\n"
+        "def _handle(req):\n"
+        "    LOG.write(json.dumps({'id': req.get('id'), 'method': req.get('method')}) + '\\n')\n"
+        "    if req['method'] == 'initialize':\n"
+        "        return {'protocolVersion': 1, 'agentCapabilities': {}}\n"
+        "    if req['method'] == 'session/new':\n"
+        "        return {'sessionId': 'ses_perm_1'}\n"
+        "    if req['method'] == 'session/prompt':\n"
+        # Drive the gate: emit a request_permission request BEFORE closing
+        # the turn. The transport must respond with a result on the same
+        # id; we record the response shape and assert it matches the
+        # load-bearing contract.
+        "        _send({'jsonrpc':'2.0','id':99,'method':'session/request_permission','params':{\n"
+        "            'sessionId':'ses_perm_1',\n"
+        "            'toolCall':{'toolCallId':'call_perm_1','title':'Edit /tmp/x','kind':'edit','status':'pending','rawInput':{'filepath':'/tmp/x'}},\n"
+        "            'options':[\n"
+        "                {'optionId':'allow_once','name':'Allow once','kind':'allow_once'},\n"
+        "                {'optionId':'reject_once','name':'Reject','kind':'reject_once'},\n"
+        "            ],\n"
+        "        }})\n"
+        # Wait for the response (the server's read loop blocks until the
+        # transport replies; we then close the turn normally).
+        "        return {'stopReason': 'end_turn', 'usage': {'inputTokens': 1, 'outputTokens': 1, 'totalTokens': 2}}\n"
+        "    return {}\n"
+        # Override _send so we capture every JSON-RPC message the server
+        # writes — including the response that the transport sends back to
+        # the server's request_permission. We capture by intercepting stdout
+        # in a side-channel: read everything the transport wrote after the
+        # request_permission before responding. The simpler trick: the
+        # transport's response is on stdin (we are the server reading it).
+        "while True:\n"
+        "    req = _read_message()\n"
+        "    if req is None:\n"
+        "        break\n"
+        "    # If this is a response to our request_permission request (id 99),\n"
+        "    # record the result before discarding.\n"
+        "    if req.get('id') == 99 and 'result' in req:\n"
+        "        RESPONSES_PATH = os.environ.get('FAKE_ACP_RESPONSES_PATH')\n"
+        "        if RESPONSES_PATH:\n"
+        "            with open(RESPONSES_PATH, 'a', buffering=1) as rf:\n"
+        "                rf.write(json.dumps(req) + '\\n')\n"
+        "    resp = {'jsonrpc':'2.0','id':req['id'],'result':_handle(req)}\n"
+        "    _send(resp)\n"
+    )
+    fake_acp.chmod(0o755)
+
+    # Capture every JSON-RPC message the transport writes to its stdin
+    # (i.e. the server's stdout). This includes the response to the
+    # request_permission request id=99.
+    responses_log = tmp_path / "responses.jsonl"
+    monkeypatch.setenv("FAKE_ACP_RESPONSES_PATH", str(responses_log))
+
+    monkeypatch.setattr(acp, "resolve_acp_executable", lambda: str(fake_acp))
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(acp.session_registry, "can_add_session", lambda: True)
+    monkeypatch.setattr(acp.session_registry, "reserve_external", lambda name: None)
+
+    # Capture every structured event the transport emits so we can assert
+    # it sees the permission_request event.
+    seen_events: list = []
+
+    async def _capture_event(event, *, session_name, provider):
+        seen_events.append(event)
+
+    monkeypatch.setattr(acp, "_on_event", _capture_event)
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+
+    result = await acp.acp_transport(
+        directory=str(worktree), prompt="hello", session_name="k-acp-perm",
+        cli_id="open-code", provider="opencode-go",
+    )
+
+    # Wait for the background run_acp task so the response is on the wire
+    # before we read responses.jsonl.
+    for task in list(acp._acp_start_tasks):
+        if task.get_name() == f"acp-run-{result['session_name']}":
+            await task
+            break
+
+    # 1. The transport emitted a permission_request structured event when
+    # the server sent session/request_permission.
+    perm_events = [
+        e for e in seen_events if e.type == StructuredEventType.PERMISSION_REQUEST
+    ]
+    assert len(perm_events) == 1, (
+        f"expected exactly one permission_request event; got {len(perm_events)}"
+    )
+    assert perm_events[0].tool_call_id == "call_perm_1"
+    assert len(perm_events[0].options) == 2
+
+    # 2. The transport sent a JSON-RPC response with the load-bearing
+    # shape — outcome.selected.optionId = the first allow_once option.
+    responses = [
+        json.loads(line) for line in responses_log.read_text().splitlines() if line.strip()
+    ]
+    perm_responses = [r for r in responses if r.get("id") == 99]
+    assert len(perm_responses) == 1, (
+        f"expected exactly one response to id=99 request_permission; "
+        f"got {len(perm_responses)} responses: {responses!r}"
+    )
+    result_payload = perm_responses[0]["result"]
+    assert result_payload["outcome"]["outcome"] == "selected"
+    assert result_payload["outcome"]["optionId"] == "allow_once"

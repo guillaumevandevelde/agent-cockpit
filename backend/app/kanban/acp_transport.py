@@ -1065,7 +1065,12 @@ async def run_acp(
 
         prompt_result = await client.request("session/prompt", {
             "sessionId": session_id,
-            "prompt": prompt,
+            # ACP ``session/prompt`` takes the prompt as an array of
+            # content blocks, not a bare string (measured against OpenCode
+            # 1.18.8: a string payload returns ``-32602 Invalid params:
+            # expected array, received string``). The text-block form is
+            # the canonical "single user message" shape.
+            "prompt": [{"type": "text", "text": prompt}],
         }, timeout=None)
 
         # Terminal: emit the usage_result event from the prompt response
