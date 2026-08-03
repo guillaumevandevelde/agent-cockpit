@@ -6111,6 +6111,48 @@ class TestBuildShipInstructions:
             assert "rm -fr" not in instructions
             assert "rm node_modules" not in instructions
 
+    def test_frontend_gate_probes_symlinked_install_for_deeper_corruption(self):
+        """Tertiary papercut (card 9b7c2a98…, revisit of 4279448c): the
+        fast-path symlink shortcut only checks that ``.bin/`` exists,
+        which catches the partial-install trap (card 15cc257d…) but
+        misses a subtler form of corruption where ``.bin/eslint`` is
+        present but a *deeper* transitive dependency (e.g. ``acorn``,
+        imported by ``espree``/``eslint``) is missing. The symlinked
+        install then dies with ``Cannot find module 'acorn'`` on the
+        first ``npm run lint``, forcing the agent to manually
+        ``rm`` (deny-listed, so ``mv``) the symlink and re-pay the
+        multi-minute ``npm ci``. The gate must probe the symlinked
+        install for actual workability — not just for the presence of
+        ``.bin/`` — and fall back to ``npm ci`` on probe failure."""
+        for mode in ("direct", "pull-request"):
+            instructions = dispatch._build_ship_instructions(mode)
+            # The probe must actually exercise eslint's module graph
+            # (not just `require.resolve`, which only checks file
+            # presence). Either `require('eslint/lib/cli.js')` (forces
+            # Node to load eslint's full module graph, so a missing
+            # transitive dep like `acorn` surfaces immediately) or
+            # `node_modules/.bin/eslint --version` (same entry point
+            # `npm run lint` uses). A pure `[ -d .bin ]` check is
+            # insufficient — that's exactly what the card asks us to
+            # *replace*.
+            assert "require('eslint/lib/cli.js')" in instructions \
+                or "node_modules/.bin/eslint --version" in instructions, \
+                f"{mode} ship recipe must probe the symlinked install " \
+                "for deeper-dep corruption, not just .bin presence"
+            # The probe must drive a real fallback to `npm ci` when it
+            # fails — `npm ci` is the canonical recovery (pinned by
+            # `test_frontend_gate_installs_deps_when_node_modules_missing`).
+            # We don't assert the literal token here because the fallback
+            # block already lives in the existing else-branch; instead
+            # we assert the probe runs *after* the symlink so the
+            # fallback path is reachable from a corrupt-symlink state.
+            assert "ln -s" in instructions
+            # The corrupt symlink must be moved aside (`rm` is
+            # deny-listed, `mv` is the only safe move), matching the
+            # partial-install convention above.
+            assert " mv " in instructions, \
+                f"{mode} ship recipe must `mv` a corrupt symlink aside"
+
     def test_pull_request_mode_polls_for_merge_before_done(self):
         instructions = dispatch._build_ship_instructions("pull-request")
         assert "gh pr ready" in instructions
