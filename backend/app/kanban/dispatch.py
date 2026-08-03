@@ -276,7 +276,7 @@ SKIP_PERMISSIONS_PREFIX = "skip_permissions:"
 SHIP_MODES = ("pull-request", "direct")
 DEFAULT_SHIP_MODE = "pull-request"
 TRANSPORT_PREFIX = "transport:"
-TRANSPORTS = ("worktree", "sandcastle", "headless")
+TRANSPORTS = ("worktree", "sandcastle", "headless", "acp")
 DEFAULT_TRANSPORT = "worktree"
 # A card whose session dies within seconds of being dispatched, this many times in a
 # row with no successful run in between, is flagged to Impediment instead of being
@@ -4144,6 +4144,32 @@ async def _live_headless_sessions() -> set[str]:
         return set()
 
 
+async def _live_acp_sessions() -> set[str]:
+    """Session names of ACP ``opencode acp`` subprocesses still running.
+
+    Fourth liveness source for ``reap_stale_claims`` — sits alongside
+    ``_live_sessions`` (tmux), ``_live_sandcastle_sessions`` (DB rows),
+    and ``_live_headless_sessions`` (headless pidfiles). An ACP run has
+    none of those, so without this fourth source the reaper would release
+    + re-dispatch ACP claims every tick — the same dispatch-loop bug
+    sandcastle had before its own second source was added. The liveness
+    predicate is the durable pidfile plus the same OS-level pid+cwd check
+    the headless transport uses; see
+    ``backend/app/kanban/acp_transport.py:live_acp_sessions``.
+
+    Defensive: any failure yields an empty set, which only makes the
+    reaper *more* eager — never less — so a transient registry hiccup
+    can't keep a truly-dead claim alive forever. Same contract as
+    ``_live_headless_sessions`` and ``_live_sandcastle_sessions``.
+    """
+    try:
+        from app.kanban.acp_transport import live_acp_sessions
+        return live_acp_sessions()
+    except Exception:
+        logger.exception("could not query live acp sessions")
+        return set()
+
+
 def _slug(name: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower()
     return s or "project"
@@ -6586,6 +6612,7 @@ async def check_progress_liveness(
     live_sessions: set[str] | None = None,
     sandcastle_live: set[str] | None = None,
     headless_live: set[str] | None = None,
+    acp_live: set[str] | None = None,
     now: float | None = None,
     signal_seconds: int | None = None,
     action_seconds: int | None = None,
@@ -6665,6 +6692,10 @@ async def check_progress_liveness(
         _progress_liveness_state.pop(stale_id, None)
 
     acted: set[str] = set()
+    # Default-set so the membership check below never sees None (test
+    # callers omit ``acp_live`` and that's fine — same fail-open shape as
+    # ``headless_live``/``sandcastle_live``).
+    acp_live = acp_live or set()
 
     for card in cards:
         if card.column in COLUMNS:
@@ -6672,11 +6703,11 @@ async def check_progress_liveness(
         name = _claimant_session(card)
         if name is None:
             continue
-        if name in live_sessions or name in sandcastle_live or name in headless_live:
+        if name in live_sessions or name in sandcastle_live or name in headless_live or name in acp_live:
             # Those transports own liveness — see reap_stale_claims for the
             # same carve-out. Skipping is correct even if the transcript
-            # happens to exist for a sandcastle/headless session (it won't
-            # normally — different cwd — but the carve-out is on the
+            # happens to exist for a sandcastle/headless/acp session (it
+            # won't normally — different cwd — but the carve-out is on the
             # transport, not on the transcript).
             continue
 
@@ -6779,6 +6810,7 @@ async def reap_stale_claims(
     session, *, project_key: str, cards: Iterable[KanbanCard], live_sessions: set[str],
     sandcastle_live: set[str] | None = None,
     headless_live: set[str] | None = None,
+    acp_live: set[str] | None = None,
     project_path: str | None = None,
 ) -> int:
     """Release `agent:` claims on cards in agent columns whose session is gone.
@@ -6818,6 +6850,7 @@ async def reap_stale_claims(
 
     sandcastle_live = sandcastle_live or set()
     headless_live = headless_live or set()
+    acp_live = acp_live or set()
     reaped = 0
 
     # Pre-compute the stuck set once per tick: get_stuck_sessions walks the
@@ -6897,7 +6930,7 @@ async def reap_stale_claims(
                     reaped += 1
                     continue
 
-        if name in live_sessions or name in sandcastle_live or name in headless_live:
+        if name in live_sessions or name in sandcastle_live or name in headless_live or name in acp_live:
             continue
 
         # If we know the project path, try resume recovery first
@@ -7183,6 +7216,7 @@ async def dispatch_project(
     live_sessions: set[str] | None = None,
     sandcastle_live: set[str] | None = None,
     headless_live: set[str] | None = None,
+    acp_live: set[str] | None = None,
 ) -> dict | None:
     """Claim+move+spawn the next card for one project. Returns a result dict or
     None when there is nothing to do (no candidate card, or the per-column cap
@@ -7210,6 +7244,7 @@ async def dispatch_project(
         if await reap_stale_claims(
             session, project_key=project_key, cards=cards, live_sessions=live_sessions,
             sandcastle_live=sandcastle_live, headless_live=headless_live,
+            acp_live=acp_live,
             project_path=project_path,
         ):
             cards = await list_cards(session, project_key)
@@ -7238,6 +7273,7 @@ async def dispatch_project(
             live_sessions=live_sessions,
             sandcastle_live=sandcastle_live,
             headless_live=headless_live,
+            acp_live=acp_live,
         ):
             cards = await list_cards(session, project_key)
 
@@ -8028,6 +8064,7 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
     live_sessions = _live_sessions()  # one tmux query per tick, shared across projects
     sandcastle_live = await _live_sandcastle_sessions()  # sandcastle liveness, shared
     headless_live = await _live_headless_sessions()  # headless subprocess liveness, shared
+    acp_live = await _live_acp_sessions()  # ACP subprocess liveness, shared
 
     for project_key, project_path in mapping.items():
         async with KanbanSessionLocal() as ks:
@@ -8037,6 +8074,7 @@ async def run_dispatch_tick(*, transport: SpawnTransport | None = None) -> None:
                     transport=transport, live_sessions=live_sessions,
                     sandcastle_live=sandcastle_live,
                     headless_live=headless_live,
+                    acp_live=acp_live,
                 )
                 await ks.commit()
                 
@@ -8119,6 +8157,9 @@ async def get_transport_for_project(project_path: str) -> SpawnTransport:
         if transport_name == "headless":
             from app.kanban.headless_runner import headless_transport
             return headless_transport
+        if transport_name == "acp":
+            from app.kanban.acp_transport import acp_transport
+            return acp_transport
         skip = await get_skip_permissions(ks, project_key)
 
     return make_worktree_transport(skip_permissions=skip)
@@ -8250,6 +8291,9 @@ def get_transport_for_card(card: KanbanCard, default_transport: SpawnTransport) 
     elif card.transport == "headless":
         from app.kanban.headless_runner import headless_transport
         return headless_transport
+    elif card.transport == "acp":
+        from app.kanban.acp_transport import acp_transport
+        return acp_transport
     elif card.transport == "worktree":
         return worktree_transport
 
