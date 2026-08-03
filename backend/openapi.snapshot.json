@@ -23016,7 +23016,7 @@
     },
     "/api/v1/cc-bridge/sessions": {
       "get": {
-        "description": "List all discovered Claude Code sessions in tmux.",
+        "description": "List all discovered Claude Code sessions in tmux.\n\nThe synchronous tmux ``list-panes`` subprocess is offloaded to a worker\nthread so the FastAPI event loop is never blocked on a slow ``tmux``\ninvocation.\n\nNote: this legacy route does NOT enrich sessions with kanban-card\nmetadata \u2014 that's the live endpoint's job\n(``runs/router.py::list_sessions`` \u2192 ``enrich_sessions_with_cards``).\nSee the module docstring for the rationale.",
         "operationId": "list_sessions_api_v1_cc_bridge_sessions_get",
         "responses": {
           "200": {
