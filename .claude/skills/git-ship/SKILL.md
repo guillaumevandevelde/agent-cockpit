@@ -57,6 +57,16 @@ if [ -n "$FRONTEND_TOUCHED" ]; then
   # `npm ci` leaves some scoped dirs but no `.bin/`, which makes `npm run
   # lint` die with `eslint: not found` and blocks a plain symlink. Move the
   # partial aside (`mv`, not `rm` — `rm` is deny-listed) before bootstrapping.
+  # Card 9b7c2a98… (revisit of 4279448c) also handles a subtler form of
+  # corruption: `.bin/` is present (so the partial-install trap above
+  # doesn't fire) but a *deeper* transitive dep — e.g. `acorn`, imported
+  # by `espree`/`eslint` — is missing, so `npm run lint` dies with
+  # `Cannot find module 'acorn'`. The presence check is necessary but
+  # not sufficient; probe the symlinked install with a quick `require`
+  # of eslint's main module (forces Node to resolve the full module
+  # graph, so a missing transitive dep surfaces immediately) and, on
+  # probe failure, `mv` the corrupt symlink aside and fall back to
+  # `npm ci`. `rm` stays deny-listed so `mv` is the only safe cleanup.
   # Note: `<project-root>` is always shell-quoted in the bash below —
   # the dispatcher uses `shlex.quote`, which wraps the path in single
   # quotes and escapes any embedded single quote. Single quotes are
@@ -77,7 +87,18 @@ if [ -n "$FRONTEND_TOUCHED" ]; then
       if git diff --quiet "$BASE" origin/master -- frontend/package-lock.json \
          && [ -d "<project-root>/frontend/node_modules/.bin" ]; then \
         ln -s "<project-root>/frontend/node_modules" node_modules && \
-        echo "bootstrapped frontend/node_modules via symlink (lockfile matches master)"; \
+        echo "bootstrapped frontend/node_modules via symlink (lockfile matches master)" && \
+        # Sanity-probe the symlinked install: `.bin/`-presence is necessary
+        # but not sufficient (card 9b7c2a98…). Force Node to resolve eslint's
+        # full module graph so a missing transitive dep like `acorn`
+        # surfaces immediately; on probe failure, `mv` the corrupt symlink
+        # aside (`rm` is deny-listed) and fall back to `npm ci` — the outer
+        # block has already passed, so the cleanup must re-install in-place.
+        if ! node -e "require('eslint/lib/cli.js')" >/dev/null 2>&1; then \
+          mv node_modules "../node_modules.corrupt-$(date +%s)" && \
+          echo "WARN: symlinked install failed probe (missing transitive dep?) — falling back to npm ci" && \
+          npm ci; \
+        fi; \
       else \
         npm ci; \
       fi; \
