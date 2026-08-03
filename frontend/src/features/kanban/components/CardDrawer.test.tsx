@@ -1168,6 +1168,59 @@ describe("CardDrawer Subtasks section", () => {
     expect(section.textContent).toMatch(/Completed/);
   });
 
+  // Pins the (held …) suffix in the drawer-subtask badge tooltip (kaart
+  // bf8cc64e…). The suffix is the operator's only signal that distinguishes
+  // a healthy temporary wait from a dead one — the column CardItem has had
+  // it since heldSince landed; the drawer was still passing 3/5 CardMeta
+  // fields, so the suffix never showed up here. `formatHeldAge` reads
+  // `Date.now()` (impure — see ReadyStateBadge docstring), so freeze the
+  // clock to make the expected age deterministic.
+  it("forwards heldSince to the child's ReadyStateBadge so the tooltip gets the '(held …)' suffix", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
+    try {
+      const parent: Card = { ...baseCard, id: "parent-1" };
+      const childHeld: Card = {
+        ...baseCard,
+        id: "child-held",
+        title: "Child held",
+        parent_card_id: "parent-1",
+        column: "Backlog",
+      };
+
+      // 5 days before the frozen clock — formatHeldAge returns "5d".
+      const cardMeta = new Map([
+        [
+          "child-held",
+          {
+            readyState: "dependent" as const,
+            blockerTitles: ["sibling-1"],
+            heldSince: "2026-06-26T00:00:00Z",
+          },
+        ],
+      ]);
+
+      render(
+        <CardDrawerWithRouter
+          card={parent}
+          projectPath="/proj"
+          cards={[parent, childHeld]}
+          cardMeta={cardMeta}
+          onClose={() => {}}
+          onChanged={() => {}}
+        />,
+      );
+
+      const badge = screen
+        .getByTestId("subtasks-section")
+        .querySelector('[data-ready-state="dependent"]');
+      expect(badge).not.toBeNull();
+      expect(badge?.getAttribute("title")).toMatch(/Waiting on: sibling-1 \(held 5d\)/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("navigates to the clicked child card via the ?card= deep-link", async () => {
     const parent: Card = { ...baseCard, id: "parent-1" };
     const child: Card = {
