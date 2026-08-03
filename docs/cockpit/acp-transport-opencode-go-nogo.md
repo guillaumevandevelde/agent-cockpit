@@ -317,6 +317,19 @@ dus krijgen ze verschillende variants. De bestaande claude-code stream-json-mapp
   `session/request_permission` als gate-haak aanbiedt.
 - **Wel:** hergebruik van `structured_events.py` met één nieuwe variant (`context_usage`) voor
   `usage_update`.
+
+✅ **Geïmplementeerd (kaart `f647a44e…`)** — `backend/app/kanban/acp_transport.py` is de
+vierde `SpawnTransport`-sibling naast `worktree`, `sandcastle` en `headless`. Geselecteerd
+wanneer `card.transport == "acp"` (dispatch transport-meta) of wanneer de project-default
+transport op `acp` staat (zie `dispatch.get_transport_for_project` / `get_transport_for_card`).
+Spawn `opencode acp`, drijf JSON-RPC 2.0 over stdio (initialize → session/new →
+session/prompt), map ACP `session/update`-varianten via `map_acp_event` op het
+bestaande `structured_events`-model, en antwoord op `session/request_permission` als
+getypeerde gate. Schrijft een `opencode.json` met `permission.edit=ask` /
+`permission.bash=ask` op de worktree zodat de gate vuurt (brondoc §3.3 preconditie).
+Liveness via `live_acp_sessions` (vierde bron voor `reap_stale_claims` naast tmux,
+sandcastle en headless). `map_acp_event`/`map_acp_result` zijn pure functies met
+geïsoleerde tests per ACP-variant (zie `backend/tests/test_acp_transport.py`).
 - **Niet:** vervanging van de claude-code stream-json-transport. Die blijft.
 - **Niet:** een uitspraak dat ACP nu het universele transport voor alle vendors is (§3.5).
 - **Niet:** tmux vervangen voor human-in-the-loop werk — ongewijzigd t.o.v.

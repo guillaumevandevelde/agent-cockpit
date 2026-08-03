@@ -151,6 +151,24 @@ async def lifespan(app: FastAPI):
                 start_headless_tailer(rec)
     except Exception:
         logger.exception("headless adoption failed at startup")
+    # ACP subprocess adoption (kaart f647a44e…): mirrors the headless
+    # adoption path — durable ``.cockpit-acp.json`` pidfiles are
+    # OS-verified and re-attached to the in-memory registry so the
+    # reaper's first tick doesn't release-and-redispatch ACP claims.
+    # The transport's reader-loop is launched lazily on the next ACP
+    # dispatch (a fresh run re-establishes its own consumer task), so
+    # we only need to (a) populate the cache and (b) re-reserve the
+    # session_registry slot — no tailer is spawned for adopted runs.
+    try:
+        from app.kanban.acp_transport import adopt_acp_runs
+        adopted_acp = adopt_acp_runs(paths)
+        if adopted_acp:
+            logger.info(
+                "adopted %d live acp run(s) after restart",
+                len(adopted_acp),
+            )
+    except Exception:
+        logger.exception("acp adoption failed at startup")
     # Install the Notification/Stop/UserPromptSubmit/SessionStart hooks that feed
     # the usage-limit auto-resume pipeline. These used to require a manual click
     # on the Scheduled Messages page, which meant the whole pipeline stayed dead

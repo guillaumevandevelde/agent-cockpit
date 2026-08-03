@@ -37,6 +37,7 @@ def _protocol_kwarg_names() -> set[str]:
 
 
 def _transports() -> dict[str, object]:
+    from app.kanban.acp_transport import acp_transport
     from app.kanban.dispatch import (
         make_resume_transport,
         make_worktree_transport,
@@ -49,6 +50,7 @@ def _transports() -> dict[str, object]:
         "resume": make_resume_transport("session-under-test"),
         "sandcastle": sandcastle_transport,
         "headless": headless_transport,
+        "acp": acp_transport,
     }
 
 
