@@ -912,6 +912,19 @@ def _group_dict_to_team_response(group: dict[str, Any]) -> RunGroupResponse:
 async def list_teams(db: AsyncSession = Depends(get_db)):
     """List all run groups (auto-detected + manual) with their runs."""
     runs = discover_agent_sessions()
+    # Enrich the discovered runs in place with kanban-card breadcrumbs before
+    # grouping. ``discover_groups`` and ``get_ungrouped_runs`` both share the
+    # same dict objects with the input list (groups.py:only inserts pointers
+    # into ``runs``), so a single in-place pass covers the lead/member dicts
+    # in each group AND the ungrouped list — the Agent Bridge page reads
+    # ``card_id`` from both code paths. Failure is non-fatal, mirroring the
+    # /sessions fail-open contract (router.py:107-111) so an unreachable
+    # Kanban DB never blocks the page from rendering session tiles.
+    try:
+        async with KanbanSessionLocal() as ks:
+            await enrich_sessions_with_cards(runs, ks)
+    except Exception:
+        logger.exception("session→card enrichment failed; returning unenriched runs")
     manual_groups = await groups_service.get_manual_groups(db)
     groups = groups_service.discover_groups(runs, manual_groups)
     ungrouped = groups_service.get_ungrouped_runs(runs, groups)
