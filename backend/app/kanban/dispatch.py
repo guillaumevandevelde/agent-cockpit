@@ -3217,11 +3217,21 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "   # `$HOME/.cache/` satisfies both: persistent across Bash "
             "calls (not reaped), and outside every git working tree and "
             "gitdir. Note git still registers the admin slot under "
-            "`.git/worktrees/ship-merge-$$` — that is correct and harmless; "
+            "`.git/worktrees/<basename-of-WT>` (where `<basename-of-WT>` is "
+            "the branch-derived suffix below) — that is correct and harmless; "
             "only the CHECKOUT must live elsewhere.\n"
             "   SHIP_TMP=\"${HOME}/.cache/cockpit-ship\"\n"
             "   mkdir -p \"$SHIP_TMP\"\n"
-            "   WT=\"$SHIP_TMP/ship-merge-$$\"\n"
+            # Slot derived from `$BRANCH`, NOT from `$$` (PID). The Bash tool
+            # spawns a fresh shell per call, so `$$` drifts between calls —
+            # a recipe split across calls lost the worktree path with
+            # `fatal: cannot change to …: No such file or directory` on
+            # every `git -C "$WT" …` line. `${BRANCH//\//-}` is stable
+            # within a single ship session (`$BRANCH` doesn't change between
+            # calls) and gives unique slots across ships of different
+            # branches. Same-branch ships serialize via the
+            # `git worktree remove --force` at end of each ship.
+            "   WT=\"$SHIP_TMP/ship-merge-${BRANCH//\\//-}\"\n"
             "   # Main-checkout path discovery (kanban card 5e83b6e0…,\n"
             "fourth iteration). The ship-worktree is a detached checkout\n"
             "that cannot update `master` itself — only the canonical\n"

@@ -221,19 +221,26 @@ fi
 #
 # `$HOME/.cache/` satisfies both: persistent across Bash calls (not reaped),
 # and outside every git working tree and gitdir. Note git still registers the
-# admin slot under `.git/worktrees/ship-merge-$$` — that is correct and
+# admin slot under `.git/worktrees/<basename-of-WT>` (where
+# `<basename-of-WT>` is the branch-derived suffix below) — that is correct and
 # harmless; only the CHECKOUT must live elsewhere.
 SHIP_TMP="${HOME}/.cache/cockpit-ship"
 mkdir -p "$SHIP_TMP"
-WT="$SHIP_TMP/ship-merge-$$"
-# Slot name MUST be unique per session: git derives the `.git/worktrees/<name>`
-# entry from the path's basename, so a fixed name (e.g. `ship-merge`) collides
-# under concurrent dispatched sessions — both target the same gitdir slot, and
-# a stale HEAD (or a half-pruned gitdir from a crashed predecessor) leaks
-# into the fresh session's merge push, producing a spurious non-fast-forward
-# rejection against origin/master. `$$` (this process's PID) guarantees a
-# fresh slot per invocation — do NOT simplify back to a fixed name.
-# (kanban card c23dfe46…)
+# Slot is derived from $BRANCH (NOT from $$ — PID). The Bash tool respawns
+# a fresh shell per call, so `$$` drifts between calls and a recipe split
+# across calls lost the worktree path with `fatal: cannot change to …: No
+# such file or directory` on every `git -C "$WT" …` line.
+# `${BRANCH//\//-}` (replace `/` with `-`) is stable within a single ship
+# session (`$BRANCH` doesn't change between calls) and gives unique slots
+# across ships of DIFFERENT branches. Same-branch concurrent ships are
+# rare (the dispatcher enforces one session per card claim) and serialize
+# via the `git worktree remove --force` at end of each ship, so the
+# cross-session collision window is essentially zero. (Earlier PID-based
+# slotting from kanban card c23dfe46… traded cross-call stability for
+# cross-session uniqueness; this card swaps that trade-off because every
+# real ship recipe by now exceeds 30 lines and is naturally split across
+# Bash calls.)
+WT="$SHIP_TMP/ship-merge-${BRANCH//\//-}"
 # Main-checkout path discovery (kanban card 5e83b6e0…, fourth iteration).
 # The ship-worktree is a detached checkout that cannot update `master`
 # itself — only the canonical checkout where `master` is checked out can
@@ -433,17 +440,18 @@ als **producttrade-offs**, niet als implementatie-forks.
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
 
-**Corrupt-slot recovery (0-byte index).** The `ship-merge-$$` slot lives in the
-shared `.git/worktrees/`, which a concurrent or crashed session can leave in a
-half-written state. The observed shape (kanban card `608e2a27…`): `git worktree
-add --detach` prints `Preparing worktree (detached HEAD …)` and exits 0, but the
-slot's `index` is 0 bytes — so the *merge* is what fails, with `fatal:
-…/ship-merge-<pid>/index: index file smaller than expected`. The obvious cleanup
-(`git worktree remove --force "$WT"`) then refuses with `is not a working tree`,
-leaving the slot orphaned. Nothing about the checkout itself is wrong: it holds
-the correct tree at the correct HEAD, only the index is missing. `git -C "$WT"
-read-tree HEAD` rebuilds it from that HEAD, and the same slot merges normally on
-the retry. The guard above does exactly that inline, so no session has to
+**Corrupt-slot recovery (0-byte index).** The `ship-merge-${BRANCH//\//-}`
+slot lives in the shared `.git/worktrees/`, which a concurrent or crashed
+session can leave in a half-written state. The observed shape (kanban card
+`608e2a27…`): `git worktree add --detach` prints `Preparing worktree (detached
+HEAD …)` and exits 0, but the slot's `index` is 0 bytes — so the *merge* is
+what fails, with `fatal: …/ship-merge-<branch-suffix>/index: index file
+smaller than expected`. The obvious cleanup (`git worktree remove --force
+"$WT"`) then refuses with `is not a working tree`, leaving the slot
+orphaned. Nothing about the checkout itself is wrong: it holds the correct
+tree at the correct HEAD, only the index is missing. `git -C "$WT" read-tree
+HEAD` rebuilds it from that HEAD, and the same slot merges normally on the
+retry. The guard above does exactly that inline, so no session has to
 rediscover the recipe by hand.
 
 **Carve-out semantics.** If the merge block hits a conflict, the script enumerates
