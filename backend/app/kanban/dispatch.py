@@ -12,6 +12,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -354,6 +355,9 @@ async def disable_all_autodispatch(session) -> None:
     claiming/spawning Todo cards on the very next tick after any backend
     restart or crash-recovery, with nobody necessarily watching. Auto-dispatch
     must always start from an explicit opt-in each time the backend comes up.
+
+    Callers in the startup path must go through :func:`reset_autodispatch_for_boot`
+    instead, which exempts a ``uvicorn --reload`` hot reload — see that function.
     """
     from sqlalchemy import select
     rows = (await session.execute(select(KanbanMeta))).scalars().all()
@@ -361,6 +365,95 @@ async def disable_all_autodispatch(session) -> None:
         if row.key.startswith(META_PREFIX) and row.value == "1":
             row.value = "0"
     await session.flush()
+
+
+# Identity of the server process that "owns" the current autodispatch flags.
+# Written by reset_autodispatch_for_boot; compared on the next startup to tell a
+# hot reload apart from a genuine backend start. Not part of the op-log.
+BOOT_OWNER_META_KEY = "autodispatch_boot_owner"
+
+
+def _reload_parent_identity() -> str | None:
+    """Stable identity of the ``uvicorn --reload`` parent owning this worker.
+
+    Under ``--reload`` uvicorn runs a long-lived *reloader* process that respawns
+    a fresh worker child on every file change. The reloader's pid is therefore
+    constant across hot reloads and new on every genuine backend (re)start, which
+    makes ``<pid>:<starttime>`` exactly the discriminator we need. ``starttime``
+    (``/proc/<pid>/stat`` field 22) is included so a recycled pid can never be
+    mistaken for the same reloader.
+
+    Returns ``None`` when this process is not a uvicorn reload child — including
+    on any platform without ``/proc`` — which makes the caller fall back to the
+    unconditional force-off default. Failing closed is deliberate: a missed
+    reload only costs a toggle click, a missed *restart* silently resumes
+    spawning agents.
+    """
+    try:
+        ppid = os.getppid()
+        with open(f"/proc/{ppid}/cmdline", "rb") as fh:
+            argv = fh.read().split(b"\0")
+        if b"--reload" not in argv or not any(b"uvicorn" in arg for arg in argv):
+            return None
+        with open(f"/proc/{ppid}/stat", "rb") as fh:
+            stat = fh.read()
+        # Field 2 (comm) is parenthesised and may itself contain spaces, so the
+        # split has to start after the *last* ')'. Fields 1-2 are then consumed,
+        # putting field N at index N-3; starttime is field 22.
+        starttime = stat[stat.rindex(b")") + 2:].split()[19].decode()
+        return f"{ppid}:{starttime}"
+    except Exception:  # pragma: no cover - defensive: /proc shape, permissions
+        return None
+
+
+async def reset_autodispatch_for_boot(session) -> bool:
+    """Apply the startup opt-in policy, exempting uvicorn ``--reload`` reloads.
+
+    :func:`disable_all_autodispatch` is the right policy for a real backend
+    start, but ``scripts/dev.sh`` / ``scripts/cockpit.sh`` run uvicorn with
+    ``--reload``, so *any* write under ``backend/app/`` respawns the worker and
+    re-runs ``lifespan``. That turned a working factory into a self-defeating
+    one: every time a dispatched agent merged a backend change into master, the
+    main checkout changed, uvicorn hot-reloaded, and auto-dispatch silently
+    switched itself off board-wide — the more the factory shipped, the more
+    often it stalled (observed 2026-08-03: enabled 18:40, killed 18:58 by the
+    merge of an `acp_transport.py`/`main.py`/`dispatch.py` change, 44 eligible
+    cards idle until a human noticed).
+
+    A hot reload is not an operator restart: same server, same supervising
+    process, nobody walked away. So the flags are preserved when the owning
+    reloader is unchanged, and force-disabled in every other case (fresh start,
+    crash-recovery, unknown environment). Returns True when preserved.
+    """
+    identity = _reload_parent_identity()
+    row = await session.get(KanbanMeta, BOOT_OWNER_META_KEY)
+    enabled = await list_autodispatch_projects(session)
+
+    if identity is not None and row is not None and row.value == identity:
+        logger.info(
+            "hot reload of the same uvicorn reloader (%s): keeping autodispatch "
+            "enabled for %d project(s)", identity, len(enabled),
+        )
+        return True
+
+    await disable_all_autodispatch(session)
+    if enabled:
+        # Loud on purpose: before this line the force-off left no trace at all,
+        # so a stalled board looked like a dispatcher bug rather than policy.
+        logger.warning(
+            "backend start: autodispatch force-disabled for %d project(s) (%s) — "
+            "re-enable from the board to resume dispatching",
+            len(enabled), ", ".join(sorted(enabled)),
+        )
+    if identity is None:
+        if row is not None:
+            await session.delete(row)
+    elif row is None:
+        session.add(KanbanMeta(key=BOOT_OWNER_META_KEY, value=identity))
+    else:
+        row.value = identity
+    await session.flush()
+    return False
 
 
 # ---- risk_class-driven dispatch defaults ----------------------------------

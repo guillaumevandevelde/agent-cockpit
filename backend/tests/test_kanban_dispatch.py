@@ -106,6 +106,87 @@ async def test_disable_all_autodispatch_is_noop_when_nothing_enabled():
         assert await dispatch.list_autodispatch_projects(s) == []
 
 
+# ---- startup policy: restart disables, hot reload does not -----------------
+
+
+def _fake_identity(monkeypatch, value):
+    """Pin the reloader identity and prove the double actually fired."""
+    calls = []
+
+    def _identity():
+        calls.append(value)
+        return value
+
+    # reset_autodispatch_for_boot resolves this through the module globals, so
+    # patching the definition site is also the consumer site here.
+    monkeypatch.setattr(dispatch, "_reload_parent_identity", _identity)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_reset_autodispatch_for_boot_disables_on_a_real_start(monkeypatch):
+    calls = _fake_identity(monkeypatch, None)
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_autodispatch(s, PK, True)
+        await s.commit()
+
+        assert await dispatch.reset_autodispatch_for_boot(s) is False
+        await s.commit()
+
+        assert calls == [None]
+        assert await dispatch.list_autodispatch_projects(s) == []
+        # No owner marker when we cannot identify a reloader: every later start
+        # must keep failing closed.
+        assert await s.get(dispatch.KanbanMeta, dispatch.BOOT_OWNER_META_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_reset_autodispatch_for_boot_survives_a_hot_reload(monkeypatch):
+    calls = _fake_identity(monkeypatch, "2020:11800")
+    async with KanbanSessionLocal() as s:
+        # First boot under the reloader: still force-off, but record the owner.
+        await dispatch.set_autodispatch(s, PK, True)
+        assert await dispatch.reset_autodispatch_for_boot(s) is False
+        await s.commit()
+        assert await dispatch.list_autodispatch_projects(s) == []
+
+        # Operator opts in, then a file change respawns the worker under the
+        # *same* reloader -- the flag must stay on.
+        await dispatch.set_autodispatch(s, PK, True)
+        await s.commit()
+
+        assert await dispatch.reset_autodispatch_for_boot(s) is True
+        await s.commit()
+
+        assert calls == ["2020:11800"] * 2
+        assert await dispatch.is_autodispatch_enabled(s, PK) is True
+
+
+@pytest.mark.asyncio
+async def test_reset_autodispatch_for_boot_disables_when_the_reloader_is_new(monkeypatch):
+    async with KanbanSessionLocal() as s:
+        _fake_identity(monkeypatch, "2020:11800")
+        await dispatch.reset_autodispatch_for_boot(s)
+        await dispatch.set_autodispatch(s, PK, True)
+        await s.commit()
+
+        # Backend restarted: fresh uvicorn, so a different reloader pid.
+        calls = _fake_identity(monkeypatch, "33877:122753")
+        assert await dispatch.reset_autodispatch_for_boot(s) is False
+        await s.commit()
+
+        assert calls == ["33877:122753"]
+        assert await dispatch.list_autodispatch_projects(s) == []
+        row = await s.get(dispatch.KanbanMeta, dispatch.BOOT_OWNER_META_KEY)
+        assert row is not None and row.value == "33877:122753"
+
+
+def test_reload_parent_identity_is_none_outside_a_uvicorn_reloader():
+    # pytest's parent is not `uvicorn --reload`, so the real probe must decline
+    # and let the caller fall back to the force-off default.
+    assert dispatch._reload_parent_identity() is None
+
+
 # ---- prompt ----------------------------------------------------------------
 
 @pytest.mark.asyncio
