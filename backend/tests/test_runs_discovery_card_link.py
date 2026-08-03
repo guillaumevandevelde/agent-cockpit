@@ -116,6 +116,175 @@ async def test_agent_bridge_sessions_response_includes_matching_card(monkeypatch
     assert response["sessions"][0]["card_project_key"] == "git:github.com/example/repo"
 
 
+async def test_agent_bridge_teams_response_includes_matching_card_on_ungrouped(monkeypatch):
+    """The ``/api/v1/agent-bridge/teams`` endpoint exposes the card navigation
+    fields on ungrouped sessions so the SessionCard render-guard can show the
+    "view kanban card" affordance.
+
+    The ``/teams`` handler is the corner the Agent Bridge page actually reads
+    (``useTeams`` → ``teams`` + ``ungrouped``); the ``/sessions`` enrichment is
+    only consumed for the page-level count. Without this, the affordance
+    never renders — kanban card 4cdf1fc6… (the bug this test exists to pin).
+    """
+    await _reset()
+    cwd = "/home/dev/projects/foo/.claude/worktrees/k-foo-1234"
+    card_id = await _seed_card(
+        project_key="git:github.com/example/repo",
+        column="engineer",
+        dispatch_project_folder=convert_path_to_folder_name(cwd),
+    )
+
+    from app.api.v1.runs import router as agent_bridge_api
+    from app.services.runs import groups as groups_service
+
+    discovered = [
+        {
+            "cli": "claude-code",
+            "cli_display_name": "Claude Code",
+            "session_name": "k-foo-1234",
+            "cwd": cwd,
+            "tmux_target": "k-foo-1234:0.0",
+        },
+        {
+            "cli": "claude-code",
+            "cli_display_name": "Claude Code",
+            "session_name": "k-foo-other",
+            "cwd": "/home/dev/projects/foo/.claude/worktrees/k-foo-other",
+            "tmux_target": "k-foo-other:0.0",
+        },
+    ]
+
+    monkeypatch.setattr(agent_bridge_api, "discover_agent_sessions", lambda: discovered)
+
+    async def fake_get_manual_groups(db):
+        return []
+
+    monkeypatch.setattr(groups_service, "get_manual_groups", fake_get_manual_groups)
+
+    response = await agent_bridge_api.list_teams(db=None)
+    wire = response.model_dump()
+
+    assert wire["ungrouped"][0]["card_id"] == card_id
+    assert wire["ungrouped"][0]["card_project_key"] == "git:github.com/example/repo"
+    # The other session has no matching card — it must stay un-enriched.
+    assert "card_id" not in wire["ungrouped"][1]
+
+
+async def test_agent_bridge_teams_response_includes_matching_card_on_team_member(monkeypatch):
+    """The team-member dicts in the ``teams`` array also get enriched, since
+    the lead/member render path goes through the same dict objects that
+    ``discover_groups`` emits (``get_ungrouped_runs`` shares the dicts with
+    the input list).
+
+    The frontend's TeamCard reads the same ``card_id`` field, so a
+    dispatched lead or member needs the enrichment on its dict just as
+    much as an ungrouped session does.
+    """
+    await _reset()
+    cwd = "/home/dev/projects/foo/.claude/worktrees/k-foo-1234"
+    card_id = await _seed_card(
+        project_key="git:github.com/example/repo",
+        column="engineer",
+        dispatch_project_folder=convert_path_to_folder_name(cwd),
+    )
+
+    from app.api.v1.runs import router as agent_bridge_api
+    from app.services.runs import groups as groups_service
+
+    discovered = [
+        {
+            "cli": "claude-code",
+            "cli_display_name": "Claude Code",
+            "session_name": "lead-aaaa",
+            "cwd": cwd,
+            "tmux_target": "lead-aaaa:0.0",
+        },
+        {
+            "cli": "claude-code",
+            "cli_display_name": "Claude Code",
+            "session_name": "member-bbbb",
+            "cwd": cwd,
+            "tmux_target": "member-bbbb:0.0",
+        },
+    ]
+
+    monkeypatch.setattr(agent_bridge_api, "discover_agent_sessions", lambda: discovered)
+
+    async def fake_get_manual_groups(db):
+        return []
+
+    monkeypatch.setattr(groups_service, "get_manual_groups", fake_get_manual_groups)
+
+    response = await agent_bridge_api.list_teams(db=None)
+    wire = response.model_dump()
+
+    assert len(wire["teams"]) == 1
+    team = wire["teams"][0]
+    assert team["lead"]["card_id"] == card_id
+    assert team["lead"]["card_project_key"] == "git:github.com/example/repo"
+    # Both members share the same cwd → both get the same card_id.
+    member_cards = [m["card_id"] for m in team["members"]]
+    assert member_cards == [card_id, card_id]
+
+
+async def test_agent_bridge_teams_enrichment_fails_open_when_kanban_db_unavailable(monkeypatch):
+    """An unreachable KanbanSessionLocal must NOT blow up the /teams route —
+    the page must still see the session list, just without the card link.
+    Mirrors the fail-open contract on /sessions (router.py:107-111)."""
+    await _reset()
+    cwd = "/home/dev/projects/foo/.claude/worktrees/k-foo-1234"
+    # Seed a card so enrichment would normally succeed — we want to verify
+    # the failure path is the one being taken, not the "no match" path.
+    await _seed_card(
+        project_key="git:github.com/example/repo",
+        column="engineer",
+        dispatch_project_folder=convert_path_to_folder_name(cwd),
+    )
+
+    from app.api.v1.runs import router as agent_bridge_api
+    from app.services.runs import groups as groups_service
+
+    discovered = [
+        {
+            "cli": "claude-code",
+            "cli_display_name": "Claude Code",
+            "session_name": "k-foo-1234",
+            "cwd": cwd,
+            "tmux_target": "k-foo-1234:0.0",
+        },
+    ]
+
+    monkeypatch.setattr(agent_bridge_api, "discover_agent_sessions", lambda: discovered)
+
+    async def fake_get_manual_groups(db):
+        return []
+
+    monkeypatch.setattr(groups_service, "get_manual_groups", fake_get_manual_groups)
+
+    real_kanban_session = agent_bridge_api.KanbanSessionLocal
+
+    class _BrokenSession:
+        def __aenter__(self):
+            raise RuntimeError("kanban DB unavailable")
+
+        def __aexit__(self, *args):
+            return False
+
+    monkeypatch.setattr(agent_bridge_api, "KanbanSessionLocal", lambda: _BrokenSession())
+
+    try:
+        response = await agent_bridge_api.list_teams(db=None)
+    finally:
+        monkeypatch.setattr(agent_bridge_api, "KanbanSessionLocal", real_kanban_session)
+
+    # The session list MUST still come back — fail-open, not 500.
+    wire = response.model_dump()
+    assert len(wire["ungrouped"]) == 1
+    assert wire["ungrouped"][0]["session_name"] == "k-foo-1234"
+    # …and the card fields must be absent because enrichment failed.
+    assert "card_id" not in wire["ungrouped"][0]
+
+
 async def test_enrich_leaves_session_untouched_when_no_match():
     """A session whose cwd doesn't match any card stays un-enriched —
     the SessionCard renders no link in that case."""
