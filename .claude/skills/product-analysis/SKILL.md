@@ -1,6 +1,6 @@
 ---
 name: product-analysis
-description: Use when a human points at ONE specific external application, repo or product — usually with a URL — and asks what Cockpit can learn from it, adopt from it, or do better ("Product analyse - <url>", "vergelijk deze toepassing met de onze", "wat kunnen we overnemen van X", "die lijkt matuurder"). Produces one grounded docs/cockpit/<naam>-analyse.md plus 0–N scoped child cards. NOT for periodic ecosystem sweeps (that's market-research) and NOT for problems in this repo (that's flag-problem).
+description: Use when a human points at ONE specific external application, repo or product — usually with a URL — and asks what Cockpit can learn from it, adopt from it, or do better ("Product analyse - <url>", "vergelijk deze toepassing met de onze", "wat kunnen we overnemen van X", "die lijkt matuurder"). Produces one grounded docs/cockpit/<naam>-analyse.md plus 0–N scoped child cards. NOT for periodic ecosystem sweeps (that's market-research) and NOT for problems in this repo (that's flag-problem). This skill EXECUTES the analysis; the `product-analysis-card` skill is the AUTHORING half (creates the Backlog-kaart — see that skill for the kaartvorm).
 ---
 
 # product-analysis
