@@ -959,6 +959,7 @@ function SubtasksSection({
                   state={meta.readyState}
                   blockerTitles={meta.blockerTitles}
                   missingDepIds={meta.missingDepIds}
+                  heldSince={meta.heldSince}
                 />
               )}
             </button>
