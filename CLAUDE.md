@@ -124,6 +124,7 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Dangling-dep sweepers (vangnet voor verweesde kanban-references — advisory; --strict = exit 1; JSON op stdout)
 ./scripts/sweep_dangling_depends_on.py        # Flag niet-Done kaarten waarvan een depends_on-id naar een niet-bestaande kaart verwijst
 ./scripts/sweep_dangling_plan_refs.py         # Flag plan_ref-deliverables waarvan de parent of het plan niet meer resolvet
+./scripts/sweep_orphaned_deliverables.py      # Flag kaarten met ≥1 deliverable die niet in een terminale kolom staan, geen levende claim hebben, en geen Summary-comment hebben — precies de klasse die de dispatch-orphan-fallback stil herdispatched (kaart 4a60048365004d808e2dbfdd9551afe4, a4a091fa… als voorbeeld)
 
 # Remote-branch sweeper (vangnet voor merged-maar-niet-verwijderde branches op `origin`; volgt op de direct-mode ship-recipe fix uit kanban-kaart `3027671c…` — advisory; --strict = exit 1; JSON op stdout; nudge vanuit `cockpit.sh start`)
 ./scripts/sweep_merged_remote_branches.py      # Flag refs/remotes/<remote>/* branches die `git cherry <base> <ref>` met 0 `+`-regels beantwoorden (volledig gemerged)
