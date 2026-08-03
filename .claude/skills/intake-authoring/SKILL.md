@@ -1,6 +1,6 @@
 ---
 name: intake-authoring
-description: Use when a human wants to author a new app-idea or inceptie-kaart (free conversation → promotable intake-column kaart met spec+plan), OR a product-analysis Backlog kaart voor één externe product/repo/URL ("Product analyse - <naam of URL>" → Backlog-kaart met vier vaste velden, work_type=analysis, executor=product-analysis skill). Runs interactively outside the autonomous dispatcher.
+description: Use when a human wants to author a new app-idea or inceptie-kaart (free conversation → promotable intake-column kaart met spec+plan). Runs interactively outside the autonomous dispatcher. For a product-analyse Backlog-kaart (one external product / repo / URL comparison), use `product-analysis-card` instead.
 ---
 
 # intake-authoring
@@ -24,20 +24,17 @@ This skill is the **voordeur** of the inceptie-pipeline (gat A in
   survives past the session.
 - The output target is **the meta-project's intake column** (not a new
   project — that doesn't exist yet, by design).
-- A human points at one external product / repo / URL and asks *"vergelijk
-  deze toepassing met de onze"*, *"wat kunnen we leren van X"*, or says
-  *"Product analyse - <url>"* — the alternative form below produces a
-  normal Backlog card with four fixed description fields, `work_type=
-  analysis`, and the `product-analysis` skill as executor (no promote-flow).
 
 ## When NOT to use
 
 - The human wants to capture a small change inside an existing project —
   that's `flag-problem` (for problems) or a normal Backlog card via the
-  dispatcher. Don't route ordinary bug-fix ideation through here. *(This
-  does not exclude the product-analysis form above: comparing one external
-  product to ours is a deliberate, scoped analysis-kaart, not "a small
-  change".)*
+  dispatcher. Don't route ordinary bug-fix ideation through here.
+- The human points at one external product / repo / URL and asks *"vergelijk
+  deze toepassing met de onze"*, *"wat kunnen we leren van X"*, or
+  *"Product analyse - <url>"* — that is the `product-analysis-card` skill
+  (Backlog-kaart in an existing project, no promote-flow). This skill is
+  the inceptie-flow only.
 - The idea already has a repo. Use `superpowers:brainstorming` + `writing-plans`
   directly, land the plan in the existing repo's `docs/plans/`, then file a
   normal Backlog card.
@@ -130,118 +127,3 @@ column cards (`_DISPATCH_COLUMNS = ("Backlog", "To Resume")`,
 many-turn conversational flows that don't compress into single-shot
 `report_impediment` decisions (decision §4). Run this skill in a dedicated
 interactive session with the human present.
-
-## Alternative form: Product analyse (forward-looking, *niet* de intake-flow)
-
-Een **tweede** kaartvorm die deze skill kan produceren, naast de
-inceptie-kaart hierboven: een **forward-looking Product analyse** voor een
-**bestaand project**. Dit is **geen** meta-project `intake`-kaart — er is
-geen promotiestap, geen `create_project_from_intake`, en de kaart landt
-rechtstreeks in `Backlog` van een project dat je met `resolve_project_key`
-hebt opgezocht.
-
-De vorm bestaat *prospectively*: bestaand kaart `87b99d2d…` ("Product
-analyse - https://github.com/donkruger/Kanban") heeft alleen een titel en
-wordt **niet** met terugwerkende kracht omgezet — stap 1 van de
-`product-analysis`-skill valt graceful terug op de legacy
-*bare-title*-default als de beschrijving leeg is. De nieuwe vorm is voor
-**toekomstige** kaarten waar de gebruiker de vier velden wel kan invullen.
-
-### Wanneer deze vorm (en wanneer niet)
-
-- **Wel** — de gebruiker zegt *"vergelijk deze toepassing met de onze"*,
-  *"wat kunnen we leren van X"* of *"Product analyse - <url>"* en geeft een
-  voorgedachte premisse, focusvragen en gewenste diepgang mee. De skill
-  zet dan om tot een **Backlog**-kaart van een **bestaand** project.
-- **Niet** — voor een nieuw app-idee (de inceptie-flow hierboven), een
-  klein idee binnen een bestaand project dat geen aparte analyse verdient
-  (een gewone Backlog-kaart via de dispatcher), of een periodieke sweep
-  over een bronnenlijst (dat is `market-research`).
-
-### Het contract — één Backlog-kaart, niets meer
-
-1. **Eén Backlog-kaart in een bestaand project** (`create_card` via
-   `cockpit-kanban` MCP, `project=<resolved key>`, `column="Backlog"`).
-   `work_type="analysis"` — dat is een bestaande `WORK_TYPES`-waarde
-   (`schemas.py:35`), geen nieuw veld. **Geen** `card.agent` instellen:
-   skills zijn geen personas, en `product-analysis` is geen rol. De
-   `analyst`-persona modus 2 pikt de kaart op aan de hand van
-   `work_type="analysis"` + de titel `Product analyse - …`.
-2. **De `product-analysis`-skill is de executor** — geen `plan`/`spec`-deliverable,
-   geen `add_plan_attachment`. Dat zijn kind-kaart-families, niet van
-   toepassing op een kale analyse-kaart.
-3. **`resolve_project_key` gebruiken**, geen gok — net als stap 4 hierboven.
-   Een verkeerd getypt project-key maakt een onzichtbare bucket.
-
-### De vier verplichte velden in de `description`
-
-De beschrijving heeft **exact vier** vaste velden, in deze volgorde. Het
-idee: stap 1 van de `product-analysis`-skill leest ze 1-op-1 en heeft
-precies de input die hij nodig heeft om de premisse te toetsen (zie
-[`product-analysis/SKILL.md`](../product-analysis/SKILL.md) stap 1).
-
-```
-URL/product: <URL of productnaam>
-Premisse/aanleiding: <wat de gebruiker denkt dat waar is>
-Focusvragen: <focusvragen>  —  of, als er geen zijn: "geen — gebruik de standaard"
-Diepgang: <learning analysis | go/no-go (adopt/integrate)>
-```
-
-**Taal van de veld-labels is fixed** — `URL/product`, `Premisse/aanleiding`,
-`Focusvragen`, `Diepgang`. Die zijn letterlijk wat de
-`product-analysis`-skill herkent; afwijken breekt de afspraak. De body van
-elk veld is vrij, behalve `Focusvragen` waar de literal *"geen — gebruik de
-standaard"* de standaard-uitwijking is.
-
-### Flow
-
-**Stap P1 — bevestig trigger en vorm.** Zeg hardop: *"Ik gebruik de
-intake-authoring-skill, alternative form Product analyse, om deze vraag in
-een Backlog-kaart van een bestaand project om te zetten."* Bevestig dat
-dit **geen** inceptie-kaart is en geen promotie-flow — de gebruiker geeft
-het project op waarin de Backlog-kaart moet landen.
-
-**Stap P2 — verzamel de vier velden.** Vraag door tot elk veld een
-concrete inhoud heeft (of de "geen — gebruik de standaard"-uitwijking
-voor Focusvragen). Een leeg veld is geen antwoord — de skill kan de
-premise pas toetsen als die er staat.
-
-**Stap P3 — resolve project key.** `resolve_project_key` van dit project
-(of de REST-fallback uit stap 4 hierboven). Vertel de gebruiker expliciet
-welk project-key je kreeg zodat een tikfout niet ongezien blijft.
-
-**Stap P4 — land de kaart.**
-
-```
-card = create_card(
-    project=<resolved project key>,
-    column="Backlog",
-    title="Product analyse - <naam of URL>",
-    description=(
-        "URL/product: <URL of productnaam>\n"
-        "Premisse/aanleiding: <...>\n"
-        "Focusvragen: <focusvragen | geen — gebruik de standaard>\n"
-        "Diepgang: <learning analysis | go/no-go (adopt/integrate)>\n"
-    ),
-    work_type="analysis",
-)
-```
-
-De vier `Label:`-regels hierboven zijn letterlijk wat de
-`product-analysis`-skill leest (stap 1); niets meer, niets minder. **De
-executor is de `product-analysis`-skill** (`.claude/skills/product-analysis`)
-— niet als een vijfde `Label:`-veld maar als een platte aanwijzing in de
-kaart-tekst: de `analyst`-persona modus 2 herkent 'm aan de combinatie
-`work_type="analysis"` + de titel `Product analyse - …` + de
-skill-verwijzing. Stop hier: de kaart staat op `Backlog` van het
-opgegeven project met de juiste `work_type`.
-
-### Veelgemaakte fouten
-
-| Excus | Waarom fout |
-|---|---|
-| *"Ik zet `card.agent='product-analyst'`, dan is de routing expliciet"* | Persona-waarden zijn een gesloten set (`engineer` / `analyst` / `reviewer`); `product-analysis` is een skill, geen persona. `work_type="analysis"` + de skill-verwijzing in de beschrijving is wat de `analyst`-persona triggert. |
-| *"Ik maak een inceptie-kaart en promoot die naar Backlog"* | Product analyse is geen inceptie — er is geen promote-stap en geen `spec`/`plan`-deliverable. De kaart gaat rechtstreeks in `Backlog` van een bestaand project. |
-| *"De veld-labels zijn niet heilig, 'Premisse' werkt ook"* | De `product-analysis`-skill leest de labels letterlijk (`URL/product`, `Premisse/aanleiding`, `Focusvragen`, `Diepgang`). Andere varianten breken het matchende lees-pad. |
-| *"Ik laat `Diepgang` leeg, dat is default learning analysis"* | Geen veld = geen toetsbare claim. De skill heeft juist die vraag nodig om te beslissen tussen `analysis`-doc of `decision`-doc + register-rij (zie `product-analysis/SKILL.md` §5). |
-| *"Ik pas bestaande kaart `87b99d2d…` retroactief aan"* | Dat is een imperatief buiten deze skill. Bestaande bare-title-kaarten blijven via de legacy default lopen; de nieuwe vorm is voor toekomstige kaarten. |

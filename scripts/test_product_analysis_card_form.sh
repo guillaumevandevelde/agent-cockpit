@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Test harness for the product-analysis card form that the intake-authoring
-# skill must expose prospectively, plus the matching vocabulary alignment in
-# product-analysis/SKILL.md step 1, plus the implementation marker in
-# docs/cockpit/product-analyse-methode-decision.md §7 item 1.
+# Test harness for the product-analysis card form that the
+# product-analysis-card skill must expose, plus the matching vocabulary
+# alignment in product-analysis/SKILL.md step 1, plus the implementation
+# marker in docs/cockpit/product-analyse-methode-decision.md §7 item 1.
+#
+# The card form was originally housed in intake-authoring/SKILL.md
+# alongside the inceptie-flow. It was carved out into its own skill when
+# intake-authoring is rewritten to `new-app` (see
+# docs/cockpit/kaartloze-app-inceptie-decision.md), so the form's
+# canonical home is now product-analysis-card/SKILL.md.
 #
 # Kanban-kaart: bc6b266c… (follow-up on 8394f725… → product-analyse-methode-decision).
 #
 # Assertions:
-#   1. intake-authoring/SKILL.md mentions a forward-looking Backlog form for
-#      product analyses that is NOT the meta-project intake/promotion flow.
+#   1. product-analysis-card/SKILL.md mentions a forward-looking Backlog form
+#      for product analyses that is NOT the meta-project intake/promotion flow.
 #   2. That form fixes the title to `Product analyse - <naam of URL>` exactly.
 #   3. The create_card template carries exactly four fixed `Label:` lines
 #      (URL/product, Premisse/aanleiding, Focusvragen, Diepgang) — no fifth
@@ -31,20 +37,19 @@
 #      paragraph (not any free-floating `bc6b266c` mention elsewhere in the
 #      doc), analogous to item 2's existing `✅ Geïmplementeerd (kaart
 #      d5072884…)` marker.
-#   9. The intake-authoring frontmatter `description:` lists both the new-app
-#      inceptie trigger AND the product-analysis authoring trigger, so a fresh
-#      skill-routing decision can discover the product-analysis path. The
-#      description stays when-to-use only (no workflow summary).
-#  10. A top-level `## When to use` bullet points to the alternative
-#      product-analysis form / external-product comparison trigger. The
-#      `## When NOT to use` "small change" bullet is narrowly clarified so it
-#      does not appear to exclude product-analysis authoring.
+#   9. The product-analysis-card frontmatter `description:` only triggers on
+#      the product-analysis authoring trigger (NOT the inceptie / new-app
+#      trigger — that one belongs to intake-authoring). The description
+#      stays when-to-use only (no workflow summary).
+#  10. A top-level `## When to use` bullet points to the product-analysis
+#      form / external-product comparison trigger. There is no
+#      inceptie / new-app bullet (that one lives in intake-authoring).
 
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-INTAKE="$REPO_ROOT/.claude/skills/intake-authoring/SKILL.md"
+INTAKE="$REPO_ROOT/.claude/skills/product-analysis-card/SKILL.md"
 PRODUCT="$REPO_ROOT/.claude/skills/product-analysis/SKILL.md"
 DECISION="$REPO_ROOT/docs/cockpit/product-analyse-methode-decision.md"
 
@@ -212,16 +217,14 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-echo "Task 9: frontmatter description is discoverable for both triggers"
-# Extract the YAML frontmatter (the block between the first two `---` lines)
-# and assert it lists BOTH triggers. Section-scoped, not whole-file.
+echo "Task 9: product-analysis-card frontmatter is discoverable for the trigger only"
+# Extract the YAML frontmatter (the block between the first two `---` lines).
+# This skill is the product-analysis authoring home — it must NOT carry the
+# inceptie / new-app trigger (that one belongs to intake-authoring).
 FRONTMATTER="$TMP/frontmatter.txt"
 awk 'BEGIN{n=0} /^---$/{n++; if(n==1) next; if(n==2) exit} n==1{print}' "$INTAKE" > "$FRONTMATTER"
 check "frontmatter extracted" "description:" "$FRONTMATTER"
-# Existing new-app / inceptie trigger must remain.
-check "frontmatter keeps the inceptie / new-app trigger" \
-  "inceptie|new app|app-idea" "$FRONTMATTER"
-# New product-analysis trigger must be discoverable.
+# Product-analysis trigger must be discoverable.
 check "frontmatter mentions product-analysis authoring trigger" \
   "product-analysis" "$FRONTMATTER"
 check "frontmatter mentions Backlog / external product trigger" \
@@ -229,6 +232,13 @@ check "frontmatter mentions Backlog / external product trigger" \
 # Description stays when-to-use only (no workflow summary).
 check "frontmatter description is when-to-use style (no workflow step-list)" \
   "Use when" "$FRONTMATTER"
+# Negative: frontmatter must NOT include the inceptie / new-app trigger —
+# routing for that lives in intake-authoring, not here.
+if grep -qE "inceptie|new app|app-idea" "$FRONTMATTER"; then
+  bad "frontmatter mentions the inceptie / new-app trigger (routing should live in intake-authoring)"
+else
+  ok "frontmatter does NOT mention the inceptie / new-app trigger"
+fi
 # Negative: frontmatter must NOT be a workflow summary like "Steps: ...".
 if grep -qE "^description: .*[Ss]tep [0-9]:" "$FRONTMATTER"; then
   bad "frontmatter description looks like a workflow summary"
@@ -252,19 +262,17 @@ awk '
   in_para && /^## / { in_para=0 }
   in_para { print }
 ' "$INTAKE" > "$WHEN_NOT_USE"
-check "## When to use section extracted" "A human says" "$WHEN_USE"
 # Top-level bullet pointing to the product-analysis form / external-product
 # comparison trigger. Use a forgiving regex covering the trigger phrases.
 check "## When to use contains a product-analysis bullet" \
   "external product|vergelijk|Product analyse|product-analysis" "$WHEN_USE"
-# Existing inceptie bullet must remain (no broad rewrite).
-check "## When to use keeps the inceptie bullet" \
-  "new app" "$WHEN_USE"
-# The "small change" `When NOT to use` bullet must be narrowly clarified so
-# it does not appear to exclude product-analysis authoring. The clarification
-# we add is in parentheses; assert the parenthetical exists.
-check "## When NOT to use 'small change' bullet has a clarification" \
-  "does not exclude|scoped analysis-kaart|not .small change" "$WHEN_NOT_USE"
+# Negative: this skill is product-analysis-only — the inceptie / new-app
+# bullet lives in intake-authoring, not here.
+if grep -qE "new app|app-idea" "$WHEN_USE"; then
+  bad "## When to use mentions the inceptie / new-app bullet (that one lives in intake-authoring)"
+else
+  ok "## When to use does NOT mention the inceptie / new-app bullet"
+fi
 
 # ----------------------------------------------------------------------------
 echo ""
