@@ -179,10 +179,13 @@ async def lifespan(app: FastAPI):
     # restarts, so without this a project left toggled on would start having
     # cards auto-claimed/spawned on the very next tick after any backend
     # restart -- auto-dispatch must always start from an explicit opt-in.
+    # Exception: a `uvicorn --reload` hot reload is the same running server, not
+    # a restart, and force-disabling there made the factory disable itself every
+    # time an agent merged a backend change (see reset_autodispatch_for_boot).
     from app.kanban import dispatch as kanban_dispatch
     from app.kanban.db import KanbanSessionLocal
     async with KanbanSessionLocal() as ks:
-        await kanban_dispatch.disable_all_autodispatch(ks)
+        await kanban_dispatch.reset_autodispatch_for_boot(ks)
         await ks.commit()
     # Start kanban auto-dispatch polling
     scheduler_service.schedule_kanban_dispatch(
