@@ -209,7 +209,16 @@ def test_build_run_command_no_caps_yields_empty_flags(tmp_path):
 
 def test_build_run_command_threads_extra_env_into_config(tmp_path):
     svc = SandcastleService()
-    config = _config(tmp_path, sandbox_provider="docker")
+    # Pick a non-Claude-Code agent so the test isolates the "extras pass
+    # through" contract from the per-CLI baseline injection exercised by
+    # the dedicated tests below. ``CLAUDE_CODE_BASELINE_ENV`` is only
+    # injected for ``cli_id == "claude-code"``, so the assertion below
+    # reads the dict exactly without subtracting baseline vars. The
+    # ``COCKPIT_*`` session-context vars are still added by
+    # ``build_spawn_env`` for every transport and belong in the dict
+    # (the worktree transport gets them today; kaart 1f8b4e99… unifies
+    # the contract so sandcastle does too).
+    config = _config(tmp_path, sandbox_provider="docker", agent_provider="open-code")
     run = SimpleNamespace(id=5, prompt="x")
     svc._build_run_command(
         config, run, branch_name=None, max_iterations=None,
@@ -218,17 +227,132 @@ def test_build_run_command_threads_extra_env_into_config(tmp_path):
     data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-5.json").read_text())
     # Project-scoped secrets land in the run-config `env` the runner reads and
     # injects as the sandbox provider's env vars.
-    assert data["env"] == {"API_TOKEN": "t0k", "DB_URL": "sqlite://"}
+    assert data["env"] == {
+        "API_TOKEN": "t0k",
+        "DB_URL": "sqlite://",
+        "COCKPIT_PROJECT_KEY": config.project_path,
+        "COCKPIT_RUNTIME": "sandcastle",
+    }
 
 
-def test_build_run_command_no_extra_env_yields_empty_dict(tmp_path):
+def test_build_run_command_no_extra_env_yields_only_cockpit_context(tmp_path):
     svc = SandcastleService()
-    config = _config(tmp_path, sandbox_provider="docker")
+    # Non-Claude-Code agent so the baseline-env injection path doesn't
+    # muddy this isolated "no extras => only cockpit context" contract.
+    # The baseline-injection tests below cover the Claude Code side.
+    config = _config(tmp_path, sandbox_provider="docker", agent_provider="open-code")
     run = SimpleNamespace(id=6, prompt="x")
     svc._build_run_command(config, run, branch_name=None, max_iterations=None)
     data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-6.json").read_text())
-    # No secrets => empty dict (the runner skips setting provider.env for it).
-    assert data["env"] == {}
+    # No caller secrets and a non-Claude-Code agent => just the COCKPIT_*
+    # session-context vars (added by build_spawn_env for every transport).
+    assert data["env"] == {
+        "COCKPIT_PROJECT_KEY": config.project_path,
+        "COCKPIT_RUNTIME": "sandcastle",
+    }
+
+
+# ---- baseline env injection -----------------------------------------------
+#
+# Kaart 1f8b4e9963e24451a02eea03c5d1592a: ``CLAUDE_CODE_BASELINE_ENV`` from
+# ``app.services.agentic_cli.provider_env`` (today just
+# ``CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL=1``) must reach a sandbox Claude
+# Code spawn — every other Claude Code transport (``worktree``,
+# ``headless``, ``cc_spawn``) routes its explicit env through
+# ``build_spawn_env`` and gets the baseline for free. ``sandcastle``
+# historically passed ``extra_env`` straight through, so a sandboxed Claude
+# Code agent never saw the baseline and the bundled ``claude-api`` skill
+# could fire on turn one — the trigger hit prompts naming
+# ``claude-*``/``anthropic``/``Opus``/``Sonnet``/``Haiku`` and the next
+# request died with ``invalid_request: Prompt is too long``.
+#
+# These tests assert the contract the runner.mjs-side of the bridge relies
+# on: every ``agent_provider="claude-code"`` run gets the baseline, every
+# other agent CLI (``codex-cli``, ``open-code``) does not (their own
+# basenames live next to theirs, not in ``CLAUDE_CODE_BASELINE_ENV``), and
+# caller-supplied extras still win on collision so a stale project secret
+# can't disable the safety toggle.
+
+def test_build_run_command_claude_code_baseline_env_injected(tmp_path):
+    """A sandbox Claude Code run gets ``CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL=1``.
+
+    Without the baseline, the bundled ``claude-api`` skill fires on any
+    prompt mentioning ``claude-*``/``anthropic``/``Opus``/``Sonnet``/``Haiku``
+    and inlines ~212k tokens of skill body into a single tool result —
+    every card on this repo matches that trigger, and a sandboxed session
+    dies 8 seconds after dispatch with ``invalid_request: Prompt is too
+    long`` (kaart 1f8b4e9963e24451a02eea03c5d1592a)."""
+    from app.services.agentic_cli.provider_env import CLAUDE_CODE_BASELINE_ENV
+
+    svc = SandcastleService()
+    config = _config(tmp_path, sandbox_provider="docker", agent_provider="claude-code")
+    run = SimpleNamespace(id=70, prompt="x")
+    svc._build_run_command(config, run, branch_name=None, max_iterations=None)
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-70.json").read_text())
+    # Baseline is Claude-Code-specific, so agent_provider="claude-code" must include it.
+    for key, value in CLAUDE_CODE_BASELINE_ENV.items():
+        assert data["env"].get(key) == value, (
+            f"expected baseline var {key}={value!r} in run-config env, got {data['env']!r}"
+        )
+
+
+def test_build_run_command_baseline_merges_with_caller_extras(tmp_path):
+    """Baseline vars merge into ``extra_env``; both survive the merge.
+
+    A project secret (here ``API_TOKEN``) lives alongside the baseline;
+    the runner.mjs injects both into the sandbox provider's env. The two
+    layers are independent: missing extras do not strip the baseline and
+    present extras do not strip absent ones either."""
+    svc = SandcastleService()
+    config = _config(tmp_path, sandbox_provider="docker", agent_provider="claude-code")
+    run = SimpleNamespace(id=71, prompt="x")
+    svc._build_run_command(
+        config, run, branch_name=None, max_iterations=None,
+        extra_env={"API_TOKEN": "t0k"},
+    )
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-71.json").read_text())
+    assert data["env"]["API_TOKEN"] == "t0k"
+    assert data["env"]["CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL"] == "1"
+
+
+def test_build_run_command_caller_extras_override_baseline(tmp_path):
+    """Caller-supplied extras win on collision (the ``build_spawn_env`` contract).
+
+    A project secret that explicitly sets ``CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL=0``
+    is the operator opting the sandbox back in — the baseline must yield
+    so the operator's choice is respected, mirroring the precedence
+    chain documented in ``provider_env.build_spawn_env``."""
+    svc = SandcastleService()
+    config = _config(tmp_path, sandbox_provider="docker", agent_provider="claude-code")
+    run = SimpleNamespace(id=72, prompt="x")
+    svc._build_run_command(
+        config, run, branch_name=None, max_iterations=None,
+        extra_env={"CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL": "0"},
+    )
+    data = json.loads((Path(tmp_path) / ".sandcastle" / "run-config-72.json").read_text())
+    assert data["env"]["CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL"] == "0"
+
+
+def test_build_run_command_baseline_skipped_for_non_claude_code_agents(tmp_path):
+    """Baseline is Claude-Code-specific — ``codex-cli``/``open-code`` runs must not see it.
+
+    The var name starts with ``CLAUDE_CODE_`` and only Claude Code's CLI
+    honours it. Injecting it into a Codex or OpenCode container is
+    meaningless (silently ignored) but still misleading in a runner
+    trace; the build-time branch in ``build_spawn_env`` keeps the var
+    scoped to ``cli_id == "claude-code"`` and the sandcastle lane must
+    honour that same scoping instead of broadening it."""
+    svc = SandcastleService()
+    for cli in ("codex-cli", "open-code"):
+        config = _config(tmp_path, sandbox_provider="docker", agent_provider=cli)
+        run = SimpleNamespace(id=80 + hash(cli) % 100, prompt="x")
+        svc._build_run_command(config, run, branch_name=None, max_iterations=None)
+        data = json.loads(
+            (Path(tmp_path) / ".sandcastle" / f"run-config-{run.id}.json").read_text()
+        )
+        assert "CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL" not in data["env"], (
+            f"baseline var leaked into {cli} run-config env: {data['env']!r}"
+        )
 
 
 # ---- parallel-run command building -----------------------------------------
