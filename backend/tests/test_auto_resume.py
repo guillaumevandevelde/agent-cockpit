@@ -104,6 +104,78 @@ class TestParseResetTime:
         assert svc.parse_reset_time(msg) is None
 
 
+class TestParseDatedResetTime:
+    """The weekly-limit wording carries a *date* before the clock time
+    ("resets Aug 3, 7pm") because the reset can be days away. Without it the
+    parser returned None and every caller fell back to the blind
+    FALLBACK_PAUSE_HOURS guess -- see the 2026-08-01 board incident where two
+    cards were parked for 5h while their real reset had already passed.
+    """
+
+    def test_parses_dated_weekly_reset_time(self):
+        svc = AutoResumeService()
+        msg = "You've hit your weekly limit · resets Aug 3, 7pm (Europe/Brussels)"
+        result = svc.parse_reset_time(msg)
+        assert result is not None
+        reset_time, tz_name = result
+        assert tz_name == "Europe/Brussels"
+        assert (reset_time.month, reset_time.day) == (8, 3)
+        assert (reset_time.hour, reset_time.minute) == (19, 0)
+
+    def test_parses_dated_reset_time_with_minutes(self):
+        svc = AutoResumeService()
+        msg = "You've hit your weekly limit · resets Jul 27, 7:30pm (Europe/Brussels)"
+        result = svc.parse_reset_time(msg)
+        assert result is not None
+        reset_time, _tz = result
+        assert (reset_time.month, reset_time.day) == (7, 27)
+        assert (reset_time.hour, reset_time.minute) == (19, 30)
+
+    def test_dated_reset_in_the_past_is_not_rolled_forward(self):
+        """A dated reset that already passed must come back as the real past
+        moment -- that is what tells the caller "the limit is over, dispatch
+        now". Rolling it to tomorrow (the undated-form behaviour) would park
+        the card for another day."""
+        svc = AutoResumeService()
+        tz = ZoneInfo("Europe/Brussels")
+        past = datetime.now(tz) - timedelta(days=2)
+        msg = (
+            "You've hit your weekly limit · resets "
+            f"{past.strftime('%b %-d')}, 9am (Europe/Brussels)"
+        )
+        result = svc.parse_reset_time(msg)
+        assert result is not None
+        reset_time, _tz = result
+        assert (reset_time.month, reset_time.day) == (past.month, past.day)
+        assert reset_time < datetime.now(tz)
+
+    def test_returns_none_for_unparsable_month_name(self):
+        svc = AutoResumeService()
+        msg = "You've hit your weekly limit · resets Smarch 3, 7pm (Europe/Brussels)"
+        assert svc.parse_reset_time(msg) is None
+
+
+class TestResolveYear:
+    """The notification carries no year, so the month/day pair is resolved
+    against the nearest occurrence -- otherwise a Dec 31 -> Jan 1 reset lands
+    364 days in the past."""
+
+    def test_picks_current_year_for_a_nearby_date(self):
+        from app.services.scheduling.auto_resume import _resolve_year
+        now = datetime(2026, 8, 3, 12, 0, tzinfo=ZoneInfo("Europe/Brussels"))
+        assert _resolve_year(8, 3, now) == 2026
+
+    def test_rolls_forward_across_new_year(self):
+        from app.services.scheduling.auto_resume import _resolve_year
+        now = datetime(2026, 12, 31, 22, 0, tzinfo=ZoneInfo("Europe/Brussels"))
+        assert _resolve_year(1, 1, now) == 2027
+
+    def test_rolls_back_across_new_year(self):
+        from app.services.scheduling.auto_resume import _resolve_year
+        now = datetime(2027, 1, 1, 2, 0, tzinfo=ZoneInfo("Europe/Brussels"))
+        assert _resolve_year(12, 31, now) == 2026
+
+
 class TestEnabledState:
     def test_default_disabled(self):
         svc = AutoResumeService()

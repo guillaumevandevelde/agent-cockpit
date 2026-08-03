@@ -6,7 +6,7 @@ session (or resumes) and injects a continuation message.
 """
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -15,10 +15,40 @@ from apscheduler.triggers.date import DateTrigger
 logger = logging.getLogger(__name__)
 
 # Pattern: "You've hit your session or weekly limit · resets 11:10pm (Europe/Brussels)"
+#
+# The weekly variant prefixes the clock time with a date -- "resets Aug 3, 7pm
+# (Europe/Brussels)" -- because a weekly reset can be days away. That optional
+# `<month> <day>,` group is what the pattern grew for; without it the whole
+# message failed to parse and every caller fell back to the blind
+# FALLBACK_PAUSE_HOURS guess (see `parse_reset_time`).
 _LIMIT_PATTERN = re.compile(
-    r"hit your .*? limit.*?resets\s+(\d{1,2}(?::\d{2})?(?:am|pm)?)\s*\(([^)]+)\)",
+    r"hit your .*? limit.*?resets\s+"
+    r"(?:(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?,?\s+)?"
+    r"(?P<time>\d{1,2}(?::\d{2})?(?:am|pm)?)\s*\((?P<tz>[^)]+)\)",
     re.IGNORECASE,
 )
+
+# How far a dated reset may sit from "now" before we assume the notification
+# means the neighbouring year (Dec 31 -> Jan 1 and back). Half a year: a limit
+# reset is always days away, never months.
+_YEAR_ROLLOVER_WINDOW_DAYS = 180
+
+
+def _resolve_year(month: int, day: int, now: datetime) -> int:
+    """Pick the year for a year-less `<month> <day>` from a limit notification.
+
+    Anthropic's wording carries no year, so "Jan 1" seen on Dec 31 means *next*
+    year and "Dec 31" seen on Jan 1 means *last* year. Returns the year whose
+    month/day lands nearest `now`, preferring the current year on a tie.
+    """
+    for year in (now.year, now.year + 1, now.year - 1):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            continue  # e.g. Feb 29 in a non-leap year
+        if abs((candidate - now.date()).days) <= _YEAR_ROLLOVER_WINDOW_DAYS:
+            return year
+    return now.year
 
 # Default continuation message when auto-resuming
 DEFAULT_RESUME_MESSAGE = "Continue where you left off."
@@ -140,6 +170,15 @@ class AutoResumeService:
     def parse_reset_time(self, message: str | None) -> tuple[datetime, str] | None:
         """Parse reset time and timezone from notification message.
 
+        Handles both wordings: the undated session-limit form ("resets 11:10pm
+        (Europe/Brussels)") and the dated weekly form ("resets Aug 3, 7pm
+        (Europe/Brussels)").
+
+        A *dated* reset is returned as-is even when it already passed -- that
+        past timestamp is the signal that the limit is over and dispatch may
+        resume immediately. Only the undated form rolls a past clock time to
+        tomorrow, because there the date is genuinely unknown.
+
         Returns (datetime, timezone_name) or None if parsing fails.
         """
         if not message:
@@ -148,8 +187,10 @@ class AutoResumeService:
         if not match:
             return None
 
-        time_str = match.group(1)
-        tz_name = match.group(2)
+        time_str = match.group("time")
+        tz_name = match.group("tz")
+        month_str = match.group("month")
+        day_str = match.group("day")
 
         try:
             tz = ZoneInfo(tz_name)
@@ -176,6 +217,29 @@ class AutoResumeService:
         except ValueError:
             logger.warning("Could not parse time '%s' from limit notification", time_str)
             return None
+
+        if month_str is not None and day_str is not None:
+            try:
+                month = datetime.strptime(month_str[:3].title(), "%b").month
+            except ValueError:
+                logger.warning(
+                    "Could not parse month '%s' from limit notification", month_str
+                )
+                return None
+            day = int(day_str)
+            try:
+                reset_time = reset_time.replace(
+                    year=_resolve_year(month, day, now), month=month, day=day
+                )
+            except ValueError:
+                logger.warning(
+                    "Invalid reset date '%s %s' in limit notification",
+                    month_str, day_str,
+                )
+                return None
+            # No rollover: the notification told us the exact date. A reset in
+            # the past means the limit already lifted -- report it as such.
+            return reset_time, tz_name
 
         # If reset time is in the past, it's tomorrow
         if reset_time <= now:

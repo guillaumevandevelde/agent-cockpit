@@ -4778,6 +4778,48 @@ def _tail_rate_limit_message(path: Path) -> str | None:
     return None
 
 
+def _transcript_reset_time(project_path: str | None, session_name: str) -> datetime | None:
+    """Read the real usage-limit reset time out of a dead session's transcript.
+
+    The session that a rate limit killed almost always left the limit message
+    as the last thing in its transcript, and that message carries the reset
+    time ("resets Aug 3, 7pm (Europe/Brussels)"). Reading it turns the
+    reaper's blind FALLBACK_PAUSE_HOURS guess into the actual moment the
+    limit lifts -- which is frequently *earlier* than the guess, and for a
+    session that died days ago is already in the past (dispatch may resume
+    immediately).
+
+    Returns None when there is no transcript, no unresolved limit in its tail,
+    or a limit whose wording doesn't parse -- the caller keeps the guess for
+    those.
+    """
+    if not project_path:
+        return None
+    from app.services.scheduling.auto_resume import auto_resume_service
+    try:
+        from app.kanban.session_recovery import _resolve_transcript_file
+        path = _resolve_transcript_file(project_path, session_name)
+        if path is None:
+            return None
+        message = _tail_rate_limit_message(path)
+    except Exception:
+        # Never let a transcript hiccup block the reap -- the caller's
+        # conservative fallback pause is always a valid answer.
+        logger.exception("failed to read reset time from transcript for %s", session_name)
+        return None
+    if message is None:
+        return None
+    parsed = auto_resume_service.parse_reset_time(message)
+    if parsed is None:
+        logger.info(
+            "reaper: unparseable usage-limit message for %s, keeping the "
+            "fallback pause: %r", session_name, message,
+        )
+        return None
+    reset_time, _tz_name = parsed
+    return reset_time
+
+
 # Pane-resume: when a rate-limited session's tmux pane is still alive, defer
 # the kill+To Resume reaction and try to nudge the same session back to life
 # at the parsed reset time via the existing tmux_inject helpers. See
@@ -4977,6 +5019,13 @@ async def try_pane_resume(
     fire_at = reset_time + timedelta(
         seconds=PANE_RESUME_MARGIN_S + PANE_RESUME_BACKOFF_S * (attempts - 1),
     )
+    # A reset time can be in the past: the dated weekly-limit wording ("resets
+    # Aug 3, 7pm") parses to a real date, so a limit noticed after its reset
+    # (idle session, backend restart replaying an old transcript tail) yields a
+    # fire_at that APScheduler would silently drop as a misfire -- leaving the
+    # card pinned on `pane_resume_pending=True` with nobody left to nudge it.
+    # Deliver those immediately instead; the limit has demonstrably lifted.
+    fire_at = max(fire_at, datetime.now(UTC) + timedelta(seconds=1))
 
     # Schedule the nudge via the scheduler directly so we can call our own
     # `_execute_pane_resume` (the standard auto_resume_service._execute_resume
@@ -7050,20 +7099,20 @@ async def reap_stale_claims(
 
         # If we know the project path, try resume recovery first
         if project_path is not None:
-            # The reaper only sees tmux pane content, never a parsed usage-limit
-            # reset time -- fall back to a conservative fixed pause (same
-            # duration as _cleanup_stuck_session's global pause) so the card
-            # doesn't get immediately re-picked up by the next dispatch tick
-            # while the rate limit is still in effect.
-            from datetime import timedelta
+            resume_at = _transcript_reset_time(project_path, name)
+            if resume_at is None:
+                # No reset time to be had (no transcript, or a limit message
+                # whose wording we can't parse) -- fall back to a conservative
+                # fixed pause (same duration as _cleanup_stuck_session's global
+                # pause) so the card doesn't get immediately re-picked up by
+                # the next dispatch tick while the limit is still in effect.
+                from datetime import timedelta
 
-            from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
-            fallback_scheduled_at = (
-                datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
-            ).isoformat()
+                from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
+                resume_at = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
             if await _move_to_resume(
                 session, card=card, project_key=project_key,
-                project_path=project_path, scheduled_at=fallback_scheduled_at,
+                project_path=project_path, scheduled_at=resume_at.isoformat(),
             ):
                 reaped += 1
                 continue
