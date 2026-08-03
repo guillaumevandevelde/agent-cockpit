@@ -382,12 +382,10 @@ Vuistregels (harness-contract: cwd lekt tussen calls):
   vanuit je worktree-cwd (geen `cd` nodig).
 
 (CLAUDE.md's git-ship-recept hanteert hetzelfde `git -C "$WT"`-patroon
-voor de merge-stap, met `WT="$HOME/.cache/cockpit-ship/ship-merge-$$"`
-— de slot-naam `ship-merge-$$` (per-proces uniek) voorkomt dat
-concurrent sessies dezelfde worktree-directory hergebruiken. Dit is de
-algemene variant voor élke git-mutatie binnen een worktree-sessie: zet
-de scratch-worktree onder `$HOME/.cache/cockpit-ship/` (persistent, maar
-**buiten** élke gitdir en élke werkboom). Twee eerdere keuzes faalden:
+voor de merge-stap, met `WT="$HOME/.cache/cockpit-ship/ship-merge-${BRANCH//\//-}"`
+— de slot-naam is afgeleid van `$BRANCH` en dus stabiel binnen één sessie
+(handig nu het recept over meerdere Bash-calls gesplitst kan worden —
+`$$` (PID) is per-call en breekt het pad). Twee eerdere keuzes faalden:
 
   - **Niet** onder `$(mktemp -d)` — de Bash-tool reapet `/tmp` tussen
     calls, dus de worktree kan halverwege verdwijnen (kaart `01aa1ef5…`).

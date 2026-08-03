@@ -281,8 +281,21 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         'SHIP_TMP="${HOME}/.cache/cockpit-ship"',
     ),
     (
-        "PID-unique ship worktree path",
-        'WT="$SHIP_TMP/ship-merge-$$"',
+        # Branch-unique ship worktree path (NOT PID-derived). The Bash tool
+        # spawns a fresh shell per call, so `$$` (PID) drifts between calls —
+        # a recipe split across calls lost the worktree path with
+        # `fatal: cannot change to …: No such file or directory` on every
+        # `git -C "$WT" …` line (the bug motivating this card). A slot
+        # derived from `$BRANCH` is stable within a single ship session
+        # because `$BRANCH` doesn't change between calls, and still gives
+        # unique slots across ships of different branches. Same-branch
+        # concurrent ships serialize via the `git worktree remove --force`
+        # at end of each ship, so the cross-session collision window is
+        # essentially zero. `${BRANCH//\//-}` replaces `/` with `-` so the
+        # branch name is a single path component (e.g. `feature/foo` →
+        # `feature-foo`).
+        "branch-unique ship worktree path (stable across Bash calls)",
+        'WT="$SHIP_TMP/ship-merge-${BRANCH//\\//-}"',
     ),
     # The carve-out stages by explicit path, never `add -A` (kanban card
     # 7dd8a3dd…). A blind `add -A` stages everything under the worktree
@@ -1122,6 +1135,48 @@ def test_ship_worktree_is_not_nested_under_git_worktrees(source_name: str) -> No
 
 
 @pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_ship_worktree_path_is_branch_derived_not_pid(source_name: str) -> None:
+    """The ship-worktree slot MUST be derived from $BRANCH, NOT from $$.
+
+    Pins the fix for kanban card c23dfe46-revisit — the cross-call path
+    instability: ``$$`` is the calling shell's PID, and the Bash tool spawns
+    a fresh shell per call (no state carries between calls). A recipe that
+    references ``WT=\"$SHIP_TMP/ship-merge-$$\"`` therefore computed a
+    DIFFERENT worktree path on each Bash call, and every ``git -C \"$WT\" …``
+    after the first died with ``fatal: cannot change to …: No such file or
+    directory``. Recovered by reusing the actually-existing worktree from
+    the first call — but that recovery is brittle (the first call has to
+    succeed before the second can find anything) and silent from CI's
+    perspective.
+
+    A slot derived from ``${BRANCH//\\//-}`` is stable within a single ship
+    session because ``$BRANCH`` does not change between calls. Across
+    sessions of different branches the slots are naturally unique; same-
+    branch concurrent ships serialize via the ``git worktree remove --force``
+    at end of each ship, so the cross-session collision window is
+    essentially zero (the dispatcher enforces one session per card claim).
+
+    Pinned as an absence assertion on EXECUTABLE lines so a future comment
+    that explains the old PID shape (in the spirit of this test's own
+    rationale paragraph) doesn't false-positive. The `_executable_lines`
+    filter strips `#`-prefixed comment lines — the same filter the existing
+    ``test_ship_worktree_is_not_nested_under_git_worktrees`` and
+    ``test_carve_out_never_stages_everything`` rely on.
+    """
+    source_text = _executable_lines(SOURCES[source_name]())
+    assert 'ship-merge-$$' not in source_text, (
+        f"{source_name}: ship-worktree slot is PID-derived "
+        f"(`ship-merge-$$`) in executable code. The Bash tool respawns a "
+        f"fresh shell per call, so `$$` drifts between calls and a recipe "
+        f"split across calls loses the worktree path "
+        f"(`fatal: cannot change to ship-merge-<pid>: No such file or "
+        f"directory`). Use the branch-derived form (see the "
+        f"`branch-unique ship worktree path` invariant above) so the slot "
+        f"survives arbitrary splits of the recipe across Bash calls."
+    )
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
 def test_carve_out_never_stages_everything(source_name: str) -> None:
     """The carve-out must stage by explicit path, never `add -A`.
 
@@ -1215,14 +1270,16 @@ def test_repo_has_no_tracked_worktree_admin_files() -> None:
 
 
 def test_engineer_md_does_not_teach_the_broken_worktree_pattern() -> None:
-    """engineer.md is a PARTIAL mirror of the recipe — pin the one shape it owns.
+    r"""engineer.md is a PARTIAL mirror of the recipe — pin the one shape it owns.
 
     The engineer persona prompt carries a paragraph teaching sessions WHERE
     to put scratch worktrees. Historically that paragraph pointed at the
     broken ``WT="$(git rev-parse --git-common-dir)/worktrees/ship-merge-$$"``
     pattern — the exact path whose overlap with git's admin dir caused the
-    card-7dd8a3dd… incident. After the fix it points at
-    ``$HOME/.cache/cockpit-ship/ship-merge-$$`` instead.
+    card-7dd8a3dd… incident. After the c23dfe46-revisit fix (this card) it
+    points at ``$HOME/.cache/cockpit-ship/ship-merge-${BRANCH//\//-}``
+    instead — branch-derived for cross-call stability (PID drifts between
+    Bash tool calls, the very bug motivating this card).
 
     engineer.md is NOT in SOURCES (it carries only the worktree-placement
     teaching, not the full ship recipe, so almost every CORE_RECIPE_INVARIANT
@@ -1240,11 +1297,13 @@ def test_engineer_md_does_not_teach_the_broken_worktree_pattern() -> None:
     text = _engineer_md_worktree_pattern()
 
     # Positive: the new pattern is the example the persona teaches.
-    assert "cockpit-ship/ship-merge-$$" in text, (
+    assert "cockpit-ship/ship-merge-${BRANCH" in text, (
         "engineer.md no longer teaches the new scratch-worktree pattern "
-        "`$HOME/.cache/cockpit-ship/ship-merge-$$`. Restore the paragraph "
-        "in the Bash-cwd section so engineers keep placing scratch worktrees "
-        "outside every gitdir (kanban card 7dd8a3dd…)."
+        "`$HOME/.cache/cockpit-ship/ship-merge-${BRANCH//\\//-}`. Restore "
+        "the paragraph in the Bash-cwd section so engineers keep placing "
+        "scratch worktrees outside every gitdir AND keep the branch-derived "
+        "slot name (PID drifts between Bash tool calls — kanban card "
+        "c23dfe46-revisit, the very bug this card fixes)."
     )
 
     # Negative: the original teaching paragraph (full bash assignment) is
@@ -1256,7 +1315,7 @@ def test_engineer_md_does_not_teach_the_broken_worktree_pattern() -> None:
         "That path overlaps git's live admin dir; checkout there breaks "
         "the index, and a tracked `HEAD` makes `git diff --quiet HEAD` exit "
         "128 (kanban card 7dd8a3dd…). The teaching paragraph must point at "
-        "`$HOME/.cache/cockpit-ship/ship-merge-$$` instead."
+        "`$HOME/.cache/cockpit-ship/ship-merge-${BRANCH//\\//-}` instead."
     )
 
 
