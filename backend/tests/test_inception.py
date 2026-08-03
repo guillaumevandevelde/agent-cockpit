@@ -16,7 +16,9 @@ and leave detritus behind" is caught.
 """
 from __future__ import annotations
 
+import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -26,7 +28,7 @@ from sqlalchemy import delete, or_, select
 from app.kanban import dispatch, service
 from app.kanban.models import KanbanCard
 from app.kanban.operations import apply_operation
-from app.kanban.schemas import COLUMNS
+from app.kanban.schemas import COLUMNS, SPEC_DOC_META_KEY
 from tests.kanban_test_db import TestSessionLocal, reset_test_tables
 
 KanbanSessionLocal = TestSessionLocal()
@@ -79,6 +81,41 @@ async def _create_intake_card(project_key: str, column: str = "intake",
         )
         await s.commit()
         return cid
+
+
+# Map from "route" label to (method-name, kwargs-builder). The kwargs-builder
+# closes over the per-test fixtures (intake_id / project_name / target_path /
+# spec_md / plan_md) and produces the dict the inception method needs. Both
+# routes share `project_name` + `target_path`; the rest differs.
+#
+# Parametrising the rollback tests over both routes is what acceptance
+# criterion #9 asked for (the new route must inherit the same atomicity
+# guarantees as the intake route).
+_ROUTE_KWARGS = {
+    "intake": "create_project_from_intake",
+    "interview": "create_project_from_interview",
+}
+
+
+def _build_kwargs(route: str, *, project_name: str, target_path: str,
+                  intake_id: str | None, spec_md: str, plan_md: str,
+                  title: str, description: str) -> dict:
+    if route == "intake":
+        return {
+            "intake_card_id": intake_id,
+            "project_name": project_name,
+            "target_path": target_path,
+        }
+    if route == "interview":
+        return {
+            "project_name": project_name,
+            "target_path": target_path,
+            "title": title,
+            "description": description,
+            "spec_md": spec_md,
+            "plan_md": plan_md,
+        }
+    raise ValueError(f"unknown route {route!r}")
 
 
 # ---- intake column / schema ------------------------------------------------
@@ -208,38 +245,50 @@ async def test_rejects_missing_card():
 # ---- create_project_from_intake: failure modes + atomic rollback --------
 
 
+@pytest.mark.parametrize("route", list(_ROUTE_KWARGS))
 @pytest.mark.asyncio
-async def test_rollback_when_target_path_already_exists(tmp_path: Path):
+async def test_rollback_when_target_path_already_exists(tmp_path: Path, route: str):
     """If the target dir already exists, abort before touching anything else
-    — no kanban card, no Project row, autodispatch not flipped."""
+    — no kanban card, no Project row, autodispatch not flipped. Covers both
+    the intake route and the interview route (kaart b9e6365a, AC #9)."""
     from app.services.inception_service import InceptionService
 
     intake_id = await _create_intake_card("meta")
     target = tmp_path / "already-here"
     target.mkdir()
 
+    kwargs = _build_kwargs(
+        route, project_name="X", target_path=str(target),
+        intake_id=intake_id,
+        spec_md="# Spec\nbody", plan_md="# Plan\nbody",
+        title="X", description="desc",
+    )
+    method_name = _ROUTE_KWARGS[route]
+
     async with KanbanSessionLocal() as ks:
         from app.database import AsyncSessionLocal
         async with AsyncSessionLocal() as app_db:
             svc = InceptionService(ks, app_db)
             with pytest.raises(FileExistsError):
-                await svc.create_project_from_intake(
-                    intake_card_id=intake_id, project_name="X",
-                    target_path=str(target),
-                )
+                await getattr(svc, method_name)(**kwargs)
 
-    # Intake card untouched.
+    # Intake card untouched (the interview route doesn't move it; intake
+    # route moves it on success — both still untouched on failure).
     async with KanbanSessionLocal() as s:
         intake = await service.get_card(s, intake_id)
         assert intake.column == "intake"
 
 
+@pytest.mark.parametrize("route", list(_ROUTE_KWARGS))
 @pytest.mark.asyncio
-async def test_rollback_when_project_already_registered(tmp_path: Path, monkeypatch):
+async def test_rollback_when_project_already_registered(
+    tmp_path: Path, monkeypatch, route: str
+):
     """If a Project row already exists at target_path, abort — don't register
     a duplicate, don't seed, don't move anything. (ProjectService.add_project
     would silently update the existing row's `name` field, which is *worse*
-    than a hard error here, so the inception service pre-checks.)"""
+    than a hard error here, so the inception service pre-checks.) Covers both
+    routes (kaart b9e6365a, AC #9)."""
     from app.database import AsyncSessionLocal
     from app.models.database import Project
     from app.services.inception_service import InceptionService
@@ -253,14 +302,19 @@ async def test_rollback_when_project_already_registered(tmp_path: Path, monkeypa
         app_db.add(Project(name="inception-test-existing", path=str(target)))
         await app_db.commit()
 
+    kwargs = _build_kwargs(
+        route, project_name="MyApp", target_path=str(target),
+        intake_id=intake_id,
+        spec_md="# Spec\nbody", plan_md="# Plan\nbody",
+        title="MyApp", description="desc",
+    )
+    method_name = _ROUTE_KWARGS[route]
+
     async with KanbanSessionLocal() as ks:
         async with AsyncSessionLocal() as app_db:
             svc = InceptionService(ks, app_db)
             with pytest.raises(ValueError, match="already"):
-                await svc.create_project_from_intake(
-                    intake_card_id=intake_id, project_name="MyApp",
-                    target_path=str(target),
-                )
+                await getattr(svc, method_name)(**kwargs)
 
     # Intake card untouched, no kanban card with this title exists anywhere.
     async with KanbanSessionLocal() as s:
@@ -272,11 +326,15 @@ async def test_rollback_when_project_already_registered(tmp_path: Path, monkeypa
         assert rows == []
 
 
+@pytest.mark.parametrize("route", list(_ROUTE_KWARGS))
 @pytest.mark.asyncio
-async def test_rollback_when_git_init_fails(tmp_path: Path, monkeypatch):
+async def test_rollback_when_git_init_fails(
+    tmp_path: Path, monkeypatch, route: str
+):
     """Simulate `git init` failure by monkeypatching subprocess.run for the
     `git init` call. After the failure: target dir is removed, no Project row,
-    no kanban card, intake card untouched, autodispatch-meta not flipped."""
+    no kanban card, intake card untouched, autodispatch-meta not flipped.
+    Covers both routes (kaart b9e6365a, AC #9)."""
     from app.services.inception_service import InceptionService
 
     real_run = subprocess.run
@@ -293,15 +351,20 @@ async def test_rollback_when_git_init_fails(tmp_path: Path, monkeypatch):
     intake_id = await _create_intake_card("meta")
     target = tmp_path / "myapp"
 
+    kwargs = _build_kwargs(
+        route, project_name="MyApp", target_path=str(target),
+        intake_id=intake_id,
+        spec_md="# Spec\nbody", plan_md="# Plan\nbody",
+        title="MyApp", description="desc",
+    )
+    method_name = _ROUTE_KWARGS[route]
+
     async with KanbanSessionLocal() as ks:
         from app.database import AsyncSessionLocal
         async with AsyncSessionLocal() as app_db:
             svc = InceptionService(ks, app_db)
             with pytest.raises(RuntimeError, match="git init"):
-                await svc.create_project_from_intake(
-                    intake_card_id=intake_id, project_name="MyApp",
-                    target_path=str(target),
-                )
+                await getattr(svc, method_name)(**kwargs)
 
     # Atomic rollback: target dir gone, intake untouched.
     assert not target.exists()
@@ -434,3 +497,162 @@ async def test_intake_card_without_plan_deliverable_still_works(tmp_path: Path):
         new_card = await service.get_card(s, result["first_card_id"])
         plan_refs = [d for d in new_card.deliverables if d.kind == "plan_ref"]
         assert plan_refs == []  # no plan → no plan_ref
+
+
+# ---- create_project_from_interview: cardless birth route -----------------
+#
+# Kaart b9e6365a… (inceptie kaartloze geboorte): the interview route lands
+# spec + plan as repo files before the first commit, sets the first card's
+# `metadata[SPEC_DOC_META_KEY]` to the spec path, and skips the intake-card
+# move-to-Done (no intake card on this route). Every rollback test above is
+# parametrised over both routes so the same atomicity guarantees apply.
+
+
+def _slugify(name: str) -> str:
+    """Mirror the service's slug derivation so the tests can compute the
+    expected file paths without re-implementing the rule."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+async def _run_interview_happy_path(
+    tmp_path: Path, *, project_name: str = "My App",
+    title: str | None = None, description: str | None = None,
+    spec_md: str | None = None, plan_md: str | None = None,
+):
+    """Drive a happy-path interview birth and return (target, result, today)."""
+    from app.services.inception_service import InceptionService
+
+    target = tmp_path / "myapp"
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    kwargs = {
+        "project_name": project_name,
+        "target_path": str(target),
+        "title": title if title is not None else project_name,
+        "description": description if description is not None else "An idea worth building.",
+        "spec_md": spec_md if spec_md is not None else "# Spec\n\nspec body.",
+        "plan_md": plan_md if plan_md is not None else "# Plan\n\nplan body.",
+    }
+    async with KanbanSessionLocal() as ks:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            result = await svc.create_project_from_interview(**kwargs)
+    return target, result, today
+
+
+@pytest.mark.parametrize("label,spec_md,plan_md", [
+    ("empty_spec",  "",          "# Plan\nbody"),
+    ("empty_plan",  "# Spec\nbody", ""),
+    ("empty_both",  "",          ""),
+])
+@pytest.mark.asyncio
+async def test_rejects_empty_spec_or_plan(
+    tmp_path: Path, label: str, spec_md: str, plan_md: str
+):
+    """AC #2: empty spec_md or plan_md → ValueError, no side effects.
+
+    The interview route validates the payload *in place of* looking up an
+    intake card — there's no card to fall back on, so an empty spec/plan
+    would render a half-born project with no design. Refuse loudly."""
+    from app.services.inception_service import InceptionService
+
+    target = tmp_path / "myapp"
+
+    async with KanbanSessionLocal() as ks:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            with pytest.raises(ValueError, match="spec_md|plan_md|empty"):
+                await svc.create_project_from_interview(
+                    project_name="MyApp",
+                    target_path=str(target),
+                    title="MyApp",
+                    description="desc",
+                    spec_md=spec_md,
+                    plan_md=plan_md,
+                )
+
+    # Nothing on disk.
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_spec_and_plan_land_in_repo_and_are_committed(tmp_path: Path):
+    """AC #3: spec + plan land as repo files at the dated/slugged paths and
+    are captured in the first commit. The first commit message no longer
+    embeds the intake-card-id placeholder (AC #6)."""
+    target, result, today = await _run_interview_happy_path(
+        tmp_path, project_name="My App",
+    )
+
+    slug = _slugify("My App")
+    spec_path = target / "docs" / "specs" / f"{today}-{slug}-design.md"
+    plan_path = target / "docs" / "plans" / f"{today}-{slug}-plan.md"
+
+    assert spec_path.exists(), f"expected {spec_path} to exist"
+    assert plan_path.exists(), f"expected {plan_path} to exist"
+    # Body content round-trips.
+    assert "spec body" in spec_path.read_text()
+    assert "plan body" in plan_path.read_text()
+
+    # The first commit must include docs/ — `git ls-files` lists tracked
+    # files; both spec + plan should appear.
+    ls = subprocess.run(
+        ["git", "-C", str(target), "ls-files"],
+        capture_output=True, text=True, check=True,
+    )
+    assert str(spec_path.relative_to(target)) in ls.stdout
+    assert str(plan_path.relative_to(target)) in ls.stdout
+
+    # No pending changes against HEAD (the first commit captured them all).
+    status = subprocess.run(
+        ["git", "-C", str(target), "status", "--porcelain"],
+        capture_output=True, text=True, check=True,
+    )
+    assert status.stdout.strip() == "", (
+        f"expected clean tree after first commit, got:\n{status.stdout}"
+    )
+
+    # AC #6: the first-commit message reflects the interview route
+    # (no `{intake_card_id}` placeholder would survive — the intake-card
+    # value would be missing). Verify the message fits the new format.
+    log = subprocess.run(
+        ["git", "-C", str(target), "log", "-1", "--pretty=%s"],
+        capture_output=True, text=True, check=True,
+    )
+    msg = log.stdout.strip()
+    assert "{intake_card_id}" not in msg, (
+        f"interview-route commit message must not interpolate the intake id; got {msg!r}"
+    )
+    assert "My App" in msg or "MyApp" in msg, (
+        f"interview-route commit message should name the project; got {msg!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_first_card_carries_spec_doc_metadata(tmp_path: Path):
+    """AC #4: first card gets ``metadata[SPEC_DOC_META_KEY]`` =
+    repo-relative path to the design doc, and the title/description come
+    from the payload (no intake card to inherit from). AC #5: no plan_ref
+    deliverable on the first card."""
+    target, result, today = await _run_interview_happy_path(
+        tmp_path, project_name="My App",
+        title="Custom title from interview",
+        description="Custom description from interview.",
+    )
+
+    slug = _slugify("My App")
+    expected_spec_rel = f"docs/specs/{today}-{slug}-design.md"
+
+    async with KanbanSessionLocal() as s:
+        new_card = await service.get_card(s, result["first_card_id"])
+        assert new_card is not None
+        # AC #4 — title + description from payload, not an intake card.
+        assert new_card.title == "Custom title from interview"
+        assert new_card.description == "Custom description from interview."
+        # AC #4 — metadata carries the spec-doc link.
+        assert new_card.meta is not None
+        assert new_card.meta.get(SPEC_DOC_META_KEY) == expected_spec_rel
+        # AC #5 — no plan_ref deliverable on the new card.
+        plan_refs = [d for d in new_card.deliverables if d.kind == "plan_ref"]
+        assert plan_refs == [], "interview route must NOT wire a plan_ref"
