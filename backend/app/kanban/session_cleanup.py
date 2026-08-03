@@ -156,9 +156,10 @@ async def _worktree_path_for_card(card) -> Path | None:
     """Best-effort resolution of the git worktree directory backing this card.
 
     Tries the live claim (worktree lives at <project_path>/.claude/worktrees/
-    <session_name>) first, then a "To Resume" target (card.resume_project_folder,
-    which was recorded by the dead-session reaper). Returns None when neither
-    resolves to an existing worktree.
+    <session_name>) first, then a "To Resume" target. Claude stores an encoded
+    project folder; other adapters store a validated absolute worktree path in
+    ``card.resume_project_folder``. Returns None when neither resolves to an
+    existing worktree.
     """
     session_name = _extract_session_name(getattr(card, "claimed_by", None))
     if session_name:
@@ -170,6 +171,19 @@ async def _worktree_path_for_card(card) -> Path | None:
 
     resume_folder = getattr(card, "resume_project_folder", None)
     if resume_folder:
+        candidate = Path(resume_folder).expanduser()
+        if candidate.is_absolute():
+            project_path = await resolve_project_path(card.project_key)
+            if not project_path:
+                return None
+            allowed_root = (
+                Path(project_path) / ".claude" / "worktrees"
+            ).resolve()
+            resolved = candidate.resolve()
+            if not resolved.is_relative_to(allowed_root) or not resolved.is_dir():
+                return None
+            return resolved
+
         from app.services.runs.cc_spawn import _resolve_project_directory
         try:
             resolved = _resolve_project_directory(

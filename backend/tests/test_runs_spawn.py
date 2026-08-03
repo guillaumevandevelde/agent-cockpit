@@ -72,6 +72,40 @@ def test_claude_resume_resolves_directory_from_transcript_cwd(monkeypatch, tmp_p
     assert "--resume session-123" in calls[0][-1]
 
 
+def test_codex_resume_uses_recorded_worktree_directory(monkeypatch, tmp_path):
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.runs import spawn
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    worktree = repo / ".claude" / "worktrees" / "k-codex"
+    worktree.mkdir(parents=True)
+    calls = []
+
+    def fake_run(args, capture_output=True, text=True, timeout=10):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn, "_session_name_for", lambda directory, preferred=None: "k-resume")
+    monkeypatch.setattr(spawn.subprocess, "run", fake_run)
+    spawn.get_spawned_sessions().clear()
+
+    spawn.spawn_session(
+        "codex-cli",
+        SpawnCommandOptions(
+            directory=str(repo),
+            mode="resume",
+            session_id="codex-session",
+            project_folder=str(worktree),
+        ),
+    )
+
+    assert calls[0][:7] == [
+        "tmux", "new-session", "-d", "-s", "k-resume", "-c", str(worktree),
+    ]
+    assert f"--cd {worktree}" in calls[0][-1]
+
+
 def test_bedrock_platform_injects_env_flags(monkeypatch, tmp_path):
     from app.services.agentic_cli.base import SpawnCommandOptions
     from app.services.runs import spawn

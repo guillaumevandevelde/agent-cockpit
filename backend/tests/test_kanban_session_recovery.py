@@ -22,10 +22,15 @@ async def _tables():
     yield
 
 
-async def _make_card(s, title="Task", column="Backlog"):
+async def _make_card(
+    s, title="Task", column="Backlog", executor_agent_id=None,
+):
+    payload = {"title": title, "column": column}
+    if executor_agent_id is not None:
+        payload["executor_agent_id"] = executor_agent_id
     cid = await apply_operation(
         s, op_type="create", entity_type="card", project_key=PK,
-        entity_id=None, payload={"title": title, "column": column},
+        entity_id=None, payload=payload,
     )
     await s.flush()
     return cid
@@ -132,6 +137,46 @@ def test_resolve_resume_target_none_without_transcript(tmp_path):
     assert result is None
 
 
+def test_resolve_resume_target_routes_to_requested_cli(monkeypatch, tmp_path):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "k-codex"
+    worktree.mkdir(parents=True)
+    calls = []
+
+    class FakeCli:
+        supports_resume_resolution = True
+
+        def resolve_resume_target(self, worktree_path, *, data_dir=None):
+            calls.append((worktree_path, data_dir))
+            return "codex-session", str(worktree_path)
+
+    monkeypatch.setattr(
+        recovery,
+        "get_agentic_cli",
+        lambda cli_id: FakeCli() if cli_id == "codex-cli" else None,
+    )
+
+    result = recovery._resolve_resume_target(
+        str(repo), "k-codex", cli_id="codex-cli",
+    )
+
+    assert result == ("codex-session", str(worktree))
+    assert calls == [(worktree, None)]
+
+
+def test_resolve_resume_target_logs_unsupported_cli(caplog, tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".claude" / "worktrees" / "k-copilot").mkdir(parents=True)
+
+    with caplog.at_level("INFO"):
+        result = recovery._resolve_resume_target(
+            str(repo), "k-copilot", cli_id="copilot-cli",
+        )
+
+    assert result is None
+    assert "resume detection unsupported for cli=copilot-cli" in caplog.text
+
+
 # ---- recover_project ------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -148,7 +193,8 @@ async def test_recover_project_resumes_dead_session():
         })
         return {"card_id": card_id, "session_name": "k-new-9999"}
 
-    def fake_resolve(project_path, session_name):
+    def fake_resolve(project_path, session_name, *, cli_id):
+        assert cli_id == "claude-code"
         return ("sess-abc", f"-p--claude-worktrees-{session_name}")
 
     async with KanbanSessionLocal() as s:
@@ -172,6 +218,44 @@ async def test_recover_project_resumes_dead_session():
 
 
 @pytest.mark.asyncio
+async def test_recover_project_routes_non_claude_card_to_its_cli():
+    calls = []
+
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
+        card = await get_card(session, card_id)
+        calls.append((card.resume_session_id, card.resume_project_folder))
+        return {"card_id": card_id, "session_name": "k-new-open"}
+
+    def fake_resolve(project_path, session_name, *, cli_id):
+        assert project_path == "/p"
+        assert session_name == "k-dead-open"
+        assert cli_id == "open-code"
+        return "ses_open", "/p/.claude/worktrees/k-dead-open"
+
+    async with KanbanSessionLocal() as s:
+        dead = await _make_card(
+            s,
+            title="open-code wip",
+            column="engineer",
+            executor_agent_id="open-code",
+        )
+        await _claim(s, dead, "agent:k-dead-open")
+        await s.commit()
+        recovered = await recovery.recover_project(
+            s,
+            project_key=PK,
+            project_path="/p",
+            live_sessions=set(),
+            resolve=fake_resolve,
+            redispatch=fake_redispatch,
+        )
+        await s.commit()
+
+    assert len(recovered) == 1
+    assert calls == [("ses_open", "/p/.claude/worktrees/k-dead-open")]
+
+
+@pytest.mark.asyncio
 async def test_recover_project_skips_when_no_resumable_transcript():
     called = []
 
@@ -185,7 +269,7 @@ async def test_recover_project_skips_when_no_resumable_transcript():
         await s.commit()
         recovered = await recovery.recover_project(
             s, project_key=PK, project_path="/p", live_sessions=set(),
-            resolve=lambda p, n: None, redispatch=fake_redispatch,
+            resolve=lambda p, n, **kwargs: None, redispatch=fake_redispatch,
         )
         await s.commit()
         card = await get_card(s, dead)
@@ -216,7 +300,7 @@ async def test_recover_project_ignores_live_human_and_fixed_columns():
         recovered = await recovery.recover_project(
             s, project_key=PK, project_path="/p",
             live_sessions={"k-alive-0001"},
-            resolve=lambda p, n: ("s", "f"), redispatch=fake_redispatch,
+            resolve=lambda p, n, **kwargs: ("s", "f"), redispatch=fake_redispatch,
         )
         await s.commit()
 
@@ -259,7 +343,7 @@ async def test_recover_project_respects_session_budget(monkeypatch):
 
         recovered = await recovery.recover_project(
             s, project_key=PK, project_path="/p", live_sessions=set(),
-            resolve=lambda p, n: ("s", "f"), redispatch=fake_redispatch,
+            resolve=lambda p, n, **kwargs: ("s", "f"), redispatch=fake_redispatch,
         )
         await s.commit()
 
@@ -303,7 +387,7 @@ async def test_recover_project_counts_live_sessions_against_session_budget(monke
 
         recovered = await recovery.recover_project(
             s, project_key=PK, project_path="/p", live_sessions={"k-alive-0001"},
-            resolve=lambda p, n: ("s", "f"), redispatch=fake_redispatch,
+            resolve=lambda p, n, **kwargs: ("s", "f"), redispatch=fake_redispatch,
         )
         await s.commit()
 
@@ -326,7 +410,7 @@ async def test_recover_project_survives_redispatch_failure():
         # Must not raise even though every redispatch fails.
         recovered = await recovery.recover_project(
             s, project_key=PK, project_path="/p", live_sessions=set(),
-            resolve=lambda p, n: ("s", "f"), redispatch=boom_redispatch,
+            resolve=lambda p, n, **kwargs: ("s", "f"), redispatch=boom_redispatch,
         )
         await s.commit()
 
@@ -360,7 +444,7 @@ async def test_recover_project_retains_claim_for_live_session_despite_mcp_discon
         recovered = await recovery.recover_project(
             s, project_key=PK, project_path="/p",
             live_sessions={"k-product-analy-312c"},
-            resolve=lambda p, n: ("sess", "folder"), redispatch=fake_redispatch,
+            resolve=lambda p, n, **kwargs: ("sess", "folder"), redispatch=fake_redispatch,
         )
         await s.commit()
         card = await get_card(s, live)

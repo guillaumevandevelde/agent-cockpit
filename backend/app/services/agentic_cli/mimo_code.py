@@ -10,7 +10,9 @@ from pathlib import Path
 
 from app.services.agentic_cli.base import (
     AgenticCli,
+    ResumeTarget,
     SpawnCommandOptions,
+    _resolve_sqlite_resume_target,
     argv0_name,
     has_binary_descendant,
 )
@@ -18,8 +20,19 @@ from app.services.agentic_cli.base import (
 logger = logging.getLogger(__name__)
 
 def get_mimo_home() -> Path:
-    """Return MIMO_HOME, defaulting to ~/.mimocode."""
+    """Return the legacy MIMO_HOME path used by existing Cockpit settings."""
     return Path(os.environ.get("MIMO_HOME", Path.home() / ".mimocode")).expanduser()
+
+
+def get_mimo_data_home() -> Path:
+    """Return MiMoCode's runtime data directory from its current XDG contract."""
+    mimocode_home = os.environ.get("MIMOCODE_HOME")
+    if mimocode_home:
+        return Path(mimocode_home).expanduser() / "data"
+    xdg_data = Path(
+        os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+    ).expanduser()
+    return xdg_data / "mimocode"
 
 
 def _find_mimo_binary() -> str | None:
@@ -39,6 +52,16 @@ class MiMoCodeCli(AgenticCli):
     display_name = "MiMoCode"
     binary_name = "mimo"
     version_args = ("--version",)
+    supports_resume_resolution = True
+
+    def resolve_resume_target(
+        self,
+        worktree_path: Path,
+        *,
+        data_dir: Path | None = None,
+    ) -> ResumeTarget | None:
+        database = (data_dir or get_mimo_data_home()) / "mimocode.db"
+        return _resolve_sqlite_resume_target(database, worktree_path)
 
     def get_backup_policy(self) -> dict:
         return {
@@ -96,12 +119,12 @@ class MiMoCodeCli(AgenticCli):
         elif options.mode == "resume":
             if not options.session_id:
                 raise ValueError("session_id is required for MiMoCode resume mode")
-            command += ["--resume", options.session_id]
+            command += ["--session", options.session_id]
         else:
             raise ValueError(f"Unsupported MiMoCode mode: {options.mode}")
 
         if options.prompt:
-            command.append(options.prompt)
+            command += ["--prompt", options.prompt]
         return command
 
     def get_allowed_cli_commands(self) -> list[str]:

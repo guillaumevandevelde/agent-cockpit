@@ -13,7 +13,6 @@ from pathlib import Path
 from app.config import settings
 from app.services.agentic_cli import get_agentic_cli
 from app.services.agentic_cli.base import SpawnCommandOptions
-from app.services.agentic_cli.claude_code import ClaudeCodeCli
 from app.services.agentic_cli.provider_env import (
     PROVIDER_BEDROCK,
     _record_audit,
@@ -188,9 +187,8 @@ def spawn_session(
     explicitly passed them via ``extra_env`` or the provider-env builder.
     """
     cli = get_agentic_cli(cli_id)
-    if isinstance(cli, ClaudeCodeCli):
-        directory = cli.resolve_directory(options)
-        options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})
+    directory = cli.resolve_directory(options)
+    options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})
 
     directory = _validate_directory(options.directory)
     options = SpawnCommandOptions(**{**options.__dict__, "directory": directory})

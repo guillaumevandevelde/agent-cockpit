@@ -2825,10 +2825,9 @@ async def test_redispatch_with_agent_override():
 
 
 @pytest.mark.asyncio
-async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
-    """A card stuck on a live-but-limit-hit session (never reaped, no resume_session_id
-    set yet) should resume the existing Claude conversation when redispatched, not
-    discard it and spawn a brand new worktree session."""
+async def test_redispatch_resumes_non_claude_session_instead_of_fresh():
+    """A non-Claude card with a dead resumable session must keep its CLI and
+    resume target instead of discarding context in a fresh worktree."""
     import unittest.mock as mock
 
     from app.kanban import session_recovery
@@ -2836,13 +2835,17 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
     resume_calls = []
 
     def resume_transport(*, directory, prompt, session_name, cli_id="claude-code", provider="anthropic", model=None, **kwargs):
-        resume_calls.append(session_name)
+        resume_calls.append((session_name, cli_id))
         return {"session_name": session_name}
 
     fresh_transport = RecordingTransport()
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="limit-hit", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"dispatch_provider": "opencode-go"},
+        )
         await apply_operation(
             s, op_type="claim", entity_type="card", project_key=PK,
             entity_id=cid, payload={"claimed_by": "agent:k-limited-0001"},
@@ -2851,8 +2854,8 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
 
     with mock.patch.object(
         session_recovery, "_resolve_resume_target",
-        return_value=("sess-resumed", "proj-folder"),
-    ), mock.patch.object(
+        return_value=("sess-resumed", "/p/.claude/worktrees/k-limited-0001"),
+    ) as resolve_mock, mock.patch.object(
         dispatch, "make_resume_transport", return_value=resume_transport,
     ), mock.patch.object(
         dispatch, "_kill_agent_session", return_value=None,
@@ -2866,9 +2869,13 @@ async def test_redispatch_resumes_instead_of_fresh_session_when_resumable():
 
     assert result is not None
     assert len(resume_calls) == 1
+    assert resume_calls[0][1] == "open-code"
     assert fresh_transport.calls == []  # never fell back to a fresh session
     assert card.resume_session_id == "sess-resumed"
-    assert card.resume_project_folder == "proj-folder"
+    assert card.resume_project_folder == "/p/.claude/worktrees/k-limited-0001"
+    resolve_mock.assert_called_once_with(
+        "/p", "k-limited-0001", cli_id="open-code",
+    )
     kill_mock.assert_called_once_with("k-limited-0001")
 
 
@@ -4919,6 +4926,44 @@ async def test_move_to_resume_moves_card_to_to_resume():
     assert card.resume_project_folder == "proj-folder"
     assert card.claimed_by is None
     kill_mock.assert_called_once_with("k-dead-0001")
+
+
+@pytest.mark.asyncio
+async def test_move_to_resume_routes_detection_to_original_cli():
+    import unittest.mock as mock
+
+    from app.kanban import session_recovery
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="codex context-limit", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"executor_agent_id": "codex-cli"},
+        )
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": "agent:k-dead-codex"},
+        )
+        await s.commit()
+
+    captured = []
+
+    def fake_resolve(project_path, session_name, **kwargs):
+        captured.append((project_path, session_name, kwargs.get("cli_id")))
+        return "codex-session", "/p/.claude/worktrees/k-dead-codex"
+
+    with mock.patch.object(
+        session_recovery, "_resolve_resume_target", side_effect=fake_resolve,
+    ), mock.patch.object(dispatch, "_kill_agent_session", return_value=None):
+        async with KanbanSessionLocal() as s:
+            card = await get_card(s, cid)
+            result = await dispatch._move_to_resume(
+                s, card=card, project_key=PK, project_path="/p",
+            )
+            await s.commit()
+
+    assert result is True
+    assert captured == [("/p", "k-dead-codex", "codex-cli")]
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,5 @@
 import subprocess
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -135,6 +136,51 @@ async def test_cleanup_removes_worktree_when_tmux_dead(monkeypatch):
 
     assert len(removed) == 1
     assert removed[0] == ("k-test-1234", "/tmp/test-repo")
+
+
+@pytest.mark.asyncio
+async def test_worktree_path_accepts_persisted_absolute_resume_directory(
+    monkeypatch, tmp_path,
+):
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "k-resume"
+    worktree.mkdir(parents=True)
+    monkeypatch.setattr(
+        session_cleanup,
+        "resolve_project_path",
+        AsyncMock(return_value=str(repo)),
+    )
+    card = SimpleNamespace(
+        project_key="git:test/repo",
+        claimed_by=None,
+        resume_session_id="ses_non_claude",
+        resume_project_folder=str(worktree),
+    )
+
+    assert await session_cleanup._worktree_path_for_card(card) == worktree.resolve()
+
+
+@pytest.mark.asyncio
+async def test_worktree_path_rejects_absolute_resume_directory_outside_project(
+    monkeypatch, tmp_path,
+):
+    repo = tmp_path / "repo"
+    (repo / ".claude" / "worktrees").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(
+        session_cleanup,
+        "resolve_project_path",
+        AsyncMock(return_value=str(repo)),
+    )
+    card = SimpleNamespace(
+        project_key="git:test/repo",
+        claimed_by=None,
+        resume_session_id="ses_untrusted",
+        resume_project_folder=str(outside),
+    )
+
+    assert await session_cleanup._worktree_path_for_card(card) is None
 
 
 def _git(*args, cwd):
