@@ -257,8 +257,8 @@ describe("CardDrawer Done summary banner", () => {
   });
 });
 
-describe("CardDrawer request review control", () => {
-  it("does not render the request-review control when the card is not in Done", () => {
+describe("CardDrawer feedback control", () => {
+  it("does not render the feedback control when the card is not in Done", () => {
     const doingCard: Card = { ...baseCard, column: "Doing" };
 
     render(
@@ -270,11 +270,12 @@ describe("CardDrawer request review control", () => {
       />,
     );
 
-    expect(screen.queryByTestId("request-review-control")).toBeNull();
+    expect(screen.queryByTestId("feedback-control")).toBeNull();
     expect(screen.queryByTestId("review-requested-state")).toBeNull();
+    expect(screen.queryByTestId("reopen-requested-state")).toBeNull();
   });
 
-  it("submits the note via requestReview and calls onChanged on a Done card", async () => {
+  it("submits the note via requestReview when the Review button is clicked", async () => {
     (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const requestReviewMock = kanbanApi.requestReview as ReturnType<typeof vi.fn>;
     requestReviewMock.mockResolvedValue({ ...baseCard, id: "review-card-9" });
@@ -291,19 +292,19 @@ describe("CardDrawer request review control", () => {
       />,
     );
 
-    // The controls live inside <DoneActionsPanel>; expand it first.
+    // The control lives inside <DoneActionsPanel>; expand it first.
     await expandDoneActions();
-    const control = screen.getByTestId("request-review-control");
+    const control = screen.getByTestId("feedback-control");
     expect(control).not.toBeNull();
 
-    const textarea = screen.getByTestId("request-review-note") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId("feedback-note") as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.change(textarea, {
         target: { value: "I doubt the edge case is handled" },
       });
     });
     await act(async () => {
-      fireEvent.click(screen.getByTestId("request-review-submit"));
+      fireEvent.click(screen.getByTestId("feedback-submit-review"));
     });
 
     await waitFor(() => expect(requestReviewMock).toHaveBeenCalled());
@@ -311,9 +312,10 @@ describe("CardDrawer request review control", () => {
     expect(cardId).toBe("card-1");
     expect(note).toBe("I doubt the edge case is handled");
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(kanbanApi.reopen).not.toHaveBeenCalled();
   });
 
-  it("renders the already-requested state when a matching activity entry exists", async () => {
+  it("renders the already-requested-review state and keeps the Reopen button available", async () => {
     const activityMock = kanbanApi.activity as ReturnType<typeof vi.fn>;
     activityMock.mockResolvedValue([
       {
@@ -336,14 +338,48 @@ describe("CardDrawer request review control", () => {
       />,
     );
 
-    // The controls live inside <DoneActionsPanel>; expand it first so the
+    // The control lives inside <DoneActionsPanel>; expand it first so the
     // already-requested amber panel can render inside it.
     await expandDoneActions();
 
     const state = await screen.findByTestId("review-requested-state");
     expect(state.textContent).toMatch(/the retry logic looks off/);
-    // The fresh input form must not render alongside the already-requested state.
-    expect(screen.queryByTestId("request-review-control")).toBeNull();
+    // The Reopen button must still be available — the two actions are
+    // independent: a prior review-request does not block a reopen.
+    expect(screen.getByTestId("feedback-submit-reopen")).not.toBeNull();
+    // The Review button is suppressed once the note is already pinned.
+    expect(screen.queryByTestId("feedback-submit-review")).toBeNull();
+  });
+
+  it("renders the already-reopen state and keeps the Review button available", async () => {
+    const activityMock = kanbanApi.activity as ReturnType<typeof vi.fn>;
+    activityMock.mockResolvedValue([
+      {
+        hlc: "1",
+        op_type: "comment",
+        entity_type: "comment",
+        payload: { text: "**Revisit:** the dispatch prompt needs another pass" },
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    await expandDoneActions();
+
+    const state = await screen.findByTestId("reopen-requested-state");
+    expect(state.textContent).toMatch(/the dispatch prompt needs another pass/);
+    expect(screen.getByTestId("feedback-submit-review")).not.toBeNull();
+    expect(screen.queryByTestId("feedback-submit-reopen")).toBeNull();
   });
 });
 
@@ -366,7 +402,7 @@ describe("CardDrawer Done actions panel — collapsed by default", () => {
     expect(screen.queryByTestId("done-actions-toggle")).toBeNull();
   });
 
-  it("renders only the toggle on a Done card by default; both controls stay hidden", () => {
+  it("renders only the toggle on a Done card by default; the feedback control stays hidden", () => {
     const doneCard: Card = { ...baseCard, column: "Done" };
     render(
       <CardDrawerWithRouter
@@ -377,16 +413,12 @@ describe("CardDrawer Done actions panel — collapsed by default", () => {
       />,
     );
     expect(screen.getByTestId("done-actions-toggle")).not.toBeNull();
-    expect(screen.queryByTestId("request-review-control")).toBeNull();
-    expect(screen.queryByTestId("reopen-control")).toBeNull();
+    expect(screen.queryByTestId("feedback-control")).toBeNull();
   });
 
-  it("expands both controls when the toggle is clicked, and collapses them again on a second click", async () => {
-    // Pin activity to empty so RequestReviewControl renders the input form
-    // (not the amber "review requested" panel) — an earlier test in this file
-    // already mocked activity with a `**Review requested:**` entry, and
-    // `vi.clearAllMocks()` only clears call history (not mockResolvedValue),
-    // so the leak would otherwise swap the form for the amber panel here.
+  it("expands the feedback control when the toggle is clicked, and collapses it again on a second click", async () => {
+    // Pin activity to empty so FeedbackControl renders the input form (not
+    // the amber "review requested" or "heropend" panels).
     (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
     const doneCard: Card = { ...baseCard, column: "Done" };
@@ -404,77 +436,20 @@ describe("CardDrawer Done actions panel — collapsed by default", () => {
     await act(async () => {
       fireEvent.click(toggle);
     });
-    expect(screen.getByTestId("request-review-control")).not.toBeNull();
-    expect(screen.getByTestId("reopen-control")).not.toBeNull();
+    expect(screen.getByTestId("feedback-control")).not.toBeNull();
 
     // Second click → collapse
     await act(async () => {
       fireEvent.click(toggle);
     });
-    expect(screen.queryByTestId("request-review-control")).toBeNull();
-    expect(screen.queryByTestId("reopen-control")).toBeNull();
+    expect(screen.queryByTestId("feedback-control")).toBeNull();
   });
 });
 
-describe("CardDrawer reopen control", () => {
-  it("does not render the reopen control when the card is not in Done", () => {
-    const doingCard: Card = { ...baseCard, column: "Doing" };
-
-    render(
-      <CardDrawerWithRouter
-        card={doingCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={() => {}}
-      />,
-    );
-
-    expect(screen.queryByTestId("reopen-control")).toBeNull();
-  });
-
-  it("submits the rebuttal via reopen and calls onChanged on a Done card", async () => {
+describe("CardDrawer feedback control — in-flight", () => {
+  it("disables the reopen submit button while the request is in flight", async () => {
     (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const reopenMock = kanbanApi.reopen as ReturnType<typeof vi.fn>;
-    reopenMock.mockResolvedValue({ ...baseCard, id: "card-1", column: "Backlog" });
-
-    const doneCard: Card = { ...baseCard, column: "Done" };
-    const onChanged = vi.fn();
-
-    render(
-      <CardDrawerWithRouter
-        card={doneCard}
-        projectPath="/proj"
-        onClose={() => {}}
-        onChanged={onChanged}
-      />,
-    );
-
-    // The controls live inside <DoneActionsPanel>; expand it first.
-    await expandDoneActions();
-    const control = screen.getByTestId("reopen-control");
-    expect(control).not.toBeNull();
-
-    const textarea = screen.getByTestId("reopen-note") as HTMLTextAreaElement;
-    await act(async () => {
-      fireEvent.change(textarea, {
-        target: { value: "X is wrong because Y." },
-      });
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("reopen-submit"));
-    });
-
-    await waitFor(() => expect(reopenMock).toHaveBeenCalled());
-    const [cardId, note] = reopenMock.mock.calls[0];
-    expect(cardId).toBe("card-1");
-    expect(note).toBe("X is wrong because Y.");
-    await waitFor(() => expect(onChanged).toHaveBeenCalled());
-  });
-
-  it("disables the submit button while the request is in flight", async () => {
-    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-    const reopenMock = kanbanApi.reopen as ReturnType<typeof vi.fn>;
-    // Resolve only on the explicit call below — keep the in-flight promise pending.
     let resolveReopen!: (value: Card) => void;
     reopenMock.mockImplementation(
       () =>
@@ -494,15 +469,14 @@ describe("CardDrawer reopen control", () => {
       />,
     );
 
-    // The controls live inside <DoneActionsPanel>; expand it first.
     await expandDoneActions();
-    const textarea = screen.getByTestId("reopen-note") as HTMLTextAreaElement;
+    const textarea = screen.getByTestId("feedback-note") as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.change(textarea, {
         target: { value: "Rebuttal text" },
       });
     });
-    const submit = screen.getByTestId("reopen-submit");
+    const submit = screen.getByTestId("feedback-submit-reopen");
     await act(async () => {
       fireEvent.click(submit);
     });
