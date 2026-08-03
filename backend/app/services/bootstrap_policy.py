@@ -113,6 +113,18 @@ class BootstrapPolicy:
     key_collision_strategy: KeyCollisionStrategy = "suffix-counter"
 
 
+#: Cardless inceptie-flow (kanban card b9e6365a…): the interview route has
+#: no intake-card-id to interpolate, so the bootstrap commit uses a sibling
+#: message without that placeholder. Kept as a module constant (not a
+#: ``BootstrapPolicy`` field) because it's the *only* message for this route
+#: — overriding it isn't part of the policy surface; the per-route choice
+#: lives in the service. Same shape as ``BootstrapPolicy.first_commit_message``
+#: so the caller uses ``.format(project_name=...)``.
+INTERVIEW_FIRST_COMMIT_MESSAGE = (
+    "chore: bootstrap {project_name} from interview"
+)
+
+
 #: The out-of-the-box cockpit defaults. A convenience singleton for consumers that want
 #: "just the defaults" without constructing their own instance.
 COCKPIT_DEFAULT_POLICY = BootstrapPolicy()

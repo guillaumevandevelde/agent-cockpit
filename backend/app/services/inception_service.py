@@ -1,27 +1,31 @@
-"""InceptionService — promotes an intake card on the meta-project to a
-brand-new project on the kanban board.
+"""InceptionService — promotes an idea to a brand-new project on the kanban
+board. Two entry points share the same atomic 6-step scaffold:
 
-Drives the inceptie-pipeline from kanban card c33b2f14 (facet A of
-platform-as-app-factory; see `docs/cockpit/product-inceptie-pipeline.md` §4
-optie 2). The pipeline is "kaart aanmaken → plan + kinderen → kinderen staan
-in het nieuwe project" — the chicken-and-egg from §2.3 of the same doc, where
-a parent card lived on the meta-project but its work belonged in a project
-that didn't exist yet.
+* ``create_project_from_intake`` — the human-approved intake flow (kaart
+  c33b2f14, facet A of platform-as-app-factory; see
+  ``docs/cockpit/product-inceptie-pipeline.md`` §4 optie 2).
+* ``create_project_from_interview`` — the cardless interview flow
+  (kanban card b9e6365a…, ``docs/cockpit/kaartloze-app-inceptie-decision.md``
+  optie 3): spec + plan land as repo files before the first commit, the
+  first kanban card carries ``metadata[SPEC_DOC_META_KEY]`` pointing at
+  the design doc, and there is no intake card to move to Done.
 
-The 6-step atomic scaffold runs in a strict order, and any failure between
-steps rolls back the filesystem (rm -rf the target dir) and the kanban-DB
-(deletes any partial kanban card, undoes the Project row, flips autodispatch
-back off, and reverts the intake-card move) so the system is never left
+Both routes run the same filesystem + kanban-DB + Project-row +
+autodispatch-meta atomic scaffold. Any failure between steps rolls back
+filesystem (rm -rf the target dir), kanban-DB (deletes any partial kanban
+card, undoes the Project row, flips autodispatch back off), and — for the
+intake route only — reverts the intake-card move. The system is never left
 half-registered.
 
-This module is *the* canonical entry point for "an idea on the meta-project
-becomes a new project" — sibling kanban card 0260dbcd added the matching MCP
-actie + REST endpoint on top of the same logic, and sibling kanban card
-395590d landed `BlueprintService.apply()` which step 4 now delegates to.
+This module is *the* canonical entry point for "an idea becomes a new
+project" — sibling kanban card 0260dbcd added the matching MCP actie + REST
+endpoint on top of the same logic, and sibling kanban card 395590d landed
+``BlueprintService.apply()`` which step 4 now delegates to.
 """
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import uuid
@@ -36,11 +40,13 @@ from app.kanban import service as kanban_service
 from app.kanban.models import KanbanCard, KanbanDeliverable
 from app.kanban.operations import apply_operation
 from app.kanban.project_key import resolve_project_key
+from app.kanban.schemas import SPEC_DOC_META_KEY
 from app.models.database import Project
 from app.models.schemas import ProjectCreate
 from app.services.blueprint import Blueprint, BlueprintService, BlueprintServiceError
 from app.services.bootstrap_policy import (
     COCKPIT_DEFAULT_POLICY,
+    INTERVIEW_FIRST_COMMIT_MESSAGE,
     BootstrapPolicy,
     render_license,
 )
@@ -193,7 +199,10 @@ class InceptionService:
             # rmtarget closure registered in step 2.
             self._write_license(target, policy, project_name)
             if policy.first_commit_content == "template":
-                self._first_commit(target, policy, project_name, intake_card_id)
+                first_commit_message = policy.first_commit_message.format(
+                    project_name=project_name, intake_card_id=intake_card_id,
+                )
+                self._first_commit(target, first_commit_message)
 
             # ---- step 5: ProjectService.add_project ------------------------
             # add_project commits internally; rollback below handles the
@@ -335,6 +344,215 @@ class InceptionService:
                     logger.exception("inception rollback cleanup failed")
             raise
 
+    async def create_project_from_interview(
+        self, *, project_name: str, target_path: str,
+        title: str, description: str,
+        spec_md: str, plan_md: str,
+        policy: BootstrapPolicy | None = None,
+    ) -> dict:
+        """Cardless inceptie-flow (kanban card b9e6365a…,
+        ``docs/cockpit/kaartloze-app-inceptie-decision.md`` optie 3): an
+        interactive interview produces spec + plan + title + description,
+        and that bundle becomes a brand-new project on the kanban board in
+        one atomic transaction. No intake card is involved.
+
+        The scaffold mirrors ``create_project_from_intake`` (mkdir → git init
+        → blueprint apply → LICENSE + spec + plan in first commit →
+        ProjectService.add_project → autodispatch on → first kanban card),
+        with three route-specific deviations:
+
+        * Step 1 validates the payload (spec_md / plan_md non-empty) instead
+          of looking up an intake card.
+        * Spec + plan land as repo files at
+          ``docs/specs/<YYYY-MM-DD>-<slug>-design.md`` and
+          ``docs/plans/<YYYY-MM-DD>-<slug>-plan.md`` (slug derived from
+          ``project_name``) *before* the first commit, so the commit
+          captures them.
+        * First kanban card carries ``metadata[SPEC_DOC_META_KEY]`` = the
+          repo-relative spec path. ``title`` / ``description`` come from
+          the payload (no intake card to inherit from). No ``plan_ref``
+          deliverable, no intake-card move-to-Done.
+
+        ``policy`` defaults to ``COCKPIT_DEFAULT_POLICY`` (autodispatch off
+        — there's no human-in-the-loop on this route). The interview
+        bootstrap-commit message is ``INTERVIEW_FIRST_COMMIT_MESSAGE`` and
+        does NOT carry the ``{intake_card_id}`` placeholder.
+
+        Raises:
+            ValueError: empty ``spec_md`` / ``plan_md``, or a project
+                already registered at ``target_path``.
+            FileExistsError: ``target_path`` already exists on disk.
+            RuntimeError: git init / blueprint / first commit failed.
+        """
+        policy = policy or COCKPIT_DEFAULT_POLICY
+        target = Path(target_path).resolve()
+
+        # ---- step 1: validate the payload i.p.v. een intake-card ----
+        # De kaartloze route heeft geen "kaart bestaat niet / in verkeerde
+        # kolom" guards — de payload *is* het contract. Lege spec/plan
+        # zou een half-gebouwd project opleveren met geen design en geen
+        # plan; wij dat luid af.
+        if not spec_md or not spec_md.strip():
+            raise ValueError(
+                "spec_md is empty; the interview route requires a non-empty "
+                "design document"
+            )
+        if not plan_md or not plan_md.strip():
+            raise ValueError(
+                "plan_md is empty; the interview route requires a non-empty "
+                "implementation plan"
+            )
+
+        # ---- step 1b: check no Project row already at target_path ----
+        # Zelfde preconditie als de intake-route (zie
+        # ``create_project_from_intake`` voor de rationale —
+        # ProjectService.add_project zou de bestaande naam stiekem
+        # overschrijven).
+        existing = (await self.app.execute(
+            select(Project).where(Project.path == str(target))
+        )).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(
+                f"project at {target} is already registered "
+                f"(name={existing.name!r}); refusing to clobber"
+            )
+
+        # ---- step 2: mkdir ------------------------------------------------
+        try:
+            target.mkdir(parents=False)
+        except FileExistsError:
+            raise FileExistsError(
+                f"target path {target} already exists; refusing to clobber"
+            )
+
+        rollback_actions: list = []
+        try:
+            # The product-side project doesn't need an intake column at
+            # birth — its first kanban card lives in Backlog. The meta-
+            # project's intake column is still managed by the intake
+            # route; we don't touch it here.
+            rollback_actions.append(_rmtarget_factory(target))
+
+            # ---- step 3: git init -----------------------------------------
+            try:
+                subprocess.run(
+                    ["git", "init", "--initial-branch=main", str(target)],
+                    capture_output=True, text=True, timeout=15, check=True,
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                    FileNotFoundError) as exc:
+                raise RuntimeError(
+                    f"git init failed at {target}: {exc}"
+                ) from exc
+
+            # ---- step 4: blueprint-apply (.claude/ + CLAUDE.md seed) ------
+            # Zelfde BlueprintService als intake-route; de CLAUDE.md note
+            # is hier "interview" i.p.v. "intake card `<id>`".
+            try:
+                BlueprintService(
+                    Blueprint(claudemd=(
+                        f"# {project_name}\n\n"
+                        f"Born from an interactive interview "
+                        f"(inceptie-pipeline, cardless route).\n"
+                    )),
+                ).apply(str(target))
+            except BlueprintServiceError as exc:
+                raise RuntimeError(
+                    f"blueprint apply failed at {target}: {exc}"
+                ) from exc
+
+            # ---- step 4b: LICENSE + spec + plan + first commit ----------
+            # §1.6: write the policy's LICENSE.
+            # Spec + plan: schrijf ze als repo-files zodat de eerste commit
+            # ze oppakt via ``git add .``. De slug is afgeleid van
+            # ``project_name``; de datum is UTC vandaag.
+            self._write_license(target, policy, project_name)
+            spec_rel_path, plan_rel_path = self._write_spec_and_plan(
+                target, project_name=project_name,
+                spec_md=spec_md, plan_md=plan_md,
+            )
+            if policy.first_commit_content == "template":
+                first_commit_message = INTERVIEW_FIRST_COMMIT_MESSAGE.format(
+                    project_name=project_name,
+                )
+                self._first_commit(target, first_commit_message)
+
+            # ---- step 5: ProjectService.add_project ------------------------
+            project_service = ProjectService(self.app)
+            project = await project_service.add_project(ProjectCreate(
+                name=project_name, path=str(target),
+            ))
+            rollback_actions.append(
+                _delete_project_factory(project.id)
+            )
+
+            # ---- step 6: resolve new project_key + flip autodispatch ------
+            new_project_key = resolve_project_key(str(target))
+            await dispatch.set_autodispatch(
+                self.kanban, new_project_key, policy.autodispatch_default
+            )
+            rollback_actions.append(
+                _set_autodispatch_factory(new_project_key, False)
+            )
+
+            # ---- step 7: create first kanban card with spec_doc link -----
+            # ``title`` / ``description`` komen uit de payload (geen
+            # intake-card om van te erven); ``metadata[SPEC_DOC_META_KEY]``
+            # wijst naar het repo-relatieve pad van het design-doc zodat
+            # spec-driven-development Fase 2 de card aan de spec kan
+            # koppelen. Geen ``plan_ref`` deliverable — traceability loopt
+            # via ``spec_doc`` in plaats van via een plan-ref (zie
+            # ``docs/cockpit/kaartloze-app-inceptie-decision.md`` optie 3).
+            first_card_id = await apply_operation(
+                self.kanban, op_type="create", entity_type="card",
+                project_key=new_project_key, entity_id=None,
+                payload={
+                    "title": title,
+                    "description": description,
+                    "column": "Backlog",
+                    "metadata": {SPEC_DOC_META_KEY: spec_rel_path},
+                },
+            )
+            rollback_actions.append(
+                _delete_card_factory(first_card_id)
+            )
+
+            # GEEN step 8 — er is geen intake-card om naar Done te
+            # verplaatsen. De activiteit-feed van deze nieuwe kaart is
+            # de canonieke "wat gebeurde er"-bron.
+
+            await self.kanban.commit()
+
+            logger.info(
+                "inception: interview → project %s (%s) + card %s (spec_doc=%s, plan=%s)",
+                project_name, new_project_key, first_card_id,
+                spec_rel_path, plan_rel_path,
+            )
+
+            return asdict(InceptionResult(
+                project_id=project.id,
+                new_project_key=new_project_key,
+                first_card_id=first_card_id,
+            ))
+
+        except Exception:
+            # Atomic rollback — zelfde keten als de intake-route, minus de
+            # intake-card revert (er is hier geen intake-card). De kanban
+            # session's transaction houdt stappen 6-7 (set_autodispatch +
+            # create first card); rollback unwindt ze. De Project row is
+            # door add_project gecommit; ``_delete_project_factory`` ruimt
+            # 'm. Filesystem stappen 2-4b zijn door rmtarget gedekt.
+            try:
+                await self.kanban.rollback()
+            except Exception:
+                logger.exception("inception-from-interview rollback of kanban session failed")
+            for cleanup in reversed(rollback_actions):
+                try:
+                    await cleanup(self)
+                except Exception:
+                    logger.exception("inception-from-interview rollback cleanup failed")
+            raise
+
     # ------------------------------------------------------------------
     # BootstrapPolicy step helpers (LICENSE + first commit)
     # ------------------------------------------------------------------
@@ -348,19 +566,49 @@ class InceptionService:
         if body is not None:
             (target / "LICENSE").write_text(body)
 
+    def _write_spec_and_plan(
+        self, target: Path, *, project_name: str,
+        spec_md: str, plan_md: str,
+    ) -> tuple[str, str]:
+        """Write the interview-route spec + plan into the repo before the
+        first commit.
+
+        Files land at ``docs/specs/<YYYY-MM-DD>-<slug>-design.md`` and
+        ``docs/plans/<YYYY-MM-DD>-<slug>-plan.md`` where ``<slug>`` is the
+        ``project_name`` lower-cased and slug-ified (any non-alphanumeric
+        run collapses to a single dash; leading/trailing dashes stripped).
+
+        Returns the *repo-relative* paths so the caller can store the spec
+        path in the first card's ``metadata[SPEC_DOC_META_KEY]`` without
+        re-deriving the slug.
+        """
+        slug = _slugify(project_name)
+        if not slug:
+            # Edge case: project_name stripped to empty by the slug rule
+            # (e.g. "!!!" → ""). Fall back to a literal token so the path
+            # is well-formed and a follow-up operator can rename the file.
+            slug = "project"
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        spec_rel = f"docs/specs/{today}-{slug}-design.md"
+        plan_rel = f"docs/plans/{today}-{slug}-plan.md"
+        (target / spec_rel).parent.mkdir(parents=True, exist_ok=True)
+        (target / plan_rel).parent.mkdir(parents=True, exist_ok=True)
+        (target / spec_rel).write_text(spec_md)
+        (target / plan_rel).write_text(plan_md)
+        return spec_rel, plan_rel
+
     def _first_commit(
-        self, target: Path, policy: BootstrapPolicy, project_name: str,
-        intake_card_id: str,
+        self, target: Path, message: str,
     ) -> None:
         """Configure a local git identity and capture the birth tree in one commit.
 
-        The birthed repo has no committer configured (the ad-hoc ``git init`` in
-        step 3 does not touch ``--global``), so we pin a per-repo dummy identity —
-        never the user's machine-wide config — just for the bootstrap commit.
+        ``message`` is the fully-formatted commit message; each route formats
+        its own (intake uses ``policy.first_commit_message``, interview uses
+        ``INTERVIEW_FIRST_COMMIT_MESSAGE``). The birthed repo has no committer
+        configured (the ad-hoc ``git init`` in step 3 does not touch
+        ``--global``), so we pin a per-repo dummy identity — never the user's
+        machine-wide config — just for the bootstrap commit.
         """
-        message = policy.first_commit_message.format(
-            project_name=project_name, intake_card_id=intake_card_id,
-        )
         try:
             subprocess.run(
                 ["git", "-C", str(target), "config", "user.name", "Repo Bootstrap"],
@@ -397,6 +645,20 @@ class InceptionService:
             return None
         name = result.stdout.strip()
         return name or None
+
+
+# ---- rollback helpers ------------------------------------------------------
+
+
+def _slugify(name: str) -> str:
+    """Lower-case + collapse non-alphanumeric runs to a single dash + strip.
+
+    Used to derive the spec/plan file slug from ``project_name``. Mirrors
+    the convention in ``docs/cockpit/kaartloze-app-inceptie-decision.md``
+    (optie 3) — same shape as the dispatch-side ``resolve_project_key``
+    fallback (``slug:<token>``).
+    """
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 # ---- rollback helpers ------------------------------------------------------

@@ -39,6 +39,8 @@ from app.kanban.schemas import (
     CommentRequest,
     CreateProjectFromIntakeRequest,
     CreateProjectFromIntakeResponse,
+    CreateProjectFromInterviewRequest,
+    CreateProjectFromInterviewResponse,
     DefaultTransportRequest,
     DispatchRequest,
     EnableRequest,
@@ -1471,6 +1473,62 @@ async def create_project_from_intake(payload: CreateProjectFromIntakeRequest):
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except RuntimeError as e:
         # git init failed (or any sub-step before commit). The action's own
+        # rollback ran, but surface the failure so the caller knows nothing
+        # landed.
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
+
+
+@router.post(
+    "/projects/from-interview",
+    response_model=CreateProjectFromInterviewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_project_from_interview(payload: CreateProjectFromInterviewRequest):
+    """REST mirror of the MCP `create_project_from_interview` tool.
+
+    Cardless inceptie-flow (kanban card b9e6365a…,
+    `docs/cockpit/kaartloze-app-inceptie-decision.md` optie 3): an
+    interactive interview produces spec + plan + title + description, and
+    that bundle becomes a brand-new project on the kanban board in one
+    atomic transaction. No intake card is involved; the meta-board never
+    sees this idea before birth.
+
+    Action is atomic across filesystem (rm -rf the target dir), Project row,
+    autodispatch-meta, and the partial first kanban card. Empty
+    ``spec_md`` or ``plan_md`` is rejected by the Pydantic schema (422)
+    *before* any side effect; the service layer re-validates as a defense
+    in depth.
+
+    Returns the new `project_id`, the resolved `new_project_key`
+    (slug:<basename> for git-init repos without a remote), and the id of
+    the first kanban card placed in the new project's Backlog. The first
+    card carries ``metadata["spec_doc"]`` pointing at the design doc —
+    the spec-driven-development pipeline can trace it from there.
+    """
+    from app.database import AsyncSessionLocal
+    from app.services.inception_service import InceptionService
+
+    try:
+        async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            result = await svc.create_project_from_interview(
+                project_name=payload.project_name,
+                target_path=payload.target_path,
+                title=payload.title,
+                description=payload.description,
+                spec_md=payload.spec_md,
+                plan_md=payload.plan_md,
+            )
+        return CreateProjectFromInterviewResponse(**result)
+    except ValueError as e:
+        # Validation failures (empty spec/plan caught by the Pydantic schema
+        # upstream; project already registered at target path) — the action
+        # did NOT touch anything.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+    except FileExistsError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except RuntimeError as e:
+        # git init / blueprint / first commit failed. The action's own
         # rollback ran, but surface the failure so the caller knows nothing
         # landed.
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))

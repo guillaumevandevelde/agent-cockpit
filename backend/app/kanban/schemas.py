@@ -653,6 +653,44 @@ class CreateProjectFromIntakeResponse(BaseModel):
     first_card_id: str
 
 
+class CreateProjectFromInterviewRequest(BaseModel):
+    """Body for POST /api/v1/kanban/projects/from-interview.
+
+    Cardless inceptie-flow (kanban card b9e6365a…): an interactive interview
+    produces spec + plan + title + description, and that bundle becomes a
+    brand-new project on the kanban board in one atomic transaction. No
+    intake card is involved — the meta-board never sees this idea before
+    birth. See `docs/cockpit/kaartloze-app-inceptie-decision.md` (optie 3).
+
+    ``spec_md`` and ``plan_md`` land as repo files at
+    ``docs/specs/<YYYY-MM-DD>-<slug>-design.md`` and
+    ``docs/plans/<YYYY-MM-DD>-<slug>-plan.md`` (slug derived from
+    ``project_name``) before the first commit, and the first kanban card's
+    ``metadata[SPEC_DOC_META_KEY]`` is set to the spec path so the
+    spec-driven-development pipeline can trace it. Empty spec/plan is
+    rejected at the service layer.
+    """
+    project_name: str
+    target_path: str
+    title: str
+    description: str = ""
+    spec_md: str = Field(..., min_length=1)
+    plan_md: str = Field(..., min_length=1)
+
+
+class CreateProjectFromInterviewResponse(BaseModel):
+    """Return shape after a successful cardless interview birth.
+
+    Identical to ``CreateProjectFromIntakeResponse`` — the new project_key +
+    project_id + first_card_id is the same shape every promotion path
+    returns. Kept as a separate model so a future divergence (e.g. the
+    interview route returning the spec_doc path) can be additive.
+    """
+    project_id: int
+    new_project_key: str
+    first_card_id: str
+
+
 class RedispatchRequest(BaseModel):
     project_path: str
     agent: str | None = None  # override: use this agent instead of card's current agent

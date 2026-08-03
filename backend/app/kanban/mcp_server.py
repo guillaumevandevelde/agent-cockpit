@@ -1519,3 +1519,87 @@ async def create_project_from_intake(
         return {"error": "target_path_exists", "message": str(e)}
     except RuntimeError as e:
         return {"error": "scaffold_failed", "message": str(e)}
+
+
+@mcp.tool()
+async def create_project_from_interview(
+    project_name: str,
+    target_path: str,
+    title: str,
+    description: str,
+    spec_md: str,
+    plan_md: str,
+) -> dict:
+    """Cardless inceptie-flow (kanban card b9e6365a…,
+    `docs/cockpit/kaartloze-app-inceptie-decision.md` optie 3): an
+    interactive interview produces spec + plan + title + description, and
+    that bundle becomes a brand-new project on the kanban board in one
+    atomic transaction.
+
+    Runs alongside ``create_project_from_intake`` (which still promotes an
+    intake card) — this is the route that drops the meta-board card
+    entirely. No intake card is moved to Done; the first kanban card in
+    the new project carries ``metadata["spec_doc"]`` pointing at the
+    design doc so the spec-driven-development pipeline can trace it.
+
+    The action is atomic: any failure rolls back filesystem (rm -rf the
+    target dir), the Project row, the autodispatch-meta, and the partial
+    first kanban card so the system is never left half-registered. Empty
+    ``spec_md`` or ``plan_md`` is rejected before any side effect.
+
+    Steps:
+      1. Validate ``spec_md`` / ``plan_md`` are non-empty.
+      2. mkdir + pre-check ``Project`` row.
+      3. `git init --initial-branch=main <target_path>`.
+      4. `BlueprintService.apply()` for `.claude/` + CLAUDE.md seed.
+      5. Write LICENSE + ``docs/specs/<date>-<slug>-design.md`` +
+         ``docs/plans/<date>-<slug>-plan.md``; capture in one first commit.
+      6. `ProjectService.add_project(name, target_path)`.
+      7. `KanbanMeta:autodispatch:<new_project_key>` = enabled.
+      8. Create the first kanban card in the new project's Backlog (title +
+         description from the payload; ``metadata[spec_doc]`` set).
+
+    Args:
+        project_name: The new project's display name (and `Project.name`).
+            Also feeds the slug for the spec/plan file paths.
+        target_path: Absolute filesystem path for the new project. Must not
+            exist yet; the action refuses to clobber.
+        title: Title for the first kanban card in the new project's Backlog.
+        description: Description for the first kanban card.
+        spec_md: Markdown body of the design doc (non-empty). Lands at
+            ``docs/specs/<YYYY-MM-DD>-<slug>-design.md`` before the first
+            commit.
+        plan_md: Markdown body of the implementation plan (non-empty). Lands
+            at ``docs/plans/<YYYY-MM-DD>-<slug>-plan.md``.
+
+    Returns:
+        On success: `{"project_id": int, "new_project_key": str,
+        "first_card_id": str}`. The new project is reachable as a kanban
+        bucket; the dispatcher picks the first card up on its next tick
+        (autodispatch follows the ``BootstrapPolicy`` default — off, since
+        there's no human-in-the-loop on this route).
+
+        On failure: `{"error": "<reason>", ...}`. Nothing was registered —
+        the action's own rollback ran.
+    """
+    from app.database import AsyncSessionLocal
+    from app.services.inception_service import InceptionService
+
+    try:
+        async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            result = await svc.create_project_from_interview(
+                project_name=project_name,
+                target_path=target_path,
+                title=title,
+                description=description,
+                spec_md=spec_md,
+                plan_md=plan_md,
+            )
+        return result
+    except ValueError as e:
+        return {"error": "validation_failed", "message": str(e)}
+    except FileExistsError as e:
+        return {"error": "target_path_exists", "message": str(e)}
+    except RuntimeError as e:
+        return {"error": "scaffold_failed", "message": str(e)}
