@@ -170,7 +170,7 @@ skill-bron (de hand-run-route die de dispatch-mirror omzeilt).
 Geen buildable — dit is de rol-herkadering uit §3 in de praktijk:
 
 - **Vast wekelijks checkpoint** i.p.v. continu monitoren. De digest (4.1) is de agenda ervan.
-- **Stuur bij de intake, niet bij de merge.** De `intake-authoring`-skill bestaat al — dat is
+- **Stuur bij de intake, niet bij de merge.** De `new-app`-skill (voorheen `intake-authoring`) bestaat al — dat is
   jouw hoogste-hefboom-moment. Een kaart goed scopen bij creatie is tien keer waardevoller
   dan een afgeronde kaart afkeuren.
 - **Optioneel later: een levend "noord-ster"-één-pager** die jij mede-bezit, zodat losse

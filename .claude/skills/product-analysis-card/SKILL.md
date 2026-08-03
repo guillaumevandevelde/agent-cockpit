@@ -15,7 +15,7 @@ analysis-execution skill needs. This skill produces the card; the
 
 | You have | You use |
 |---|---|
-| A free conversation about a brand-new app / project / tool (inceptie) | `intake-authoring` (intake-column card with `spec` + `plan` deliverables) |
+| A free conversation about a brand-new app / project / tool (inceptie) | `new-app` (interview → cardless birth of a real project) |
 | A pointer to one external product, want to compare | **this skill** (creates the Backlog-kaart) |
 | A Backlog-kaart titled `Product analyse - <...>` waiting to be analysed | `product-analysis` (executes the analysis) |
 | A fixed sources list, periodic sweep, "what's new in the space?" | `market-research` |

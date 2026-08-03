@@ -168,7 +168,8 @@ leeg; wél allebei een `plan_ref` via de plan-attachment).
    gebruiker levert vandaag titel + URL en verder niets (`87b99d2d…`), waardoor de
    premisse, de focusvragen en de gewenste diepgang elke keer geraden of nagevraagd
    moeten worden. De skill kan de premisse alleen toetsen als die er staat.
-   ✅ Geïmplementeerd (kaart `bc6b266c…`): `.claude/skills/intake-authoring/SKILL.md`
+   ✅ Geïmplementeerd (kaart `bc6b266c…`): `.claude/skills/product-analysis-card/SKILL.md`
+   (oorspronkelijk in `intake-authoring`; uitgesplitst toen die skill `new-app` werd)
    heeft een tweede, vooruitkijkende vorm — titel `Product analyse - <naam of URL>`,
    `Backlog` (geen promote), `work_type="analysis"`, en vier vaste beschrijvings-velden
    (`URL/product` / `Premisse/aanleiding` / `Focusvragen` met `geen — gebruik de

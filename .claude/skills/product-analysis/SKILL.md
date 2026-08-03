@@ -24,7 +24,7 @@ Siblings, so you pick the right one:
 | One named external product + "what can we learn?" | **this skill** |
 | A fixed sources list, periodic sweep, "what's new in the space?" | `market-research` |
 | Something broken in *this* repo you noticed mid-task | `flag-problem` |
-| A human wants to author a new app idea / intake card | `intake-authoring` |
+| A human wants to author a new app idea (interview → new project) | `new-app` |
 | One or two web pages to inform a card you're already on | just `WebFetch` — no skill |
 
 ## The two rules that carry the most weight
@@ -53,7 +53,7 @@ sentence is the analysis — see `9router-integratie-analyse.md` §4.
 
 Read the card and write down, before fetching anything. The card carries
 its scope in up to four fixed fields in the description — the
-`intake-authoring`-skill publishes the same labels so the contract is
+`product-analysis-card`-skill publishes the same labels so the contract is
 defined exactly once:
 
 - **`URL/product`** — the URL or product name, and what kind of thing it is.
@@ -72,7 +72,7 @@ defined exactly once:
   decision doc; "wat kunnen we leren van X?" is an analysis doc.
 
 The labels are fixed strings (`URL/product`, `Premisse/aanleiding`,
-`Focusvragen`, `Diepgang`) because the `intake-authoring`-skill emits
+`Focusvragen`, `Diepgang`) because the `product-analysis-card`-skill emits
 exactly those — keep them in sync if either side evolves.
 
 **Legacy bare-title cards.** If the card is a bare title with a URL and no
