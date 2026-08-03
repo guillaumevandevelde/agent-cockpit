@@ -519,7 +519,29 @@ class SandcastleService:
         max_iterations: int | None,
         extra_env: dict[str, str] | None = None,
     ) -> list[str]:
-        """Build the Node.js command to execute sandcastle."""
+        """Build the Node.js command to execute sandcastle.
+
+        ``extra_env`` is routed through ``provider_env.build_spawn_env`` so
+        the per-CLI baseline (``CLAUDE_CODE_BASELINE_ENV`` — today
+        ``CLAUDE_CODE_DISABLE_CLAUDE_API_SKILL=1``) reaches a sandboxed
+        Claude Code agent the same way every other transport gets it.
+        Without this hop the ``claude-api`` skill can fire on turn one
+        and the next request dies with ``invalid_request: Prompt is too
+        long`` (kaart 1f8b4e9963e24451a02eea03c5d1592a). ``agent_provider``
+        drives the cli_id so the baseline is scoped to Claude Code only —
+        ``codex-cli`` / ``open-code`` containers don't get Claude-specific
+        vars injected.
+        """
+        from app.services.agentic_cli.provider_env import build_spawn_env
+
+        spawn_env = build_spawn_env(
+            provider_env={},
+            extra_env=extra_env,
+            project_key=config.project_path,
+            runtime="sandcastle",
+            cli_id=config.agent_provider,
+        )
+
         # Create a temporary config file for this run
         run_config = {
             "run_id": run.id,
@@ -538,10 +560,12 @@ class SandcastleService:
             "network": _network_option(getattr(config, "network_mode", None)),
             "container_run_flags": _container_security_flags(config),
             "egress_allowlist": getattr(config, "egress_allowlist", None),
-            # Project-scoped secrets injected into the sandbox container as env
-            # vars (never the backend's os.environ). The runner passes these to
-            # the sandbox provider's `env` option. Empty dict => no injection.
-            "env": extra_env or {},
+            # Project-scoped secrets + per-CLI baseline (CLAUDE_CODE_BASELINE_ENV
+            # for ``agent_provider="claude-code"``) injected into the sandbox
+            # container as env vars (never the backend's os.environ). The
+            # runner passes these to the sandbox provider's `env` option.
+            # Empty dict => no injection.
+            "env": spawn_env.env,
         }
 
         # Write config to temp file
