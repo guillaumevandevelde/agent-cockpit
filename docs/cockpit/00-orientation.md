@@ -26,7 +26,7 @@ lagen:
 ## Huidige staat
 
 > **Wil je een nieuw app-idee spec-driven starten?** Het end-to-end-pad
-> (intake-authoring → intake-kaart → Promote → geboorte van een nieuwe project-repo
+> (de `new-app`-skill: interview → kaartloze geboorte van een nieuwe project-repo
 > met geseede `.claude/`) staat in één doc:
 > **[`docs/cockpit/new-project-startup-flow.md`](./new-project-startup-flow.md)**.
 > Het Projects-scherm in de UI heeft dezelfde hint, met link naar dat doc.

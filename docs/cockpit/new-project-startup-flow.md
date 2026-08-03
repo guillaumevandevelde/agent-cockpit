@@ -50,7 +50,7 @@ geïmplementeerd:
 
 | # | Stap | Wie | Waar in de code |
 |---|---|---|---|
-| 1 | **Idee → intake-kaart.** Een vrij gesprek over een app-idee wordt via de `intake-authoring`-skill omgezet in één kaart in de `intake`-kolom van het meta-project, met een `spec`-deliverable (design-doc uit `superpowers:brainstorming`) en een `plan`-deliverable (TDD-plan uit `superpowers:writing-plans`). | Mens, interactieve sessie | `.claude/skills/intake-authoring/SKILL.md` |
+| 1 | **Idee → intake-kaart.** Een vrij gesprek over een app-idee wordt via de `intake-authoring`-skill omgezet in één kaart in de `intake`-kolom van het meta-project, met een `spec`-deliverable (design-doc uit `superpowers:brainstorming`) en een `plan`-deliverable (TDD-plan uit `superpowers:writing-plans`). **Vervangen (kaart `1fa1b693…`):** de voordeur is nu de kaartloze `new-app`-skill — interview → durabele scratch-map → `create_project_from_interview`, zónder tussenkaart. Stap 2-3 hieronder gelden alleen nog voor de oude intake-route, die naast de nieuwe blijft bestaan tot de sloop-kaart landt. | Mens, interactieve sessie | `.claude/skills/new-app/SKILL.md` |
 | 2 | **Intake-kolom, buiten de dispatcher.** De `intake`-kolom is een vaste kolom die de auto-dispatcher bewust overslaat (`_DISPATCH_COLUMNS = ("Backlog", "To Resume")`). Intake is per definitie mensenwerk. | Board | `backend/app/kanban/schemas.py:21` (`COLUMNS`), `kanban-conventions.md` §1 |
 | 3 | **Promote-knop → geboorte.** De gebruiker klikt **Promote** op de intake-kaart; dat roept `create_project_from_intake` aan. | Mens, één klik | `frontend/src/features/kanban/components/PromoteToProjectDialog.tsx`, `POST /api/v1/kanban/projects/from-intake` (`router.py:1013`) |
 | 4 | **Geboorte-actie.** `InceptionService.create_project_from_intake` maakt een map + git-repo aan (`RepoBootstrapService`), seedt `.claude/` via `BlueprintService.apply` (baseline-blueprint), registreert het pad via `ProjectService.add_project`, flipt `autodispatch` aan, en kopieert de intake-kaart naar de eerste Backlog-kaart van het nieuwe project. | Systeem | `backend/app/services/inception_service.py`, `backend/app/services/repo_bootstrap_service.py`, `backend/app/services/blueprint/{apply_engine,baseline,store}.py` |
@@ -78,7 +78,7 @@ Steekproef tegen de huidige codebase — alles bestaat:
 - `RepoBootstrapService` + `repo_bootstrap.py` — atomic mkdir + git init +
   eerste commit.
 - `PromoteToProjectDialog.tsx` + `BlueprintsPage.tsx` — de UI-oppervlakken.
-- `intake-authoring`-skill — de gedocumenteerde voordeur.
+- `new-app`-skill (voorheen `intake-authoring`) — de gedocumenteerde voordeur.
 
 Facet E (`platform-als-app-factory.md` §2.1) telt dit uitputtend op en
 concludeert: van de 35 oorspronkelijke facet-follow-ups zijn er **33 gemerged**;
@@ -134,7 +134,7 @@ uit §1 werkt, maar is verspreid over
 [`product-inceptie-pipeline.md`](./product-inceptie-pipeline.md),
 [`platform-als-app-factory.md`](./platform-als-app-factory.md),
 [`intake-authoring-flow-decision.md`](./intake-authoring-flow-decision.md),
-[`blueprints-typology.md`](./blueprints-typology.md), de `intake-authoring`-
+[`blueprints-typology.md`](./blueprints-typology.md), de `new-app`-
 skill, en een `Promote`-knop op de kanban-kaart. Er is **geen enkel top-level
 instappunt** dat een mens vertelt: *"wil je een nieuw app-idee bouwen? Start
 hier."* De Projects-pagina's `AddProjectDialog` zegt zelfs expliciet *"Track

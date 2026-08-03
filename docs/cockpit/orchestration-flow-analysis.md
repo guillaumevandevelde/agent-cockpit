@@ -41,7 +41,7 @@ bestaan al — verspreid over kanban, personas, deliverables en CI.
 
 | Voorgestelde stap | Wat er vandaag is | Bron | Robuust? |
 |---|---|---|---|
-| **spec** | `intake-authoring`-skill: `brainstorming` + `writing-plans` → intake-kaart met `spec`- + `plan`-deliverables. | `intake-authoring-flow-decision.md`, `.claude/skills/intake-authoring/` | ✅ voor mens-geïnitieerd werk; autonome kaarten slaan 'm over (zie §4) |
+| **spec** | `new-app`-skill (voorheen `intake-authoring`): `brainstorming` + `writing-plans` → kaartloze geboorte van een nieuw project met spec + plan als repo-bestanden. | `intake-authoring-flow-decision.md`, `.claude/skills/new-app/` | ✅ voor mens-geïnitieerd werk; autonome kaarten slaan 'm over (zie §4) |
 | **clarify** | Alleen reactief: `report_impediment(question, options)` → kaart naar `Impediment`, claim vrij, mens beslist async. Geen proactieve clarify-loop in autonome dispatch. | `kanban-dispatch-spec.md` §"Reporting a human-decision impediment" | ⚠️ bewuste trade-off, geen defect (zie §4) |
 | **plan** | `analyst`-persona splitst parent in kind-kaarten + `add_plan_attachment` (plan-markdown + `depends_on`-DAG). | `multi-agent-kanban.md`, `.claude/agents/analyst.md` | ✅ |
 | **implement small diff** | `engineer`-persona voert één kaart end-to-end uit in een geïsoleerde git-worktree; één kaart = één branch = één scoped diff. | `kanban-dispatch-spec.md` §"Scope = git worktree", `.claude/agents/engineer.md` | ✅ ("small diff" = per-kaart-scope) |
