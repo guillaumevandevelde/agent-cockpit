@@ -1491,6 +1491,60 @@ describe("CardDrawer Ledger tab", () => {
   });
 });
 
+// --- Done-kaart bottom-clip (kaart d4012bd1…) ----------------------------
+// "Done kaarten nog altijd niet goed leesbaar, nu is het onderste deel niet
+// langer leesbaar." — the body must remain scrollable for a Done card so the
+// operator can reach the Deliverables / TabsContent below the description.
+// jsdom doesn't compute layout (scrollHeight/clientHeight stay 0), so the
+// structural contract is pinned instead: the body must declare
+// `min-h-0 + overflow-auto` on a flex parent that itself owns a fixed height
+// and `overflow-hidden`. Together these are the CSS preconditions for the
+// browser to actually paint a vertical scrollbar on overflow content.
+describe("CardDrawer Done-kaart body keeps the scroll preconditions", () => {
+  it("Done card: the body sits in a fixed-height flex parent that itself clips — so the body's overflow-auto can reach the full content height", () => {
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      done_summary: "Shipped.",
+      completed_at: "2026-07-10T12:00:00Z",
+    };
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const body = screen.getByTestId("card-drawer-body");
+
+    // Body must shrink below its content height and own its own scrollbar —
+    // a missing `min-h-0` reverts the flex child to min-height:auto, which
+    // makes the body grow to fit the description + TabsContent and pushes the
+    // bottom past the DialogContent's `overflow-hidden` clip (the symptom
+    // shown in the screenshot: "10 self-improve 366…" cut off at the modal
+    // edge with no scrollbar in sight).
+    expect(body.className).toMatch(/\bmin-h-0\b/);
+    expect(body.className).toMatch(/\boverflow-auto\b/);
+    expect(body.className).toMatch(/\bflex-1\b/);
+
+    // The body's flex parent (DialogContent) must cap the drawer's height so
+    // the body's flex-1 has a finite height to fill. Without the explicit
+    // `h-[85vh]`, the dialog would grow to the body content's full height and
+    // the bottom of the drawer would be off-screen on a 1080p viewport.
+    // (jsdom doesn't run Tailwind so getComputedStyle returns defaults; check
+    // the className directly, which is what the browser actually compiles.)
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog).not.toBeNull();
+    const dialogClass = dialog.className;
+    expect(dialogClass).toMatch(/\bflex\b/);
+    expect(dialogClass).toMatch(/\bflex-col\b/);
+    expect(dialogClass).toMatch(/\boverflow-hidden\b/);
+    expect(dialogClass).toMatch(/h-\[85vh\]/);
+  });
+});
+
 // --- Scroll contract (kanban-kaart 72476d8e…) -----------------------------
 // The drawer must own exactly one scroll container: the body between a sticky
 // DialogHeader and the modal border. No other element inside the drawer
