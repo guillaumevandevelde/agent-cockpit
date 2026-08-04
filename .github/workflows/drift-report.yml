@@ -102,6 +102,58 @@ jobs:
           } || true
         working-directory: backend
 
+      - name: Decision register drift (incl. headers)
+        id: decision-register
+        # Signal-only: surfaces docs/cockpit/*-decision.md not linked from
+        # the canonical register (decisions.md) AND, via --check-headers,
+        # docs whose four-field header (Datum/Status/Kaart/Uitkomst) is
+        # missing or disagrees with the register row. Advisory by design;
+        # the script exits 0 unless --strict is added.
+        # (kanban card fce4b010… — was unwired before; drifted headers
+        # landed on master around 9ad6f8f1 and stayed hidden until a prose
+        # session stumbled on them.)
+        run: |
+          {
+            bash scripts/check-decision-register.sh --check-headers \
+              > /tmp/decision_register_status 2>&1
+          } || true
+
+      - name: Doc frontmatter drift
+        id: doc-frontmatter
+        # Signal-only: surfaces docs/cockpit/*.md missing the OKF
+        # frontmatter backbone (title + type + status) or carrying
+        # unknown type/status values. Advisory by design.
+        run: |
+          {
+            bash scripts/check-doc-frontmatter.sh \
+              > /tmp/doc_frontmatter_status 2>&1
+          } || true
+
+      - name: Doc broken-link drift
+        id: doc-links
+        # Signal-only: surfaces relative Markdown links inside
+        # docs/cockpit/*.md that don't resolve to an existing file.
+        # Pure anchors, absolute paths, and URI schemes are skipped.
+        # Advisory by design.
+        run: |
+          {
+            bash scripts/check-doc-links.sh \
+              > /tmp/doc_links_status 2>&1
+          } || true
+
+      - name: Generated doc-index drift
+        id: doc-index
+        # Signal-only: surfaces docs/cockpit/README.md (generated block)
+        # or docs/cockpit/llms.txt that hasn't been regenerated from the
+        # frontmatter backbone. --strict makes the script exit 1 on drift
+        # so the step turns yellow; the outer `|| true` keeps the overall
+        # workflow green so this stays an advisory signal, not a gate.
+        run: |
+          {
+            python scripts/generate-doc-index.py --check --strict \
+              > /tmp/doc_index_status 2>&1
+          } || true
+
       - name: Write summary
         run: |
           {
@@ -113,6 +165,10 @@ jobs:
             echo "- Agent role consistency: $(cat /tmp/agent_roles_status)"
             echo "- CLAUDE.md age: $(cat /tmp/claude_md_age_status)"
             echo "- Spec drift: $(cat /tmp/spec_drift_status)"
+            echo "- Decision register (incl. headers): $(cat /tmp/decision_register_status)"
+            echo "- Doc frontmatter: $(cat /tmp/doc_frontmatter_status)"
+            echo "- Doc broken links: $(cat /tmp/doc_links_status)"
+            echo "- Generated doc index: $(cat /tmp/doc_index_status)"
             echo ""
             echo "See the Quality and Security workflow runs for lint/type/coverage/security detail."
           } >> "$GITHUB_STEP_SUMMARY"
