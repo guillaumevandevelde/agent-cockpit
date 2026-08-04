@@ -141,6 +141,44 @@ class SessionSignalRegistry:
         """
         return self._limits.get(session_name)
 
+    def is_limit_message_processed(self, session_name: str, message: str) -> bool:
+        """True iff we've already recorded a Notification(limit) with the
+        *same* ``message`` text for ``session_name``.
+
+        Used by ``handle_rate_limit_signal`` as the idempotency gate for the
+        transcript-tail sweep: a session that's hit its limit writes nothing
+        new to its transcript, so the same message stays at the tail
+        indefinitely. Without this check every dispatch tick (≈10 s) would
+        re-arm the per-provider pause — for unparseable messages the
+        ``now + FALLBACK_PAUSE_HOURS`` fallback slides the deadline forward
+        by 10 s per tick (kaart e279a52b, MiniMax Token Plan: 8u36m
+        onafgebroken her-armeren); for parseable ones ``parse_reset_time``'s
+        "past → +1 day" rollover pushes the deadline +24 u at the exact
+        moment the limit was supposed to lift (gemeten op sessie
+        k-update-readme-e85e om 2026-07-28T03:20:04Z — vier seconden ná de
+        reset van 05:20 +02:00).
+        """
+        stored = self._limits.get(session_name)
+        if stored is None:
+            return False
+        return stored == message
+
+    def clear_limit(self, session_name: str) -> None:
+        """Forget only the rate-limit signal for ``session_name``.
+
+        Distinct from ``clear()``, which drops *every* signal (started +
+        limit) for that session — that's the right move when a tmux pane is
+        killed and the name may be reused, but too aggressive for the
+        transcript-tail sweep's "the session recovered on its own" path,
+        which must keep ``started`` set but reset ``limits`` so the next
+        *genuine* limit (different message text) can be recorded fresh
+        under the same session name. Without this carve-out
+        ``record_limit``'s first-write-wins semantics would silently swallow
+        the new message — the dedupe gate would then keep matching the old
+        one forever.
+        """
+        self._limits.pop(session_name, None)
+
     async def wait_until_started(
         self, session_name: str, timeout_s: float,
     ) -> bool:

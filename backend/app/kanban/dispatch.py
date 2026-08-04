@@ -5318,6 +5318,15 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
     (e.g. "hook" vs "transcript"), so a later "why did this pause happen" read
     of the logs can tell the two channels apart.
 
+    **Idempotency:** when the same in-transcript message is re-detected on a
+    later tick (the limited session writes nothing new, so the tail keeps
+    matching), the function returns ``False`` without re-arming the pause
+    or re-running the move — see
+    ``session_signals.is_limit_message_processed`` and kanban card
+    ``e279a52b…`` for the production measurements (16 k firings for tens of
+    real events; +24 u rollover on parseable reset times at the reset
+    moment; +10 s/tick slide on unparseable ones).
+
     Returns True iff a kanban card was found and moved to "To Resume".
     """
     from datetime import timedelta
@@ -5329,7 +5338,25 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
         FALLBACK_PAUSE_HOURS,
         auto_resume_service,
     )
-    from app.services.scheduling.session_signals import session_signals
+    from app.services.scheduling.session_signals import (
+        session_name_for_dispatched_cwd,
+        session_signals,
+    )
+
+    # Idempotency gate: re-detecting the same in-transcript message on a later
+    # dispatch tick must NOT re-arm the pause. The structured signal is already
+    # recorded — re-running parse_reset_time / set_paused_until / move would
+    # either slide the fallback deadline forward (unparseable messages) or
+    # roll the reset +24u once the original parse's reset_time has passed
+    # (parseable messages). See kanban card e279a52b… for both measurements.
+    name = session_name_for_dispatched_cwd(cwd)
+    if name and session_signals.is_limit_message_processed(name, message or ""):
+        logger.debug(
+            "rate-limit signal already handled for %s (source=%s); "
+            "skipping re-detection of the same in-transcript message",
+            cwd, source,
+        )
+        return False
 
     session_signals.record_limit(cwd, message=message or "")
     parsed = auto_resume_service.parse_reset_time(message)
@@ -5461,6 +5488,16 @@ async def detect_transcript_rate_limits(
             # stale one from a limit that's already in the past.
             if (card.meta or {}).get("pane_resume_pending"):
                 await _clear_pane_resume_metadata_for_card(card, project_path)
+            # Also clear the structured rate-limit signal — without this
+            # `record_limit`'s first-write-wins would silently swallow the
+            # next genuine limit (different message text) under the same
+            # session name, and the idempotency gate built on top of it
+            # would keep matching the old message forever.
+            # Kanban card e279a52b…, same fix as the handle_rate_limit_signal
+            # idempotency gate above.
+            if name is not None:
+                from app.services.scheduling.session_signals import session_signals
+                session_signals.clear_limit(name)
             continue
         cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
         moved = await handle_rate_limit_signal(cwd, message, source="transcript")

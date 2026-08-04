@@ -112,6 +112,81 @@ def test_record_limit_first_write_wins():
     assert reg.limit_message("k-rl-0002") == "first message"
 
 
+def test_is_limit_message_processed_returns_false_when_unrecorded():
+    """A session we never recorded has no processed message — returns False
+    on first sight so the dedupe gate in handle_rate_limit_signal lets the
+    full reaction run."""
+    reg = SessionSignalRegistry()
+    assert reg.is_limit_message_processed("k-proc-0001", "anything") is False
+
+
+def test_is_limit_message_processed_matches_same_text():
+    """When the stored message equals the incoming one, the dedupe gate
+    trips and the re-detection is treated as already handled — this is the
+    load-bearing path for kanban card e279a52b… (idempotency)."""
+    reg = SessionSignalRegistry()
+    reg.record_limit(
+        "/p/.claude/worktrees/k-proc-0002",
+        "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+    )
+    assert reg.is_limit_message_processed(
+        "k-proc-0002",
+        "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+    ) is True
+
+
+def test_is_limit_message_processed_rejects_different_text():
+    """A different incoming message (e.g. a fresh limit after recovery)
+    must NOT match — otherwise the dedupe gate would silently swallow the
+    new event because record_limit's first-write-wins only sees a
+    non-empty registry."""
+    reg = SessionSignalRegistry()
+    reg.record_limit(
+        "/p/.claude/worktrees/k-proc-0003",
+        "first limit message",
+    )
+    assert reg.is_limit_message_processed("k-proc-0003", "different limit message") is False
+
+
+def test_clear_limit_drops_only_the_limit_signal():
+    """clear_limit must drop the limit signal but NOT the started signal —
+    the recovery-clearing path needs the started bit to stay set so
+    delivery's wait_for_pane_ready fast-path keeps working."""
+    reg = SessionSignalRegistry()
+    reg.record_started("/p/.claude/worktrees/k-cll-0001")
+    reg.record_limit("/p/.claude/worktrees/k-cll-0001", "boom")
+    assert reg.is_started("k-cll-0001") is True
+    assert reg.is_rate_limited("k-cll-0001") is True
+    reg.clear_limit("k-cll-0001")
+    assert reg.is_started("k-cll-0001") is True, "started must survive clear_limit"
+    assert reg.is_rate_limited("k-cll-0001") is False
+    assert reg.limit_message("k-cll-0001") is None
+
+
+def test_clear_limit_unknown_name_is_noop():
+    """clear_limit on a name we never recorded is a no-op — the
+    recovery-clearing path fires per-session on every sweep, so a session
+    that never hit a limit must not raise."""
+    reg = SessionSignalRegistry()
+    reg.clear_limit("never-existed")  # must not raise
+
+
+def test_clear_limit_resets_dedupe_gate():
+    """After clear_limit, is_limit_message_processed returns False for any
+    incoming message — this is the recovery scenario that lets a *new*
+    limit (different message text) bypass the dedupe gate and run the full
+    reaction again."""
+    reg = SessionSignalRegistry()
+    reg.record_limit("/p/.claude/worktrees/k-clrd-0001", "old")
+    assert reg.is_limit_message_processed("k-clrd-0001", "old") is True
+    reg.clear_limit("k-clrd-0001")
+    assert reg.is_limit_message_processed("k-clrd-0001", "old") is False
+    # The new message can now be recorded — first-write-wins on a fresh
+    # registry writes the new message verbatim.
+    reg.record_limit("/p/.claude/worktrees/k-clrd-0001", "new")
+    assert reg.limit_message("k-clrd-0001") == "new"
+
+
 def test_clear_drops_all_signals():
     """The dispatch kill path calls clear() so a re-spawn under the same
     tmux session name doesn't inherit the previous occupant's "rate-limited"
