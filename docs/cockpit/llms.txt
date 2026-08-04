@@ -32,6 +32,7 @@
 - [Skill Stats — per-project skill-gebruik](./skill-stats.md): type=reference status=active
 - [Structured events / `headless_run` — ACP-isomorf event-schema](./structured-events-schema.md): type=reference status=active
 - [Subscriptions-pagina — credential-beheer & per-provider quota](./subscriptions.md): type=reference status=active
+- [Taalgebruik — schrijfconventie voor alle tekst in dit project](./taalgebruik-conventies.md): type=reference status=active
 - [Terminology — canonieke woordenlijst](./terminology.md): type=reference status=active
 - [Test-doubles convention — patch where the consumer looks](./test-doubles-convention.md): type=reference status=active
 - [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md): type=reference status=active

@@ -509,6 +509,15 @@ Twee schrijfregels, beide even hard:
    sneller live, meer onderhoud later — B: trager live, minder
    onderhoud"*. De product owner beslist op gevolg, niet op techniek.
 
+**Bovenop deze twee regels geldt de leesbaarheidsnorm.** Product-taal zegt
+*welke inhoud* vooraan staat; de leesbaarheidsnorm zegt *hoe* die zin
+geschreven is: maximaal 40 woorden per zin, diepte achter een verwijzing, geen
+kaart-id als enige onderbouwing. Beide gelden voor élke tekst op het bord —
+kaarttitel, beschrijving, Done-`summary` en impediment-vraag. De norm en het
+meetcommando staan in
+[`taalgebruik-conventies.md`](./taalgebruik-conventies.md); §6 daarvan gaat
+specifiek over bordtekst.
+
 ### 5b. Voorbeelden — vóór en ná
 
 **Done-`summary` (engineer / reviewer / analyst leaf-spike):**

@@ -118,3 +118,13 @@ voor de gebruiker", niet "klopt de API-vorm". Voor een
 product-effect dat niet klopt (en niet "regel X schendt"), `options`
 drukken producttrade-offs of vervolgkeuzes uit — geen "deploy of
 revert"-fork tenzij dat ook echt het product-fork is.
+
+**Leesbaarheidsnorm — geldt bovenop het bovenstaande.** Product-taal
+bepaalt *welke inhoud* vooraan staat; de leesbaarheidsnorm bepaalt *hoe*
+je het opschrijft: maximaal 40 woorden per zin, conclusie eerst, diepte
+achter een verwijzing die zegt wát daar staat, en een kaart-id nooit als
+enige onderbouwing. Norm en meetcommando:
+[`docs/cockpit/taalgebruik-conventies.md`](../../docs/cockpit/taalgebruik-conventies.md).
+Raakt de diff die je reviewt een `*.md`-document, controleer dan of het
+de norm haalt met `scripts/check-doc-readability.py --file <pad>` — een
+onleesbare doc is een terechte review-bevinding, geen smaakkwestie.

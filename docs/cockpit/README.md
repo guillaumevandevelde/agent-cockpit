@@ -28,6 +28,7 @@ is de uitvoerings-/ontwerp-tegenhanger (referentie, niet leidend).
 | Feature / gebied | Leidend document (canoniek) | Superpowers-tegenhanger (referentie) |
 |---|---|---|
 | **Naamgeving / glossary** | [`terminology.md`](./terminology.md) | — |
+| **Taalgebruik / leesbaarheid van alle tekst** | [`taalgebruik-conventies.md`](./taalgebruik-conventies.md) | — |
 | **Oriëntatie / repo-map** | [`00-orientation.md`](./00-orientation.md) | — |
 | **Start een nieuw spec-driven project** (intake → Promote → geboorte) | [`new-project-startup-flow.md`](./new-project-startup-flow.md) | `specs/...` van de intake-pipeline zijn via dat doc ontsloten |
 | **Scheduled messages** | [`fase-2-spec.md`](./fase-2-spec.md) (spec) + [`fase-2-plan.md`](./fase-2-plan.md) (plan) | `specs/2026-06-13-scheduled-session-resume-design.md`, `plans/2026-06-14-scheduled-session-resume.md` |
@@ -87,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 112 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 113 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -96,7 +97,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [`docs/cockpit/` — de canonieke spec-boom (index)](./README.md) | 🟢 active |
 | [Beslis-register — alle genomen productbeslissingen (index)](./decisions.md) | 🟢 active |
 
-### Reference (26)
+### Reference (27)
 
 | Document | Status |
 |---|---|
@@ -123,6 +124,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Skill Stats — per-project skill-gebruik](./skill-stats.md) | 🟢 active |
 | [Structured events / `headless_run` — ACP-isomorf event-schema](./structured-events-schema.md) | 🟢 active |
 | [Subscriptions-pagina — credential-beheer & per-provider quota](./subscriptions.md) | 🟢 active |
+| [Taalgebruik — schrijfconventie voor alle tekst in dit project](./taalgebruik-conventies.md) | 🟢 active |
 | [Terminology — canonieke woordenlijst](./terminology.md) | 🟢 active |
 | [Test-doubles convention — patch where the consumer looks](./test-doubles-convention.md) | 🟢 active |
 | [Veilig bouwen & uitleveren van willekeurige apps — isolatie, secrets, CI en run/deploy](./veilig-bouwen-en-uitleveren.md) | 🟢 active |
