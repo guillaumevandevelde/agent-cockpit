@@ -465,12 +465,20 @@ Dat vangt de limiet-case, maar ook alles wat we niet opgesomd hebben: een crash-
 wachtende permission-prompt, een sessie die op een netwerk-timeout hangt. Het verandert het
 systeem van "zelfherstellend voor bekende fouten" naar "zelfherstellend, punt".
 
-✅ Geïmplementeerd (kaart f0953a11…): `check_progress_liveness` in `app/kanban/dispatch.py`
+✅ **Geïmplementeerd** (kaart f0953a11…): `check_progress_liveness` in `app/kanban/dispatch.py`
 draait elke tick ná `detect_transcript_rate_limits`, vergelijkt het transcript-mtime van
 elke `agent:`-claimed kaart met de vorige observatie, post één "stilstaand"-comment bij
 `PROGRESS_LIVENESS_SIGNAL_SECONDS=30min` en released via `_move_to_resume` bij
 `PROGRESS_LIVENESS_ACTION_SECONDS=60min`. Sandcastle / headless transports behouden hun
 eigen liveness-bron (carve-out in de skip-set).
+**Effect: 0 `progress-liveness`-logregels over de volledige backend-historie**
+(gemeten 2026-08-04 via `grep -h "progress-liveness" logs/backend/*.log | wc -l`),
+tegenover ~16.000 limiet-detecties. Negatief bewijs — de skip-set bevat
+`live_sessions`, en een gelimiteerde `claude` exit niet, dus de detector sluit
+precies de doel-verzameling uit waarvoor hij gebouwd is. Vervolg nodig:
+skip-set beperken tot transports die hun eigen liveness-bron hebben; gevolg
+van kaart `21a349bc…` die de ✅-conventie invoert (zie
+[`recipe-writing-conventions.md`](./recipe-writing-conventions.md) §2).
 
 ### R4 — Maak de pane-detector veilig (kaart C5)
 
