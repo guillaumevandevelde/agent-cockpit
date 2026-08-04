@@ -529,6 +529,64 @@ function ReopenControl({
   );
 }
 
+// Collapsed wrapper around the two rare-action controls on a Done card:
+// RequestReviewControl (spawns a sibling analysis card) and ReopenControl
+// (moves the *same* card back to Backlog with a rebuttal). Both used to
+// render unconditionally above the body, and the two textarea blocks
+// (each ~120px in the 85vh dialog) clipped the description / spec /
+// subtasks / tabs past the modal edge on long Done summaries (kanban-kaart
+// d4012bd1 "Done kaarten nog altijd niet goed leesbaar"). Per the
+// operator's decision: "Request review + Heropen inklappen tot één knop,
+// pas openen als je ze nodig hebt". The wrapper renders a single toggle
+// by default; clicking it reveals the two controls inline, each still
+// using its original testid so the existing submit / already-requested /
+// in-flight tests keep their hooks intact. The DoneSummaryBanner above
+// stays always visible — that's the operator's primary information about
+// what shipped; the controls are the rare path.
+function DoneActionsPanel({
+  card,
+  activity,
+  onChanged,
+}: {
+  card: Card;
+  activity: ActivityEntry[];
+  onChanged: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className="rounded-md border p-3 text-sm space-y-2"
+      data-testid="done-actions-panel"
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-controls="done-actions-panel-body"
+        data-testid="done-actions-toggle"
+        className="flex w-full items-center justify-between gap-2 rounded-sm text-left text-xs font-semibold uppercase text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span>Review of heropen</span>
+        <span aria-hidden="true">{expanded ? "▴" : "▾"}</span>
+      </button>
+      {expanded && (
+        <div
+          id="done-actions-panel-body"
+          className="space-y-3 pt-1"
+          data-testid="done-actions-panel-body"
+        >
+          <RequestReviewControl
+            card={card}
+            activity={activity}
+            onChanged={onChanged}
+          />
+          <ReopenControl card={card} onChanged={onChanged} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // "Run this branch" control shown on Done cards. Spins up a RunService
 // instance for the card's project, polls until it reaches ``healthy`` (or
 // fails), posts the preview-URL as an activity-comment, and renders a
@@ -1281,8 +1339,11 @@ export function CardDrawer({
           {card.column === DONE_COLUMN && (
             <>
               <DoneSummaryBanner card={card} />
-              <RequestReviewControl card={card} activity={activity} onChanged={onChanged} />
-              <ReopenControl card={card} onChanged={onChanged} />
+              <DoneActionsPanel
+                card={card}
+                activity={activity}
+                onChanged={onChanged}
+              />
             </>
           )}
         </div>
