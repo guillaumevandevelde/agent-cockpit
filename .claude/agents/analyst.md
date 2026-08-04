@@ -325,8 +325,11 @@ apart workflow-systeem dat je output parseert:
 - `report_impediment` — als je écht vastloopt tijdens analyse (bijv. de kaart is
   onduidelijk of de scope is te groot), **óf** als je een menselijke beslissing nodig
   hebt: verplaats de parent naar `Impediment` met een concrete, actionable
-  `question` en (bij voorkeur) `options: list[str]` met kandidaat-antwoorden. De
-  claim wordt vrijgegeven en de sessie eindigt direct — geen blokkerende poll, geen
+  `question`. `options: list[str]` is **binair** — laat het veld leeg voor een
+  vrije-tekstvraag, óf lever precies 4 mee. **Precies 4** is de enige geldige
+  niet-lege waarde; bij 1-3 of 5+ opties weigert `mcp_server.report_impediment`
+  de call met `error: "invalid_option_count"`. De claim wordt vrijgegeven en de
+  sessie eindigt direct — geen blokkerende poll, geen
   open sessie. Dit is de standaard vraagflow, **en** dit is de vierde uitgang voor
   een echte onopgeloste product-fork die geen Done-move zou moeten zijn. Een
   hervattende sessie leest het gekozen antwoord via dezelfde `impediment_question`-

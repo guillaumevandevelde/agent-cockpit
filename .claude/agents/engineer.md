@@ -457,14 +457,14 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 - `comment` — log voortgang of beslissingen op de kaart.
 - `attach_deliverable` — koppel je PR/branch/commit (`kind`: pr|branch|commit|link|note).
 - `report_impediment` — als je écht vastloopt: geef verplicht een concrete, actionable
-  `question` mee en (bij voorkeur) een `options: list[str]` met kandidaat-antwoorden.
-  **Geef je `options` mee, dan moet het er precies 4 zijn** — de Impediment-UI
-  toont steeds 4 keuze-knoppen, allemaal agent-voorgesteld (kaart 4279448c
-  revisit: een UI-filler die een kortere lijst opvulde met een "Other"-knop
-  werd afgekeurd). `mcp_server.report_impediment` valideert dit en weigert de
-  call met `error: "invalid_option_count"` bij 1-3 opties — vul zelf aan tot 4
-  (ook een bewust zwakkere optie mag), of laat `options` helemaal weg voor een
-  vrije-tekstvraag. Verplaatst naar `Impediment` en geeft de claim vrij — de
+  `question` mee. `options: list[str]` is **binair** — laat het veld leeg voor
+  een vrije-tekstvraag, óf lever precies 4 mee. **Precies 4** is de
+  enige geldige niet-lege waarde: de Impediment-UI toont steeds 4 keuze-knoppen,
+  allemaal agent-voorgesteld (kaart 4279448c revisit: een UI-filler die een
+  kortere lijst opvulde met een "Other"-knop werd afgekeurd). `mcp_server
+  .report_impediment` weigert de call met `error: "invalid_option_count"` bij
+  1-3 of 5+ opties — vul zelf aan tot 4 (een bewust zwakkere optie mag) of
+  laat het veld leeg. Verplaatst naar `Impediment` en geeft de claim vrij — de
   sessie eindigt hier direct. De mens kiest later (via de UI) één van de
   opties of typt een eigen antwoord in de activiteit-feed; een hervattende
   sessie leest het resultaat via dezelfde `impediment_question`-pipeline. Dit
