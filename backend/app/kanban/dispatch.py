@@ -1050,11 +1050,18 @@ async def _gather_pool_usage_snapshots(
 # ---- endpoint reachability probe (kaart 424c23d4…) -------------------------
 #
 # When an ``anthropic-compatible`` pool entry's resolved endpoint URL is
-# unreachable, the pool router must treat the provider as paused so the
-# pool picks the next entry instead of looping through
-# ``MAX_DISPATCH_FAILURES`` on a dead proxy. Explicit pins on the same
-# provider (column_overrides / per-card provider pin) stay fail-closed —
-# they walk the existing spawn-failure path because
+# unreachable, the pool router marks the provider as paused. In the
+# vangnet-topology (head exhausted + dead vangnet) this changes nothing
+# about ``pick_subscription_for_cli``'s ``chosen`` output — the
+# "laatste val-terug"-tak (``subscription_pool.py:236-249``) returns
+# the dead vangnet regardless of whether it's paused — but
+# ``has_available_spillover`` then sees the chosen entry in the
+# paused-set and returns ``False``; the reactive limit path
+# (``move_limited_session_to_resume``) parks the card until the proxy
+# is reachable again instead of looping through ``MAX_DISPATCH_FAILURES``
+# on the same dead proxy. Explicit pins on the same provider
+# (column_overrides / per-card provider pin) stay fail-closed — they
+# walk the existing spawn-failure path because
 # ``resolve_effective_provider_and_model`` does NOT consult
 # ``_paused_providers_for_pool`` on its higher layers (see
 # ``_pick_pool_choice`` as the only entry point that does).
@@ -1125,10 +1132,10 @@ async def _unreachable_compatible_providers(
     Walks the project's pool, resolves each compatible entry's
     ``endpoint_name`` to its ``base_url`` via the project-scoped
     endpoint registry, and probes the URL. ``False`` adds the provider
-    to the returned set; the pool router's hard-skip semantics then
-    keep that provider off the dispatch path until a subsequent
-    probe finds it reachable again (cache TTL ``_ENDPOINT_PROBE_TTL_S``).
-
+    to the returned set; ``has_available_spillover`` then sees the
+    chosen entry in the paused-set (in the vangnet topology, where the
+    last entry is the dead proxy) and returns ``False`` so the reactive
+    limit path parks the card instead of looping on the dead proxy.
     Probe or registry failures (timeout, DNS, missing endpoint row)
     resolve to "available" via ``_probe_endpoint_reachable``'s
     fail-soft contract — they do NOT add the provider to the paused
@@ -1209,7 +1216,12 @@ async def _paused_providers_for_pool(
        merged in by ``_pick_pool_choice`` itself)
     3. The endpoint-reachability probe for ``anthropic-compatible`` pool
        entries (kaart 424c23d4…): a dead proxy pauses the provider so
-       the pool picks the next entry instead of looping on a dead host.
+       ``has_available_spillover`` returns ``False`` in the vangnet
+       topology and the reactive limit path parks the card until the
+       proxy is reachable again (kaart 424c23d4…, herevalideerd
+       2026-08-04: de "laatste val-terug"-tak in
+       ``pick_subscription_for_cli`` verandert niet — alleen de
+       spillover-gate ziet de pauze).
 
     Callers (pool picker, spillover gate) pass the project_key they are
     routing for. The probe layer is process-local + TTL-cached so the

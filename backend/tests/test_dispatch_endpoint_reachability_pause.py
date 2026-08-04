@@ -1,26 +1,40 @@
 """Tests for the unreachable-endpoint pause merge in dispatch.
 
 Card 424c23d4… (``docs/cockpit/litellm-sidecar-lifecycle-decision.md``
-§3): when an ``anthropic-compatible`` pool entry's endpoint fails to
-answer, the pool router must treat the provider as paused so the pool
-picks the next entry instead of looping through ``MAX_DISPATCH_FAILURES``
-on a dead proxy. **Explicit pins** on the same provider stay
-fail-closed — they walk the existing spawn-failure path, NOT through
-this pause merge.
+§3, herevalideerd 2026-08-04): when an ``anthropic-compatible`` pool
+entry's endpoint fails to answer, the pool router adds the provider to
+the paused set. In the **vangnet topology** (head exhausted + dead
+vangnet) the merge does NOT change ``pick_subscription_for_cli``'s
+``chosen`` output — the "laatste val-terug"-tak in
+``subscription_pool.py:236-249`` returns the dead vangnet regardless
+of whether it's paused. What the merge DOES change is
+``has_available_spillover`` (``subscription_pool.py:274-323``): with
+the chosen entry in the paused-set, the gate returns ``False`` and
+the reactive limit path parks the card until the proxy is reachable
+again. **Explicit pins** stay fail-closed — they walk the existing
+spawn-failure path, NOT through this pause merge.
 
 The merge lives in ``_paused_providers_for_pool`` (dispatch.py). Two
 test groups exercise it:
 
 1. Unit-test the merge: a pool whose compatible entry points at a
    non-answering endpoint adds ``anthropic-compatible`` to the paused
-   set; a pool whose entry is reachable does NOT pause anything.
-2. End-to-end: the dispatch path picks the next pool entry (Anthropic)
-   when the compatible proxy is dead; with an explicit pin, the spawn
-   is still attempted (the merge is NOT consulted on the explicit-pin
-   path) and the existing failure loop takes over.
+   set; a pool whose entry is reachable does NOT pause anything; a
+   probe that raises is treated as "available"; the result is cached.
+2. End-to-end against ``has_available_spillover`` (vangnet-topology
+   discrimination): with the probe-paused vangnet the gate returns
+   ``False``; flipping the probe to True (or removing the merge) flips
+   the gate back to ``True``. The pre-existing tautological tests
+   (``test_pool_unreachable_compatible_falls_through_to_next_entry``
+   and ``test_explicit_pin_to_unreachable_endpoint_still_spawns``)
+   were rewritten because they passed vacuously — they didn't seed a
+   pool with an above-drempel head, so the head won on "no snapshot =
+   available" regardless of whether the merge ran, and the
+   explicit-pin test seeded no pool at all so the new code never
+   executed.
 
 The probe is a module-level seam: tests monkeypatch
-``dispatch._probe_endpoint_reachable`` so no real HTTP is ever
+``dispatch._endpoint_probe_uncached`` so no real HTTP is ever
 performed.
 """
 from __future__ import annotations
@@ -153,9 +167,10 @@ async def test_paused_providers_for_pool_pauses_unreachable_compatible(
 ):
     """An ``anthropic-compatible`` pool entry whose endpoint fails to
     answer causes ``_paused_providers_for_pool`` to add
-    ``"anthropic-compatible"`` to the paused set. The pool router uses
-    this set as a hard skip list (``subscription_pool.PoolEntry``'s
-    membership is keyed by provider), so the next entry wins."""
+    ``"anthropic-compatible"`` to the paused set. With the vangnet
+    dead (see the end-to-end tests below) that membership makes
+    ``has_available_spillover`` return ``False`` — the chosen entry
+    itself is paused, so the reactive limit path parks the card."""
     stub_probe["http://dead-router.example/v1"] = False
 
     async with KanbanSessionLocal() as s:
@@ -271,68 +286,179 @@ async def test_paused_providers_for_pool_caches_probe_results(stub_probe):
 
 
 # ---- end-to-end tests on the dispatch path ---------------------------------
+#
+# These three tests are the discriminating half of the file. The original
+# end-to-end tests (``test_pool_unreachable_compatible_falls_through_to_next_entry``
+# and ``test_explicit_pin_to_unreachable_endpoint_still_spawns``) were
+# tautological — both passed vacuously because the seed didn't exercise
+# the new code. The replacements below seed a pool where the head IS
+# actually above-drempel (so it falls through to the vangnet), or where
+# the pool HAS a compatible entry the probe can pause (so the new code
+# runs end-to-end).
 
 
 @pytest.mark.asyncio
-async def test_pool_unreachable_compatible_falls_through_to_next_entry(
-    stub_probe,
-):
-    """End-to-end: a pool ordering whose first entry is a dead
-    ``anthropic-compatible`` proxy and whose second entry is healthy
-    anthropic must dispatch on anthropic, NOT on the dead provider —
-    the pool router sees the compatible entry as paused."""
+async def test_vangnet_dead_flips_spillover_gate_to_false(stub_probe):
+    """Vangnet topology (head above-drempel + dead vangnet): the
+    probe-paused compatible entry makes ``_pool_spillover_available``
+    return ``False`` — the reactive limit path parks the card instead
+    of looping through ``MAX_DISPATCH_FAILURES`` on the dead proxy.
+
+    This is the discriminating test for the chosen behavior
+    ("vangnet dood = kaart wacht op reset, niet door-schuiven",
+    kaart 424c23d4… bevestigd 2026-08-04). With the probe-merge
+    intact, the spillover gate is False; flipping the probe to True
+    (or removing the merge) flips the gate back to True. The flip is
+    asserted in the second half of the test.
+
+    The head is seeded with a usage snapshot above its drempel so the
+    val-terug-tak in ``pick_subscription_for_cli`` is exercised, not
+    the trivial "no snapshot = available" branch that hid the bug in
+    the pre-existing tautological test.
+    """
     stub_probe["http://dead-router.example/v1"] = False
 
-    transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
-        await _make_column(s, default_provider="anthropic")
         await _seed_endpoint(s, "router-dead", base_url="http://dead-router.example/v1")
-        # Column-default is anthropic; pool's compatible entry is the
-        # spillover-fallback that should be tried first then skipped on
-        # the dead proxy.
+        # Head (anthropic) above-drempel so the val-terug fires;
+        # tail (compatible) probe-paused so the merge can flip the gate.
         await subscription_pool.set_subscription_pool(s, "git:example.com/me/repo", [
             subscription_pool.PoolEntry(
-                provider="anthropic-compatible", model=None,
-                drempel=0.9, endpoint_name="router-dead",
+                provider="anthropic", model=None, drempel=0.9, cli="claude-code",
+            ),
+            subscription_pool.PoolEntry(
+                provider="anthropic-compatible", model=None, drempel=0.9,
+                endpoint_name="router-dead", cli="claude-code",
             ),
         ])
-        cid = await _make_card(s)
         await s.commit()
 
-        await dispatch.dispatch_card(
-            s, card_id=cid, project_path="/p", transport=transport,
+        # The merge pauses the compatible entry: ``_pool_spillover_available``
+        # builds ``paused = {anthropic-compatible, anthropic}`` (anthropic
+        # added by the limited_provider arg). The chosen entry from
+        # ``pick_subscription_for_cli`` is the dead vangnet itself
+        # (val-terug returns it regardless of paused-set membership), and
+        # since chosen.provider is in paused, the gate returns False.
+        spillover = await dispatch._pool_spillover_available(
+            s, project_key="git:example.com/me/repo",
+            limited_provider="anthropic", cli_id="claude-code",
         )
+        assert spillover is False, (
+            "vangnet dead + probe-pause must make has_available_spillover "
+            "return False so the reactive limit path parks the card"
+        )
+
+    # Flip the probe to True — simulate probe-merge removed or proxy
+    # recovered. Use a fresh endpoint URL so the probe cache from the
+    # first half doesn't poison the second half (the cache is
+    # process-local and keyed on (project_key, endpoint_name)).
+    stub_probe["http://recovered-router.example/v1"] = True
+    dispatch._endpoint_reach_cache.clear()
+    async with KanbanSessionLocal() as s:
+        await _seed_endpoint(s, "router-recovered", base_url="http://recovered-router.example/v1")
+        await subscription_pool.set_subscription_pool(s, "git:example.com/me/repo", [
+            subscription_pool.PoolEntry(
+                provider="anthropic", model=None, drempel=0.9, cli="claude-code",
+            ),
+            subscription_pool.PoolEntry(
+                provider="anthropic-compatible", model=None, drempel=0.9,
+                endpoint_name="router-recovered", cli="claude-code",
+            ),
+        ])
         await s.commit()
 
-    # The pool skipped the dead compatible; the column-default (anthropic)
-    # was the one in priority position above, so the resolved provider is
-    # anthropic — never the dead one.
-    assert len(transport.calls) == 1
-    assert transport.calls[0]["provider"] == "anthropic"
-    assert transport.calls[0]["endpoint_name"] is None
+        # Without the probe-pause (or with the proxy recovered), the
+        # vangnet is "available" — nothing pauses it. The gate returns
+        # True. THIS is the buggy state the merge prevents; the first
+        # half asserts False (merge intact), this half asserts True
+        # (merge removed/recovered). Together they pin down both sides
+        # of the discriminating test.
+        spillover = await dispatch._pool_spillover_available(
+            s, project_key="git:example.com/me/repo",
+            limited_provider="anthropic", cli_id="claude-code",
+        )
+        assert spillover is True, (
+            "without the probe-pause, the dead vangnet IS available — "
+            "the gate flips back to True (this is the buggy state the "
+            "merge prevents)"
+        )
 
 
 @pytest.mark.asyncio
-async def test_explicit_pin_to_unreachable_endpoint_still_spawns(
-    stub_probe,
-):
-    """Explicit pin (column_overrides → anthropic-compatible) on a dead
-    endpoint must NOT be skipped by the new pause merge — the explicit
-    pin path doesn't consult ``_paused_providers_for_pool``. The
-    transport is called with the pinned provider; the spawn itself will
-    then fail (we don't need to simulate that here — we only assert the
-    merge doesn't pre-empt the spawn).
+async def test_head_healthy_wins_regardless_of_vangnet_pause(stub_probe):
+    """Head-healthy topology (head under-drempel / no-usage + dead
+    vangnet): the head wins regardless of whether the vangnet is
+    paused, because ``pick_subscription_for_cli`` returns the first
+    entry that's both not paused AND not above-drempel. This is the
+    trivial sub-case — the probe-merge is irrelevant here — but it's
+    worth pinning down so a future refactor that changes
+    ``_is_above_threshold``'s default for None snapshots doesn't
+    accidentally flip the order.
+    """
+    stub_probe["http://dead-router.example/v1"] = False
+
+    async with KanbanSessionLocal() as s:
+        await _seed_endpoint(s, "router-dead", base_url="http://dead-router.example/v1")
+        await subscription_pool.set_subscription_pool(s, "git:example.com/me/repo", [
+            subscription_pool.PoolEntry(
+                provider="anthropic", model=None, drempel=0.9, cli="claude-code",
+            ),
+            subscription_pool.PoolEntry(
+                provider="anthropic-compatible", model=None, drempel=0.9,
+                endpoint_name="router-dead", cli="claude-code",
+            ),
+        ])
+        await s.commit()
+
+        chosen = await dispatch._pick_pool_choice(
+            s, await subscription_pool.get_subscription_pool(s, "git:example.com/me/repo"),
+            project_key="git:example.com/me/repo", cli_id="claude-code",
+        )
+        assert chosen is not None
+        assert chosen.provider == "anthropic", (
+            "head healthy + dead vangnet must dispatch on the head — "
+            "the probe-merge is irrelevant here"
+        )
+
+
+@pytest.mark.asyncio
+async def test_explicit_pin_bypasses_pool_pause(stub_probe):
+    """Explicit pin (column_overrides → anthropic-compatible) on a
+    dead endpoint must NOT be skipped by the new pause merge — the
+    explicit pin path doesn't consult ``_paused_providers_for_pool``
+    in a way that short-circuits the spawn. The transport is called
+    with the pinned provider; the spawn itself will then fail
+    downstream (we don't need to simulate that here — we only assert
+    the merge doesn't pre-empt the spawn).
 
     This is the "fail-closed" branch from the card acceptance criteria:
     the explicit pin walks the existing ``MAX_DISPATCH_FAILURES`` →
     Impediment path, not the new "skip the provider" path.
+
+    Discriminating seed (the pre-existing test was tautological):
+    the pool HAS a compatible entry (dead, probe-paused) so
+    ``_unreachable_compatible_providers`` actually runs; the column
+    has ``default_provider=None`` so the resolver doesn't synthesise an
+    anthropic head that would win in ``pick_subscription_for_cli`` (the
+    resolver walks pool_choice > column_override, so without the head
+    the pin's provider wins through both layers). Seeding a pool is
+    the load-bearing change: without it, the original test passed
+    vacuously because ``_unreachable_compatible_providers``
+    short-circuited on empty entries.
     """
     stub_probe["http://dead-router.example/v1"] = False
 
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         await _seed_endpoint(s, "router-dead", base_url="http://dead-router.example/v1")
-        await _make_column(s, default_provider="anthropic")
+        await _make_column(s, default_provider=None)
+        # Pool HAS the dead compatible entry — proves the pause-merge runs.
+        await subscription_pool.set_subscription_pool(s, "git:example.com/me/repo", [
+            subscription_pool.PoolEntry(
+                provider="anthropic-compatible", model=None,
+                drempel=0.9, endpoint_name="router-dead", cli="claude-code",
+            ),
+        ])
         cid = await _make_card(s, column_overrides={
             "engineer": {
                 "provider": "anthropic-compatible",
@@ -347,10 +473,13 @@ async def test_explicit_pin_to_unreachable_endpoint_still_spawns(
         )
         await s.commit()
 
-    # The transport IS called: explicit pins bypass the pool-pause merge.
-    # The spawn itself will then fail downstream (CLI cannot connect to
-    # the dead proxy); that's covered by the existing MAX_DISPATCH_FAILURES
-    # test, not by this card.
+    # The spawn IS attempted: transport called with anthropic-compatible
+    # on router-dead. The pause-merge ran (pool seeded, probe returns
+    # False, compatible is in the paused set) but the resolver does NOT
+    # consult that paused-set on the explicit-pin path beyond the
+    # pool-choice it already made — the spawn proceeds. It will fail
+    # downstream on the dead proxy, walking the existing
+    # MAX_DISPATCH_FAILURES → Impediment path, NOT the pause-merge.
     assert len(transport.calls) == 1
     call = transport.calls[0]
     assert call["provider"] == "anthropic-compatible"
