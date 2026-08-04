@@ -78,7 +78,7 @@ class PortfolioOverview(BaseModel):
 def _bucket(column: str | None) -> str | None:
     """Map a card's column name to a portfolio bucket.
 
-    The board's fixed columns are intake/Backlog/Impediment/Done/To Resume plus
+    The board's fixed columns are Backlog/Impediment/Done/To Resume plus
     per-persona agent columns. Agent columns (and any custom column) count as
     ``doing`` — a card sits on its agent's column while being worked. Done is
     tracked separately via the op-log (``done_24h``), so it maps to None here.
@@ -90,7 +90,7 @@ def _bucket(column: str | None) -> str | None:
         return "impediment"
     if low == "done":
         return None
-    if low in ("intake", "to resume", "todo", "to do"):
+    if low in ("to resume", "todo", "to do"):
         return "todo"
     return "doing"
 

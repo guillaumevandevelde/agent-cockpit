@@ -1,7 +1,7 @@
 ---
 title: "Beslissing: `intake_kind` nu toevoegen, of YAGNI?"
 type: decision
-status: decided
+status: superseded
 ---
 
 # Beslissing: `intake_kind` nu toevoegen, of YAGNI?
@@ -10,6 +10,15 @@ status: decided
 **Status:** besloten
 **Kaart:** `646f5860…`
 **Uitkomst:** **Geen standalone veld nu** (geen enum zonder lezer), maar het echte gemis — de interview-/intake-authoring-flow — krijgt één `analysis`-vervolgkaart waarin `intake_kind` mét consument meekomt. ↩︎ afgesloten door `intake-authoring-flow-decision.md`.
+
+> ⚠️ **Achterhaald door
+> [`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md)
+> (2026-07-29).** Deze beslissing stelde `intake_kind` uit tot er een
+> consument zou zijn. Die consument is er nooit gekomen: de `intake`-kolom
+> zelf is gesloopt (kaart `d0531c12…`), samen met de Promote-route en
+> `create_project_from_intake`. Er zijn dus geen intake-kaarten meer om te
+> taggen. De uitkomst ("geen veld") blijft staan — nu permanent in plaats
+> van uitgesteld.
 
 > Kanban-kaart: **`[beslissing] Intake-kaarten: nu een optioneel intake_kind-veld
 > toevoegen, of YAGNI?`** (`646f5860…`). Leaf-spike: deze doc *is* de deliverable.

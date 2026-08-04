@@ -39,7 +39,6 @@ export function Column({
   cardMeta,
   subtaskCounts,
   projectPath,
-  onPromote,
   collapsed = false,
   onToggleCollapsed,
   unconfigured = false,
@@ -57,10 +56,6 @@ export function Column({
   // quick-action can call kanbanApi.redispatch without bouncing through
   // the drawer. Optional for backwards compat with tests that don't care.
   projectPath?: string;
-  // Inceptie-pipeline entry point. CardItem renders the Promote button
-  // only when this is set AND the card's column is "intake" — keeps the
-  // button out of the way on every other column.
-  onPromote?: (c: Card) => void;
   // Rail mode: the lane shrinks to a ~40px vertical strip that still shows the
   // name + count and still accepts card drops. Seven full-width lanes never fit
   // a laptop viewport (7 × 224px + gaps = 1640px), so the lanes an operator is
@@ -222,7 +217,6 @@ export function Column({
                 heldSince={meta?.heldSince}
                 subtasks={subtaskCounts?.get(c.id)}
                 projectPath={projectPath}
-                onPromote={onPromote}
               />
             </div>
           );

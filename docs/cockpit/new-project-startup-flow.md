@@ -50,34 +50,36 @@ geïmplementeerd:
 
 | # | Stap | Wie | Waar in de code |
 |---|---|---|---|
-| 1 | **Idee → intake-kaart.** Een vrij gesprek over een app-idee wordt via de `intake-authoring`-skill omgezet in één kaart in de `intake`-kolom van het meta-project, met een `spec`-deliverable (design-doc uit `superpowers:brainstorming`) en een `plan`-deliverable (TDD-plan uit `superpowers:writing-plans`). **Vervangen (kaart `1fa1b693…`):** de voordeur is nu de kaartloze `new-app`-skill — interview → durabele scratch-map → `create_project_from_interview`, zónder tussenkaart. Stap 2-3 hieronder gelden alleen nog voor de oude intake-route, die naast de nieuwe blijft bestaan tot de sloop-kaart landt. | Mens, interactieve sessie | `.claude/skills/new-app/SKILL.md` |
-| 2 | **Intake-kolom, buiten de dispatcher.** De `intake`-kolom is een vaste kolom die de auto-dispatcher bewust overslaat (`_DISPATCH_COLUMNS = ("Backlog", "To Resume")`). Intake is per definitie mensenwerk. | Board | `backend/app/kanban/schemas.py:21` (`COLUMNS`), `kanban-conventions.md` §1 |
-| 3 | **Promote-knop → geboorte.** De gebruiker klikt **Promote** op de intake-kaart; dat roept `create_project_from_intake` aan. | Mens, één klik | `frontend/src/features/kanban/components/PromoteToProjectDialog.tsx`, `POST /api/v1/kanban/projects/from-intake` (`router.py:1013`) |
-| 4 | **Geboorte-actie.** `InceptionService.create_project_from_intake` maakt een map + git-repo aan (`RepoBootstrapService`), seedt `.claude/` via `BlueprintService.apply` (baseline-blueprint), registreert het pad via `ProjectService.add_project`, flipt `autodispatch` aan, en kopieert de intake-kaart naar de eerste Backlog-kaart van het nieuwe project. | Systeem | `backend/app/services/inception_service.py`, `backend/app/services/repo_bootstrap_service.py`, `backend/app/services/blueprint/{apply_engine,baseline,store}.py` |
+| 1 | **Idee → interview.** Een vrij gesprek over een app-idee wordt via de `new-app`-skill omgezet in een design-doc (`superpowers:brainstorming`) en een TDD-plan (`superpowers:writing-plans`), incrementeel weggeschreven naar een durabele scratch-map. Er komt **geen kaart** op het meta-bord. | Mens, interactieve sessie | `.claude/skills/new-app/SKILL.md` |
+| 2 | **Kaartloze geboorte.** De skill roept `create_project_from_interview` aan met spec + plan + titel + beschrijving. Geen tussenkaart, geen Promote-klik. | Skill → MCP/REST | `POST /api/v1/kanban/projects/from-interview`, `mcp__cockpit-kanban__create_project_from_interview` |
+| 3 | **Geboorte-actie.** `InceptionService.create_project_from_interview` maakt een map + git-repo aan, seedt `.claude/` via `BlueprintService.apply` (baseline-blueprint), schrijft spec + plan als repo-bestanden (`docs/specs/<datum>-<slug>-design.md`, `docs/plans/<datum>-<slug>-plan.md`) vóór de eerste commit, registreert het pad via `ProjectService.add_project`, zet `autodispatch` volgens de `BootstrapPolicy`, en maakt de eerste Backlog-kaart met `metadata["spec_doc"]` naar het design-doc. Atomisch: elke fout rolt filesystem + Project-rij + kanban-kaart terug. | Systeem | `backend/app/services/inception_service.py`, `backend/app/services/blueprint/{apply_engine,baseline,store}.py` |
 | 5 | **Autonome opbouw.** Vanaf hier neemt de bestaande multi-agent kanban-flow het over: de eerste Backlog-kaart wordt door de analyst-fase in kind-kaarten gesplitst en door executors gebouwd — dezelfde machine als het meta-project zelf gebruikt. | Dispatcher | `backend/app/kanban/dispatch.py`, `multi-agent-kanban.md` |
 
 **Dit is een echte, gesloten pijplijn:** vrij idee → spec + plan → nieuw
 gitrepo met geseede `.claude/` → autonome dispatch. Het "spec-driven"-deel is
-letterlijk ingebakken: de intake-kaart *draagt* een `spec`- én `plan`-
-deliverable voordat het project geboren wordt, en die reizen mee als eerste
-Backlog-kaart. Zie de design-beslissing in
-[`product-inceptie-pipeline.md`](./product-inceptie-pipeline.md) §9 (Optie 2 —
-twee-staps intake, gekozen 2026-07-11, kaart `c33b2f14`) en de
-intake-interview-keuze in
-[`intake-authoring-flow-decision.md`](./intake-authoring-flow-decision.md)
-(`decisions.md`-regels 2026-07-14).
+letterlijk ingebakken: spec én plan landen als repo-bestanden in het nieuwe
+project vóór de eerste commit, en de eerste Backlog-kaart wijst er via
+`metadata["spec_doc"]` naar. Zie de design-beslissing in
+[`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md)
+(optie 3 — kaartloze geboorte, gekozen 2026-07-29), die
+[`product-inceptie-pipeline.md`](./product-inceptie-pipeline.md) §9 (optie 2 —
+twee-staps intake) en
+[`intake-authoring-flow-decision.md`](./intake-authoring-flow-decision.md) §3
+herziet. De `intake`-kolom en de Promote-route zijn gesloopt in kaart
+`d0531c12…`.
 
 ## 2. Wat geverifieerd aanwezig is (bouwstenen)
 
 Steekproef tegen de huidige codebase — alles bestaat:
 
-- `intake`-kolom in `COLUMNS` (`schemas.py:21`), dispatcher-skip intact.
-- `InceptionService` + REST-endpoint + `create_project_from_intake` MCP-tool.
+- `InceptionService` + REST-endpoint + `create_project_from_interview` MCP-tool.
 - `BlueprintService` (`baseline.py`, `apply_engine.py`, `store.py`,
   `baseline_blueprint.yaml`) — seedt de `.claude/`-laag van een nieuw project.
 - `RepoBootstrapService` + `repo_bootstrap.py` — atomic mkdir + git init +
   eerste commit.
-- `PromoteToProjectDialog.tsx` + `BlueprintsPage.tsx` — de UI-oppervlakken.
+- `BlueprintsPage.tsx` — het UI-oppervlak voor de blueprint-laag. (De
+  `PromoteToProjectDialog.tsx` is met de intake-route verwijderd; de
+  geboorte-flow heeft geen UI-knop meer — hij loopt via `/new-app`.)
 - `new-app`-skill (voorheen `intake-authoring`) — de gedocumenteerde voordeur.
 
 Facet E (`platform-als-app-factory.md` §2.1) telt dit uitputtend op en

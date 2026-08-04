@@ -30,7 +30,7 @@ expliciet: *"Policy-keuzes aan oppervlak … komen terecht in één
 `ProjectBootstrapPolicy`-config, niet versnipperd door de code."*
 
 `BootstrapPolicy` bevat **defaults**. De aanroeper (in de praktijk facet A's
-`create_project_from_intake`) mag per-project overriden — de policy is de
+`create_project_from_interview`) mag per-project overriden — de policy is de
 veilige bodem, niet een keurslijf.
 
 ## 1. De zeven beslissingen
@@ -42,9 +42,10 @@ staat samengevat in §3.
 ### 1.1 Autodispatch-default bij geboorte — **UIT**
 
 **Aanbeveling.** `autodispatch_default = False`. Een splinternieuw project start met
-autodispatch **uit**. De standaard-intake-flow (facet A, `create_project_from_intake`)
-mag 'm expliciet op `True` zetten omdat op dát moment een mens de intake zojuist heeft
-goedgekeurd — de mens-in-de-lus blijft dan intact.
+autodispatch **uit**. Een aanroeper met een mens in de lus (facet A,
+`create_project_from_interview`) mag 'm expliciet op `True` zetten omdat op dát
+moment een mens het ontwerp zojuist heeft goedgekeurd — de mens-in-de-lus blijft
+dan intact.
 
 **Onderbouwing.** Security-default-deny. Autodispatch-aan betekent dat agents meteen
 in een verse repo gaan committen/pushen zonder dat er ook maar één menselijke review
@@ -53,14 +54,14 @@ schrijft voor: *"Respecteer de ingestelde autonomiegrenzen en vraag goedkeuring 
 acties die buiten deze grenzen vallen."* Default-uit respecteert die grens; de
 friction om 'm aan te zetten is één toggle (`set_autodispatch`, bestaat al —
 `dispatch.py:174`). Door de default in de dataclass conservatief te houden maar de
-mens-goedgekeurde intake-flow expliciet te laten opt-in-en, betalen we **geen** echte
+mens-goedgekeurde geboorte-flow expliciet te laten opt-in-en, betalen we **geen** echte
 friction in het reële pad én blijven we veilig voor toekomstige aanroepers die géén
 menselijke goedkeuring achter zich hebben (bv. een batch-import).
 
 **Alternatieven + waarom niet.**
 - *Default-aan ("direct productief").* Verleidelijk omdat de geboorte ná een
-  goedgekeurde intake gebeurt — er ís een mens in de lus. Maar de policy-default geldt
-  voor élke aanroeper, niet alleen de intake-flow; default-aan zou een niet-intake-pad
+  goedgekeurde geboorte gebeurt — er ís een mens in de lus. Maar de policy-default geldt
+  voor élke aanroeper, niet alleen de interview-flow; default-aan zou een ander pad
   ongewild autonoom maken. We verplaatsen de "aan" liever naar de expliciete,
   mens-goedgekeurde call.
 - *Aan bij eerste Backlog-kaart i.p.v. bij geboorte.* Introduceert een impliciete,
@@ -105,7 +106,12 @@ niet door een permission-rij.
 ### 1.3 Eerste-commit-inhoud — **de gerenderde template (nooit leeg, nooit het plan-attachment)**
 
 **Aanbeveling.** `first_commit_content = "template"`,
-`first_commit_message = "chore: bootstrap {project_name} from intake {intake_card_id}"`.
+`first_commit_message = "chore: bootstrap {project_name}"`. (De oorspronkelijke
+vorm droeg ook een `{intake_card_id}`-placeholder; die verviel met de sloop van
+de intake-route — kaart `d0531c12…`, zie
+[`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md).
+De interview-route gebruikt de sibling-constante
+`INTERVIEW_FIRST_COMMIT_MESSAGE`.)
 De eerste commit legt de **volledig gerenderde template-boom** vast — voor het
 `empty`-template is dat minimaal `.gitignore` + `README.md`; getypeerde templates
 voegen hun eigen skelet toe. De `.claude/`-seed + `CLAUDE.md`-stub komen uit
@@ -134,7 +140,7 @@ beslist het exacte snijpunt; de policy schrijft alleen voor: **eerste commit ≠
   regeneratie-probleem. Het plan hoort op de kaart, niet in de git-boom.
 
 **Consumeert:** de git-init-+-first-commit-stap (§3.1 stap 1) in de atomic-init-kaart
-`dca8c8dc30d0`; het `{project_name}`/`{intake_card_id}`-substitutiepatroon leunt op het
+`dca8c8dc30d0`; het `{project_name}`-substitutiepatroon leunt op het
 `{{ var }}`-render-mechanisme dat `TemplateService` al levert (`5512a442da8d`, Done).
 
 ### 1.4 `.gitignore`-profiel — **template-specifiek; policy levert alleen een fallback**
@@ -267,7 +273,7 @@ Elk veld mapt op precies één beslissing:
 | `autodispatch_default` | `bool` | `False` | 1.1 |
 | `permission_mode` | `Literal["default","acceptEdits","bypassPermissions"] \| None` | `None` | 1.2 |
 | `first_commit_content` | `Literal["template","empty"]` | `"template"` | 1.3 |
-| `first_commit_message` | `str` | `"chore: bootstrap {project_name} from intake {intake_card_id}"` | 1.3 |
+| `first_commit_message` | `str` | `"chore: bootstrap {project_name}"` | 1.3 |
 | `gitignore_fallback` | `str` | *kitchen-sink uit `empty/.gitignore.tmpl`* | 1.4 |
 | `ci_bootstrap` | `bool` | `False` | 1.5 |
 | `license` | `str \| None` | `"MIT"` | 1.6 |

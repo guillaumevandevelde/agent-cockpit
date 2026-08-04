@@ -37,8 +37,6 @@ from app.kanban.schemas import (
     ColumnResponse,
     ColumnUpdate,
     CommentRequest,
-    CreateProjectFromIntakeRequest,
-    CreateProjectFromIntakeResponse,
     CreateProjectFromInterviewRequest,
     CreateProjectFromInterviewResponse,
     DefaultTransportRequest,
@@ -1430,52 +1428,6 @@ async def set_autodispatch(payload: AutodispatchRequest):
         await dispatch.set_autodispatch(s, payload.project_key, payload.enabled)
         await s.commit()
     return {"project_key": payload.project_key, "enabled": payload.enabled}
-
-
-@router.post(
-    "/projects/from-intake",
-    response_model=CreateProjectFromIntakeResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_project_from_intake(payload: CreateProjectFromIntakeRequest):
-    """REST mirror of the MCP `create_project_from_intake` tool.
-
-    Drives the inceptie-pipeline (kanban card c33b2f14, facet A of
-    platform-as-app-factory — `docs/cockpit/product-inceptie-pipeline.md`
-    §4 optie 2). The action is atomic: any failure between the 6 steps
-    rolls back filesystem + kanban-DB + Project row + autodispatch-meta
-    so the system is never left half-registered. The intake card lands on
-    Done with a `**Promoted to project:** …` comment when the action
-    succeeds, providing a one-glance audit trail.
-
-    Returns the new `project_id`, the resolved `new_project_key`
-    (slug:<basename> for git-init repos without a remote), and the id of
-    the first kanban card placed in the new project's Backlog.
-    """
-    from app.database import AsyncSessionLocal
-    from app.services.inception_service import InceptionService
-
-    try:
-        async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
-            svc = InceptionService(ks, app_db)
-            result = await svc.create_project_from_intake(
-                intake_card_id=payload.intake_card_id,
-                project_name=payload.project_name,
-                target_path=payload.target_path,
-            )
-        # 201 on creation; the result shape is the response model.
-        return CreateProjectFromIntakeResponse(**result)
-    except ValueError as e:
-        # Validation failures (card not found, wrong column, project already
-        # registered at target path) — the action did NOT touch anything.
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
-    except FileExistsError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
-    except RuntimeError as e:
-        # git init failed (or any sub-step before commit). The action's own
-        # rollback ran, but surface the failure so the caller knows nothing
-        # landed.
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
 
 
 @router.post(

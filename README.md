@@ -48,7 +48,7 @@ If you use one agent casually with mostly default config, Agent Cockpit is overk
 
 ### Running work
 
-- **Kanban** — The board that drives the work loop. It has a fixed set of columns — `intake`, `Backlog`, `Impediment`, `Awaiting Subtasks`, `Done` and `To Resume` — plus one column per agent, generated from the project's `.claude/agents/`. Auto-dispatch is opt-in per project: the poller claims a `Backlog` card, moves it into the target agent's column, and spawns that agent in a fresh git worktree. A card carries its own comments, deliverables (PR / branch / commit / link / note), labels, priority, work type, dependencies on other cards, and per-card model, provider or transport overrides. A blocked agent posts an impediment with a concrete question and candidate answers for a human to pick from.
+- **Kanban** — The board that drives the work loop. It has a fixed set of columns — `Backlog`, `Impediment`, `Awaiting Subtasks`, `Done` and `To Resume` — plus one column per agent, generated from the project's `.claude/agents/`. Auto-dispatch is opt-in per project: the poller claims a `Backlog` card, moves it into the target agent's column, and spawns that agent in a fresh git worktree. A card carries its own comments, deliverables (PR / branch / commit / link / note), labels, priority, work type, dependencies on other cards, and per-card model, provider or transport overrides. A blocked agent posts an impediment with a concrete question and candidate answers for a human to pick from.
 - **Multi-agent decomposition** — A card that is too big for one session goes to an analyst agent, which splits it into child cards with an explicit dependency DAG and attaches the plan. Executor sessions only start once their dependencies are `Done`.
 - **Agent Mail** — A mailbox between sessions. Each repository gets a durable identity; sessions send structured context requests, handoffs, broadcasts and answers, and a session that is asleep in tmux can be woken to read its inbox. The UI shows participants, roles, charters, inbox load and every pending request.
 - **Agent Bridge** — Discover and observe agent sessions running in tmux, per CLI. Attach up to 4 terminals at once in a 2x2 grid, each independently read-only or interactive, with fullscreen, per-pane controls, and spawn / resume / fork / kill from the UI.
@@ -109,7 +109,7 @@ All screenshots are taken against a throwaway instance seeded with demo data (`e
 | Dashboard | Kanban |
 |-----------|--------|
 | ![Dashboard](screenshots/dashboard.png) | ![Kanban](screenshots/kanban.png) |
-| Installed CLIs and their capability matrix, plus configuration counts | Cards moving from intake through per-agent columns to Done, with dispatch controls |
+| Installed CLIs and their capability matrix, plus configuration counts | Cards moving from Backlog through per-agent columns to Done, with dispatch controls |
 
 | Portfolio | Agent Performance |
 |-----------|-------------------|

@@ -5869,32 +5869,8 @@
         "title": "CreateGroupRequest",
         "type": "object"
       },
-      "CreateProjectFromIntakeRequest": {
-        "description": "Body for POST /api/v1/kanban/projects/from-intake.\n\nDrives the inceptie-pipeline (facet A of platform-as-app-factory,\n`docs/cockpit/product-inceptie-pipeline.md` \u00a74 optie 2): an intake card\non the meta-project becomes a brand-new project on the kanban board in\none atomic transaction. See kanban card c33b2f14.",
-        "properties": {
-          "intake_card_id": {
-            "title": "Intake Card Id",
-            "type": "string"
-          },
-          "project_name": {
-            "title": "Project Name",
-            "type": "string"
-          },
-          "target_path": {
-            "title": "Target Path",
-            "type": "string"
-          }
-        },
-        "required": [
-          "intake_card_id",
-          "project_name",
-          "target_path"
-        ],
-        "title": "CreateProjectFromIntakeRequest",
-        "type": "object"
-      },
-      "CreateProjectFromIntakeResponse": {
-        "description": "Return shape after a successful inceptie-pipeline promotion.",
+      "CreateProjectFromInterviewResponse": {
+        "description": "Return shape after a successful cardless interview birth.\n\nThe new project_key + project_id + first_card_id is the canonical\nreturn shape for the inceptie-pipeline. Kept as a separate model so a\nfuture divergence (e.g. the interview route returning the spec_doc\npath) can be additive.",
         "properties": {
           "first_card_id": {
             "title": "First Card Id",
@@ -5914,7 +5890,7 @@
           "new_project_key",
           "first_card_id"
         ],
-        "title": "CreateProjectFromIntakeResponse",
+        "title": "CreateProjectFromInterviewResponse",
         "type": "object"
       },
       "CreateRuleRequest": {
@@ -28014,48 +27990,6 @@
           }
         },
         "summary": "Project Key",
-        "tags": [
-          "Kanban"
-        ]
-      }
-    },
-    "/api/v1/kanban/projects/from-intake": {
-      "post": {
-        "description": "REST mirror of the MCP `create_project_from_intake` tool.\n\nDrives the inceptie-pipeline (kanban card c33b2f14, facet A of\nplatform-as-app-factory \u2014 `docs/cockpit/product-inceptie-pipeline.md`\n\u00a74 optie 2). The action is atomic: any failure between the 6 steps\nrolls back filesystem + kanban-DB + Project row + autodispatch-meta\nso the system is never left half-registered. The intake card lands on\nDone with a `**Promoted to project:** \u2026` comment when the action\nsucceeds, providing a one-glance audit trail.\n\nReturns the new `project_id`, the resolved `new_project_key`\n(slug:<basename> for git-init repos without a remote), and the id of\nthe first kanban card placed in the new project's Backlog.",
-        "operationId": "create_project_from_intake_api_v1_kanban_projects_from_intake_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProjectFromIntakeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateProjectFromIntakeResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Project From Intake",
         "tags": [
           "Kanban"
         ]

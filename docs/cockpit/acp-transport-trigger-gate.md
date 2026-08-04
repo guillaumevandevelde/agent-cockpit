@@ -94,7 +94,7 @@ doen. Het probleem is dat de poort nergens in die keten voorkomt.
 
 1. De kaart is op 2026-07-14 07:48 aangemaakt door een analyst-decompositie, met
    `work_type="analysis"` → `agent="analyst"`, en landt daarmee in de **`analyst`-kolom**.
-2. `analyst` staat niet in `COLUMNS` (`schemas.py:21` — `["intake", "Backlog", "Impediment",
+2. `analyst` staat niet in `COLUMNS` (`schemas.py:21` — `["Backlog", "Impediment",
    "Done", "To Resume"]`). Daarmee valt de kaart in de **orphan-fallback** van `_next_card`
    (`dispatch.py:2255-2262`): elke onclaimde kaart in een niet-vaste kolom is dispatch-kandidaat.
    Die fallback is er met reden (een gereapte claim mag niet onzichtbaar worden), maar hij maakt

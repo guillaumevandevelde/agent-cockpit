@@ -103,7 +103,7 @@ status: active
 
 - Het datamodel is tweelaags: een append-only `KanbanOp`-log als bron van waarheid plus
   gematerialiseerde `KanbanCard`/`KanbanDeliverable`-rijen voor snelle reads
-  (`backend/app/kanban/models.py:25,40,160`). Vaste kolommen: `COLUMNS = ["intake",
+  (`backend/app/kanban/models.py:25,40,160`). Vaste kolommen: `COLUMNS = [
   "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]`
   (`backend/app/kanban/schemas.py:21`), aangevuld met vrij te configureren agent-kolommen
   (`KanbanColumn`, `models.py:194`).

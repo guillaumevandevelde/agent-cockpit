@@ -1,15 +1,26 @@
 ---
 title: "Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart"
 type: decision
-status: decided
+status: superseded
 ---
 
 # Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart
 
 **Datum:** 2026-07-14
-**Status:** besloten
+**Status:** herzien (superseded)
 **Kaart:** `f2fe8548…`
 **Uitkomst:** **`superpowers:brainstorming` + `writing-plans`** in een dunne `intake-authoring`-skill. Niet spec-kit (zware dep, dubbele orkestratie). `intake_kind` vervalt voor de MVP.
+
+> ⚠️ **Herzien door
+> [`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md)
+> (2026-07-29).** Wat hier §3 als output-contract vastlegde — een kaart in de
+> `intake`-kolom met een `spec`- en `plan`-deliverable, wachtend op een
+> Promote-klik — bestaat niet meer. De `intake`-kolom, de Promote-route en
+> `create_project_from_intake` zijn gesloopt (kaart `d0531c12…`); de voordeur
+> is nu de kaartloze `new-app`-skill (interview → `create_project_from_interview`).
+> Wat **wel** overeind blijft: de toolkeuze uit §4.1 (`superpowers:brainstorming`
+> + `writing-plans`, niet spec-kit) en de mens-in-de-lus-vorm uit §4.2 — die
+> draagt de `new-app`-skill ongewijzigd door.
 
 > Kanban-kaart: **`[analysis][inceptie] Interview-/intake-authoring-flow: vrij
 > gesprek → ingevulde intake-kaart (spec + plan)`**

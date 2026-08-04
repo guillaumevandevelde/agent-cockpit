@@ -210,7 +210,20 @@ aanmaakt.
 | Het plan-attachment-mechanisme is al SSOT-sterk (zie `spec-driven-development-analysis.md` §2.3). | De cap van 1 dispatch per project knelt zodra er meerdere intakes tegelijk lopen — eerste observatie van een portfolio-cap (zie facet C). |
 | De brainstorming-skill past ongewijzigd in een interactieve sessie. | Een dispatcher-gedreven intake concurreert met alle andere meta-werk-kaarten — geen apart kanaal. |
 
-### Optie 2 — "Twee-staps intake" (aanbevolen voor product-fork)
+### Optie 2 — "Twee-staps intake" (aanbevolen voor product-fork) — **herzien**
+
+> ⚠️ **Herzien (2026-07-29,
+> [`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md)).**
+> Optie 2 is gebouwd én weer gesloopt. De `intake`-kolom, de Promote-knop en
+> `create_project_from_intake` bestaan niet meer (kaart `d0531c12…`). Wat
+> hieronder staat is de oorspronkelijke afweging; de gekozen vorm is nu
+> **optie 3-achtig maar kaartloos**: een interactief `new-app`-interview roept
+> `create_project_from_interview` aan, spec + plan landen als repo-bestanden
+> in het nieuwe project, en het meta-bord ziet het idee nooit. Stappen 1-5
+> hieronder gelden ongewijzigd; stap 6 (intake-kaart overzetten mét
+> `plan_ref`) is vervangen door `metadata["spec_doc"]` op de eerste
+> Backlog-kaart.
+
 
 **Idee.** Introduceer een **nieuwe kanban-kolom `intake`** (naast
 Backlog/Todo/Doing/…) op het meta-project. Intake-kaarten zijn **per
@@ -400,6 +413,21 @@ en kruipt door de overlap met B en D.
 > automatisch over (`_DISPATCH_COLUMNS` blijft `("Backlog", "To Resume")`),
 > en de MCP-actie `kanban.create_project_from_intake` (sibling kanban card
 > `0260dbcd`) is de canonieke ingang. Zie PR-thread voor de rationale.
+
+> ⚠️ **Herzien (2026-07-29,
+> [`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md)).**
+> Bovenstaande beslissing is teruggedraaid. De praktijk wees uit dat de
+> tussenkaart geen waarde toevoegde: in de hele levensduur van de
+> intake-kolom stond er precies één kaart in (een test-fixture) en is er
+> nooit een promotie gedraaid. De kolom, de Promote-knop,
+> `create_project_from_intake` en de bijbehorende REST/MCP-oppervlakken zijn
+> gesloopt in kaart `d0531c12…`. De canonieke ingang is nu
+> `create_project_from_interview`, aangeroepen vanuit de interactieve
+> `new-app`-skill. De onderstaande tabel-analyse blijft leerzaam als
+> vastlegging van *waarom* optie 2 destijds won; de doorslaggevende
+> "first-class traceability"-as wordt nu ingevuld door spec + plan als
+> repo-bestanden plus `metadata["spec_doc"]` op de eerste Backlog-kaart —
+> binnen het nieuwe project, dus nog steeds conform de drie-bomen-regel.
 
 ### Waarom Optie 2 (en niet 1 of 3)?
 

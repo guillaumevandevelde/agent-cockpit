@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 111 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 112 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -149,7 +149,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (37)
+### Decision (38)
 
 | Document | Status |
 |---|---|
@@ -165,9 +165,10 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md) | 🔵 decided |
 | [Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies](./headless-session-retro-decision.md) | 🔵 decided |
 | [Beslissing: human-takeover-UX voor headless sessies](./human-takeover-headless-decision.md) | 🔵 decided |
-| [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md) | 🔵 decided |
-| [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md) | 🔵 decided |
+| [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md) | ⚪ superseded |
+| [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md) | ⚪ superseded |
 | [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md) | 🔵 decided |
+| [Kaartloze app-inceptie: interview → geboorte, zonder intake-kaart](./kaartloze-app-inceptie-decision.md) | 🔵 decided |
 | [LiteLLM als sidecar — lifecycle, faalgedrag en scope van het kritieke pad](./litellm-sidecar-lifecycle-decision.md) | 🔵 decided |
 | [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md) | 🔵 decided |
 | [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md) | 🔵 decided |
@@ -204,7 +205,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Analyse — verweesde `depends_on` blokkeren kaarten permanent en onzichtbaar](./dangling-depends-on-analyse.md) | 🟢 active |
 | [Analyse — is auto-dispatch vastgeklonken aan het Anthropic-abonnement?](./dispatch-vendor-koppeling-analyse.md) | 🟢 active |
 | [Spike: headless `stream-json`-transport (Claude) achter `SpawnTransport`](./headless-stream-json-transport-spike.md) | 🔵 decided |
-| [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md) | 🟢 active |
+| [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md) | ⚪ superseded |
 | [Wat kunnen we leren van JIRA? — kritische analyse](./jira-lessen-analyse.md) | 🟢 active |
 | [Analyse — Kanban Pro (donkruger/Kanban): wat kunnen we overnemen of leren?](./kanban-pro-analyse.md) | 🟢 active |
 | [Kennisopbouw & navigatie — hoe structureren we de docs-berg](./knowledge-structure-navigation-analysis.md) | 🟡 proposed |

@@ -4,7 +4,7 @@
 # For every project that has any `kanban_columns` row (i.e. kanban enabled),
 # assert that EVERY name in the canonical `COLUMNS` list from
 # backend/app/kanban/schemas.py has a matching row. Catches the
-# "project-enabled-BEFORE-`intake`-was-added"-class of stale-column bugs
+# "project-enabled-BEFORE-a-column-was-added"-class of stale-column bugs
 # before they ship — without this check, the column silently disappears
 # from the board until the project is re-enabled or the matching
 # `ensure_<name>_column` helper runs.
@@ -115,7 +115,7 @@ quiet = os.environ.get("KANBAN_CONVENTIONS_QUIET", "0") == "1"
 # Mirror of backend/app/kanban/schemas.py COLUMNS. Keep in sync via the
 # docs/cockpit/kanban-conventions.md §1 contract — if you change one,
 # change both.
-FIXED_COLUMNS = ["intake", "Backlog", "Impediment", "Done", "To Resume"]
+FIXED_COLUMNS = ["Backlog", "Impediment", "Done", "To Resume"]
 
 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
 try:

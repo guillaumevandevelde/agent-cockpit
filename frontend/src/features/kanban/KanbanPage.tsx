@@ -19,11 +19,10 @@ import { DefaultTransportSelect } from "./components/DefaultTransportSelect";
 import { SubscriptionToolbarButton } from "./components/SubscriptionToolbarButton";
 import { DispatchPauseBanner } from "./components/DispatchPauseBanner";
 import { WorkTypeMappingDialog } from "./components/WorkTypeMappingDialog";
-import { PromoteToProjectDialog } from "./components/PromoteToProjectDialog";
 import { kanbanApi } from "./api";
 import type { Card, KanbanColumn } from "./types";
 
-const FIXED_COLUMNS = new Set(["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]);
+const FIXED_COLUMNS = new Set(["Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]);
 const DISPATCH_COLUMNS = new Set(["Backlog", "To Resume"]);
 const POLL_INTERVAL_MS = 5000;
 const AGENT_CLAIM_PREFIX = "agent:";
@@ -42,10 +41,6 @@ export default function KanbanPage() {
   const [creating, setCreating] = useState(false);
   const [editingColumns, setEditingColumns] = useState(false);
   const [editingWorkTypeMappings, setEditingWorkTypeMappings] = useState(false);
-  // Inceptie-pipeline (kanban card c33b2f14): the intake card currently
-  // selected for promotion. Set by `onPromote` (passed down to CardItem
-  // via Board → Column); the dialog reads it and renders a confirmation.
-  const [promotingCard, setPromotingCard] = useState<Card | null>(null);
   // kanban-pro-analyse.md §4.4 (problem 2): a client-side filter input
   // over the already-loaded `cards`. Matches title and label substrings
   // case-insensitively; empty query = current behaviour. The filter lives
@@ -619,7 +614,6 @@ export default function KanbanPage() {
         onOpen={openCard}
         onDropCardAt={onDropCardAt}
         projectPath={projectPath}
-        onPromote={setPromotingCard}
         onReorderColumns={async (sourceId, targetId) => {
           const source = columns.find((c) => c.id === sourceId);
           const target = columns.find((c) => c.id === targetId);
@@ -728,23 +722,6 @@ export default function KanbanPage() {
           projectKey={projectKey}
           onClose={() => setEditingWorkTypeMappings(false)}
           onChanged={reload}
-        />
-      )}
-      {promotingCard && (
-        <PromoteToProjectDialog
-          open
-          intakeCardId={promotingCard.id}
-          intakeCardTitle={promotingCard.title}
-          defaultTargetPath={(() => {
-            // Suggest `<parent-of-active-project>/<slug-from-title>`. We don't
-            // know the actual parent's path here without an extra API call —
-            // use the active project path itself as a sensible fallback; the
-            // operator can edit before confirming.
-            const base = activeProject?.path ?? "/tmp";
-            return `${base}/${promotingCard.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
-          })()}
-          onClose={() => setPromotingCard(null)}
-          onPromoted={() => void reload()}
         />
       )}
     </div>

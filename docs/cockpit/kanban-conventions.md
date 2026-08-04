@@ -28,7 +28,7 @@ synoniem en het is belangrijk ze uit elkaar te houden.
 
 | Set | Bron van waarheid | Wat zit erin | Wat wordt er wel/niet mee gedaan |
 |---|---|---|---|
-| **`COLUMNS`** | `backend/app/kanban/schemas.py:13` | `["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]` | **Bron van waarheid voor wat een "vaste" kolom is op de server.** De frontend `KanbanPage.tsx FIXED_COLUMNS` is een snapshot (kans op drift). |
+| **`COLUMNS`** | `backend/app/kanban/schemas.py:13` | `["Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]` | **Bron van waarheid voor wat een "vaste" kolom is op de server.** De frontend `KanbanPage.tsx FIXED_COLUMNS` is een snapshot (kans op drift). |
 | **`_DISPATCH_COLUMNS`** | `backend/app/kanban/dispatch.py` (`_DISPATCH_COLUMNS`) | `("To Resume", "Backlog")` | **Auto-dispatch scan alleen deze twee** — hervatte kaarten worden van `To Resume` opgepakt, nieuwe kaarten van `Backlog`. Alles wat hier niet in zit, wordt nooit automatisch naar een sessie gestuurd. **De volgorde is load-bearing**: zie hieronder. |
 | **`FIXED_COLUMNS`** | `frontend/src/features/kanban/KanbanPage.tsx:23` | `new Set([...])` met dezelfde namen als `COLUMNS` | Alleen voor bord-rendering (welke kolommen verdwijnen in de agent-sectie). |
 
@@ -63,21 +63,20 @@ synoniem en het is belangrijk ze uit elkaar te houden.
 ### `ensure_*_column` helpers per vaste kolom
 
 Vaste-kolommen krijgen hun `kanban_columns`-rij meestal via `POST /enable`
-(itereert `COLUMNS`). Maar er zijn drie uitzonderingen die **buiten** die
+(itereert `COLUMNS`). Maar er zijn twee uitzonderingen die **buiten** die
 bulk-sync vallen:
 
 | Helper | Wanneer aangeroepen | Wat het doet |
 |---|---|---|
-| `ensure_intake_column` (`service.py:558`) | Iedere keer een intake-kaart wordt aangemaakt op een project dat nog geen `intake`-rij had | Voegt `intake` aan `kanban_columns` toe met `rank="0000"` (linksboven) en verschuift bestaande rijen +1 — idempotent, dus dubbel-aanroep is veilig. |
 | `ensure_analyst_column` (`service.py:531`) | Iedere keer een kaart een `analyst_agent_id` krijgt op een project dat nog geen `analyst`-rij had | Idempotent, rank net vóór `Done` zodat de analyst-kolom op de natuurlijke plek tussen agent-kolommen en Done landt. |
 | `ensure_awaiting_subtasks_column` (`service.py:635`) | Vanuit de `move_card`-parkeerlogica, de eerste keer een kaart écht in `Awaiting Subtasks` parkeert op een project dat nog geen rij had | Idempotent, rank net vóór `Done` — zelfde beleid als `ensure_analyst_column`. |
-| `ensure_fixed_columns` (`service.py`) | Bij élke `GET /api/v1/kanban/columns` — dus zodra iemand het bord opent (kaart `4f0677c7…`) | Vult voor een *enabled* bord (≥1 rij) alle ontbrekende `COLUMNS`-namen aan: `intake` via `ensure_intake_column` (links), de rest achteraan. Idempotent; schrijft alleen bij de eerste load na een gat, daarna is de poll read-only. Een bord zonder rijen (nooit enabled) blijft ongemoeid. |
+| `ensure_fixed_columns` (`service.py`) | Bij élke `GET /api/v1/kanban/columns` — dus zodra iemand het bord opent (kaart `4f0677c7…`) | Vult voor een *enabled* bord (≥1 rij) alle ontbrekende `COLUMNS`-namen aan: `Awaiting Subtasks` via `ensure_awaiting_subtasks_column` (net vóór `Done`), de rest achteraan. Idempotent; schrijft alleen bij de eerste load na een gat, daarna is de poll read-only. Een bord zonder rijen (nooit enabled) blijft ongemoeid. |
 
-> **De "ensure_intake_column"-bugklasse** — een project dat `enable` draaide
-> **vóór** `intake` aan `COLUMNS` werd toegevoegd, heeft geen `intake`-rij in
-> `kanban_columns` totdat `ensure_intake_column` (of een re-`enable`) draait.
-> Zonder die rij wordt `intake` niet op het bord getoond en kunnen intake-kaarten
-> onzichtbaar verdwijnen. De validatiescript
+> **De stale-kolom-bugklasse** — een project dat `enable` draaide **vóór** een
+> naam aan `COLUMNS` werd toegevoegd, heeft geen rij voor die naam in
+> `kanban_columns` totdat de bijbehorende `ensure_<naam>_column` (of een
+> re-`enable`) draait. Zonder die rij wordt de kolom niet op het bord getoond en
+> kunnen kaarten erin onzichtbaar verdwijnen. De validatiescript
 > [`scripts/check-kanban-conventions.sh`](../../scripts/check-kanban-conventions.sh)
 > detecteert deze klasse voor elk project dat wel een `kanban_columns`-rij heeft
 > maar niet alle namen uit `COLUMNS`.
@@ -85,9 +84,9 @@ bulk-sync vallen:
 > **Sinds kaart `4f0677c7…` repareert het bord zichzelf.** `GET
 > /api/v1/kanban/columns` roept `service.ensure_fixed_columns` aan: een project
 > met ≥1 `kanban_columns`-rij krijgt idempotent een rij voor élke naam uit
-> `COLUMNS` (`intake` links via `ensure_intake_column`, de rest achteraan
+> `COLUMNS` (`Awaiting Subtasks` via zijn eigen helper, de rest achteraan
 > aangevuld). Dat is exact de invariant die het validatiescript al toetste — die
-> meldde dit bord als stale (*"missing fixed columns: intake, To Resume"*)
+> meldde dit bord als stale (*"missing fixed columns: To Resume"*)
 > terwijl 25 kaarten in `To Resume` op geen enkele lane stonden, en de toolbar
 > ze wél meetelde in `Dispatch all (41)`. Een project **zonder** rijen is nooit
 > enabled en blijft met rust — `POST /enable` blijft de bewuste actie. Een
@@ -181,7 +180,7 @@ als je er een introduceert.
 | `commit` | idem | Volledige `<sha>` (40 hex). |
 | `link` | idem | Een willekeurige URL (docs, dashboards, externe systemen). |
 | `note` | idem | Vrije tekst — geen URL/SHA-vereisten. |
-| `plan` | `add_plan_attachment` (MCP/REST); `PATCH /cards/{cid}/plan-attachment` (update) | Het markdown-plan van de analyst-fase. `ref` is **de body zelf**, geen URL. Precies één per parent-kaart; `_materialize` koppelt hem aan kind-kaart `plan_ref`s. **Childless escape hatch:** voor een intake-kaart (of andere kaart zonder kinderen) is `attach_deliverable(kind="plan", ref=<md body>)` het intake-correcte pad — `add_plan_attachment` weigert kind-loze parents (`mcp_server.add_plan_attachment:690-696`). |
+| `plan` | `add_plan_attachment` (MCP/REST); `PATCH /cards/{cid}/plan-attachment` (update) | Het markdown-plan van de analyst-fase. `ref` is **de body zelf**, geen URL. Precies één per parent-kaart; `_materialize` koppelt hem aan kind-kaart `plan_ref`s. **Childless escape hatch:** voor een kaart zonder kinderen is `attach_deliverable(kind="plan", ref=<md body>)` het correcte pad — `add_plan_attachment` weigert kind-loze parents (`mcp_server.add_plan_attachment:690-696`). |
 | `plan_ref` | `add_plan_attachment` (idem) | Pointer op een kind-kaart terug naar het `plan`-deliverable van de parent. `ref` is de `plan_deliverable_id`. |
 | `spec` | `attach_deliverable(card_id, kind="spec", ref=<md body>)` | Companion van `plan` — output van de `brainstorming`-skill. `ref` is wederom de body (lege body wordt geweigerd: `mcp_server.attach_deliverable:349`). |
 
@@ -573,7 +572,7 @@ engineering-summary posten als dat om een of andere reden passend is).
 [`scripts/check-kanban-conventions.sh`](../../scripts/check-kanban-conventions.sh)
 valideert dat elk project dat `kanban` enabled heeft (≥1 `kanban_columns`-rij) een
 rij heeft voor elke naam uit `COLUMNS`. Dit vangt de
-"project-enabled-vóór-`intake`-toegevoegd"-klasse van bugs voordat ze aan de
+"project-enabled-vóór-een-kolomnaam-toegevoegd"-klasse van bugs voordat ze aan de
 oppervlakte komen in de UI. Draai het lokaal of in CI na elke wijziging aan
 `COLUMNS` of `ensure_*_column` helpers. Sinds kaart `4f0677c7…` herstelt
 `ensure_fixed_columns` deze drift bij het openen van het bord, dus een hit hier

@@ -1,10 +1,20 @@
 ---
 title: "Routing van intake-kaarten — analyse & ontwerpbesluit"
 type: analysis
-status: active
+status: superseded
 ---
 
 # Routing van intake-kaarten — analyse & ontwerpbesluit
+
+> ⚠️ **Achterhaald door
+> [`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md)
+> (2026-07-29).** De hele vraag van deze analyse — hoe voorkom je dat een
+> intake-kaart door de auto-dispatcher wordt opgepakt — is vervallen: de
+> `intake`-kolom bestaat niet meer (kaart `d0531c12…`), net zomin als de
+> Promote-knop en `create_project_from_intake`. Een nieuw app-idee loopt nu
+> via de kaartloze `new-app`-skill en raakt het meta-bord nooit. De conclusie
+> die dit doc bereikte — **géén** `work_type="intake"` in `WORK_TYPES` —
+> blijft geldig en is nooit gebouwd. Bewaard als achtergrond bij die keuze.
 
 > Kanban-kaart: **`[work-type][inceptie] Routing van intake-kaarten — niet door
 > auto-dispatch oppakken`** (`071172d76feb422f8c39a47d5f9d80dc`). Leaf-spike:

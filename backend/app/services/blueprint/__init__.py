@@ -199,8 +199,8 @@ def _default_blueprint() -> Blueprint:
 
     Future design-card #5 will deliver a typed catalog (webapp-rich,
     cli-minimal, service-fullstack, ...). Until then, this default is the
-    only shape and is also what `inception_service` uses when promoting
-    an intake card to a brand-new project.
+    only shape and is also what `inception_service` uses when birthing a
+    brand-new project.
     """
     return Blueprint(
         name="default",

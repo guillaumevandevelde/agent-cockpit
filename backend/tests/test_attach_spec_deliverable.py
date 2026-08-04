@@ -149,23 +149,23 @@ async def test_attach_spec_via_rest_with_empty_ref_is_rejected():
 
 @pytest.mark.asyncio
 async def test_attach_plan_via_mcp_persists_on_childless_card():
-    """``kind="plan"`` on a childless (intake) card is the intake-correct
-    route — ``add_plan_attachment`` requires ``child_card_ids`` and rejects
-    a parent with no children, so a plan deliverable on an intake card must
-    come through ``attach_deliverable``. Locks that contract so a future
+    """``kind="plan"`` on a childless card is the correct route —
+    ``add_plan_attachment`` requires ``child_card_ids`` and rejects a parent
+    with no children, so a plan deliverable on a childless card must come
+    through ``attach_deliverable``. Locks that contract so a future
     ``_materialize`` change can't silently break it.
     """
     async with KanbanSessionLocal() as s:
         cid = await apply_operation(
             s, op_type="create", entity_type="card",
             project_key="git:example", entity_id=None,
-            payload={"title": "intake plan", "column": "intake"},
+            payload={"title": "childless plan", "column": "Backlog"},
         )
         await s.commit()
 
     plan_body = (
         "# Plan\n\n"
-        "## Goal\nLand a plan deliverable on a childless intake card.\n"
+        "## Goal\nLand a plan deliverable on a childless card.\n"
         "## Approach\nUse attach_deliverable — add_plan_attachment needs kids.\n"
     )
     result = await mcp_server.attach_deliverable(cid, "plan", plan_body)
@@ -188,7 +188,7 @@ async def test_attach_plan_via_rest_endpoint_persists_on_childless_card():
         cid = await apply_operation(
             s, op_type="create", entity_type="card",
             project_key="git:example", entity_id=None,
-            payload={"title": "intake plan", "column": "intake"},
+            payload={"title": "childless plan", "column": "Backlog"},
         )
         await s.commit()
 
