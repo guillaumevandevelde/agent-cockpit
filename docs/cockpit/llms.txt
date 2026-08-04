@@ -78,6 +78,7 @@
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided
 - [Plans-feature — analyse & richting (leaf spike)](./plans-feature-decision.md): type=decision status=decided
 - [Product-analyses uniformeren — template, skill of eigen agent?](./product-analyse-methode-decision.md): type=decision status=decided
+- [Prompt-injectors (Caveman + Ponytail) per-lane opt-in](./prompt-injectors-decision.md): type=decision status=besloten
 - [Rebrand naar Agent Cockpit — naam, logo en thema](./rebrand-decision.md): type=decision status=decided
 - [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md): type=decision status=decided
 - [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md): type=decision status=decided
@@ -123,11 +124,13 @@
 - [Portfolio ↔ security overdracht — drie open vragen voor facet D](./portfolio-security-handoff.md): type=analysis status=proposed
 - [Analyse — Volgbaarheid van het project voor de product owner](./product-owner-volgbaarheid-analyse.md): type=analysis status=active
 - [Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel](./recurring-cadence-proposal.md): type=analysis status=proposed
+- [Analyse — Resume auto-dispatch niet werkend (kaart 8489ff9b): wat er al staat en welk stukje ontbreekt](./resume-auto-dispatch-analyse.md): type=analysis status=active
 - [Analyse — Run vasthouden + gebufferde events over een transport-onderbreking](./run-hold-buffered-events-analyse.md): type=analysis status=decided
 - [Analyse — waarom sessies op hun abonnementslimiet blijven hangen (en de auto-dispatcher ze niet terugpakt)](./sessie-limiet-auto-dispatch-analyse.md): type=analysis status=active
 - [Test-gespawnde agent-bridge-sessies blokkeren auto-dispatch — analyse](./spawn-test-bridge-sessions-analyse.md): type=analysis status=active
 - [Spec-driven development als single source of truth — analyse](./spec-driven-development-analysis.md): type=analysis status=active
 - [Spike — per-sessie credential-/HOME-isolatie voor meerdere accounts binnen één vendor](./spike-same-vendor-multi-account-isolation.md): type=analysis status=decided
+- [Analyse — kan het abonnement zichzelf vrijgeven en de sessies herstarten na een limiet?](./subscription-auto-release-analyse.md): type=analysis status=active
 - [Analyse — Flexibel & maximaal gebruik van abonnementen (usage-aware dispatch-routing)](./subscription-flexibiliteit-analyse.md): type=analysis status=active
 - [Analyse — subscription-pool × auto-dispatcher × kolom-toewijzing](./subscription-pool-dispatch-analyse.md): type=analysis status=active
 - [Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)](./subscription-verbruik-inzicht-analyse.md): type=analysis status=active

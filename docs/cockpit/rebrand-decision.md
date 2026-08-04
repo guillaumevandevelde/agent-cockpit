@@ -129,7 +129,7 @@ werken en blijft `resolve_project_key()` de oude waarde teruggeven.
 | Fase | Wat | Status |
 |---|---|---|
 | 1 | `gh repo rename agent-cockpit -R guillaumevandevelde/claude-cockpit` — **alleen** de forge. De `-R`-vorm laat de lokale remote expliciet ongemoeid; de vorm zónder `-R` schrijft 'm wél bij en zou fase 2 ongepland afdwingen. | ✅ 2026-07-28 |
-| 2 | `origin` omzetten + de 13.372 rijen herschrijven, in één run via `scripts/migrate-project-key.py`. | ⏳ wacht op een leeg dispatch-venster |
+| 2 | `origin` omzetten + de 13.372 rijen herschrijven, in één run via `scripts/migrate-project-key.py`. | ✅ 2026-08-05 — 17.126 rijen herschreven (`kanban_ops` 16.002, `kanban_cards` 80, `kanban_columns` 9, `kanban_gates` 13, `kanban_meta` 14 prefix-replaces, `security_audit` 1.008), back-ups in `~/.claude-registry/backups/*.pre-rekey-20260805-010800.db`. `--force` was nodig voor twee claims — de eigen kaart van de engineer-sessie die dit uitvoerde en een stale reviewer-claim zonder live sessie-files (kaart `c705fe0c…`). |
 | 3 | Lokale checkout hernoemen. | ❌ niet gepland — zie §2.1 |
 
 Fase 2 draait `--dry-run` by default, snapshot beide DB's naar
