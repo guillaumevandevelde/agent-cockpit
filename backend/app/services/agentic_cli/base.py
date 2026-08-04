@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import sqlite3
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -70,6 +71,46 @@ class SpawnCommandOptions:
     no_ask_user: bool = False
 
 
+ResumeTarget = tuple[str, str | None]
+
+
+def _resolve_sqlite_resume_target(
+    database_path: Path,
+    worktree_path: Path,
+) -> tuple[str, str] | None:
+    """Resolve the newest active session recorded for one exact worktree."""
+    if not database_path.is_file() or not worktree_path.is_dir():
+        return None
+
+    resolved_worktree = worktree_path.resolve()
+    try:
+        connection = sqlite3.connect(
+            f"{database_path.resolve().as_uri()}?mode=ro",
+            uri=True,
+            timeout=1,
+        )
+        try:
+            row = connection.execute(
+                "SELECT id FROM session WHERE directory = ? "
+                "AND parent_id IS NULL AND time_archived IS NULL "
+                "ORDER BY time_updated DESC LIMIT 1",
+                (str(resolved_worktree),),
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        logger.warning(
+            "could not read resume session store %s",
+            database_path,
+            exc_info=True,
+        )
+        return None
+
+    if row is None:
+        return None
+    return str(row[0]), str(resolved_worktree)
+
+
 def argv0_name(command: str) -> str:
     """Return the executable basename from a command or argv0 string."""
     if not command:
@@ -131,6 +172,27 @@ class AgenticCli(ABC):
     display_name: str
     binary_name: str
     version_args: tuple[str, ...] = ("--version",)
+    supports_resume_resolution: bool = False
+
+    def resolve_resume_target(
+        self,
+        worktree_path: Path,
+        *,
+        data_dir: Path | None = None,
+    ) -> ResumeTarget | None:
+        """Find this CLI's session for ``worktree_path`` when supported."""
+        return None
+
+    def resolve_directory(self, options: SpawnCommandOptions) -> str:
+        """Resolve an opaque resume target back to its original directory."""
+        if options.mode == "resume" and options.project_folder:
+            candidate = Path(options.project_folder).expanduser()
+            if candidate.is_absolute():
+                resolved = candidate.resolve()
+                if not resolved.is_dir():
+                    raise ValueError(f"Resume directory does not exist: '{candidate}'")
+                return str(resolved)
+        return options.directory
 
     def get_capabilities(self) -> dict[str, bool]:
         """Return backward-compatible feature support flags."""

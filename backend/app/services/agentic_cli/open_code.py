@@ -10,7 +10,9 @@ from pathlib import Path
 
 from app.services.agentic_cli.base import (
     AgenticCli,
+    ResumeTarget,
     SpawnCommandOptions,
+    _resolve_sqlite_resume_target,
     argv0_name,
     has_binary_descendant,
 )
@@ -54,6 +56,16 @@ class OpenCodeCli(AgenticCli):
     display_name = "OpenCode"
     binary_name = "opencode"
     version_args = ("--version",)
+    supports_resume_resolution = True
+
+    def resolve_resume_target(
+        self,
+        worktree_path: Path,
+        *,
+        data_dir: Path | None = None,
+    ) -> ResumeTarget | None:
+        database = (data_dir or get_opencode_data_home()) / "opencode.db"
+        return _resolve_sqlite_resume_target(database, worktree_path)
 
     def get_backup_policy(self) -> dict:
         return {

@@ -167,16 +167,13 @@ async def test_reopen_does_not_disturb_original_done_summary():
 
 
 @pytest.mark.asyncio
-async def test_reopen_does_not_set_resume_fields(monkeypatch, tmp_path):
+async def test_reopen_does_not_set_resume_fields():
     """Resume handling lives at the dispatch layer (not the service
     layer), because the resume resolver needs `project_path` which the
     service-level card API doesn't carry. The service only mutates board
     state — comment + move-to-Backlog — and the next dispatch tick is
     what tries to attach the resume fields. Here we assert the service
     leaves them alone so dispatch owns that decision cleanly."""
-    from app.kanban import session_recovery
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir",
-                        lambda: tmp_path / "projects")
 
     async with KanbanSessionLocal() as s:
         original_id = await _make_done_card(s)
@@ -374,22 +371,17 @@ async def test_stamp_resume_target_persists_session_id(monkeypatch, tmp_path):
     `resume_project_folder` onto the card so the spawn below picks the
     resume transport. Failure (transcript gone) is silent — None fallback
     is the expected path for analyst cards post-GC."""
-    import os
-
     from app.kanban import session_recovery
-    from app.utils.path_utils import convert_path_to_folder_name
 
     repo = tmp_path / "repo"
-    worktree = repo / ".claude" / "worktrees" / "k-some-0001"
-    worktree.mkdir(parents=True)
-    folder = convert_path_to_folder_name(str(worktree))
-    folder_dir = tmp_path / "projects" / folder
-    folder_dir.mkdir(parents=True)
-    transcript = folder_dir / "abc-123.jsonl"
-    transcript.write_text("{}")
-    os.utime(transcript, (2000, 2000))
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir",
-                        lambda: tmp_path / "projects")
+    (repo / ".claude" / "worktrees" / "k-some-0001").mkdir(parents=True)
+    calls = []
+
+    def fake_resolve(project_path, session_name, *, cli_id):
+        calls.append((project_path, session_name, cli_id))
+        return "abc-123", "encoded-project-folder"
+
+    monkeypatch.setattr(session_recovery, "_resolve_resume_target", fake_resolve)
 
     async with KanbanSessionLocal() as s:
         cid = await _make_done_card(s)
@@ -409,7 +401,8 @@ async def test_stamp_resume_target_persists_session_id(monkeypatch, tmp_path):
     async with KanbanSessionLocal() as s:
         card = await service.get_card(s, cid)
     assert card.resume_session_id == "abc-123"
-    assert card.resume_project_folder == folder
+    assert card.resume_project_folder == "encoded-project-folder"
+    assert calls == [(str(repo), "k-some-0001", "claude-code")]
 
 
 @pytest.mark.asyncio
@@ -420,8 +413,11 @@ async def test_stamp_resume_target_silent_when_no_transcript(
     fallback is the contract (analysis cards GC their worktrees after
     Done)."""
     from app.kanban import session_recovery
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir",
-                        lambda: tmp_path / "projects")
+    monkeypatch.setattr(
+        session_recovery,
+        "_resolve_resume_target",
+        lambda project_path, session_name, **kwargs: None,
+    )
 
     async with KanbanSessionLocal() as s:
         cid = await _make_done_card(s)
@@ -450,8 +446,13 @@ async def test_stamp_resume_target_noop_without_agent_claim(monkeypatch, tmp_pat
     hand) have no prior session to resume — the helper is a no-op so it
     doesn't synthesize a phantom resume pointer."""
     from app.kanban import session_recovery
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir",
-                        lambda: tmp_path / "projects")
+
+    def unexpected_resolve(*args, **kwargs):
+        raise AssertionError("resolver must not run without an agent claim")
+
+    monkeypatch.setattr(
+        session_recovery, "_resolve_resume_target", unexpected_resolve,
+    )
 
     async with KanbanSessionLocal() as s:
         cid = await _make_done_card(s)

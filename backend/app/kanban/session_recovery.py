@@ -4,13 +4,12 @@ When the machine reboots, tmux dies but every card that an agent session was
 working on stays in its agent column, still claimed by ``agent:<session>``. The
 dispatch reaper would release those claims and orphan the cards; a subsequent
 redispatch then builds a *fresh* worktree, throwing away the work-in-progress and
-the Claude conversation.
+the prior CLI conversation.
 
 Instead, at startup (before the dispatch scheduler runs, so the reaper never gets
 to release the claim first) we detect cards whose agent session is gone but whose
-worktree still holds a resumable Claude transcript, tag them with the recorded
-session id, and re-dispatch them in *resume* mode. ``claude --resume`` then picks
-the conversation back up in the original worktree — see ``dispatch.make_resume_transport``.
+worktree still has a vendor-owned resumable session record, tag them with that
+session id, and re-dispatch them in *resume* mode through the original CLI adapter.
 """
 from __future__ import annotations
 
@@ -18,13 +17,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from app.kanban.dispatch import CLAIMANT_PREFIX
-from app.utils.path_utils import convert_path_to_folder_name, get_claude_projects_dir
+from app.kanban.dispatch import CLAIMANT_PREFIX, _effective_resume_cli_id
+from app.services.agentic_cli import get_agentic_cli
 
 logger = logging.getLogger(__name__)
 
 # (project_path, session_name) -> (session_id, project_folder) | None
-ResolveFn = Callable[[str, str], tuple[str, str] | None]
+ResolveFn = Callable[..., tuple[str, str | None] | None]
 # (session, *, card_id, project_path) -> result dict | None
 RedispatchFn = Callable[..., Awaitable[dict | None]]
 
@@ -34,7 +33,8 @@ def _recoverable(card, live_sessions: set[str]) -> bool:
 
     Fixed columns (Backlog/Impediment/Done), human (`me@ui`) claims, unclaimed
     cards, and cards whose session is still live are all left alone. Sandcastle
-    cards have no local worktree/transcript, so they can't be resumed this way.
+    cards have no local worktree or host-side session store, so they cannot be
+    resumed this way.
     """
     from app.kanban.schemas import COLUMNS
 
@@ -52,44 +52,30 @@ def _recoverable(card, live_sessions: set[str]) -> bool:
 def _resolve_transcript_file(
     project_path: str, session_name: str, *, projects_dir: Path | None = None,
 ) -> Path | None:
-    """Find the most recently modified Claude transcript for an agent session.
-
-    A dispatched session runs in ``<project_path>/.claude/worktrees/<session_name>``
-    and writes its transcript to ``~/.claude/projects/<encoded-worktree>/<uuid>.jsonl``.
-    Returns the transcript path, or None when the worktree or a transcript is
-    missing.
-    """
+    """Find the most recently modified Claude transcript for an agent session."""
     worktree = Path(project_path) / ".claude" / "worktrees" / session_name
-    if not worktree.exists():
-        return None
-    folder = convert_path_to_folder_name(str(worktree))
-    base = projects_dir if projects_dir is not None else get_claude_projects_dir()
-    folder_dir = Path(base) / folder
-    if not folder_dir.is_dir():
-        return None
-    transcripts = sorted(
-        folder_dir.glob("*.jsonl"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if not transcripts:
-        return None
-    return transcripts[0]
+    cli = get_agentic_cli("claude-code")
+    return cli.resolve_transcript_file(worktree, data_dir=projects_dir)
 
 
 def _resolve_resume_target(
-    project_path: str, session_name: str, *, projects_dir: Path | None = None,
-) -> tuple[str, str] | None:
-    """Find the Claude session to resume for a dead agent session.
-
-    Returns ``(session_id, project_folder)`` for the most recently modified
-    transcript (see ``_resolve_transcript_file``), or None when the worktree
-    or a transcript is missing (nothing to resume).
-    """
-    path = _resolve_transcript_file(project_path, session_name, projects_dir=projects_dir)
-    if path is None:
+    project_path: str,
+    session_name: str,
+    *,
+    cli_id: str = "claude-code",
+    projects_dir: Path | None = None,
+) -> tuple[str, str | None] | None:
+    """Delegate resumable-session discovery to the selected CLI adapter."""
+    worktree = Path(project_path) / ".claude" / "worktrees" / session_name
+    try:
+        cli = get_agentic_cli(cli_id)
+    except ValueError:
+        logger.warning("resume detection requested for unknown cli=%s", cli_id)
         return None
-    return path.stem, path.parent.name
+    if not cli.supports_resume_resolution:
+        logger.info("resume detection unsupported for cli=%s", cli_id)
+        return None
+    return cli.resolve_resume_target(worktree, data_dir=projects_dir)
 
 
 async def recover_project(
@@ -100,8 +86,8 @@ async def recover_project(
     """Resume every recoverable interrupted session in one project, bounded by
     the shared hardware-aware session budget.
 
-    For each dead-session card that still has a resumable transcript: persist the
-    resume session id/folder, then re-dispatch (which selects the resume transport).
+    For each dead-session card that still has a vendor-resolvable session: persist
+    the resume session id/folder, then re-dispatch (which selects the resume transport).
     Per-card failures are logged and skipped so one bad card can't block the rest.
 
     ``redispatch_card`` deliberately bypasses per-project limits for its normal
@@ -141,11 +127,19 @@ async def recover_project(
         if not _recoverable(card, live_sessions):
             continue
         session_name = (card.claimed_by or "")[len(CLAIMANT_PREFIX):]
-        target = resolve(project_path, session_name)
+        cli_id = _effective_resume_cli_id(card)
+        target = resolve(
+            project_path,
+            session_name,
+            cli_id=cli_id,
+        )
         if target is None:
             logger.info(
-                "no resumable transcript for card %s (session %s); leaving for reaper",
-                card.id, session_name,
+                "no resumable session for card %s (session %s, cli=%s); "
+                "leaving for reaper",
+                card.id,
+                session_name,
+                cli_id,
             )
             continue
         session_id, project_folder = target

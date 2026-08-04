@@ -63,7 +63,7 @@ async def test_promote_spawns_resume_with_same_session_name_and_persists_resume_
 
         result = await takeover.promote_to_tmux(
             s, card_id=cid, project_key=PK, project_path="/repo",
-            resolve=lambda p, n: ("sess-abc", "-repo--claude-worktrees-k-hl-0001"),
+            resolve=lambda p, n, **kwargs: ("sess-abc", "-repo--claude-worktrees-k-hl-0001"),
             live_sessions=lambda: set(),
             kill_headless=fake_kill,
             spawn=fake_spawn,
@@ -85,6 +85,46 @@ async def test_promote_spawns_resume_with_same_session_name_and_persists_resume_
 
     assert card.resume_session_id == "sess-abc"
     assert card.resume_project_folder == "-repo--claude-worktrees-k-hl-0001"
+
+
+@pytest.mark.asyncio
+async def test_promote_routes_resolution_and_spawn_to_original_cli():
+    resolved_with = []
+    spawn_calls = []
+
+    def fake_resolve(project_path, session_name, **kwargs):
+        resolved_with.append(kwargs.get("cli_id"))
+        return "codex-session", "/repo/.claude/worktrees/k-hl-codex"
+
+    def fake_spawn(**kwargs):
+        spawn_calls.append(kwargs)
+        return {"tmux_target": "k-hl-codex:0.0", "session_name": "k-hl-codex"}
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s)
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=cid, payload={
+                "analyst_agent_id": "codex-cli",
+                "executor_agent_id": "claude-code",
+            },
+        )
+        await _claim(s, cid, "agent:k-hl-codex")
+        await s.commit()
+
+        await takeover.promote_to_tmux(
+            s,
+            card_id=cid,
+            project_key=PK,
+            project_path="/repo",
+            resolve=fake_resolve,
+            live_sessions=lambda: set(),
+            kill_headless=lambda name: True,
+            spawn=fake_spawn,
+        )
+
+    assert resolved_with == ["codex-cli"]
+    assert spawn_calls[0]["cli_id"] == "codex-cli"
 
 
 @pytest.mark.asyncio
@@ -111,7 +151,7 @@ async def test_promote_threads_repo_path_for_mcp_fallback():
         project_root = "/scratch/scratchpad/product-x"
         await takeover.promote_to_tmux(
             s, card_id=cid, project_key=PK, project_path=project_root,
-            resolve=lambda p, n: ("sess-abc", "-repo--claude-worktrees-k-hl-mcp"),
+            resolve=lambda p, n, **kwargs: ("sess-abc", "-repo--claude-worktrees-k-hl-mcp"),
             live_sessions=lambda: set(),
             kill_headless=lambda n: True,
             spawn=fake_spawn,
@@ -137,7 +177,7 @@ async def test_promote_raises_when_card_not_claimed_by_agent():
         with pytest.raises(takeover.TakeoverError):
             await takeover.promote_to_tmux(
                 s, card_id=cid, project_key=PK, project_path="/repo",
-                resolve=lambda p, n: ("sess-abc", "folder"),
+                resolve=lambda p, n, **kwargs: ("sess-abc", "folder"),
                 live_sessions=lambda: set(),
                 kill_headless=lambda n: False,
                 spawn=lambda **kw: {},
@@ -156,7 +196,7 @@ async def test_promote_raises_when_session_already_live_in_tmux():
         with pytest.raises(takeover.TakeoverError):
             await takeover.promote_to_tmux(
                 s, card_id=cid, project_key=PK, project_path="/repo",
-                resolve=lambda p, n: ("sess-abc", "folder"),
+                resolve=lambda p, n, **kwargs: ("sess-abc", "folder"),
                 live_sessions=lambda: {"k-hl-0002"},
                 kill_headless=lambda n: False,
                 spawn=lambda **kw: spawn_calls.append(kw) or {},
@@ -176,7 +216,7 @@ async def test_promote_raises_when_tmux_liveness_ambiguous():
         with pytest.raises(takeover.TakeoverError):
             await takeover.promote_to_tmux(
                 s, card_id=cid, project_key=PK, project_path="/repo",
-                resolve=lambda p, n: ("sess-abc", "folder"),
+                resolve=lambda p, n, **kwargs: ("sess-abc", "folder"),
                 live_sessions=lambda: None,
                 kill_headless=lambda n: False,
                 spawn=lambda **kw: {},
@@ -193,7 +233,7 @@ async def test_promote_raises_when_no_resumable_transcript():
         with pytest.raises(takeover.TakeoverError):
             await takeover.promote_to_tmux(
                 s, card_id=cid, project_key=PK, project_path="/repo",
-                resolve=lambda p, n: None,
+                resolve=lambda p, n, **kwargs: None,
                 live_sessions=lambda: set(),
                 kill_headless=lambda n: False,
                 spawn=lambda **kw: {},
@@ -206,7 +246,7 @@ async def test_promote_raises_when_card_not_found():
         with pytest.raises(takeover.TakeoverError):
             await takeover.promote_to_tmux(
                 s, card_id="does-not-exist", project_key=PK, project_path="/repo",
-                resolve=lambda p, n: ("sess-abc", "folder"),
+                resolve=lambda p, n, **kwargs: ("sess-abc", "folder"),
                 live_sessions=lambda: set(),
                 kill_headless=lambda n: False,
                 spawn=lambda **kw: {},

@@ -405,3 +405,23 @@ def test_claude_code_spawn_command_includes_model_flag_across_modes(tmp_path):
         str(tmp_path / ".mcp.json"),
         "--model", "haiku",
     ]
+
+
+def test_mimo_resume_uses_session_and_prompt_flags():
+    from app.services.agentic_cli.base import SpawnCommandOptions
+    from app.services.agentic_cli.mimo_code import MiMoCodeCli
+
+    with patch(
+        "app.services.agentic_cli.mimo_code._find_mimo_binary",
+        return_value=None,
+    ):
+        command = MiMoCodeCli().build_spawn_command(
+            SpawnCommandOptions(
+                directory="/tmp/project",
+                mode="resume",
+                session_id="ses_mimo",
+                prompt="continue",
+            )
+        )
+
+    assert command == ["mimo", "--session", "ses_mimo", "--prompt", "continue"]

@@ -6,12 +6,11 @@ takeover-UX. The machinery already exists (§5 of the doc) — this module is
 mostly wiring:
 
 1. Best-effort end the headless subprocess (`headless_runner.kill_headless_session`).
-2. Resolve the resumable transcript for the card's claimed session
-   (`session_recovery._resolve_resume_target` — transport-agnostic, globs
-   the worktree's transcript dir, never touches tmux).
+2. Resolve the resumable session for the card's claimed worktree through its
+   original CLI adapter (`session_recovery._resolve_resume_target`).
 3. Persist `resume_session_id`/`resume_project_folder` on the card — the
    same fields crash-recovery uses, not a parallel mechanism.
-4. Spawn `claude --resume <session_id>` in tmux under the **same**
+4. Spawn the original CLI in resume mode inside tmux under the **same**
    session_name the headless run used. Reusing the name is what keeps the
    `agent:<session_name>` claim, branch, and worktree untouched, and what
    shifts the card's liveness source from the headless registry to tmux for
@@ -33,12 +32,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from app.kanban.dispatch import CLAIMANT_PREFIX, _live_sessions
+from app.kanban.dispatch import (
+    CLAIMANT_PREFIX,
+    _effective_resume_cli_id,
+    _live_sessions,
+)
 from app.kanban.session_recovery import _resolve_resume_target
 
 logger = logging.getLogger(__name__)
 
-ResolveFn = Callable[[str, str], tuple[str, str] | None]
+ResolveFn = Callable[..., tuple[str, str | None] | None]
 LiveSessionsFn = Callable[[], set[str] | None]
 KillFn = Callable[[str], bool]
 SpawnFn = Callable[..., dict]
@@ -48,10 +51,10 @@ class TakeoverError(ValueError):
     """Raised when a card's session cannot be promoted to an attachable pane."""
 
 
-def _default_spawn(**kwargs) -> dict:
+def _default_spawn(*, cli_id: str, **kwargs) -> dict:
     from app.services.runs.spawn import spawn_session
 
-    return spawn_session("claude-code", **kwargs)
+    return spawn_session(cli_id, **kwargs)
 
 
 async def promote_to_tmux(
@@ -98,7 +101,8 @@ async def promote_to_tmux(
 
     kill_headless(session_name)
 
-    target = resolve(project_path, session_name)
+    cli_id = _effective_resume_cli_id(card)
+    target = resolve(project_path, session_name, cli_id=cli_id)
     if target is None:
         raise TakeoverError("no resumable transcript found for this session yet")
     resume_session_id, resume_project_folder = target
@@ -118,9 +122,8 @@ async def promote_to_tmux(
         project_folder=resume_project_folder,
         # ``project_path`` is the project_root (the same value the dispatcher
         # passes as ``directory`` to ``make_resume_transport``). ``spawn_session``
-        # rewrites ``options.directory`` to the worktree via
-        # ``resolve_directory`` for resume mode, so the worktree is what Claude
-        # Code actually sees as its cwd. Thread ``repo_path`` so
+        # rewrites ``options.directory`` through the selected adapter's resume
+        # target, so the original worktree is what the CLI sees as its cwd. Thread ``repo_path`` so
         # ``_project_mcp_config_args`` can fall back to
         # ``<repo-root>/.mcp.json`` when the worktree has no copy — the
         # external product-project case (untracked ``.mcp.json`` in the
@@ -129,6 +132,7 @@ async def promote_to_tmux(
         skip_permissions=True,
     )
     result = spawn(
+        cli_id=cli_id,
         options=options,
         session_name=session_name,
         project_key=project_key,

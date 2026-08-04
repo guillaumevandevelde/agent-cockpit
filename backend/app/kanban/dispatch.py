@@ -199,6 +199,27 @@ def _phase_cli_id(card, *, phase: str, known_clis: set | None = None) -> str:
     return "claude-code"
 
 
+def _effective_resume_cli_id(card) -> str:
+    """Resolve the CLI that created the session now being recovered."""
+    known_clis = _known_cli_ids()
+    phase = resolve_phase(card)
+    cli_id = _phase_cli_id(card, phase=phase, known_clis=known_clis)
+    phase_agent_id = getattr(
+        card,
+        "analyst_agent_id" if phase == "analyst" else "executor_agent_id",
+        None,
+    )
+    explicit_cli_chosen = any(
+        value in known_clis
+        for value in (phase_agent_id, getattr(card, "agent", None))
+    )
+    return _cli_id_for_opencode_provider(
+        cli_id,
+        getattr(card, "dispatch_provider", None),
+        explicit_cli_chosen=explicit_cli_chosen,
+    )
+
+
 def _phase_target_agent(card, *, project_path: str, phase: str, source_column: str,
                         agent_override: str | None = None,
                         known_clis: set | None = None,
@@ -2636,7 +2657,7 @@ async def _resolve_impediment(session, card) -> tuple[str | None, str | None]:
 async def _stamp_resume_target(session, *, card, project_key: str,
                                project_path: str) -> None:
     """Best-effort resume: if the previous agent claim points at a session
-    whose worktree + Claude transcript still exist, persist
+    whose worktree + vendor session record still exist, persist
     `resume_session_id`/`resume_project_folder` on the card so the spawn
     below picks the resume transport.
 
@@ -2658,7 +2679,11 @@ async def _stamp_resume_target(session, *, card, project_key: str,
     if not claimant.startswith(CLAIMANT_PREFIX):
         return
     session_name = claimant[len(CLAIMANT_PREFIX):]
-    target = _resolve_resume_target(project_path, session_name)
+    target = _resolve_resume_target(
+        project_path,
+        session_name,
+        cli_id=_effective_resume_cli_id(card),
+    )
     if target is None:
         return
     resume_session_id, resume_project_folder = target
@@ -5941,12 +5966,15 @@ async def _run_card(
     #   - a persona name (engineer, analyst, …)  → which column + role prompt
     # Resolve them separately so a CLI id is never mistaken for a column.
     known_clis = _known_cli_ids()
-    cli_id = next(
-        (v for v in (agent_override, _phase_cli_id(card, phase=phase,
-                                                       known_clis=known_clis))
-         if v in known_clis),
-        "claude-code",
-    )
+    if getattr(card, "resume_session_id", None):
+        cli_id = _effective_resume_cli_id(card)
+    else:
+        cli_id = next(
+            (v for v in (agent_override, _phase_cli_id(card, phase=phase,
+                                                           known_clis=known_clis))
+             if v in known_clis),
+            "claude-code",
+        )
     # Resolve the work_type fallback *before* the persona check in
     # _phase_target_agent. Cheap when the project's mapping has no override
     # (single DB lookup with a small indexed table). Closes the regression
@@ -6254,7 +6282,7 @@ async def _move_to_resume(
     session id/folder on the card, moves it to the "To Resume" fixed column, kills
     the dead tmux session, and releases the agent claim. Returns True when a resume
     target was found and the card was moved; False when the worktree has no resumable
-    transcript — the caller should fall back to a plain claim release (reaper default).
+    session — the caller should fall back to a plain claim release (reaper default).
 
     ``scheduled_at`` (ISO8601, optional) is written onto the card alongside the resume
     fields so ``_is_due`` holds it out of auto-dispatch until then, instead of relying
@@ -6286,7 +6314,11 @@ async def _move_to_resume(
     if session_name is None:
         return False
 
-    target = _resolve_resume_target(project_path, session_name)
+    target = _resolve_resume_target(
+        project_path,
+        session_name,
+        cli_id=_effective_resume_cli_id(card),
+    )
     if target is None:
         return False
 
@@ -7934,7 +7966,11 @@ async def redispatch_card(
         if not getattr(card, "resume_session_id", None) and card.transport != "sandcastle":
             from app.kanban.session_recovery import _resolve_resume_target
 
-            target = _resolve_resume_target(project_path, session_name)
+            target = _resolve_resume_target(
+                project_path,
+                session_name,
+                cli_id=_effective_resume_cli_id(card),
+            )
             if target is not None:
                 resume_session_id, resume_project_folder = target
                 await apply_operation(
@@ -8355,8 +8391,8 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
     """Factory that returns a transport that resumes an existing session.
 
     Unlike the worktree transport, this does NOT create a new git worktree.
-    The ClaudeCodeCli resolves the working directory from the session's
-    recorded cwd (via project_folder), and spawns with ``--resume session_id``.
+    The selected CLI adapter resolves the original working directory from the
+    opaque ``project_folder`` target and emits its own resume command.
 
     kaart 27317b4871… (FCR gap 7): ``_run_card`` forwards the
     anthropic-compatible ``endpoint_*`` kwargs to every ``SpawnTransport``
@@ -8405,8 +8441,8 @@ def make_resume_transport(session_id: str, project_folder: str | None = None,
             # ``directory`` here is the project_root passed by the dispatcher
             # (``card_transport(directory=project_path, ...)`` at
             # dispatch.py:5375). ``spawn_session`` rewrites ``options.directory``
-            # to the worktree via ``resolve_directory`` for resume mode, so the
-            # worktree is what Claude Code actually sees as its cwd. Thread
+            # to the worktree via the selected adapter's ``resolve_directory``
+            # hook for resume mode, so the worktree is what the CLI sees as cwd. Thread
             # ``repo_path`` so ``_project_mcp_config_args`` can fall back to
             # ``<repo-root>/.mcp.json`` when the worktree has no copy — the
             # external product-project case (untracked ``.mcp.json`` in the

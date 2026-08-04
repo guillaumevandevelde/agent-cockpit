@@ -1,12 +1,15 @@
 """Codex CLI implementation."""
 from __future__ import annotations
 
+import json
 import logging
 import os
+from itertools import islice
 from pathlib import Path
 
 from app.services.agentic_cli.base import (
     AgenticCli,
+    ResumeTarget,
     SpawnCommandOptions,
     argv0_name,
     has_binary_descendant,
@@ -22,11 +25,74 @@ def get_codex_home() -> Path:
     return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
 
 
+def _read_session_meta(path: Path) -> dict | None:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in islice(handle, 20):
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if item.get("type") != "session_meta":
+                    continue
+                payload = item.get("payload")
+                return payload if isinstance(payload, dict) else None
+    except OSError:
+        return None
+    return None
+
+
 class CodexCli(AgenticCli):
     id = "codex-cli"
     display_name = "Codex"
     binary_name = "codex"
     version_args = ("--version",)
+    supports_resume_resolution = True
+
+    def resolve_resume_target(
+        self,
+        worktree_path: Path,
+        *,
+        data_dir: Path | None = None,
+    ) -> ResumeTarget | None:
+        if not worktree_path.is_dir():
+            return None
+        sessions_dir = (data_dir or get_codex_home()) / "sessions"
+        if not sessions_dir.is_dir():
+            return None
+
+        candidates: list[tuple[float, Path]] = []
+        for path in sessions_dir.rglob("rollout-*.jsonl"):
+            try:
+                candidates.append((path.stat().st_mtime, path))
+            except OSError:
+                continue
+
+        resolved_worktree = worktree_path.resolve()
+        for _, path in sorted(candidates, key=lambda item: item[0], reverse=True):
+            metadata = _read_session_meta(path)
+            if metadata is None or metadata.get("parent_thread_id"):
+                continue
+            cwd = metadata.get("cwd")
+            if not isinstance(cwd, str):
+                continue
+            candidate_cwd = Path(cwd).expanduser()
+            if not candidate_cwd.is_absolute():
+                continue
+            try:
+                matches = candidate_cwd.resolve() == resolved_worktree
+            except OSError:
+                continue
+            if not matches:
+                continue
+            session_id = metadata.get("id") or metadata.get("session_id")
+            if not session_id:
+                continue
+            session_id = str(session_id)
+            if not path.name.endswith(f"-{session_id}.jsonl"):
+                continue
+            return session_id, str(resolved_worktree)
+        return None
 
     def get_backup_policy(self) -> dict:
         return {

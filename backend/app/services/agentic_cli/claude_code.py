@@ -6,12 +6,17 @@ from pathlib import Path
 
 from app.services.agentic_cli.base import (
     AgenticCli,
+    ResumeTarget,
     SpawnCommandOptions,
     argv0_name,
     has_binary_descendant,
 )
 from app.services.runs.cc_spawn import _project_mcp_config_args, _resolve_project_directory
-from app.utils.path_utils import ClaudePathUtils
+from app.utils.path_utils import (
+    ClaudePathUtils,
+    convert_path_to_folder_name,
+    get_claude_projects_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +25,37 @@ class ClaudeCodeCli(AgenticCli):
     id = "claude-code"
     display_name = "Claude Code"
     binary_name = "claude"
+    supports_resume_resolution = True
+
+    def resolve_transcript_file(
+        self,
+        worktree_path: Path,
+        *,
+        data_dir: Path | None = None,
+    ) -> Path | None:
+        if not worktree_path.is_dir():
+            return None
+        project_folder = convert_path_to_folder_name(str(worktree_path))
+        folder = (data_dir or get_claude_projects_dir()) / project_folder
+        if not folder.is_dir():
+            return None
+        transcripts = sorted(
+            folder.glob("*.jsonl"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        return transcripts[0] if transcripts else None
+
+    def resolve_resume_target(
+        self,
+        worktree_path: Path,
+        *,
+        data_dir: Path | None = None,
+    ) -> ResumeTarget | None:
+        transcript = self.resolve_transcript_file(worktree_path, data_dir=data_dir)
+        if transcript is None:
+            return None
+        return transcript.stem, transcript.parent.name
 
     def get_backup_policy(self) -> dict:
         return {
