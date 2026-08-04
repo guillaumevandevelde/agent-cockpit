@@ -350,6 +350,11 @@ grep -h "dispatch tick failed" /home/vdvgu/claude-cockpit/logs/backend/*.log | w
 Een spawn-fout op één kaart is een kaart-probleem, geen tick-probleem; doorgaan naar de
 volgende kandidaat is het juiste gedrag.
 
+✅ **Geïmplementeerd (kaart `05592c13…`).** `dispatch_project`'s while-loop vangt de
+compensated spawn-failure nu af (`CardSpawnFailed`) en gaat door naar de volgende
+kandidaat; de gefaalde kaart wordt binnen die tick uit de werkverzameling gehaald zodat
+hij niet meermaals binnen één tick herkanst wordt.
+
 ---
 
 ## 7. Aanbevolen richting
