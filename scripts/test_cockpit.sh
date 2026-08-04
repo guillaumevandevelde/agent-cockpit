@@ -248,5 +248,46 @@ rm -rf "$TMP_O3"
 unset LITELLM_CONFIG_PATH
 
 echo ""
+echo "Task 6: run_merged_branches_sweeper actually runs the sweeper"
+# Regression: the nudge referenced an undefined $REPO_ROOT (cockpit.sh defines
+# PROJECT_ROOT), so under `set -u` the command substitution died in its
+# subshell — every `cockpit.sh start` printed "REPO_ROOT: unbound variable" and
+# silently took the "sweeper niet kunnen draaien" path. Stub the sweeper so the
+# assertions are hermetic (no git, no network).
+TMP_SW="$(mktemp -d)"
+mkdir -p "$TMP_SW/bin" "$TMP_SW/logs"
+cat > "$TMP_SW/bin/sweep_merged_remote_branches.py" <<'STUB'
+import sys, json
+# Echo the --repo we were handed so the test can assert it is a real path.
+repo = sys.argv[sys.argv.index("--repo") + 1] if "--repo" in sys.argv else ""
+print(json.dumps({"repo_path": repo, "totals": {"fully_merged": 3}}))
+STUB
+chmod +x "$TMP_SW/bin/sweep_merged_remote_branches.py"
+SW_OUT="$TMP_SW/out.txt"
+(
+    export COCKPIT_NO_MAIN=1
+    source "$SCRIPT_DIR/cockpit.sh"
+    SCRIPT_DIR="$TMP_SW/bin"
+    LOG_DIR="$TMP_SW/logs"
+    unset COCKPIT_SKIP_REMOTE_SWEEP
+    run_merged_branches_sweeper
+) > "$SW_OUT" 2>&1
+check "no unbound-variable error"        '! grep -q "unbound variable" "$SW_OUT"'
+check "sweeper hit-count is reported"    'grep -q "3 volledig gemergede branch(es)" "$SW_OUT"'
+check "sweeper did not take skip path"   '! grep -q "niet kunnen draaien" "$TMP_SW/logs/supervisor.log" 2>/dev/null'
+check "sweeper got the repo root"        'grep -q -- "--repo \"$PROJECT_ROOT\"" "$SW_OUT"'
+# Opt-out still wins.
+(
+    export COCKPIT_NO_MAIN=1
+    source "$SCRIPT_DIR/cockpit.sh"
+    SCRIPT_DIR="$TMP_SW/bin"
+    LOG_DIR="$TMP_SW/logs"
+    export COCKPIT_SKIP_REMOTE_SWEEP=1
+    run_merged_branches_sweeper
+) > "$TMP_SW/out2.txt" 2>&1
+check "COCKPIT_SKIP_REMOTE_SWEEP silences the nudge" '[ ! -s "$TMP_SW/out2.txt" ]'
+rm -rf "$TMP_SW"
+
+echo ""
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

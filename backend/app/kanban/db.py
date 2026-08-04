@@ -241,6 +241,21 @@ async def _ensure_column_table(conn) -> None:
             "ALTER TABLE kanban_columns ADD COLUMN "
             "token_saver_enabled INTEGER NOT NULL DEFAULT 0"
         )
+    # Per-lane prompt-injector opt-in flags (kaart d0446fd8…,
+    # ``app.kanban.prompt_injectors``). Both default 0 = off; existing rows
+    # round-trip as 0 without a backfill script. Independent switches: one
+    # toggling does not move the other, and the board-wide kill-switch
+    # (``prompt_injector:<project_key>`` in ``KanbanMeta``) overrides both.
+    if "caveman_enabled" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_columns ADD COLUMN "
+            "caveman_enabled INTEGER NOT NULL DEFAULT 0"
+        )
+    if "ponytail_enabled" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE kanban_columns ADD COLUMN "
+            "ponytail_enabled INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 async def _ensure_work_type_mapping_table(conn) -> None:

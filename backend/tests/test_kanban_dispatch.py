@@ -2151,19 +2151,66 @@ async def test_dispatch_skips_already_claimed_todo_card():
 
 @pytest.mark.asyncio
 async def test_spawn_failure_releases_and_returns_card_to_todo():
+    # dispatch_project no longer propagates a synchronous spawn failure --
+    # it already applied the compensating ops itself and moves on to the
+    # next candidate (kaart 05592c13…, "spawn-fout op één kaart breekt de
+    # hele dispatch-tick af"). With no other candidate here, the while loop
+    # simply ends and dispatch_project returns without raising.
     transport = RecordingTransport(fail=True)
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s)
         await s.commit()
-        with pytest.raises(RuntimeError):
-            await dispatch.dispatch_project(
-                s, project_key=PK, project_path="/p", transport=transport,
-            )
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
         await s.commit()
         card = await get_card(s, cid)
     assert card.column == "Backlog"       # compensated back
     assert card.claimed_by is None        # claim released
     assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_spawn_failure_on_one_card_does_not_block_the_next_candidate():
+    """A synchronous spawn failure on one candidate must not abort the rest
+    of dispatch_project's ``while True`` loop -- a healthy second candidate
+    in the same project still gets dispatched in the same tick (kaart
+    05592c13…, "spawn-fout op één kaart breekt de hele dispatch-tick af").
+    Before the fix, _run_card's already-compensated exception unwound the
+    whole loop and no other card in the project got a chance that tick;
+    since "To Resume" sorts before "Backlog" in _DISPATCH_COLUMNS, a single
+    unresumable card could starve every Backlog card for a full tick."""
+    class SelectiveFailTransport(RecordingTransport):
+        def __init__(self, failing_card_id):
+            super().__init__()
+            self.failing_card_id = failing_card_id
+
+        def __call__(self, **kwargs):
+            self.calls.append(kwargs)
+            if kwargs.get("card_id") == self.failing_card_id:
+                raise RuntimeError("Could not resolve project directory for 'x'")
+            return {"session_name": kwargs["session_name"]}
+
+    async with KanbanSessionLocal() as s:
+        failing_cid = await _make_card(s, title="always-fails", column="To Resume")
+        healthy_cid = await _make_card(s, title="healthy", column="Backlog")
+        await s.commit()
+
+    transport = SelectiveFailTransport(failing_cid)
+    async with KanbanSessionLocal() as s:
+        result = await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        failing_card = await get_card(s, failing_cid)
+        healthy_card = await get_card(s, healthy_cid)
+
+    assert len(transport.calls) == 2, "the healthy card must still be attempted"
+    assert failing_card.column == "To Resume"    # compensated back
+    assert failing_card.claimed_by is None
+    assert failing_card.dispatch_failures == 1
+    assert healthy_card.claimed_by is not None   # still dispatched this tick
+    assert result is not None and result["card_id"] == healthy_cid
 
 
 # ---- stale-claim reaping (tmux-liveness) ----------------------------------
@@ -2741,14 +2788,16 @@ def test_mint_session_name_skips_collision_check_when_live_sessions_unknown(monk
 
 @pytest.mark.asyncio
 async def test_spawn_failure_returns_analysis_card_to_analysis():
+    # See test_spawn_failure_releases_and_returns_card_to_todo -- a synchronous
+    # spawn failure is compensated inside dispatch_project and no longer
+    # propagates out of it.
     transport = RecordingTransport(fail=True)
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="Investigate", column="Backlog")
         await s.commit()
-        with pytest.raises(RuntimeError):
-            await dispatch.dispatch_project(
-                s, project_key=PK, project_path="/p", transport=transport,
-            )
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
         await s.commit()
         card = await get_card(s, cid)
     assert card.column == "Backlog"      # compensated back to its source column
@@ -6935,12 +6984,15 @@ async def test_repeated_synchronous_spawn_failures_move_to_impediment():
         cid = await _make_card(s, title="always-fails", column="To Resume")
         await s.commit()
 
+    # dispatch_project no longer propagates a synchronous spawn failure --
+    # it applies the compensating ops (release, bump dispatch_failures,
+    # move back / to Impediment) itself, same as before, but returns
+    # normally instead of raising (kaart 05592c13…).
     for _ in range(dispatch.MAX_DISPATCH_FAILURES):
         async with KanbanSessionLocal() as s:
-            with pytest.raises(RuntimeError):
-                await dispatch.dispatch_project(
-                    s, project_key=PK, project_path="/p", transport=transport,
-                )
+            await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p", transport=transport,
+            )
             await s.commit()
 
     async with KanbanSessionLocal() as s:
@@ -6972,10 +7024,9 @@ async def test_awaitable_spawn_failure_uses_dispatch_failure_path():
 
     for _ in range(dispatch.MAX_DISPATCH_FAILURES):
         async with KanbanSessionLocal() as s:
-            with pytest.raises(RuntimeError, match="cockpit-kanban"):
-                await dispatch.dispatch_project(
-                    s, project_key=PK, project_path="/p", transport=transport,
-                )
+            await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p", transport=transport,
+            )
             await s.commit()
 
     async with KanbanSessionLocal() as s:
@@ -7007,10 +7058,9 @@ async def test_synchronous_spawn_failure_comment_includes_last_error():
 
     for _ in range(dispatch.MAX_DISPATCH_FAILURES):
         async with KanbanSessionLocal() as s:
-            with pytest.raises(RuntimeError):
-                await dispatch.dispatch_project(
-                    s, project_key=PK, project_path="/p", transport=transport,
-                )
+            await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p", transport=transport,
+            )
             await s.commit()
 
     async with KanbanSessionLocal() as s:
@@ -7050,10 +7100,9 @@ async def test_synchronous_spawn_failure_comment_truncates_long_error(monkeypatc
 
     for _ in range(dispatch.MAX_DISPATCH_FAILURES):
         async with KanbanSessionLocal() as s:
-            with pytest.raises(ValueError):
-                await dispatch.dispatch_project(
-                    s, project_key=PK, project_path="/p", transport=transport,
-                )
+            await dispatch.dispatch_project(
+                s, project_key=PK, project_path="/p", transport=transport,
+            )
             await s.commit()
 
     async with KanbanSessionLocal() as s:
@@ -7126,10 +7175,9 @@ async def test_synchronous_spawn_failure_clears_stale_resume_fields(monkeypatch)
                                      "resume_project_folder": "-old-worktree"},
         )
         await s.commit()
-        with pytest.raises(RuntimeError):
-            await dispatch.dispatch_project(
-                s, project_key=PK, project_path="/p", transport=transport,
-            )
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
         await s.commit()
         card = await get_card(s, cid)
     assert card.resume_session_id is None

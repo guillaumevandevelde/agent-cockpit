@@ -2240,7 +2240,9 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       revisit_prior_decision: dict | None = None,
                       prior_branch_warning: str | None = None,
                       project_path: str | None = None,
-                      worktree_path: str | None = None) -> str:
+                      worktree_path: str | None = None,
+                      prompt_injector_caveman: str = "",
+                      prompt_injector_ponytail: str = "") -> str:
     # A card dispatched in the executor phase (no `analyst_agent_id`) can
     # still resolve to the analyst persona via `work_type='analysis'` or
     # `card.agent='analyst'` (the "leaf analyst spike" case — see
@@ -2253,6 +2255,25 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
     # for the two-modi framing and fbe7937e99484941b196bf2ebc0866f6 for the
     # removal of the (now redundant) per-dispatch override preamble.
     preamble = (persona.strip() + "\n\n") if persona else ""
+    # Prompt-injectors (kaart d0446fd8…). The slices come from the
+    # kanban-side resolver (``app.kanban.prompt_injectors.resolve_active_injectors``)
+    # and are bound to the system-prompt layer only — kaarttekst,
+    # persona-contract, ship-instructies en impediment/revisit-secties
+    # blijven onaangeraakt. Empty strings when the per-lane flag or the
+    # board kill-switch is off. The slices sit *between* the persona and
+    # the rest of the prompt because Claude's prompt-cache key treats
+    # the entire tail as cacheable input; keeping the injectors in the
+    # prefix + the variability downstream means an unchanged-session
+    # cache hit survives both injectors being on across calls (the
+    # resolver is pure — see ``tests/test_prompt_injectors.py::test_resolver_returns_byte_stable_output_for_same_inputs``).
+    if prompt_injector_caveman or prompt_injector_ponytail:
+        injector_blocks: list[str] = []
+        if prompt_injector_caveman:
+            injector_blocks.append(prompt_injector_caveman.rstrip())
+        if prompt_injector_ponytail:
+            injector_blocks.append(prompt_injector_ponytail.rstrip())
+        if injector_blocks:
+            preamble = preamble + "\n\n---\n\n" + "\n\n---\n\n".join(injector_blocks) + "\n\n"
     impediment_section = ""
     if impediment_question:
         impediment_section = (
@@ -5318,6 +5339,15 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
     (e.g. "hook" vs "transcript"), so a later "why did this pause happen" read
     of the logs can tell the two channels apart.
 
+    **Idempotency:** when the same in-transcript message is re-detected on a
+    later tick (the limited session writes nothing new, so the tail keeps
+    matching), the function returns ``False`` without re-arming the pause
+    or re-running the move — see
+    ``session_signals.is_limit_message_processed`` and kanban card
+    ``e279a52b…`` for the production measurements (16 k firings for tens of
+    real events; +24 u rollover on parseable reset times at the reset
+    moment; +10 s/tick slide on unparseable ones).
+
     Returns True iff a kanban card was found and moved to "To Resume".
     """
     from datetime import timedelta
@@ -5329,7 +5359,25 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
         FALLBACK_PAUSE_HOURS,
         auto_resume_service,
     )
-    from app.services.scheduling.session_signals import session_signals
+    from app.services.scheduling.session_signals import (
+        session_name_for_dispatched_cwd,
+        session_signals,
+    )
+
+    # Idempotency gate: re-detecting the same in-transcript message on a later
+    # dispatch tick must NOT re-arm the pause. The structured signal is already
+    # recorded — re-running parse_reset_time / set_paused_until / move would
+    # either slide the fallback deadline forward (unparseable messages) or
+    # roll the reset +24u once the original parse's reset_time has passed
+    # (parseable messages). See kanban card e279a52b… for both measurements.
+    name = session_name_for_dispatched_cwd(cwd)
+    if name and session_signals.is_limit_message_processed(name, message or ""):
+        logger.debug(
+            "rate-limit signal already handled for %s (source=%s); "
+            "skipping re-detection of the same in-transcript message",
+            cwd, source,
+        )
+        return False
 
     session_signals.record_limit(cwd, message=message or "")
     parsed = auto_resume_service.parse_reset_time(message)
@@ -5461,6 +5509,16 @@ async def detect_transcript_rate_limits(
             # stale one from a limit that's already in the past.
             if (card.meta or {}).get("pane_resume_pending"):
                 await _clear_pane_resume_metadata_for_card(card, project_path)
+            # Also clear the structured rate-limit signal — without this
+            # `record_limit`'s first-write-wins would silently swallow the
+            # next genuine limit (different message text) under the same
+            # session name, and the idempotency gate built on top of it
+            # would keep matching the old message forever.
+            # Kanban card e279a52b…, same fix as the handle_rate_limit_signal
+            # idempotency gate above.
+            if name is not None:
+                from app.services.scheduling.session_signals import session_signals
+                session_signals.clear_limit(name)
             continue
         cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
         moved = await handle_rate_limit_signal(cwd, message, source="transcript")
@@ -5865,6 +5923,23 @@ def _next_card(
 
 # ---- core ------------------------------------------------------------------
 
+class CardSpawnFailed(Exception):
+    """Raised by ``_run_card`` when a spawn attempt fails synchronously,
+    after its compensating ops (release, clear stale resume pointer, bump
+    dispatch_failures, move back / to Impediment) have already been applied.
+
+    A dedicated type — rather than re-raising the original exception — lets
+    ``dispatch_project``'s while loop tell "this card is done, already
+    cleaned up, move on to the next candidate" apart from a genuine bug
+    surfacing from elsewhere in ``_run_card`` that has NOT been compensated
+    and must still propagate. See kaart 05592c13… ("spawn-fout op één kaart
+    breekt de hele dispatch-tick af"): before this type existed, every
+    synchronous spawn failure re-raised the bare exception, which unwound
+    the whole ``while True`` loop in ``dispatch_project`` and skipped every
+    other dispatchable card for the rest of that project's tick.
+    """
+
+
 async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
     phase: str = "executor",
@@ -6109,6 +6184,17 @@ async def _run_card(
         str(Path(project_path) / ".claude" / "worktrees" / name)
         if is_fresh_worktree else None
     )
+    # Prompt-injectors: kaart d0446fd8… resolves the per-lane flags +
+    # board kill-switch via ``app.kanban.prompt_injectors``. Pure call
+    # (no side effects) so the dispatch hot path stays cheap. Audit
+    # comment is posted separately after the spawn returns, so a
+    # half-failed spawn never logs a phantom activation.
+    from app.kanban import prompt_injectors as _prompt_injectors
+    cav_text, pon_text = await _prompt_injectors.resolve_active_injectors(
+        session, project_key=project_key, column_name=target_agent,
+    )
+    cav_active = bool(cav_text)
+    pon_active = bool(pon_text)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         phase=phase,
         impediment_question=impediment_question,
@@ -6117,7 +6203,9 @@ async def _run_card(
         revisit_prior_decision=revisit_prior_decision,
         prior_branch_warning=prior_branch_warning,
         project_path=project_path,
-        worktree_path=worktree_path)
+        worktree_path=worktree_path,
+        prompt_injector_caveman=cav_text,
+        prompt_injector_ponytail=pon_text)
     if phase == "executor" and card.parent_card_id is not None:
         # Only child cards (parent_card_id set) get the PLAN CONTEXT section.
         # Legacy single-agent cards never have a parent; prepending the
@@ -6229,12 +6317,31 @@ async def _run_card(
                 entity_id=card.id, payload={"column": source_column},
             )
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
-        raise
+        raise CardSpawnFailed(str(exc)) from exc
 
     logger.info("dispatched card %s (%s) -> session %s (transport: %s, provider: %s)",
                 card.id, source_column, name,
                 "sandcastle" if card_transport == sandcastle_transport else "worktree",
                 cli_id)
+
+    # Prompt-injector audit comment (kaart d0446fd8…): post a single
+    # ``**Prompt injector:**`` line so a follow-up complaint about
+    # output style can be cross-referenced back. Done *after* the
+    # spawn returns, not before — posting on a half-failed spawn
+    # would log a phantom activation. Helper is fail-open so a bug
+    # here cannot crash the dispatch hot path; if both flags are
+    # off the helper is a no-op.
+    if cav_active or pon_active:
+        try:
+            await _prompt_injectors.log_active(
+                session, card_id=card.id, project_key=project_key,
+                caveman_active=cav_active, ponytail_active=pon_active,
+            )
+        except Exception:
+            logger.exception(
+                "prompt-injector audit comment failed for card %s (continuing)",
+                card.id,
+            )
 
     # Per-dispatch telemetry breadcrumbs (kanban card 8a2ad986): write the
     # fields that the per-card usage endpoint reads. The worktree path is
@@ -7496,6 +7603,17 @@ async def dispatch_project(
 
     column_caps = await _column_max_sessions(session, project_key)
     last_result: dict | None = None
+    # Cards whose spawn failed (and were already compensated) this tick.
+    # A plain `cards = [c for c in cards if c.id != card.id]` only holds for
+    # as long as `cards` isn't replaced wholesale — but a *later* successful
+    # dispatch elsewhere in this loop refetches the full project card list,
+    # which would bring a just-compensated, now-unclaimed card straight back
+    # into the working set and let `_next_card` pick it again this same
+    # tick. Tracking ids here and filtering every refetch keeps a failed
+    # card excluded for the rest of THIS tick, one attempt per tick, same as
+    # before this fix — see kaart 05592c13… (a card that failed 3 times in
+    # one tick escalated straight to Impediment).
+    failed_card_ids: set[str] = set()
 
     # Board-wide existence oracle, fetched once per tick: lets the dep gate
     # below tell a *dangling* depends_on (id resolves to no card anywhere) apart
@@ -7646,17 +7764,39 @@ async def dispatch_project(
         # executor branch.
         phase = resolve_phase(card)
         if phase == "analyst":
-            last_result = await _run_card(
-                session, card=card, project_key=project_key,
-                project_path=project_path, transport=transport,
-                phase="analyst",
-                revisit_question=revisit_question,
-                revisit_prior_decision=revisit_prior_decision,
-                impediment_question=impediment_question,
-                impediment_answer=impediment_answer,
-                live_sessions=live_sessions,
-                auto_dispatch=True,
-            )
+            try:
+                last_result = await _run_card(
+                    session, card=card, project_key=project_key,
+                    project_path=project_path, transport=transport,
+                    phase="analyst",
+                    revisit_question=revisit_question,
+                    revisit_prior_decision=revisit_prior_decision,
+                    impediment_question=impediment_question,
+                    impediment_answer=impediment_answer,
+                    live_sessions=live_sessions,
+                    auto_dispatch=True,
+                )
+            except CardSpawnFailed:
+                # _run_card already applied (and logged, at ERROR level with
+                # the card id) its compensating ops before raising — release,
+                # clear stale resume pointer, bump dispatch_failures, move
+                # back / to Impediment. A spawn failure on one card is a
+                # card-level problem, not a tick-level one: move on to the
+                # next candidate instead of aborting the rest of this
+                # project's tick (kaart 05592c13…).
+                #
+                # Drop it from THIS tick's working set by id (not a re-fetch
+                # + re-pick) — the card was just moved back to source_column
+                # / Impediment, so a fresh list_cards() would make it
+                # immediately re-selectable again by _next_card and burn
+                # through MAX_DISPATCH_FAILURES in one tick instead of one
+                # attempt per tick, same as the per-column-cap skip below.
+                # Tracked in failed_card_ids too, so a *later* full refetch
+                # (a subsequent successful dispatch elsewhere in this loop)
+                # can't bring it back either.
+                failed_card_ids.add(card.id)
+                cards = [c for c in cards if c.id != card.id]
+                continue
             if last_result is None:
                 break  # dispatch failed (e.g. memory) — let the tick queue/retry
             if "session_name" in last_result:
@@ -7673,23 +7813,38 @@ async def dispatch_project(
                     project_key=project_key, entity_id=card.id,
                     payload={"analyst_run_id": last_result["session_name"]},
                 )
-            cards = await list_cards(session, project_key)
+            cards = [c for c in await list_cards(session, project_key)
+                     if c.id not in failed_card_ids]
             continue
 
-        last_result = await _run_card(
-            session, card=card, project_key=project_key,
-            project_path=project_path, transport=transport,
-            phase="executor",
-            revisit_question=revisit_question,
-            revisit_prior_decision=revisit_prior_decision,
-            impediment_question=impediment_question,
-            impediment_answer=impediment_answer,
-            live_sessions=live_sessions,
-            auto_dispatch=True,
-        )
+        try:
+            last_result = await _run_card(
+                session, card=card, project_key=project_key,
+                project_path=project_path, transport=transport,
+                phase="executor",
+                revisit_question=revisit_question,
+                revisit_prior_decision=revisit_prior_decision,
+                impediment_question=impediment_question,
+                impediment_answer=impediment_answer,
+                live_sessions=live_sessions,
+                auto_dispatch=True,
+            )
+        except CardSpawnFailed:
+            # See the matching comment in the analyst branch above: the
+            # compensating ops already ran, so this card is done — move on
+            # to the next candidate instead of aborting the tick. Dropped by
+            # id, not re-fetched, for the same reason: a fresh list_cards()
+            # would make the just-compensated card immediately re-selectable
+            # again this same tick. Tracked in failed_card_ids so a later
+            # refetch (another successful dispatch this loop) can't bring
+            # it back either.
+            failed_card_ids.add(card.id)
+            cards = [c for c in cards if c.id != card.id]
+            continue
         if last_result is None:
             break  # dispatch failed (e.g. memory) — let the tick queue/retry
-        cards = await list_cards(session, project_key)
+        cards = [c for c in await list_cards(session, project_key)
+                 if c.id not in failed_card_ids]
 
     return last_result
 

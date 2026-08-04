@@ -79,3 +79,136 @@ routeren. Blijvende beslissingen:
 
 - [`agent-bridge.md`](./agent-bridge.md) — platform-selectie die deze credentials in de spawn-omgeving injecteert.
 - [`terminology.md`](./terminology.md) — Provider / CLI / Model naamgeving.
+
+## Subscription-pool inspectie & wijzigen
+
+De **subscription-pool** is een per-project-configuratie in de kanban-DB die de dispatcher
+in staat stelt uit te wijken naar een alternatief abonnement wanneer het huidige
+abonnement zijn limiet raakt. De **kop** (eerste entry) is de impliciete kolom-default —
+de **staart** is wat de operator hier instelt. Voor ontwerp en rationale zie
+[`spillover-per-kolom-decision.md`](./spillover-per-kolom-decision.md); voor de
+implementatie-context zie
+[`subscription-auto-release-analyse.md` §5](./subscription-auto-release-analyse.md#5-gat-d-spillover-is-nog-altijd-dode-code).
+
+### Inspecteren
+
+Drie gelijkwaardige oppervlakken, allemaal read-only:
+
+**REST:**
+```bash
+# Board-wide (legacy key)
+curl -s "http://localhost:8000/api/v1/kanban/subscription-pool?project_key=<pk>"
+
+# Per-kolom (post-kaart-b36ca702; default fallback is board-wide)
+curl -s "http://localhost:8000/api/v1/kanban/subscription-pool?project_key=<pk>&column=engineer"
+```
+
+**Rechtstreeks op de DB** (handig voor diagnose; pad is bewust portable gehouden — zie
+`backend/app/config.py:21-29`):
+```bash
+python3 -c "
+import sqlite3
+c = sqlite3.connect('/home/vdvgu/.claude-registry/kanban.db')
+for k, v in c.execute(\"select key, value from kanban_meta where key like 'subscription_pool%' order by key\"):
+    print(k, '->', v)
+"
+```
+
+**UI:** de `Subscriptions`-pagina (`frontend/src/features/subscriptions/`) heeft een
+"Pool"-kaart met een kolom-`<Select>` (`SubscriptionPoolDialog.tsx`); bij een
+kolom-selectie toont hij `column.default_provider` als read-only kop-regel plus de
+staart-entries eronder. Lege staat = "no pool configured — column defaults apply".
+
+### Wijzigen
+
+Dezelfde drie oppervlakken, met dezelfde write- of clear-semantiek:
+
+**REST** (preferred — valideert tegen de `kanban_columns`-allow-list en faalt-fast op
+onbekende kolommen):
+```bash
+# Engineer: spill van MiniMax naar Anthropic
+curl -s -X POST "http://localhost:8000/api/v1/kanban/subscription-pool" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_key": "<pk>",
+    "column": "engineer",
+    "pool": [{"cli": "claude-code", "provider": "anthropic", "model": null, "drempel": 0.9}]
+  }'
+
+# Reviewer: bewust leeg ("nooit uitwijken")
+curl -s -X POST "http://localhost:8000/api/v1/kanban/subscription-pool" \
+  -H "Content-Type: application/json" \
+  -d '{"project_key": "<pk>", "column": "reviewer", "pool": []}'
+
+# Wissen — kolom erft weer de board-wide pool
+curl -s -X POST "http://localhost:8000/api/v1/kanban/subscription-pool" \
+  -H "Content-Type: application/json" \
+  -d '{"project_key": "<pk>", "column": "engineer", "pool": null}'
+```
+
+`drempel` is een fractie in `(0, 1]`: bij `0.9` slaat de router de entry over zodra
+het usage-snapshot ≥ 90% verbruikt is; `1.0` betekent "gebruik tot de per-provider pause
+hem raakt". Houd hem conservatief (≥ 0.9) zodat de router pas uitwijkt als de
+provider echt bijna op is — niet bij elke kleinere schommeling.
+
+**Storage-laag direct** (niet aanbevolen — geen validatie tegen de kolom-allow-list):
+```python
+from app.kanban.db import KanbanSessionLocal
+from app.kanban.subscription_pool import PoolEntry, set_subscription_pool
+
+async def main():
+    async with KanbanSessionLocal() as s:
+        await set_subscription_pool(
+            s, "<pk>",
+            [PoolEntry(provider="anthropic", model=None, drempel=0.9)],
+            column="engineer",
+        )
+        await s.commit()
+```
+
+**UI:** de `SubscriptionPoolDialog` heeft dezelfde kolom-`<Select>`; bewaar met de
+"Save"-knop, veeg leeg met de prullenbak-knop. Validaties en de
+"empty list rejected" guard draaien client-side; een save via de UI komt door dezelfde
+REST-endpoint.
+
+### Valideren dat spillover vuurt
+
+De pure router (`subscription_pool.has_available_spillover`) is de canonieke bron — geen
+DB-pause-gating, alleen drempel/paused-providerr-logica:
+```python
+from app.kanban.db import KanbanSessionLocal
+from app.kanban import subscription_pool
+
+async def main():
+    async with KanbanSessionLocal() as s:
+        entries = await subscription_pool.get_subscription_pool(
+            s, "<pk>", column="engineer",
+        )
+    # Simuleer: provider X raakt limiet. Kies X != entries[0].provider.
+    assert subscription_pool.has_available_spillover(
+        entries, {}, paused_providers={"bedrock"}, cli_id="claude-code",
+    ) is True
+```
+
+Voor de dispatch-zijde (inclusief time-based pause):
+```python
+from app.kanban.db import KanbanSessionLocal
+from app.kanban import dispatch
+
+async def main():
+    async with KanbanSessionLocal() as s:
+        return await dispatch._pool_spillover_available(
+            s, project_key="<pk>", limited_provider="minimax",
+            cli_id="claude-code", column="engineer",
+        )
+# True  = er is een vrije uitwijk; de kaart wordt direct herdispatchbaar.
+# False = geen vrije uitwijk; de bestaande per-provider pause (wachten op reset) geldt.
+```
+
+Een echte `spilling over`-logregel verschijnt op de kaart-activiteit-feed
+(`🔀 Rate-limit hit on '<provider>' — spilling over …`) zodra een bestaande sessie
+daadwerkelijk zijn limiet raakt; de dispatcher post hem via
+`move_limited_session_to_resume` (`backend/app/kanban/dispatch.py:6704-6709`). De
+regressietests `test_production_pool_tails_*` in
+`backend/tests/test_subscription_pool_dispatch.py` pinnen het end-to-end-pad inclusief
+die comment.

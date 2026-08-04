@@ -444,7 +444,7 @@ run_merged_branches_sweeper() {
     fi
     local out hits
     if ! out="$(python3 "$SCRIPT_DIR/sweep_merged_remote_branches.py" \
-            --repo "$REPO_ROOT" 2>&1)"; then
+            --repo "$PROJECT_ROOT" 2>&1)"; then
         # Network failure, missing origin, etc. — never block start.
         sup_log "remote-branches-sweeper: skip (sweeper niet kunnen draaien)"
         return 0
@@ -459,7 +459,7 @@ print(d["totals"]["fully_merged"])' 2>/dev/null)" || hits=""
     if [ -n "$hits" ] && [ "$hits" -gt 0 ] 2>/dev/null; then
         sup_log "remote-branches-sweeper: $hits dead branch(es) op origin (zie scripts/sweep_merged_remote_branches.py)"
         echo "remote-branches-sweeper: $hits volledig gemergede branch(es) op origin gevonden."
-        echo "  inspecteer met: python3 scripts/sweep_merged_remote_branches.py --repo \"$REPO_ROOT\""
+        echo "  inspecteer met: python3 scripts/sweep_merged_remote_branches.py --repo \"$PROJECT_ROOT\""
         echo "  opruimen: voor elke branch in \`.rows[]\` → \`git push origin --delete <branch>\`"
     fi
 }
