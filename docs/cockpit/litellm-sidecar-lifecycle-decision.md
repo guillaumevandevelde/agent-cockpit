@@ -13,7 +13,7 @@ status: decided
 
 ✅ **Geïmplementeerd (kaart `893033c6…`, V1):** opt-in `cockpit.sh`-service met `/health/liveliness`-watchdog, eigen venv met `litellm==1.93.0` + `prisma` gepind in `config/litellm/requirements.txt`, conditionele doctor-check die `check-litellm-hardening.sh` hergebruikt, `*.example`-configsjabloon + gitignored real config. De upgrade-procedure uit §7 staat nu inline in het requirements-bestand zelf.
 
-✅ **Geïmplementeerd (kaart `424c23d4…`, V2):** een derde bron in `_paused_providers_for_pool` (`backend/app/kanban/dispatch.py`) — een per-endpoint `GET base_url`-probe met 30 s TTL-cache, fail-soft op timeout/DNS/connection refused (`bij twijfel = beschikbaar`). Het herstel hoort in de selectie, niet in de error-handler, precies zoals §3.2 voorschrift: bij een dode proxy in de vangnet-modus pauzeert de pool de provider en kiest de volgende entry. De expliciete-pin-tak blijft fail-closed: `resolve_effective_provider_and_model` raadpleegt de pause-merge niet — die loopt via `MAX_DISPATCH_FAILURES` naar Impediment mét de echte fout. Dekking: `tests/test_dispatch_endpoint_reachability_pause.py`.
+✅ **Geïmplementeerd (kaart `424c23d4…`, V2, herevalideerd 2026-08-04):** een derde bron in `_paused_providers_for_pool` (`backend/app/kanban/dispatch.py:1208-1226`) — een per-endpoint `GET base_url`-probe met 30 s TTL-cache, fail-soft op timeout/DNS/connection refused (`bij twijfel = beschikbaar`). Het herstel hoort in de selectie, niet in de error-handler, precies zoals §3.2 voorschrift: bij een dode proxy in de vangnet-modus pauzeert de pool de provider. `_pick_pool_choice` blijft de dode vangnet teruggeven — de "laatste val-terug"-tak in `pick_subscription_for_cli` (`subscription_pool.py:236-249`) verandert niet — maar `has_available_spillover` keert `False` terug zodra de gekozen entry zelf gepauzeerd is, waardoor de reactieve limiet-lus de kaart parkeert tot de proxy weer bereikbaar is in plaats van door te schuiven naar diezelfde dode proxy. **Geen uitwijk** — de kaart wacht op reset. De expliciete-pin-tak blijft fail-closed: `resolve_effective_provider_and_model` raadpleegt de pause-merge niet — die loopt via `MAX_DISPATCH_FAILURES` naar Impediment mét de echte fout. Dekking: `tests/test_dispatch_endpoint_reachability_pause.py` (vier unit-tests op de pause-merge zelf plus drie end-to-end-tests op de dispatch-flow).
 
 ---
 
@@ -22,7 +22,7 @@ status: decided
 | Vraag | Antwoord |
 |---|---|
 | **Q1** Beheert `cockpit.sh` de lifecycle? | **Ja — als derde `watch_service`, maar alleen wanneer een config-bestand aanwezig is.** Geen config = geen service = niets verandert voor wie de sidecar niet gebruikt. |
-| **Q2** Fail-open of fail-closed? | **Fail-closed.** Geen impliciete terugval naar Anthropic bij de spawn. De *herstel*-tak zit vóór de spawn in de pool-router (een dode proxy pauzeert de provider, de pool kiest de volgende entry) — niet in een `except`-blok. |
+| **Q2** Fail-open of fail-closed? | **Fail-closed.** Geen impliciete terugval naar Anthropic bij de spawn. De *herstel*-tak zit vóór de spawn in de pool-router: een dode proxy pauzeert de provider en de spillover-gate (`has_available_spillover`) ziet dat er geen echte uitwijk meer is — kaart wacht op reset, geen stille substitutie. Niet in een `except`-blok. |
 | **Q3** Health-check in `cockpit-doctor.sh`? | **Ja, conditioneel + advisory (`WARN`).** Doctor draait `check-litellm-hardening.sh` en telt `FAIL`-regels — hetzelfde hergebruikpatroon als checks 5/6/7. Slaat over wanneer geen sidecar geconfigureerd is. |
 | **Q4** Welke dispatch-lanes mogen erdoor? | **Twee: expliciete pin (`column_overrides` / kaart-provider) en de *laatste* pool-entry (vangnet).** Verboden: `column.default_provider` en de globale active-subscription-override — die twee maken het verplicht. |
 | **Q5** Keys uitgeven en opruimen? | **Eén master key in de project-scoped SecretStore; geen per-sessie virtuele keys.** Die vereisen een LiteLLM-database (gemeten), en wat ze zouden opleveren — attributie — heeft een goedkopere bron (response-headers). |
@@ -171,24 +171,34 @@ kunnen draaien.
 
 Dat is een reëel bezwaar, en het antwoord is **niet** een fallback in de
 error-handler. Het is dat de terugval op de verkeerde laag zou zitten. De pool-router
-kiest de provider **vóór** de spawn en slaat gepauzeerde providers al over
+kiest de provider **vóór** de spawn en merget de gepauzeerde-set in de drempel-scan
 (`subscription_pool.py:236-249`: een gepauzeerde of boven-drempel-entry wordt
-overgeslagen; de laatste entry is de val-terug). De juiste ingreep is dus: **markeer
-een onbereikbare proxy als gepauzeerd vóór de selectie**, dan kiest de pool
-vanzelf de volgende entry — en dat is een *normale, gelogde pool-keuze*, geen stille
-substitutie.
+overgeslagen; de laatste entry is de val-terug — **maar die val-terug wordt ook
+teruggegeven wanneer die laatste entry zelf gepauzeerd is**, want de functie geeft
+deterministisch "als ik móét kiezen, dan deze" terug, zodat de caller weet welk
+pad de spawn heeft gekozen). De juiste ingreep is dus: **markeer een onbereikbare
+proxy als gepauzeerd vóór de selectie**. Daarmee verandert de `chosen`-uitkomst
+in de vangnet-topologie niet (de val-terug blijft de dode vangnet), **maar**
+`has_available_spillover` (`subscription_pool.py:274-323`) ziet dat de gekozen
+entry zelf in de paused-set zit en geeft `False` terug — de reactieve
+limiet-lus (`move_limited_session_to_resume`) parkeert de kaart tot de proxy
+weer bereikbaar is. Dat is een *normale, gelogde pool-observatie*, geen stille
+substitutie; het bord gaat niet plat, maar de kaart wacht. Op 2026-08-04 heeft
+de mens dit gedrag ("vangnet dood = kaart wacht op reset") bevestigd als
+gekozen behavior voor kaart `424c23d4…` — er is geen uitwijk naar een andere
+provider, de kaart wacht tot de proxy weer bereikbaar is.
 
 Het injectiepunt bestaat al en is één functie: `_paused_providers_for_pool`
-(`dispatch.py:955-963`) wordt in `dispatch.py:986-995` al gemerged met de handmatige
-pauze-lijst van de operator. Een derde bron — "endpoint antwoordt niet" — hoort in
-diezelfde merge.
+(`dispatch.py:1201-1225`) wordt in `dispatch.py:1248-1275` al gemerged met de
+handmatige pauze-lijst van de operator. Een derde bron — "endpoint antwoordt
+niet" — hoort in diezelfde merge.
 
 Zo verdeelt het faalgedrag zich precies zoals het hoort:
 
 | Situatie | Gedrag |
 |---|---|
 | Kaart/kolom **pint** de sidecar expliciet, proxy dood | **Fail-closed.** 3× retry → Impediment met de fout. Er bestaat geen eerlijk substituut voor een expliciete keuze. |
-| Sidecar is **vangnet** in de pool, proxy dood | **Pool kiest de volgende entry** — herstel vóór de spawn, zichtbaar als pool-keuze. |
+| Sidecar is **vangnet** in de pool, proxy dood | **Geen uitwijk — kaart wacht op reset.** `pick_subscription_for_cli` blijft de dode vangnet teruggeven (de val-terug-tak verandert niet), maar `has_available_spillover` is `False` en de reactieve limiet-lus parkeert de kaart tot de proxy weer bereikbaar is. Herstel vóór de spawn, zichtbaar als pool-observatie. |
 | Proxy leeft, upstream loopt tegen een limiet | **LiteLLM's eigen `fallbacks`** vangen het mid-sessie op (gemeten: pilot §5). Cockpit ziet niets en hoeft niets te doen. |
 
 Dat is ook consistent met de conventie uit
