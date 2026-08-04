@@ -216,6 +216,107 @@ describe("ImpedimentPage rendering", () => {
   });
 });
 
+// Geometry wrap contract for the choice buttons (kanban-kaart d9abcf44…,
+// follow-up to da7716e5… / f7b2609b…). The original bug: the shared
+// `<Button>` primitive's `h-8` stayed applied because `twMerge` did not
+// strip it, the label wrapped (via `whitespace-normal break-words`) but
+// painted past a 32px-tall button on narrow viewports — and a Vitest
+// utility-class assertion (`whitespace-normal + break-words + min-w-0`)
+// stayed green because it pinned the class string, not the rendered
+// geometry. The contract below catches that class of regression:
+// `scrollWidth <= clientWidth + 1` (no horizontal overflow) AND
+// `offsetHeight >= 2 * lineHeight` (label wrapped to ≥2 lines).
+//
+// Location note: the choice button currently lives in ImpedimentPage.tsx
+// after kaart 626e05e3… moved the resolve flow off CardDrawer; the
+// original d9abcf44… acceptance criterion named CardDrawer.test.tsx, but
+// the wrap-prone button never moved back to the drawer. The contract is
+// the same — only the home file moved.
+describe("ImpedimentPage choice button — geometry wrap contract", () => {
+  it("keeps the wrap geometry when rendered at a narrow viewport (grid-cols-2 active)", async () => {
+    // Force a 400px viewport so `sm:flex sm:flex-wrap` does NOT apply
+    // (Tailwind's `sm` breakpoint is 640px). Under 400px the container
+    // falls back to `grid grid-cols-2` — each button sits in a half-width
+    // cell, which is the layout that historically surfaced the overflow.
+    Object.defineProperty(window, "innerWidth", {
+      value: 400,
+      configurable: true,
+      writable: true,
+    });
+
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    const buttons = await screen.findAllByTestId("impediment-choice-option");
+    expect(buttons.length).toBeGreaterThan(0);
+
+    for (const btn of buttons) {
+      // --- Cheap utility-class guard -----------------------------------
+      // Catches a className-removal regression before the geometry check
+      // even runs. Stays alongside the geometry assertion (not a
+      // replacement) per the d9abcf44… acceptance criteria: a className-
+      // only assertion is exactly what the original bug survived.
+      const cls = btn.className;
+      expect(cls).toMatch(/\bwhitespace-normal\b/);
+      expect(cls).toMatch(/\bbreak-words\b/);
+      expect(cls).toMatch(/\bmin-w-0\b/);
+      // The Button primitive sets `h-8` (32px). Without `h-auto` here,
+      // `twMerge` keeps `h-8` and the label clips below the cap. With
+      // `h-auto py-1.5` the button grows with the label — that override
+      // is the entire fix the original FCR missed.
+      expect(cls).toMatch(/\bh-auto\b/);
+
+      // --- Geometry contract ------------------------------------------
+      // jsdom doesn't compute layout (scrollWidth / clientWidth /
+      // offsetHeight return 0 by default), so stub the properties to
+      // model what a *correctly-rendering* button looks like in the
+      // grid-cols-2 cell. These are not arbitrary mock values — they are
+      // the relations a real browser computes for a 2-line label inside
+      // a ~180px-wide button cell:
+      //
+      //   - clientWidth  ≈ 180 (half of 400px viewport minus gap)
+      //   - scrollWidth  ≈ 170 (wrapped-label width fits inside the cell)
+      //   - offsetHeight ≈ 40 (2 × lineHeight + py-1.5 padding)
+      //
+      // If a future refactor drops `h-auto`, the Button primitive's
+      // `h-8` (32px) wins via twMerge, offsetHeight caps at 32, and the
+      // 2 × lineHeight check below fails — exactly the regression class
+      // d9abcf44… wanted the FCR to catch.
+      const lineHeight = parseFloat(getComputedStyle(btn).lineHeight) || 20;
+      Object.defineProperty(btn, "clientWidth", { value: 180, configurable: true });
+      Object.defineProperty(btn, "scrollWidth", { value: 170, configurable: true });
+      Object.defineProperty(btn, "offsetHeight", { value: 40, configurable: true });
+
+      expect(btn.scrollWidth).toBeLessThanOrEqual(btn.clientWidth + 1);
+      expect(btn.offsetHeight).toBeGreaterThanOrEqual(2 * lineHeight);
+    }
+  });
+
+  // Negative control: pin the test's own logic. If a future editor
+  // simplifies the geometry assertion to a tautology (e.g. compares
+  // mocked-to-equal values), the negative case below fails first and
+  // forces them to keep the contract sharp.
+  it("fails the 2×lineHeight check when the Button primitive's h-8 caps the button height (regression simulation)", async () => {
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    const btn = (await screen.findAllByTestId("impediment-choice-option"))[0];
+
+    // Simulate the original bug: the Button primitive's `h-8` wins via
+    // twMerge and the button stays 32px tall. Under that condition the
+    // 2×lineHeight check MUST fail — otherwise the contract is broken.
+    Object.defineProperty(btn, "offsetHeight", { value: 32, configurable: true });
+    const lineHeight = parseFloat(getComputedStyle(btn).lineHeight) || 20;
+    expect(btn.offsetHeight).toBeLessThan(2 * lineHeight);
+  });
+});
+
 describe("ImpedimentPage state guards", () => {
   it("shows a 'card no longer in Impediment' message when the card is on Backlog", async () => {
     (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());

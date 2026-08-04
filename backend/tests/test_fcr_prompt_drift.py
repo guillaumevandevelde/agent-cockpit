@@ -185,6 +185,21 @@ CORE_FCR_INVARIANTS: list[tuple[str, str]] = [
         "out-of-scope refusal clause: blockers outside --stat → actionable refusal",
         "out-of-scope review",
     ),
+    # Geometry-assertion check for `whitespace-nowrap`/`h-*` overrides on
+    # shared primitives (kaart d9abcf44…, follow-up on da7716e5… / fix
+    # commits 51ae48a6 + f7b2609b). A reviewer that only validates a
+    # className-assertion for `whitespace-normal` / `break-words` / `h-auto`
+    # misses the exact regression class the original FCR missed — the
+    # shared `<Button>` primitive's `h-8` stayed applied via `twMerge`
+    # and the label still overflowed a 32px-tall button on narrow
+    # viewports. Both mirrors must carry the explicit reminder that
+    # "className-assertion alleen is geen bewijs" — the anchor is the
+    # literal Dutch phrase from the rule so a future re-translation
+    # silently failing to mirror is loud, not silent.
+    (
+        "geometry-assertion for whitespace-nowrap / h-* overrides on shared primitives",
+        "is geen bewijs dat de layout klopt",
+    ),
 ]
 
 
