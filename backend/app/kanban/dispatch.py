@@ -5902,6 +5902,23 @@ def _next_card(
 
 # ---- core ------------------------------------------------------------------
 
+class CardSpawnFailed(Exception):
+    """Raised by ``_run_card`` when a spawn attempt fails synchronously,
+    after its compensating ops (release, clear stale resume pointer, bump
+    dispatch_failures, move back / to Impediment) have already been applied.
+
+    A dedicated type — rather than re-raising the original exception — lets
+    ``dispatch_project``'s while loop tell "this card is done, already
+    cleaned up, move on to the next candidate" apart from a genuine bug
+    surfacing from elsewhere in ``_run_card`` that has NOT been compensated
+    and must still propagate. See kaart 05592c13… ("spawn-fout op één kaart
+    breekt de hele dispatch-tick af"): before this type existed, every
+    synchronous spawn failure re-raised the bare exception, which unwound
+    the whole ``while True`` loop in ``dispatch_project`` and skipped every
+    other dispatchable card for the rest of that project's tick.
+    """
+
+
 async def _run_card(
     session, *, card, project_key: str, project_path: str, transport: SpawnTransport,
     phase: str = "executor",
@@ -6266,7 +6283,7 @@ async def _run_card(
                 entity_id=card.id, payload={"column": source_column},
             )
         logger.exception("spawn failed for card %s in %s", card.id, project_key)
-        raise
+        raise CardSpawnFailed(str(exc)) from exc
 
     logger.info("dispatched card %s (%s) -> session %s (transport: %s, provider: %s)",
                 card.id, source_column, name,
@@ -7533,6 +7550,17 @@ async def dispatch_project(
 
     column_caps = await _column_max_sessions(session, project_key)
     last_result: dict | None = None
+    # Cards whose spawn failed (and were already compensated) this tick.
+    # A plain `cards = [c for c in cards if c.id != card.id]` only holds for
+    # as long as `cards` isn't replaced wholesale — but a *later* successful
+    # dispatch elsewhere in this loop refetches the full project card list,
+    # which would bring a just-compensated, now-unclaimed card straight back
+    # into the working set and let `_next_card` pick it again this same
+    # tick. Tracking ids here and filtering every refetch keeps a failed
+    # card excluded for the rest of THIS tick, one attempt per tick, same as
+    # before this fix — see kaart 05592c13… (a card that failed 3 times in
+    # one tick escalated straight to Impediment).
+    failed_card_ids: set[str] = set()
 
     # Board-wide existence oracle, fetched once per tick: lets the dep gate
     # below tell a *dangling* depends_on (id resolves to no card anywhere) apart
@@ -7683,17 +7711,39 @@ async def dispatch_project(
         # executor branch.
         phase = resolve_phase(card)
         if phase == "analyst":
-            last_result = await _run_card(
-                session, card=card, project_key=project_key,
-                project_path=project_path, transport=transport,
-                phase="analyst",
-                revisit_question=revisit_question,
-                revisit_prior_decision=revisit_prior_decision,
-                impediment_question=impediment_question,
-                impediment_answer=impediment_answer,
-                live_sessions=live_sessions,
-                auto_dispatch=True,
-            )
+            try:
+                last_result = await _run_card(
+                    session, card=card, project_key=project_key,
+                    project_path=project_path, transport=transport,
+                    phase="analyst",
+                    revisit_question=revisit_question,
+                    revisit_prior_decision=revisit_prior_decision,
+                    impediment_question=impediment_question,
+                    impediment_answer=impediment_answer,
+                    live_sessions=live_sessions,
+                    auto_dispatch=True,
+                )
+            except CardSpawnFailed:
+                # _run_card already applied (and logged, at ERROR level with
+                # the card id) its compensating ops before raising — release,
+                # clear stale resume pointer, bump dispatch_failures, move
+                # back / to Impediment. A spawn failure on one card is a
+                # card-level problem, not a tick-level one: move on to the
+                # next candidate instead of aborting the rest of this
+                # project's tick (kaart 05592c13…).
+                #
+                # Drop it from THIS tick's working set by id (not a re-fetch
+                # + re-pick) — the card was just moved back to source_column
+                # / Impediment, so a fresh list_cards() would make it
+                # immediately re-selectable again by _next_card and burn
+                # through MAX_DISPATCH_FAILURES in one tick instead of one
+                # attempt per tick, same as the per-column-cap skip below.
+                # Tracked in failed_card_ids too, so a *later* full refetch
+                # (a subsequent successful dispatch elsewhere in this loop)
+                # can't bring it back either.
+                failed_card_ids.add(card.id)
+                cards = [c for c in cards if c.id != card.id]
+                continue
             if last_result is None:
                 break  # dispatch failed (e.g. memory) — let the tick queue/retry
             if "session_name" in last_result:
@@ -7710,23 +7760,38 @@ async def dispatch_project(
                     project_key=project_key, entity_id=card.id,
                     payload={"analyst_run_id": last_result["session_name"]},
                 )
-            cards = await list_cards(session, project_key)
+            cards = [c for c in await list_cards(session, project_key)
+                     if c.id not in failed_card_ids]
             continue
 
-        last_result = await _run_card(
-            session, card=card, project_key=project_key,
-            project_path=project_path, transport=transport,
-            phase="executor",
-            revisit_question=revisit_question,
-            revisit_prior_decision=revisit_prior_decision,
-            impediment_question=impediment_question,
-            impediment_answer=impediment_answer,
-            live_sessions=live_sessions,
-            auto_dispatch=True,
-        )
+        try:
+            last_result = await _run_card(
+                session, card=card, project_key=project_key,
+                project_path=project_path, transport=transport,
+                phase="executor",
+                revisit_question=revisit_question,
+                revisit_prior_decision=revisit_prior_decision,
+                impediment_question=impediment_question,
+                impediment_answer=impediment_answer,
+                live_sessions=live_sessions,
+                auto_dispatch=True,
+            )
+        except CardSpawnFailed:
+            # See the matching comment in the analyst branch above: the
+            # compensating ops already ran, so this card is done — move on
+            # to the next candidate instead of aborting the tick. Dropped by
+            # id, not re-fetched, for the same reason: a fresh list_cards()
+            # would make the just-compensated card immediately re-selectable
+            # again this same tick. Tracked in failed_card_ids so a later
+            # refetch (another successful dispatch this loop) can't bring
+            # it back either.
+            failed_card_ids.add(card.id)
+            cards = [c for c in cards if c.id != card.id]
+            continue
         if last_result is None:
             break  # dispatch failed (e.g. memory) — let the tick queue/retry
-        cards = await list_cards(session, project_key)
+        cards = [c for c in await list_cards(session, project_key)
+                 if c.id not in failed_card_ids]
 
     return last_result
 
