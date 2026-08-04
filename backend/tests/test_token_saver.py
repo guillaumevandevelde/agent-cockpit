@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -86,13 +87,24 @@ def _write_fake_rtk(bin_dir: Path, version: str = "0.43.0") -> Path:
 
 
 def _read_settings(worktree: Path) -> dict:
-    """Read and JSON-parse the worktree's ``.claude/settings.json``."""
-    path = worktree / ".claude" / "settings.json"
+    """Read and JSON-parse the worktree's ``.claude/settings.local.json``.
+
+    NOTE: kept the historical name so test bodies stay readable; the
+    helper points at ``settings.local.json`` because that's the file the
+    helper actually patches.
+    """
+    path = worktree / ".claude" / "settings.local.json"
     return json.loads(path.read_text())
 
 
+def _read_local_settings(worktree: Path) -> dict:
+    """Alias for :func:`_read_settings` — clarifies intent at call sites."""
+    return _read_settings(worktree)
+
+
 def _write_settings(worktree: Path, payload: dict) -> None:
-    path = worktree / ".claude" / "settings.json"
+    """Write ``.claude/settings.local.json`` (the gitignored variant)."""
+    path = worktree / ".claude" / "settings.local.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))
 
@@ -162,7 +174,7 @@ async def test_fail_open_when_rtk_binary_missing(tmp_path, monkeypatch):
         )
     assert status == "failed"
     assert "rtk binary missing" in reason
-    assert not (worktree / ".claude" / "settings.json").exists()
+    assert not (worktree / ".claude" / "settings.local.json").exists()
 
 
 @pytest.mark.asyncio
@@ -189,7 +201,7 @@ async def test_fail_open_when_rtk_version_wrong(tmp_path, monkeypatch):
     assert status == "failed"
     assert "0.42.0" in reason
     assert "0.43.0" in reason
-    assert not (worktree / ".claude" / "settings.json").exists()
+    assert not (worktree / ".claude" / "settings.local.json").exists()
 
 
 # --- Fail-open: filesystem problems ------------------------------------------
@@ -221,7 +233,7 @@ async def test_fail_open_when_worktree_missing(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fail_open_when_settings_unwritable(tmp_path, monkeypatch):
-    """``.claude/settings.json`` is a *directory* (unparseable) → ``failed``,
+    """``.claude/settings.local.json`` is unparseable → ``failed``,
     no exception, dispatch continues."""
     bin_dir = tmp_path / "bin"
     _write_fake_rtk(bin_dir)
@@ -234,8 +246,8 @@ async def test_fail_open_when_settings_unwritable(tmp_path, monkeypatch):
 
     worktree = tmp_path / "wt"
     worktree.mkdir()
-    # Block writes by making .claude a directory of an unwritable kind.
-    settings_path = worktree / ".claude" / "settings.json"
+    # Pre-populate with unparseable content so the JSON-load step raises.
+    settings_path = worktree / ".claude" / "settings.local.json"
     settings_path.parent.mkdir()
     settings_path.write_text("not json {{{ broken")
 
@@ -250,13 +262,25 @@ async def test_fail_open_when_settings_unwritable(tmp_path, monkeypatch):
     assert settings_path.read_text() == "not json {{{ broken"
 
 
-# --- Active branch: settings.json merge --------------------------------------
+# --- Active branch: settings.local.json merge + cached wrapper ---------------
+#
+# The wrapper hook lives in the RTK cache (NOT in the worktree) and the
+# hook-config is written to ``.claude/settings.local.json`` (gitignored by
+# Claude Code's default ignore, ``**/.claude/settings.local.json`` from
+# ``~/.config/git/ignore``). Both moves keep the dispatch worktree's
+# ``git status`` clean so the ship-gate accepts the agent's commits —
+# the broken-state symptom this test exists to prevent: a previous
+# version wrote a tracked ``.claude/settings.json`` and a new
+# ``.claude/hooks/`` directory, every ship aborted at the first
+# uncommitted-changes guard (kanban card c31333bf… reviewer-gate, 4th
+# iteration).
 
 
 @pytest.mark.asyncio
 async def test_active_branch_writes_hook_and_settings(tmp_path, monkeypatch):
-    """Active branch writes the wrapper hook + settings.json and is
-    idempotent on the second invocation."""
+    """Active branch writes the wrapper into the cache and patches
+    ``.claude/settings.local.json`` (not the tracked settings.json), and
+    is idempotent on the second invocation."""
     bin_dir = tmp_path / "bin"
     _write_fake_rtk(bin_dir)
     monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
@@ -281,18 +305,28 @@ async def test_active_branch_writes_hook_and_settings(tmp_path, monkeypatch):
     assert status == "active"
     assert "0.43.0" in reason
 
-    # Wrapper hook script exists.
-    hook = worktree / ".claude" / "hooks" / "rtk-cockpit-rewrite.sh"
-    assert hook.is_file()
-    assert hook.stat().st_mode & 0o111  # executable
+    # Wrapper hook script lives in the RTK cache, NOT the worktree.
+    wrapper = token_saver.RTK_CACHE_ROOT / token_saver.RTK_PINNED_VERSION \
+        / "hooks" / "rtk-cockpit-rewrite-wrapper.sh"
+    assert wrapper.is_file()
+    assert wrapper.stat().st_mode & 0o111  # executable
 
-    # settings.json carries the PreToolUse entry on Bash.
-    settings = _read_settings(worktree)
+    # No hook script in the worktree (otherwise it would pollute git status).
+    assert not (worktree / ".claude" / "hooks").exists(), (
+        "wrapper hook leaked into worktree — ship gate would abort on "
+        "untracked .claude/hooks/"
+    )
+
+    # settings.local.json carries the PreToolUse entry on Bash.
+    settings = _read_local_settings(worktree)
     pretooluse = settings["hooks"]["PreToolUse"]
     bash_matchers = [e for e in pretooluse if e.get("matcher") == "Bash"]
     assert bash_matchers, f"no Bash PreToolUse entry: {pretooluse}"
     cmd = bash_matchers[0]["hooks"][0]["command"]
-    assert "rtk-cockpit-rewrite.sh" in cmd
+    assert str(wrapper) in cmd
+
+    # settings.json (the tracked file) is NOT touched.
+    assert not (worktree / ".claude" / "settings.json").exists()
 
 
 @pytest.mark.asyncio
@@ -436,6 +470,404 @@ async def test_active_branch_is_idempotent(tmp_path, monkeypatch):
     ]
     # Idempotent: only one Bash entry, even though maybe_install ran twice.
     assert len(bash_matchers) == 1
+
+
+# --- Clean-git-status contract ------------------------------------------------
+#
+# The previous iteration of the helper wrote the wrapper to
+# ``<worktree>/.claude/hooks/`` and patched ``<worktree>/.claude/settings.json``
+# (a TRACKED file). On every dispatch that fired the installer the worktree
+# ended up with a modified tracked file + an untracked ``.claude/hooks/``
+# directory; the ship-gate aborted on the first ``git status --porcelain``
+# check, and the prescribed recovery (``git add -A && git commit``) committed
+# the hook + the patched settings.json to master, which made RTK active
+# board-wide from the next dispatch on, with the kill-switch unable to undo
+# it. The fix: the wrapper lives in the RTK cache (outside the worktree),
+# the hook-config goes to ``settings.local.json`` (gitignored by Claude Code's
+# default ``**/.claude/settings.local.json`` rule), and ``git status`` stays
+# clean. These tests pin that contract against a real git worktree, not
+# ``tmp_path`` (where ``git status`` has nothing to look at).
+
+
+@pytest.mark.asyncio
+async def test_active_branch_leaves_worktree_git_status_clean(
+    tmp_path, monkeypatch,
+):
+    """Driving ``write_rtk_settings_into_worktree`` against a real git
+    worktree leaves ``git status --porcelain`` empty.
+
+    Kanban card c31333bf… reviewer-gate 4th iteration: a previous
+    implementation wrote ``.claude/settings.json`` (TRACKED) and
+    ``.claude/hooks/rtk-cockpit-rewrite.sh`` (UNTRACKED) into the dispatch
+    worktree, polluting its ``git status`` from the first second of the
+    session. The ship-gate aborts on any ``M`` or ``??`` line under
+    ``.claude/``, so every shipping lane that ran the saver became
+    unshippable, and the prescribed recovery committed the hook to master
+    board-wide. This test pins the clean-status invariant.
+    """
+    import subprocess
+
+    # Set up a real git repo + a single-branch worktree off it. ``tmp_path``
+    # alone is not enough — ``git status`` only sees what ``git`` itself
+    # sees, and ``tmp_path`` is not a repo.
+    repo = tmp_path / "repo"
+    wt = tmp_path / "wt"
+    repo.mkdir()
+    for cmd in (
+        ["git", "init", "-b", "main", str(repo)],
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        ["git", "-C", str(repo), "config", "user.name", "test"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+    (repo / "README.md").write_text("hello\n")
+    for cmd in (
+        ["git", "-C", str(repo), "add", "README.md"],
+        ["git", "-C", str(repo), "commit", "-m", "init"],
+        ["git", "-C", str(repo), "worktree", "add",
+         "-b", "feature", str(wt), "main"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+
+    # Sandbox the cache root so the helper doesn't touch the real one.
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", cache_root)
+
+    bin_dir = tmp_path / "bin"
+    _write_fake_rtk(bin_dir)
+    monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
+    monkeypatch.setattr(
+        token_saver.shutil, "which", lambda _: str(bin_dir / "rtk"),
+    )
+    monkeypatch.setattr(token_saver, "_ensure_cache_ready", lambda: None)
+
+    # Drive the public seam. ``write_rtk_settings_into_worktree`` is the
+    # same function the dispatch path uses; the autouse async fixture
+    # gives us a clean kanban DB even though the seam itself is sync.
+    token_saver.write_rtk_settings_into_worktree(
+        str(wt), str(bin_dir / "rtk"),
+    )
+
+    # The ship-gate's pre-flight: any non-empty porcelain line aborts.
+    status_out = subprocess.run(
+        ["git", "-C", str(wt), "status", "--porcelain"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert status_out.strip() == "", (
+        f"worktree has uncommitted/untracked changes after token-saver "
+        f"install — ship-gate would abort:\n{status_out}"
+    )
+
+    # And the wrapper hook actually exists at the documented cache path,
+    # so the install was real (not a no-op pretending to be clean).
+    wrapper = cache_root / token_saver.RTK_PINNED_VERSION \
+        / "hooks" / "rtk-cockpit-rewrite-wrapper.sh"
+    assert wrapper.is_file()
+    assert wrapper.stat().st_mode & 0o111, "wrapper is not executable"
+
+
+@pytest.mark.asyncio
+async def test_active_branch_preserves_tracked_settings_json(
+    tmp_path, monkeypatch,
+):
+    """A pre-existing ``.claude/settings.json`` (TRACKED) is left alone.
+
+    The wrapper installer writes ONLY to ``settings.local.json``. Operators
+    who already have hand-curated entries in ``settings.json`` keep them
+    verbatim — the Bash PreToolUse hook lands in the local override
+    alongside, where Claude Code reads it.
+    """
+    import subprocess
+
+    repo = tmp_path / "repo"
+    wt = tmp_path / "wt"
+    repo.mkdir()
+    for cmd in (
+        ["git", "init", "-b", "main", str(repo)],
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        ["git", "-C", str(repo), "config", "user.name", "test"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+    (repo / "README.md").write_text("hello\n")
+    (repo / ".claude").mkdir()
+    tracked = {
+        "includeCoAuthoredBy": False,
+        "permissions": {"allow": ["Read(*.py)"]},
+    }
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps(tracked, indent=2),
+    )
+    for cmd in (
+        ["git", "-C", str(repo), "add", "README.md", ".claude/settings.json"],
+        ["git", "-C", str(repo), "commit", "-m", "init"],
+        ["git", "-C", str(repo), "worktree", "add",
+         "-b", "feature", str(wt), "main"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", tmp_path / "cache")
+    bin_dir = tmp_path / "bin"
+    _write_fake_rtk(bin_dir)
+    monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
+    monkeypatch.setattr(
+        token_saver.shutil, "which", lambda _: str(bin_dir / "rtk"),
+    )
+    monkeypatch.setattr(token_saver, "_ensure_cache_ready", lambda: None)
+
+    token_saver.write_rtk_settings_into_worktree(
+        str(wt), str(bin_dir / "rtk"),
+    )
+
+    # Tracked settings.json is untouched.
+    on_disk = json.loads(
+        (wt / ".claude" / "settings.json").read_text(),
+    )
+    assert on_disk == tracked
+
+    # Git status: only ``.claude/settings.local.json`` may appear, and it
+    # must NOT appear (it is gitignored by Claude Code's default rule).
+    status_out = subprocess.run(
+        ["git", "-C", str(wt), "status", "--porcelain"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert status_out.strip() == "", (
+        f"tracked settings.json was modified or settings.local.json leaked "
+        f"through gitignore:\n{status_out}"
+    )
+
+
+# --- Fail-open op het hook-uitvoeringspad -----------------------------------
+#
+# Claude Code's PreToolUse hook contract: exit 2 BLOCKS the tool call and
+# prompts the model to retry; any other non-zero exit is non-blocking
+# (stderr shown, call proceeds). A broken RTK upstream must NOT exit 2,
+# or the agent's Bash tool gets blocked and the dispatch stalls — the
+# opposite of the card's fail-open-eis. The wrapper guards against
+# this by ALWAYS exiting 0 (force-`exit 0` after the upstream call,
+# stderr discarded). These tests pin that contract end-to-end by
+# substituting the upstream ``rtk-rewrite.sh`` with one that exits
+# non-zero, including the blocking exit 2.
+
+
+def _write_upstream_rtk_rewrite(
+    cache_root: Path, *, exit_code: int, stderr_msg: str = "",
+) -> Path:
+    """Drop a fake ``rtk-rewrite.sh`` that exits ``exit_code``.
+
+    Mirrors the cache layout used by the real helper: same dir as the
+    wrapper, named ``rtk-rewrite.sh`` (NOT ``-wrapper.sh``). The
+    wrapper resolves it via ``$(dirname "$0")/rtk-rewrite.sh``.
+    """
+    upstream_dir = cache_root / token_saver.RTK_PINNED_VERSION / "hooks"
+    upstream_dir.mkdir(parents=True, exist_ok=True)
+    upstream = upstream_dir / "rtk-rewrite.sh"
+    upstream.write_text(
+        "#!/usr/bin/env bash\n"
+        f"if [ -n '{stderr_msg}' ]; then echo '{stderr_msg}' >&2; fi\n"
+        f"exit {exit_code}\n"
+    )
+    upstream.chmod(
+        upstream.stat().st_mode
+        | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH,
+    )
+    return upstream
+
+
+def _run_wrapper(wrapper: Path, command: str) -> subprocess.CompletedProcess:
+    """Drive the wrapper with a fake PreToolUse payload that names the
+    given Bash command. Returns the subprocess result so the test can
+    inspect exit code + stderr.
+    """
+    payload = json.dumps({
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    })
+    return subprocess.run(
+        [str(wrapper)],
+        input=payload, capture_output=True, text=True, timeout=5,
+        check=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_fail_open_when_upstream_rtk_exits_1(
+    tmp_path, monkeypatch,
+):
+    """Upstream ``rtk-rewrite.sh`` exits 1 → wrapper still exits 0.
+
+    Claude Code treats exit 1 as a non-blocking error (stderr shown,
+    call proceeds). The wrapper must preserve that semantic regardless
+    of what RTK does internally — that's the fail-open contract on
+    the hook-execution path (kaart ``c31333bf…`` acceptance #2:
+    "Fail-open aangetoond met een test die de saver moedwillig laat
+    falen en verifieert dat de originele inhoud doorgaat").
+    """
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", tmp_path / "cache")
+    _ensure_wrapper_for_test(tmp_path / "cache")
+    _write_upstream_rtk_rewrite(tmp_path / "cache", exit_code=1)
+
+    wrapper = (
+        tmp_path / "cache" / token_saver.RTK_PINNED_VERSION
+        / "hooks" / "rtk-cockpit-rewrite-wrapper.sh"
+    )
+
+    result = _run_wrapper(wrapper, "echo hello")
+    assert result.returncode == 0, (
+        f"wrapper exited {result.returncode} when upstream RTK exited 1 — "
+        f"a non-zero exit would block the Bash call on Claude Code's "
+        f"hook contract. stderr was: {result.stderr!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fail_open_when_upstream_rtk_exits_2_blocking(
+    tmp_path, monkeypatch,
+):
+    """Upstream ``rtk-rewrite.sh`` exits 2 → wrapper MUST still exit 0.
+
+    Exit 2 in Claude Code's PreToolUse contract is the BLOCKING
+    failure mode: the model is prompted to retry. If the wrapper
+    propagates an upstream exit 2, a broken RTK silently turns into a
+    dispatch-stall. The wrapper force-exits 0 to prevent that
+    downgrade — even at the cost of swallowing the upstream's
+    stderr noise.
+    """
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", tmp_path / "cache")
+    _ensure_wrapper_for_test(tmp_path / "cache")
+    _write_upstream_rtk_rewrite(
+        tmp_path / "cache", exit_code=2,
+        stderr_msg="RTK upstream crashed",
+    )
+
+    wrapper = (
+        tmp_path / "cache" / token_saver.RTK_PINNED_VERSION
+        / "hooks" / "rtk-cockpit-rewrite-wrapper.sh"
+    )
+
+    result = _run_wrapper(wrapper, "echo hello")
+    assert result.returncode == 0, (
+        f"wrapper propagated upstream exit 2 — Claude Code would BLOCK "
+        f"the agent's Bash call. stderr was: {result.stderr!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fail_open_when_upstream_rtk_missing(
+    tmp_path, monkeypatch,
+):
+    """Upstream ``rtk-rewrite.sh`` doesn't exist → wrapper exits 0.
+
+    A fresh cache (after a partial install or a clean-rtk reset)
+    has the wrapper but not yet the upstream. Without force-exit-0,
+    bash's "No such file or directory" propagates as exit 127, which
+    Claude Code treats as a non-blocking error — acceptable, but
+    strictly exit 0 is the contract.
+    """
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", tmp_path / "cache")
+    _ensure_wrapper_for_test(tmp_path / "cache")
+    # Deliberately do NOT write rtk-rewrite.sh.
+
+    wrapper = (
+        tmp_path / "cache" / token_saver.RTK_PINNED_VERSION
+        / "hooks" / "rtk-cockpit-rewrite-wrapper.sh"
+    )
+
+    result = _run_wrapper(wrapper, "echo hello")
+    assert result.returncode == 0, (
+        f"wrapper exited {result.returncode} with no upstream present — "
+        f"fresh-cache installs should fail-open. stderr: {result.stderr!r}"
+    )
+
+
+def _ensure_wrapper_for_test(cache_root: Path) -> Path:
+    """Write the wrapper into the cache by running the helper. Used by
+    the fail-open tests that monkeypatch ``RTK_CACHE_ROOT`` to a fresh
+    tmp dir.
+    """
+    return token_saver._ensure_wrapper_in_cache()
+
+
+# --- Instructie-isolatie -----------------------------------------------------
+#
+# Kaart ``c31333bf…`` acceptance #3: "Aangetoond dat instructie-inhoud
+# (systeemprompt/persona/kaarttekst) niet gemuteerd wordt". The
+# implementation is structured around this: the helper only patches
+# ``.claude/settings.local.json`` (Bash PreToolUse config) and the
+# wrapper-script lives in the cache. It never opens CLAUDE.md, the
+# persona file, the kaarttekst file, or any other instruction-bearing
+# path. This test pins that contract end-to-end by pre-populating
+# those paths in the worktree, running the install, and asserting
+# byte-identical content after.
+
+
+@pytest.mark.asyncio
+async def test_active_branch_does_not_mutate_instruction_content(
+    tmp_path, monkeypatch,
+):
+    """Install writes ONLY to ``.claude/settings.local.json`` and the
+    RTK cache. CLAUDE.md, persona files, and a stand-in card-text
+    file are byte-identical before vs. after.
+
+    The wrapper script lives in the cache (``<cache>/<version>/hooks/``),
+    so it can never modify anything inside the worktree. The
+    ``settings.local.json`` patch is bounded to a single Bash
+    PreToolUse entry — no instructions of any kind flow through this
+    path.
+    """
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", tmp_path / "cache")
+    bin_dir = tmp_path / "bin"
+    _write_fake_rtk(bin_dir)
+    monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
+    monkeypatch.setattr(
+        token_saver.shutil, "which", lambda _: str(bin_dir / "rtk"),
+    )
+    monkeypatch.setattr(token_saver, "_ensure_cache_ready", lambda: None)
+
+    # Pre-populate the worktree with representative instruction-bearing
+    # files. None of these are tracked by the helper — but the test
+    # pins that they stay untouched anyway.
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    claude_md = worktree / "CLAUDE.md"
+    persona_md = worktree / ".claude" / "persona.md"
+    card_text = worktree / ".claude" / "card-text.md"
+    card_text_before = (
+        "# Card c31333bf…\n\nThis card text must survive install.\n"
+    )
+    claude_md.write_text(
+        "# project rules\n\nDon't touch the prompt.\n",
+    )
+    persona_md.parent.mkdir(parents=True, exist_ok=True)
+    persona_md.write_text(
+        "You are an engineer. Always TDD.\n",
+    )
+    card_text.write_text(card_text_before)
+
+    # Snapshot the bytes of every instruction-bearing path before install.
+    snapshot_before = {
+        p.relative_to(worktree): p.read_bytes()
+        for p in (claude_md, persona_md, card_text)
+    }
+
+    token_saver.write_rtk_settings_into_worktree(
+        str(worktree), str(bin_dir / "rtk"),
+    )
+
+    snapshot_after = {
+        p.relative_to(worktree): p.read_bytes()
+        for p in (claude_md, persona_md, card_text)
+    }
+
+    assert snapshot_after == snapshot_before, (
+        f"instruction content was mutated by the install.\n"
+        f"  diff: " + ", ".join(
+            f"{k} changed" for k in snapshot_before
+            if snapshot_before[k] != snapshot_after.get(k)
+        )
+    )
+
+    # And the card-text-specific check — the file must not only be
+    # byte-equal, it must still contain the original marker line.
+    assert card_text_before in card_text.read_text()
 
 
 # --- Helper: board kill-switch read ------------------------------------------

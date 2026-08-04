@@ -621,8 +621,13 @@ alsnog een apart proxy-proces zijn, niet een import in onze backend.
 
 **Acceptance-criteria check:**
 
-- ✅ Per-lane via worktree-lokale `.claude/settings.json`,
-  nooit `~/.claude/`
+- ✅ Per-lane via worktree-lokale `.claude/settings.local.json`
+  (gitignored door Claude Code's default `**/.claude/settings.local.json`
+  in `~/.config/git/ignore`); wrapper-script leeft in de
+  RTK-cache (`<cache>/<version>/hooks/rtk-cockpit-rewrite-wrapper.sh`)
+  en wordt van daaruit aangeroepen, niet vanuit de worktree. Geen
+  muteert `~/.claude/`, geen modified-tracked-bestand in de dispatch-
+  worktree.
 - ✅ `grep` carve-out actief (RTK omzeilt de ugrep-shim; in deze
   kaart niet opgelost, wel uitgezonderd door de wrapper-config)
 - ✅ `git diff`-truncatie expliciet uitgezet voor ship-lanes
@@ -805,6 +810,112 @@ comprimeert of welke lanes opt-in zijn.
 load, (f) een operator wil de note ook als samenvattende card-rij zien, of (g) de
 pre-spawn-commit veroorzaakt aantoonbaar claim/reaper-gedrag dat de bestaande
 compensatiepad-tests niet afvangen.
+
+### ✅ Geïmplementeerd (kaart `c31333bf…`, 2026-08-04) — worktree-clean-status na reviewer-gate ronde 4
+
+**Wat de reviewer-gate ronde 4 bracht.** De integrator van de §8-implementatie schreef
+twee artefacten in de dispatch-worktree: het wrapper-script op
+`<worktree>/.claude/hooks/rtk-cockpit-rewrite.sh` en een gemuteerd
+`<worktree>/.claude/settings.json`. Het hook-script is een untracked file in een
+nieuwe directory (`git status` → `?? .claude/hooks/rtk-cockpit-rewrite.sh`); de
+settings.json is **tracked** in deze repo (`git ls-files` bevestigt). Op élke
+shippende lane die de saver aan had, vuurde de ship-gate
+(`.claude/skills/git-ship/SKILL.md:154-156`) `git diff --quiet HEAD -- || git
+ls-files --others --exclude-standard` af en weigerde — vanaf de eerste seconde
+van de sessie, vóór de agent één regel werk deed. De voorgeschreven
+recovery-stap (`git add -A && git commit`) commitde dan de hook + de
+gepatchte `settings.json` naar `master`; van dat moment laadde élke sessie
+in élke worktree die hook uit de getrackte `settings.json`, RTK stond
+board-wide aan zonder lane-vlag, en de kill-switch kon het niet meer
+uitzetten (die gate't alléén de installatie, niet een al gecommitte
+settings.json). De bug was bovendien onzichtbaar zolang de RTK-binary niet
+op deze host stond — de installer valt fail-open op `failed` zonder
+filesystem-writes, en geen enkele bestaande test gebruikte een echte git
+worktree om `git status` te pollen.
+
+**De fix (operator-besluit optie A, 2026-08-04).** Wrapper-script en
+hook-config verhuizen buiten de worktree zodat `git status` schoon blijft:
+
+- **Wrapper-script** naar de RTK-cache:
+  `<cache>/<version>/hooks/rtk-cockpit-rewrite-wrapper.sh`, parallel aan de
+  upstream `rtk-rewrite.sh` die de wrapper met `$(dirname "$0")/rtk-rewrite.sh`
+  aanroept. Eén kopie per host, gedeeld door alle worktrees; de cache is
+  per-user/per-versie, geen werkboom. Het script zelf verandert niet —
+  alleen de bestemming.
+- **Hook-config** naar `<worktree>/.claude/settings.local.json` in plaats
+  van `<worktree>/.claude/settings.json`. Claude Code leest beide files,
+  maar `settings.local.json` valt onder Claude Code's default gitignore
+  (`**/.claude/settings.local.json` in `~/.config/git/ignore`) en is dus
+  volledig onzichtbaar voor `git`. De PreToolUse-command referencet het
+  absolute pad naar de wrapper in de cache, zodat de hook werkt vanuit elke
+  worktree op deze host.
+
+Het effect: `git status --porcelain` op de dispatch-worktree blijft leeg
+na installatie, ook al draaien we op een echte git-worktree, niet op een
+kale `tmp_path`. Dat is **precies** de "één test die na installatie een
+schone `git status` in een echte worktree aantoont" die het operator-besluit
+vroeg als bewijs.
+
+**Wat er ongewijzigd blijft.**
+
+- De publieke `token_saver.py`-surface (`maybe_install` / `is_board_enabled`
+  / `set_board_enabled` / `post_note` / `write_rtk_settings_into_worktree`)
+  en de `(status, reason)`-teruggave.
+- Per-lane `KanbanColumn.token_saver_enabled` vlag.
+- Board-wide runtime kill-switch via `KanbanMeta:token_saver:<project_key>`.
+- Fail-open op élke stap (cache-misser, wrapper-schrijffout,
+  onparseable `settings.local.json`).
+- Activity-feed observability met `**Note:** Token saver activated: …` /
+  `fail-open: …` via `post_note`, 60-s-dedup.
+- `RTK_TELEMETRY=off` expliciet in de spawn-env.
+- De wrapper-body zelf, met dezelfde `grep` carve-out en `git diff`
+  bypass-list — het script hangt nu in de cache in plaats van in de
+  worktree, maar zijn gedrag is identiek.
+- Het lockstep-meet-harnas en zijn `real-saver`-rij; de §8-meting op N=2
+  staat en de netto-opbrengst-conclusie (proxy wél, `real-saver` niet op
+  N=2) blijft.
+
+**Regressiedekking.** `test_token_saver.py` telt nu 25 tests. Twee nieuwe
+regressietests die de reviewer-vals in een echte git-worktree afvangen,
+gebaseerd op `subprocess.run(["git", "init", …] + worktree add)`:
+
+- `test_active_branch_leaves_worktree_git_status_clean` — zet een verse
+  git-repo op met één werkende branch, draait de installatie, en
+  assertt dat `git status --porcelain` leeg is. Tevens assertt het dat
+  de wrapper daadwerkelijk op de cache-pad bestaat en uitvoerbaar is —
+  een "schone worktree" alleen is niet genoeg als de hook niet landt.
+- `test_active_branch_preserves_tracked_settings_json` — pre-populeert de
+  werkende branch met een tracked `.claude/settings.json` (operator-hand-
+  werk), draait de installatie, en verifieert dat (a) de tracked file
+  ongewijzigd blijft en (b) `git status --porcelain` alsnog leeg is. Dekt
+  het scenario waarin een operator `settings.json` al handmatig heeft
+  ingericht voor eigen hooks.
+
+De bestaande `test_active_branch_writes_hook_and_settings` is bijgewerkt
+om het nieuwe contract te pinen (wrapper in cache, niet in worktree;
+`settings.local.json`, niet `settings.json`). De andere settings-IO-tests
+(`test_existing_pre_tool_use_entries_preserved`,
+`test_existing_permissions_preserved`,
+`test_settings_without_hooks_key_gets_hooks_added`,
+`test_active_branch_is_idempotent`,
+`test_fail_open_when_settings_unwritable`) gebruiken dezelfde
+`_read_settings` / `_write_settings`-helpers, die nu naar
+`settings.local.json` wijzen — de assertion (Bash PreToolUse-entry is
+er, andere keys overleven, idempotent) is ongewijzigd.
+
+**Netto-opbrengst.** Onveranderd ten opzichte van §8: de proxy
+(`with-saver`) claimt een output-daling van ~35–59% en een
+`input`/`cache_read`-daling op N≥1; `real-saver` is op N=2 niet eenduidig
+en de kaart promoot niet naar default-on. De fix maakt die opbrengst
+bereikbaar op shippende lanes waar ze eerst onbereikbaar was door de
+git-pollutie — dát was de blokkade, niet de compressie zelf.
+
+**Heropenen** bij: dezelfde voorwaarden als §8 + (h) Claude Code stopt
+met het gitignore-patroon voor `settings.local.json` (dan terugvallen op
+een andere gitignored bestemming, bv. `.claude/settings.local.json` →
+`<cache>/settings/<project_key>.json` met absolute pad, of een
+`xattr`-gestuurd hook), of (i) RTK zelf komt met een ingebouwde
+git-werkboom-veilige installatie die dit patroon overbodig maakt.
 
 ## 9. Reproductie
 
