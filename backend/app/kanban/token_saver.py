@@ -285,48 +285,101 @@ async def _maybe_install_impl(
 
 
 def write_rtk_settings_into_worktree(worktree_path: str, rtk_binary: str) -> None:
-    """Materialise the wrapper hook + patch ``.claude/settings.json``.
+    """Materialise the wrapper hook into the RTK cache and patch
+    ``.claude/settings.local.json``.
+
+    Why two moves and not one:
+
+    - **Wrapper hook in the cache** (``<cache>/<version>/hooks/``):
+      the wrapper is a plain shell script, identical across every worktree
+      on this host, and writing it into the worktree would create an
+      untracked ``.claude/hooks/`` directory — the ship-gate's
+      ``git ls-files --others --exclude-standard`` step would abort on
+      that from the first second of every dispatch
+      (``docs/cockpit/kanban-conventions.md`` §2 + ``git-ship`` SKILL §3).
+      Putting it in the per-version cache means every worktree on this
+      host shares one copy, no untracked files appear, and the cache
+      bootstrap (best-effort) brings it in alongside the upstream
+      ``rtk-rewrite.sh`` it delegates to.
+
+    - **Settings in ``.claude/settings.local.json``** (NOT
+      ``settings.json``): the tracked ``settings.json`` is shared repo
+      state; patching it would create a modified file in every dispatch
+      worktree, again tripping the ship-gate's pre-flight
+      ``git diff --quiet HEAD --`` check. Claude Code's default gitignore
+      covers ``**/.claude/settings.local.json``
+      (``~/.config/git/ignore:1``), so the file is invisible to ``git``
+      entirely and the worktree stays clean. The Bash PreToolUse command
+      we write there points at the absolute cache path so the hook runs
+      regardless of which worktree it is invoked from.
 
     Idempotent. Preserves every other key in the existing
-    ``settings.json``. Raises on filesystem failure — the dispatcher
-    wrapper at :func:`maybe_install` catches the raise and converts to
-    ``("failed", "<reason>")`` so a broken worktree never breaks a
-    dispatch.
+    ``settings.local.json``. Raises on filesystem failure — the
+    dispatcher wrapper at :func:`maybe_install` catches the raise and
+    converts to ``("failed", "<reason>")`` so a broken filesystem never
+    breaks a dispatch.
     """
     wt = Path(worktree_path)
     if not wt.is_dir():
         raise FileNotFoundError(f"worktree not found: {worktree_path}")
 
-    hook_dir = wt / ".claude" / "hooks"
-    hook_dir.mkdir(parents=True, exist_ok=True)
-    wrapper = hook_dir / "rtk-cockpit-rewrite.sh"
-    if not wrapper.exists():
-        wrapper.write_text(_HOOK_SCRIPT_BODY)
-    _make_executable(wrapper)
+    # Wrapper script lives in the RTK cache, OUTSIDE the worktree. The
+    # cache dir is per-version, parallel to ``bin/rtk`` and
+    # ``hooks/rtk-rewrite.sh`` (the upstream script we delegate to).
+    wrapper = _ensure_wrapper_in_cache()
 
-    # Patch settings.json (preserves everything else; idempotent merge).
-    settings_path = wt / ".claude" / "settings.json"
+    # Patch settings.local.json — the gitignored overlay Claude Code reads
+    # on top of the tracked settings.json. Absolute path to the wrapper
+    # so the hook works from any worktree on this host.
+    settings_path = wt / ".claude" / "settings.local.json"
     payload = _load_or_default_settings(settings_path)
-    _merge_rtk_hook(payload)
+    _merge_rtk_hook(payload, wrapper_path=str(wrapper))
     _atomic_write_json(settings_path, payload)
 
 
-def _merge_rtk_hook(payload: dict[str, Any]) -> None:
-    """Append the Bash PreToolUse entry, idempotently."""
+def _wrapper_cache_path() -> Path:
+    """Absolute path of the wrapper script under the pinned cache dir."""
+    return (
+        RTK_CACHE_ROOT / RTK_PINNED_VERSION / "hooks"
+        / "rtk-cockpit-rewrite-wrapper.sh"
+    )
+
+
+def _ensure_wrapper_in_cache() -> Path:
+    """Materialise the wrapper script in the pinned cache dir, idempotent.
+
+    Returns the absolute path. The cache layout mirrors the upstream
+    RTK cache: ``<cache>/<version>/{bin,hooks}/``. Upstream ships
+    ``hooks/rtk-rewrite.sh``; we add ``hooks/rtk-cockpit-rewrite-wrapper.sh``
+    alongside it. Both scripts end up co-located so the wrapper's
+    ``$(dirname "$0")/rtk-rewrite.sh`` lookup works without an absolute
+    path.
+    """
+    wrapper = _wrapper_cache_path()
+    if not wrapper.exists():
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        wrapper.write_text(_HOOK_SCRIPT_BODY)
+    _make_executable(wrapper)
+    return wrapper
+
+
+def _merge_rtk_hook(payload: dict[str, Any], wrapper_path: str) -> None:
+    """Append the Bash PreToolUse entry pointing at ``wrapper_path``,
+    idempotently."""
     hooks = payload.setdefault("hooks", {})
     pretooluse = hooks.setdefault("PreToolUse", [])
-    target_cmd_fragment = "rtk-cockpit-rewrite.sh"
+    target = str(wrapper_path)
     for entry in pretooluse:
         if entry.get("matcher") != "Bash":
             continue
         for h in entry.get("hooks", []):
-            if h.get("type") == "command" and target_cmd_fragment in h.get("command", ""):
+            if h.get("type") == "command" and target in h.get("command", ""):
                 return  # already merged
     pretooluse.append({
         "matcher": "Bash",
         "hooks": [{
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/rtk-cockpit-rewrite.sh",
+            "command": target,
         }],
     })
 

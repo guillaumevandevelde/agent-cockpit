@@ -86,13 +86,24 @@ def _write_fake_rtk(bin_dir: Path, version: str = "0.43.0") -> Path:
 
 
 def _read_settings(worktree: Path) -> dict:
-    """Read and JSON-parse the worktree's ``.claude/settings.json``."""
-    path = worktree / ".claude" / "settings.json"
+    """Read and JSON-parse the worktree's ``.claude/settings.local.json``.
+
+    NOTE: kept the historical name so test bodies stay readable; the
+    helper points at ``settings.local.json`` because that's the file the
+    helper actually patches.
+    """
+    path = worktree / ".claude" / "settings.local.json"
     return json.loads(path.read_text())
 
 
+def _read_local_settings(worktree: Path) -> dict:
+    """Alias for :func:`_read_settings` — clarifies intent at call sites."""
+    return _read_settings(worktree)
+
+
 def _write_settings(worktree: Path, payload: dict) -> None:
-    path = worktree / ".claude" / "settings.json"
+    """Write ``.claude/settings.local.json`` (the gitignored variant)."""
+    path = worktree / ".claude" / "settings.local.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))
 
@@ -162,7 +173,7 @@ async def test_fail_open_when_rtk_binary_missing(tmp_path, monkeypatch):
         )
     assert status == "failed"
     assert "rtk binary missing" in reason
-    assert not (worktree / ".claude" / "settings.json").exists()
+    assert not (worktree / ".claude" / "settings.local.json").exists()
 
 
 @pytest.mark.asyncio
@@ -189,7 +200,7 @@ async def test_fail_open_when_rtk_version_wrong(tmp_path, monkeypatch):
     assert status == "failed"
     assert "0.42.0" in reason
     assert "0.43.0" in reason
-    assert not (worktree / ".claude" / "settings.json").exists()
+    assert not (worktree / ".claude" / "settings.local.json").exists()
 
 
 # --- Fail-open: filesystem problems ------------------------------------------
@@ -221,7 +232,7 @@ async def test_fail_open_when_worktree_missing(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fail_open_when_settings_unwritable(tmp_path, monkeypatch):
-    """``.claude/settings.json`` is a *directory* (unparseable) → ``failed``,
+    """``.claude/settings.local.json`` is unparseable → ``failed``,
     no exception, dispatch continues."""
     bin_dir = tmp_path / "bin"
     _write_fake_rtk(bin_dir)
@@ -234,8 +245,8 @@ async def test_fail_open_when_settings_unwritable(tmp_path, monkeypatch):
 
     worktree = tmp_path / "wt"
     worktree.mkdir()
-    # Block writes by making .claude a directory of an unwritable kind.
-    settings_path = worktree / ".claude" / "settings.json"
+    # Pre-populate with unparseable content so the JSON-load step raises.
+    settings_path = worktree / ".claude" / "settings.local.json"
     settings_path.parent.mkdir()
     settings_path.write_text("not json {{{ broken")
 
@@ -250,13 +261,25 @@ async def test_fail_open_when_settings_unwritable(tmp_path, monkeypatch):
     assert settings_path.read_text() == "not json {{{ broken"
 
 
-# --- Active branch: settings.json merge --------------------------------------
+# --- Active branch: settings.local.json merge + cached wrapper ---------------
+#
+# The wrapper hook lives in the RTK cache (NOT in the worktree) and the
+# hook-config is written to ``.claude/settings.local.json`` (gitignored by
+# Claude Code's default ignore, ``**/.claude/settings.local.json`` from
+# ``~/.config/git/ignore``). Both moves keep the dispatch worktree's
+# ``git status`` clean so the ship-gate accepts the agent's commits —
+# the broken-state symptom this test exists to prevent: a previous
+# version wrote a tracked ``.claude/settings.json`` and a new
+# ``.claude/hooks/`` directory, every ship aborted at the first
+# uncommitted-changes guard (kanban card c31333bf… reviewer-gate, 4th
+# iteration).
 
 
 @pytest.mark.asyncio
 async def test_active_branch_writes_hook_and_settings(tmp_path, monkeypatch):
-    """Active branch writes the wrapper hook + settings.json and is
-    idempotent on the second invocation."""
+    """Active branch writes the wrapper into the cache and patches
+    ``.claude/settings.local.json`` (not the tracked settings.json), and
+    is idempotent on the second invocation."""
     bin_dir = tmp_path / "bin"
     _write_fake_rtk(bin_dir)
     monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
@@ -281,18 +304,28 @@ async def test_active_branch_writes_hook_and_settings(tmp_path, monkeypatch):
     assert status == "active"
     assert "0.43.0" in reason
 
-    # Wrapper hook script exists.
-    hook = worktree / ".claude" / "hooks" / "rtk-cockpit-rewrite.sh"
-    assert hook.is_file()
-    assert hook.stat().st_mode & 0o111  # executable
+    # Wrapper hook script lives in the RTK cache, NOT the worktree.
+    wrapper = token_saver.RTK_CACHE_ROOT / token_saver.RTK_PINNED_VERSION \
+        / "hooks" / "rtk-cockpit-rewrite-wrapper.sh"
+    assert wrapper.is_file()
+    assert wrapper.stat().st_mode & 0o111  # executable
 
-    # settings.json carries the PreToolUse entry on Bash.
-    settings = _read_settings(worktree)
+    # No hook script in the worktree (otherwise it would pollute git status).
+    assert not (worktree / ".claude" / "hooks").exists(), (
+        "wrapper hook leaked into worktree — ship gate would abort on "
+        "untracked .claude/hooks/"
+    )
+
+    # settings.local.json carries the PreToolUse entry on Bash.
+    settings = _read_local_settings(worktree)
     pretooluse = settings["hooks"]["PreToolUse"]
     bash_matchers = [e for e in pretooluse if e.get("matcher") == "Bash"]
     assert bash_matchers, f"no Bash PreToolUse entry: {pretooluse}"
     cmd = bash_matchers[0]["hooks"][0]["command"]
-    assert "rtk-cockpit-rewrite.sh" in cmd
+    assert str(wrapper) in cmd
+
+    # settings.json (the tracked file) is NOT touched.
+    assert not (worktree / ".claude" / "settings.json").exists()
 
 
 @pytest.mark.asyncio
@@ -436,6 +469,169 @@ async def test_active_branch_is_idempotent(tmp_path, monkeypatch):
     ]
     # Idempotent: only one Bash entry, even though maybe_install ran twice.
     assert len(bash_matchers) == 1
+
+
+# --- Clean-git-status contract ------------------------------------------------
+#
+# The previous iteration of the helper wrote the wrapper to
+# ``<worktree>/.claude/hooks/`` and patched ``<worktree>/.claude/settings.json``
+# (a TRACKED file). On every dispatch that fired the installer the worktree
+# ended up with a modified tracked file + an untracked ``.claude/hooks/``
+# directory; the ship-gate aborted on the first ``git status --porcelain``
+# check, and the prescribed recovery (``git add -A && git commit``) committed
+# the hook + the patched settings.json to master, which made RTK active
+# board-wide from the next dispatch on, with the kill-switch unable to undo
+# it. The fix: the wrapper lives in the RTK cache (outside the worktree),
+# the hook-config goes to ``settings.local.json`` (gitignored by Claude Code's
+# default ``**/.claude/settings.local.json`` rule), and ``git status`` stays
+# clean. These tests pin that contract against a real git worktree, not
+# ``tmp_path`` (where ``git status`` has nothing to look at).
+
+
+@pytest.mark.asyncio
+async def test_active_branch_leaves_worktree_git_status_clean(
+    tmp_path, monkeypatch,
+):
+    """Driving ``write_rtk_settings_into_worktree`` against a real git
+    worktree leaves ``git status --porcelain`` empty.
+
+    Kanban card c31333bf… reviewer-gate 4th iteration: a previous
+    implementation wrote ``.claude/settings.json`` (TRACKED) and
+    ``.claude/hooks/rtk-cockpit-rewrite.sh`` (UNTRACKED) into the dispatch
+    worktree, polluting its ``git status`` from the first second of the
+    session. The ship-gate aborts on any ``M`` or ``??`` line under
+    ``.claude/``, so every shipping lane that ran the saver became
+    unshippable, and the prescribed recovery committed the hook to master
+    board-wide. This test pins the clean-status invariant.
+    """
+    import subprocess
+
+    # Set up a real git repo + a single-branch worktree off it. ``tmp_path``
+    # alone is not enough — ``git status`` only sees what ``git`` itself
+    # sees, and ``tmp_path`` is not a repo.
+    repo = tmp_path / "repo"
+    wt = tmp_path / "wt"
+    repo.mkdir()
+    for cmd in (
+        ["git", "init", "-b", "main", str(repo)],
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        ["git", "-C", str(repo), "config", "user.name", "test"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+    (repo / "README.md").write_text("hello\n")
+    for cmd in (
+        ["git", "-C", str(repo), "add", "README.md"],
+        ["git", "-C", str(repo), "commit", "-m", "init"],
+        ["git", "-C", str(repo), "worktree", "add",
+         "-b", "feature", str(wt), "main"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+
+    # Sandbox the cache root so the helper doesn't touch the real one.
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", cache_root)
+
+    bin_dir = tmp_path / "bin"
+    _write_fake_rtk(bin_dir)
+    monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
+    monkeypatch.setattr(
+        token_saver.shutil, "which", lambda _: str(bin_dir / "rtk"),
+    )
+    monkeypatch.setattr(token_saver, "_ensure_cache_ready", lambda: None)
+
+    # Drive the public seam. ``write_rtk_settings_into_worktree`` is the
+    # same function the dispatch path uses; the autouse async fixture
+    # gives us a clean kanban DB even though the seam itself is sync.
+    token_saver.write_rtk_settings_into_worktree(
+        str(wt), str(bin_dir / "rtk"),
+    )
+
+    # The ship-gate's pre-flight: any non-empty porcelain line aborts.
+    status_out = subprocess.run(
+        ["git", "-C", str(wt), "status", "--porcelain"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert status_out.strip() == "", (
+        f"worktree has uncommitted/untracked changes after token-saver "
+        f"install — ship-gate would abort:\n{status_out}"
+    )
+
+    # And the wrapper hook actually exists at the documented cache path,
+    # so the install was real (not a no-op pretending to be clean).
+    wrapper = cache_root / token_saver.RTK_PINNED_VERSION \
+        / "hooks" / "rtk-cockpit-rewrite-wrapper.sh"
+    assert wrapper.is_file()
+    assert wrapper.stat().st_mode & 0o111, "wrapper is not executable"
+
+
+@pytest.mark.asyncio
+async def test_active_branch_preserves_tracked_settings_json(
+    tmp_path, monkeypatch,
+):
+    """A pre-existing ``.claude/settings.json`` (TRACKED) is left alone.
+
+    The wrapper installer writes ONLY to ``settings.local.json``. Operators
+    who already have hand-curated entries in ``settings.json`` keep them
+    verbatim — the Bash PreToolUse hook lands in the local override
+    alongside, where Claude Code reads it.
+    """
+    import subprocess
+
+    repo = tmp_path / "repo"
+    wt = tmp_path / "wt"
+    repo.mkdir()
+    for cmd in (
+        ["git", "init", "-b", "main", str(repo)],
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        ["git", "-C", str(repo), "config", "user.name", "test"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+    (repo / "README.md").write_text("hello\n")
+    (repo / ".claude").mkdir()
+    tracked = {
+        "includeCoAuthoredBy": False,
+        "permissions": {"allow": ["Read(*.py)"]},
+    }
+    (repo / ".claude" / "settings.json").write_text(
+        json.dumps(tracked, indent=2),
+    )
+    for cmd in (
+        ["git", "-C", str(repo), "add", "README.md", ".claude/settings.json"],
+        ["git", "-C", str(repo), "commit", "-m", "init"],
+        ["git", "-C", str(repo), "worktree", "add",
+         "-b", "feature", str(wt), "main"],
+    ):
+        subprocess.run(cmd, check=True, capture_output=True)
+
+    monkeypatch.setattr(token_saver, "RTK_CACHE_ROOT", tmp_path / "cache")
+    bin_dir = tmp_path / "bin"
+    _write_fake_rtk(bin_dir)
+    monkeypatch.setattr(token_saver, "_resolve_cache_binary", lambda: None)
+    monkeypatch.setattr(
+        token_saver.shutil, "which", lambda _: str(bin_dir / "rtk"),
+    )
+    monkeypatch.setattr(token_saver, "_ensure_cache_ready", lambda: None)
+
+    token_saver.write_rtk_settings_into_worktree(
+        str(wt), str(bin_dir / "rtk"),
+    )
+
+    # Tracked settings.json is untouched.
+    on_disk = json.loads(
+        (wt / ".claude" / "settings.json").read_text(),
+    )
+    assert on_disk == tracked
+
+    # Git status: only ``.claude/settings.local.json`` may appear, and it
+    # must NOT appear (it is gitignored by Claude Code's default rule).
+    status_out = subprocess.run(
+        ["git", "-C", str(wt), "status", "--porcelain"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert status_out.strip() == "", (
+        f"tracked settings.json was modified or settings.local.json leaked "
+        f"through gitignore:\n{status_out}"
+    )
 
 
 # --- Helper: board kill-switch read ------------------------------------------
