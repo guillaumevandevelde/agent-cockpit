@@ -13,7 +13,7 @@ status: decided
 
 ✅ **Geïmplementeerd (kaart `893033c6…`, V1):** opt-in `cockpit.sh`-service met `/health/liveliness`-watchdog, eigen venv met `litellm==1.93.0` + `prisma` gepind in `config/litellm/requirements.txt`, conditionele doctor-check die `check-litellm-hardening.sh` hergebruikt, `*.example`-configsjabloon + gitignored real config. De upgrade-procedure uit §7 staat nu inline in het requirements-bestand zelf.
 
-✅ **Geïmplementeerd (kaart `424c23d4…`, V2, herevalideerd 2026-08-04):** een derde bron in `_paused_providers_for_pool` (`backend/app/kanban/dispatch.py:1201-1225`) — een per-endpoint `GET base_url`-probe met 30 s TTL-cache, fail-soft op timeout/DNS/connection refused (`bij twijfel = beschikbaar`). Het herstel hoort in de selectie, niet in de error-handler, precies zoals §3.2 voorschrift: bij een dode proxy in de vangnet-modus pauzeert de pool de provider. `_pick_pool_choice` blijft de dode vangnet teruggeven — de "laatste val-terug"-tak in `pick_subscription_for_cli` (`subscription_pool.py:236-249`) verandert niet — maar `has_available_spillover` keert `False` terug zodra de gekozen entry zelf gepauzeerd is, waardoor de reactieve limiet-lus de kaart parkeert tot de proxy weer bereikbaar is in plaats van door te schuiven naar diezelfde dode proxy. **Geen uitwijk** — de kaart wacht op reset. De expliciete-pin-tak blijft fail-closed: `resolve_effective_provider_and_model` raadpleegt de pause-merge niet — die loopt via `MAX_DISPATCH_FAILURES` naar Impediment mét de echte fout. Dekking: `tests/test_dispatch_endpoint_reachability_pause.py` (vier unit-tests op de pause-merge zelf plus twee end-to-end-tests op de dispatch-flow).
+✅ **Geïmplementeerd (kaart `424c23d4…`, V2, herevalideerd 2026-08-04):** een derde bron in `_paused_providers_for_pool` (`backend/app/kanban/dispatch.py:1208-1226`) — een per-endpoint `GET base_url`-probe met 30 s TTL-cache, fail-soft op timeout/DNS/connection refused (`bij twijfel = beschikbaar`). Het herstel hoort in de selectie, niet in de error-handler, precies zoals §3.2 voorschrift: bij een dode proxy in de vangnet-modus pauzeert de pool de provider. `_pick_pool_choice` blijft de dode vangnet teruggeven — de "laatste val-terug"-tak in `pick_subscription_for_cli` (`subscription_pool.py:236-249`) verandert niet — maar `has_available_spillover` keert `False` terug zodra de gekozen entry zelf gepauzeerd is, waardoor de reactieve limiet-lus de kaart parkeert tot de proxy weer bereikbaar is in plaats van door te schuiven naar diezelfde dode proxy. **Geen uitwijk** — de kaart wacht op reset. De expliciete-pin-tak blijft fail-closed: `resolve_effective_provider_and_model` raadpleegt de pause-merge niet — die loopt via `MAX_DISPATCH_FAILURES` naar Impediment mét de echte fout. Dekking: `tests/test_dispatch_endpoint_reachability_pause.py` (vier unit-tests op de pause-merge zelf plus drie end-to-end-tests op de dispatch-flow).
 
 ---
 
@@ -171,7 +171,7 @@ kunnen draaien.
 
 Dat is een reëel bezwaar, en het antwoord is **niet** een fallback in de
 error-handler. Het is dat de terugval op de verkeerde laag zou zitten. De pool-router
-kiest de provider **vóór** de spawn en slaat gepauzeerde providers nominatim over
+kiest de provider **vóór** de spawn en merget de gepauzeerde-set in de drempel-scan
 (`subscription_pool.py:236-249`: een gepauzeerde of boven-drempel-entry wordt
 overgeslagen; de laatste entry is de val-terug — **maar die val-terug wordt ook
 teruggegeven wanneer die laatste entry zelf gepauzeerd is**, want de functie geeft

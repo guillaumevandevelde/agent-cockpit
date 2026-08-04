@@ -445,6 +445,14 @@ async def test_explicit_pin_bypasses_pool_pause(stub_probe):
     the load-bearing change: without it, the original test passed
     vacuously because ``_unreachable_compatible_providers``
     short-circuited on empty entries.
+
+    We assert TWO things so this test is not a partial tautology:
+    (a) the merge ran (``_paused_providers_for_pool`` returns
+    ``{"anthropic-compatible"}`` for the project's pool); (b) the
+    spawn proceeded despite the paused set (transport called once
+    with the pinned provider). Removing the merge from
+    ``_paused_providers_for_pool`` would fail (a); a hypothetical
+    "skip the spawn when paused" branch would fail (b).
     """
     stub_probe["http://dead-router.example/v1"] = False
 
@@ -468,18 +476,26 @@ async def test_explicit_pin_bypasses_pool_pause(stub_probe):
         })
         await s.commit()
 
+        # (a) Probe-merge ran: ``anthropic-compatible`` is in the paused
+        # set. If the merge branch were removed from
+        # ``_paused_providers_for_pool``, this set would be empty.
+        paused = await dispatch._paused_providers_for_pool(
+            s, project_key="git:example.com/me/repo",
+        )
+        assert "anthropic-compatible" in paused
+
         await dispatch.dispatch_card(
             s, card_id=cid, project_path="/p", transport=transport,
         )
         await s.commit()
 
-    # The spawn IS attempted: transport called with anthropic-compatible
-    # on router-dead. The pause-merge ran (pool seeded, probe returns
-    # False, compatible is in the paused set) but the resolver does NOT
-    # consult that paused-set on the explicit-pin path beyond the
-    # pool-choice it already made — the spawn proceeds. It will fail
-    # downstream on the dead proxy, walking the existing
-    # MAX_DISPATCH_FAILURES → Impediment path, NOT the pause-merge.
+    # (b) The spawn IS attempted: transport called with
+    # anthropic-compatible on router-dead. The pause-merge ran (paused
+    # set contains compatible) but the resolver does NOT consult that
+    # paused-set on the explicit-pin path beyond the pool-choice it
+    # already made — the spawn proceeds. It will fail downstream on
+    # the dead proxy, walking the existing MAX_DISPATCH_FAILURES →
+    # Impediment path, NOT the pause-merge.
     assert len(transport.calls) == 1
     call = transport.calls[0]
     assert call["provider"] == "anthropic-compatible"
