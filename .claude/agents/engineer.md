@@ -260,6 +260,18 @@ altijd door.
    > - De implementatie integreert zonder siblings te breken.
    > - Het deliverable dat in de samenvatting geclaimd wordt, is
    >   daadwerkelijk aanwezig.
+   > - Wanneer de fix een `whitespace-nowrap`- of `h-*`-override is op een
+   >   shared primitive (zoals de gedeelde `<Button>`-primitive in deze
+   >   codebase, waar `h-8` anders via `twMerge` blijft staan): controleer
+   >   dat de resulterende geometrie aan de eis voldoet — een
+   >   className-assertion op `whitespace-normal` / `break-words` /
+   >   `h-auto` is geen bewijs dat de layout klopt (kaart `d9abcf44…`, regression
+   >   `da7716e5…` → fix `51ae48a6`/`f7b2609b`). De canonieke evidence is
+   >   een geometrie-assertion (`scrollWidth <= clientWidth + 1` voor
+   >   geen-overflow, `offsetHeight >= 2 * lineHeight` voor daadwerkelijke
+   >   wrap), of in jsdom een stub van diezelfde properties plus een
+   >   negatieve controle die bewijst dat de test de regression zou
+   >   vangen.
    > - Wanneer de kaart een auto-recovery in een error-handler
    >   beschrijft: verify dat de recovery in het uitvoeringspad zit
    >   (dezelfde `if`-blok als de fout-detectie), niet als prose of
