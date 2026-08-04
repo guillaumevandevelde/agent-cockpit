@@ -2165,3 +2165,196 @@ async def _async_iter(items):
     matching ``list_cards``'s async-returning signature for the
     monkeypatched shim."""
     return items
+
+
+# ---------------------------------------------------------------------------
+# Production spillover-config (kaart 2bb37d97…)
+#
+# Pins the per-column tails the operator configures on the live board so
+# the AC scenarios stay reproducible from a unit test. The configuration
+# has three intentional properties:
+#
+#   - engineer default = minimax; tail = [anthropic] — when MiniMax
+#     hits its limit, the engineer card spills to Anthropic instead of
+#     waiting. AC scenario: "spilling over"-logregel must appear on a
+#     simulated MiniMax limit.
+#   - analyst default  = anthropic; tail = [minimax] — when Anthropic
+#     hits its limit, the analyst card spills to MiniMax. Lower-priority
+#     workload than reviewer; MiniMax-M3 is acceptable here.
+#   - reviewer default = anthropic; tail = [] — quality > speed;
+#     reviewer waits on the reset (see spillover-per-kolom-decision.md §6
+#     "kwaliteitsafweging").
+#
+# ``_build_spillover_candidates`` (dispatch.py:1806) prepends the column
+# default as the implicit head automatically, so the tails below are
+# ONLY the spillover targets — never the column default itself (otherwise
+# the dedup branch strips them and we end up with an empty chain).
+# ---------------------------------------------------------------------------
+
+
+def _production_pool_tails():
+    """The exact per-column tails installed on the live board.
+
+    Kept as a function (not a constant) so each test gets a fresh list
+    — ``PoolEntry`` is a frozen dataclass but the list itself is mutable
+    and a single shared instance would leak between tests."""
+    return {
+        # engineer: spill from minimax → anthropic on limit hit.
+        "engineer": [_entry(provider="anthropic", drempel=0.9)],
+        # analyst: spill from anthropic → minimax on limit hit.
+        "analyst": [_entry(provider="minimax", drempel=0.9)],
+        # reviewer: deliberately empty ("nooit uitwijken").
+        "reviewer": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_production_pool_tails_round_trip_through_storage():
+    """The per-column tails installed by ``set_subscription_pool`` must
+    round-trip through the KanbanMeta wrapper so an operator can read
+    them back via ``GET /api/v1/kanban/subscription-pool?column=…``."""
+    tails = _production_pool_tails()
+    async with KanbanSessionLocal() as s:
+        for column, entries in tails.items():
+            await subscription_pool.set_subscription_pool(
+                s, PK, entries, column=column,
+            )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        for column, expected in tails.items():
+            got = await subscription_pool.get_subscription_pool(
+                s, PK, column=column,
+            )
+            assert got == expected, (
+                f"column={column!r}: expected {expected!r}, got {got!r}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_production_pool_tails_fire_spillover_on_first_entry_limit():
+    """AC scenario (kaart 2bb37d97…): a limit on a column's first entry
+    (the implicit head = column default) must trigger spillover for
+    engineer + analyst, and must NOT for reviewer (intentional
+    "nooit uitwijken"). Pins the production decision per column."""
+    tails = _production_pool_tails()
+    async with KanbanSessionLocal() as s:
+        for column, entries in tails.items():
+            if column == "engineer":
+                await service.create_column(
+                    s, project_key=PK, name="engineer",
+                    default_agent="engineer", default_provider="minimax",
+                )
+            elif column == "analyst":
+                await service.create_column(
+                    s, project_key=PK, name="analyst",
+                    default_agent="analyst", default_provider="anthropic",
+                )
+            elif column == "reviewer":
+                await service.create_column(
+                    s, project_key=PK, name="reviewer",
+                    default_agent="reviewer", default_provider="anthropic",
+                )
+            await subscription_pool.set_subscription_pool(
+                s, PK, entries, column=column,
+            )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        engineer_spillover = await dispatch._pool_spillover_available(
+            s, project_key=PK,
+            limited_provider="minimax",  # MiniMax hit (column default)
+            cli_id="claude-code",
+            column="engineer",
+        )
+        analyst_spillover = await dispatch._pool_spillover_available(
+            s, project_key=PK,
+            limited_provider="anthropic",  # Anthropic hit (column default)
+            cli_id="claude-code",
+            column="analyst",
+        )
+        reviewer_spillover = await dispatch._pool_spillover_available(
+            s, project_key=PK,
+            limited_provider="anthropic",  # Anthropic hit
+            cli_id="claude-code",
+            column="reviewer",
+        )
+    # engineer + analyst spill (head hit → tail exists); reviewer does not.
+    assert engineer_spillover is True
+    assert analyst_spillover is True
+    assert reviewer_spillover is False
+
+
+@pytest.mark.asyncio
+async def test_production_pool_tails_emit_spilling_over_activity_comment_on_engineer():
+    """End-to-end AC: when an engineer card hits a MiniMax limit, the
+    card-move path collapses ``scheduled_at`` to ``None`` AND posts the
+    ``🔀 … spilling over …`` activity comment. This is the exact
+    behaviour the operator will observe on the board after the live-DB
+    install — and the comment string is the canonical signal a sweeper
+    can grep for to confirm spillover fired."""
+    tails = _production_pool_tails()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(
+            s, project_key=PK, name="engineer",
+            default_agent="engineer", default_provider="minimax",
+        )
+        await subscription_pool.set_subscription_pool(
+            s, PK, tails["engineer"], column="engineer",
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card_with_column(s, PK, "engineer")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        cards = await dispatch.list_cards(s, PK)
+        card = next(c for c in cards if c.id == cid)
+
+    captured: dict[str, object] = {}
+    captured_comment: dict[str, object] = {}
+    real_scheduled_at = (
+        datetime.now(UTC) + timedelta(hours=1)
+    ).isoformat()
+
+    async def _capture(ks, **kwargs):
+        captured["scheduled_at"] = kwargs.get("scheduled_at")
+        return True
+
+    async def _capture_comment(ks, *, card, project_key, text, **_):
+        captured_comment["text"] = text
+        return True
+
+    from _pytest.monkeypatch import MonkeyPatch
+    mp = MonkeyPatch()
+    try:
+        mp.setattr(
+            dispatch, "list_cards",
+            lambda ks, project_key: _async_iter([card]),
+        )
+        mp.setattr(dispatch, "_move_to_resume", _capture)
+        mp.setattr(
+            dispatch, "_post_rate_limit_activity_comment",
+            _capture_comment,
+        )
+        mp.setattr(
+            dispatch, "_resume_target_from_cwd",
+            lambda cwd: ("/tmp/fake-project-path", "lim-test"),
+        )
+        mp.setattr(dispatch, "safe_resolve_project_key", lambda _p: PK)
+        moved = await dispatch.move_limited_session_to_resume(
+            "/tmp/fake-project-path/.claude/worktrees/lim-test",
+            scheduled_at=real_scheduled_at,
+        )
+    finally:
+        mp.undo()
+    assert moved is True
+    # Spillover fires: scheduled_at collapsed + 🔀 spilling-over comment.
+    assert captured.get("scheduled_at") is None
+    comment_text = captured_comment.get("text", "")
+    assert "spilling over" in comment_text, (
+        f"expected 🔀 spilling-over comment, got: {comment_text!r}"
+    )
+    assert "minimax" in comment_text, (
+        f"comment should name the just-hit provider, got: {comment_text!r}"
+    )
