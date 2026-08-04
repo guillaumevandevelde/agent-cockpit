@@ -478,6 +478,18 @@ die alleen bestaat uit bestandsnamen + commit-jargon voldoet aan de
 precies het probleem dat kaart `4358fe0a00e342878bc7a77fd21ffebe`
 wilde voorkomen.
 
+**Leesbaarheidsnorm — geldt bovenop het bovenstaande, en ook voor elke
+doc en comment die je schrijft.** Product-taal bepaalt *welke inhoud*
+vooraan staat; de leesbaarheidsnorm bepaalt *hoe* je het opschrijft:
+maximaal 40 woorden per zin, conclusie eerst, diepte achter een
+verwijzing die zegt wát daar staat, en een kaart-id nooit als enige
+onderbouwing. Vermijd Engelse werkwoorden met Nederlandse vervoeging
+(*globt*, *flag't*, *overridet*); vakjargon als dispatch, claim en
+worktree blijft. Norm, woordenlijst en meetcommando:
+[`docs/cockpit/taalgebruik-conventies.md`](../../docs/cockpit/taalgebruik-conventies.md).
+Raakt je diff een `*.md`-document, meet het dan vóór je shipt met
+`scripts/check-doc-readability.py --file <pad>`.
+
 ## Projectconventies
 
 ### Backend (Python)

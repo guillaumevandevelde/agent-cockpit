@@ -255,6 +255,18 @@ geldt ook voor jouw analyse-kaarten. Concreet:
   onopgeloste product-forks): producttrade-offs, geen
   implementatie-keuzes.
 
+**Leesbaarheidsnorm — geldt bovenop het bovenstaande, en ook voor je
+kind-kaarten en je analyse-doc.** Product-taal bepaalt *welke inhoud*
+vooraan staat; de leesbaarheidsnorm bepaalt *hoe* je het opschrijft:
+maximaal 40 woorden per zin, conclusie eerst, diepte achter een
+verwijzing die zegt wát daar staat, en een kaart-id nooit als enige
+onderbouwing. Vermijd Engelse werkwoorden met Nederlandse vervoeging
+(*globt*, *flag't*, *overridet*); vakjargon als dispatch, claim en
+worktree blijft. Norm, woordenlijst en meetcommando:
+[`docs/cockpit/taalgebruik-conventies.md`](../../docs/cockpit/taalgebruik-conventies.md).
+Meet je eigen doc vóór je shipt met
+`scripts/check-doc-readability.py --file <pad>`.
+
 ## Outcome-contract (geldt voor modus 1 én modus 2)
 
 `move_card` naar `Done` op een analyse-kaart (`work_type='analysis'` of
