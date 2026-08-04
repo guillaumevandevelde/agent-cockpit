@@ -308,6 +308,23 @@ logregels over de hele historie. De ontwerpknoop die dit ooit blokkeerde is inmi
 doorgehakt (kolom-default als impliciete eerste pool-entry), dus wat rest is
 configureren + verifiëren — geen ontwerpwerk meer.
 
+✅ Geïmplementeerd (kaart `2bb37d97…`, 2026-08-04) — per-kolom tails geïnstalleerd op
+`git:github.com/guillaumevandevelde/claude-cockpit`:
+
+| Kolom | Head (impliciet, kolom-default) | Tail (spillover-target) | Gedrag op limiet |
+|---|---|---|---|
+| `engineer` | `minimax` | `[anthropic @ drempel=0.9]` | MiniMax raakt limiet → direct uitwijken naar Anthropic (geen wachttijd) |
+| `analyst` | `anthropic` | `[minimax @ drempel=0.9]` | Anthropic raakt limiet → direct uitwijken naar MiniMax |
+| `reviewer` | `anthropic` | `[]` (bewust leeg) | Anthropic raakt limiet → wacht op reset (kwaliteit > snelheid) |
+
+Operator-handleiding: [`subscriptions.md` § "Subscription-pool inspectie & wijzigen"](./subscriptions.md#subscription-pool-inspectie--wijzigen).
+Verificatie: `_pool_spillover_available(project_key, limited_provider=..., column=...)`
+retourneert `True` voor analyst + simulated Anthropic-limiet (live gemeten 2026-08-04),
+en de pure-router-laag (`subscription_pool.has_available_spillover`) retourneert `True`
+voor élke simulated limit op engineer/analyst. Drie regressietests in
+`backend/tests/test_subscription_pool_dispatch.py::test_production_pool_tails_*` pinnen
+de installatie + de end-to-end card-move met de 🔀 activity-comment.
+
 ---
 
 ## 6. Gat E — één onhervatbare kaart breekt de hele tick af
