@@ -100,6 +100,7 @@ ls scripts/test_*.sh     # family-level reference — check-test-harness-coverag
 bash scripts/test_po_digest_source.sh                  # PO-digest collector (mechanische helft)
 bash scripts/test_check_doc_readability.sh             # Leesbaarheidsnorm-meter (zie de Taalgebruik-regel hieronder)
 bash scripts/test_sweep_unchecked_implemented_markers.sh   # ✅-marker-sweep (kaart 21a349bc… — recipe-writing-conventions §2)
+bash scripts/test_sweep_stale_interviews.sh            # Stale-interview-sweeper (interviews/<slug>/ vangnet; zie kaartloze-app-inceptie-decision.md §5)
 
 # Single-test run = the documented exception to feedback_no_local_pytest (<1.5s; zie kaart ed09173c).
 bash scripts/run-single-test.sh tests/test_x.py                  # whole file
