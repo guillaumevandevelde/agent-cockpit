@@ -98,6 +98,20 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// Done cards wrap their two rare-action controls (RequestReviewControl +
+// ReopenControl) in a collapsible <DoneActionsPanel> so the body of the
+// drawer (description, spec, subtasks, tabs) gets the full 85vh height back
+// — kanban-kaart d4012bd1 "Done kaarten nog altijd niet goed leesbaar".
+// Tests that previously expected the controls to be visible immediately on
+// Done-render must click the toggle first; this helper centralises that
+// step so each test stays focused on the behaviour it actually asserts.
+async function expandDoneActions() {
+  const toggle = screen.getByTestId("done-actions-toggle");
+  await act(async () => {
+    fireEvent.click(toggle);
+  });
+}
+
 describe("CardDrawer live activity", () => {
   it("picks up new activity entries while the drawer stays open, without being closed and reopened", async () => {
     const activityMock = kanbanApi.activity as ReturnType<typeof vi.fn>;
@@ -277,7 +291,9 @@ describe("CardDrawer request review control", () => {
       />,
     );
 
-    const control = await screen.findByTestId("request-review-control");
+    // The controls live inside <DoneActionsPanel>; expand it first.
+    await expandDoneActions();
+    const control = screen.getByTestId("request-review-control");
     expect(control).not.toBeNull();
 
     const textarea = screen.getByTestId("request-review-note") as HTMLTextAreaElement;
@@ -320,10 +336,83 @@ describe("CardDrawer request review control", () => {
       />,
     );
 
+    // The controls live inside <DoneActionsPanel>; expand it first so the
+    // already-requested amber panel can render inside it.
+    await expandDoneActions();
+
     const state = await screen.findByTestId("review-requested-state");
     expect(state.textContent).toMatch(/the retry logic looks off/);
     // The fresh input form must not render alongside the already-requested state.
     expect(screen.queryByTestId("request-review-control")).toBeNull();
+  });
+});
+
+// Done card collapsed-state contract (kanban-kaart d4012bd1). The two
+// rare-action controls must collapse into a single toggle by default so the
+// drawer body keeps its full 85vh height. Expanding the toggle surfaces
+// both controls; clicking it again collapses them.
+describe("CardDrawer Done actions panel — collapsed by default", () => {
+  it("does not render the panel when the card is not in Done", () => {
+    const doingCard: Card = { ...baseCard, column: "Doing" };
+    render(
+      <CardDrawerWithRouter
+        card={doingCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId("done-actions-panel")).toBeNull();
+    expect(screen.queryByTestId("done-actions-toggle")).toBeNull();
+  });
+
+  it("renders only the toggle on a Done card by default; both controls stay hidden", () => {
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("done-actions-toggle")).not.toBeNull();
+    expect(screen.queryByTestId("request-review-control")).toBeNull();
+    expect(screen.queryByTestId("reopen-control")).toBeNull();
+  });
+
+  it("expands both controls when the toggle is clicked, and collapses them again on a second click", async () => {
+    // Pin activity to empty so RequestReviewControl renders the input form
+    // (not the amber "review requested" panel) — an earlier test in this file
+    // already mocked activity with a `**Review requested:**` entry, and
+    // `vi.clearAllMocks()` only clears call history (not mockResolvedValue),
+    // so the leak would otherwise swap the form for the amber panel here.
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    const doneCard: Card = { ...baseCard, column: "Done" };
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    const toggle = screen.getByTestId("done-actions-toggle");
+
+    // First click → expand
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.getByTestId("request-review-control")).not.toBeNull();
+    expect(screen.getByTestId("reopen-control")).not.toBeNull();
+
+    // Second click → collapse
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(screen.queryByTestId("request-review-control")).toBeNull();
+    expect(screen.queryByTestId("reopen-control")).toBeNull();
   });
 });
 
@@ -360,7 +449,9 @@ describe("CardDrawer reopen control", () => {
       />,
     );
 
-    const control = await screen.findByTestId("reopen-control");
+    // The controls live inside <DoneActionsPanel>; expand it first.
+    await expandDoneActions();
+    const control = screen.getByTestId("reopen-control");
     expect(control).not.toBeNull();
 
     const textarea = screen.getByTestId("reopen-note") as HTMLTextAreaElement;
@@ -403,7 +494,9 @@ describe("CardDrawer reopen control", () => {
       />,
     );
 
-    const textarea = await screen.findByTestId("reopen-note");
+    // The controls live inside <DoneActionsPanel>; expand it first.
+    await expandDoneActions();
+    const textarea = screen.getByTestId("reopen-note") as HTMLTextAreaElement;
     await act(async () => {
       fireEvent.change(textarea, {
         target: { value: "Rebuttal text" },
