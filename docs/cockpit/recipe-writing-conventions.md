@@ -158,3 +158,161 @@ auto-recovery schrijft, leg de recovery in de `else`-tak van dezelfde
 `if`. Review met de FCR-reachability-check; laat `test_*_drift.py` de
 positionele invarianten pinnen. Een recovery die "elders in het script"
 zit, is per definitie onbereikbaar in het scenario dat hem nodig heeft.
+
+## 2. "✅ Geïmplementeerd" in analysedocs = code gemerged, niet gat gedicht
+
+> **Bron van waarheid:** deze paragraaf is leidend voor het
+> ✅ Geïmplementeerd-patroon in `docs/cockpit/*-analyse.md`,
+> `*-decision.md` en verwante analysedocs. Sluit aan op de
+> "evidence vóór OK"-norm uit de persona-instructies en op de
+> broncode-updates-paragraaf in `engineer.md` / `analyst.md`
+> (de bron is `metadata["spec_doc"]`).
+
+### De regel — één zin
+
+> **Een `✅ Geïmplementeerd`-regel in een analysedoc is pas geldig als
+> ernaast een waargenomen effect staat — een logmarker-telling, een
+> gemeten gedragsverandering, of het expliciete label "nog niet in
+> productie waargenomen" met reden.** Alleen "code gemerged" of
+> "kaart afgerond" is geen effect-bewijs.
+
+### Waarom?
+
+Een `✅ Geïmplementeerd`-regel wordt door elke lezer gelezen als "gat
+gedicht". De tekst claimt soms alleen "code gemerged en getest" — en dat
+is letterlijk waar, maar het zegt niets over wat het mechanisme in
+productie doet. Geobserveerd op
+[`sessie-limiet-auto-dispatch-analyse.md`](./sessie-limiet-auto-dispatch-analyse.md)
+R3 (kaart `f0953a11…`, geïmplementeerd 2026-07): de progress-liveness
+sprong van "voorgesteld" naar "geïmplementeerd" en stond zeven dagen op
+het bord als een gedicht gat. Tegelijk: 0 progress-liveness-logregels
+op de volledige backend-historie, tegenover ~16.000 limiet-detecties.
+De skip-set bevatte `live_sessions` en een gelimiteerde `claude` exit
+niet, dus de detector sloot precies de verzameling uit waarvoor hij
+gebouwd was. De `✅`-regel logde niet — registreerde "code geland" waar
+elke lezer "gat dicht" las.
+
+### Wat is een geldig "waargenomen effect"?
+
+Drie vormen, alle drie expliciet en machine-leesbaar:
+
+1. **Logmarker-telling.** Een citeerbare grep op een unieke log-string
+   met een getal. Voorbeeld: `Effect: 12 logregels "progress-liveness" in
+   18 dagen productie`. Negatief bewijs is ook bewijs: `Effect: 0
+   logregels — detector sluit zijn doel-verzameling uit (zie noot)`.
+2. **Gemeten gedragsverandering.** Een getal dat voor en na de fix
+   vastligt. Voorbeeld: `Effect: false-positive rate 6/8 → 0/8 cases
+   over 24 uur productie`.
+3. **Expliciet "nog niet waargenomen"-label met reden.** Een vaste
+   string die reviewers dwingt de afwezigheid van bewijs te onderbouwen,
+   niet alleen te negeren. Voorbeeld: `Effect: nog niet in productie
+   waargenomen — eerste reset passeert <datum>, vervolgmeting volgt`.
+
+Wat **niet** telt als effect-bewijs:
+
+- "Code gemerged in commit X" — dat is de kaart-claim, niet het effect.
+- "Getest in <test_file>" — unit-tests bewijzen dat het werkt op de
+  test-input, niet dat het in productie vangt waarvoor het gebouwd is.
+- Een kale kaart-`id` als enige onderbouwing — de taalgebruik-norm
+  verbiedt dat al, maar deze conventie maakt het expliciet voor
+  effect-paragrafen.
+
+### Vorm van de regel
+
+Een `✅ Geïmplementeerd`-regel in dit formaat:
+
+```markdown
+> ✅ **Geïmplementeerd** (kaart `<id>`): <korte samenvatting van wat
+> de code doet>.
+> Effect: <logmarker-telling | gemeten gedragsverandering | "nog niet
+> in productie waargenomen" + reden>.
+```
+
+De `Effect:`-zin staat op de eerstvolgende regel(s) onder de
+implementatie-samenvatting — geen paragraaf verderop, geen in een
+footnote. Een lezer die alleen de `>`-gequote regel leest, ziet het
+effect meteen.
+
+### Wanneer geldt deze regel?
+
+Voor élke `✅ Geïmplementeerd`-, `✅ Uitgevoerd`- of equivalente
+"code-merger"-markering in `docs/cookpit/*.md` die gekoppeld is aan
+een aanbeveling, R-blok, ontwerpbeslissing of gefilede follow-up. Doc
+types die dit het hardst raken: `type: analysis`-docs (de
+"Aanbevolen richting" / "Vervolgkaarten"-secties), `type: decision`-docs
+("**Beslist**"-blokken), en design-docs met een
+"**Geïmplementeerd**"-closed-sectie.
+
+### Counter-example — R3, de bug (kaart `f0953a11…`)
+
+De oorspronkelijke R3-regel in
+`sessie-limiet-auto-dispatch-analyse.md:468`:
+
+```markdown
+✅ Geïmplementeerd (kaart f0953a11…): `check_progress_liveness` in
+`app/kanban/dispatch.py` draait elke tick ná `detect_transcript_rate_limits`,
+vergelijkt het transcript-mtime van elke `agent:`-claimed kaart met de
+vorige observatie, post één "stilstaand"-comment bij
+`PROGRESS_LIVENESS_SIGNAL_SECONDS=30min` en released via `_move_to_resume`
+bij `PROGRESS_LIVENESS_ACTION_SECONDS=60min`. Sandcastle / headless
+transports behouden hun eigen liveness-bron (carve-out in de skip-set).
+```
+
+Wat er ontbrak: een effect-claim. De tekst beschrijft precies wat de
+code doet — en dat is waar, het draait en de tests zijn groen. Maar de
+`skip-set` bevat `live_sessions`, en een gelimiteerde `claude` exit
+niet, dus de detector slaat 100% van de gevallen over waarvoor hij
+gebouwd is. Gemeten: `grep -h "progress-liveness" logs/backend/*.log |
+wc -l` = 0. Geen `Effect:`-regel betekent dat geen lezer dit opmerkt
+— en het bord zag er zeven dagen uit alsof het gat gedicht was.
+
+### Worked example — R3 in gecorrigeerde vorm
+
+Dezelfde R3-regel, met de `Effect:`-verplichting toegepast:
+
+```markdown
+✅ **Geïmplementeerd** (kaart f0953a11…): `check_progress_liveness` in
+`app/kanban/dispatch.py` draait elke tick ná `detect_transcript_rate_limits`,
+vergelijkt het transcript-mtime van elke `agent:`-claimed kaart met de
+vorige observatie, post één "stilstaand"-comment bij
+`PROGRESS_LIVENESS_SIGNAL_SECONDS=30min` en released via `_move_to_resume`
+bij `PROGRESS_LIVENESS_ACTION_SECONDS=60min`. Sandcastle / headless
+transports behouden hun eigen liveness-bron (carve-out in de skip-set).
+Effect: **0 `progress-liveness`-logregels over de volledige
+backend-historie** (gemeten op logread vóór kaart `21a349bc…`), tegenover
+~16.000 limiet-detecties. Negatief bewijs — de skip-set bevat
+`live_sessions`, en een gelimiteerde `claude` exit niet, dus de
+detector sluit precies de doel-verzameling uit. Vervolg nodig: skip-set
+beperken tot transports die hun eigen liveness-bron hebben, en een
+vervolgkaart is in de maak.
+```
+
+Drie dingen vallen op:
+
+- De `Effect:`-zin legt het **gemeten getal** vast (0 logregels) — geen
+  ruimte voor "we weten niet of het werkt".
+- De verklaring voor het negatieve resultaat staat expliciet in dezelfde
+  alinea, niet in een aparte noot — een lezer kan de claim niet
+  negeren.
+- Een vervolgstap wordt meteen benoemd, zodat de `Effect:`-zin niet
+  eindigt als "dode observatie" maar als "open gat met richting".
+
+### Hoe validatie werkt
+
+``scripts/sweep_unchecked_implemented_markers.py`` (advies-only, advisory
+met `--strict` voor CI) itereert alle `✅ Geïmplementeerd`-regels in
+`docs/cockpit/*.md` en flagt degene zonder `Effect:`-zin in de eerst-
+volgende 3 regels. Het script laat de **inhoud** aan de mens over — het
+detecteert alleen de structurele afwezigheid van een effect-claim. Een
+hit betekent niet automatisch "bug", maar "geen effect-bewijs
+geregistreerd" — dezelfde klasse als `git log` zonder commit-message.
+
+### Wanneer NIET van toepassing
+
+- Een `✅ Geïmplementeerd`-regel zonder onderliggende aanbeveling
+  (bijv. een changelog-aggregaat dat een reeks updates samenvat) — geen
+  effect-claim nodig omdat er geen "gat" was.
+- Een `✅ Beslist`-regel in een `*-decision.md` die alleen een product-
+  of proces-beslissing markeert zonder code-ship. De regel geldt voor
+  "code gemerged" / "vangnet gebouwd" / "detector geïnstalleerd" — niet
+  voor "we hebben deze richting gekozen".
