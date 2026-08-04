@@ -162,10 +162,29 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # branches accumulated over 6 weeks before this was caught (kanban card
     # 3027671c…). Position matters as much as presence: see
     # `test_branch_delete_guarded_by_push_success` for the invariant that it
-    # must run *only* when the push to master succeeded.
+    # must run *only* when the push to master succeeded, and
+    # `test_branch_delete_guarded_by_remote_ref_exists` for the further
+    # invariant that the delete is gated on the remote ref actually
+    # existing.
     (
         "remote branch cleanup",
         'git push origin --delete "$BRANCH"',
+    ),
+    # Remote-ref pre-check for the delete (kanban card 552036fa…). The
+    # delete itself prints two `error:` lines when the remote ref doesn't
+    # exist (`error: unable to delete '<branch>': remote ref does not
+    # exist` + `error: failed to push some refs to '<url>'`), and that
+    # spurious error output reliably trips "the ship failed" reading on
+    # the tail of the log — even though the push-to-master already
+    # succeeded by then and the recipe was fail-open. Pinning the
+    # substring alone is insufficient: see
+    # `test_branch_delete_guarded_by_remote_ref_exists` for the
+    # structural invariant that the pre-check is *positionally* the
+    # gate of the delete (delete inside the `then`-branch of an `if` whose
+    # condition is this exact `git ls-remote` line).
+    (
+        "remote-ref pre-check for delete",
+        'git ls-remote --exit-code --heads origin "$BRANCH"',
     ),
     # Pre-flight: the detached worktree only sees COMMITTED state, so an
     # uncommitted/untracked branch would merge as a silent no-op. This guard
@@ -484,6 +503,20 @@ def test_invariants_list_covers_the_four_commands_from_the_card() -> None:
     # route leaks a merged branch onto `origin` on every single ship.
     assert any("push origin --delete" in c for c in commands), (
         "invariants list lost the remote branch cleanup command"
+    )
+    # Remote-ref pre-check for the delete (kanban card 552036fa…). Without
+    # it the delete against a never-pushed branch prints `error:` lines that
+    # read like a failed ship — the WARN `||` fallback kept it fail-open
+    # but the spurious error tripped "the ship failed" reading on the tail.
+    # Substring alone is insufficient: see
+    # `test_branch_delete_guarded_by_remote_ref_exists` for the structural
+    # invariant that the pre-check is *positionally* the gate of the delete.
+    assert any(
+        'git ls-remote --exit-code --heads origin "$BRANCH"' in c
+        for c in commands
+    ), (
+        "invariants list lost the remote-ref pre-check for delete (kanban "
+        "card 552036fa…)"
     )
     # 0-byte-index guard (kanban card 608e2a27…). Without it, a slot whose
     # index was truncated by an aborted predecessor kills the merge with
@@ -945,6 +978,152 @@ def test_branch_delete_guard_detects_unconditional_delete() -> None:
     assert "if-condition" in reason, (
         f"unexpected failure reason: {reason!r}; expected a missing "
         f"if-condition diagnosis."
+    )
+
+
+# Remote-branch cleanup guards the delete itself on the remote ref actually
+# existing (kanban card 552036fa…). Without the pre-check, a never-pushed
+# branch yields two `error:` lines from git that read like a failed ship —
+# the push-to-master already succeeded, the WARN `||` fallback kept the
+# ship fail-open, but the spurious error output reliably trips "the ship
+# failed" reading on the tail of the log. The fix wraps the delete in an
+# `if git ls-remote --exit-code --heads origin "$BRANCH" …; then` guard:
+# when the remote ref doesn't exist the recipe prints a quiet `INFO:` line
+# and skips the delete instead of fighting git. Position matters as much as
+# presence — see the helper below for the structural pin.
+LS_REMOTE_GUARD = 'git ls-remote --exit-code --heads origin "$BRANCH"'
+
+
+def _branch_delete_is_guarded_by_remote_ref_exists(
+    source_text: str,
+) -> tuple[bool, str]:
+    """Return ``(ok, reason)``: whether the remote-branch delete is wrapped
+    inside the ``then``-branch of an ``if git ls-remote --exit-code --heads
+    origin "$BRANCH"`` pre-check.
+
+    Pins the structural invariant from kanban card ``552036fa…``: an
+    unconditional ``git push origin --delete "$BRANCH"`` against a
+    never-pushed branch prints two ``error:`` lines that read like a failed
+    ship, even though the push-to-master itself succeeded. The recipe was
+    fail-open (``|| echo "WARN: …"``) but the spurious error output reliably
+    trips "the ship failed" reading on the tail. The fix wraps the delete
+    in a pre-check that exits 0 only when the remote ref actually exists;
+    if it does not, the recipe prints a quiet ``INFO:`` line and skips the
+    delete — no spurious error output, no WARN noise.
+
+    Checks, in order:
+
+    1. The ``git ls-remote --exit-code --heads origin "$BRANCH"`` pre-check
+       is present.
+    2. The literal ``git push origin --delete "$BRANCH"`` appears *after*
+       the pre-check (the guard must run first).
+    3. The delete sits between the pre-check line and the closing ``fi`` at
+       the pre-check's indent — i.e. inside the ``then``-branch, not after
+       the ``fi`` (unreachable) or in the ``else``-branch (which would only
+       fire when the ref doesn't exist — the exact case we want to skip).
+
+    Same positional style as ``_branch_delete_is_guarded_by_push_success``:
+    the substring invariant in ``CORE_RECIPE_INVARIANTS`` pins *that* the
+    pre-check exists, this one pins *when* it gates the delete.
+    """
+    guard_idx = source_text.find(LS_REMOTE_GUARD)
+    delete_idx = source_text.find(BRANCH_DELETE)
+    if guard_idx == -1:
+        return False, (
+            f"missing the remote-ref pre-check ({LS_REMOTE_GUARD!r}) — the "
+            f"delete would fire unconditionally and print `error:` lines on "
+            f"a never-pushed branch (kanban card 552036fa…)"
+        )
+    if delete_idx == -1:
+        return False, f"missing the delete command ({BRANCH_DELETE!r})"
+    if delete_idx < guard_idx:
+        return False, (
+            f"branch delete ({delete_idx}) appears BEFORE the ls-remote "
+            f"pre-check ({guard_idx}) — the guard runs after the action, "
+            f"so it can't gate it"
+        )
+
+    # Find the line containing the pre-check, then walk forward to find the
+    # closing `fi` at the same indent. The delete must sit between them —
+    # i.e. inside the `then`-branch, not in the `else`-branch (which would
+    # only fire when the ref doesn't exist) and not after the block.
+    guard_line_start = source_text.rfind("\n", 0, guard_idx) + 1
+    guard_indent = _line_indent(source_text[guard_line_start:guard_idx])
+    cursor = source_text.find("\n", guard_idx) + 1
+    close_idx = -1
+    for raw_line in source_text[cursor:].split("\n"):
+        stripped = raw_line.strip()
+        if stripped == "fi" and _line_indent(raw_line) == guard_indent:
+            close_idx = source_text.find(raw_line, cursor)
+            break
+        cursor += len(raw_line) + 1
+    if close_idx == -1:
+        return False, (
+            f"could not find the `fi` closing the ls-remote conditional at "
+            f"indent {guard_indent} — the if-block looks malformed"
+        )
+    if not (guard_idx < delete_idx < close_idx):
+        return False, (
+            f"branch delete ({delete_idx}) is NOT inside the ls-remote "
+            f"`if`/`then`/`fi` block (guard at {guard_idx}, closed at "
+            f"{close_idx}) — the delete would fire when the remote ref "
+            f"doesn't exist, printing the `error:` lines this guard is "
+            f"meant to suppress (kanban card 552036fa…)"
+        )
+    return True, ""
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_branch_delete_guarded_by_remote_ref_exists(source_name: str) -> None:
+    """The remote-branch delete must only fire when the remote ref exists.
+
+    Pins the structural invariant from kanban card ``552036fa…``: a direct-mode
+    ship of a never-pushed branch ends with two ``error:`` lines that read
+    like a failed ship (``error: unable to delete '<branch>': remote ref
+    does not exist`` + ``error: failed to push some refs to '<url>'``), even
+    though the push-to-master itself succeeded. The recipe was fail-open
+    (``|| echo "WARN: …"``) but the spurious error output reliably tripped
+    "the ship failed" reading on the tail. The fix wraps the delete in an
+    ``if git ls-remote --exit-code --heads origin "$BRANCH"`` pre-check that
+    exits 0 only when the remote ref actually exists; if it does not, the
+    recipe prints a quiet ``INFO:`` line and skips the delete — no spurious
+    error output, no WARN noise.
+
+    Complements the parametrised substring-presence test: presence says
+    "the pre-check is *somewhere* in the mirror"; this test says "the
+    pre-check is the gate of the delete".
+    """
+    source_text = SOURCES[source_name]()
+    ok, reason = _branch_delete_is_guarded_by_remote_ref_exists(source_text)
+    assert ok, (
+        f"{source_name}: branch delete not guarded by remote-ref check — {reason}"
+    )
+
+
+def test_branch_delete_remote_ref_guard_detects_unguarded_delete() -> None:
+    """Live negative case: the unguarded recipe shape must fail the new
+    positional invariant.
+
+    Reproduces the exact pre-fix recipe (delete after a successful push, no
+    remote-ref pre-check). The structural check must flag this so a future
+    revert to the unguarded shape trips CI, not just the parametrised
+    substring-presence check.
+    """
+    unguarded_mirror = (
+        'if git -C "$WT" push origin HEAD:master; then\n'
+        '  git push origin --delete "$BRANCH" || echo "WARN: al weg?"\n'
+        'else\n'
+        '  echo "WARN: push naar master afgewezen" >&2\n'
+        'fi\n'
+    )
+    ok, reason = _branch_delete_is_guarded_by_remote_ref_exists(unguarded_mirror)
+    assert not ok, (
+        f"guard did NOT flag an unguarded delete; reason={reason!r}. "
+        f"The positional invariant has rotted."
+    )
+    assert "ls-remote" in reason, (
+        f"unexpected failure reason: {reason!r}; expected a missing "
+        f"ls-remote-pre-check diagnosis."
     )
 
 

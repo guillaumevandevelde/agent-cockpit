@@ -381,10 +381,19 @@ if git -C "$WT" push origin HEAD:master; then
   # `delete_branch_on_merge` (enabled 2026-07-07) only fires when a *PR*
   # merges; this route closes no PR, so without this line every shipped card
   # leaves a branch on `origin` forever (kanban card 3027671c…: 7 fully-merged
-  # branches piled up over 6 weeks). Fail-open — an already-deleted branch
+  # branches piled up over 6 weeks). Guard the delete on the remote ref
+  # actually existing: a direct-mode branch that never made it to `origin`
+  # yields two `error:` lines from `git push --delete` that read like a
+  # failed ship, even though the push-to-master already succeeded — and that
+  # spurious output reliably trips "the ship failed" reading on the tail of
+  # the log (kanban card 552036fa…). Fail-open — an already-deleted branch
   # must not kill the ship. Only the REMOTE branch goes; the local branch
   # stays, so redispatch/resume off it still works.
-  git push origin --delete "$BRANCH" || echo "WARN: kon origin/$BRANCH niet verwijderen (al weg?)"
+  if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+    git push origin --delete "$BRANCH" || echo "WARN: kon origin/$BRANCH niet verwijderen"
+  else
+    echo "INFO: origin/$BRANCH bestond niet — niets te verwijderen"
+  fi
   # Post-push main-checkout sync (kanban card 5e83b6e0…, fourth iteration).
   # The divergence guard above bases on local `master`, so a successful
   # push that doesn't also move local `master` in the main checkout leaves
