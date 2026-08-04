@@ -87,7 +87,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 111 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 112 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -149,7 +149,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (37)
+### Decision (38)
 
 | Document | Status |
 |---|---|
@@ -177,6 +177,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md) | 🔵 decided |
 | [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md) | 🔵 decided |
 | [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md) | 🔵 decided |
+| [Beslissing — één tijd-trigger: de klok maakt de kaart, de kaart is het werk](./scheduled-trigger-consolidatie-decision.md) | 🔵 decided |
 | [Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic](./schema-migrations-decision.md) | 🔵 decided |
 | [Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)](./spec-driven-development-fase-0-decision.md) | 🔵 decided |
 | [Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR](./spike-claude-code-model-switching.md) | 🔵 decided |

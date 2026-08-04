@@ -80,6 +80,7 @@
 - [Completed beslissing weerleggen + heropenen met context — beslisdocument](./reopen-completed-decision-analysis.md): type=decision status=decided
 - [Reviewer-agent + review-kolom — wenselijk? Trade-off + beslissing (REVISED²)](./reviewer-agent-decision.md): type=decision status=decided
 - [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md): type=decision status=decided
+- [Beslissing — één tijd-trigger: de klok maakt de kaart, de kaart is het werk](./scheduled-trigger-consolidatie-decision.md): type=decision status=decided
 - [Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic](./schema-migrations-decision.md): type=decision status=decided
 - [Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)](./spec-driven-development-fase-0-decision.md): type=decision status=decided
 - [Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR](./spike-claude-code-model-switching.md): type=decision status=decided
