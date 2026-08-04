@@ -6,6 +6,14 @@ status: proposed
 
 # Terugkerende cadans voor het zelfverbeteringsonderzoek — voorstel
 
+> ⚠️ **§2 en §6 zijn herzien (2026-08-04).** De gelaagde "A nu, B als evolutie"-lijn
+> en de migratie naar scheduled-messages gaan niet door: de klok wordt een
+> **server-side trigger die de kaart aanmaakt** wanneer ze nodig is, en de
+> chain-of-one-shots uit §4.2 vervalt. §3 (cadans + tijdzone) en §5 (pauzeren,
+> overriden, auditen) blijven inhoudelijk overeind. Reden, meting en scope:
+> [`scheduled-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md)
+> (kaart `0767c57a…`).
+
 > Companion van kanban-kaart
 > *"Terugkerende cadans voor het zelfverbeteringsonderzoek voorstellen"* (id
 > `7ae60646…`) en van de `market-research`-skill
@@ -34,6 +42,14 @@ de trigger-kaart aanmaakt plus de één-regel opt-in-call.
 ---
 
 ## 2. Gekozen aanpak — gelaagd
+
+> ⚠️ **Herzien 2026-08-04 — zie [`scheduled-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md).**
+> Mechanisme **B** (scheduled-messages) is geschrapt in plaats van "evolutie":
+> vijf weken scherp, 1 rij, `last_fired_at=NULL`, 0 delivery-attempts, en de enige
+> geplande maandag structureel gemist (in-memory jobstore ⇒ geen inhaal na een
+> restart). Mechanisme **A** blijft, maar niet in de vorm hieronder: de kaart
+> ontstaat pas op zijn eigen ochtend via een server-side cron-trigger, in plaats
+> van weken vooruit in Backlog te wachten.
 
 Drie mechanismen liggen klaar; ze zijn niet concurrent maar **opeengestapeld** —
 elk vangt een ander geval af:
@@ -194,6 +210,11 @@ acties die buiten deze grenzen vallen"*.
 ---
 
 ## 6. Evolutie naar mechanisme B (fase 2)
+
+> ⚠️ **Vervallen 2026-08-04.** Deze migratie gaat niet door; de richting is
+> omgekeerd. Companion-kaart `a4d9f8b6…` is gesloten als *superseded*. Zie
+> [`scheduled-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md)
+> §4. De sectie blijft staan als historisch record van de afgewogen route.
 
 **Afhankelijkheid:** scheduled-messages feature, fase 2. Status per 2026-07-09:
 code-compleet (Tasks 1–11), runtime-e2e = Task 12 = nog open

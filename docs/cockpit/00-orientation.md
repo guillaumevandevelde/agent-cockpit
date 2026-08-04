@@ -16,9 +16,12 @@ Claude-deck levert al sessie-**monitoring** (Sessions / CC Bridge) — dat dekt 
 wacht op mijn input" grotendeels. Daar bovenop bouwt Agent Cockpit twee samenhangende
 lagen:
 
-1. **Scheduled-messages** (vrijwel af) — boodschappen klaarzetten met een eenmalige
-   **timer** of terugkerende **cron**, die op het geplande moment in een Claude
-   Code-sessie worden geïnjecteerd (via tmux `send-keys`).
+1. **Scheduled-messages** (**wordt uitgefaseerd**, 2026-08-04) — boodschappen
+   klaarzetten met een eenmalige **timer** of terugkerende **cron**, die op het
+   geplande moment in een Claude Code-sessie worden geïnjecteerd (via tmux
+   `send-keys`). Code-compleet maar nooit in bedrijf genomen; de injectieroute
+   verdwijnt en tijd wordt een trigger die een kanban-kaart aanmaakt. Zie
+   [`scheduled-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md).
 2. **Kanban als hoofdwerking** (huidige actieve track) — een poll-loop die Todo-kaarten
    autonoom claimt + spawnt, met multi-agent decompositie (analyst → executors) en
    Agent Mail voor cross-session coördinatie.
@@ -31,7 +34,16 @@ lagen:
 > **[`docs/cockpit/new-project-startup-flow.md`](./new-project-startup-flow.md)**.
 > Het Projects-scherm in de UI heeft dezelfde hint, met link naar dat doc.
 
-### Scheduled-messages — fase 2 vrijwel af
+### Scheduled-messages — fase 2 vrijwel af, maar wordt uitgefaseerd
+
+> **Besloten 2026-08-04:** Task 12 wordt niet meer afgerond. De feature stond vijf
+> weken scherp met 1 rij, `last_fired_at=NULL` en 0 delivery-attempts, en miste zijn
+> enige geplande maandag structureel (in-memory APScheduler-jobstore ⇒ geen inhaal na
+> een restart). De tmux-injectieroute gaat uit; tijd wordt een trigger die een
+> kanban-kaart aanmaakt, net zoals de GitHub-webhook al doet. Het gedeelde
+> sessie-substraat onder `services/scheduling/` (session-registry, tmux-inject,
+> hook-ingest, auto-resume) blijft — dat draagt kanban-dispatch en Agent Mail. Zie
+> [`scheduled-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md).
 
 Het implementatieplan staat in **`fase-2-plan.md`** (12 TDD-tasks). **Tasks 1–11 zijn
 geïmplementeerd via TDD**: backend-tests groen, frontend build clean. Resterend is alleen
