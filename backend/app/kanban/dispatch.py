@@ -2240,7 +2240,9 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
                       revisit_prior_decision: dict | None = None,
                       prior_branch_warning: str | None = None,
                       project_path: str | None = None,
-                      worktree_path: str | None = None) -> str:
+                      worktree_path: str | None = None,
+                      prompt_injector_caveman: str = "",
+                      prompt_injector_ponytail: str = "") -> str:
     # A card dispatched in the executor phase (no `analyst_agent_id`) can
     # still resolve to the analyst persona via `work_type='analysis'` or
     # `card.agent='analyst'` (the "leaf analyst spike" case — see
@@ -2253,6 +2255,25 @@ def build_card_prompt(card, *, persona: str | None, ship_mode: str,
     # for the two-modi framing and fbe7937e99484941b196bf2ebc0866f6 for the
     # removal of the (now redundant) per-dispatch override preamble.
     preamble = (persona.strip() + "\n\n") if persona else ""
+    # Prompt-injectors (kaart d0446fd8…). The slices come from the
+    # kanban-side resolver (``app.kanban.prompt_injectors.resolve_active_injectors``)
+    # and are bound to the system-prompt layer only — kaarttekst,
+    # persona-contract, ship-instructies en impediment/revisit-secties
+    # blijven onaangeraakt. Empty strings when the per-lane flag or the
+    # board kill-switch is off. The slices sit *between* the persona and
+    # the rest of the prompt because Claude's prompt-cache key treats
+    # the entire tail as cacheable input; keeping the injectors in the
+    # prefix + the variability downstream means an unchanged-session
+    # cache hit survives both injectors being on across calls (the
+    # resolver is pure — see ``tests/test_prompt_injectors.py::test_resolver_returns_byte_stable_output_for_same_inputs``).
+    if prompt_injector_caveman or prompt_injector_ponytail:
+        injector_blocks: list[str] = []
+        if prompt_injector_caveman:
+            injector_blocks.append(prompt_injector_caveman.rstrip())
+        if prompt_injector_ponytail:
+            injector_blocks.append(prompt_injector_ponytail.rstrip())
+        if injector_blocks:
+            preamble = preamble + "\n\n---\n\n" + "\n\n---\n\n".join(injector_blocks) + "\n\n"
     impediment_section = ""
     if impediment_question:
         impediment_section = (
@@ -6163,6 +6184,17 @@ async def _run_card(
         str(Path(project_path) / ".claude" / "worktrees" / name)
         if is_fresh_worktree else None
     )
+    # Prompt-injectors: kaart d0446fd8… resolves the per-lane flags +
+    # board kill-switch via ``app.kanban.prompt_injectors``. Pure call
+    # (no side effects) so the dispatch hot path stays cheap. Audit
+    # comment is posted separately after the spawn returns, so a
+    # half-failed spawn never logs a phantom activation.
+    from app.kanban import prompt_injectors as _prompt_injectors
+    cav_text, pon_text = await _prompt_injectors.resolve_active_injectors(
+        session, project_key=project_key, column_name=target_agent,
+    )
+    cav_active = bool(cav_text)
+    pon_active = bool(pon_text)
     prompt = build_card_prompt(card, persona=persona, ship_mode=ship_mode,
         phase=phase,
         impediment_question=impediment_question,
@@ -6171,7 +6203,9 @@ async def _run_card(
         revisit_prior_decision=revisit_prior_decision,
         prior_branch_warning=prior_branch_warning,
         project_path=project_path,
-        worktree_path=worktree_path)
+        worktree_path=worktree_path,
+        prompt_injector_caveman=cav_text,
+        prompt_injector_ponytail=pon_text)
     if phase == "executor" and card.parent_card_id is not None:
         # Only child cards (parent_card_id set) get the PLAN CONTEXT section.
         # Legacy single-agent cards never have a parent; prepending the
@@ -6289,6 +6323,25 @@ async def _run_card(
                 card.id, source_column, name,
                 "sandcastle" if card_transport == sandcastle_transport else "worktree",
                 cli_id)
+
+    # Prompt-injector audit comment (kaart d0446fd8…): post a single
+    # ``**Prompt injector:**`` line so a follow-up complaint about
+    # output style can be cross-referenced back. Done *after* the
+    # spawn returns, not before — posting on a half-failed spawn
+    # would log a phantom activation. Helper is fail-open so a bug
+    # here cannot crash the dispatch hot path; if both flags are
+    # off the helper is a no-op.
+    if cav_active or pon_active:
+        try:
+            await _prompt_injectors.log_active(
+                session, card_id=card.id, project_key=project_key,
+                caveman_active=cav_active, ponytail_active=pon_active,
+            )
+        except Exception:
+            logger.exception(
+                "prompt-injector audit comment failed for card %s (continuing)",
+                card.id,
+            )
 
     # Per-dispatch telemetry breadcrumbs (kanban card 8a2ad986): write the
     # fields that the per-card usage endpoint reads. The worktree path is

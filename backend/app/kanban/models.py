@@ -233,6 +233,19 @@ class KanbanColumn(KanbanBase):
     token_saver_enabled: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False,
     )
+    # Per-lane prompt-injector opt-in flags (kaart d0446fd8…). Independent
+    # switches — toggling one does not move the other. Same 0/1 contract as
+    # ``token_saver_enabled``. Read by the dispatch hot path via
+    # ``app.kanban.prompt_injectors.resolve_active_injectors`` on every spawn;
+    # the board-wide kill-switch (``prompt_injector:<project_key>`` in
+    # ``KanbanMeta``) overrides both. Default 0 = off (acceptatiecriterium:
+    # "nooit aan by default").
+    caveman_enabled: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False,
+    )
+    ponytail_enabled: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
