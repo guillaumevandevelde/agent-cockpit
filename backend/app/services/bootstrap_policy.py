@@ -7,9 +7,9 @@ reconcile against a single source of truth instead of each re-deciding the same
 defaults.
 
 **It is now consumed by the new-project birth flow.** ``InceptionService`` (facet A's
-``create_project_from_intake``) threads a ``BootstrapPolicy`` through the birth so that
-autodispatch-at-birth, the MIT license default, the first-commit-template choice and
-the no-CI-at-birth stance come from this policy instead of ad-hoc code-path defaults;
+``create_project_from_interview``) threads a ``BootstrapPolicy`` through the birth so
+that autodispatch-at-birth, the MIT license default, the first-commit-template choice
+and the no-CI-at-birth stance come from this policy instead of ad-hoc code-path defaults;
 ``RepoBootstrapService.init_local`` also accepts a policy to write the LICENSE. See
 ``docs/cockpit/bootstrap-policy.md`` for the full decision rationale and the
 consuming-card matrix.
@@ -68,12 +68,12 @@ class BootstrapPolicy:
     """The centralised defaults for one repo-bootstrap run.
 
     Every field is a *default*; the caller (in practice facet A's
-    ``create_project_from_intake``) may override per-project. Frozen so a policy value
-    can be shared safely across the bootstrap chain without a step mutating it.
+    ``create_project_from_interview``) may override per-project. Frozen so a policy
+    value can be shared safely across the bootstrap chain without a step mutating it.
     """
 
-    #: §1.1 — Autodispatch off at birth. The human-approved intake flow may pass
-    #: ``True`` explicitly (a human just approved), keeping human-in-the-loop intact.
+    #: §1.1 — Autodispatch off at birth. A caller with a human in the loop may pass
+    #: ``True`` explicitly, keeping human-in-the-loop intact.
     autodispatch_default: bool = False
 
     #: §1.2 — ``None`` means "write no ``skip_permissions:<key>`` KanbanMeta row"; the
@@ -86,10 +86,12 @@ class BootstrapPolicy:
     #: kept only as an explicit opt-out.
     first_commit_content: FirstCommitContent = "template"
 
-    #: §1.3 — ``{project_name}`` / ``{intake_card_id}`` are substituted at bootstrap
-    #: time. Never embeds the kanban plan-attachment (that lives on the card).
+    #: §1.3 — ``{project_name}`` is substituted at bootstrap time. Never embeds the
+    #: kanban plan-attachment (that lives on the card). The former
+    #: ``{intake_card_id}`` placeholder went away with the intake column
+    #: (kanban card d0531c12…) — there is no card-carried birth route left.
     first_commit_message: str = (
-        "chore: bootstrap {project_name} from intake {intake_card_id}"
+        "chore: bootstrap {project_name}"
     )
 
     #: §1.4 — Consulted only when the chosen template provides no .gitignore of its own.
@@ -113,9 +115,8 @@ class BootstrapPolicy:
     key_collision_strategy: KeyCollisionStrategy = "suffix-counter"
 
 
-#: Cardless inceptie-flow (kanban card b9e6365a…): the interview route has
-#: no intake-card-id to interpolate, so the bootstrap commit uses a sibling
-#: message without that placeholder. Kept as a module constant (not a
+#: Cardless inceptie-flow (kanban card b9e6365a…): the bootstrap commit
+#: message for the interview route. Kept as a module constant (not a
 #: ``BootstrapPolicy`` field) because it's the *only* message for this route
 #: — overriding it isn't part of the policy surface; the per-route choice
 #: lives in the service. Same shape as ``BootstrapPolicy.first_commit_message``

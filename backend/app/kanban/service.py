@@ -928,7 +928,7 @@ async def ensure_awaiting_subtasks_column(session, project_key: str) -> bool:
     Called lazily from the move_card parking path (mcp_server.move_card)
     the first time a card actually parks there, so projects that enabled
     kanban before this column existed still render it — mirrors
-    `ensure_analyst_column`/`ensure_intake_column`. Rank net vóór `Done`
+    `ensure_analyst_column`. Rank net vóór `Done`
     (docs/cockpit/analyse-levenscyclus-decision.md §3).
     """
     existing = await list_columns(session, project_key)
@@ -966,13 +966,13 @@ async def ensure_fixed_columns(session, project_key: str) -> list[str]:
     The invariant is the one that script already asserts, unchanged: a project
     with ≥1 `kanban_columns` row has a row for every name in `COLUMNS`. Empty
     fixed lanes are cheap — the board collapses a lane with no cards to a 40px
-    rail (board-card-layout-decision.md §3c), so restoring `intake` +
-    `To Resume` costs 80px, not two full lanes.
+    rail (board-card-layout-decision.md §3c), so restoring `To Resume` costs
+    40px, not a full lane.
 
     Placement reuses the existing per-column helpers where one exists
-    (`ensure_intake_column` leftmost, `ensure_awaiting_subtasks_column` just
-    before `Done`) so a lane sits in the same place regardless of which path
-    created it; the remaining names are appended after the last lane.
+    (`ensure_awaiting_subtasks_column` just before `Done`) so a lane sits in
+    the same place regardless of which path created it; the remaining names
+    are appended after the last lane.
 
     A project with *no* rows at all was never enabled; this leaves it alone,
     matching the validator's own predicate. Inventing rows there would quietly
@@ -1002,11 +1002,10 @@ async def ensure_fixed_columns(session, project_key: str) -> list[str]:
         return []
 
     created: list[str] = []
-    # Two fixed names already own a placement rule elsewhere; go through their
-    # helper so a column lands in the same spot no matter which path created it
-    # (`intake` leftmost, `Awaiting Subtasks` just before `Done`).
+    # `Awaiting Subtasks` owns a placement rule elsewhere; go through the
+    # helper so the column lands in the same spot no matter which path
+    # created it (just before `Done`).
     for name, helper in (
-        ("intake", ensure_intake_column),
         ("Awaiting Subtasks", ensure_awaiting_subtasks_column),
     ):
         if name not in missing:
@@ -1085,42 +1084,6 @@ async def close_parent_if_all_children_done(session, parent_id: str) -> bool:
             "**Summary:** All subtasks reached Done — auto-closed from "
             "Awaiting Subtasks."
         )})
-    return True
-
-
-async def ensure_intake_column(session, project_key: str) -> bool:
-    """Idempotent: create the 'intake' kanban_columns row for this project
-    if one doesn't already exist. Returns True iff a new column was created.
-
-    The inceptie-pipeline (kanban card c33b2f14 / facet A of
-    platform-as-app-factory) puts idea-cards on the meta-project's `intake`
-    column before they're promoted to a new project via
-    `create_project_from_intake`. For projects that enabled kanban before
-    `intake` was added to `COLUMNS` (schemas.py), this helper back-fills the
-    kanban_columns row so the column renders on the board. For new projects
-    it stays out of the way — the row is created lazily the first time an
-    intake card is created OR the project is re-enabled (which iterates
-    `COLUMNS` and creates any missing entries).
-    """
-    existing = await list_columns(session, project_key)
-    if any(c.name == "intake" for c in existing):
-        return False
-    # Insert at the top of the board (rank=0) so intake is the leftmost column,
-    # matching the natural flow "intake → Backlog → … → Done".
-    rank = "0000"
-    for col in existing:
-        try:
-            if int(col.rank) >= int(rank):
-                # Shift everyone else down by 1. Bump-only-if-conflict keeps
-                # the existing rank order stable when intake wasn't there.
-                col.rank = f"{int(col.rank) + 1:04d}"
-        except (TypeError, ValueError):
-            # Non-numeric ranks (uuid4 hex) — leave alone; intake is fine
-            # sitting at rank=0000 since the order is dominated by created_at
-            # ties anyway.
-            pass
-    await create_column(session, project_key, name="intake", rank=rank)
-    await session.flush()
     return True
 
 

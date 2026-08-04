@@ -45,7 +45,7 @@ trap 'rm -rf "$TMP"' EXIT
 #
 # FIXED_COLUMNS mirrors backend/app/kanban/schemas.py:COLUMNS via the
 # inline copy inside scripts/check-kanban-conventions.sh. Keep in sync.
-FIXED_COLUMNS=(intake Backlog Impediment Done "To Resume")
+FIXED_COLUMNS=(Backlog Impediment Done "To Resume")
 
 # Seed a synthetic kanban DB at $1. $2..$2+N are project_keys; for each one,
 # write the full FIXED_COLUMNS set into kanban_columns unless $3 names a

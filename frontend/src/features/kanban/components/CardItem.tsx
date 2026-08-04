@@ -4,7 +4,6 @@ import {
   HelpCircle,
   MessageSquareWarning,
   RefreshCw,
-  Rocket,
   type LucideProps,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -180,7 +179,6 @@ export function CardItem({
   heldSince,
   subtasks,
   projectPath,
-  onPromote,
 }: {
   card: Card;
   onOpen: (c: Card) => void;
@@ -199,9 +197,6 @@ export function CardItem({
   // Needed for the dispatch_failed → Redispatch quick-action so the card can
   // call `kanbanApi.redispatch` directly without bouncing through the drawer.
   projectPath?: string;
-  // Inceptie-pipeline entry point. Only meaningful on intake cards;
-  // CardItem renders the Promote button iff this is set AND column=intake.
-  onPromote?: (c: Card) => void;
 }) {
   const priority = card.priority && card.priority !== "none" ? card.priority : null;
   const labels = card.labels ?? [];
@@ -256,14 +251,6 @@ export function CardItem({
     !!readyState &&
     !(isDone && readyState === "completed") &&
     !(isImpediment && readyState === "impeded" && !!impedimentSpec);
-
-  // Inceptie-pipeline entry point (kanban card c33b2f14 / facet A). Intake
-  // cards are human-only — they never auto-dispatch — but the human can
-  // promote them to a brand-new project via the Promote-to-project action.
-  // The button is only rendered when the parent KanbanPage wires
-  // `onPromote` down; otherwise intake cards are read-only until the page
-  // decides otherwise.
-  const isIntake = card.column === "intake";
 
   // Local "redispatching…" state so the compact button can show a brief
   // busy state without taking over the card. The parent board's 5s poll
@@ -354,8 +341,8 @@ export function CardItem({
           a card with three labels wrapped this row to three lines and pushed the
           median card to 144px tall — only 4 of 16 Backlog cards fitted on a
           1440x900 screen. Every fact here is still available in full in the
-          drawer, and the chips that can be acted on (Redispatch / Promote)
-          live in their own row below so they can never be clipped. */}
+          drawer, and the chips that can be acted on (Redispatch) live in
+          their own row below so they can never be clipped. */}
       <div
         className={
           "mt-1.5 flex items-center gap-1.5 overflow-hidden text-xs text-muted-foreground [&>*]:shrink-0 " +
@@ -507,7 +494,7 @@ export function CardItem({
       {/* Action row. Kept out of the clipped metadata row above: a quick-action
           that is half-clipped is a quick-action you cannot click. Renders only
           for the two states that have one, so it costs zero height otherwise. */}
-      {(canRedispatch || (isIntake && onPromote)) && (
+      {canRedispatch && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         {canRedispatch && (
           <Button
@@ -527,26 +514,6 @@ export function CardItem({
           >
             <RefreshCw className="mr-1 h-3 w-3" aria-hidden="true" />
             {redispatching ? "Redispatching…" : "Redispatch"}
-          </Button>
-        )}
-        {isIntake && onPromote && (
-          <Button
-            size="sm"
-            variant="default"
-            className="h-6 px-2 text-[10px]"
-            onClick={(e) => {
-              // Same rationale as Redispatch: a button inside a clickable
-              // card must NOT open the drawer — only the button's own
-              // handler runs.
-              e.stopPropagation();
-              onPromote(card);
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
-            data-testid="promote-to-project-quick-action"
-            title="Promote this intake card to a brand-new project on the kanban board"
-          >
-            <Rocket className="mr-1 h-3 w-3" aria-hidden="true" />
-            Promote to project
           </Button>
         )}
         </div>

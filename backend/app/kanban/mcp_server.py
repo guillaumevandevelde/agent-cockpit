@@ -892,11 +892,11 @@ async def attach_deliverable(card_id: str, kind: str, ref: str) -> dict:
     blank spec card.
 
     `plan`/`plan_ref` are wired by their own tools (`add_plan_attachment`),
-    but may also be posted through this same endpoint. The
-    **intake-correct route** for `plan` on a *childless* card is this tool —
-    `add_plan_attachment` requires `child_card_ids` and rejects a card with
-    no children, so an intake card that wants to carry a plan deliverable
-    must use `attach_deliverable(kind="plan", ref=<markdown body>)` here.
+    but may also be posted through this same endpoint. The **correct route**
+    for `plan` on a *childless* card is this tool — `add_plan_attachment`
+    requires `child_card_ids` and rejects a card with no children, so a
+    childless card that wants to carry a plan deliverable must use
+    `attach_deliverable(kind="plan", ref=<markdown body>)` here.
     """
     if not ref:
         return {"error": "invalid_ref", "card_id": card_id,
@@ -1455,73 +1455,6 @@ async def add_plan_attachment(
 
 
 @mcp.tool()
-async def create_project_from_intake(
-    intake_card_id: str,
-    project_name: str,
-    target_path: str,
-) -> dict:
-    """Promote an intake card on the meta-project to a brand-new project on
-    the kanban board.
-
-    Drives the inceptie-pipeline (kanban card c33b2f14, facet A of
-    platform-as-app-factory — `docs/cockpit/product-inceptie-pipeline.md`
-    §4 optie 2). The action is atomic: any failure between the 6 steps
-    rolls back filesystem + kanban-DB + Project row + autodispatch-meta
-    so the system is never left half-registered. The intake card lands on
-    Done with a `**Promoted to project:** …` comment when the action
-    succeeds.
-
-    Steps:
-      1. Validate the card is in the `intake` column on its current project.
-      2. mkdir `target_path` (refuses to clobber).
-      3. `git init --initial-branch=main <target_path>`.
-      4. Write minimal `.claude/CLAUDE.md` (placeholder until sibling kanban
-         card 395590d lands `BlueprintService.apply()`).
-      5. `ProjectService.add_project(name, target_path)`.
-      6. `KanbanMeta:autodispatch:<new_project_key>` = enabled.
-      7. Create the first kanban card in the new project's Backlog (carrying
-         over the intake card's title + description + metadata; with a
-         `plan_ref` deliverable linking back to the intake card).
-      8. Move the intake card to Done with a `**Promoted to project:** …`
-         comment so the meta-project's activity feed shows the birth.
-
-    Args:
-        intake_card_id: The id of the intake card to promote. Must be in the
-            `intake` column — cards on Backlog/Doing/etc. are rejected.
-        project_name: The new project's display name (and `Project.name`).
-        target_path: Absolute filesystem path for the new project. Must not
-            exist yet; the action refuses to clobber.
-
-    Returns:
-        On success: `{"project_id": int, "new_project_key": str,
-        "first_card_id": str}`. The new project is reachable as a kanban
-        bucket and the dispatcher will pick up the first card on its next
-        tick (autodispatch is enabled).
-
-        On failure: `{"error": "<reason>", ...}`. Nothing was registered —
-        the action's own rollback ran.
-    """
-    from app.database import AsyncSessionLocal
-    from app.services.inception_service import InceptionService
-
-    try:
-        async with KanbanSessionLocal() as ks, AsyncSessionLocal() as app_db:
-            svc = InceptionService(ks, app_db)
-            result = await svc.create_project_from_intake(
-                intake_card_id=intake_card_id,
-                project_name=project_name,
-                target_path=target_path,
-            )
-        return result
-    except ValueError as e:
-        return {"error": "validation_failed", "message": str(e)}
-    except FileExistsError as e:
-        return {"error": "target_path_exists", "message": str(e)}
-    except RuntimeError as e:
-        return {"error": "scaffold_failed", "message": str(e)}
-
-
-@mcp.tool()
 async def create_project_from_interview(
     project_name: str,
     target_path: str,
@@ -1536,11 +1469,10 @@ async def create_project_from_interview(
     that bundle becomes a brand-new project on the kanban board in one
     atomic transaction.
 
-    Runs alongside ``create_project_from_intake`` (which still promotes an
-    intake card) — this is the route that drops the meta-board card
-    entirely. No intake card is moved to Done; the first kanban card in
-    the new project carries ``metadata["spec_doc"]`` pointing at the
-    design doc so the spec-driven-development pipeline can trace it.
+    This is the only birth route — no meta-board card is involved. The
+    first kanban card in the new project carries ``metadata["spec_doc"]``
+    pointing at the design doc so the spec-driven-development pipeline can
+    trace it.
 
     The action is atomic: any failure rolls back filesystem (rm -rf the
     target dir), the Project row, the autodispatch-meta, and the partial

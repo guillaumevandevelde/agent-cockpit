@@ -95,7 +95,7 @@ export function BlueprintsPage() {
           <p className="text-sm text-muted-foreground mt-1">
             Version-pinned recipes that seed a project's{' '}
             <code>.claude/</code> folder on demand. Used by{' '}
-            <code>create_project_from_intake</code> and any operator who
+            <code>create_project_from_interview</code> and any operator who
             wants to onboard a new project with a known-good baseline.
           </p>
         </div>

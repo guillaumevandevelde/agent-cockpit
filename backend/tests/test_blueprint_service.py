@@ -1,7 +1,7 @@
 """Tests for BlueprintService — the .claude/ seeding engine.
 
 Acceptance criteria from facet A sibling #4 (card 395590d7) and the
-`create_project_from_intake` card (0260dbcd):
+`create_project_from_interview` card (0260dbcd):
 - `apply()` creates settings.json, the declared subdirs, optional CLAUDE.md
 - `apply()` is atomic: a write failure leaves the project without a
   half-written `.claude/`

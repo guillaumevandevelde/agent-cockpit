@@ -49,7 +49,7 @@ te dispatchen.
 ## 2. Eindoordeel: hoe geschikt is Cockpit vandaag?
 
 **Kort antwoord.** Cockpit kan vandaag, zonder verdere implementatie,
-het volledige pad lopen: mens-goedgekeurd idee → intake-kaart →
+het volledige pad lopen: mens-goedgekeurd idee →
 spec + plan → nieuw gitrepo met baseline-`.claude/`-configuratie,
 scaffold-template, git-historie en registratie in het portfolio →
 autonome kanban-dispatch die het nieuwe project verder opbouwt via
@@ -74,7 +74,7 @@ een app-fabriek.
 
 | Facet | Bouwsteen | Status | Bewijs |
 |---|---|---|---|
-| A — Inceptie | `intake`-kolom + `kanban.create_project_from_intake` (Optie 2 uit A§4) | ✅ geïmplementeerd | `backend/app/services/inception_service.py`, `POST /api/v1/kanban/projects/from-intake` |
+| A — Inceptie | Kaartloos interview + `kanban.create_project_from_interview` (optie 3; herziet optie 2 uit A§4 — zie [`kaartloze-app-inceptie-decision.md`](./kaartloze-app-inceptie-decision.md)) | ✅ geïmplementeerd | `backend/app/services/inception_service.py`, `POST /api/v1/kanban/projects/from-interview` |
 | A | `BlueprintService` (baseline-blueprint + apply-engine) | ✅ | `backend/app/services/blueprint/{baseline,apply_engine,store}.py` |
 | A | Plans ↔ kanban-DB fusie (drie-bomen-probleem opgelost) | ✅ | `kanban_plans`-tabel, `KanbanPlan`-model |
 | A | Deliverable-kind `spec` (companion van `plan`) | ✅ | kanban-schema |

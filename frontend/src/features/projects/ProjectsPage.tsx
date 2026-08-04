@@ -3,7 +3,6 @@
  */
 import { useState } from 'react';
 import { FolderOpen, FolderPlus, Sparkles, ArrowRight } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { useProjectContext } from '@/contexts/ProjectContext';
 import { ProjectList } from './ProjectList';
 import { ProjectDiscovery } from './ProjectDiscovery';
@@ -16,8 +15,8 @@ import { RefreshButton } from '@/components/shared/RefreshButton';
 // Link to the canonical doc that explains the spec-driven new-project flow.
 // The flow lives in `docs/cockpit/new-project-startup-flow.md` and is
 // surfaced here so a user landing on this page knows there are TWO ways to
-// get a project into the list: "birth" (spec-driven intake → Promote) versus
-// "track" (Add Folder for an existing directory).
+// get a project into the list: "birth" (a spec-driven `/new-app` interview)
+// versus "track" (Add Folder for an existing directory).
 // Read the full flow button. Keep the URL on `claude-cockpit` (not
 // `agent-cockpit`) until the upstream GitHub repo is actually renamed:
 // rebrand commit 60a097d swept this string with the brand sweep, but the
@@ -56,11 +55,10 @@ export function ProjectsPage() {
       </div>
 
       {/* Discoverability hint — distinguishes "birth a new spec-driven project"
-          (intake → spec → Promote → new repo with seeded .claude/) from
-          "track an existing folder" (Add Folder / Discover above). A user who
-          came here to start a new app-idea used to have to dig through
-          ~8 docs + a skill + a kanban button; the flow is fully built but
-          the entry point was hidden. See
+          (interview → design + plan → a fresh repo) from "track an existing
+          folder" (Add Folder / Discover above). The birth route is cardless
+          (kanban card d0531c12…): it runs as an interactive `/new-app`
+          session, so there is no button here to click. See
           docs/cockpit/new-project-startup-flow.md §4. */}
       <Card className="border-amber-500/40 bg-amber-50/40 dark:bg-amber-950/20">
         <CardHeader>
@@ -71,20 +69,15 @@ export function ProjectsPage() {
           <CardDescription>
             The &ldquo;Add Folder&rdquo; button above is for{' '}
             <em>tracking an existing folder</em>. To <em>birth a new
-            spec-driven project</em> (intake-kaart → design-doc →
-            plan → Promote into a fresh git-repo with seeded{' '}
-            <code>.claude/</code>), start on the Kanban board&apos;s{' '}
-            <strong>intake</strong> column.
+            spec-driven project</em>, run{' '}
+            <code>/new-app</code> in an interactive Claude Code session: an
+            interview turns your idea into a design-doc + TDD-plan, then
+            births a fresh git-repo with seeded <code>.claude/</code>, the
+            design and plan committed as repo files, and a first Backlog
+            card. It appears in this list when it&apos;s done.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <Link
-            to="/kanban"
-            className={buttonVariants({ variant: 'default' }) + ' gap-2'}
-          >
-            Go to Kanban &mdash; intake column
-            <ArrowRight className="h-4 w-4" />
-          </Link>
           <a
             href={SPEC_DRIVEN_FLOW_DOC_URL}
             target="_blank"

@@ -308,7 +308,7 @@ async def test_update_column_can_set_default_model():
 
 @pytest.mark.asyncio
 async def test_ensure_awaiting_subtasks_column_creates_row_ranked_before_done():
-    """Idempotent helper, mirrors ensure_analyst_column/ensure_intake_column:
+    """Idempotent helper, mirrors ensure_analyst_column:
     creates the row once, ranks it just before `Done`, and a second call is
     a no-op (returns False, no duplicate row)."""
     async with KanbanSessionLocal() as s:

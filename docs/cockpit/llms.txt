@@ -68,9 +68,10 @@
 - [Beslissing: database-plafond — SQLite-concurrency-grens vs. Postgres](./database-scaling-decision.md): type=decision status=decided
 - [Beslissing: headless SessionEnd-retro voor niet-gedispatchte sessies](./headless-session-retro-decision.md): type=decision status=decided
 - [Beslissing: human-takeover-UX voor headless sessies](./human-takeover-headless-decision.md): type=decision status=decided
-- [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md): type=decision status=decided
-- [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md): type=decision status=decided
+- [Interview-/intake-authoring-flow: van vrij gesprek naar ingevulde intake-kaart](./intake-authoring-flow-decision.md): type=decision status=superseded
+- [Beslissing: `intake_kind` nu toevoegen, of YAGNI?](./intake-kind-decision.md): type=decision status=superseded
 - [Beslissing — Kaart-modal wordt lees-first (richting A), geen aparte kaart-pagina](./kaart-modal-leesfirst-decision.md): type=decision status=decided
+- [Kaartloze app-inceptie: interview → geboorte, zonder intake-kaart](./kaartloze-app-inceptie-decision.md): type=decision status=decided
 - [LiteLLM als sidecar — lifecycle, faalgedrag en scope van het kritieke pad](./litellm-sidecar-lifecycle-decision.md): type=decision status=decided
 - [Beslissing: orchestratie-substraat — tmux + CLI-scraping vs. Claude Agent SDK / headless](./orchestration-substrate-decision.md): type=decision status=decided
 - [Per-persona MCP-tool-allowlist — analyse & beslissing](./per-persona-mcp-allowlist-decision.md): type=decision status=decided
@@ -106,7 +107,7 @@
 - [Analyse — verweesde `depends_on` blokkeren kaarten permanent en onzichtbaar](./dangling-depends-on-analyse.md): type=analysis status=active
 - [Analyse — is auto-dispatch vastgeklonken aan het Anthropic-abonnement?](./dispatch-vendor-koppeling-analyse.md): type=analysis status=active
 - [Spike: headless `stream-json`-transport (Claude) achter `SpawnTransport`](./headless-stream-json-transport-spike.md): type=analysis status=decided
-- [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md): type=analysis status=active
+- [Routing van intake-kaarten — analyse & ontwerpbesluit](./intake-card-routing-analysis.md): type=analysis status=superseded
 - [Wat kunnen we leren van JIRA? — kritische analyse](./jira-lessen-analyse.md): type=analysis status=active
 - [Analyse — Kanban Pro (donkruger/Kanban): wat kunnen we overnemen of leren?](./kanban-pro-analyse.md): type=analysis status=active
 - [Kennisopbouw & navigatie — hoe structureren we de docs-berg](./knowledge-structure-navigation-analysis.md): type=analysis status=proposed

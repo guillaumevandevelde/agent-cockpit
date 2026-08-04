@@ -34,7 +34,6 @@ export function Board({
   cardMeta,
   subtaskCounts,
   projectPath,
-  onPromote,
 }: {
   columns: KanbanColumn[];
   cards: Card[];
@@ -46,9 +45,6 @@ export function Board({
   // Threaded down to Column → CardItem so the Impediment `dispatch_failed`
   // badge can render a Redispatch quick-action.
   projectPath?: string;
-  // Inceptie-pipeline entry point — threaded to intake cards so the
-  // Promote-to-project button can open the dialog at the page level.
-  onPromote?: (c: Card) => void;
 }) {
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const [collapseOverrides, setCollapseOverrides] = useState(readCollapseOverrides);
@@ -111,7 +107,6 @@ export function Board({
             cardMeta={cardMeta}
             subtaskCounts={subtaskCounts}
             projectPath={projectPath}
-            onPromote={onPromote}
             collapsed={collapsed}
             onToggleCollapsed={() => toggleCollapsed(col.id, collapsed)}
           />
@@ -137,7 +132,6 @@ export function Board({
             cardMeta={cardMeta}
             subtaskCounts={subtaskCounts}
             projectPath={projectPath}
-            onPromote={onPromote}
             collapsed={collapsed}
             onToggleCollapsed={() => toggleCollapsed(key, collapsed)}
           />

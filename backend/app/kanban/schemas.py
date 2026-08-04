@@ -64,11 +64,7 @@ def _validate_column_overrides_value(value: Any) -> Any:
 
 # Fixed kanban columns. Cards on a fixed column are never auto-dispatched
 # (dispatch pulls from `_DISPATCH_COLUMNS` in dispatch.py, which is the
-# explicit "Backlog" + "To Resume" pair). The `intake` column was added
-# for the inceptie-pipeline (facet A of platform-as-app-factory,
-# `docs/cockpit/product-inceptie-pipeline.md` §4 optie 2): humans put an
-# idea on `intake` and the inceptie-action promotes it to a new project
-# via `create_project_from_intake`. See sibling kanban card c33b2f14.
+# explicit "Backlog" + "To Resume" pair).
 #
 # When you change this list: the project-level column sync on
 # POST /api/v1/kanban/enable creates any missing `kanban_columns` rows.
@@ -77,7 +73,7 @@ def _validate_column_overrides_value(value: Any) -> Any:
 # in service.py runs. See docs/cockpit/kanban-conventions.md §1 for the
 # full convention map and scripts/check-kanban-conventions.sh for the
 # validator that catches the "stale column" bug class.
-COLUMNS = ["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]
+COLUMNS = ["Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]
 DELIVERABLE_KINDS = ["pr", "branch", "commit", "link", "note"]  # the short enum clients validate against; `plan`, `plan_ref`, `spec` are wired by their own tools — see docs/cockpit/kanban-conventions.md §3
 
 # Machine-readable card → spec-doc link (spec-driven-development Fase 1). A
@@ -634,25 +630,6 @@ class DispatchRequest(BaseModel):
     agent: str | None = None  # override: use this agent instead of card's agent
 
 
-class CreateProjectFromIntakeRequest(BaseModel):
-    """Body for POST /api/v1/kanban/projects/from-intake.
-
-    Drives the inceptie-pipeline (facet A of platform-as-app-factory,
-    `docs/cockpit/product-inceptie-pipeline.md` §4 optie 2): an intake card
-    on the meta-project becomes a brand-new project on the kanban board in
-    one atomic transaction. See kanban card c33b2f14."""
-    intake_card_id: str
-    project_name: str
-    target_path: str  # absolute path; mkdir + git init land here
-
-
-class CreateProjectFromIntakeResponse(BaseModel):
-    """Return shape after a successful inceptie-pipeline promotion."""
-    project_id: int
-    new_project_key: str
-    first_card_id: str
-
-
 class CreateProjectFromInterviewRequest(BaseModel):
     """Body for POST /api/v1/kanban/projects/from-interview.
 
@@ -681,10 +658,10 @@ class CreateProjectFromInterviewRequest(BaseModel):
 class CreateProjectFromInterviewResponse(BaseModel):
     """Return shape after a successful cardless interview birth.
 
-    Identical to ``CreateProjectFromIntakeResponse`` — the new project_key +
-    project_id + first_card_id is the same shape every promotion path
-    returns. Kept as a separate model so a future divergence (e.g. the
-    interview route returning the spec_doc path) can be additive.
+    The new project_key + project_id + first_card_id is the canonical
+    return shape for the inceptie-pipeline. Kept as a separate model so a
+    future divergence (e.g. the interview route returning the spec_doc
+    path) can be additive.
     """
     project_id: int
     new_project_key: str

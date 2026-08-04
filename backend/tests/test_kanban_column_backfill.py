@@ -10,8 +10,8 @@ Backlog cards, because 25 cards sat on a ``To Resume`` column that had no row).
 that: an enabled board (≥1 ``kanban_columns`` row) gets a row for every name in
 ``schemas.COLUMNS``, idempotently and with no migration system involved. That is
 the same invariant ``scripts/check-kanban-conventions.sh`` already asserts — the
-script reported this exact board as stale ("missing fixed columns: intake, To
-Resume") without anything acting on it.
+script reported this exact board as stale ("missing fixed columns: To Resume")
+without anything acting on it.
 
 It cannot invent a policy for *non-fixed* names (an agent column whose row was
 deleted, a legacy ``Doing``); the frontend renders those as a flagged
@@ -58,8 +58,7 @@ async def test_fixed_column_holding_cards_is_backfilled_on_load():
             f"renders no lane for card {cid}"
         )
         # The lanes the operator already arranged keep their relative order;
-        # repaired ones are appended rather than shuffled into the middle
-        # (`intake` excepted — it has its own leftmost placement rule).
+        # repaired ones are appended rather than shuffled into the middle.
         assert [n for n in names if n in ("Backlog", "Done")] == ["Backlog", "Done"]
         assert names.index("Backlog") < names.index("To Resume")
 
@@ -129,25 +128,6 @@ async def test_non_fixed_column_is_not_invented_by_the_backend():
         })
 
         assert "engineer" not in [c["name"] for c in await _columns(ac, "P")]
-
-
-@pytest.mark.asyncio
-async def test_intake_backfill_lands_leftmost():
-    """``intake`` keeps its own placement rule (leftmost, the natural
-    intake → Backlog → … → Done flow) rather than being appended."""
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://t") as ac:
-        for i, name in enumerate(("Backlog", "Done")):
-            await ac.post("/api/v1/kanban/columns", json={
-                "project_key": "P", "name": name, "rank": f"{i:04d}",
-            })
-        await ac.post("/api/v1/kanban/cards", json={
-            "project_key": "P", "title": "idea", "column": "intake",
-            "confirm_new_project": True,
-        })
-
-        names = [c["name"] for c in await _columns(ac, "P")]
-        assert names[0] == "intake", names
 
 
 @pytest.mark.asyncio

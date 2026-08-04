@@ -123,7 +123,7 @@ dispatch), `git-ship` en `flag-problem` worden elke sessie aangeboden.
 | `open_gate` | ✅ | ❌ | ❌ | engineer-persona |
 | `request_review` | ❌ | ✅ | ✅ | analyst-persona (review-kaarten) |
 | `update_card` | ~ | ~ | ~ | incidenteel, geen persona schrijft 't voor |
-| `create_project_from_intake` | ❌ | ❌ | ❌ | alleen `intake-authoring` (interactief, **niet** gedispatcht) |
+| `create_project_from_interview` | ❌ | ❌ | ❌ | alleen de `new-app`-skill (interactief, **niet** gedispatcht). Heette `create_project_from_intake` tot de intake-route werd gesloopt (kaart `d0531c12…`). |
 | `reopen_card` | ❌ | ❌ | ❌ | menselijke actie |
 | `claim_card` / `release_card` | ❌ | ❌ | ❌ | dispatcher; sessie krijgt de kaart al geclaimd |
 | `set_resume` / `redispatch_card` | ❌ | ❌ | ❌ | dispatch-interne flows |

@@ -21,7 +21,7 @@ from app.kanban.dep_resolver import (
     classify_hold,
 )
 
-BOARD_COLUMNS = ["intake", "Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]
+BOARD_COLUMNS = ["Backlog", "Impediment", "Awaiting Subtasks", "Done", "To Resume"]
 
 
 class _FakeDeliverable:
