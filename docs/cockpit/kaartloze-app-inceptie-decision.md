@@ -106,6 +106,18 @@ gelden: het interview draait native interactief, buiten de dispatcher.
 
 ## 5. Wat er níet verandert
 
+- ✅ Geïmplementeerd (kaart `32c8b05f…`): de duurzame scratch-map
+  `~/.claude-registry/interviews/<slug>/` accumuleert stil na een
+  geannuleerd interview of een gecrashte birth; een vangnet bemant
+  deze voorraad. `scripts/sweep_stale_interviews.py` signaleert
+  (a) `born`-fase dirs die hun `mv .trash/` misliepen, en
+  (b) interviews ouder dan 7 dagen — read-only, advisory, met
+  `--strict` voor CI; `cockpit.sh start` nudget wanneer er hits
+  zijn. Elke rij bevat het letterlijke
+  `/new-app --resume <slug>`-commando; in de `born`-fase voert resume
+  eerst de geboortecontrole uit en daarna de uitgestelde `mv` naar
+  `.trash/`. Zie `scripts/test_sweep_stale_interviews.sh` voor het
+  contract.
 - **`WORK_TYPES`** blijft vierwaardig. Er komt geen `work_type="intake"` —
   [`intake-card-routing-analysis.md`](./intake-card-routing-analysis.md) §2 wees
   dat al af en die afwijzing blijft staan (nu permanent: er zijn geen

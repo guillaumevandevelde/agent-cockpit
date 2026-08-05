@@ -464,6 +464,39 @@ print(d["totals"]["fully_merged"])' 2>/dev/null)" || hits=""
     fi
 }
 
+# Vangnet voor stale new-app interview scratch mappen. De
+# kaartloze-inceptie-route (docs/cockpit/kaartloze-app-inceptie-decision.md
+# §5) schrijft elke lopende interview naar ~/.claude-registry/interviews/<slug>/
+# en laat die map bewust staan — ook na een mislukte geboorte of halverwege
+# afgebroken sessie. Dat is correct voor resume, maar creëert een nieuwe
+# voorraad die stil accumuleert. De sweeper is read-only — zelfde signaal-
+# without-gate-postuur als run_merged_branches_sweeper: surface the hits,
+# laat de operator (of een follow-up chore card) beslissen tussen hervatten
+# (`/new-app --resume <slug>`) en opruimen (het `mv` uit de row).
+run_stale_interviews_sweeper() {
+    [ -x "$SCRIPT_DIR/sweep_stale_interviews.py" ] || return 0
+    local out hits
+    if ! out="$(python3 "$SCRIPT_DIR/sweep_stale_interviews.py" 2>&1)"; then
+        # Missing interviews dir, no Python — never block start.
+        sup_log "stale-interviews-sweeper: skip (sweeper niet kunnen draaien)"
+        return 0
+    fi
+    hits="$(echo "$out" | python3 -c \
+        'import json,sys
+try:
+    d=json.loads(sys.stdin.read())
+except Exception:
+    sys.exit(1)
+print(d["totals"]["flagged"])' 2>/dev/null)" || hits=""
+    if [ -n "$hits" ] && [ "$hits" -gt 0 ] 2>/dev/null; then
+        sup_log "stale-interviews-sweeper: $hits stale interview-map(pen) gevonden (zie scripts/sweep_stale_interviews.py)"
+        echo "stale-interviews-sweeper: $hits stale interview-scratch-map(pen) gevonden."
+        echo "  inspecteer met: python3 scripts/sweep_stale_interviews.py"
+        echo "  per row: hervat met \`/new-app --resume <slug>\` (interview/ready_for_birth)"
+        echo "           of ruim op met het \`mv\`-commando uit \`resume_cmd\` (born)"
+    fi
+}
+
 cmd_start() {
     if is_running "$RUN_DIR/supervisor.pid" "$SUPERVISOR_MARKER"; then
         echo "Cockpit draait al (supervisor pid $(cat "$RUN_DIR/supervisor.pid")). Gebruik 'restart' of 'status'."
@@ -474,6 +507,7 @@ cmd_start() {
         ensure_deps || return 1
         run_worktree_gc
         run_merged_branches_sweeper
+        run_stale_interviews_sweeper
         run_doctor
     fi
     # Preflight: don't crash-loop fighting another stack for the ports. Skipped
