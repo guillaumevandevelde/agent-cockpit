@@ -700,6 +700,13 @@ class ColumnResponse(BaseModel):
     # Per-lane token-saver (RTK) opt-in flag. SQLite 0/1 surfaced as bool;
     # see docs/superpowers/specs/2026-07-24-token-saver-integration-design.md.
     token_saver_enabled: bool = False
+    # Per-lane prompt-injector opt-in flags (kaart d0446fd8…). Independent
+    # switches — toggling one does not move the other. SQLite 0/1 surfaced
+    # as bool; the dispatch hot path reads them via
+    # ``app.kanban.prompt_injectors.resolve_active_injectors`` on every
+    # spawn. Default false = off (acceptance criterion: never on by default).
+    caveman_enabled: bool = False
+    ponytail_enabled: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -713,6 +720,8 @@ class ColumnCreate(BaseModel):
     default_model: str | None = None
     max_sessions: int | None = None
     token_saver_enabled: bool | None = None
+    caveman_enabled: bool | None = None
+    ponytail_enabled: bool | None = None
 
 
 class ColumnUpdate(BaseModel):
@@ -723,6 +732,8 @@ class ColumnUpdate(BaseModel):
     default_model: str | None = None
     max_sessions: int | None = None
     token_saver_enabled: bool | None = None
+    caveman_enabled: bool | None = None
+    ponytail_enabled: bool | None = None
 
 
 # Project-scoped runtime kill-switch for the per-lane token-saver. Mirrors
@@ -731,6 +742,17 @@ class ColumnUpdate(BaseModel):
 # a backend restart. See
 # docs/superpowers/specs/2026-07-24-token-saver-integration-design.md §7.2.
 class TokenSaverRequest(BaseModel):
+    project_key: str
+    enabled: bool
+
+
+# Project-scoped runtime kill-switch for the per-lane prompt-injectors
+# (Caveman + Ponytail, kaart d0446fd8…). Mirrors TokenSaverRequest above:
+# a single ``prompt_injector:<project_key>`` row in KanbanMeta flipped to
+# "1" disables BOTH injectors regardless of the per-column flags.
+# Hot-path read; the kill-switch takes effect on the next dispatch tick
+# without a backend restart.
+class PromptInjectorRequest(BaseModel):
     project_key: str
     enabled: bool
 

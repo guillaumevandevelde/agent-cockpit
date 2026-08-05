@@ -58,6 +58,7 @@ from app.kanban.schemas import (
     SubscriptionPoolRequest,
     TakeOverRequest,
     TokenSaverRequest,
+    PromptInjectorRequest,
     UpdatePlanAttachmentRequest,
     WachtrijItem,
     WachtrijResponse,
@@ -1707,6 +1708,44 @@ async def set_token_saver(payload: TokenSaverRequest):
     from app.kanban import token_saver
     async with KanbanSessionLocal() as s:
         await token_saver.set_board_enabled(
+            s, payload.project_key, payload.enabled,
+        )
+        await s.commit()
+    return {"project_key": payload.project_key, "enabled": payload.enabled}
+
+
+@router.get("/prompt-injector")
+async def get_prompt_injector(project_key: str = Query(...)):
+    """Read the per-project prompt-injector kill-switch (kaart d0446fd8…).
+
+    Returns the current state of the ``prompt_injector:<project_key>``
+    row in ``KanbanMeta``. The dispatcher reads this on every spawn
+    tick so toggling off via this endpoint takes effect on the next
+    dispatch without a backend restart. When the kill-switch is
+    engaged, BOTH per-column flags (caveman/ponytail) are suppressed
+    regardless of their value.
+    """
+    from app.kanban import prompt_injectors
+    async with KanbanSessionLocal() as s:
+        return {
+            "project_key": project_key,
+            "enabled": await prompt_injectors.is_kill_switch_on(s, project_key),
+        }
+
+
+@router.post("/prompt-injector")
+async def set_prompt_injector(payload: PromptInjectorRequest):
+    """Persist the per-project prompt-injector kill-switch.
+
+    Idempotent. Writes ``"1"`` for engaged, ``"0"`` for cleared —
+    matches the convention used by ``token_saver.set_board_enabled``
+    and ``dispatch.set_autodispatch``. Operators flip the toggle in
+    the UI, not via dispatch — the KanbanMeta table is device-local
+    (not op-log-backed), so no audit comment is posted.
+    """
+    from app.kanban import prompt_injectors
+    async with KanbanSessionLocal() as s:
+        await prompt_injectors.set_kill_switch_on(
             s, payload.project_key, payload.enabled,
         )
         await s.commit()
