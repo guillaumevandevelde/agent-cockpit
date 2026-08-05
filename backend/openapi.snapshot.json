@@ -5869,6 +5869,47 @@
         "title": "CreateGroupRequest",
         "type": "object"
       },
+      "CreateProjectFromInterviewRequest": {
+        "description": "Body for POST /api/v1/kanban/projects/from-interview.\n\nCardless inceptie-flow (kanban card b9e6365a\u2026): an interactive interview\nproduces spec + plan + title + description, and that bundle becomes a\nbrand-new project on the kanban board in one atomic transaction. No\nintake card is involved \u2014 the meta-board never sees this idea before\nbirth. See `docs/cockpit/kaartloze-app-inceptie-decision.md` (optie 3).\n\n``spec_md`` and ``plan_md`` land as repo files at\n``docs/specs/<YYYY-MM-DD>-<slug>-design.md`` and\n``docs/plans/<YYYY-MM-DD>-<slug>-plan.md`` (slug derived from\n``project_name``) before the first commit, and the first kanban card's\n``metadata[SPEC_DOC_META_KEY]`` is set to the spec path so the\nspec-driven-development pipeline can trace it. Empty spec/plan is\nrejected at the service layer.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "plan_md": {
+            "minLength": 1,
+            "title": "Plan Md",
+            "type": "string"
+          },
+          "project_name": {
+            "title": "Project Name",
+            "type": "string"
+          },
+          "spec_md": {
+            "minLength": 1,
+            "title": "Spec Md",
+            "type": "string"
+          },
+          "target_path": {
+            "title": "Target Path",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_name",
+          "target_path",
+          "title",
+          "spec_md",
+          "plan_md"
+        ],
+        "title": "CreateProjectFromInterviewRequest",
+        "type": "object"
+      },
       "CreateProjectFromInterviewResponse": {
         "description": "Return shape after a successful cardless interview birth.\n\nThe new project_key + project_id + first_card_id is the canonical\nreturn shape for the inceptie-pipeline. Kept as a separate model so a\nfuture divergence (e.g. the interview route returning the spec_doc\npath) can be additive.",
         "properties": {
@@ -27990,6 +28031,48 @@
           }
         },
         "summary": "Project Key",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/projects/from-interview": {
+      "post": {
+        "description": "REST mirror of the MCP `create_project_from_interview` tool.\n\nCardless inceptie-flow (kanban card b9e6365a\u2026,\n`docs/cockpit/kaartloze-app-inceptie-decision.md` optie 3): an\ninteractive interview produces spec + plan + title + description, and\nthat bundle becomes a brand-new project on the kanban board in one\natomic transaction. No intake card is involved; the meta-board never\nsees this idea before birth.\n\nAction is atomic across filesystem (rm -rf the target dir), Project row,\nautodispatch-meta, and the partial first kanban card. Empty\n``spec_md`` or ``plan_md`` is rejected by the Pydantic schema (422)\n*before* any side effect; the service layer re-validates as a defense\nin depth.\n\nReturns the new `project_id`, the resolved `new_project_key`\n(slug:<basename> for git-init repos without a remote), and the id of\nthe first kanban card placed in the new project's Backlog. The first\ncard carries ``metadata[\"spec_doc\"]`` pointing at the design doc \u2014\nthe spec-driven-development pipeline can trace it from there.",
+        "operationId": "create_project_from_interview_api_v1_kanban_projects_from_interview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectFromInterviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateProjectFromInterviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Project From Interview",
         "tags": [
           "Kanban"
         ]
