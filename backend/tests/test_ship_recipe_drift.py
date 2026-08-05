@@ -68,29 +68,47 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
     # fixed slot collides across concurrent dispatched sessions (kanban
     # card c23dfe46).
     #
-    # `master` (local), NOT `origin/master`: kanban card 5e83b6e0… fourth
-    # iteration. On a multi-session box local master routinely has N commits
-    # ahead of origin/master (other agents' pushes in flight). Basing the
-    # merge on `origin/master` would strand those commits on every ship —
-    # the merge would silently fast-forward to origin/master and miss the
-    # local commits. The integration point is local master; the push to
-    # `origin` is the synchronisation moment. The divergence guard below
-    # makes the push fail-fast if origin/master has raced ahead.
+    # `"$BASE"`, a variable — NOT a hardcoded `master` and NOT a hardcoded
+    # `origin/master`. Both hardcodings are wrong, in opposite directions,
+    # and the recipe now picks between them at runtime:
+    #
+    #   * hardcoded `origin/master` (kanban card 5e83b6e0… fourth
+    #     iteration): on a multi-session box local master routinely has N
+    #     commits ahead of origin/master (other agents' pushes in flight).
+    #     Basing the merge there strands those commits on every ship.
+    #   * hardcoded `master` (this card): paired with a guard that blocked
+    #     on *any* `behind > 0`, it made the ship self-blocking. The
+    #     post-push `pull --ff-only` skips with a WARN whenever the main
+    #     checkout is dirty, so local master falls behind and stays behind,
+    #     and every subsequent ship tripped the guard — with `ahead=0`,
+    #     i.e. with nothing to strand.
+    #
+    # The base-selection block below resolves `$BASE` to local `master`
+    # when local is at/ahead of origin, and to `origin/master` in the
+    # behind-only (`ahead=0`) case. Keep the variable; a future edit that
+    # hardcodes either side reintroduces one of the two bugs.
     (
         "detached-worktree merge target",
-        'git worktree add --detach "$WT" master',
+        'git worktree add --detach "$WT" "$BASE"',
     ),
-    # Divergence guard, paired with the local-master base above (kanban card
-    # 5e83b6e0…). `--is-ancestor origin/master master` returns 0 when
-    # origin/master is reachable from local master — i.e. when local master
-    # is a strict superset of origin/master (the case where a push from
-    # local master would be a fast-forward). In every other shape (origin
-    # ahead, or diverged) the guard fails-fast with `report_impediment`
-    # rather than producing a stale merge or a useless "Everything
-    # up-to-date" push.
+    # Base selection, first arm (kanban card 5e83b6e0…).
+    # `--is-ancestor origin/master master` returns 0 when origin/master is
+    # reachable from local master — i.e. local is at, or ahead of, origin,
+    # and a push from local master would be a fast-forward. That arm keeps
+    # the local-master base so concurrent unpushed commits ride along.
     (
-        "local-master divergence guard",
+        "base selection: local at/ahead of origin",
         "git merge-base --is-ancestor origin/master master",
+    ),
+    # Base selection, second arm (this card). The SYMMETRIC ancestry test:
+    # local master reachable from origin/master = behind-only, `ahead=0`.
+    # Nothing to strand, so the ship proceeds on `origin/master` instead of
+    # blocking. Losing this arm collapses the recipe back to "block on any
+    # behind", which is the self-reinforcing shape this card removed — so
+    # it is pinned as its own invariant, not folded into the arm above.
+    (
+        "base selection: behind-only, nothing to strand",
+        "git merge-base --is-ancestor master origin/master",
     ),
     # Main-checkout path discovery (kanban card 5e83b6e0…). The post-push
     # sync runs against the canonical checkout where `master` is actually
@@ -1539,12 +1557,13 @@ def test_recipe_writing_conventions_doc_does_not_show_add_A_as_good() -> None:
 # an `exit 1`: that is the exact `efb8187b…`/`c06a3a2a…` failure shape, one
 # level down.
 #
-# Local-`master` base (kanban card 5e83b6e0…): the previous
-# `origin/master` base stranded concurrent-session local commits on every
-# ship (the integration point is local master, the push is the
-# synchronisation moment). The base is now local `master` — paired with
-# the divergence guard + post-push main-checkout sync invariants below.
-WORKTREE_ADD = 'git worktree add --detach "$WT" master'
+# Runtime-selected base (kanban card 5e83b6e0… → made ahead-aware by this
+# card): a hardcoded `origin/master` stranded concurrent-session local
+# commits on every ship, and a hardcoded `master` made the ship block on
+# `behind > 0` even when `ahead=0` (nothing to strand). The base is now
+# `$BASE`, resolved by the two-arm ancestry check — paired with the
+# divergence guard + post-push main-checkout sync invariants below.
+WORKTREE_ADD = 'git worktree add --detach "$WT" "$BASE"'
 INDEX_GUARD_GITDIR = 'WT_GITDIR=$(git -C "$WT" rev-parse --absolute-git-dir)'
 INDEX_GUARD_DETECT = 'if [ ! -s "$WT_GITDIR/index" ]'
 INDEX_GUARD_RECOVER = 'git -C "$WT" read-tree HEAD'
