@@ -446,3 +446,115 @@ async def test_rest_endpoint_unknown_project_returns_empty():
 
     assert resp.status_code == 200
     assert resp.json() == {"items": [], "total": 0, "project_key": "ghost"}
+
+
+# ---------------------------------------------------------------------------
+# Free-text resolve closes the open gate (regression — kaart 504b4e8a…)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_close_open_gates_for_card_closes_with_free_text():
+    """A free-text impediment resolve must mark every open KanbanGate on the
+    card as ``answered`` with the human's free-text recorded as the gate
+    answer. ``po_wachtrij`` only surfaces ``status='open'`` gates; until the
+    gate is closed the resolved card lingers on the PO's "wacht op jou" list
+    and ``CardDrawer`` keeps rendering a stale "Decision requested" paneel
+    with the original options (kaart 504b4e8a…).
+
+    Pure service-helper check — the end-to-end wachtrij assertion lives in
+    ``test_kanban_resolve_impediment.py::test_resolve_impediment_closes_open_gate_when_human_uses_free_text``,
+    which exercises the full ``router.resolve_impediment`` path (gate close
+    + ``**Resolution:**`` comment + card move to Backlog)."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="freetext resolve", column="Impediment")
+        await _open_gate(s, cid, question="Pick a database",
+                         options=("Postgres", "SQLite", "MySQL", "MariaDB"))
+        await _post_comment(s, cid, "**Impediment:** Pick a database")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        closed = await service.close_open_gates_for_card(
+            s, cid, free_text_answer="we'll go with Postgres for now",
+        )
+        await s.commit()
+
+    assert len(closed) == 1, "exactly the one open gate must be closed"
+    gate = closed[0]
+    assert gate.status == "answered"
+    assert gate.answer == "we'll go with Postgres for now"
+    assert gate.answered_at is not None
+
+
+@pytest.mark.asyncio
+async def test_close_open_gates_for_card_idempotent_on_already_answered():
+    """Re-running ``close_open_gates_for_card`` after the gate is already
+    answered is a no-op — the returned list is empty, the existing answer is
+    preserved verbatim (we don't clobber a structured pick with the free-text
+    fallback the human supplied on a *later* resolve round)."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="re-resolve")
+        gate = await _open_gate(s, cid,
+                                question="Pick", options=("A", "B", "C", "D"))
+        await service.answer_gate(s, gate.id, "B")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        closed = await service.close_open_gates_for_card(
+            s, cid, free_text_answer="changed my mind, actually A",
+        )
+        await s.commit()
+
+    assert closed == [], "already-answered gates must not be re-closed"
+    async with KanbanSessionLocal() as s:
+        gates = await service.list_gates(s, cid)
+    assert len(gates) == 1
+    assert gates[0].status == "answered"
+    assert gates[0].answer == "B", (
+        "existing structured answer must NOT be overwritten by free-text"
+    )
+
+
+@pytest.mark.asyncio
+async def test_close_open_gates_for_card_default_answer_when_no_text():
+    """When the human resolved without typing free text either (a card
+    predating the textarea, or one resolved via the REST API without an
+    `answer` field), the gate is still closed — it just gets a sentinel
+    answer so the row records that the human acted, not a NULL."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="no text")
+        await _open_gate(s, cid, question="Pick", options=("A", "B", "C", "D"))
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        closed = await service.close_open_gates_for_card(s, cid)
+        await s.commit()
+
+    assert len(closed) == 1
+    assert closed[0].status == "answered"
+    assert closed[0].answer is not None and closed[0].answer.strip(), (
+        "default answer must be a non-empty sentinel, not NULL"
+    )
+
+
+@pytest.mark.asyncio
+async def test_close_open_gates_for_card_handles_multiple_open_gates():
+    """Edge case: a card with multiple open gates (rare but possible if a
+    session re-opened after a partial close) closes them all in one pass."""
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="two gates")
+        await _open_gate(s, cid, question="First",
+                         options=("a", "b", "c", "d"))
+        await _open_gate(s, cid, question="Second",
+                         options=("w", "x", "y", "z"))
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        closed = await service.close_open_gates_for_card(
+            s, cid, free_text_answer="both: pick a and w",
+        )
+        await s.commit()
+
+    assert len(closed) == 2
+    assert {g.status for g in closed} == {"answered"}
+    assert all(g.answer == "both: pick a and w" for g in closed)

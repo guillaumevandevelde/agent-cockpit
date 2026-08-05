@@ -160,3 +160,74 @@ async def test_resolve_impediment_gate_leads_and_free_text_follows(
     assert "mind the connection pool" in answer
     assert answer.index("Postgres") < answer.index("mind the connection pool")
     _ = dispatch_module  # silence unused-import lint (we only need dispatch_mod)
+
+
+@pytest.mark.asyncio
+async def test_resolve_impediment_closes_open_gate_when_human_uses_free_text(
+        monkeypatch, _client):
+    """Regression for kaart 504b4e8a…: when ``report_impediment`` opened a
+    KanbanGate (options=) and the human *only* typed free text — without
+    clicking one of the choice buttons — the gate stayed ``status='open'``
+    forever. The card would then linger on ``po_wachtrij`` (gate_open
+    emission ignores column + Done filter) and ``CardDrawer`` would render a
+    stale "Decision requested" paneel after the card moved to Backlog.
+
+    ``resolve_impediment`` is the single source of truth for "impediment
+    resolved"; it must close every open gate on the card and record the
+    free-text as the gate's answer (so ``service.latest_gate_answer`` keeps
+    forwarding it to the resumed session — same channel a structured pick
+    uses). The frontend (``ImpedimentPage.submit``) deliberately does NOT
+    call ``answerGate`` when the user picks no choice button, so the fix has
+    to live here.
+    """
+    from app.kanban import dispatch as dispatch_mod
+
+    async def fake_dispatch(s, *, card_id, project_path, target_agent,
+                            impediment_question, impediment_answer=None,
+                            transport=None):
+        return {"session_name": "fake"}
+
+    monkeypatch.setattr(dispatch_mod, "dispatch_impediment_card", fake_dispatch)
+
+    # 1. Create card + report_impediment WITH options (gate gets created).
+    card = await m.create_card("P", "freetext-resolve", "details",
+                               agent="engineer", confirm_new_project=True)
+    cid = card["id"]
+    await m.claim_card(cid, "agent:sess")
+    await m.report_impediment(cid, "Postgres or SQLite?",
+                              options=["Postgres", "SQLite", "MySQL", "MariaDB"])
+
+    # 2. Human does NOT click a choice button — only types free-text and
+    #    submits resolve-impediment (the bug scenario).
+    r = await _client.post(
+        f"/api/v1/kanban/cards/{cid}/resolve-impediment",
+        json={"project_path": "/tmp", "target_agent": "engineer",
+              "answer": "stay on Postgres for now, can revisit later"},
+    )
+    assert r.status_code == 200, r.text
+
+    # 3. The open gate must be closed — status=answered, answer recorded.
+    async with KanbanSessionLocal() as s:
+        gates = await service.list_gates(s, cid)
+    assert len(gates) == 1
+    gate = gates[0]
+    assert gate.status == "answered", (
+        f"gate must be closed after free-text resolve, got status={gate.status!r}"
+    )
+    assert gate.answer == "stay on Postgres for now, can revisit later"
+    assert gate.answered_at is not None
+
+    # 4. The card must NOT linger in po_wachtrij (was the second visible
+    #    consequence — gate_open surfaced for any column, even Done).
+    async with KanbanSessionLocal() as s:
+        items = await service.po_wachtrij(s, "P")
+    assert items == [], (
+        f"resolved-with-free-text card must not stay in po_wachtrij; got {items!r}"
+    )
+
+    # 5. The free-text must also reach the resumed session via
+    #    ``service.latest_gate_answer`` so the same channel a structured
+    #    pick uses carries it (kaart c3419f63).
+    async with KanbanSessionLocal() as s:
+        latest = await service.latest_gate_answer(s, cid)
+    assert latest == "stay on Postgres for now, can revisit later"

@@ -2124,6 +2124,23 @@ async def resolve_impediment(cid: str, payload: ImpedimentResolveRequest):
                 payload={"text": f"{dispatch._IMPEDIMENT_ANSWER_PREFIX}{payload.answer.strip()}"})
             await s.commit()
 
+        # Close any open KanbanGate on this card so the resolved state is
+        # internally consistent (kaart 504b4e8a…): when ``report_impediment``
+        # opened a gate via ``options=`` and the human only used free-text
+        # to resolve, ``ImpedimentPage.submit`` deliberately does NOT call
+        # ``answerGate`` — leaving a stale ``status='open'`` gate that
+        # surfaced as ``gate_open`` in ``po_wachtrij`` (any column, even
+        # Done) and as a stale "Decision requested" paneel in ``CardDrawer``
+        # once the card moved off Impediment. The free text becomes the
+        # gate's recorded answer so ``service.latest_gate_answer`` keeps
+        # forwarding it to the resumed session via the same channel a
+        # structured pick uses (kaart c3419f63). Idempotent — already
+        # answered gates are left untouched.
+        await service.close_open_gates_for_card(
+            s, cid, free_text_answer=payload.answer,
+        )
+        await s.commit()
+
         # Get impediment question + latest human answer from activity. Match the
         # exact `**Impediment:** ` prefix (not a loose "Impediment:" substring)
         # so a human's `**Resolution:**` answer that happens to mention the word
