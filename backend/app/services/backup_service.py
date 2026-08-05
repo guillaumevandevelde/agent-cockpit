@@ -1,8 +1,10 @@
 """Service for managing configuration backups."""
 import json
 import logging
+import os
 import re
 import sqlite3
+import sys
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -85,6 +87,70 @@ def kanban_db_path() -> Path | None:
     if not db or db == ":memory:":
         return None
     return Path(db)
+
+
+def _is_kanban_db_held_open(path: Path) -> bool:
+    """Return True iff the kanban DB at ``path`` is currently held open
+    by another process (the running cockpit backend in the typical case).
+
+    Used by ``RestoreService.restore_backup`` to refuse the opt-in
+    kanban-DB restore path (kanban card
+    141f2eba42444ddebc821d4182dd4cea, human direction B:
+    refuse-while-running). The detection walks ``/proc/<pid>/fd`` and
+    checks whether any *other* process has the kanban DB file open via
+    a file descriptor — which is what the cockpit backend does at
+    startup (``backend/app/kanban/db.py`` opens a connection pool that
+    holds the primary file open for the lifetime of the process).
+
+    Why not SQLite's ``BEGIN EXCLUSIVE`` for the check? In WAL mode the
+    DB file is only SHARED-locked for reads and EXCLUSIVE-locked
+    briefly during checkpoints; an idle WAL-mode connection does not
+    hold a lock that another connection's ``BEGIN EXCLUSIVE`` can see,
+    so the check would falsely report "free" against a running engine.
+    The ``/proc`` walk sees the file descriptor regardless of whether
+    SQLite is mid-transaction, mid-checkpoint, or just idle — which
+    is the actual signal we want.
+
+    Returns ``False`` when ``path`` doesn't exist (nothing to corrupt;
+    the ZIP entry creates a fresh DB on disk) and on non-Linux
+    platforms (Windows + macOS would need a different strategy; this
+    detection is best-effort and the operator can still stop the
+    cockpit manually). On Linux + path missing, returns ``False``.
+    """
+    if not path.exists():
+        return False
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        real = str(path.resolve())
+        proc_root = Path("/proc")
+        for fd_dir in proc_root.glob("*/fd"):
+            pid_str = fd_dir.parent.name
+            try:
+                int(pid_str)
+            except ValueError:
+                continue
+            # NOTE: do NOT skip our own PID. The cockpit backend opens
+            # the kanban DB in the same process that handles the
+            # ``/api/v1/backup/<id>/restore`` endpoint, so the live
+            # file descriptor lives under our own ``/proc/self/fd``.
+            # Skipping self would mean the restore path can never
+            # detect the cockpit-itself case.
+            try:
+                for fd in fd_dir.iterdir():
+                    try:
+                        target = os.readlink(str(fd))
+                    except OSError:
+                        continue
+                    if target == real or os.path.realpath(target) == real:
+                        return True
+            except OSError:
+                # Process may have exited between glob and iterdir.
+                continue
+    except OSError:
+        # ``/proc`` not available (container/sandbox without it).
+        return False
+    return False
 
 
 class BackupService:
