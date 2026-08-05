@@ -858,8 +858,8 @@ async def test_active_branch_does_not_mutate_instruction_content(
     }
 
     assert snapshot_after == snapshot_before, (
-        f"instruction content was mutated by the install.\n"
-        f"  diff: " + ", ".join(
+        "instruction content was mutated by the install.\n"
+        "  diff: " + ", ".join(
             f"{k} changed" for k in snapshot_before
             if snapshot_before[k] != snapshot_after.get(k)
         )
