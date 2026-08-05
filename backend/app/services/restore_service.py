@@ -26,8 +26,19 @@ from app.utils.path_utils import get_claude_user_skills_dir, get_user_home
 if TYPE_CHECKING:
     from app.services.backup_service import BackupService
 
-
 logger = logging.getLogger(__name__)
+
+
+def _check_kanban_db_in_use(path: Path) -> bool:
+    """Thin wrapper around ``backup_service._is_kanban_db_held_open``
+    so this module owns the call site and tests can patch a
+    module-level name. Lazy-imported to break the
+    ``backup_service`` ↔ ``restore_service`` circular dependency
+    (``backup_service`` already imports ``RestoreService`` from this
+    module).
+    """
+    from app.services.backup_service import _is_kanban_db_held_open
+    return _is_kanban_db_held_open(path)
 
 
 class RestoreService:
@@ -341,6 +352,56 @@ class RestoreService:
                 if options.skip_plugins and ".claude/plugins/" in member:
                     result.files_skipped += 1
                     continue
+
+                # Kanban DB entry: opt-in (default-skip) plus a
+                # refuse-while-running guard for the opt-in path.
+                # The DB lives at the canonical home-relative path
+                # ``.claude-registry/kanban.db`` (the snapshot is renamed
+                # to that arcname in the ZIP via
+                # ``backup_service.path_renames``). The destructive
+                # item is protected by default — overwriting it silently
+                # rolls the live board back to the snapshot's state and
+                # leaves a stale -wal/-shm sidecar pair, the failure
+                # mode kanban card 18984c63a… flagged. Operators who
+                # want to roll back set ``skip_kanban_db=False``
+                # explicitly; restore_service then refuses the entire
+                # restore if the live kanban DB is still held open by
+                # the running backend (kanban card
+                # 141f2eba42444ddebc821d4182dd4cea, human direction B:
+                # refuse-while-running — extra handeling voor de
+                # operator, in ruil voor maximale veiligheid).
+                is_kanban_db_entry = member.endswith(
+                    ".claude-registry/kanban.db"
+                )
+                if is_kanban_db_entry:
+                    if options.skip_kanban_db:
+                        result.files_skipped += 1
+                        continue
+                    # Opt-in path. Refuse the whole restore when the
+                    # backend still holds the live DB open — opening a
+                    # zip member called ``kanban.db`` over the live
+                    # file would silently corrupt the WAL pair even
+                    # though the overwrite itself is byte-clean.
+                    from app.services.backup_service import kanban_db_path
+                    live_kanban_db = kanban_db_path()
+                    if live_kanban_db is not None and _check_kanban_db_in_use(
+                        live_kanban_db
+                    ):
+                        logger.warning(
+                            "Refused kanban-DB restore while backend holds the live DB open",
+                            extra={"backup_id": backup_id},
+                        )
+                        return RestoreResult(
+                            success=False,
+                            message=(
+                                "Kanban board restore refused: the cockpit "
+                                "backend still holds the kanban DB open in "
+                                "WAL mode. Stop the cockpit and retry — "
+                                "overwriting the primary file while the "
+                                "-wal/-shm sidecars stay live leaves them "
+                                "out of sync and corrupts the board."
+                            ),
+                        )
 
                 # Determine the full target path
                 member_target = target_path / member

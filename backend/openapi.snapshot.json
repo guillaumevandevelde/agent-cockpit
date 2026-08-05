@@ -13830,6 +13830,11 @@
             "title": "Skip Plugins",
             "type": "boolean"
           },
+          "skip_kanban_db": {
+            "default": true,
+            "title": "Skip Kanban Db",
+            "type": "boolean"
+          },
           "skip_skills": {
             "default": false,
             "title": "Skip Skills",
