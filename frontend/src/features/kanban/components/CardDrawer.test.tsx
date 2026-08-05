@@ -1690,7 +1690,13 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(body.contains(title)).toBe(false);
   });
 
-  it("Done card: the same single-scroll-container contract holds", () => {
+  it("Done card: the body is the body scroll container and the DoneSummaryBanner carries its OWN scrollable area inside a max-h cap", () => {
+    // Human decision on kaart d4012bd1…: "Groene samenvatting krijgt een
+    // eigen scrollbalk en mag hoogstens 40% van het venster pakken —
+    // lange samenvatting blijft volledig leesbaar, kaartinhoud houdt
+    // altijd minstens 60%". The body contract is unchanged; the banner
+    // owns a SECOND scroll surface (capped at 40vh) so an unbounded
+    // summary never pushes the rest of the drawer below the modal edge.
     const doneCard: Card = {
       ...baseCard,
       column: "Done",
@@ -1709,12 +1715,40 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     const body = screen.getByTestId("card-drawer-body");
     expect(body.className).toMatch(/\boverflow-auto\b/);
 
-    const scrollables = scrollableElementsInDialog();
-    expect(scrollables).toHaveLength(1);
-    expect(scrollables[0]).toBe(body);
+    const banner = screen.getByTestId("done-summary-banner");
+    // The banner caps its own height at 40vh so a long summary never
+    // grows past that slice of the modal — that's the visual half of the
+    // 60/40 split.
+    expect(banner.className).toMatch(/max-h-\[40vh\]/);
+    // The banner is a flex column so its inner content area can claim
+    // the leftover height and host its own overflow-auto.
+    expect(banner.className).toMatch(/\bflex\b/);
+    expect(banner.className).toMatch(/\bflex-col\b/);
 
+    // The summary text lives in a dedicated scrollable child; together
+    // with `min-h-0` + `flex-1` this is what makes the inner scrollbar
+    // actually paint in a real browser (jsdom doesn't compute layout).
+    const summaryScroll = screen.getByTestId("done-summary-content");
+    expect(summaryScroll.className).toMatch(/\boverflow-auto\b/);
+    expect(summaryScroll.className).toMatch(/\bflex-1\b/);
+    expect(summaryScroll.className).toMatch(/\bmin-h-0\b/);
+
+    // Two scroll-class elements now: the body and the banner's content
+    // scroll area. Anything more means a regression introduced a
+    // nested scrollbar the user has to chase (see CardRunTab /
+    // CardLedgerTab history in this file's commit log).
+    const scrollables = scrollableElementsInDialog();
+    expect(scrollables).toHaveLength(2);
+    expect(scrollables).toContain(body);
+    expect(scrollables).toContain(summaryScroll);
+
+    // The title still sits outside the body — header hierarchy is intact.
     const title = screen.getByRole("heading", { name: "Test card" });
     expect(body.contains(title)).toBe(false);
+    // And the summary scroll area is a descendant of the banner, not of
+    // the body — they're independent scroll surfaces, not nested ones.
+    expect(banner.contains(summaryScroll)).toBe(true);
+    expect(body.contains(summaryScroll)).toBe(false);
   });
 
   it("Agent-claimed card with the Run tab active: the body switches to full-area mode (overflow-hidden), no scroll-class element exists, and the header is outside the full-area container", () => {

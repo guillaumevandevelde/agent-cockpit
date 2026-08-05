@@ -339,6 +339,16 @@ function DeliverableRow({ d }: { d: Deliverable }) {
 // summary + completed_at + duration) only renders when the backend-supplied
 // `done_summary` is non-empty; otherwise a slim "Completed" line keeps the
 // status visible without inventing a summary.
+//
+// Cap: the banner itself is capped at 40vh with `overflow-auto` on the
+// inner content area. Without this cap a long summary grows unboundedly
+// inside the sticky priority area and pushes the description, spec,
+// action buttons, and TabsContent below the 85vh modal edge with no
+// scrollbar in sight — kaart d4012bd1… ("Done kaarten nog altijd niet
+// goed leesbaar, nu is het onderste deel niet langer leesbaar"). The
+// 60/40 split is a deliberate product decision: a long summary stays
+// fully readable on its own scrollbar while the rest of the drawer
+// always retains at least ~60% of the modal height.
 function DoneSummaryBanner({ card }: { card: Card }) {
   const summary = (card.done_summary ?? "").trim();
   const completedAt = card.completed_at ?? null;
@@ -347,15 +357,24 @@ function DoneSummaryBanner({ card }: { card: Card }) {
 
   return (
     <div
-      className="rounded-md border-2 border-green-500/40 bg-green-50 p-3 text-sm dark:bg-green-950/30"
+      className="flex max-h-[40vh] flex-col rounded-md border-2 border-green-500/40 bg-green-50 text-sm dark:bg-green-950/30"
       data-testid="done-summary-banner"
     >
-      <div className="mb-1 text-xs font-semibold uppercase text-green-700 dark:text-green-400">
+      <div className="shrink-0 px-3 pt-3 text-xs font-semibold uppercase text-green-700 dark:text-green-400">
         ✅ Completed
       </div>
-      {summary && <MarkdownRenderer content={summary} />}
+      {summary ? (
+        <div
+          className="min-h-0 flex-1 overflow-auto px-3 py-1"
+          data-testid="done-summary-content"
+        >
+          <MarkdownRenderer content={summary} />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 px-3 py-1" />
+      )}
       {(completedAt || duration) && (
-        <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+        <div className="shrink-0 flex flex-wrap gap-x-3 px-3 pb-3 pt-1 text-xs text-muted-foreground">
           {completedAt && <span>{formatCompletedAt(completedAt)}</span>}
           {duration && <span>{duration}</span>}
         </div>
