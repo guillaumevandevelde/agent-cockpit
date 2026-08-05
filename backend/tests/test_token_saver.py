@@ -489,6 +489,36 @@ async def test_active_branch_is_idempotent(tmp_path, monkeypatch):
 # ``tmp_path`` (where ``git status`` has nothing to look at).
 
 
+def _pin_claude_code_default_gitignore(repo, tmp_path):
+    """Reproduce Claude Code's default global gitignore in a scratch repo.
+
+    The installer writes ``.claude/settings.local.json`` and relies on that
+    path already being gitignored — on a real dispatch box Claude Code puts
+    ``**/.claude/settings.local.json`` in git's default excludes file
+    (``~/.config/git/ignore``). A scratch repo built by ``git init`` inherits
+    that only when the host happens to have it.
+
+    Without pinning it the clean-status assertions below silently depend on
+    host state: green on any machine with Claude Code installed, red
+    everywhere else (CI, a fresh checkout, a container) with a bare
+    ``?? .claude/`` that reads like a product bug rather than a missing
+    precondition. Set it explicitly so the tests assert the real invariant —
+    *given the documented ignore rule, the install leaves status clean* — on
+    every host.
+
+    Repo-local config is shared with linked worktrees, so pointing
+    ``core.excludesFile`` at the repo covers the worktree the tests drive.
+    """
+    import subprocess
+
+    excludes = tmp_path / "git-excludes"
+    excludes.write_text("**/.claude/settings.local.json\n")
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "core.excludesFile", str(excludes)],
+        check=True, capture_output=True,
+    )
+
+
 @pytest.mark.asyncio
 async def test_active_branch_leaves_worktree_git_status_clean(
     tmp_path, monkeypatch,
@@ -519,6 +549,7 @@ async def test_active_branch_leaves_worktree_git_status_clean(
         ["git", "-C", str(repo), "config", "user.name", "test"],
     ):
         subprocess.run(cmd, check=True, capture_output=True)
+    _pin_claude_code_default_gitignore(repo, tmp_path)
     (repo / "README.md").write_text("hello\n")
     for cmd in (
         ["git", "-C", str(repo), "add", "README.md"],
@@ -587,6 +618,7 @@ async def test_active_branch_preserves_tracked_settings_json(
         ["git", "-C", str(repo), "config", "user.name", "test"],
     ):
         subprocess.run(cmd, check=True, capture_output=True)
+    _pin_claude_code_default_gitignore(repo, tmp_path)
     (repo / "README.md").write_text("hello\n")
     (repo / ".claude").mkdir()
     tracked = {

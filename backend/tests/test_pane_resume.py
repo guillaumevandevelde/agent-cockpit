@@ -595,8 +595,14 @@ async def test_detect_transcript_clears_pane_resume_pending_on_recovered_transcr
         ],
     )
 
-    import app.kanban.session_recovery as session_recovery
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    # Patch the consumer (the CLI adapter), not `session_recovery`: 2b195e59
+    # moved transcript resolution into `cli.resolve_transcript_file` and
+    # dropped `get_claude_projects_dir` from `session_recovery`, so patching
+    # it there raises AttributeError. See docs/cockpit/test-doubles-convention.md.
+    from app.services.agentic_cli import claude_code as claude_code_cli
+    monkeypatch.setattr(
+        claude_code_cli, "get_claude_projects_dir", lambda: projects_dir
+    )
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
 
     import app.kanban.db as kdb
