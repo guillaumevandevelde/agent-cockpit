@@ -47,6 +47,8 @@ const col = (id: string, name: string): KanbanColumn => ({
   default_model: null,
   max_sessions: null,
   token_saver_enabled: false,
+  caveman_enabled: false,
+  ponytail_enabled: false,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 });

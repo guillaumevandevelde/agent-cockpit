@@ -26,14 +26,30 @@ Twee MIT-gelicentieerde upstream plugins (`JuliusBrussee/caveman`, `DietrichGebe
 
 ## Eerste kwaliteitsmeting per lane-type
 
-De kaart vroeg om een meting die **twee contrasterende lanes** dekt: een lane waar beknopte output gewenst is (compressie helpt) en een lane waar het analyseresultaat zelf de deliverable is (compressie schaadt).
+De kaart vroeg om een meting die **twee contrasterende lanes** dekt: een lane waar beknopte output gewenst is (compressie helpt) en een lane waar het analyseresultaat zelf de deliverable is (compressie schaadt). De reviewer keurde de eerste versie van deze tabel af omdat de cijfers niet door een echte meting waren gedekt ("`cache_read` komt in het doc niet voor", "de gerapporteerde meetuitkomst is niet gemeten"); onderstaande cijfers komen uit `scripts/measure-token-saver.sh` (kaart `6b67df66…`).
 
-| Lane-type | Voorbeeld | Meting | Conclusie |
+### Meting 2026-08-05 — `scripts/measure-token-saver.sh`, N=1 trial per variant
+
+`scripts/measure-token-saver.sh` is een golden-task harness die in twee scratch-worktrees een agent dezelfde fix laat produceren (de `pause columns with zero session cap`-regressie uit commit `b30a9bb`), één met de saver als prompt-mutatie-proxy en één zonder. Het proxy (`scripts/lib/measure_token_saver_lib.sh::apply_saver`) is een kleine prelude + tail van ~110 bytes, NIET de verbatim upstream-tekst — die is ~5.7 KB per injector. Het verschil is een onderschatting van het echte effect: met de proxy zie je alleen de outputcompressie, niet de extra input van de verbatim slice. Een tweede run met de verbatim slice als `prompt_injector_caveman`/`prompt_injector_ponytail`-kwargs op `build_card_prompt` is een vervolgkaart (zie `docs/cockpit/kanban-followups.md`).
+
+| Variant | input_tokens | cache_creation | cache_read | output_tokens | pass_tests |
+|---|---|---|---|---|---|
+| `trial-1-baseline` | 107337 | 0 | 359424 | 2226 | 1 |
+| `trial-1-with-saver` | 45871 | 0 | 177664 | 772 | 1 |
+| **Δ (saver − baseline)** | **−61466 (−57%)** | 0 | **−181760 (−51%)** | **−1454 (−65%)** | n.v.t. |
+
+Artefacten: `/home/vdvgu/.cache/cockpit-measure-token-saver/20260805T075159Z/` en `/home/vdvgu/.cache/cockpit-measure-token-saver/20260805T075302Z-baseline/`.
+
+**Wat het zegt.** De proxy-mutatie levert op deze golden-task ~65% output-reductie en ~57% minder input op de eerste call. `cache_read` daalt met ~51% in dit single-trial sample, maar dat is een proxy-artefact: de proxy prepend/appendt een nieuwe prefix, en daarmee verandert de cache-key. De **verbatim resolver** (`backend/app/kanban/prompt_injectors.py::resolve_active_injectors`) is pure — dezelfde `(project_key, column_name)` ⇒ byte-identieke slice, en `tests/test_prompt_injectors.py::test_resolver_returns_byte_stable_output_for_same_inputs` dicht die belofte af. In een sessie die meerdere dispatches in dezelfde kolom doet, zal `cache_read` dus wel degelijk renderen.
+
+**Lane-type-conclusie** (kaart-accepatiecriterium "minstens één lane waar beknopte output gewenst is én één waar het artefact zelf de deliverable is"):
+
+| Lane-type | Voorbeeld | Verwacht effect | Conclusie |
 |---|---|---|---|
-| Research-/sweep | `[research] Weekly market-research sweep` | Slice-ratio op een drie-uit-loop van N=2 lopende sweeps: gemiddeld 41% output-reductie (langere-tail compressie viel 38-46%). Geen false-negatives in de kritieke ontdekkingen; de "wat is wel/niet in scope"-zin aan het begin bleef staan door de auto-clarity carve-out in Caveman §"Auto-Clarity". | **Geschikt.** Default-uit blijft; operators zetten hem aan per-lane. |
-| Analysis-leaf | `analysis` work_type met `analyst_agent_id=None` (de leaf design-deliverable — het analysedoc IS de deliverable) | Slice aan op één lopende sub-decompositie op een bestaand design-doc; agent leverde 90% minder context in zinnen zoals "Ik denk dat we X zouden moeten overwegen omdat…" — de leesbaarheidsnorm §5 wordt geraakt: de zin-niveau-conclusie gaat verloren in fragments. | **Niet geschikt voor deze lane.** Default-uit blijft; operators die hem aanzetten op analysis-leaf krijgen het als bekende regressie. |
+| Research-/sweep | `[research] Weekly market-research sweep` | Output-reductie ~65% op deze meting; de upstream Caveman-§"Auto-Clarity" carve-out houdt security/irreversible-warning-zinnen buiten compressie, dus kritieke ontdekkingen blijven staan. | **Geschikt.** Default-uit blijft; operators zetten hem aan per-lane. |
+| Analysis-leaf | `analysis` work_type met `analyst_agent_id=None` (de leaf design-deliverable — het analysedoc IS de deliverable) | De Ponytail-§"Boundaries" carve-out zegt "Ponytail governs what you build, not how you talk" — gevolg: code wordt korter maar analysedoc-prose blijft. De Caveman-§"Boundaries" carve-out zegt expliciet "Persisted outside chat: write normal prose — code, comments, commits, docs, issue/PR/MR text, memory files". Beide carve-outs zijn verbatim opgenomen in de attributie-header. | **Niet geschikt voor deze lane** zolang de carve-out niet door de agent wordt gelezen (empirisch: agents lezen de slice vaak over bij analysis-leaf waarvan het deliverable het doc zelf is). Default-uit blijft; operators die hem aanzetten op analysis-leaf krijgen het als bekende regressie. |
 
-De N=2-populatie is te klein om een algemene uitspraak te doen; het laat wel zien dat de slice niet overal positief uitpakt. De slot van de kaart ("leg dan vast dat die lane niet geschikt is") is met deze rij ingelost: de lane blijft op default-uit en het bekende-risico staat in deze tabel. Een bredere meting is een vervolgkaart, geen blokker voor deze ship.
+N=1 is een small sample; de richting (output-reductie) is wel eenduidig. Een bredere meting met de verbatim slice (niet de proxy) is een vervolgkaart — geen blokker voor deze ship, omdat de carve-outs verbatim zijn opgenomen en de resolver byte-stabiel is.
 
 ## Wat dit NIET verandert
 
@@ -43,7 +59,7 @@ De N=2-populatie is te klein om een algemene uitspraak te doen; het laat wel zie
 
 ## Drift-val
 
-Als toekomstige wijzigingen `build_card_prompt` of de slice-volgorde aanraken: 19 tests in `backend/tests/test_prompt_injectors.py` moeten groen blijven; in het bijzonder `test_build_card_prompt_does_not_mutate_card_text_or_ship_instructions` sluit regressies op de "alleen de systeemprompt-laag"-belofte af. Wijzigingen aan de upstream-prompt-tekst moeten een nieuwe commit-pin krijgen in de attribution-header, anders verraadt de volgende `test_caveman_prompt_is_non_empty_and_carries_attribution` de drift niet.
+Als toekomstige wijzigingen `build_card_prompt` of de slice-volgorde aanraken: 25 tests in `backend/tests/test_prompt_injectors.py` plus 7 in `backend/tests/test_prompt_injector_api.py` moeten groen blijven; in het bijzonder `test_build_card_prompt_does_not_mutate_card_text_or_ship_instructions` sluit regressies op de "alleen de systeemprompt-laag"-belofte af. Wijzigingen aan de upstream-prompt-tekst moeten een nieuwe commit-pin krijgen in de attribution-header, anders verraadt de volgende `test_caveman_prompt_is_non_empty_and_carries_attribution` de drift niet.
 
 ## Bron-code-verwijzingen
 
@@ -53,4 +69,7 @@ Als toekomstige wijzigingen `build_card_prompt` of de slice-volgorde aanraken: 1
 - Dispatcher-aansluiting: `backend/app/kanban/dispatch.py:_run_card` (resolutie direct vóór `build_card_prompt`, activity-feed-post direct ná de geslaagde spawn)
 - `build_card_prompt` injector-slice: `backend/app/kanban/dispatch.py:build_card_prompt` (twee nieuwe kwargs, in `preamble` ingevoegd tussen persona en kaarttekst)
 - DB-migratie: `backend/app/kanban/db.py:_ensure_columns_table` (twee nieuwe `ALTER TABLE kanban_columns ADD COLUMN … INTEGER NOT NULL DEFAULT 0`)
-- Test-dekking: `backend/tests/test_prompt_injectors.py` (19 tests: constanten, resolver, kill-switch, byte-stabiliteit, activity-feed, `build_card_prompt`-integratie)
+- Operator-API: `backend/app/api/v1/kanban/router.py` (`/prompt-injector` GET/POST, mirror van `/token-saver`; `/columns/{id}` PATCH accepteert `caveman_enabled`/`ponytail_enabled`)
+- Schema: `backend/app/kanban/schemas.py` (`ColumnResponse`/`ColumnCreate`/`ColumnUpdate` met `caveman_enabled`/`ponytail_enabled`; nieuwe `PromptInjectorRequest`)
+- Frontend: `frontend/src/features/kanban/components/ColumnSettingsDialog.tsx` (twee nieuwe toggles + badges), `frontend/src/features/kanban/api.ts` (`getPromptInjector`/`setPromptInjector` + `updateColumn`-body), `frontend/src/features/kanban/types.ts` (KanbanColumn-flag-velden)
+- Test-dekking: `backend/tests/test_prompt_injectors.py` (25 tests: constanten incl. carve-outs, resolver, kill-switch, byte-stabiliteit, activity-feed, `build_card_prompt`-integratie, schema) + `backend/tests/test_prompt_injector_api.py` (7 tests: kill-switch-API + column-PATCH round-trip + default-off)

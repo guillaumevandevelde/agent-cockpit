@@ -207,6 +207,13 @@ export interface KanbanColumn {
   // docs/superpowers/specs/2026-07-24-token-saver-integration-design.md).
   // Surfaced as a bool on the API; the SQLite column stores 0/1.
   token_saver_enabled: boolean;
+  // Per-lane prompt-injector opt-in flags (kaart d0446fd8…,
+  // Caveman + Ponytail). Independent switches — toggling one does
+  // not move the other. Board-wide kill-switch
+  // (`/api/v1/kanban/prompt-injector`) overrides both. Surfaced
+  // as bool on the API; SQLite stores 0/1.
+  caveman_enabled: boolean;
+  ponytail_enabled: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -147,6 +147,43 @@ def test_caveman_prompt_is_non_empty_and_carries_attribution():
     assert "Respond terse like smart caveman" in text
 
 
+def test_caveman_prompt_includes_carve_out_sections():
+    """The Caveman prompt must carry the upstream ``## Auto-Clarity`` and
+    ``## Boundaries`` sections verbatim — these are the carve-outs that
+    suspend terse-mode at security warnings, irreversible action
+    confirmations, and persisted-outside-chat text (commits, docs,
+    Done-summaries). The card's acceptance criterion #2 names them
+    explicitly; a prompt that stops before them is the failure mode
+    the reviewer flagged in the previous attempt.
+    """
+    text = prompt_injectors.CAVEMAN_PROMPT
+    assert "## Auto-Clarity" in text, (
+        "Caveman prompt must include the upstream ## Auto-Clarity section"
+    )
+    assert "Drop caveman when:" in text, (
+        "Caveman prompt must include the upstream Drop-caveman-when list"
+    )
+    assert "## Boundaries" in text, (
+        "Caveman prompt must include the upstream ## Boundaries section"
+    )
+    # Boundaries carve-out for persisted-outside-chat text — the
+    # exact case where terse-mode would degrade the deliverable.
+    assert "Persisted outside chat" in text
+    assert "commits" in text
+
+
+def test_caveman_prompt_includes_intensity_section():
+    """The Caveman prompt must carry the upstream ``## Intensity`` section
+    (lite / full / ultra / wenyan-lite / wenyan-full / wenyan-ultra) so the
+    spawned session knows the supported levels and the default.
+    """
+    text = prompt_injectors.CAVEMAN_PROMPT
+    assert "## Intensity" in text
+    assert "wenyan-ultra" in text
+    assert "**lite**" in text
+    assert "**ultra**" in text
+
+
 def test_ponytail_prompt_is_non_empty_and_carries_attribution():
     """The Ponytail prompt must be verbatim upstream + MIT attribution."""
     text = prompt_injectors.PONYTAIL_PROMPT
@@ -157,6 +194,77 @@ def test_ponytail_prompt_is_non_empty_and_carries_attribution():
     )
     # Verbatim upstream signature line.
     assert "lazy senior developer" in text
+
+
+# --- Schema: operator-facing surface (column flags + kill-switch DTO) -----
+
+
+def test_column_response_includes_caveman_and_ponytail_fields():
+    """The column API must surface the per-lane injector flags so an
+    operator can read + flip them via the UI. The previous attempt left
+    these off the schema (the reviewer's blocker #1).
+    """
+    from app.kanban.schemas import ColumnResponse
+    fields = set(ColumnResponse.model_fields.keys())
+    assert "caveman_enabled" in fields
+    assert "ponytail_enabled" in fields
+    # Both default False — the acceptance criterion "never on by default".
+    assert ColumnResponse.model_fields["caveman_enabled"].default is False
+    assert ColumnResponse.model_fields["ponytail_enabled"].default is False
+
+
+def test_column_update_accepts_caveman_and_ponytail_fields():
+    """The PATCH schema must accept both flags so the dialog's Save path
+    can persist them. Without these fields a Save would 422 and the
+    operator-visible toggle would be a no-op.
+    """
+    from app.kanban.schemas import ColumnUpdate
+    fields = set(ColumnUpdate.model_fields.keys())
+    assert "caveman_enabled" in fields
+    assert "ponytail_enabled" in fields
+    # Optional — sending nothing in a PATCH must leave the column
+    # untouched (matches the existing token_saver_enabled behaviour).
+    assert ColumnUpdate.model_fields["caveman_enabled"].default is None
+    assert ColumnUpdate.model_fields["ponytail_enabled"].default is None
+
+
+def test_prompt_injector_request_schema_exists():
+    """The kill-switch DTO must exist (the previous attempt wrote the
+    helper but never wired the endpoint, the reviewer's blocker #1).
+    """
+    from app.kanban.schemas import PromptInjectorRequest
+    fields = set(PromptInjectorRequest.model_fields.keys())
+    assert "project_key" in fields
+    assert "enabled" in fields
+
+
+def test_ponytail_prompt_includes_all_upstream_sections():
+    """The Ponytail prompt must carry every upstream section verbatim —
+    Persistence, The ladder, Rules, Output, Intensity, When NOT to be
+    lazy, Boundaries. The card's acceptance criterion #2 names the
+    carve-outs the reviewer flagged; this test pins every section so a
+    silent re-trim of the prompt fails fast.
+    """
+    text = prompt_injectors.PONYTAIL_PROMPT
+    for section in (
+        "## Persistence",
+        "## The ladder",
+        "## Rules",
+        "## Output",
+        "## Intensity",
+        "## When NOT to be lazy",
+        "## Boundaries",
+    ):
+        assert section in text, f"Ponytail prompt missing upstream section: {section}"
+    # Upstream signature phrases the test pins so a paraphrase regresses.
+    assert "paged at 3am" in text, (
+        "Ponytail prompt must include the upstream 'paged at 3am' phrase"
+    )
+    assert "YAGNI" in text
+    assert "std" not in text or "stdlib" in text  # upstream uses "stdlib" not "std"
+    # Bug-fix = root-cause carve-out the upstream carries verbatim.
+    assert "Bug fix = root cause" in text
+    assert "Lazy code without its check is unfinished" in text
 
 
 # --- Resolver: default-off + per-lane flags + kill-switch -----------------

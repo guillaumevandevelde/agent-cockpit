@@ -55,6 +55,11 @@ export const kanbanApi = {
       // Per-lane RTK (token-saver) opt-in (kaart c31333bf…). Surfaced as
       // a bool on the API; the SQLite column stores 0/1.
       token_saver_enabled?: boolean;
+      // Per-lane prompt-injector opt-in (kaart d0446fd8…). Independent
+      // switches — toggling one does not move the other. Board-wide
+      // kill-switch (/api/v1/kanban/prompt-injector) overrides both.
+      caveman_enabled?: boolean;
+      ponytail_enabled?: boolean;
     }
   ): Promise<KanbanColumn> =>
     apiClient<KanbanColumn>(`${BASE}/columns/${id}`, {
@@ -365,6 +370,22 @@ export const kanbanApi = {
 
   setTokenSaver: (projectKey: string, enabled: boolean): Promise<{ enabled: boolean }> =>
     apiClient<{ enabled: boolean }>(`${BASE}/token-saver`, {
+      method: "POST",
+      body: JSON.stringify({ project_key: projectKey, enabled }),
+    }),
+
+  // Per-lane prompt-injector opt-in (kaart d0446fd8…,
+  // Caveman + Ponytail). Board kill-switch: read on every dispatch
+  // tick so toggling off takes effect on the next spawn without a
+  // backend restart. The per-lane column flags are orthogonal and
+  // are sent via the column update endpoint.
+  getPromptInjector: (projectKey: string): Promise<{ enabled: boolean }> =>
+    apiClient<{ enabled: boolean }>(
+      `${BASE}/prompt-injector?project_key=${encodeURIComponent(projectKey)}`
+    ),
+
+  setPromptInjector: (projectKey: string, enabled: boolean): Promise<{ enabled: boolean }> =>
+    apiClient<{ enabled: boolean }>(`${BASE}/prompt-injector`, {
       method: "POST",
       body: JSON.stringify({ project_key: projectKey, enabled }),
     }),

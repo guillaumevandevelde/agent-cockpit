@@ -57,6 +57,13 @@ export function ColumnSettingsDialog({
   // hook to land. Default false (empty state) because the button row
   // shows "Edit" → "Save"; the user opts in explicitly.
   const [editTokenSaver, setEditTokenSaver] = useState<boolean>(false);
+  // Per-lane prompt-injector opt-in flags (kaart d0446fd8…, Caveman +
+  // Ponytail). Independent switches — toggling one does not move the
+  // other. Project-wide kill-switch in /api/v1/kanban/prompt-injector
+  // overrides both. Default false (acceptance criterion: never on by
+  // default).
+  const [editCaveman, setEditCaveman] = useState<boolean>(false);
+  const [editPonytail, setEditPonytail] = useState<boolean>(false);
   const [modelOptions, setModelOptions] = useState<string[]>([...DEFAULT_MODEL_SUGGESTIONS]);
   const [minimaxOptions, setMinimaxOptions] = useState<string[]>([
     ...MINIMAX_MODEL_SUGGESTIONS,
@@ -170,6 +177,8 @@ export function ColumnSettingsDialog({
         default_model: model,
         max_sessions: editMaxSessions,
         token_saver_enabled: editTokenSaver,
+        caveman_enabled: editCaveman,
+        ponytail_enabled: editPonytail,
       });
       setItems((prev) => prev.map((c) => (c.id === id ? col : c)));
       setEditingId(null);
@@ -411,6 +420,41 @@ export function ColumnSettingsDialog({
                       — reduces Bash output
                     </span>
                   </label>
+                  {/*
+                    Per-lane prompt-injector opt-in (kaart d0446fd8…).
+                    Caveman + Ponytail are independent switches — a single
+                    combined "prompt-savers" knob would hide which of the
+                    two caused an observed behaviour change. Both default
+                    off (acceptance criterion: never on by default). The
+                    project-wide kill-switch in /api/v1/kanban/prompt-injector
+                    overrides both flags.
+                  */}
+                  <label
+                    className="flex items-center gap-1 text-xs shrink-0 whitespace-nowrap"
+                    data-testid="column-row-caveman"
+                    title="Caveman: terse-speak style injected into the system prompt"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={editCaveman}
+                      onChange={(e) => setEditCaveman(e.target.checked)}
+                      data-testid={`caveman-toggle-${col.id}`}
+                    />
+                    Caveman
+                  </label>
+                  <label
+                    className="flex items-center gap-1 text-xs shrink-0 whitespace-nowrap"
+                    data-testid="column-row-ponytail"
+                    title="Ponytail: lazy senior dev / YAGNI style injected into the system prompt"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={editPonytail}
+                      onChange={(e) => setEditPonytail(e.target.checked)}
+                      data-testid={`ponytail-toggle-${col.id}`}
+                    />
+                    Ponytail
+                  </label>
                   <Button
                     size="sm"
                     className="shrink-0"
@@ -453,6 +497,31 @@ export function ColumnSettingsDialog({
                         title="RTK token-saver hook is installed for dispatches into this column (subject to the project-wide kill-switch)"
                       >
                         Token saver: on
+                      </div>
+                    )}
+                    {/*
+                      Per-lane prompt-injector badges (kaart d0446fd8…).
+                      Shown alongside the token-saver badge so the
+                      operator sees which system-prompt mutators are
+                      active for this column. Both can be on
+                      simultaneously — independent switches.
+                    */}
+                    {col.caveman_enabled && (
+                      <div
+                        className="text-xs text-emerald-600 dark:text-emerald-400"
+                        data-testid={`caveman-badge-${col.id}`}
+                        title="Caveman terse-speak style is injected into the system prompt for dispatches into this column (subject to the project-wide prompt-injector kill-switch)"
+                      >
+                        Caveman: on
+                      </div>
+                    )}
+                    {col.ponytail_enabled && (
+                      <div
+                        className="text-xs text-emerald-600 dark:text-emerald-400"
+                        data-testid={`ponytail-badge-${col.id}`}
+                        title="Ponytail YAGNI-first style is injected into the system prompt for dispatches into this column (subject to the project-wide prompt-injector kill-switch)"
+                      >
+                        Ponytail: on
                       </div>
                     )}
                     {/* Effective-model precedence line. Only surfaces when an
@@ -502,6 +571,8 @@ export function ColumnSettingsDialog({
                           ));
                           setEditMaxSessions(col.max_sessions);
                           setEditTokenSaver(col.token_saver_enabled ?? false);
+                          setEditCaveman(col.caveman_enabled ?? false);
+                          setEditPonytail(col.ponytail_enabled ?? false);
                         }}
                       >
                         Edit
