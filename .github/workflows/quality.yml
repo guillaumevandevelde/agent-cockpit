@@ -6,8 +6,65 @@ on:
   pull_request:
     branches: [master]
 
+# Backend lint and backend tests are deliberately SEPARATE jobs.
+#
+# They used to be one sequential job with `pytest -q` as the last step, so any
+# earlier failure skipped it — GitHub stops a job at the first failed step. Two
+# stray F541s kept `pytest` from running on master for five days (last green
+# 2026-07-31, 40 consecutive red runs) while every ship claimed a backend gate
+# that had never executed. The breakage was also layered: fixing ruff only
+# revealed a stale OpenAPI snapshot behind it, which in turn had been hiding 22
+# real test failures.
+#
+# Two independent mechanisms keep that from recurring:
+#   1. lint and tests are separate jobs, so a cosmetic lint hit can never
+#      suppress the test result (or the reverse);
+#   2. inside backend-lint each gate carries `if: ${{ !cancelled() }}`, so one
+#      run reports EVERY failing gate instead of only the first. Without this a
+#      red ruff step still hides the OpenAPI verdict — exactly how the layering
+#      above stayed invisible.
 jobs:
-  backend:
+  backend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      # `id` is load-bearing: every gate below keys its `if:` off this step's
+      # outcome. Without that guard a failed install would make all of them run
+      # and fail with "command not found", burying the real cause in noise.
+      - id: deps
+        run: pip install -r requirements-dev.txt
+        working-directory: backend
+
+      # Each gate runs whenever deps installed, regardless of how the previous
+      # gate went — that is what makes one run report ALL failing gates.
+      - run: ruff check app tests
+        working-directory: backend
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - run: mypy app --ignore-missing-imports
+        working-directory: backend
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - run: bandit -r app -lll
+        working-directory: backend
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - run: bandit -r app -f txt
+        working-directory: backend
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - run: python scripts/check_openapi_snapshot.py
+        working-directory: backend
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: Superpowers promotion ledger (advisory)
+        run: bash scripts/check-superpowers-promotions.sh
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+
+  backend-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -18,21 +75,6 @@ jobs:
           cache-dependency-path: backend/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
         working-directory: backend
-      - run: ruff check app tests
-        working-directory: backend
-      - run: mypy app --ignore-missing-imports
-        working-directory: backend
-        continue-on-error: true
-      - run: bandit -r app -lll
-        working-directory: backend
-      - run: bandit -r app -f txt
-        working-directory: backend
-        continue-on-error: true
-      - run: python scripts/check_openapi_snapshot.py
-        working-directory: backend
-      - name: Superpowers promotion ledger (advisory)
-        run: bash scripts/check-superpowers-promotions.sh
-        continue-on-error: true
       - run: pytest -q
         working-directory: backend
 
@@ -56,7 +98,11 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    # Gated on the jobs that say whether the app actually works, NOT on
+    # backend-lint: import ordering has no bearing on whether the stack boots,
+    # and gating on it would let a cosmetic hit silently skip e2e — the same
+    # failure mode this split exists to remove.
+    needs: [backend-tests, frontend]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

@@ -206,10 +206,18 @@ Done-kaart `d9447e49`).
   dat een vaste baseline nodig heeft geeft die als derde argument mee, bv.
   `with_scratch_worktree "$REPO_ROOT" WT origin/master`.
 - **Geen lokale pre-push gate** (sinds 2026-07-05): full pytest + lint/build liep
-  in CI (`quality.yml`). Backend pytest + ruff en frontend lint/test/build draaien
-  in CI als backend/frontend-gate; draai zelf de frontend-checks voor ships die
-  `frontend/` raken (zie git-ship §2). `scripts/cockpit-doctor.sh` is de
-  read-only health-check.
+  in CI (`quality.yml`). Backend en frontend draaien daar als aparte gates; draai
+  zelf de frontend-checks voor ships die `frontend/` raken (zie git-ship §2).
+  `scripts/cockpit-doctor.sh` is de read-only health-check.
+- **`quality.yml` heeft drie parallelle gates, bewust gesplitst** (2026-08-05):
+  `backend-lint` (ruff, mypy, bandit, openapi-snapshot), `backend-tests`
+  (`pytest -q`) en `frontend`. Eén sequentiële backend-job liet elke lint-fout
+  `pytest` overslaan — twee F541's hielden de testsuite vijf dagen tegen terwijl
+  elke ship een groene backend-gate claimde die nooit gedraaid had. Binnen
+  `backend-lint` draait elke gate met `if: !cancelled()`, zodat één run *alle*
+  falende gates toont in plaats van alleen de eerste. Voeg je een backend-gate
+  toe, zet 'm dan in `backend-lint` met diezelfde `if`-vorm — niet vóór
+  `pytest` in een gedeelde job.
 - **Remote branch hygiene**: twee routes, twee mechanismen. **PR-route:**
   `delete_branch_on_merge` is enabled (2026-07-07), dus PR-branches ruimen
   zichzelf op bij merge. **Merge-to-master-route (direct mode):** die sluit
