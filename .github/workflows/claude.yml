@@ -10,6 +10,29 @@ on:
   pull_request_review:
     types: [submitted]
 
+# Concurrency: @claude mentions on different issues/PRs must run in
+# parallel — group on the issue or PR number, NOT on github.ref (which
+# would serialize every @claude mention in the repo behind the first).
+# cancel-in-progress: false — cancelling a Claude session mid-flight
+# on the same issue loses in-progress reasoning; a subsequent comment
+# on the same issue gets a fresh session that sees the previous
+# session's comments via the issue thread anyway. Multiple comments on
+# the SAME issue/PR still serialize because they share the same group
+# key (issue_comment and pull_request_review_comment both expose
+# issue.number, where PRs surface as issue numbers in GitHub's data
+# model). pull_request_review events lack an `issue` field, so the
+# fallback to `pull_request.number` covers them; `run_id` is the
+# last-resort uniqueness guard if both are absent (defensive — every
+# event type listed above exposes at least one).
+concurrency:
+  group: >-
+    claude-${{
+      github.event.issue.number ||
+      github.event.pull_request.number ||
+      github.run_id
+    }}
+  cancel-in-progress: false
+
 jobs:
   claude:
     if: |

@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [master]
 
+# Concurrency: cancel stale Security runs on the same workflow+ref so a
+# new push to master (or a fresh commit on the same PR) doesn't pile
+# another semgrep+gitleaks pass on top of the in-progress one.
+# Different workflows on the same ref stay parallel — the workflow
+# prefix keeps each workflow's concurrency slot independent.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   semgrep:
     runs-on: ubuntu-latest
