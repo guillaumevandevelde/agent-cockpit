@@ -63,6 +63,34 @@ jobs:
         run: bash scripts/check-superpowers-promotions.sh
         continue-on-error: true
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      # Six statische check-scripts advisory gewired (kanban card d92f6f5f…).
+      # Vorm spiegelt check-superpowers-promotions.sh hierboven: draaien vanuit
+      # repo-root, advisory (`continue-on-error: true`), en dezelfde `if:`-vorm
+      # zodat één run alle falende gates toont.
+      - name: Worktree admin files tracked (advisory)
+        run: bash scripts/check-worktree-admin-files.sh
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: Dispatch resolver usage (advisory)
+        run: bash scripts/check-dispatch-resolver-usage.sh
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: Schema rename coverage (advisory)
+        run: bash scripts/check-schema-rename-coverage.sh
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: Test harness coverage (advisory)
+        run: bash scripts/check-test-harness-coverage.sh
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: Doc readability (advisory)
+        run: python3 scripts/check-doc-readability.py
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+      - name: CI health (advisory)
+        run: bash scripts/check-ci-health.sh
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
 
   backend-tests:
     runs-on: ubuntu-latest
