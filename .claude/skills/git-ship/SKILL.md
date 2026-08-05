@@ -251,38 +251,57 @@ WT="$SHIP_TMP/ship-merge-${BRANCH//\//-}"
 # dispatcher to inline a project_root (the skill must be
 # self-discovering when an agent reads it without the dispatch prompt).
 MAIN_CHECKOUT="$(dirname "$(git rev-parse --git-common-dir)")"
-# Local-master divergence guard (kanban card 5e83b6e0…). Step 1 already
-# fetched origin, but to be defensive we fetch again here — this worktree
-# may have been running between step 1 and step 4, and a concurrent
-# session could have pushed to origin in that window. The throwaway
-# worktree MUST base on LOCAL `master` (the integration point, not the
-# last-pushed remote state) — otherwise a concurrent session's
-# not-yet-pushed commits would be stranded when we push to origin. The
-# negation of `--is-ancestor origin/master master` catches both "origin
-# ahead" (origin has commits local doesn't) and the rarer "diverged"
-# case (both sides have new commits); in either state, a push from local
-# `master` would be rejected as non-fast-forward. Fail-fast with
-# `report_impediment` and a clear remediation rather than producing
-# a stale merge or a useless "Everything up-to-date" push.
+# Merge-base selection + divergence guard (kanban card 5e83b6e0…; made
+# ahead-aware 2026-08-05). Step 1 already fetched origin,
+# but to be defensive we fetch again here — this worktree may have been
+# running between step 1 and step 4, and a concurrent session could have
+# pushed to origin in that window.
+#
+# Label semantics (kanban card 5e83b6e0…, second iteration): in
+# `git rev-list --count A..B`, A..B enumerates commits reachable from B
+# but NOT from A — i.e. commits B has that A doesn't. So
+# `master..origin/master` = commits `origin/master` has that local
+# `master` doesn't = how far local is BEHIND; and
+# `origin/master..master` = the symmetric AHEAD count. An earlier
+# revision had the two swapped, which printed `ahead=2 behind=0` while
+# local master was actually 2 BEHIND origin. Don't swap them back.
 git fetch origin -q
-if ! git merge-base --is-ancestor origin/master master 2>/dev/null; then
-  # Label semantics (kanban card 5e83b6e0…, second iteration): in
-  # `git rev-list --count A..B`, A..B enumerates commits reachable from B
-  # but NOT from A — i.e. commits B has that A doesn't. So
-  # `master..origin/master` = commits `origin/master` has that local
-  # `master` doesn't = how far local is BEHIND; and
-  # `origin/master..master` = the symmetric AHEAD count. The previous
-  # wiring had the two swapped, which printed `ahead=2 behind=0` while
-  # local master was actually 2 BEHIND origin. Don't swap them back.
-  BEHIND=$(git rev-list --count master..origin/master 2>/dev/null || echo "?")
-  AHEAD=$(git rev-list --count origin/master..master 2>/dev/null || echo "?")
-  echo "ERROR: local master is STALE — origin/master has commits local doesn't have." >&2
+BEHIND=$(git rev-list --count master..origin/master 2>/dev/null || echo "?")
+AHEAD=$(git rev-list --count origin/master..master 2>/dev/null || echo "?")
+# Three shapes, and only ONE of them is a genuine blocker. The previous
+# revision blocked on two of them, which is what made this guard
+# self-reinforcing on a busy box: the post-push `pull --ff-only` below
+# skips with a WARN whenever the main checkout is dirty (a concurrent
+# agent's in-flight edits), local `master` then falls behind, and *every*
+# subsequent ship tripped the guard — even though nothing was at risk.
+if git merge-base --is-ancestor origin/master master 2>/dev/null; then
+  # origin/master is reachable from local master: local is at, or ahead
+  # of, origin. Base on LOCAL `master` — on a multi-session box it
+  # routinely carries other agents' not-yet-pushed commits, and basing on
+  # `origin/master` here would strand them (kanban card 5e83b6e0…).
+  BASE=master
+elif git merge-base --is-ancestor master origin/master 2>/dev/null; then
+  # Behind-only: ahead=0, so local `master` has NO commits that
+  # origin/master lacks — there is literally nothing to strand, and the
+  # push below is a plain fast-forward. Base on `origin/master` and ship.
+  # This is NOT the same as the rejected "always base on origin/master"
+  # shape: that one also fired when ahead>0, which is the stranding bug.
+  BASE=origin/master
+  echo "NOTE: local master is $BEHIND behind / 0 ahead — basing this ship on origin/master (nothing to strand)." >&2
+  echo "  The main checkout's tree is unchanged; reconcile it at your leisure with:" >&2
+  echo "  git -C \"$MAIN_CHECKOUT\" pull --rebase origin master" >&2
+else
+  # True divergence: BOTH sides have commits the other lacks. A push from
+  # either base would be rejected as non-fast-forward, and picking one
+  # silently discards the other side's work. This is the only shape that
+  # needs a human.
+  echo "ERROR: local master has DIVERGED from origin/master — both sides have unique commits." >&2
   echo "  ahead=$AHEAD behind=$BEHIND (master vs origin/master)" >&2
   echo "  Reconcile: git -C \"$MAIN_CHECKOUT\" pull --rebase origin master" >&2
   echo "  Then re-run the ship from this worktree. report_impediment." >&2
   exit 1
 fi
-git worktree add --detach "$WT" master
+git worktree add --detach "$WT" "$BASE"
 # 0-byte-index guard. A predecessor that aborted mid-ship in the shared
 # gitdir can leave this slot's `index` truncated to 0 bytes, and
 # `git worktree add` reports success anyway — the corruption only surfaces
