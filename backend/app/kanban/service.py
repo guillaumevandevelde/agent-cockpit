@@ -1136,6 +1136,67 @@ async def answer_gate(session, gate_id: str, answer: str) -> KanbanGate | None:
     return gate
 
 
+# Default answer stamped on a gate when the human resolves via free-text
+# without supplying any text of their own (legacy pre-textarea path, or a
+# REST client that posts `answer=None`). The resume prompt's
+# `compose_impediment_answer` treats this as a real answer — it forwards
+# the string verbatim — so we keep the wording honest ("free-text resolve")
+# rather than inventing a "yes/no"-style placeholder that an LLM could
+# misread as a real pick.
+_FREE_TEXT_RESOLVE_SENTINEL = "[free-text resolve]"
+
+
+async def close_open_gates_for_card(
+    session, card_id: str, *,
+    free_text_answer: str | None = None,
+) -> list[KanbanGate]:
+    """Close every still-open KanbanGate on ``card_id`` by stamping it as
+    ``status='answered'`` with ``free_text_answer`` as the recorded answer.
+
+    Called from ``router.resolve_impediment`` (kaart 504b4e8a…) to undo the
+    stale-open gate the old code left behind when the human resolved via
+    free text instead of clicking one of the structured choice buttons —
+    ``ImpedimentPage.submit`` only calls ``answerGate`` when a choice is
+    picked, so without this helper an open gate would linger on the card
+    forever and surface as ``gate_open`` in ``po_wachtrij`` (regardless of
+    column, even Done) plus a stale "Decision requested" paneel in
+    ``CardDrawer`` once the card moved off Impediment.
+
+    Idempotent on already-answered gates: an existing structured pick is
+    never overwritten by a later free-text fallback — the gate's first
+    answer wins, matching ``answer_gate``'s "double-click no-op" rule.
+
+    Recording the free text as ``gate.answer`` (rather than introducing a
+    new ``status='superseded'`` value) keeps ``latest_gate_answer`` and
+    ``compose_impediment_answer`` working without consumer changes: the
+    resumed session sees the human's decision via the same channel a
+    structured pick uses.
+
+    Returns the list of gates just closed (caller can audit/log); empty
+    when the card had no open gates.
+    """
+    from app.kanban.models import KanbanGate
+
+    answer_text = (free_text_answer or "").strip() or _FREE_TEXT_RESOLVE_SENTINEL
+    now = datetime.now(UTC)
+
+    open_gates = (await session.execute(
+        select(KanbanGate)
+        .where(KanbanGate.card_id == card_id)
+        .where(KanbanGate.status == "open")
+    )).scalars().all()
+
+    closed: list[KanbanGate] = []
+    for gate in open_gates:
+        gate.status = "answered"
+        gate.answer = answer_text
+        gate.answered_at = now
+        closed.append(gate)
+    if closed:
+        await session.flush()
+    return closed
+
+
 async def latest_gate_answer(session, card_id: str) -> str | None:
     """Return the chosen answer from the most recent *answered* gate on this
     card, or None when no gate exists yet, no gate has been answered, or the
