@@ -153,3 +153,8 @@ op elk moment werkend bleef:
   heeft vandaag bewust geen knop; hij loopt via `/new-app` in een interactieve
   sessie). Een UI-ingang die `create_project_from_interview` aanroept is additief
   en vereist deze beslissing niet te heropenen.
+  ✅ Geïmplementeerd (kaart `bf2302fd…`): "Start new app"-knop op de Projects-pagina
+  spawnt direct een interactieve `/new-app`-sessie in de cockpit-repo
+  (`POST /api/v1/agent-bridge/sessions` met
+  `{cli:"claude-code", directory:<cockpit-repo-root>, mode:"plain", prompt:"/new-app"}`)
+  en navigeert naar de sessie.

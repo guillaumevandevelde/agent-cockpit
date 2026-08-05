@@ -1,4 +1,6 @@
 import { apiAssetUrl, apiClient, apiUpload } from "@/lib/api";
+import { spawnSession } from "@/features/cc-bridge/api";
+import type { SpawnSessionResponse } from "@/features/cc-bridge/types";
 import type {
   Card,
   ActivityEntry,
@@ -308,6 +310,19 @@ export const kanbanApi = {
     apiClient<{ project_key: string }>(`${BASE}/enable`, {
       method: "POST",
       body: JSON.stringify({ project_path: projectPath, slug }),
+    }),
+
+  // Start the spec-driven /new-app interview for a fresh project. The
+  // `directory` is the cockpit repo (where `.claude/skills/new-app` lives);
+  // the new repo doesn't exist yet, so the interview runs in the cockpit
+  // checkout and creates the new repo at the end. See
+  // docs/cockpit/kaartloze-app-inceptie-decision.md §4.
+  startNewApp: (directory: string): Promise<SpawnSessionResponse> =>
+    spawnSession({
+      cli: "claude-code",
+      directory,
+      mode: "plain",
+      prompt: "/new-app",
     }),
 
   disable: (projectPath: string): Promise<{ enabled: boolean }> =>
