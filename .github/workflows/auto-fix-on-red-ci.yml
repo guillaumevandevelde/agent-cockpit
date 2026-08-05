@@ -5,6 +5,21 @@ on:
     workflows: ["Quality"]
     types: [completed]
 
+# Concurrency: a PR that flips red→green→red across multiple commits
+# spawns one auto-fix attempt per red. Group by PR number so two PRs
+# each get their own attempt in parallel; cancel-in-progress drops a
+# previous red run's auto-fix when the next commit also goes red (its
+# auto-fix has the freshest branch state anyway). workflow_run.id is
+# the last-resort fallback if a run somehow has no PR attached — the
+# outer `if:` filters that out, but the expression is defensive.
+concurrency:
+  group: >-
+    auto-fix-${{
+      github.event.workflow_run.pull_requests[0].number ||
+      github.event.workflow_run.id
+    }}
+  cancel-in-progress: true
+
 jobs:
   comment-if-first-failure:
     if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'

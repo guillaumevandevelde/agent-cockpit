@@ -11,6 +11,17 @@ on:
 permissions:
   contents: write
 
+# Concurrency: release runs must NEVER be cancelled mid-flight — a
+# partial release could leave a tag published without an artifact or
+# vice versa. cancel-in-progress is hard-false for that reason. Group
+# by version so two parallel releases of different versions stay
+# parallel; the same version's second run waits for the first to
+# finish (and would surface as a duplicate-tag failure if rerun too
+# fast — the right error mode for a release).
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest

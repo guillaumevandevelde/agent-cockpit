@@ -6,6 +6,19 @@ on:
   pull_request:
     branches: [master]
 
+# Concurrency: a fresh push to master (or a new commit on the same PR)
+# cancels the in-progress Quality run. Without this, every push runs the
+# full lint+pytest+e2e suite in parallel with the previous one — the
+# e2e job installs Playwright-chromium and boots the backend, so
+# redundant runs burn runner-minutes we can't afford (CLAUDE.md: Quality
+# sneuvelt sinds ~2026-07-26 op een spending-limit-block). Group key
+# scopes by workflow + ref so concurrent runs of OTHER workflows on the
+# same ref (security, drift-report, claude, auto-fix-on-red-ci) keep
+# running in parallel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Backend lint and backend tests are deliberately SEPARATE jobs.
 #
 # They used to be one sequential job with `pytest -q` as the last step, so any

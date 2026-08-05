@@ -5,6 +5,17 @@ on:
     - cron: '0 7 * * 1'  # Monday 7am UTC
   workflow_dispatch: {}
 
+# Concurrency: the drift-report fires on a Monday 7am cron plus manual
+# dispatch. Group by workflow+ref so cancel-in-progress drops the
+# previous in-progress run when a manual re-trigger arrives during an
+# already-running schedule/manual pass. Schedule and dispatch both
+# resolve to refs/heads/master in practice, so they share a group —
+# the cancel still saves a half-finished pass from completing
+# redundantly.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   report:
     runs-on: ubuntu-latest
