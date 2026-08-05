@@ -6042,12 +6042,14 @@ class TestBuildShipInstructions:
         # Merge happens through a throwaway detached worktree, not `git checkout
         # master` (which deterministically fails in a linked worktree — see the
         # [self-improve] card that motivated this recipe).
-        # Local-`master` base (kanban card 5e83b6e0…): the multi-session box
-        # routinely has local master N commits ahead of origin/master; basing
-        # the merge on `origin/master` would strand those commits on every
-        # ship. The integration point is local master, the push is the
-        # synchronisation moment.
-        assert "git worktree add --detach \"$WT\" master" in instructions
+        # The base is resolved into `$BASE` by the ahead-aware divergence
+        # guard (see test_direct_mode_includes_local_master_divergence_guard):
+        # local `master` when local is at-or-ahead of origin, `origin/master`
+        # in the behind-only case. Basing *unconditionally* on origin/master
+        # is still wrong — on a multi-session box local master routinely
+        # carries other agents' not-yet-pushed commits, and that shape would
+        # strand them (kanban card 5e83b6e0…).
+        assert "git worktree add --detach \"$WT\" \"$BASE\"" in instructions
         assert "git worktree add --detach \"$WT\" origin/master" not in instructions
         assert "git checkout master" not in instructions
         assert "merge --no-ff" in instructions
@@ -6062,19 +6064,31 @@ class TestBuildShipInstructions:
         assert "gh pr create" not in instructions
 
     def test_direct_mode_includes_local_master_divergence_guard(self):
-        """Basing on local `master` requires a divergence guard.
+        """Basing on local `master` requires an ahead-aware divergence guard.
 
-        A successful push from local `master` requires origin/master to be
-        *behind* local master (i.e. the merge is a fast-forward). When
-        origin/master has commits local doesn't — another agent pushed first,
-        or origin was reset — a push from local master would be rejected as
-        non-fast-forward, or worse silently no-op. The guard must fail-fast
-        with a clear remediation before the merge worktree is created, so the
-        agent has a chance to reconcile first.
+        Three shapes, and only one is a genuine blocker:
+
+          - local at-or-ahead of origin (origin/master is an ancestor of
+            master): base on local `master`, which may carry other agents'
+            not-yet-pushed commits.
+          - behind-only (master is an ancestor of origin/master, so ahead=0):
+            nothing to strand and the push is a plain fast-forward, so base on
+            `origin/master` and ship. Blocking here is what made the previous
+            revision self-reinforcing on a busy box — the post-push
+            `pull --ff-only` skips with a WARN whenever the main checkout is
+            dirty, local master then falls behind, and every later ship
+            tripped the guard with nothing actually at risk.
+          - true divergence (both sides have unique commits): fail fast with a
+            remediation, because either base would silently discard work.
         """
         instructions = dispatch._build_ship_instructions("direct")
-        # The guard itself: origin/master must be an ancestor of master.
+        # The guard itself: both ancestry probes must be present.
         assert "git merge-base --is-ancestor origin/master master" in instructions
+        assert "git merge-base --is-ancestor master origin/master" in instructions
+        # The behind-only carve-out must survive — without pinning it, a
+        # regression back to the always-block shape would go unnoticed.
+        assert "BASE=master" in instructions
+        assert "BASE=origin/master" in instructions
         # Error message + remediation hint: an agent staring at this needs
         # to know what to do next. The remediation interpolates the absolute
         # path of the main checkout (the legacy fallback uses the hardcoded
@@ -6082,7 +6096,7 @@ class TestBuildShipInstructions:
         # /home/vdvgu/claude-cockpit pull --rebase origin master`). The
         # bash continuation in the source spans two physical lines, so check
         # the joined substring across the line break.
-        assert "ERROR: local master is STALE" in instructions
+        assert "ERROR: local master has DIVERGED from origin/master" in instructions
         joined = " ".join(line.strip() for line in instructions.splitlines())
         assert "pull --rebase origin master" in joined
         # The legendary two-labels-swap regression — pin the labels as

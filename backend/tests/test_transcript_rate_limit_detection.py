@@ -158,6 +158,27 @@ def test_tail_rate_limit_message_reads_only_the_tail(tmp_path, monkeypatch):
 # ---- detect_transcript_rate_limits -----------------------------------------
 
 
+def _redirect_projects_dir(monkeypatch, projects_dir):
+    """Point transcript resolution at a fake projects dir.
+
+    Patch the *consumer*, not the source module: `claude_code.py` does a
+    `from app.utils.path_utils import get_claude_projects_dir` at import time,
+    so the live binding sits on the adapter module. `session_recovery` used to
+    own this call, but 2b195e59 moved resolution into the CLI adapter
+    (`cli.resolve_transcript_file(worktree, data_dir=...)`) and dropped the
+    import — patching `session_recovery` there now raises AttributeError.
+
+    Redirecting only the base dir keeps the whole resolution chain real
+    (worktree path -> convert_path_to_folder_name -> newest *.jsonl), which is
+    what these tests exist to cover.
+    """
+    from app.services.agentic_cli import claude_code as claude_code_cli
+
+    monkeypatch.setattr(
+        claude_code_cli, "get_claude_projects_dir", lambda: projects_dir
+    )
+
+
 def _build_worktree_transcript(tmp_path, session_name, entries):
     """Lay out <repo>/.claude/worktrees/<session_name> plus its transcript
     under a fake projects dir, mirroring the real Claude Code layout."""
@@ -185,7 +206,7 @@ async def test_detect_transcript_rate_limits_handles_mid_session_limit(tmp_path,
             "You've hit your session limit · resets 11:10pm (Europe/Brussels)"
         )],
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
     monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
 
@@ -223,7 +244,7 @@ async def test_detect_transcript_rate_limits_is_idempotent(tmp_path, monkeypatch
         tmp_path, session_name,
         [_assistant_error("You've hit your session limit · resets 9pm (Europe/Brussels)")],
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
     monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
 
@@ -266,7 +287,7 @@ async def test_detect_transcript_rate_limits_skips_recovered_session(tmp_path, m
             _assistant("Continuing now."),
         ],
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
 
     async with KanbanSessionLocal() as s:
@@ -336,7 +357,7 @@ async def test_detect_transcript_rate_limits_logs_info_with_session_and_transcri
         tmp_path, session_name,
         [_assistant_error("You've hit your session limit · resets 9pm (Europe/Brussels)")],
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
     monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
 

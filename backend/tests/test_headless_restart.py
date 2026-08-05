@@ -868,7 +868,13 @@ async def test_adoption_tailer_dispatches_events_from_log_offset(monkeypatch, tm
         # actually delivered to the parent — not just read from disk.
         dispatched: list[tuple[str, str]] = []
 
-        async def _capture_dispatch(text: str, session_name, provider):
+        # Signature must mirror the real `_dispatch_log_line`, including the
+        # keyword-only `startup_future` added by 2e58fb15 — `_consume_log_file`
+        # always passes it, and a double that omits it raises TypeError inside
+        # the tailer task, which surfaces only as "nothing was dispatched".
+        async def _capture_dispatch(
+            text: str, session_name, provider, *, startup_future=None,
+        ):
             dispatched.append((text, session_name))
 
         monkeypatch.setattr(

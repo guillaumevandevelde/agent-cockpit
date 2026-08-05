@@ -5084,6 +5084,17 @@
       },
       "ColumnCreate": {
         "properties": {
+          "caveman_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveman Enabled"
+          },
           "default_agent": {
             "anyOf": [
               {
@@ -5132,6 +5143,17 @@
             "title": "Name",
             "type": "string"
           },
+          "ponytail_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ponytail Enabled"
+          },
           "project_key": {
             "title": "Project Key",
             "type": "string"
@@ -5168,6 +5190,11 @@
       },
       "ColumnResponse": {
         "properties": {
+          "caveman_enabled": {
+            "default": false,
+            "title": "Caveman Enabled",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -5225,6 +5252,11 @@
             "title": "Name",
             "type": "string"
           },
+          "ponytail_enabled": {
+            "default": false,
+            "title": "Ponytail Enabled",
+            "type": "boolean"
+          },
           "project_key": {
             "title": "Project Key",
             "type": "string"
@@ -5257,6 +5289,17 @@
       },
       "ColumnUpdate": {
         "properties": {
+          "caveman_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveman Enabled"
+          },
           "default_agent": {
             "anyOf": [
               {
@@ -5311,6 +5354,17 @@
               }
             ],
             "title": "Name"
+          },
+          "ponytail_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ponytail Enabled"
           },
           "rank": {
             "anyOf": [
@@ -12612,6 +12666,24 @@
           }
         },
         "title": "ProjectUpdate",
+        "type": "object"
+      },
+      "PromptInjectorRequest": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_key",
+          "enabled"
+        ],
+        "title": "PromptInjectorRequest",
         "type": "object"
       },
       "ProviderCapabilitiesResponse": {
@@ -28073,6 +28145,85 @@
           }
         },
         "summary": "Create Project From Interview",
+        "tags": [
+          "Kanban"
+        ]
+      }
+    },
+    "/api/v1/kanban/prompt-injector": {
+      "get": {
+        "description": "Read the per-project prompt-injector kill-switch (kaart d0446fd8\u2026).\n\nReturns the current state of the ``prompt_injector:<project_key>``\nrow in ``KanbanMeta``. The dispatcher reads this on every spawn\ntick so toggling off via this endpoint takes effect on the next\ndispatch without a backend restart. When the kill-switch is\nengaged, BOTH per-column flags (caveman/ponytail) are suppressed\nregardless of their value.",
+        "operationId": "get_prompt_injector_api_v1_kanban_prompt_injector_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_key",
+            "required": true,
+            "schema": {
+              "title": "Project Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Prompt Injector",
+        "tags": [
+          "Kanban"
+        ]
+      },
+      "post": {
+        "description": "Persist the per-project prompt-injector kill-switch.\n\nIdempotent. Writes ``\"1\"`` for engaged, ``\"0\"`` for cleared \u2014\nmatches the convention used by ``token_saver.set_board_enabled``\nand ``dispatch.set_autodispatch``. Operators flip the toggle in\nthe UI, not via dispatch \u2014 the KanbanMeta table is device-local\n(not op-log-backed), so no audit comment is posted.",
+        "operationId": "set_prompt_injector_api_v1_kanban_prompt_injector_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptInjectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Prompt Injector",
         "tags": [
           "Kanban"
         ]

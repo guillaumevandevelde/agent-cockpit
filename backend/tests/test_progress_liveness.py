@@ -31,7 +31,7 @@ import time
 import pytest
 import pytest_asyncio
 
-from app.kanban import dispatch, service, session_recovery
+from app.kanban import dispatch, service
 from app.kanban.operations import apply_operation
 from app.kanban.service import get_card, list_cards
 from app.utils.path_utils import convert_path_to_folder_name
@@ -57,6 +57,24 @@ async def _make_card(s, title="Task", column="engineer"):
     )
     await s.flush()
     return cid
+
+
+def _redirect_projects_dir(monkeypatch, projects_dir):
+    """Point transcript resolution at a fake projects dir.
+
+    Patch the *consumer* (`claude_code.py`), not the source module, per
+    `docs/cockpit/test-doubles-convention.md` rule 1 — the adapter binds
+    `get_claude_projects_dir` into its own namespace at import time.
+    `session_recovery` used to own this call, but 2b195e59 moved resolution
+    into the CLI adapter and dropped the import, so patching it there raises
+    AttributeError. Redirecting only the base dir keeps the resolution chain
+    real (worktree path -> convert_path_to_folder_name -> newest *.jsonl).
+    """
+    from app.services.agentic_cli import claude_code as claude_code_cli
+
+    monkeypatch.setattr(
+        claude_code_cli, "get_claude_projects_dir", lambda: projects_dir
+    )
 
 
 def _build_worktree_transcript(tmp_path, session_name, *, initial_mtime):
@@ -86,7 +104,7 @@ async def test_progress_liveness_growing_transcript_no_action(tmp_path, monkeypa
     repo, projects_dir, transcript = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=t0,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="growing", column="engineer")
@@ -136,7 +154,7 @@ async def test_progress_liveness_signal_threshold_posts_comment_no_release(tmp_p
     repo, projects_dir, _ = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 60,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
 
     import app.kanban.db as kdb
@@ -192,7 +210,7 @@ async def test_progress_liveness_signal_threshold_only_posted_once_per_stall(tmp
     repo, projects_dir, _ = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 60,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
 
     import app.kanban.db as kdb
@@ -252,7 +270,7 @@ async def test_progress_liveness_action_threshold_releases_via_to_resume(tmp_pat
     repo, projects_dir, transcript = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 180,  # stalled 3 min
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
 
@@ -305,7 +323,7 @@ async def test_progress_liveness_missing_transcript_no_action(tmp_path, monkeypa
     projects_dir = tmp_path / "projects"
     # Deliberately no transcript jsonl under projects_dir/<folder>/.
 
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="notranscript", column="engineer")
@@ -337,7 +355,7 @@ async def test_progress_liveness_missing_worktree_no_action(tmp_path, monkeypatc
     repo = tmp_path / "repo"  # no worktree created
     projects_dir = tmp_path / "projects"
 
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="noworktree", column="engineer")
@@ -367,7 +385,7 @@ async def test_progress_liveness_skips_live_tmux_session(tmp_path, monkeypatch):
     repo, projects_dir, _ = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 600,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="live", column="engineer")
@@ -395,7 +413,7 @@ async def test_progress_liveness_skips_sandcastle_live_session(tmp_path, monkeyp
     repo, projects_dir, _ = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 600,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="sand", column="engineer")
@@ -424,7 +442,7 @@ async def test_progress_liveness_skips_headless_live_session(tmp_path, monkeypat
     repo, projects_dir, _ = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 600,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="headless", column="engineer")
@@ -454,7 +472,7 @@ async def test_progress_liveness_transcript_growth_after_signal_resets_counter(t
     repo, projects_dir, transcript = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 60,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
 
     import app.kanban.db as kdb
@@ -526,7 +544,7 @@ async def test_progress_liveness_skips_fixed_columns(tmp_path, monkeypatch):
     session_name = "k-fixed-0001"
     repo = tmp_path / "repo"
 
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: tmp_path / "projects")
+    _redirect_projects_dir(monkeypatch, tmp_path / "projects")
 
     async with KanbanSessionLocal() as s:
         cid = await _make_card(s, title="parked", column="Backlog")
@@ -605,7 +623,7 @@ async def test_progress_liveness_logs_warning_on_action(tmp_path, monkeypatch, c
     repo, projects_dir, transcript = _build_worktree_transcript(
         tmp_path, session_name, initial_mtime=now - 180,
     )
-    monkeypatch.setattr(session_recovery, "get_claude_projects_dir", lambda: projects_dir)
+    _redirect_projects_dir(monkeypatch, projects_dir)
     monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
     monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
 
