@@ -127,7 +127,7 @@ def test_column_patch_persists_caveman_and_ponytail_flags(client):
     """
     # Seed a column via direct DB write (the dialog's create path).
     import uuid
-    from sqlalchemy import select
+
     from app.kanban.models import KanbanColumn
     col_id = f"col-{uuid.uuid4().hex}"
     async def _seed():
@@ -169,7 +169,7 @@ def test_column_response_default_off_on_fresh_column(client):
     injector on the first dispatch into a new column.
     """
     import uuid
-    from sqlalchemy import select
+
     from app.kanban.models import KanbanColumn
     col_id = f"col-{uuid.uuid4().hex}"
     async def _seed():
