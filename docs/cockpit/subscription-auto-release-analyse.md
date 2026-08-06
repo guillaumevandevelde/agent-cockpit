@@ -324,7 +324,7 @@ doorgehakt (kolom-default als impliciete eerste pool-entry), dus wat rest is
 configureren + verifiëren — geen ontwerpwerk meer.
 
 ✅ Geïmplementeerd (kaart `2bb37d97…`, 2026-08-04) — per-kolom tails geïnstalleerd op
-`git:github.com/guillaumevandevelde/claude-cockpit`:
+`git:github.com/guillaumevandevelde/agent-cockpit`:
 
 | Kolom | Head (impliciet, kolom-default) | Tail (spillover-target) | Gedrag op limiet |
 |---|---|---|---|
@@ -333,10 +333,13 @@ configureren + verifiëren — geen ontwerpwerk meer.
 | `reviewer` | `anthropic` | `[]` (bewust leeg) | Anthropic raakt limiet → wacht op reset (kwaliteit > snelheid) |
 
 Operator-handleiding: [`subscriptions.md` § "Subscription-pool inspectie & wijzigen"](./subscriptions.md#subscription-pool-inspectie--wijzigen).
-Verificatie: `_pool_spillover_available(project_key, limited_provider=..., column=...)`
-retourneert `True` voor analyst + simulated Anthropic-limiet (live gemeten 2026-08-04),
-en de pure-router-laag (`subscription_pool.has_available_spillover`) retourneert `True`
-voor élke simulated limit op engineer/analyst. Drie regressietests in
+Verificatie (herhaald op 2026-08-06, beide takken schoon): een gesimuleerde limiet op de
+**kop** geeft `True` voor `engineer` (`minimax` → `anthropic`) en `analyst`
+(`anthropic` → `minimax`), en `False` voor `reviewer` — zowel via de pure router
+`subscription_pool.has_available_spillover` als via `dispatch._pool_spillover_available`.
+Op 2026-08-04 gaf de dispatch-tak voor `engineer` nog `False`; dat was een toen actieve
+per-provider pause op Anthropic, geen defect — een gepauzeerde target is geen geldige
+uitwijk. Drie regressietests in
 `backend/tests/test_subscription_pool_dispatch.py::test_production_pool_tails_*` pinnen
 de installatie + de end-to-end card-move met de 🔀 activity-comment.
 

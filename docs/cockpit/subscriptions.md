@@ -114,10 +114,15 @@ for k, v in c.execute(\"select key, value from kanban_meta where key like 'subsc
 "
 ```
 
-**UI:** de `Subscriptions`-pagina (`frontend/src/features/subscriptions/`) heeft een
-"Pool"-kaart met een kolom-`<Select>` (`SubscriptionPoolDialog.tsx`); bij een
-kolom-selectie toont hij `column.default_provider` als read-only kop-regel plus de
-staart-entries eronder. Lege staat = "no pool configured — column defaults apply".
+**UI:** de pool zit achter de **Subscriptions**-knop in de **kanban-bord-toolbar**, niet
+op de `/subscriptions`-pagina — die pagina toont alleen usage en credentials en bevat
+geen enkele pool-control. Pad: `frontend/src/features/kanban/KanbanPage.tsx:559` →
+`components/SubscriptionToolbarButton.tsx:84` →
+`components/SubscriptionPoolDialog.tsx`. De dialog heeft een kolom-`<Select>`
+(`data-testid="pool-scope-column"`, regel 529); bij een kolom-selectie toont hij
+`column.default_provider` als read-only kop-regel (`data-testid="pool-implicit-head"`,
+regel 580) plus de staart-entries eronder. Lege staat = "no pool configured — column
+defaults apply".
 
 ### Wijzigen
 
@@ -166,15 +171,20 @@ async def main():
         await s.commit()
 ```
 
-**UI:** de `SubscriptionPoolDialog` heeft dezelfde kolom-`<Select>`; bewaar met de
+**UI:** dezelfde `SubscriptionPoolDialog` achter de toolbar-knop hierboven; bewaar met de
 "Save"-knop, veeg leeg met de prullenbak-knop. Validaties en de
 "empty list rejected" guard draaien client-side; een save via de UI komt door dezelfde
 REST-endpoint.
 
 ### Valideren dat spillover vuurt
 
+Simuleer het scenario dat er echt toe doet: **de kop raakt zijn limiet**. Dat is de kolom-default
+(`engineer` → `minimax`, `analyst` → `anthropic`), en de vraag is of de kaart dan uitwijkt naar de
+staart in plaats van op de reset te wachten. Kies dus nooit een provider die in geen enkele keten
+voorkomt — dat bewijst niets.
+
 De pure router (`subscription_pool.has_available_spillover`) is de canonieke bron — geen
-DB-pause-gating, alleen drempel/paused-providerr-logica:
+DB-pause-gating, alleen drempel-/paused-provider-logica:
 ```python
 from app.kanban.db import KanbanSessionLocal
 from app.kanban import subscription_pool
@@ -184,11 +194,22 @@ async def main():
         entries = await subscription_pool.get_subscription_pool(
             s, "<pk>", column="engineer",
         )
-    # Simuleer: provider X raakt limiet. Kies X != entries[0].provider.
+    # entries is de STAART: [PoolEntry(provider='anthropic', drempel=0.9, …)]
+
+    # Positief: de kop (minimax = column default) raakt zijn limiet.
     assert subscription_pool.has_available_spillover(
-        entries, {}, paused_providers={"bedrock"}, cli_id="claude-code",
+        entries, {}, paused_providers={"minimax"}, cli_id="claude-code",
     ) is True
+
+    # Negatieve controle: kop én staart gepauzeerd → niets om naar uit te wijken.
+    assert subscription_pool.has_available_spillover(
+        entries, {}, paused_providers={"minimax", "anthropic"}, cli_id="claude-code",
+    ) is False
 ```
+
+Voor `analyst` draai je hetzelfde met kop `anthropic` en staart `minimax`. Voor `reviewer` is de
+staart bewust leeg, dus de positieve assertie is daar `is False` — "nooit uitwijken" is de
+gewenste uitkomst, geen defect.
 
 Voor de dispatch-zijde (inclusief time-based pause):
 ```python
@@ -204,6 +225,19 @@ async def main():
 # True  = er is een vrije uitwijk; de kaart wordt direct herdispatchbaar.
 # False = geen vrije uitwijk; de bestaande per-provider pause (wachten op reset) geldt.
 ```
+
+Deze tak kan `False` geven terwijl de pure router `True` zegt: dat gebeurt wanneer de staart zélf
+al een actieve per-provider pause heeft. Dat is correct gedrag — een gepauzeerde target is geen
+geldige uitwijk. Meet daarom altijd beide takken voordat je een `False` als defect leest.
+
+Gemeten op de live board-configuratie (2026-08-06, `project_key`
+`git:github.com/guillaumevandevelde/agent-cockpit`), beide takken:
+
+| Kolom | Kop (limiet) | Staart | Uitkomst |
+|---|---|---|---|
+| `engineer` | `minimax` | `[anthropic@0.9]` | `True` — wijkt uit |
+| `analyst` | `anthropic` | `[minimax@0.9]` | `True` — wijkt uit |
+| `reviewer` | `anthropic` | `[]` | `False` — wacht, zoals bedoeld |
 
 Een echte `spilling over`-logregel verschijnt op de kaart-activiteit-feed
 (`🔀 Rate-limit hit on '<provider>' — spilling over …`) zodra een bestaande sessie
