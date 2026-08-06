@@ -94,7 +94,10 @@ class AgenticCliExecutor:
         try:
             # CLI commands use a resolved fixed binary, a CLI-owned subcommand
             # whitelist, shell=False, and validation for user-controlled arguments.
-            # lgtm[py/command-line-injection]
+            # Confirmed by-design in docs/cockpit/security-scanning-decision.md
+            # §2.1 (card beace361…). `# lgtm[...]` was the legacy LGTM syntax
+            # and suppressed nothing — CodeQL only reads `# codeql[...]`.
+            # codeql[py/command-line-injection]
             result = subprocess.run(
                 full_command,
                 capture_output=True,

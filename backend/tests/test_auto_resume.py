@@ -327,3 +327,68 @@ class TestClassifyNotification:
         assert svc.classify_notification(message=None) == "other"
         assert svc.classify_notification(message="") == "other"
         assert svc.classify_notification(notification_type="") == "other"
+
+
+class TestLimitPatternRedos:
+    """`_LIMIT_PATTERN` runs against notification text that arrives from the
+    CLI/provider, i.e. input this process does not control (CodeQL
+    py/polynomial-redos, alert 251).
+
+    Both `.*?` gaps in the pattern used to be unbounded, so `search` did
+    O(n) work at each of O(n) start positions -- quadratic. Measured before
+    the fix: 4000 reps 0.32s, 8000 reps 1.35s (4x for 2x input). A single
+    long notification could stall the dispatch loop that parses it.
+
+    The gaps are now bounded, which caps per-start-position work at a
+    constant and makes the whole search linear.
+    """
+
+    # Both blow-up shapes CodeQL reported for this pattern.
+    @pytest.mark.parametrize(
+        ("label", "build"),
+        [
+            ("hit-your-reps", lambda n: "hit your " * n),
+            ("limit-reps", lambda n: "hit your " + " limit" * n),
+        ],
+    )
+    def test_adversarial_input_stays_linear(self, label, build):
+        import time
+
+        svc = AutoResumeService()
+
+        def elapsed(n):
+            payload = build(n)
+            start = time.perf_counter()
+            svc.parse_reset_time(payload)
+            return time.perf_counter() - start
+
+        # Doubling the input must not quadruple the time. A quadratic
+        # pattern lands near 4.0; a linear one near 2.0. 3.0 separates them
+        # without being flaky on a loaded shared runner.
+        base = max(elapsed(8000), 1e-4)
+        doubled = elapsed(16000)
+        assert doubled / base < 3.0, (
+            f"{label}: {doubled:.3f}s vs {base:.3f}s "
+            f"(ratio {doubled / base:.1f}) suggests super-linear backtracking"
+        )
+
+    def test_adversarial_input_completes_promptly(self):
+        """Absolute ceiling, independent of the ratio check above: the
+        pre-fix pattern needed ~1.35s for 8000 reps."""
+        import time
+
+        svc = AutoResumeService()
+        payload = "hit your " * 20000
+        start = time.perf_counter()
+        assert svc.parse_reset_time(payload) is None
+        assert time.perf_counter() - start < 0.5
+
+    def test_realistic_gaps_still_parse(self):
+        """The bound must stay wide enough for the real wording, including
+        the dated weekly form."""
+        svc = AutoResumeService()
+        for msg in (
+            "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+            "You've hit your weekly limit · resets Aug 3, 7pm (Europe/Brussels)",
+        ):
+            assert svc.parse_reset_time(msg) is not None, msg

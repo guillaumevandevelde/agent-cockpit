@@ -189,8 +189,15 @@ class ApmService:
             }
         except subprocess.TimeoutExpired:
             return {"success": False, "message": "APM install timed out after 120 seconds"}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+        except Exception:
+            # The exception text reaches the client verbatim via
+            # POST /apm/install (py/stack-trace-exposure, alert 234): a
+            # subprocess failure here embeds absolute host paths. Log the full
+            # trace server-side, hand the caller a generic message. The
+            # frontend only toasts this string (ApmPage.tsx handleInstall), so
+            # nothing downstream parses it.
+            logger.exception("APM install failed")
+            return {"success": False, "message": "APM install failed — see server logs for details"}
 
     @staticmethod
     def sync_dependencies(

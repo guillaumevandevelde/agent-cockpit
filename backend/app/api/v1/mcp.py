@@ -1,5 +1,7 @@
 """MCP server management endpoints."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +29,8 @@ from app.services.mcp_config_service import UnregisteredProjectPathError
 from app.services.mcp_registry_service import MCPRegistryService
 from app.services.mcp_service import MCPService
 from app.services.oauth_service import MCPOAuthService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 mcp_service = MCPService()
@@ -284,25 +288,32 @@ async def auth_callback(
 </body>
 </html>""")
     except ValueError as e:
-        return HTMLResponse(status_code=400, content=f"""<!DOCTYPE html>
+        # The exception text used to be interpolated raw into this HTML body
+        # (py/stack-trace-exposure, alert 235). Two problems in one line: it
+        # leaked internal OAuth/exchange detail to whoever opened the callback
+        # URL, and because the message can carry attacker-supplied `state` or
+        # `code` fragments it was an unescaped HTML injection sink as well.
+        # Log it, render a static page.
+        logger.warning("MCP OAuth callback failed: %s", e)
+        return HTMLResponse(status_code=400, content="""<!DOCTYPE html>
 <html>
 <head><title>Authentication Failed</title>
 <style>
-  body {{ font-family: system-ui, sans-serif; display: flex; align-items: center;
+  body { font-family: system-ui, sans-serif; display: flex; align-items: center;
          justify-content: center; min-height: 100vh; margin: 0;
-         background: #fef2f2; color: #991b1b; }}
-  .card {{ text-align: center; padding: 2rem; border-radius: 12px;
-           background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 400px; }}
-  .x {{ font-size: 3rem; margin-bottom: 1rem; }}
-  h1 {{ font-size: 1.25rem; margin: 0 0 0.5rem; }}
-  p {{ color: #64748b; margin: 0; font-size: 0.875rem; }}
+         background: #fef2f2; color: #991b1b; }
+  .card { text-align: center; padding: 2rem; border-radius: 12px;
+           background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 400px; }
+  .x { font-size: 3rem; margin-bottom: 1rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+  p { color: #64748b; margin: 0; font-size: 0.875rem; }
 </style>
 </head>
 <body>
   <div class="card">
     <div class="x">&#10007;</div>
     <h1>Authentication Failed</h1>
-    <p>{str(e)}</p>
+    <p>The authentication could not be completed. You can close this tab and try again.</p>
   </div>
 </body>
 </html>""")

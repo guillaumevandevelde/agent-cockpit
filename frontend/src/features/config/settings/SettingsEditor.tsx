@@ -73,23 +73,37 @@ export function SettingsEditor({ onSave }: SettingsEditorProps) {
     fetchSettings()
   }, [fetchSettings])
 
+  // Rejects the three keys that let a dotted path walk onto Object.prototype.
+  // Kept as a plain `===` chain rather than a Set lookup: CodeQL's
+  // js/prototype-pollution-utility only recognises a guard it can follow to
+  // the assignment, and a `Set.has` behind `Array.some` was opaque to it —
+  // the code was already safe, but the alert (8) stayed open because the
+  // check sat one call away from the write it protects.
+  const isUnsafeKey = (key: string) =>
+    key === '__proto__' || key === 'constructor' || key === 'prototype'
+
   const updateSetting = (path: string, value: ConfigValue) => {
-    const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
     const keys = path.split('.')
-    if (keys.some((k) => UNSAFE_KEYS.has(k))) return
+    if (keys.some(isUnsafeKey)) return
     setSettings((prev) => {
       const updated = { ...prev }
       let current: Record<string, ConfigValue> = updated
       for (let i = 0; i < keys.length - 1; i++) {
-        const existing = current[keys[i]]
+        const key = keys[i]
+        // Guard immediately before the write, not only up-front, so a later
+        // refactor of the loop can't silently drop the protection.
+        if (isUnsafeKey(key)) return prev
+        const existing = current[key]
         if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
-          current[keys[i]] = {}
+          current[key] = {}
         } else {
-          current[keys[i]] = { ...existing }
+          current[key] = { ...existing }
         }
-        current = current[keys[i]] as Record<string, ConfigValue>
+        current = current[key] as Record<string, ConfigValue>
       }
-      current[keys[keys.length - 1]] = value
+      const lastKey = keys[keys.length - 1]
+      if (isUnsafeKey(lastKey)) return prev
+      current[lastKey] = value
       return updated
     })
     setHasChanges(true)

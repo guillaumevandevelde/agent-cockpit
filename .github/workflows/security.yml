@@ -18,6 +18,10 @@ concurrency:
 jobs:
   semgrep:
     runs-on: ubuntu-latest
+    # Read-only: semgrep scans the checked-out tree and prints to the log.
+    # `continue-on-error` keeps it advisory; nothing is written back.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -29,6 +33,16 @@ jobs:
 
   gitleaks:
     runs-on: ubuntu-latest
+    # Not read-only, unlike every other job in this repo's CI: gitleaks-action
+    # consumes GITHUB_TOKEN to comment on a pull request when it finds a leak
+    # (GITLEAKS_ENABLE_COMMENTS defaults to true), which needs
+    # `pull-requests: write`. Dropping to `contents: read` would silence that
+    # comment on exactly the runs that matter. The SARIF artifact
+    # (GITLEAKS_ENABLE_UPLOAD_ARTIFACT) rides the Actions runtime token, not
+    # GITHUB_TOKEN, so it needs no scope here.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:

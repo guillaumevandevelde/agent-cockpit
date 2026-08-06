@@ -39,6 +39,11 @@ concurrency:
 jobs:
   backend-lint:
     runs-on: ubuntu-latest
+    # Read-only: checkout + lint/type/security/snapshot gates. Nothing here
+    # writes back to the repo, opens a PR, or publishes a package, so the
+    # default write-capable token is strictly more than the job needs.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -107,6 +112,9 @@ jobs:
 
   backend-tests:
     runs-on: ubuntu-latest
+    # Read-only: checkout + pytest.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -121,6 +129,10 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    # Read-only: checkout + lint/test/build. The coverage report stays on the
+    # runner; nothing is uploaded back to the repo.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -139,6 +151,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # Read-only: checkout + build + Playwright against a locally booted stack.
+    permissions:
+      contents: read
     # Gated on the jobs that say whether the app actually works, NOT on
     # backend-lint: import ordering has no bearing on whether the stack boots,
     # and gating on it would let a cosmetic hit silently skip e2e — the same

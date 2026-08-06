@@ -1,11 +1,14 @@
 """Sandcastle API endpoints."""
 
+import logging
 from datetime import UTC
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator
 
 from app.services.sandcastle_service import sandcastle_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sandcastle", tags=["sandcastle"])
 
@@ -447,7 +450,14 @@ async def stream_container_logs(name: str, request: Request, runtime: str = Quer
                     break
                 yield f"data: {json.dumps({'line': line})}\n\n"
         except ValueError as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            # Don't echo the exception text down the SSE channel
+            # (py/stack-trace-exposure, alert 237) — it carries container
+            # names, runtime paths and CLI stderr. The frontend types this
+            # field as `error?: string` but never reads it
+            # (sandcastle/api.ts streamContainerLogs only acts on `line`), so
+            # a generic string costs the UI nothing.
+            logger.warning("Container log stream failed for %s: %s", name, e)
+            yield f"data: {json.dumps({'error': 'Log stream unavailable — see server logs for details'})}\n\n"
 
     return StreamingResponse(
         event_generator(),
