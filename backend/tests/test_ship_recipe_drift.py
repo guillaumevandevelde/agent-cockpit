@@ -358,6 +358,30 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "README marker-boundary awk predicate (line-number column = $1)",
         "awk -F: -v b=\"$BEGIN_LINE\" -v e=\"$END_LINE\" '$1 < b || $1 > e",
     ),
+    # Visible-UI affordance: one browser count (kanban card
+    # 07c05b84152240bdb28c61fec4e840e1). The rule guards against the
+    # "endpoint-test + component-test pass but the UI doesn't render"
+    # blind spot that bit kaart `d444b2d0…` twice — the rule itself is
+    # the only thing that catches it, and forgetting it on either mirror
+    # means the gate silently disappears for that reader. The
+    # substring below anchors the rule in both mirrors: the section
+    # heading is unique to the new gate (no other "Visible UI affordance"
+    # reference exists in either source), the localhost:5173 anchor
+    # pins the copy-pasteable Playwright recipe, and `count()` pins
+    # the canonieke assertion form. Drop any one of the three and the
+    # rule is no longer "in sync" — that's the regression to catch.
+    (
+        "visible-UI affordance browser-count section",
+        "Visible UI affordance",
+    ),
+    (
+        "visible-UI affordance Playwright target",
+        "localhost:5173",
+    ),
+    (
+        "visible-UI affordance canonieke assertion",
+        ".count()",
+    ),
 ]
 
 def _dispatch_direct_prompt() -> str:

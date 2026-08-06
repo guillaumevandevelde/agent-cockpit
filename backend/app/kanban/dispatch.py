@@ -3213,6 +3213,67 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
         "sla je deze stap over. "
         "make sure every change is committed to the current branch.\n"
     )
+    # Visible-UI affordance: one browser count (kanban card 07c05b84152240bdb28c61fec4e840e1).
+    # Endpoint-tests en component-tests bewijzen samen niet dat ze
+    # verbonden zijn — kaart `d444b2d0…` (agent-bridge →
+    # kanban-kaart-navigatie) is twee rondes als "af" geshipt met groene
+    # tests terwijl de knop nul keer in de app rendere. Voeg dit alleen
+    # toe op de inlined dispatch-prompt wanneer de kaart een **nieuwe
+    # zichtbare UI-affordance** oplevert; de conditie moet scherp zijn
+    # anders wordt de regel genegeerd of betaalt élke kaart een
+    # browser-run (kaart 07c05b84152240bdb28c61fec4e840e1, acceptance #3).
+    # Drift-val: deze sectie MOET byte-gelijk zijn met `## 2b. Visible
+    # UI affordance` in `.claude/skills/git-ship/SKILL.md`; de drift-test
+    # `backend/tests/test_ship_recipe_drift.py` bewaakt minstens de
+    # canonieke substrings (`Visible UI affordance`,
+    # `localhost:5173`, `count()`).
+    ui_browser_count = (
+        "2b. **Visible UI affordance: one browser count** — endpoint-tests "
+        "en component-tests bewijzen samen niet dat ze verbonden zijn. "
+        "Kaart `d444b2d0…` (agent-bridge → kanban-kaart-navigatie) is twee "
+        "rondes als \"af\" geshipt met groene tests terwijl de knop nul "
+        "keer in de app rendere: `/sessions` had het `card_id`-veld dat de "
+        "frontend-test voedde, maar de tegels kwamen uit `/teams` zonder "
+        "enrichment. Twee groene tests, twee blinde vlekken, en het enige "
+        "dat het had gevonden is één regel Playwright in de draaiende app.\n"
+        "   **Wanneer dit geldt.** De kaart voegt een **nieuwe zichtbare "
+        "UI-affordance** toe: een knop, link, indicator, paneel, dialoog, "
+        "route, of een element dat op het scherm verschijnt wanneer het "
+        "er eerder niet was. **Niet** voor: backend-only kaarten, "
+        "docs-kaarten, refactors, API-wijzigingen zonder UI-vertaling, "
+        "test-coverage, of bug-fixes die niets nieuws tonen. Een bestaand "
+        "element aanpassen (kleur, label, hover-state) is geen nieuwe "
+        "affordance en valt buiten deze gate. Bij twijfel: als er vóór de "
+        "diff géén DOM-element was op pad X en erna wel, telt het.\n"
+        "   **Wat je doet.** Eén telling of screenshot die bewijst dat de "
+        "affordance in de draaiende app aanwezig is:\n"
+        "   ```js\n"
+        "   const { chromium } = require('@playwright/test')\n"
+        "   const browser = await chromium.launch()\n"
+        "   const page = await browser.newPage()\n"
+        "   await page.goto('http://localhost:5173/<route>')\n"
+        "   const n = await page.locator('<jouw-affordance-selector>').count()\n"
+        "   // Verwacht ≥ 1; 0 = de feature bestaat niet in de UI\n"
+        "   await browser.close()\n"
+        "   ```\n"
+        "   Drie regels Playwright tegen de al-draaiende dev-stack zijn "
+        "genoeg — `./scripts/cockpit.sh start` of `./scripts/dev.sh` "
+        "levert `http://localhost:5173` en Chromium zit al in de tree "
+        "(zie `frontend/package.json` → `@playwright/test`). Weigert "
+        "`./scripts/cockpit.sh start` omdat een andere sessie de poorten "
+        "8000/5173 vasthoudt, volg dan "
+        "[`docs/cockpit/isolated-component-preview.md`](./docs/cockpit/isolated-component-preview.md) "
+        "om de component in een scratch Vite op een vrije poort te "
+        "mounten en dáár de telling te doen — geen wachttijd, geen "
+        "gedeelde data. `<jouw-affordance-selector>` is een concrete "
+        "`getByRole` / `getByLabel` / `getByTestId` van de affordance die "
+        "de kaart belooft; `count()` ≥ 1 is de canonieke assertion. Een "
+        "screenshot naar `/tmp/<kaart-id>-<kind>.png` is een geldige "
+        "evidence als de affordance geen getalsvorm heeft (een banner is "
+        "tekst, geen affordance — `getByText(...)` is geen selector die "
+        "telt). Sla de `count()`-uitslag of het pad op in je "
+        "`**Summary:**`-comment zodat de reviewer 'm ziet.\n"
+    )
 
     retro_direct = _build_session_retro_step(step_number=6)
     retro_pr = _build_session_retro_step(step_number=7)
@@ -3733,7 +3794,7 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
     # must work without the dispatch prompt. Both forms end up identical
     # on the meta project (``/home/vdvgu/claude-cockpit``).
     return (
-        feature_compliance_review + sync + tests + commit + shipping
+        feature_compliance_review + sync + tests + ui_browser_count + commit + shipping
     ).replace("<main-checkout>", main_checkout_q)
 
 
