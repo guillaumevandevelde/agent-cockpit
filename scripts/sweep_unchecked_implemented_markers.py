@@ -11,9 +11,11 @@ effect-bewijs.
 
 Het script detecteert uitsluitend de **structurele afwezigheid** van een
 effect-claim — een `Effect:`-zin (of equivalent label zoals "nog niet in
-productie waargenomen") binnen de eerstvolgende ~3 regels onder de marker. De
-**inhoud** van de effect-claim blijft een menselijke beoordeling; net zoals
-`check-doc-readability.py` letterlengtes meet maar geen stijl beoordeelt.
+productie waargenomen") in dezelfde alinea onder de marker: de regels tot
+de eerste blanco regel, met een harde bovengrens van `EFFECT_WINDOW_MAX`
+(12) regels. De **inhoud** van de effect-claim blijft een menselijke
+beoordeling; net zoals `check-doc-readability.py` letterlengtes meet maar
+geen stijl beoordeelt.
 
 Output: één JSON-document op stdout (altijd — geen human-readable vorm) zodat
 de aanroeper kan `jq`en, vergelijken tegen een baseline, of als bijlage aan
@@ -38,7 +40,7 @@ een follow-up-kaart hangen. Schema:
       ]
     }
 
-Gezonde markers (wel effect-bewijs binnen 3 regels) worden stil
+Gezonde markers (wel een effect-bewijs in dezelfde alinea) worden stil
 weggelaten. Een marker zonder effect is **geen automatische bug** — het is
 dezelfde klasse als "git log zonder commit-message": structurele
 afwezigheid van een verplicht veld, geen kwaliteitsoordeel over de
@@ -90,11 +92,12 @@ MARKER_PATTERNS = (
 # heading-detector te bouwen.
 CARD_REF_PATTERN = re.compile(r"\bkaart\b", re.IGNORECASE)
 
-# Effect-claim indicatoren. Een marker is "voorzien" als binnen
-# EFFECT_WINDOW_REGELS één van deze patronen op een niet-lege regel
-# matcht. Het venster is bewust klein (3 regels) zodat een effect-claim
-# dieper in de alinea niet "per ongeluk" matcht — de conventie vereist
-# een direct-aangrenzende claim.
+# Effect-claim indicatoren. Een marker is "voorzien" als één van deze
+# patronen matcht op een niet-lege regel binnen het venster dat
+# `_has_effect_claim` opspant: dezelfde alinea, met `EFFECT_WINDOW_MAX`
+# als harde bovengrens. De blanco regel is de semantische grens — de
+# conventie vereist een claim in dezelfde alinea, niet een verwijzing
+# verderop in het doc.
 EFFECT_PATTERNS = (
     re.compile(r"\bEffect\s*:", re.IGNORECASE),
     re.compile(r"\bnog niet in productie waargenomen\b", re.IGNORECASE),

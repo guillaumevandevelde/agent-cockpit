@@ -142,6 +142,9 @@ bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k fil
 # Remote-branch sweeper (vangnet voor merged-maar-niet-verwijderde branches op `origin`; volgt op de direct-mode ship-recipe fix uit kanban-kaart `3027671c…` — advisory; --strict = exit 1; JSON op stdout; nudge vanuit `cockpit.sh start`)
 ./scripts/sweep_merged_remote_branches.py      # Flag refs/remotes/<remote>/* branches die `git cherry <base> <ref>` met 0 `+`-regels beantwoorden (volledig gemerged)
 
+# ✅-marker-sweeper (vangnet voor `✅ Geïmplementeerd`-regels zonder waargenomen effect — kaart `21a349bc…`; conventie: recipe-writing-conventions.md §2; advisory; --strict = exit 1; JSON op stdout)
+./scripts/sweep_unchecked_implemented_markers.py   # Flag `✅ Geïmplementeerd`/`✅ Uitgevoerd`-markers in docs/cockpit/*.md zonder `Effect:`-zin in dezelfde alinea (venster stopt op de eerste blanco regel, max 12 regels)
+
 # Lint
 cd frontend && npm run lint      # ESLint
 

@@ -228,15 +228,16 @@ Een `✅ Geïmplementeerd`-regel in dit formaat:
 > in productie waargenomen" + reden>.
 ```
 
-De `Effect:`-zin staat op de eerstvolgende regel(s) onder de
-implementatie-samenvatting — geen paragraaf verderop, geen in een
-footnote. Een lezer die alleen de `>`-gequote regel leest, ziet het
-effect meteen.
+De `Effect:`-zin staat in **dezelfde alinea** als de
+implementatie-samenvatting — geen paragraaf verderop, niet in een
+footnote. Een blanco regel sluit de alinea, en daarmee het venster
+waarin de sweep zoekt (zie "Hoe validatie werkt" hieronder). Een lezer
+die alleen de `>`-gequote regel leest, ziet het effect meteen.
 
 ### Wanneer geldt deze regel?
 
 Voor élke `✅ Geïmplementeerd`-, `✅ Uitgevoerd`- of equivalente
-"code-merger"-markering in `docs/cookpit/*.md` die gekoppeld is aan
+"code-merger"-markering in `docs/cockpit/*.md` die gekoppeld is aan
 een aanbeveling, R-blok, ontwerpbeslissing of gefilede follow-up. Doc
 types die dit het hardst raken: `type: analysis`-docs (de
 "Aanbevolen richting" / "Vervolgkaarten"-secties), `type: decision`-docs
@@ -301,8 +302,12 @@ Drie dingen vallen op:
 
 ``scripts/sweep_unchecked_implemented_markers.py`` (advies-only, advisory
 met `--strict` voor CI) itereert alle `✅ Geïmplementeerd`-regels in
-`docs/cockpit/*.md` en flagt degene zonder `Effect:`-zin in de eerst-
-volgende 3 regels. Het script laat de **inhoud** aan de mens over — het
+`docs/cockpit/*.md` en markeert degene zonder `Effect:`-zin **in dezelfde
+alinea**. Het venster begint op de regel ná de marker en stopt bij de
+eerste blanco regel, met een harde bovengrens van 12 regels
+(`EFFECT_WINDOW_MAX` in het script). Die bovengrens is een vangnet voor
+een marker zonder alinea-break; in de praktijk stopt de blanco regel het
+venster eerder. Het script laat de **inhoud** aan de mens over — het
 detecteert alleen de structurele afwezigheid van een effect-claim. Een
 hit betekent niet automatisch "bug", maar "geen effect-bewijs
 geregistreerd" — dezelfde klasse als `git log` zonder commit-message.
