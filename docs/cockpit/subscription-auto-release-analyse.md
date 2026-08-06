@@ -386,6 +386,13 @@ directe beantwoording van de kaart-vraag.
 naar sessies met een levende pane kijken; dat is de verzameling waarvoor hij bestaat. Dit
 is het enige vangnet dat werkt zonder een specifieke foutmelding te herkennen.
 
+✅ Geïmplementeerd (kaart `01bde6e9…`): de carve-out op `dispatch.py` laat
+`sandcastle_live` / `headless_live` / `acp_live` met rust (transports met eigen
+liveness), maar `live_sessions` (tmux-snapshot) wordt nu meegenomen — de pane
+blijft staan bij een abonnementslimiet, het transcript niet. Nieuwe tests
+`test_progress_liveness_live_tmux_with_stalled_transcript_{triggers_signal,releases_claim}`
+bewaken dat de drempels ook bij levende tmux-panes vuren.
+
 **R3 — Vervang blind wachten door proberen bij MiniMax (gat B′).** Een provider zonder
 reset-tijd verdient een korte pauze plus een gecontroleerde herkansing met exponentiële
 terugschaling, niet een geraden constante van 5 uur.
