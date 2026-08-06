@@ -342,6 +342,22 @@ CORE_RECIPE_INVARIANTS: list[tuple[str, str]] = [
         "carve-out stages by explicit path",
         'git -C "$WT" add -- docs/cockpit/README.md docs/cockpit/llms.txt',
     ),
+    # README marker-boundary awk predicate (kanban card
+    # `2d27fca8…`). The carve-out's marker-boundary check uses awk to
+    # filter CONFLICT_LINES whose line-number column falls outside
+    # [BEGIN_LINE, END_LINE]; the predicate MUST reference that column as
+    # `$1` (set by `grep -n`). Using an undefined awk variable like
+    # `mode` (or any other name) defaults to 0, so the predicate is
+    # always true (0 < b || 0 > e when b>0 and e>0) — every README
+    # conflict hunk is then treated as outside the generated block and
+    # the carve-out always falls through to report_impediment. Pin the
+    # full predicate form across both mirrors; the absence of the
+    # `mode` anti-pattern is pinned separately as an explicit
+    # anti-presence test.
+    (
+        "README marker-boundary awk predicate (line-number column = $1)",
+        "awk -F: -v b=\"$BEGIN_LINE\" -v e=\"$END_LINE\" '$1 < b || $1 > e",
+    ),
 ]
 
 def _dispatch_direct_prompt() -> str:
@@ -1273,6 +1289,61 @@ def test_readme_marker_check_sits_between_enumeration_and_open(
     )
 
 
+# README marker-boundary awk predicate — anti-pattern pin (kanban card
+# `2d27fca8…`). The presence invariant above pins the *correct* form
+# (`$1 < b || $1 > e`); this pins the *broken* form (`mode < b || mode > e`)
+# as an explicit anti-presence. The two are complementary: the presence
+# test catches a future editor who deletes the predicate entirely (or
+# rephrases it so the substring no longer matches); this absence test
+# catches a future editor who replaces `$1` with `mode` (or any other
+# undefined awk variable). Either drift silently breaks the carve-out —
+# every README conflict hunk is then treated as outside the generated
+# block and the recipe always falls through to report_impediment, even
+# when the conflict is fully inside the generated block.
+#
+# The substring is specific enough to be unambiguous: `mode < b || mode > e`
+# is a peculiar awk filter, not a normal bash/awk idiom, and there is no
+# other plausible use of that exact phrase in either mirror. So a plain
+# `not in` check is safe — no need for the `_executable_lines` filter
+# the negative pins for kanban card 7dd8a3dd… use (those need it because
+# `add -A` is a more general phrase that the comments routinely mention).
+README_AWK_PREDICATE_ANTI_PATTERN = "'mode < b || mode > e"
+
+
+@pytest.mark.parametrize("source_name", sorted(SOURCES))
+def test_readme_marker_awk_predicate_does_not_use_undefined_mode(
+    source_name: str,
+) -> None:
+    """The README marker-boundary awk predicate must not use `mode` (or any
+    other undefined awk variable) where the line-number column is meant.
+
+    Pins the anti-pattern from kanban card ``2d27fca8…``: the predicate
+    ``awk -F: -v b="$BEGIN_LINE" -v e="$END_LINE" 'mode < b || mode > e'``
+    uses ``mode``, an undefined awk variable that defaults to 0. The
+    comparison ``0 < b || 0 > e`` is then always true (for b>0, e>0),
+    so every CONFLICT_LINES entry is printed as "outside" and the
+    carve-out always falls through to report_impediment. The line-
+    number column set by ``grep -n`` is ``$1``; the predicate must
+    reference that.
+
+    The presence invariant above (``README marker-boundary awk
+    predicate (line-number column = $1)``) catches a missing predicate
+    or a rephrased substring; this test catches the specific
+    ``mode``-in-place-of-``$1`` regression that motivated the card.
+    """
+    source_text = SOURCES[source_name]()
+    assert README_AWK_PREDICATE_ANTI_PATTERN not in source_text, (
+        f"{source_name}: README marker-boundary awk predicate uses "
+        f"`mode` (or another undefined awk variable) where the line-"
+        f"number column `$1` is required. `mode` defaults to 0 in awk, "
+        f"so the predicate `mode < b || mode > e` is always true and "
+        f"every README conflict hunk is treated as outside the "
+        f"generated block — the carve-out silently always falls through "
+        f"to report_impediment. Use `$1 < b || $1 > e` instead "
+        f"(kanban card `2d27fca8…`)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Negative pins for kanban card 7dd8a3dd… — the "no card can ship at all"
 # incident. Ten files whose names are exactly git's per-worktree admin
@@ -1691,4 +1762,72 @@ def test_index_guard_detects_recovery_after_an_exit() -> None:
     assert "unreachable" in reason, (
         f"unexpected failure reason: {reason!r}; expected an unreachable-"
         f"recovery diagnosis."
+    )
+
+
+def test_readme_marker_awk_predicate_detects_the_mode_drift() -> None:
+    """Live negative case: a mirror carrying the broken `mode` predicate
+    must trip the anti-pattern test, not pass it vacuously.
+
+    Mirrors ``test_drift_detector_fails_when_mirror_loses_a_command``
+    (and the other live negative cases in this file): a future edit
+    that softens the anti-pattern (e.g. narrows the substring until it
+    no longer matches anything) would let the test pass on every
+    mirror, including a mirror carrying the broken shape. Replaying the
+    check against a fixture with the exact broken predicate keeps the
+    pin honest.
+
+    The fixture carries BOTH the broken predicate (so the absence
+    check would flag it) AND the absence of the correct predicate (so
+    the presence check would also flag it). Only the former matters
+    for this test, but verifying both keeps the fixture representative
+    of the full drift scenario.
+    """
+    broken_mirror = (
+        'git worktree add --detach "$WT" origin/master\n'
+        'if ! git -C "$WT" merge --no-ff "$BRANCH" -m "Merge $BRANCH"; then\n'
+        '  CONFLICTED=$(git -C "$WT" diff --name-only --diff-filter=U)\n'
+        '  if printf \'%s\\n\' "$CONFLICTED" | grep -qx \'docs/cockpit/README.md\'; then\n'
+        '    README_FILE="$WT/docs/cockpit/README.md"\n'
+        '    BEGIN_LINE=$(grep -nF \'<!-- BEGIN GENERATED DOC INDEX\' "$README_FILE" | head -1 | cut -d: -f1)\n'
+        '    END_LINE=$(grep -nF \'<!-- END GENERATED DOC INDEX -->\' "$README_FILE" | head -1 | cut -d: -f1)\n'
+        '    CONFLICT_LINES=$(grep -nE \'^(<<<<<<< |=======$|>>>>>>> )\' "$README_FILE" 2>/dev/null || true)\n'
+        '    OUTSIDE=$(awk -F: -v b="$BEGIN_LINE" -v e="$END_LINE" \'mode < b || mode > e { print }\' <<< "$CONFLICT_LINES")\n'
+        '    if [ -n "$OUTSIDE" ]; then\n'
+        '      exit 1\n'
+        '    fi\n'
+        '  fi\n'
+        'fi\n'
+    )
+    # Sanity: the fixture really is broken — it has the `mode` predicate.
+    assert README_AWK_PREDICATE_ANTI_PATTERN in broken_mirror, (
+        f"test fixture bug: broken mirror unexpectedly does NOT contain "
+        f"the anti-pattern {README_AWK_PREDICATE_ANTI_PATTERN!r}"
+    )
+    # Sanity: the fixture really is missing the correct `$1` predicate.
+    # (This is a separate check from the absence test; the absence test
+    # is the one that runs across real mirrors.)
+    assert (
+        "awk -F: -v b=\"$BEGIN_LINE\" -v e=\"$END_LINE\" '$1 < b || $1 > e"
+        not in broken_mirror
+    ), (
+        "test fixture bug: broken mirror unexpectedly contains the "
+        "correct `$1` predicate — the live negative case is testing "
+        "the wrong shape."
+    )
+    # Detector contract: the parametrised test would flag this. Replay
+    # its exact check here so a future refactor of the parametrised
+    # test is forced to keep the same failure mode. The detector's
+    # check is `anti-pattern NOT in source`; it PASSES on a clean
+    # mirror and FAILS on a broken one. A fixture that carries the
+    # broken `mode` predicate must therefore make the detector's check
+    # FAIL — if the detector instead passes vacuously, the pin has
+    # rotted and a future regression would no longer trip CI.
+    detector_passes = README_AWK_PREDICATE_ANTI_PATTERN not in broken_mirror
+    assert not detector_passes, (
+        f"anti-pattern detector PASSES on a mirror carrying the broken "
+        f"`mode` predicate; the absence pin has rotted and a future "
+        f"regression would no longer trip CI. "
+        f"Anti-pattern: {README_AWK_PREDICATE_ANTI_PATTERN!r}; "
+        f"present in fixture: {not detector_passes}."
     )
