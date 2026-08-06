@@ -159,6 +159,89 @@ auto-recovery schrijft, leg de recovery in de `else`-tak van dezelfde
 positionele invarianten pinnen. Een recovery die "elders in het script"
 zit, is per definitie onbereikbaar in het scenario dat hem nodig heeft.
 
+## `git fetch <remote> <branch>:<branch>` weigert op een uitgecheckte branch
+
+> **`git fetch <remote> <branch>:<branch>` in de refspec-vorm
+> wordt door git geweigerd zodra `<branch>` ergens is uitgecheckt.**
+> Niet alleen in de huidige worktree, ook in andere. Gebruik
+> `git update-ref`, `git pull --ff-only`, of een detached worktree.
+> Kies op basis van de working-tree-state van de doel-checkout, niet
+> op de "fetch"-reflex.
+
+Het faal-symptoom is eenduidig en makkelijk te missen in een pijplijn:
+
+```
+fatal: refusing to fetch into branch 'refs/heads/master' checked out at '/.../claude-cockpit'
+```
+
+De reflex "ik wil de lokale master fast-forwarden naar
+`origin/master`" leidt op het eerste gezicht tot
+`git fetch origin master:master` — en dat commando weigert op precies
+de multi-session-box waar `master` in de hoofd-checkout staat. Een
+recipe die deze vorm gebruikt, breekt op de eerste ship, niet bij
+een test.
+
+### Drie routes voor ref-sync, één trade-off
+
+De drie werkende vormen op deze box, gerangschikt op "hoe zwaar is
+de ingreep op de doel-checkout":
+
+- **`git pull --ff-only <remote> <branch>`** — fast-forwardt de
+  ref én werkt index + working tree in één stap bij. **Voorkeur**
+  in de ship-recipe voor de post-push sync van de hoofd-checkout
+  (zie `.claude/skills/git-ship/SKILL.md` §4a, vierde iteratie):
+  de dev-stack (`cockpit.sh`) draait door tegen het laatste tree.
+  Weigert wanneer de working tree vuil is — dat is de juiste
+  default: een concurrent agent-editor niet overschrijven. De
+  skip-with-WARN (kanban-kaart `5e83b6e0…`) maakt de
+  divergentie-guard zichtbaar op de volgende ship, in plaats van
+  'm stil langs `update-ref` te omzeilen.
+
+- **`git update-ref refs/heads/<branch> <remote>/<branch>`** —
+  schrijft de ref direct naar `refs/heads/`, raakt index en
+  working tree niet aan. **Alleen** geschikt wanneer de
+  working tree van die checkout bewust stale mag blijven (bv.
+  een referentie die niet door andere tooling wordt uitgelezen).
+  In de ship-recipe is deze route afgekeurd als primair pad
+  (derde iteratie, kanban-kaart `5e83b6e0…`): de ref-update
+  slaagde bijna altijd stil, waardoor de divergentie-guard op de
+  volgende ship bleef trippen zonder dat een operator de
+  oorzaak kon zien.
+
+- **Detached worktree** — `git worktree add --detach <pad> <base>`,
+  merge of sync dáár, en post-push de hoofd-checkout via
+  `pull --ff-only`. Dit is de canonieke vorm voor de merge-kant
+  van een ship-recipe op deze box: de detached worktree heeft
+  geen branch uitgecheckt en loopt dus niet tegen de
+  `fetch <branch>:<branch>`-blokkade aan.
+
+### Counter-example — de derde iteratie (kanban-kaart `5e83b6e0…`)
+
+De afgekeurde variant in de derde iteratie van de ship-recipe
+probeerde de lokale `master`-ref bij te werken met
+`git fetch origin master:master` — exact het commando dat git
+weigert zodra `master` in de hoofd-checkout staat. De eerste
+workaround was `git update-ref refs/heads/master origin/master`,
+wat de ref wel bijwerkte maar de working tree stale liet. Een
+operator die daarna `git status` draaide, zag een
+"uncommitted changes"-achtige staat en de divergentie-guard liep
+op elke volgende ship vast zonder zichtbare reden — de
+ref-update was het signaal aan het verbergen. De vierde iteratie
+(`.claude/skills/git-ship/SKILL.md` §4a, post-push sync block)
+vervangt beide: merge in een detached worktree (geen blokkade),
+en sync van de hoofd-checkout via `pull --ff-only` met WARN bij
+een vuile working tree.
+
+### Wanneer geldt deze regel?
+
+Voor élke shell-recipe (skill, dispatch-blok, sync-helper) die
+een lokale branch-ref wil updaten naar een remote branch-ref.
+Kies bij voorbaat uit de drie routes hierboven op basis van de
+working-tree-state van de doel-checkout. Een toekomstige editor
+die de natuurlijke `fetch origin <branch>:<branch>`-reflex
+volgt, breekt gegarandeerd op de eerste ship — precies het
+patroon dat deze sectie wil voorkomen.
+
 ## 2. "✅ Geïmplementeerd" in analysedocs = code gemerged, niet gat gedicht
 
 > **Bron van waarheid:** deze paragraaf is leidend voor het
