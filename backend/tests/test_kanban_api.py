@@ -33,6 +33,37 @@ async def test_create_list_move_card():
 
 
 @pytest.mark.asyncio
+async def test_rest_move_card_to_impediment_is_rejected():
+    """REST fallback mirror of the MCP gate (kaart b8e3ac8b… decision A).
+
+    The dispatch fallback-instructie in dispatch.py points at this
+    REST endpoint when the MCP handshake is broken. Without this gate
+    a degraded dispatch path would still produce the 0-button
+    Impediment screen, so the policy must be enforced server-side —
+    not just in the MCP tool wrapper. The error message names
+    `report_impediment` so the agent can self-correct without reading
+    docs."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "T", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Impediment"})
+        assert r.status_code == 422, r.text
+        # Message must steer the agent to the right tool.
+        msg = r.text
+        assert "report_impediment" in msg, (
+            f"422 message must name report_impediment, got: {msg!r}"
+        )
+        # Card must stay put — the rejected move must not have applied.
+        r2 = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
+        card = next(c for c in r2.json()["items"] if c["id"] == cid)
+        assert card["column"] != "Impediment"
+
+
+@pytest.mark.asyncio
 async def test_reorder_cards_sets_rank_order():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as ac:

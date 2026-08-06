@@ -345,7 +345,7 @@ async def claim_card(card_id: str, claimed_by: str) -> dict:
 # prompt text that could be skipped. report_impediment already gets this for free
 # (its mandatory `question` arg is posted the same way), so this only closes the gap
 # for the Done path and for a raw move_card("Impediment", ...) bypassing that tool.
-_SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary", "Impediment": "Impediment"}
+_SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary"}
 
 # Analysis cards (`work_type == "analysis"` or `agent == "analyst"`) are the
 # highest-discipline consumer of the Done state: their value is downstream
@@ -436,12 +436,46 @@ async def move_card(card_id: str, column: str,
     auto-closes to `Done` once every child card reaches `Done`, which also
     walks up a chain of nested parents. See
     `docs/cockpit/analyse-levenscyclus-decision.md` §3.
+
+    Routing-to-Impediment gate (kaart b8e3ac8b… decision A): moving a card
+    straight to `Impediment` via `move_card` is rejected — fire
+    `report_impediment` instead, which is the only call that opens a
+    KanbanGate and renders the 4-button picker. `move_card(column="Impediment")`
+    posted a `**Impediment:** <summary>` comment but never opened a gate,
+    so `ResolveImpedimentControl` rendered `hasChoiceRow === false` —
+    the exact blank 0-button screen the product owner complained about
+    for three rounds. Even a perfectly-written `summary` on this path is
+    refused; the issue is the missing gate, not the missing prose.
     """
     async with KanbanSessionLocal() as s:
         card = await _require_card(s, card_id)
         if card is None:
             logger.debug("move_card: %s not found", card_id)
             return {"error": _NOT_FOUND, "card_id": card_id}
+
+        # Routing-to-Impediment gate (kaart b8e3ac8b… decision A). Fires
+        # BEFORE `summary_required` so the agent sees the actionable
+        # error code even when they supplied a summary — the issue is
+        # the missing gate, not the missing prose. The error message
+        # names `report_impediment` so the agent doesn't have to read
+        # the docs to find the right tool.
+        if column == "Impediment":
+            logger.info(
+                "move_card: %s rejected — column='Impediment' is "
+                "report_impediment's job, not move_card's", card_id)
+            return {
+                "error": "use_report_impediment",
+                "message": (
+                    "`move_card` cannot park a card in `Impediment` — "
+                    "that route skips the KanbanGate and leaves the "
+                    "Impediment screen with 0 choice buttons. Use "
+                    "`report_impediment(card_id, question, options=...)` "
+                    "instead; pass 4 options for a structured 4-button "
+                    "picker, or omit `options` for a free-text question. "
+                    "Either way a human sees the question and the card "
+                    "stays gateable."
+                ),
+            }
 
         label = _SUMMARY_REQUIRED_COLUMNS.get(column)
         summary = (summary or "").strip()

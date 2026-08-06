@@ -899,6 +899,30 @@ def _project_key_from_card(s, card) -> str:
 
 @router.post("/cards/{cid}/move", response_model=CardResponse)
 async def move_card(cid: str, payload: MoveRequest):
+    # Routing-to-Impediment gate (kaart b8e3ac8b… decision A). Same
+    # reason as `mcp_server.move_card`: a raw REST move into Impediment
+    # skips the KanbanGate and leaves the 0-button screen. The MCP
+    # fallback-instructie in dispatch.py pointed at this endpoint when
+    # the MCP handshake was broken, so closing the route here is what
+    # keeps the product owner's invariant alive even on a degraded
+    # dispatch path. The MCP `report_impediment` tool is the only way
+    # in; this REST endpoint mirrors that policy. `report_impediment`
+    # has no REST equivalent on purpose — the gate machinery is
+    # designed to be machine-driven, and the only machine path is via
+    # MCP.
+    if payload.column == "Impediment":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "REST /cards/{id}/move cannot park a card in `Impediment` "
+                "— that route skips the KanbanGate and leaves the "
+                "Impediment screen with 0 choice buttons. Use the MCP "
+                "tool `report_impediment(card_id, question, options=...)` "
+                "instead; pass 4 options for a structured 4-button "
+                "picker, or omit `options` for a free-text question."
+            ),
+        )
+
     async with KanbanSessionLocal() as s:
         card = await service.get_card(s, cid)
         if card is None:

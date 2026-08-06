@@ -453,7 +453,10 @@ nooit met `Write`/`Edit`/`MultiEdit`.
 Gebruik de `cockpit-kanban` MCP-tools om de kaart te sturen — er is **geen** apart
 workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
 
-- `move_card` — verplaats de kaart (naar `Done` bij succes, `Impediment` bij blokkade).
+- `move_card` — verplaats de kaart (naar `Done` bij succes). Accepteert elke
+  kolom behalve `Impediment`: een `move_card(column="Impediment")` wordt
+  geweigerd met `error: "use_report_impediment"`, ook mét `summary`. De
+  Impediment-route is uitsluitend `report_impediment`'s verantwoordelijkheid.
 - `comment` — log voortgang of beslissingen op de kaart.
 - `attach_deliverable` — koppel je PR/branch/commit (`kind`: pr|branch|commit|link|note).
 - `report_impediment` — als je écht vastloopt: geef verplicht een concrete, actionable
@@ -470,13 +473,16 @@ workflow-systeem dat je output parseert; jij beweegt de kaart zelf:
   sessie leest het resultaat via dezelfde `impediment_question`-pipeline. Dit
   is de **standaard vraagflow** voor élke menselijke beslissing — geen
   blokkerende `open_gate` meer (die houdt de sessie open en laat de worktree
-  als 'dood' reaperen).
+  als 'dood' reaperen). De gate werd uitgebreid (kaart b8e3ac8b… decision A):
+  ook de REST `POST /cards/{id}/move` route weigert `column="Impediment"` — een
+  blanco scherm kan dus niet meer ontstaan, ongeacht of de MCP-handshake mee-
+  werkt.
 
 Volg de `Ship mode` uit je prompt (pull-request vs direct).
 
 ## Product-taal voor `summary` (Done) en `report_impediment`-options
 
-`move_card` naar `Done`/`Impediment` eist een `summary` (zie MCP-tool),
+`move_card` naar `Done` eist een `summary` (zie MCP-tool),
 maar *wat* er in die `summary` staat is niet vastgelegd door de gate.
 De product-taal-conventie uit
 [`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options)

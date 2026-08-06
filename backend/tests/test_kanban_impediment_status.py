@@ -288,14 +288,20 @@ async def test_get_card_includes_impediment_status_dispatch_failed(_client):
 
 @pytest.mark.asyncio
 async def test_get_card_includes_impediment_status_needs_answer(_client):
-    """A `**Impediment:**` comment + open gate → needs_answer."""
+    """A `**Impediment:**` comment (free-text question, no gate) → needs_answer.
+
+    Uses `report_impediment` (free-text, no `options`) because the
+    `move_card(column="Impediment")` route is now gated (kaart b8e3ac8b…
+    decision A) — the only machine path into Impediment is via
+    `report_impediment`. The "needs_answer" state is the same one
+    `move_card` used to set up implicitly; the path is just a level
+    deeper into the actual canonical tool."""
     from app.kanban import mcp_server as m
 
     cid = (await m.create_card("IMP-HTTP-2", "t", "", confirm_new_project=True))["id"]
-    _moved = await m.move_card(cid, "Impediment", summary="which DB?")
-    assert "error" not in _moved, _moved
-    # move_card already posted "**Impediment:** which DB?" for us — the summary
-    # gate makes that the normal way a question reaches the feed.
+    await m.report_impediment(cid, "which DB?")
+    # report_impediment posted "**Impediment:** which DB?" for us (free-text
+    # path, no gate). The status surface is the same.
 
     r = await _client.get(f"/api/v1/kanban/cards/{cid}")
     assert r.json()["impediment_status"] == "needs_answer"
@@ -309,8 +315,10 @@ async def test_list_cards_includes_impediment_status_per_card(_client):
     no_q_id = (await m.create_card("IMP-LIST", "bare", "", confirm_new_project=True))["id"]
     await _bare_move_to_impediment("IMP-LIST", no_q_id)
     ask_id = (await m.create_card("IMP-LIST", "ask", "", confirm_new_project=True))["id"]
-    _moved = await m.move_card(ask_id, "Impediment", summary="pick A or B")
-    assert "error" not in _moved, _moved
+    # `move_card(Impediment)` is gated (kaart b8e3ac8b… decision A); use the
+    # canonical free-text path through report_impediment — same end state
+    # (`**Impediment:** pick A or B`).
+    await m.report_impediment(ask_id, "pick A or B")
     back_id = (await m.create_card("IMP-LIST", "back", "", confirm_new_project=True))["id"]
     # Stays on Backlog.
 

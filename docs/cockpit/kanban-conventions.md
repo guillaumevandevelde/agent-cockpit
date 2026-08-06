@@ -135,9 +135,10 @@ de prefix exact zoals hieronder of de consumer ziet je comment als ruis.
 - **`[dispatch-failure]` voor een handmatige move naar Impediment** → de UI zal
   de kaart als `dispatch_failed` classificeren en een "Redispatch"-knop tonen
   in plaats van de vraag. Menselijke Impediment-moves moeten via
-  `report_impediment` (met of zonder `options`) of een gewone `move_card` met
-  `column="Impediment"` + `summary="<vraag>"` — beide produceren automatisch
-  de juiste prefix intern.
+  `report_impediment` (met of zonder `options`) — kaart b8e3ac8b… decision A
+  sloot de tweede route (`move_card(column="Impediment")` + `summary`) omdat
+  die géén KanbanGate opende en de UI 0 keuze-knoppen liet zien. De REST
+  `POST /cards/{id}/move` weigert die kolom ook met 422.
 
 ### 2a. Outcome-label vocabulary (analyse-fase afronding)
 
@@ -275,7 +276,8 @@ uitsluitend** in `mcp_server.move_card` — het pad dat agents gebruiken:
 
 | Poort | Wat hij afdwingt | Doc |
 |---|---|---|
-| `summary_required` | `Done`/`Impediment` zonder `summary` wordt geweigerd | §2 |
+| `summary_required` | `Done` zonder `summary` wordt geweigerd | §2 |
+| `use_report_impediment` | `move_card(column="Impediment")` wordt geweigerd — gebruik `report_impediment` (kaart b8e3ac8b… decision A; geldt ook voor de REST `POST /cards/{id}/move`) | §2 |
 | Analyse-outcome-contract | Analyse-kaart naar `Done` moet `outcome` ∈ {`decomposed`, `not_feasible`, `no_action_needed`} declareren; `decomposed` wordt geverifieerd tegen ≥1 kind-kaart | [`analysis-outcome-contract-decision.md`](./analysis-outcome-contract-decision.md) |
 | Parent-parking | Kaart met ≥1 kind gaat naar `Awaiting Subtasks` i.p.v. `Done` | [`analyse-levenscyclus-decision.md`](./analyse-levenscyclus-decision.md) §3 |
 | Reviewer-gate | Kaart naar echte `Done` wordt omgeleid naar de `reviewer`-kolom (mits die kolom bestaat) | [`reviewer-agent-decision.md`](./reviewer-agent-decision.md) |
