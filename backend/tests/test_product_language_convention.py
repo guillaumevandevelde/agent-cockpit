@@ -83,6 +83,18 @@ COMMON_PRODUCT_LANGUAGE_ANCHORS: list[tuple[str, str]] = [
         "convention name",
         "product-taal",
     ),
+    # The "no process-meta in human-facing summaries" rule (kaart
+    # ``8b3ce64c…``). The new §5a anchors the three-delen-vorm with a
+    # explicit prohibition on FCR-uitslagen / session-retro / dedup-boekhouding
+    # / audit-log-archeologie in the human-facing summary — those belong in
+    # the activity-feed / retro-kaarten, not on the banner a human reads.
+    # Every mirror that reminds the agent about the convention also has to
+    # carry this rule's name so a future edit that drops the rule fails
+    # CI loudly on every mirror at once, not on the convention doc alone.
+    (
+        "no process-meta in human-facing summaries",
+        "proces-meta",
+    ),
 ]
 
 # Done-summary surfaces: anchors about the "lead with product

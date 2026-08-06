@@ -76,6 +76,14 @@ Regels die de vier faal-punten sluiten:
 > Deze samenvatting-vorm is ook toegepast op de Done-move van *deze* kaart —
 > de analyse is haar eigen eerste testgeval.
 
+✅ Geïmplementeerd (kaart `8b3ce64c…`): de drie-delen-vorm is
+opgenomen als verplichte structuur in §5a van
+`kanban-conventions.md`, met de drie proces-regels
+(lead-with-product-meaning, geen proces-meta, jargon = naam + waarom),
+de vóór/ná-muur-tekst-paragraph in §5b, en een nieuwe `proces-meta`-
+anker in de drift-guard zodat élke toekomstige edit die de regel
+laat vallen op alle mirrors tegelijk faalt.
+
 ### 2.2 Skill, geen agent
 
 De kaart vraagt: *"kan mogelijks via skills en/of een agent specifiek voor

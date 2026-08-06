@@ -486,15 +486,27 @@ Volg de `Ship mode` uit je prompt (pull-request vs direct).
 maar *wat* er in die `summary` staat is niet vastgelegd door de gate.
 De product-taal-conventie uit
 [`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options)
-vult dat gat — leid met **één zin productbetekenis** (wat kan de
-product owner nu doen/zien/beslissen dat voorheen niet kon), en zet de
-engineering-detail erna. Voor `report_impediment`-`options`: druk
-**producttrade-offs** uit, geen implementatie-forks. De product owner
-beslist op gevolg, niet op techniek. Een geposte engineer-`summary`
-die alleen bestaat uit bestandsnamen + commit-jargon voldoet aan de
-`summary_required`-gate maar niet aan deze conventie — en is daarmee
-precies het probleem dat kaart `4358fe0a00e342878bc7a77fd21ffebe`
-wilde voorkomen.
+vult dat gat — de **drie-delen-vorm** is verplicht (één **Uitkomst**-zin
+die leidt met productbetekenis → 2-4 bullets wat & waarom → optioneel
+**Rest / nazicht**), plus vier regels: **geen proces-meta** in de
+mens-gerichte samenvatting (FCR-uitslag, retro, dedup-boekhouding en
+audit-log-archeologie horen in de activity-feed, niet in de banner),
+**jargon = naam + waarom** (een interne component noem je alleen met
+wat 'ie voor de lezer betekent), **lead with product meaning** in elke
+samenvatting, en voor `report_impediment`-`options`: druk
+**producttrade-offs** uit, geen implementatie-forks. Een geposte
+engineer-`summary` die alleen bestaat uit bestandsnamen + commit-jargon
+voldoet aan de `summary_required`-gate maar niet aan deze conventie —
+en is daarmee precies het probleem dat kaart `4358fe0a00e342878bc7a77fd21ffebe`
+(probleem) en kaart `8b3ce64c…` (structuur-vorm) wilden voorkomen.
+
+*Concreet:* leid met één zin **productbetekenis** (wat kan de product
+owner nu doen / zien / beslissen dat voorheen niet kon), zet de
+engineering-detail (bestanden, commit, endpoint-namen, tests) in de
+bullets of in `Rest / nazicht`. Voorbeeld: niet
+`"POST /usage/subscription + SubscriptionUsageCard.tsx"`, wél
+`"Product owner kan nu het abonnementsverbruik zien op de
+Usage-pagina (POST /usage/subscription + SubscriptionUsageCard.tsx)"`.
 
 **Leesbaarheidsnorm — geldt bovenop het bovenstaande, en ook voor elke
 doc en comment die je schrijft.** Product-taal bepaalt *welke inhoud*

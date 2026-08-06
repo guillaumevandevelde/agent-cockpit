@@ -238,19 +238,31 @@ ToolSearch defert ze). Referentie-meetrecept:
 
 De product-taal-conventie uit
 [`docs/cockpit/kanban-conventions.md` §5](../../docs/cockpit/kanban-conventions.md#5-product-taal-voor-done-summaries-en-impediment-options)
-geldt ook voor jouw analyse-kaarten. Concreet:
+geldt ook voor jouw analyse-kaarten, met de **drie-delen-vorm** als
+verplichte structuur: één **Uitkomst**-zin die leidt met
+productbetekenis → 2-4 bullets wat & waarom → optioneel
+**Rest / nazicht**. Daarboven gelden de drie proces-regels: **geen
+proces-meta** in de mens-gerichte samenvatting (FCR-uitslag, retro,
+dedup-boekhouding en audit-log-archeologie horen in de activity-feed
+of in retro-kaarten, niet in de banner), **jargon = naam + waarom**
+(noem een interne component alleen met wat 'ie voor de lezer
+betekent), en lead-with-product-meaning in elke openingszin.
+
+Concreet, per modus:
 
 - **`summary` bij modus-1 `Done`** ("Plan opgesplitst in N taken…"):
-  leid met de *productbetekenis* van het plan (bv. *"Product owner
-  krijgt één wekelijks overzicht van wat de agents de afgelopen week
-  hebben opgeleverd"*). De kind-kaart-titels volgen als opsomming,
-  niet andersom.
-- **`summary` bij modus-2 `Done`**: idem — leid met product-effect,
-  engineering-detail erna.
+  leid met de *productbetekenis* van het plan in de **Uitkomst**-zin
+  (bv. *"Product owner krijgt één wekelijks overzicht van wat de
+  agents de afgelopen week hebben opgeleverd"*). De kind-kaart-titels
+  volgen als bullets, niet andersom. Geen FCR-uitslag of
+  retro-uitkomst in de `summary` — die horen in de activity-feed.
+- **`summary` bij modus-2 `Done`**: idem — drie-delen-vorm,
+  product-effect vooraan, engineering-detail in de bullets.
 - **`summary` bij `not_feasible` / `no_action_needed`**: de rationale
   is per definitie een product-beslissing — schrijf 'm in
   product-taal ("niet bouwen want het product-effect weegt niet op
-  tegen de onderhoudslast"), niet in engineering-taal.
+  tegen de onderhoudslast"), niet in engineering-taal. Geen
+  proces-meta of jargon-zonder-waarom.
 - **`report_impediment`-`options`** (modus 1, alleen voor échte
   onopgeloste product-forks): producttrade-offs, geen
   implementatie-keuzes.
