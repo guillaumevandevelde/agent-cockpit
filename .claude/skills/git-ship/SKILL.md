@@ -460,11 +460,21 @@ retro** (invoke the `session-retro` skill — read
 0–N `[self-improve]` cards → `comment` on this host card), and finally `move_card` to
 `Done` with a `summary` of the work you did (required — the move is rejected without it).
 **Product-taal** (conventie §5 van `docs/cockpit/kanban-conventions.md`, kaart
-`4358fe0a…`): leid met één zin *productbetekenis* (wat kan de product owner nu doen /
-zien / beslissen dat voorheen niet kon), zet de engineering-detail (bestanden, endpoints,
-tests) erna. Een kale engineering-summary voldoet aan de gate maar niet aan de
-product-taal-conventie. Voor een `report_impediment` met `options`: druk de opties uit
-als **producttrade-offs**, niet als implementatie-forks.
+`4358fe0a…` + kaart `8b3ce64c…`): volg de verplichte **drie-delen-vorm** —
+één **Uitkomst**-zin die leidt met *productbetekenis* (wat kan de product
+owner nu doen / zien / beslissen dat voorheen niet kon), gevolgd door
+2-4 bullets met de engineering-detail (bestanden, endpoints, tests), en
+optioneel een **Rest / nazicht**-sectie. Daarboven gelden de drie
+proces-regels: **geen proces-meta** in de mens-gerichte samenvatting
+(geen FCR-uitslag, geen session-retro-uitkomst, geen
+dedup-boekhouding, geen audit-log-archeologie — die horen in de
+activity-feed of in retro-kaarten), **jargon = naam + waarom** (een
+interne component noem je alleen met wat 'ie voor de lezer betekent),
+en lead-with-product-meaning in elke openingszin. Een kale
+engineering-summary voldoet aan de gate maar niet aan de
+product-taal-conventie. Voor een `report_impediment` met `options`:
+druk de opties uit als **producttrade-offs**, niet als
+implementatie-forks.
 
 If the push is rejected (master moved / protected): fall back to the `pull-request` path.
 
@@ -558,10 +568,20 @@ If it merged: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), **run the sessio
 full procedure: reflect → dedupe → file 0–N `[self-improve]` cards → `comment` on this host
 card), and finally `move_card` to `Done` with a `summary` of the work you did (required —
 the move is rejected without it). **Product-taal** (conventie §5 van
-`docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…`): leid met één zin
-*productbetekenis*, zet de engineering-detail erna. Een kale engineering-summary voldoet
-aan de gate maar niet aan de product-taal-conventie. Voor een `report_impediment` met
-`options`: druk de opties uit als **producttrade-offs**, niet als implementatie-forks.
+`docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…` + kaart `8b3ce64c…`):
+volg de verplichte **drie-delen-vorm** — één **Uitkomst**-zin die leidt
+met *productbetekenis*, gevolgd door 2-4 bullets met de
+engineering-detail, en optioneel een **Rest / nazicht**-sectie.
+Daarboven gelden de drie proces-regels: **geen proces-meta** in de
+mens-gerichte samenvatting (geen FCR-uitslag, geen
+session-retro-uitkomst, geen dedup-boekhouding, geen
+audit-log-archeologie — die horen in de activity-feed), **jargon =
+naam + waarom** (een interne component noem je alleen met wat 'ie
+voor de lezer betekent), en lead-with-product-meaning in elke
+openingszin. Een kale engineering-summary voldoet aan de gate maar
+niet aan de product-taal-conventie. Voor een `report_impediment` met
+`options`: druk de opties uit als **producttrade-offs**, niet als
+implementatie-forks.
 
 If the loop exited because a check failed, the PR was closed, or the wait timed
 out: `attach_deliverable` (kind `pr`, ref=`<PR-URL>`), then `report_impediment`
@@ -605,6 +625,10 @@ when leftovers exist.
 - `move_card` into `Done` or `Impediment` requires `summary` — the server rejects the
   move without it (`report_impediment` already supplies one via its `question` arg). The
   `summary` itself is bound by the product-taal-conventie (§5 van
-  `docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…`): leid met één zin
-  *productbetekenis*, zet de engineering-detail erna; voor impediment-options: druk
+  `docs/cockpit/kanban-conventions.md`, kaart `4358fe0a…` + kaart
+  `8b3ce64c…`): volg de verplichte **drie-delen-vorm** (één
+  **Uitkomst**-zin met *productbetekenis* → 2-4 bullets engineering-detail
+  → optioneel **Rest / nazicht**), met **geen proces-meta** in de
+  mens-gerichte samenvatting, **jargon = naam + waarom**, en
+  lead-with-product-meaning; voor impediment-options: druk
   *producttrade-offs* uit, niet als implementatie-forks.

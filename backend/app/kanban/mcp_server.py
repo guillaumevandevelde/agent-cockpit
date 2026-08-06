@@ -400,16 +400,25 @@ async def move_card(card_id: str, column: str,
     transcript. Returns {"error": "summary_required"} without moving the card if
     summary is missing/blank for those two columns.
 
-    Product-taal voor `summary` (kaart `4358fe0a…`): leid met **één zin
-    productbetekenis** — wat kan de product owner nu doen / zien /
-    beslissen dat voorheen niet kon — en zet de engineering-detail
-    (bestanden, commit, endpoint-namen) erna. Voorbeeld: niet
-    "POST /usage/subscription + SubscriptionUsageCard.tsx", wél
-    "Product owner kan nu het abonnementsverbruik zien op de
-    Usage-pagina (POST /usage/subscription + SubscriptionUsageCard.tsx)".
-    Een kale engineering-summary voldoet aan deze gate maar niet aan de
-    product-taal-conventie — die lees je in
-    `docs/cockpit/kanban-conventions.md` §5.
+    Product-taal voor `summary` (kaart `4358fe0a…` + kaart `8b3ce64c…`):
+    volg de verplichte **drie-delen-vorm** uit
+    `docs/cockpit/kanban-conventions.md` §5 — één **Uitkomst**-zin die
+    leidt met **één zin productbetekenis** (wat kan de product owner nu
+    doen / zien / beslissen dat voorheen niet kon), gevolgd door 2-4
+    bullets met de engineering-detail (bestanden, commit, endpoint-
+    namen), en optioneel een **Rest / nazicht**-sectie. Daarboven
+    gelden de drie proces-regels: **geen proces-meta** in deze
+    mens-gerichte samenvatting (geen FCR-uitslag, geen
+    session-retro-uitkomst, geen dedup-boekhouding, geen
+    audit-log-archeologie — die horen in de activity-feed), **jargon =
+    naam + waarom** (een interne component noem je alleen met wat 'ie
+    voor de lezer betekent), en lead-with-product-meaning in elke
+    openingszin. Voorbeeld: niet "POST /usage/subscription +
+    SubscriptionUsageCard.tsx", wél "Product owner kan nu het
+    abonnementsverbruik zien op de Usage-pagina (POST /usage/subscription
+    + SubscriptionUsageCard.tsx)". Een kale engineering-summary voldoet
+    aan deze gate maar niet aan de product-taal-conventie — die lees je
+    volledig in `docs/cockpit/kanban-conventions.md` §5.
 
     For analysis cards (`work_type='analysis'` or `agent='analyst'`) moving to
     `Done`, `outcome` is also required and must be one of:
@@ -1000,14 +1009,20 @@ async def report_impediment(card_id: str, question: str,
     request goes here, not through the blocking `open_gate` tool, which would
     keep this session (and its worktree) alive until a human happens to answer.
 
-    Product-taal voor `options` (kaart `4358fe0a…`): `options` drukken
-    **producttrade-offs** uit, geen implementatie-forks. De product
-    owner beslist op gevolg, niet op techniek. Voorbeeld: niet
-    "APScheduler of Celery"; wél "A: sneller live, meer onderhoud
-    later — B: trager live, minder onderhoud". De `question` zelf
-    omschrijft ook liever het product-fork ("Hoe lossen we de
-    scheduler-trap op?") dan het techniek-fork ("Welke scheduler
-    kiezen we?"). De product-taal-conventie volledig: lees
+    Product-taal voor `options` (kaart `4358fe0a…` + kaart `8b3ce64c…`):
+    `options` drukken **producttrade-offs** uit, geen
+    implementatie-forks. De product owner beslist op gevolg, niet op
+    techniek. Voorbeeld: niet "APScheduler of Celery"; wél "A: sneller
+    live, meer onderhoud later — B: trager live, minder onderhoud". De
+    `question` zelf omschrijft ook liever het product-fork ("Hoe lossen
+    we de scheduler-trap op?") dan het techniek-fork ("Welke scheduler
+    kiezen we?"). En net als bij de Done-`summary` gelden de drie
+    proces-regels voor élke mens-gerichte tekst: **geen proces-meta**
+    in de vraag (geen FCR-uitslag, geen audit-log-archeologie — die
+    horen in de activity-feed), **jargon = naam + waarom** (een interne
+    component noem je alleen met wat 'ie voor de lezer betekent), en
+    lead-with-product-meaning in elke openingszin. De
+    product-taal-conventie volledig: lees
     `docs/cockpit/kanban-conventions.md` §5.
 
     Backwards compatible: omitting `options` keeps the legacy free-text path

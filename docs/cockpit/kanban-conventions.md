@@ -486,51 +486,98 @@ checker en blijft auditeerbaar in de PR-diff.
 > **Bron van waarheid:** dit is de canonieke § voor de
 > product-taal-conventie uit
 > [`product-owner-volgbaarheid-analyse.md`](./product-owner-volgbaarheid-analyse.md)
-> §4.2 (kaart `75c0952f…`, follow-up kaart `4358fe0a00e342878bc7a77fd21ffebe`).
+> §4.2 (kaart `75c0952f…`, follow-up kaart `4358fe0a00e342878bc7a77fd21ffebe`),
+> aangevuld met de drie-delen-vorm uit
+> [`communicatie-en-weergave-analyse.md`](./communicatie-en-weergave-analyse.md)
+> §2.1 (kaart `8b3ce64c…`).
 > Drift-guard:
 > `backend/tests/test_product_language_convention.py` — elke mirror (deze
 > doc, de drie persona-prompts, de analyst-prompt-Python-mirror, de
-> `move_card`/`report_impediment` MCP docstrings, en de dispatch-ship-
-> instructies) moet dezelfde vier anker-substrings dragen. Wijzig de
-> conventie-tekst op alle mirrors in dezelfde commit, anders faalt CI.
+> `move_card`/`report_impediment` MCP docstrings, de dispatch-ship-
+> instructies, en de git-ship-skill) moet dezelfde anker-substrings dragen.
+> Wijzig de conventie-tekst op alle mirrors in dezelfde commit, anders
+> faalt CI.
 
 ### 5a. De regel
 
-Twee schrijfregels, beide even hard:
+Elke mens-gerichte samenvatting — Done-`summary`, impediment-vraag,
+kaart-comment die de mens naleest — volgt de **drie-delen-vorm** en
+vier bijbehorende regels.
 
-1. **Elke Done-`summary` leidt met één zin productbetekenis** — wat kan
-   de product owner nu doen / zien / beslissen dat voorheen niet kon?
-   *Engineering-detail volgt erna*, niet ervoor. Voorbeeld: niet
+**De drie-delen-vorm (verplicht):**
+
+```markdown
+**Uitkomst.** <één zin: wat is nu waar dat eerst niet waar was>
+
+- <wat & waarom, op het niveau dat de lezer schikt — 2-4 bullets>
+- <…>
+
+**Rest / nazicht (optioneel).** <wat open blijft of wat de mens wil checken>
+```
+
+De eerste zin is de conclusie, niet de aanloop. De bullets leggen uit
+*welke verandering het product-effect mogelijk maakt*; een optionele
+laatste sectie markeert wat open blijft of wat de mens nog wil
+verifiëren. De weergave rendert deze samenvatting als markdown
+([§5c](#5c-waar-wordt-het-afgedwongen), `CardDrawer.tsx:340` +
+`DoneSummaryBanner`), dus de asterisken en bullets zijn geen ruis.
+
+**Vier regels die de drie-delen-vorm sluiten:**
+
+1. **Lead with product meaning** — wat kan de product owner nu doen /
+   zien / beslissen dat voorheen niet kon? De `Uitkomst`-zin is per
+   definitie product-eerst; engineering-detail (bestanden, commits,
+   endpoint-namen, tests) hoort in de bullets of in `Rest / nazicht`,
+   nooit in de openingszin. Voorbeeld: niet
    *"POST /usage/subscription endpoint + SubscriptionUsageCard.tsx"*,
-   maar *"Product owner kan nu het abonnementsverbruik zien op de
-   Usage-pagina — nieuwe `/usage/subscription`-endpoint +
-   `SubscriptionUsageCard.tsx`."*
-2. **Elke impediment-`options`-lijst drukt producttrade-offs uit, geen
+   wél *"Product owner kan nu het abonnementsverbruik per provider zien
+   op de Usage-pagina."* De engineering-detail komt erna als opsomming.
+   *Eén zin **productbetekenis** opent, engineering-detail volgt.*
+2. **Geen proces-meta in de mens-gerichte samenvatting.** FCR-uitslag,
+   session-retro-uitkomsten, dedup-boekhouding, audit-log-archeologie
+   (*"gereconstrueerd uit de durable kanban_ops-audit-log"*) horen in
+   de activity-feed of in eventuele retro-kaarten — niet in de banner
+   die de mens naleest. De reviewer-gate en de `session-retro`-skill
+   hebben hun eigen kanalen; de samenvatting die ze produceren is
+   bedoeld voor de product owner, niet voor de procesboekhouding.
+3. **Jargon = naam + waarom** — noem een interne component of
+   proces-stap alleen mét wat 'ie voor de lezer betekent. Anders laat
+   je 'm weg. *"`SecretStore`-check via `GET /api/v1/secrets/`"* is
+   leesbaar; *"SecretStore-resolutie-pad"* alleen is jargon-zonder-
+   waarom en hoort niet in een mens-gerichte samenvatting.
+4. **Impediment-`options` drukken producttrade-offs uit, geen
    implementatie-forks.** Niet *"APScheduler of Celery"*; wél *"A:
    sneller live, meer onderhoud later — B: trager live, minder
    onderhoud"*. De product owner beslist op gevolg, niet op techniek.
+   De `question` zelf omschrijft ook liever het product-fork dan het
+   techniek-fork.
 
-**Bovenop deze twee regels geldt de leesbaarheidsnorm.** Product-taal zegt
-*welke inhoud* vooraan staat; de leesbaarheidsnorm zegt *hoe* die zin
-geschreven is: maximaal 40 woorden per zin, diepte achter een verwijzing, geen
-kaart-id als enige onderbouwing. Beide gelden voor élke tekst op het bord —
-kaarttitel, beschrijving, Done-`summary` en impediment-vraag. De norm en het
-meetcommando staan in
-[`taalgebruik-conventies.md`](./taalgebruik-conventies.md); §6 daarvan gaat
-specifiek over bordtekst.
+**Bovenop deze regels geldt de leesbaarheidsnorm.** Product-taal zegt
+*welke inhoud* vooraan staat en *welke structuur* de samenvatting
+volgt; de leesbaarheidsnorm zegt *hoe* elke zin geschreven is:
+maximaal 40 woorden per zin, diepte achter een verwijzing, geen
+kaart-id als enige onderbouwing. Beide gelden voor élke tekst op het
+bord — kaarttitel, beschrijving, Done-`summary`, impediment-vraag,
+elke mens-nalees-comment. De norm en het meetcommando staan in
+[`taalgebruik-conventies.md`](./taalgebruik-conventies.md); §6 daarvan
+gaat specifiek over bordtekst.
 
 ### 5b. Voorbeelden — vóór en ná
 
-**Done-`summary` (engineer / reviewer / analyst leaf-spike):**
+**Done-`summary` — engineering-eerst vs. product-eerst:**
 
 - ❌ Vóór (engineering-eerst):
   > Added `/usage/subscription` endpoint and `SubscriptionUsageCard.tsx`
   > component. Touches `backend/app/api/v1/usage/`, `frontend/src/features/
   > usage/`. 4 unit tests added.
-- ✅ Na (product-eerst):
-  > Product owner kan nu het abonnementsverbruik per provider zien op de
-  > Usage-pagina. Implementeert via nieuwe `/usage/subscription`-endpoint
-  > en `SubscriptionUsageCard.tsx`; 4 unit tests toegevoegd.
+- ✅ Na (product-eerst, drie-delen-vorm):
+  > **Uitkomst.** Product owner kan nu het abonnementsverbruik per
+  > provider zien op de Usage-pagina.
+  >
+  > - Nieuwe `/usage/subscription`-endpoint levert de per-provider-cijfers.
+  > - `SubscriptionUsageCard.tsx` rendert de cijfers in een bestaande
+  >   Usage-lijst.
+  > - 4 unit tests toegevoegd voor de provider-aggregatie.
 
 **Impediment-`options`:**
 
@@ -545,6 +592,33 @@ specifiek over bordtekst.
   > B. Trager live (~4 sprints setup), daarna schaalbaar zonder
   >    refactor-terugslag
 
+**Done-`summary` — muur tekst faalt, gestructureerd slaagt (kaart
+`b0d2124e…`, dezelfde "33 van 35 follow-ups"-casus):**
+
+- ❌ Vóór — één alinea, proces-meta + jargon, kern begraven:
+  > De synthese-spike leverde een analyse-doc op met 35 follow-ups
+  > verdeeld over 4 facet-docs; FCR kwam terug met OK op commit
+  > 7a1c5f3, session-retro: 1 self-improve-kaart gefiled, 1
+  > problem-finding gededupet op bestaande
+  > `flag-problem`-kaart; gereconstrueerd uit de durable
+  > kanban_ops-audit-log want de oorspronkelijke comment technisch
+  > geslaagd al bestaat de kaart niet meer; 33 van 35 follow-ups
+  > bleken al geïmplementeerd in de afgelopen maand, de resterende
+  > 2 zijn policy-lagen die nog moeten worden aangesloten op de
+  > bestaande `dispatch.py:_DISPATCH_COLUMNS`-pad.
+- ✅ Na — drie-delen-vorm, geen proces-meta, jargon met waarom:
+  > **Uitkomst.** Product owner ziet dat 33 van de 35 ooit geplande
+  > follow-ups al geïmplementeerd zijn; er resteren nog 2 kleine
+  > policy-lagen om aan te sluiten.
+  >
+  > - De vier facet-docs beschrijven de implementatie van de
+  >   afgeronde 33; de resterende 2 zijn korte vervolgkaarten.
+  > - Geen nieuwe ontwerp-fork ontstaan — synthese heeft bestaand
+  >   werk bevestigd, geen nieuwe patronen geïntroduceerd.
+  >
+  > **Rest / nazicht.** Twee policy-kaarten wachten op een menselijke
+  > prioritering; zie de vervolgtabel onderaan het analyse-doc.
+
 ### 5c. Waar wordt het afgedwongen?
 
 - **Persona-prompts** (`.claude/agents/{engineer,analyst,reviewer}.md`)
@@ -554,8 +628,10 @@ specifiek over bordtekst.
   `mcp_server.report_impediment`) zijn de afdwingplek voor gedispatchte
   sessies die hun persona-prompt niet (kunnen) lezen.
 - **Drift-guard** in `backend/tests/test_product_language_convention.py`
-  — tien bronnen, vier ankers, één test faalt als één mirror de regel
-  vergeet.
+  — alle mirrors (deze doc, de drie persona-prompts, de
+  analyst-prompt-Python-mirror, de `move_card`/`report_impediment` MCP
+  docstrings, de dispatch-ship-instructies, en de git-ship-skill) dragen
+  dezelfde ankers; één test faalt zodra één mirror de regel vergeet.
 
 Menselijke moves via de REST-endpoint blijven ongepoort (de regel is
 *agent-discipline*, geen DB-constraint — een mens mag een kale

@@ -165,16 +165,25 @@ Werkwijze (modus 2 — leaf design-deliverable):
 Product-taal voor `summary` en `report_impediment`-`options`
 (geldt voor BEIDE modi):
 De product-taal-conventie uit
-`docs/cockpit/kanban-conventions.md` §5 (kaart `4358fe0a…`) geldt ook
-voor jouw analyse-kaarten. Concreet: de `summary` bij elke `Done`-move
-(modus 1, modus 2, `not_feasible`, `no_action_needed`) leidt met de
-*productbetekenis* — wat kan de product owner nu doen/zien/beslissen
-dat voorheen niet kon — gevolgd door de kind-kaart-titels of
-deliverable-refs als opsomming. De engineering-detail (welke
-persona-kolom, welke agent-rol) staat in de kind-kaarten en hoort
-niet in de parent-summary. `report_impediment`-`options` (modus 1,
-alleen bij échte onopgeloste product-forks) drukken
-producttrade-offs uit, geen implementatie-keuzes. Een kale
+`docs/cockpit/kanban-conventions.md` §5 (kaart `4358fe0a…` + kaart
+`8b3ce64c…` voor de drie-delen-vorm) geldt ook voor jouw
+analyse-kaarten. Concreet: de `summary` bij elke `Done`-move
+(modus 1, modus 2, `not_feasible`, `no_action_needed`) volgt de
+verplichte **drie-delen-vorm** — één **Uitkomst**-zin die leidt met de
+*productbetekenis* (wat kan de product owner nu doen/zien/beslissen
+dat voorheen niet kon), gevolgd door 2-4 bullets (kind-kaart-titels of
+deliverable-refs als opsomming), en optioneel een
+**Rest / nazicht**-sectie. De engineering-detail (welke persona-kolom,
+welke agent-rol) staat in de kind-kaarten of in de bullets, niet in
+de openingszin. Daarboven gelden de drie proces-regels: **geen
+proces-meta** in de mens-gerichte samenvatting (geen FCR-uitslag, geen
+session-retro-uitkomst, geen dedup-boekhouding, geen
+audit-log-archeologie — die horen in de activity-feed of in
+retro-kaarten), **jargon = naam + waarom** (een interne component
+noem je alleen met wat 'ie voor de lezer betekent), en
+lead-with-product-meaning in elke openingszin. `report_impediment`-
+`options` (modus 1, alleen bij échte onopgeloste product-forks)
+drukken producttrade-offs uit, geen implementatie-keuzes. Een kale
 "Plan opgesplitst in N taken" voldoet aan de gate maar niet aan deze
 conventie.
 
