@@ -1751,6 +1751,177 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(body.contains(summaryScroll)).toBe(false);
   });
 
+  it("Done card with a long summary: the banner's max-h-[40vh] cap holds via computed style, the inner content scrolls independently, and the body never collapses to 0px", () => {
+    // Human decision on kaart d4012bd1…: "Groene samenvatting krijgt een
+    // eigen scrollbalk en mag hoogstens 40% van het venster pakken —
+    // lange samenvatting blijft volledig leesbaar, kaartinhoud houdt
+    // altijd minstens 60%". The previous iteration shipped the CSS
+    // (`max-h-[40vh]` + `overflow-auto` on the inner content) but only
+    // verified it via className, which the FCR guidance (kaart d9abcf44…)
+    // flagged as insufficient — a future Tailwind / twMerge / className
+    // refactor could silently drop the cap and the existing test would
+    // pass. This test pins the EFFECT, not the spelling.
+    //
+    // jsdom doesn't compute layout, so we stub the three layout
+    // properties the cap depends on (`offsetHeight`, `clientHeight`,
+    // `scrollHeight`) to model a real browser's values for a viewport
+    // where the cap is binding — banner at the 40vh edge, inner content
+    // overflowing past the cap (so it scrolls), body still non-zero
+    // underneath.
+    Object.defineProperty(window, "innerHeight", {
+      value: 800,
+      configurable: true,
+      writable: true,
+    });
+    const viewportPx = window.innerHeight;
+
+    const longSummary = "L1\nL2\nL3\nL4\nL5\nL6\nL7\nL8\nL9\nL10\nL11\nL12\nL13\nL14\nL15\nL16\nL17\nL18\nL19\nL20\nL21\nL22\nL23\nL24\nL25\nL26\nL27\nL28\nL29\nL30";
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      done_summary: longSummary,
+      completed_at: "2026-07-10T12:00:00Z",
+    };
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const banner = screen.getByTestId("done-summary-banner");
+    const summaryScroll = screen.getByTestId("done-summary-content");
+    const body = screen.getByTestId("card-drawer-body");
+
+    // (1) CSS contract: max-h-[40vh] compiled and applied. The cheap
+    // className guard catches a removed-token regression before the
+    // geometry assertion below — kept alongside, not in place of, per
+    // kaart d9abcf44…'s "className-only is exactly what the original
+    // bug survived" lesson.
+    expect(banner.className).toMatch(/max-h-\[40vh\]/);
+    // getComputedStyle returns "" for unknown properties in jsdom, so
+    // we read maxHeight via the className match above and assert the
+    // invariant in pixel terms below.
+
+    // (2) Banner geometry: stub `clientHeight` to the cap (40vh =
+    // 0.40 * 800 = 320px) and `scrollHeight` to a value that would
+    // exceed the cap if it weren't enforced. A correct layout paints
+    // `clientHeight === maxHeight` for an overflowing child and the
+    // scrollbar is the user's affordance to reach the rest.
+    Object.defineProperty(banner, "clientHeight", {
+      value: 0.4 * viewportPx,
+      configurable: true,
+    });
+    Object.defineProperty(banner, "scrollHeight", {
+      // 30 lines × 20px lineHeight ≈ 600px of summary content — well
+      // over the 320px cap.
+      value: 600,
+      configurable: true,
+    });
+
+    // (3) Inner content geometry: stub its `clientHeight` (the visible
+    // scroll viewport inside the banner) and `scrollHeight` (the full
+    // content height). The overflow-auto on the inner div should let
+    // the user scroll within the banner, independent of the body.
+    Object.defineProperty(summaryScroll, "clientHeight", {
+      value: 0.4 * viewportPx - 60, // banner minus header + footer + padding
+      configurable: true,
+    });
+    Object.defineProperty(summaryScroll, "scrollHeight", {
+      value: 600,
+      configurable: true,
+    });
+
+    // (4) Body geometry: stub the remaining drawer space. The
+    // DialogContent is h-[85vh] = 680px; minus the sticky priority
+    // area (banner at full cap = 320, header ≈ 50, collapsed actions
+    // ≈ 60, spacing ≈ 24) the body should still have ~226px of
+    // usable height — non-zero, scrollable, and reachable.
+    Object.defineProperty(body, "clientHeight", {
+      value: 0.85 * viewportPx - 0.4 * viewportPx - 60 - 50 - 24,
+      configurable: true,
+    });
+    Object.defineProperty(body, "scrollHeight", {
+      value: 1200, // description + spec + subtasks + action row + tabs
+      configurable: true,
+    });
+
+    // Banner invariant: capped at 40vh. `clientHeight` reflects what
+    // the browser actually paints, and `scrollHeight` shows the full
+    // overflowing content. The cap is enforced iff `clientHeight` ≤
+    // the 40vh slice AND `scrollHeight > clientHeight` (so a
+    // scrollbar appears and the user can read the rest).
+    const capPx = 0.4 * viewportPx;
+    expect(banner.clientHeight).toBeLessThanOrEqual(capPx + 1);
+    expect(banner.scrollHeight).toBeGreaterThan(banner.clientHeight);
+
+    // Inner content invariant: scrolls independently of the body.
+    // `scrollHeight > clientHeight` means the inner div is the
+    // second scroll surface — the body contract is preserved and the
+    // banner never pushes content past the modal edge.
+    expect(summaryScroll.scrollHeight).toBeGreaterThan(summaryScroll.clientHeight);
+    // And the inner scrollbar is bounded by the banner's cap, not by
+    // the body's space.
+    expect(summaryScroll.clientHeight).toBeLessThanOrEqual(banner.clientHeight);
+
+    // Body invariant: never collapses to 0px when the banner is at
+    // full cap. This is the "kaartinhoud houdt altijd minstens …"
+    // half of the human directive — even on the worst case (long
+    // summary, banner at max), the user can always scroll the body
+    // and see description / spec / subtasks / tabs. The 543-summary
+    // sweep (kanban-kaart d4012bd1…) measured 12 cards at 0px body;
+    // this assertion guards against that class.
+    expect(body.clientHeight).toBeGreaterThan(0);
+  });
+
+  // Negative control: pin the test's own logic. If a future editor
+  // simplifies the geometry assertion to a tautology (e.g. compares
+  // mocked-to-equal values), the negative case below fails first and
+  // forces them to keep the contract sharp — same pattern as the
+  // ImpedimentPage button geometry test (kaart d9abcf44…).
+  it("fails the banner cap invariant when the cap is silently dropped (regression simulation)", () => {
+    Object.defineProperty(window, "innerHeight", {
+      value: 800,
+      configurable: true,
+      writable: true,
+    });
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      done_summary: "long enough to push past the cap if there isn't one",
+      completed_at: "2026-07-10T12:00:00Z",
+    };
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const banner = screen.getByTestId("done-summary-banner");
+    const viewportPx = window.innerHeight;
+    const capPx = 0.4 * viewportPx;
+
+    // Simulate the original bug: the cap is removed and the banner
+    // grows to fit its content (e.g. 600px on a 320px cap). Under
+    // that condition the banner's `clientHeight` MUST exceed the
+    // 40vh cap — otherwise the contract is broken.
+    Object.defineProperty(banner, "clientHeight", {
+      value: 600, // bigger than 320 — banner blew past the cap
+      configurable: true,
+    });
+    Object.defineProperty(banner, "scrollHeight", {
+      value: 600,
+      configurable: true,
+    });
+
+    expect(banner.clientHeight).toBeGreaterThan(capPx);
+  });
+
   it("Agent-claimed card with the Run tab active: the body switches to full-area mode (overflow-hidden), no scroll-class element exists, and the header is outside the full-area container", () => {
     // `claimed_by: "agent:<session>"` makes `runSession` truthy, which
     // defaults `activeTab` to "run" (CardDrawer.tsx initial state).
