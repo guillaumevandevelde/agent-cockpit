@@ -21,8 +21,15 @@ logger = logging.getLogger(__name__)
 # `<month> <day>,` group is what the pattern grew for; without it the whole
 # message failed to parse and every caller fell back to the blind
 # FALLBACK_PAUSE_HOURS guess (see `parse_reset_time`).
+# Both gaps are BOUNDED (`.{0,40}?`, not `.*?`). The message is provider- and
+# CLI-supplied, so it is untrusted input; with unbounded lazy gaps `search`
+# did O(n) work at each of O(n) start positions, i.e. quadratic
+# (py/polynomial-redos, alert 251 — measured 0.32s at 4k reps, 1.35s at 8k).
+# Bounding caps per-position work at a constant and makes the search linear.
+# 40 is far wider than the real gaps ("session" = 7, " · " = 3); see
+# TestLimitPatternRedos in tests/test_auto_resume.py.
 _LIMIT_PATTERN = re.compile(
-    r"hit your .*? limit.*?resets\s+"
+    r"hit your .{0,40}? limit.{0,40}?resets\s+"
     r"(?:(?P<month>[A-Za-z]{3,9})\.?\s+(?P<day>\d{1,2})(?:st|nd|rd|th)?,?\s+)?"
     r"(?P<time>\d{1,2}(?::\d{2})?(?:am|pm)?)\s*\((?P<tz>[^)]+)\)",
     re.IGNORECASE,

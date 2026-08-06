@@ -118,10 +118,22 @@ async def handle_mcp_post(request: Request, db: AsyncSession = Depends(get_db)):
             headers=MCP_HEADERS,
         )
 
-    except Exception as e:
+    except Exception:
+        # `logger.exception` already captured the full trace above. The wire
+        # message stays generic: this is the public MCP endpoint, and echoing
+        # str(e) shipped internal detail (paths, SQL, driver errors) to any
+        # caller (py/stack-trace-exposure, alert 236). -32603 plus the method
+        # name is what a JSON-RPC client actually acts on.
         logger.exception("[mcp] error calling %s", method)
         return JSONResponse(
-            content={"jsonrpc": "2.0", "id": req_id, "error": {"code": -32603, "message": str(e)}},
+            content={
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error handling '{method}' — see server logs for details",
+                },
+            },
             headers=MCP_HEADERS,
         )
 

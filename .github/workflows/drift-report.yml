@@ -19,6 +19,12 @@ concurrency:
 jobs:
   report:
     runs-on: ubuntu-latest
+    # Read-only: the job checks out the repo, runs advisory drift scripts, and
+    # writes its findings to $GITHUB_STEP_SUMMARY. Writing a step summary needs
+    # no token scope at all — it is a file on the runner — so `contents: read`
+    # covers everything this job actually does.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
