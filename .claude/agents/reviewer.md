@@ -98,7 +98,10 @@ Gebruik de `cockpit-kanban` MCP-tools:
 - `comment` — log optioneel wat je controleerde.
 - `move_card` — naar `Done` bij akkoord (met verplichte `summary`).
 - `report_impediment` — bij afkeuring: verplicht een concrete `question` met de
-  reden, en bij voorkeur `options: list[str]`.
+  reden. `options: list[str]` is **binair** — laat het veld leeg voor een
+  vrije-tekstvraag, óf lever precies 4 mee. **Precies 4** is de enige geldige
+  niet-lege waarde; bij 1-3 of 5+ opties weigert `mcp_server.report_impediment`
+  de call met `error: "invalid_option_count"`.
 
 Faalt een `cockpit-kanban`-call met `-32602`, retry één keer; daarna de REST-
 fallback op `http://localhost:8000/api/v1/kanban` (zelfde bord, zelfde effect).

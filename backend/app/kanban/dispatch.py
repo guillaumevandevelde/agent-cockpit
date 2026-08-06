@@ -3696,8 +3696,12 @@ def _build_ship_instructions(ship_mode: str, project_path: str | None = None) ->
             "de product-taal-conventie.  If the poll loop exited because a "
             "check failed, the PR was closed, or the wait timed out, call "
             "``report_impediment`` instead so a human can look at it — do not "
-            "move to Done. Voor een ``report_impediment``: druk ``options`` als "
-            "*producttrade-offs* uit, niet als implementatie-forks.\n"
+            "move to Done. Voor een ``report_impediment``: ``options: list[str]`` "
+            "is binair — laat het veld leeg voor een vrije-tekstvraag, óf lever "
+            "precies 4 mee (de Impediment-UI toont steeds 4 keuze-knoppen; bij "
+            "1-3 of 5+ weigert `mcp_server.report_impediment` met "
+            "`invalid_option_count`). Druk ``options`` als *producttrade-offs* "
+            "uit, niet als implementatie-forks.\n"
         )
 
     # ``<main-checkout>`` is a placeholder for the canonical checkout where
@@ -3765,8 +3769,12 @@ def _build_analyst_session_end_instructions() -> str:
         "detail (kind-kaart-titels of deliverable-refs) als opsomming "
         "erna. Een kale \"Plan opgesplitst in N taken\" voldoet aan de gate "
         "maar niet aan de product-taal-conventie. Voor een "
-        "``report_impediment``: druk de ``options`` als "
-        "**producttrade-offs** uit, niet als implementatie-forks.\n"
+        "``report_impediment``: ``options: list[str]`` is binair — laat het "
+        "veld leeg voor een vrije-tekstvraag, óf lever precies 4 mee (de "
+        "Impediment-UI toont steeds 4 keuze-knoppen; bij 1-3 of 5+ weigert "
+        "`mcp_server.report_impediment` met `invalid_option_count`). Druk de "
+        "``options`` als **producttrade-offs** uit, niet als implementatie-"
+        "forks.\n"
     )
     return retro + move
 
