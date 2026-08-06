@@ -80,13 +80,60 @@ set +e
     | sort -u > "$CURRENT"
 set -e
 
+# Strip the `# `-prefixed metadata header (written by pytest-baseline.sh at
+# capture time — see kanban card 53af2e23…) before running `comm`, otherwise
+# the header lines would either pollute the diff or be reported as fake test
+# names. `comm` requires sorted input; the body is already `sort -u`'d at
+# capture, and the header removal preserves that ordering.
+BASELINE_NO_META="$(mktemp)"
+trap 'rm -f "$CURRENT" "$BASELINE_NO_META"' EXIT
+grep -v '^# ' "$BASELINE" > "$BASELINE_NO_META"
+
 # Set arithmetic: |pre-existing ∩ current|, |current \ pre-existing|,
 # |pre-existing \ current|. Use comm -12 (intersection), -23 (current-only),
 # -13 (baseline-only). Both files are sorted + unique, so this is exact.
-pre_count=$(comm -12 "$BASELINE" "$CURRENT" | wc -l)
-new_list=$(comm -23 "$CURRENT" "$BASELINE" || true)
-fixed_list=$(comm -13 "$CURRENT" "$BASELINE" || true)
+pre_count=$(comm -12 "$BASELINE_NO_META" "$CURRENT" | wc -l)
+new_list=$(comm -23 "$CURRENT" "$BASELINE_NO_META" || true)
+fixed_list=$(comm -13 "$CURRENT" "$BASELINE_NO_META" || true)
 new_count=$(printf '%s\n' "$new_list" | grep -c . || true)
+
+# Baseline provenance — printed in BOTH modes (incl. --pre-existing-only) so
+# the engineer can read a "pre-existing: 5" line in the context of "baseline
+# was captured N hours ago on origin/master@SHA, which has since moved M
+# commits". A "0 NEW" line without this context is exactly the ambiguity
+# that burned kaart ae9648c2… (kanban card 53af2e23…).
+body_count=$(grep -cv '^# ' "$BASELINE")
+meta_captured_at=$(grep -m1 '^# captured-at: ' "$BASELINE" 2>/dev/null \
+    | sed -E 's/^# captured-at:[[:space:]]+//' || true)
+meta_baseline_sha=$(grep -m1 '^# baseline-sha: ' "$BASELINE" 2>/dev/null \
+    | sed -E 's/^# baseline-sha:[[:space:]]+//' || true)
+echo "=== pytest baseline context ==="
+if [ -n "$meta_baseline_sha" ]; then
+    echo "baseline: $body_count pre-existing failures (captured ${meta_captured_at:-unknown}, baseline-sha: $meta_baseline_sha)"
+else
+    echo "baseline: $body_count pre-existing failures (no baseline-sha recorded — legacy file, re-run pytest-baseline.sh --regen)"
+fi
+# Compare against current origin/master so a stale cache can't be silently
+# shipped. `rev-parse --verify --quiet` is the cheap, network-free check
+# (master has to be fetched separately — we trust the dispatcher / the
+# engineer's normal sync flow to have done that already).
+if git -C "$REPO_ROOT" rev-parse --verify --quiet origin/master >/dev/null 2>&1; then
+    current_sha="$(git -C "$REPO_ROOT" rev-parse origin/master)"
+    if [ -n "$meta_baseline_sha" ]; then
+        if [ "$meta_baseline_sha" = "$current_sha" ]; then
+            echo "origin/master: $current_sha [matches baseline]"
+        else
+            # `rev-list --count A..B` enumerates commits in B not in A. We
+            # want "how far origin/master has moved past the baseline-sha",
+            # i.e. commits in origin/master that aren't in baseline-sha, so
+            # A=baseline_sha, B=origin/master.
+            behind="$(git -C "$REPO_ROOT" rev-list --count "$meta_baseline_sha..origin/master" 2>/dev/null || echo "?")"
+            echo "origin/master: $current_sha [STALE — baseline is $behind commits behind]"
+        fi
+    else
+        echo "origin/master: $current_sha (no baseline-sha recorded to compare against)"
+    fi
+fi
 
 # --pre-existing-only: cheapest output path. Triage-tool mode.
 if [ "$PRE_ONLY" = 1 ]; then

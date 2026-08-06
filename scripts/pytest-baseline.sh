@@ -66,7 +66,15 @@ done
 # Print-only mode: just report the current state, don't capture anything.
 if [ "$PRINT_ONLY" = 1 ]; then
     if [ -f "$BASELINE" ]; then
-        n=$(wc -l < "$BASELINE")
+        # Prefer the count declared in the metadata header (matches what was
+        # logged at capture time). Fall back to a non-comment body count for
+        # legacy files without a header — which equals `wc -l` since those
+        # files have no `#` lines.
+        n=$(grep -m1 '^# pytest-baseline: ' "$BASELINE" 2>/dev/null \
+            | sed -E 's/^# pytest-baseline:[[:space:]]+([0-9]+).*/\1/' || true)
+        if [ -z "$n" ]; then
+            n=$(grep -cv '^# ' "$BASELINE" || true)
+        fi
         echo "$BASELINE ($n pre-existing failures)"
     else
         echo "(no baseline yet — run $0 to capture)"
@@ -81,8 +89,17 @@ fi
 if [ "$REGEN" = 0 ] && [ -f "$BASELINE" ]; then
     age=$(( $(date +%s) - $(stat -c %Y "$BASELINE") ))
     if [ "$age" -lt $((MAX_AGE_HOURS * 3600)) ]; then
-        n=$(wc -l < "$BASELINE")
+        # Count non-comment lines so a metadata-headered cache reports the
+        # test-name count, not "header + body". For legacy files (no header)
+        # this is identical to `wc -l`.
+        n=$(grep -cv '^# ' "$BASELINE" || true)
+        cached_at=$(grep -m1 '^# captured-at: ' "$BASELINE" 2>/dev/null \
+            | sed -E 's/^# captured-at:[[:space:]]+//' || true)
+        cached_sha=$(grep -m1 '^# baseline-sha: ' "$BASELINE" 2>/dev/null \
+            | sed -E 's/^# baseline-sha:[[:space:]]+//' || true)
         echo "Using cached baseline: $n pre-existing failures ($((age / 60))m old) → $BASELINE"
+        [ -n "$cached_at" ]  && echo "  captured-at: $cached_at"
+        [ -n "$cached_sha" ] && echo "  baseline-sha: $cached_sha"
         exit 0
     fi
 fi
@@ -150,5 +167,24 @@ set +e
     | sort -u > "$BASELINE"
 set -e
 
+# Prepend a metadata header so a later pytest-compare.sh run can answer
+# "where did this baseline come from?" without forcing the engineer to grep
+# two commands (kanban card 53af2e23…: `0 NEW` was ambiguous because the
+# baseline provenance was invisible). Schema is a 3-line `# `-prefixed header
+# that pytest-compare.sh strips before running `comm` — `# ` (with trailing
+# space) is the convention, locked by Task 10 of test_pytest_baseline.sh.
+captured_sha="$(git -C "$REPO_ROOT" rev-parse origin/master)"
+captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 n=$(wc -l < "$BASELINE")
+tmpfile=$(mktemp)
+{
+    echo "# pytest-baseline: $n pre-existing failures"
+    echo "# captured-at: $captured_at"
+    echo "# baseline-sha: $captured_sha"
+    cat "$BASELINE"
+} > "$tmpfile"
+mv "$tmpfile" "$BASELINE"
+
 echo "Captured baseline: $n pre-existing failures → $BASELINE"
+echo "  captured-at: $captured_at"
+echo "  baseline-sha: $captured_sha"

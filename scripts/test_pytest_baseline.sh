@@ -180,9 +180,15 @@ check "second run does NOT print 'Captured baseline'" \
 out=$(PYTEST_BASELINE_PATH="$state_dir/pytest-baseline.txt" \
       PYTEST_CMD=/bin/true PYTEST_CWD="$TMPDIR" PYTEST_FAKE_WORKTREE=1 \
       bash "$SCRIPT_DIR/pytest-baseline.sh" --regen 2>&1 || true)
-# /bin/true produces no FAILED lines, so the baseline file becomes empty.
-check "--regen flows through capture (file now empty)" \
-    '[ ! -s "$state_dir/pytest-baseline.txt" ]'
+# /bin/true produces no FAILED lines, so the baseline body has no test names.
+# With metadata-header support (Task 10), the file now carries a 3-line
+# `# pytest-baseline:` / `# captured-at:` / `# baseline-sha:` header and no
+# body — verify both: the metadata header is present, and the stale test
+# name from the previous cache has been dropped.
+check "--regen flows through capture (metadata header present)" \
+    'grep -qE "^# pytest-baseline:" "$state_dir/pytest-baseline.txt"'
+check "--regen flows through capture (stale test name is gone)" \
+    '! grep -qE "^tests/test_a\.py::test_one$" "$state_dir/pytest-baseline.txt"'
 
 # ----------------------------------------------------------------------------
 echo
@@ -210,6 +216,24 @@ check "--print on missing cache → 'no baseline yet'" \
     'echo "$out" | grep -qE "no baseline yet"'
 check "--print on missing cache does not create it" \
     '[ ! -e "$empty_state/pytest-baseline.txt" ]'
+
+# --print with a metadata-header file: the count line must come from the
+# header (NOT from `wc -l` over the whole file, which would over-count by 3).
+# Regression guard for Task 10 + 11: a naive `wc -l` would say "3
+# pre-existing failures" for a file with a header + zero test names.
+header_state="$TMPDIR/header_state"
+mkdir -p "$header_state"
+cat > "$header_state/pytest-baseline.txt" <<'EOF'
+# pytest-baseline: 7 pre-existing failures
+# captured-at: 2026-08-06T07:48:00Z
+# baseline-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+EOF
+out=$(PYTEST_BASELINE_PATH="$header_state/pytest-baseline.txt" \
+      bash "$SCRIPT_DIR/pytest-baseline.sh" --print 2>&1 || true)
+check "--print reads count from metadata header, not raw line count" \
+    'echo "$out" | grep -qE "7 pre-existing failures"'
+check "--print on header file does NOT report 3 (raw line count)" \
+    '! echo "$out" | grep -qE "3 pre-existing failures"'
 
 # ----------------------------------------------------------------------------
 echo
@@ -373,6 +397,161 @@ check "none found: hint names the injected shared venv path" \
     'echo "$out" | grep -qE "nonexistent_shared_venv/pytest"'
 check "none found: hint names PATH fallback" \
     'echo "$out" | grep -qE "on PATH"'
+
+# ----------------------------------------------------------------------------
+echo
+echo "Task 10: baseline metadata header — pytest-baseline.sh records SHA + timestamp + count"
+# Regression guard for kanban card 53af2e23… ("pytest-compare.sh 0 NEW is
+# ambiguous when baseline is pre-fix"). The fix makes pytest-baseline.sh
+# prepend a 3-line `# `-prefixed header to the baseline file, so a later
+# pytest-compare.sh run can answer "where did this baseline come from?"
+# without forcing the engineer to grep two commands. Header schema:
+#   # pytest-baseline: <N> pre-existing failures
+#   # captured-at: <ISO-8601 UTC>
+#   # baseline-sha: <origin/master SHA at capture time>
+meta_state="$TMPDIR/meta_state"
+mkdir -p "$meta_state"
+: > "$meta_state/pytest-baseline.txt"
+
+PYTEST_BASELINE_PATH="$meta_state/pytest-baseline.txt" \
+  PYTEST_CMD=/bin/true PYTEST_CWD="$TMPDIR" PYTEST_FAKE_WORKTREE=1 \
+  bash "$SCRIPT_DIR/pytest-baseline.sh" --regen >/dev/null 2>&1
+
+check "baseline file has '# pytest-baseline:' header line" \
+    'grep -qE "^# pytest-baseline: [0-9]+ pre-existing failures" "$meta_state/pytest-baseline.txt"'
+check "baseline file has '# captured-at:' header line" \
+    'grep -qE "^# captured-at: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z" "$meta_state/pytest-baseline.txt"'
+check "baseline file has '# baseline-sha:' header line" \
+    'grep -qE "^# baseline-sha: [0-9a-f]{40}" "$meta_state/pytest-baseline.txt"'
+
+# The `# ` prefix MUST be the comment convention chosen by the implementation;
+# pytest-compare.sh filters those lines before running `comm`, otherwise a
+# 3-line header would either pollute the diff or be reported as a fake test
+# name. Lock the convention so a future cleanup doesn't silently break it.
+check "comment convention is '# ' prefix (3 lines, with trailing space)" \
+    '[ "$(grep -cE "^# " "$meta_state/pytest-baseline.txt")" = "3" ]'
+
+# Body still captures real failures when the fake pytest emits them.
+cat > "$TMPDIR/fake_pytest_with_fail" <<'EOF'
+#!/usr/bin/env bash
+cat <<INNER
+FAILED tests/test_a.py::test_one - assert 1 == 2
+FAILED tests/test_b.py::test_three - OSError
+=========== 2 failed in 0.01s ===========
+INNER
+exit 1
+EOF
+chmod +x "$TMPDIR/fake_pytest_with_fail"
+
+PYTEST_BASELINE_PATH="$meta_state/pytest-baseline.txt" \
+  PYTEST_CMD="$TMPDIR/fake_pytest_with_fail" PYTEST_CWD="$TMPDIR" PYTEST_FAKE_WORKTREE=1 \
+  bash "$SCRIPT_DIR/pytest-baseline.sh" --regen >/dev/null 2>&1
+
+check "header reflects current count after capture (2 failures)" \
+    'grep -qE "^# pytest-baseline: 2 pre-existing failures" "$meta_state/pytest-baseline.txt"'
+check "body still holds the real FAILED test names (under the header)" \
+    'grep -qE "^tests/test_a\.py::test_one$" "$meta_state/pytest-baseline.txt" && grep -qE "^tests/test_b\.py::test_three$" "$meta_state/pytest-baseline.txt"'
+
+# ----------------------------------------------------------------------------
+echo
+echo "Task 11: pytest-compare.sh prints baseline context + current origin/master"
+# Regression guard for the same card: when compare runs, it must surface the
+# baseline provenance on top so a `0 NEW` line is readable in context.
+meta_compare_state="$TMPDIR/meta_compare_state"
+mkdir -p "$meta_compare_state"
+cat > "$meta_compare_state/pytest-baseline.txt" <<'EOF'
+# pytest-baseline: 5 pre-existing failures
+# captured-at: 2026-08-06T07:48:00Z
+# baseline-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+tests/test_a.py::test_five
+tests/test_a.py::test_four
+tests/test_a.py::test_one
+tests/test_a.py::test_three
+tests/test_a.py::test_two
+EOF
+# Fake pytest that emits zero failures — the engineer only sees the fixed-list
+# math, which today is ambiguous without baseline context.
+cat > "$TMPDIR/fake_pytest_clean" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMPDIR/fake_pytest_clean"
+
+out=$(PYTEST_BASELINE_PATH="$meta_compare_state/pytest-baseline.txt" \
+      PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" PYTEST_FAKE_WORKTREE=1 \
+      bash "$SCRIPT_DIR/pytest-compare.sh" 2>&1 || true)
+
+check "compare prints a baseline-context section above the attribution header" \
+    'echo "$out" | grep -qE "baseline context"'
+check "compare prints the recorded count from the metadata header" \
+    'echo "$out" | grep -qE "5 pre-existing failures"'
+check "compare prints the recorded captured-at timestamp" \
+    'echo "$out" | grep -qE "2026-08-06T07:48:00Z"'
+check "compare prints the recorded baseline-sha" \
+    'echo "$out" | grep -qE "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"'
+check "compare prints the current origin/master SHA alongside baseline-sha" \
+    'echo "$out" | grep -qE "origin/master.*[0-9a-f]{40}"'
+check "compare still prints the existing attribution block (no regression)" \
+    'echo "$out" | grep -qE "pytest failure attribution"'
+
+# Comment lines must NOT leak into the FIXED/NEW enumeration — a `# baseline-sha`
+# line in the diff output would be a loud red herring to anyone grepping.
+check "baseline metadata does not leak into the FIXED list" \
+    '! echo "$out" | grep -qE "^  tests/test_a\.py::test_one$" || true; ! echo "$out" | grep -qE "FIXED" | grep -qE "# "'
+# (Re-stated more directly: grep the whole output for any '# pytest-baseline' or
+# '# baseline-sha' line — those are metadata, never a test name.)
+check "metadata lines never appear in stdout body" \
+    '! echo "$out" | grep -qE "^# (pytest-baseline|captured-at|baseline-sha)"'
+
+# ----------------------------------------------------------------------------
+echo
+echo "Task 12: stale-baseline warning when baseline-sha != origin/master"
+# The whole point of the card: a 0-NEW output with a stale baseline should be
+# loudly flagged, not silently shipped. We derive a real-but-stale SHA from
+# the repo's history (the earliest commit) so `git rev-list` can resolve it
+# and return a deterministic "N commits ahead" count — using a synthetic
+# `deadbeef…` SHA would make `rev-list` error and the comparison would fall
+# back to "?", which doesn't match the test's "[0-9]+ commit" expectation.
+stale_state="$TMPDIR/stale_state"
+mkdir -p "$stale_state"
+STALE_SHA="$(git -C "$REPO_ROOT" rev-list --max-parents=0 HEAD | head -1)"
+cat > "$stale_state/pytest-baseline.txt" <<EOF
+# pytest-baseline: 5 pre-existing failures
+# captured-at: 2026-08-06T07:48:00Z
+# baseline-sha: $STALE_SHA
+tests/test_a.py::test_five
+tests/test_a.py::test_four
+tests/test_a.py::test_one
+tests/test_a.py::test_three
+tests/test_a.py::test_two
+EOF
+out=$(PYTEST_BASELINE_PATH="$stale_state/pytest-baseline.txt" \
+      PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" PYTEST_FAKE_WORKTREE=1 \
+      bash "$SCRIPT_DIR/pytest-compare.sh" 2>&1 || true)
+
+check "compare flags stale baseline with a visible marker (STALE)" \
+    'echo "$out" | grep -qiE "stale|behind|ahead"'
+check "compare prints how far origin/master has moved from baseline" \
+    'echo "$out" | grep -qE "[0-9]+ commit"'
+
+# Backward-compat: an OLD baseline file without any metadata header must still
+# produce a working run, just with a clear "no baseline-sha recorded" note so
+# the engineer knows the provenance signal is unavailable (rather than the
+# script silently omitting it).
+legacy_state="$TMPDIR/legacy_state"
+mkdir -p "$legacy_state"
+cat > "$legacy_state/pytest-baseline.txt" <<'EOF'
+tests/test_a.py::test_one
+tests/test_a.py::test_two
+EOF
+out=$(PYTEST_BASELINE_PATH="$legacy_state/pytest-baseline.txt" \
+      PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" PYTEST_FAKE_WORKTREE=1 \
+      bash "$SCRIPT_DIR/pytest-compare.sh" 2>&1 || true)
+
+check "compare still works on legacy baseline (no metadata header)" \
+    'echo "$out" | grep -qE "pre-existing.*not your fault"'
+check "compare notes when baseline lacks metadata (legacy file)" \
+    'echo "$out" | grep -qiE "no baseline-sha|legacy|pre-metadata|unknown.*sha|baseline.*no.*sha"'
 
 # ----------------------------------------------------------------------------
 mv "$TMPDIR" /tmp/_pytest_baseline_test_artifacts >/dev/null 2>&1 || true
