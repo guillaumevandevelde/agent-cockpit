@@ -397,6 +397,20 @@ bewaken dat de drempels ook bij levende tmux-panes vuren.
 reset-tijd verdient een korte pauze plus een gecontroleerde herkansing met exponentiële
 terugschaling, niet een geraden constante van 5 uur.
 
+✅ Geïmplementeerd (kaart `b106def4…`): nieuwe `app/kanban/rate_limit_backoff.py`
+slaat een per-provider teller op in `KanbanMeta` op key
+`rate_limit_backoff:<provider>`; `handle_rate_limit_signal` valt bij een
+onparseerbare melding op die teller terug in plaats van `FALLBACK_PAUSE_HOURS`,
+met een `BACKOFF_SEQUENCE = [120, 240, 480, 960, 1920, 3600]` (2 m → 60 m).
+`detect_transcript_rate_limits` reset de teller zodra een sessie op die
+provider is hersteld (transcript toont geen limiet meer), en een
+`prune_idle_backoffs` ruimt tellers op die langer dan twee uur niet bewogen
+hebben. Nieuwe tests in `tests/test_rate_limit_backoff.py` (11) en zes
+nieuwe integratietests in `tests/test_transcript_rate_limit_detection.py`
+dekken alle acceptatiecriteria: korte initiële pauze, verdubbeling tot
+plafond, per-provider, niet-vechten met R1, recovery-reset, en de
+parsbare-pad dat de teller ongemoeid laat.
+
 **R4 — Zet de subscription-pool aan (gat D).** De grootste autonomie-winst per eenheid
 werk: uitwijken in plaats van wachten. De ontwerpknoop is al doorgehakt; wat rest is
 configureren en meten dat er daadwerkelijk gespilloverd wordt.

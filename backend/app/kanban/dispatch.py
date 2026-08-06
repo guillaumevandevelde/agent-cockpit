@@ -5452,6 +5452,10 @@ async def handle_rate_limit_signal(
 
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.dispatch_pause import set_paused_until
+    from app.kanban.rate_limit_backoff import (
+        record_backoff,
+        window_for_attempt,
+    )
     from app.kanban.rate_limit_signals import (
         is_signal_handled,
         record_handled_signal,
@@ -5498,20 +5502,69 @@ async def handle_rate_limit_signal(
     now = datetime.now(UTC)
     reference = observed_at or now
 
+    # Resolve the provider BEFORE the parse, so the unparseable path can
+    # key its per-provider backoff state on a real provider name. When the
+    # helper can't resolve one (no card claimed by this session, etc.) we
+    # fall through to the legacy FALLBACK_PAUSE_HOURS guess at the bottom
+    # of the unparseable branch below.
+    try:
+        provider = await _provider_for_cwd(cwd)
+    except Exception:
+        logger.exception("failed to resolve provider for %s", cwd)
+        provider = None
+
     session_signals.record_limit(cwd, message=message or "")
     parsed = auto_resume_service.parse_reset_time(message, now=reference)
     if parsed:
         pause_until, _tz_name = parsed
+    elif provider:
+        # Unparseable reset (e.g. MiniMax "Token Plan usage limit reached").
+        # Replace the blind FALLBACK_PAUSE_HOURS guess with a per-provider
+        # exponential backoff: the first fresh limit uses a short window
+        # (minutes, not hours), each subsequent fresh limit on the same
+        # provider doubles it up to an explicit cap. A successful retry —
+        # observed as a session on this provider whose transcript no longer
+        # shows a limit message — resets the counter to 0.
+        #
+        # Composes with the R1 dedupe above: this branch is only reached
+        # when the same-message gate passed, so a re-detection of the same
+        # in-transcript message never re-arms the pause and never re-bumps
+        # the counter.
+        try:
+            async with KanbanSessionLocal() as bo_ks:
+                state = await record_backoff(bo_ks, provider, now=reference)
+                await bo_ks.commit()
+        except Exception:
+            # A store hiccup must never swallow a real limit. Fall back to
+            # the legacy 5h guess, which is the safe direction (a redundant
+            # pause is recoverable, a missed one burns the subscription).
+            logger.exception(
+                "failed to record backoff for provider=%s on %s; "
+                "falling back to %sh pause",
+                provider, cwd, FALLBACK_PAUSE_HOURS,
+            )
+            state = None
+        if state is not None:
+            window_seconds = window_for_attempt(state.attempt)
+            pause_until = reference + timedelta(seconds=window_seconds)
+            logger.warning(
+                "unrecognized usage-limit message format for %s (source=%s, "
+                "provider=%s), arming a %ss backoff (attempt=%d): %r",
+                cwd, source, provider, window_seconds, state.attempt, message,
+            )
+        else:
+            pause_until = reference + timedelta(hours=FALLBACK_PAUSE_HOURS)
     else:
-        # Recognized as a limit hit but the reset time didn't match the known
-        # clock-time format (e.g. a weekly/model cap with different
-        # wording). Fall back to a conservative fixed pause instead of
-        # skipping it -- skipping just re-triggers the same spin-and-burn
-        # loop the pause exists to prevent.
+        # Recognized as a limit hit but the reset time didn't match the
+        # known clock-time format AND we can't resolve a provider to key the
+        # backoff by. Keep the legacy 5h guess instead of skipping — skipping
+        # just re-triggers the same spin-and-burn loop the pause exists to
+        # prevent. This is the same fallback the R1 round kept; the backoff
+        # only fires when we have a provider to key it on.
         pause_until = reference + timedelta(hours=FALLBACK_PAUSE_HOURS)
         logger.warning(
-            "unrecognized usage-limit message format for %s (source=%s), falling "
-            "back to a %sh dispatch pause: %r",
+            "unrecognized usage-limit message format for %s (source=%s, "
+            "no provider), falling back to a %sh dispatch pause: %r",
             cwd, source, FALLBACK_PAUSE_HOURS, message,
         )
 
@@ -5526,12 +5579,6 @@ async def handle_rate_limit_signal(
             "(%s <= %s); not arming a pause",
             cwd, source, pause_until.isoformat(), now.isoformat(),
         )
-
-    try:
-        provider = await _provider_for_cwd(cwd)
-    except Exception:
-        logger.exception("failed to resolve provider for %s", cwd)
-        provider = None
 
     try:
         async with KanbanSessionLocal() as ks:
@@ -5626,6 +5673,10 @@ async def detect_transcript_rate_limits(
     detected and handled.
     """
     from app.kanban.db import KanbanSessionLocal
+    from app.kanban.rate_limit_backoff import (
+        prune_idle_backoffs,
+        reset_backoff,
+    )
     from app.kanban.rate_limit_signals import (
         clear_handled_signal,
         prune_handled_signals,
@@ -5636,6 +5687,7 @@ async def detect_transcript_rate_limits(
 
     handled = 0
     recovered: list[str] = []
+    recovered_providers: set[str] = set()
     for card in cards:
         if card.column in COLUMNS:
             continue
@@ -5664,6 +5716,26 @@ async def detect_transcript_rate_limits(
             # session at the end of the sweep rather than one per card.
             session_signals.clear_limit(name)
             recovered.append(name)
+            # Successful retry on the per-provider backoff state (kaart
+            # b106def4…): a session whose transcript no longer shows a
+            # limit is the closest "success" signal the system can observe
+            # without instrumenting the spawn path. Reset the backoff for
+            # that provider so the *next* genuinely fresh limit on it
+            # starts at the initial short window again. Dedupe by provider
+            # since multiple sessions on the same provider can recover in
+            # the same sweep.
+            try:
+                cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
+                recovered_provider = await _provider_for_cwd(cwd)
+            except Exception:
+                logger.exception(
+                    "failed to resolve provider for recovered session %s; "
+                    "leaving its backoff state alone",
+                    name,
+                )
+                recovered_provider = None
+            if recovered_provider:
+                recovered_providers.add(recovered_provider)
             continue
         message, observed_at = found
         cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
@@ -5678,7 +5750,8 @@ async def detect_transcript_rate_limits(
         handled += 1
 
     # Durable housekeeping, once per sweep: forget the signals of sessions that
-    # recovered, and garbage-collect rows whose limit message is long past.
+    # recovered, reset the per-provider backoff counters whose provider saw a
+    # recovery, and garbage-collect rows whose limit message is long past.
     # Session names are single-use, and the tmux kill path is a synchronous
     # helper with no DB session of its own, so an age-based sweep here is what
     # keeps the table from growing one dead row per rate-limited session.
@@ -5686,7 +5759,10 @@ async def detect_transcript_rate_limits(
         async with KanbanSessionLocal() as ks:
             for name in recovered:
                 await clear_handled_signal(ks, name)
+            for provider in recovered_providers:
+                await reset_backoff(ks, provider)
             await prune_handled_signals(ks)
+            await prune_idle_backoffs(ks)
             await ks.commit()
     except Exception:
         logger.exception("failed to housekeep stored rate-limit signals")
