@@ -174,13 +174,71 @@ async def list_cards(project: str, column: str | None = None,
 
 @mcp.tool()
 async def get_card(card_id: str) -> dict:
-    """Get a single card with its deliverables."""
+    """Get a single card with its deliverables.
+
+    `card_id` accepts either the full 32-char hex id (every existing caller
+    does this) or a unique prefix of ≥8 chars — the convention used in
+    every doc, comment, and persona prompt (`068845bd…`, `8b3ce64c…`,
+    …). The prefix path was added because every cross-reference in this
+    codebase uses the shortened form, and the previous exact-only lookup
+    forced a full board-fetch + manual prefix filter to recover. The
+    behavior matrix:
+
+    - Full 32-char id → that card (existing behavior, unchanged).
+    - Unique prefix of ≥8 chars → that card.
+    - Prefix shorter than 8 chars → ``{"error": "prefix_too_short",
+      "min_length": 8, …}`` (refuse up-front; collision rate climbs
+      sharply below the floor on a real-sized board).
+    - Prefix that matches ≥2 cards → ``{"error": "ambiguous_card_id",
+      "matches": [<full ids>]};`` never silently picks one.
+    - No match → ``{"error": "not_found", "message": "…prefixes of ≥8 chars
+      are accepted"}`` so the caller doesn't doubt the reference itself.
+    """
     async with KanbanSessionLocal() as s:
-        card = await service.get_card(s, card_id)
-        if card is None:
-            logger.debug("get_card: %s not found", card_id)
-            return {"error": _NOT_FOUND, "card_id": card_id}
-        return await _card_dict(s, card)
+        result = await service.resolve_card_by_id_or_prefix(s, card_id)
+        kind = result["kind"]
+        if kind == "exact" or kind == "prefix":
+            return await _card_dict(s, result["card"])
+        if kind == "prefix_too_short":
+            logger.debug("get_card: %s rejected — prefix too short",
+                         card_id)
+            return {
+                "error": "prefix_too_short",
+                "card_id": card_id,
+                "min_length": result["min_length"],
+                "message": (
+                    f"card_id prefix must be at least "
+                    f"{result['min_length']} characters to keep the "
+                    f"collision probability negligible; got "
+                    f"{len(card_id)}. Pass the full 32-char id instead, "
+                    f"or extend the prefix."
+                ),
+            }
+        if kind == "ambiguous":
+            logger.info("get_card: %s ambiguous — %d matches",
+                        card_id, len(result["matches"]))
+            return {
+                "error": "ambiguous_card_id",
+                "card_id": card_id,
+                "matches": result["matches"],
+                "message": (
+                    f"card_id prefix {card_id!r} matched "
+                    f"{len(result['matches'])} cards. Pass the full "
+                    f"32-char id (one of `matches`) instead."
+                ),
+            }
+        # kind == "not_found"
+        logger.debug("get_card: %s not found", card_id)
+        return {
+            "error": _NOT_FOUND,
+            "card_id": card_id,
+            "message": (
+                f"No card matches {card_id!r}. The id may be a typo, the "
+                f"card may have been deleted, or the prefix is too short — "
+                f"a prefix of ≥{service.CARD_ID_PREFIX_MIN_LENGTH} chars "
+                f"is accepted if the rest of the id is correct."
+            ),
+        }
 
 
 @mcp.tool()

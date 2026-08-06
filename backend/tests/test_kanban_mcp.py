@@ -3,6 +3,8 @@ import pytest
 import pytest_asyncio
 
 from app.kanban import mcp_server as m
+from app.kanban.db import KanbanSessionLocal
+from app.kanban.operations import apply_operation
 from tests.kanban_test_db import reset_test_tables
 
 
@@ -89,6 +91,105 @@ async def test_claim_conflict_returns_error_dict():
 async def test_get_card_not_found():
     result = await m.get_card("nonexistent-id")
     assert result.get("error") == "not_found"
+
+
+# --- get_card prefix-match support (kaart [self-improve] 068845bd…) ---
+# Every human/agent-written reference to a card uses the shortened form
+# (`068845bd…`), but `get_card` only accepted full 32-char ids. The fix:
+# accept a unique prefix of ≥8 chars, return `ambiguous_card_id` for
+# ≥2 matches, and reject prefixes shorter than 8 chars. Exact 32-char
+# ids keep working unchanged.
+
+
+@pytest.mark.asyncio
+async def test_get_card_full_id_still_works():
+    """Regression: a full 32-char hex id must still resolve to the card
+    via the exact-match path — every existing caller passes full ids."""
+    full_id = "0" * 32  # 32-char hex, deterministic, easy to type
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="FULL", entity_id=full_id, payload={"title": "exact-id"})
+        await s.commit()
+    result = await m.get_card(full_id)
+    assert result.get("error") is None
+    assert result["id"] == full_id
+    assert result["title"] == "exact-id"
+
+
+@pytest.mark.asyncio
+async def test_get_card_unique_prefix_returns_card():
+    """A unique prefix of ≥8 chars resolves to the matching card."""
+    full_id = "abcdef01" + "0" * 24  # 32 chars, starts with "abcdef01"
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="PFX", entity_id=full_id, payload={"title": "alpha"})
+        await s.commit()
+    # Sanity: the exact id still works
+    full_result = await m.get_card(full_id)
+    assert full_result.get("error") is None
+    assert full_result["id"] == full_id
+    # The prefix lookup: 8 chars → resolves uniquely
+    prefix_result = await m.get_card("abcdef01")
+    assert prefix_result.get("error") is None, (
+        f"unique prefix returned error: {prefix_result}"
+    )
+    assert prefix_result["id"] == full_id
+    assert prefix_result["title"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_get_card_ambiguous_prefix_returns_matches():
+    """A prefix that matches ≥2 cards returns `ambiguous_card_id` with
+    the full ids — never silently picks the first match."""
+    shared = "deadbeef"
+    full_a = shared + "0" * (32 - len(shared))      # "deadbeef000…000"
+    full_b = shared + "1" * (32 - len(shared))      # "deadbeef111…111"
+    assert full_a != full_b
+    async with KanbanSessionLocal() as s:
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="AMB", entity_id=full_a, payload={"title": "first"})
+        await apply_operation(s, op_type="create", entity_type="card",
+            project_key="AMB", entity_id=full_b, payload={"title": "second"})
+        await s.commit()
+    result = await m.get_card(shared)  # 8-char prefix matches both
+    assert result.get("error") == "ambiguous_card_id", (
+        f"expected ambiguous_card_id, got: {result}"
+    )
+    matches = result.get("matches")
+    # Acceptance criterion 3: assert on the *content* of `matches`,
+    # not just on the presence of an error key — a silently-empty
+    # `matches` list would still pass `result["error"] == ...`.
+    assert isinstance(matches, list), (
+        f"matches must be a list of full ids, got {type(matches).__name__}: {matches!r}"
+    )
+    assert sorted(matches) == sorted([full_a, full_b]), (
+        f"matches must contain both full ids, got: {matches}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_card_short_prefix_rejected():
+    """A prefix shorter than 8 chars is rejected — too many collisions
+    possible below that threshold (acceptance criterion 1)."""
+    # 7 chars — below the floor
+    result = await m.get_card("abcdef0")
+    assert result.get("error") == "prefix_too_short"
+    assert result.get("min_length") == 8
+
+
+@pytest.mark.asyncio
+async def test_get_card_unknown_prefix_returns_not_found_with_hint():
+    """A unique-but-nonexistent prefix returns `not_found` *with a hint*
+    that prefixes are allowed, so the caller doesn't doubt the reference
+    instead of the id-form."""
+    result = await m.get_card("01234567")  # 8-char valid-length prefix, no card
+    assert result.get("error") == "not_found"
+    # Hint should mention prefix so the operator doesn't loop on "this id
+    # doesn't exist" — the id-form is fine, the lookup just didn't hit.
+    assert "prefix" in str(result.get("message", "")).lower()
+
+
+# --- end get_card prefix-match tests ---
 
 
 @pytest.mark.asyncio

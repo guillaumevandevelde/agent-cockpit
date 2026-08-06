@@ -352,6 +352,97 @@ async def get_card(session, card_id: str):
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
+# Kaart [self-improve] get_card weigert de afgekorte kaart-id.
+# Every human/agent-written reference to a card uses the shortened form
+# (`068845bd…`) — the convention in docs/cockpit/*.md, in card descriptions,
+# in comments, and in persona prompts. `get_card` only accepted the full
+# 32-char id, so following a reference forced a `list_cards` round-trip +
+# manual prefix filter. This helper accepts a unique prefix of ≥
+# `CARD_ID_PREFIX_MIN_LENGTH` chars and returns a discriminated dict the
+# MCP layer turns into the appropriate `not_found`/`prefix_too_short`/
+# `ambiguous_card_id` response. The exact-id path is unchanged so every
+# caller that already passes a full id keeps working without modification.
+CARD_ID_PREFIX_MIN_LENGTH = 8
+
+
+async def resolve_card_by_id_or_prefix(session, identifier: str) -> dict:
+    """Resolve `identifier` to a card via exact match, then unique prefix match.
+
+    Returns a discriminated dict with one of:
+
+    - ``{"kind": "exact", "card": <KanbanCard>}`` — full 32-char hex id matched.
+    - ``{"kind": "prefix", "card": <KanbanCard>}`` — unique prefix of ≥
+      ``CARD_ID_PREFIX_MIN_LENGTH`` chars matched exactly one card.
+    - ``{"kind": "ambiguous", "matches": [<id>, …]}`` — prefix matched ≥2 cards;
+      the caller should surface the full ids so the operator can disambiguate.
+    - ``{"kind": "prefix_too_short", "min_length": <int>}`` — input shorter
+      than the minimum; refusing below the floor keeps the collision
+      probability negligible on a real-sized board (10k+ cards have a
+      birthday-paradox crossover around 7 hex chars).
+    - ``{"kind": "not_found"}`` — no card matched.
+
+    The prefix lookup uses SQL `LIKE '<prefix>%'` against the indexed primary
+    key. SQLite (and Postgres) can satisfy a leading-prefix LIKE on an indexed
+    string column without a full scan, so the cost stays close to the
+    exact-match path for the common unique-prefix case. The ambiguous path
+    still hits the LIKE; the caller is expected to surface a structured
+    error and not retry — disambiguation is a human decision.
+    """
+    if not identifier:
+        return {"kind": "not_found"}
+
+    # Fast path: exact id match. Every existing caller of get_card lands here.
+    card = await get_card(session, identifier)
+    if card is not None:
+        return {"kind": "exact", "card": card}
+
+    # Below the minimum prefix length the birthday-paradox collision rate
+    # climbs quickly (on a 10k-card board ~7 hex chars is the crossover),
+    # so refuse up-front instead of pretending an ambiguous result would be
+    # helpful. The MCP layer surfaces this as `prefix_too_short` with the
+    # floor so the caller knows exactly how much to extend.
+    if len(identifier) < CARD_ID_PREFIX_MIN_LENGTH:
+        return {
+            "kind": "prefix_too_short",
+            "min_length": CARD_ID_PREFIX_MIN_LENGTH,
+        }
+
+    # Leading-prefix LIKE on the indexed id column. Hex ids are
+    # case-sensitive in our schema (uuids are lowercase by convention), so
+    # a plain LIKE without ESCAPE is safe — there is no `%` or `_` in any
+    # valid id. We bound the result set small (LIMIT 2) — we only care
+    # whether the match is unique, and the database returns 2 rows the
+    # moment ambiguity exists.
+    prefix_rows = (await session.execute(
+        select(KanbanCard.id)
+        .where(KanbanCard.id.like(f"{identifier}%"))
+        .limit(2)
+    )).scalars().all()
+
+    if not prefix_rows:
+        return {"kind": "not_found"}
+    if len(prefix_rows) > 1:
+        # Real ambiguity — return every match (not just the first two),
+        # so the caller can hand the operator the full id list. The
+        # LIMIT 2 above was just a fast-path detection; widen now.
+        all_matches = (await session.execute(
+            select(KanbanCard.id)
+            .where(KanbanCard.id.like(f"{identifier}%"))
+            .order_by(KanbanCard.id.asc())
+        )).scalars().all()
+        return {"kind": "ambiguous", "matches": list(all_matches)}
+
+    # Unique prefix — fetch the full card with the same selectinload
+    # options get_card would have used.
+    card = await get_card(session, prefix_rows[0])
+    if card is None:
+        # Race: row vanished between the prefix scan and the full fetch.
+        # Treat as not_found rather than crash; the prefix scan is the
+        # source of truth for "did anything match".
+        return {"kind": "not_found"}
+    return {"kind": "prefix", "card": card}
+
+
 async def card_activity(session, card_id: str):
     stmt = (
         select(KanbanOp)
