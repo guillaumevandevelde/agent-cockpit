@@ -218,16 +218,31 @@ reset-tijd, voor deze sessie, is al behandeld" — neemt beide symptomen weg. De
 dag-rollover verdient daarnaast een expliciete leeftijdsgrens, zodat een melding die
 ouder is dan haar eigen reset nooit meer een pauze kan zetten.
 
-✅ Geïmplementeerd (kaart `e279a52b…`) — idempotency-gate op het gestructureerde
-`session_signals`-signaal. `handle_rate_limit_signal` retourneert `False` zonder
-`set_paused_until` / `move_limited_session_to_resume` opnieuw te draaien wanneer de
-nieuwe melding identiek is aan de eerder opgeslagen melding voor dezelfde sessie
-(nieuwe helpers `is_limit_message_processed` en `clear_limit` in
-`app/services/scheduling/session_signals.py`; de recovery-branch in
-`detect_transcript_rate_limits` ruimt het signaal op zodra er gewone activiteit na de
-limiet staat, anders zou `record_limit`'s first-write-wins een verse limiet met
-andere tekst stilzwijgend inslikken). De dag-rollover zelf blijft ongewijzigd — die
-was correct voor een verse melding en de fix haalt 'm alleen uit het herhaal-pad.
+✅ Geïmplementeerd (kaart `e279a52b…`) — in twee ronden, want de eerste dekte de
+leeftijdsgrens nog niet.
+
+**Ronde 1 — idempotency-gate.** `handle_rate_limit_signal` retourneert `False` zonder
+`set_paused_until` / `move_limited_session_to_resume` opnieuw te draaien, zodra de
+nieuwe melding identiek is aan de eerder opgeslagen melding voor dezelfde sessie.
+Helpers: `is_limit_message_processed` en `clear_limit` in
+`app/services/scheduling/session_signals.py`. De recovery-branch in
+`detect_transcript_rate_limits` ruimt het signaal op zodra er gewone activiteit ná de
+limiet staat — anders zou `record_limit`'s first-write-wins een verse limiet met
+andere tekst stilzwijgend inslikken.
+
+**Ronde 2 — herstart-vast signaal plus leeftijdsgrens.** `session_signals` is een
+proces-lokale singleton en dus leeg na elke backend-herstart; de eerste tick daarna
+las dezelfde transcript-staart als een verse limiet en her-armeerde de pauze alsnog.
+Twee lagen sluiten dat af. **Durend geheugen:** `app/kanban/rate_limit_signals.py`
+schrijft per sessie een `rate_limit_signal:<sessie>`-rij in `KanbanMeta`. Die rij
+bevat de message-digest, het moment waarop de melding geschreven werd en de gezette
+deadline. `handle_rate_limit_signal` raadpleegt de rij zodra het in-memory pad niets
+weet; een leeftijds-sweep ruimt rijen ouder dan een week op. **Leeftijdsgrens:**
+`parse_reset_time` neemt een `now`-referentieklok, en de transcript-sweep geeft daar
+de tijdstempel van de limiet-melding zelf in mee (`_tail_rate_limit_entry`). Een
+melding waarvan de reset op dát moment al verstreken is zet géén pauze meer. De
+dag-rollover zelf blijft ongewijzigd — die was correct voor een verse melding en de
+fix haalt 'm alleen uit het herhaal-pad.
 
 ---
 

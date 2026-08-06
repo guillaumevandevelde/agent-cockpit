@@ -32,11 +32,14 @@ KanbanSessionLocal = TestSessionLocal()
 PK = "git:example.com/me/repo"
 
 
-def _stub_parse_reset_time(message):
+def _stub_parse_reset_time(message, *, now=None):
     """Parse-reset-time stand-in for tests — returns (datetime, tz) for
     limit-form messages so handle_rate_limit_signal can unpack parsed.
     Matches the same "look for an explicit reset time" semantic as the real
-    ``auto_resume_service.parse_reset_time``."""
+    ``auto_resume_service.parse_reset_time``, including its ``now`` reference
+    clock (the caller resolves a date-less reset against the moment the limit
+    message was written, not against the wall clock — kanban card
+    ``e279a52b…``)."""
     m = re.search(
         r"resets\s+(\d{1,2}(?::\d{2})?(?:am|pm)?)\s*\(([^)]+)\)",
         message or "",
@@ -49,7 +52,7 @@ def _stub_parse_reset_time(message):
         tz = ZoneInfo(tz_name)
     except Exception:
         return None
-    now = datetime.now(tz)
+    reference = datetime.now(tz) if now is None else now.astimezone(tz)
     fmt = "%I:%M%p" if ":" in time_str else "%I%p"
     if "am" not in time_str.lower() and "pm" not in time_str.lower():
         fmt = "%H:%M"
@@ -57,8 +60,10 @@ def _stub_parse_reset_time(message):
         parsed = datetime.strptime(time_str.lower(), fmt)
     except ValueError:
         return None
-    reset = now.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
-    if reset <= now:
+    reset = reference.replace(
+        hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0
+    )
+    if reset <= reference:
         reset += timedelta(days=1)
     return reset, tz_name
 

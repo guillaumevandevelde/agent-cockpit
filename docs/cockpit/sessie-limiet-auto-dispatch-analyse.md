@@ -408,7 +408,7 @@ hersteld en mag er niets gebeuren.
 > (`backend/app/kanban/dispatch.py`) draait elke dispatch-tick per project, leest per
 > geclaimde kaart alleen de staart van het transcript (`_read_transcript_tail_entries`,
 > 64 KiB), en meldt een limiet zodra de laatste conversationele entry een
-> `isApiErrorMessage: true` is die als limiet classificeert (`_tail_rate_limit_message`).
+> `isApiErrorMessage: true` is die als limiet classificeert (`_tail_rate_limit_entry`).
 > De reactie is uitgetrokken uit de Notification-hook naar een gedeelde
 > `handle_rate_limit_signal` (per-provider `set_paused_until` + `move_limited_session_to_resume`),
 > zodat beide kanalen exact hetzelfde afhandelpad delen — geen tweede reactiepad.

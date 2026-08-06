@@ -67,21 +67,22 @@ def _write_transcript(path, entries):
     path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
 
 
-# ---- _tail_rate_limit_message ----------------------------------------------
+# ---- _tail_rate_limit_entry ------------------------------------------------
 
 
-def test_tail_rate_limit_message_detects_anthropic_session_limit(tmp_path):
+def test_tail_rate_limit_entry_detects_anthropic_session_limit(tmp_path):
     path = tmp_path / "t.jsonl"
     _write_transcript(path, [
         _user("keep going"),
         _assistant_error("You've hit your session limit · resets 11:10pm (Europe/Brussels)"),
     ])
-    msg = dispatch._tail_rate_limit_message(path)
-    assert msg is not None
+    found = dispatch._tail_rate_limit_entry(path)
+    assert found is not None
+    msg = found[0]
     assert "session limit" in msg.lower()
 
 
-def test_tail_rate_limit_message_detects_minimax_token_plan(tmp_path):
+def test_tail_rate_limit_entry_detects_minimax_token_plan(tmp_path):
     path = tmp_path / "t.jsonl"
     _write_transcript(path, [
         _user("keep going"),
@@ -90,12 +91,13 @@ def test_tail_rate_limit_message_detects_minimax_token_plan(tmp_path):
             "Upgrade your Token Plan or purchase Credits for more usage. (2056)"
         ),
     ])
-    msg = dispatch._tail_rate_limit_message(path)
-    assert msg is not None
+    found = dispatch._tail_rate_limit_entry(path)
+    assert found is not None
+    msg = found[0]
     assert "token plan" in msg.lower()
 
 
-def test_tail_rate_limit_message_none_when_activity_resumed(tmp_path):
+def test_tail_rate_limit_entry_none_when_activity_resumed(tmp_path):
     """An api-error followed by ordinary assistant/user activity means the
     session recovered on its own -- nothing should happen."""
     path = tmp_path / "t.jsonl"
@@ -104,19 +106,19 @@ def test_tail_rate_limit_message_none_when_activity_resumed(tmp_path):
         _user("continue"),
         _assistant("Sure, continuing where I left off."),
     ])
-    assert dispatch._tail_rate_limit_message(path) is None
+    assert dispatch._tail_rate_limit_entry(path) is None
 
 
-def test_tail_rate_limit_message_none_without_api_error(tmp_path):
+def test_tail_rate_limit_entry_none_without_api_error(tmp_path):
     path = tmp_path / "t.jsonl"
     _write_transcript(path, [
         _user("hi"),
         _assistant("hello, how can I help?"),
     ])
-    assert dispatch._tail_rate_limit_message(path) is None
+    assert dispatch._tail_rate_limit_entry(path) is None
 
 
-def test_tail_rate_limit_message_ignores_bookkeeping_entries_after_error(tmp_path):
+def test_tail_rate_limit_entry_ignores_bookkeeping_entries_after_error(tmp_path):
     """system/last-prompt/file-history-snapshot/attachment entries are
     interleaved by Claude Code but carry no "the agent did something"
     signal -- they must not be mistaken for recovered activity."""
@@ -127,22 +129,23 @@ def test_tail_rate_limit_message_ignores_bookkeeping_entries_after_error(tmp_pat
         {"type": "last-prompt", "lastPrompt": "do the thing", "sessionId": "s1"},
         {"type": "file-history-snapshot", "messageId": "m1", "snapshot": {}},
     ])
-    msg = dispatch._tail_rate_limit_message(path)
-    assert msg is not None
+    found = dispatch._tail_rate_limit_entry(path)
+    assert found is not None
+    msg = found[0]
     assert "session limit" in msg.lower()
 
 
-def test_tail_rate_limit_message_none_for_empty_transcript(tmp_path):
+def test_tail_rate_limit_entry_none_for_empty_transcript(tmp_path):
     path = tmp_path / "t.jsonl"
     path.write_text("")
-    assert dispatch._tail_rate_limit_message(path) is None
+    assert dispatch._tail_rate_limit_entry(path) is None
 
 
-def test_tail_rate_limit_message_none_for_missing_file(tmp_path):
-    assert dispatch._tail_rate_limit_message(tmp_path / "missing.jsonl") is None
+def test_tail_rate_limit_entry_none_for_missing_file(tmp_path):
+    assert dispatch._tail_rate_limit_entry(tmp_path / "missing.jsonl") is None
 
 
-def test_tail_rate_limit_message_reads_only_the_tail(tmp_path, monkeypatch):
+def test_tail_rate_limit_entry_reads_only_the_tail(tmp_path, monkeypatch):
     """A transcript far larger than the tail window must still resolve from
     just the last chunk -- no full-file parse."""
     monkeypatch.setattr(dispatch, "_TRANSCRIPT_TAIL_BYTES", 512)
@@ -151,8 +154,8 @@ def test_tail_rate_limit_message_reads_only_the_tail(tmp_path, monkeypatch):
     entries.append(_assistant_error("You've hit your session limit · resets 9pm (Europe/Brussels)"))
     _write_transcript(path, entries)
     assert path.stat().st_size > 512
-    msg = dispatch._tail_rate_limit_message(path)
-    assert msg is not None
+    found = dispatch._tail_rate_limit_entry(path)
+    assert found is not None
 
 
 # ---- detect_transcript_rate_limits -----------------------------------------
@@ -582,7 +585,7 @@ async def test_handle_rate_limit_signal_reprocesses_when_message_text_changes(mo
     first_pause = captured[-1][0]
 
     # Recovery simulated by clearing the structured signal — production path
-    # is `detect_transcript_rate_limits` clearing it when _tail_rate_limit_message
+    # is `detect_transcript_rate_limits` clearing it when _tail_rate_limit_entry
     # returns None (see test_detect_transcript_rate_limits_clears_signal_on_recovery).
     ssignals.session_signals.clear("k-bug-recovery-0001")
 
@@ -671,5 +674,383 @@ async def test_detect_transcript_rate_limits_clears_signal_on_recovery(monkeypat
         "first-write-wins"
     )
     assert ssignals.session_signals.is_rate_limited(session_name) is False
+
+    ssignals.session_signals.clear(session_name)
+
+
+# ---- restart-survival + age guard (kanban card e279a52b…, revisit) ----------
+#
+# The first pass at this card deduped purely in memory. That removed the
+# ~10 s/tick re-arming while the backend stayed up, but the in-memory registry
+# is emptied by any restart (supervisor crash-restart, `cockpit.sh restart`,
+# `uvicorn --reload`) and by `_kill_agent_session`. After such a reset the very
+# same transcript tail read as a brand-new limit, and the measured +24 u
+# rollover happened all over again — the subscription was re-locked at the
+# exact moment it came free.
+#
+# The fix has two halves, both covered below:
+#   1. a durable record in KanbanMeta, so the dedupe survives a restart;
+#   2. an age guard, so a message whose reset moment has already passed can
+#      never arm a pause at all — the backstop for when even the durable
+#      record is gone (fresh DB, pruned row).
+
+
+def _limit_entry(text, timestamp):
+    entry = _assistant_error(text)
+    entry["timestamp"] = timestamp
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_stored_signal_survives_in_memory_registry_reset(monkeypatch):
+    """The measured production shape: same message, in-memory registry wiped
+    by a restart. The durable record must still recognise it as handled."""
+    from app.services.scheduling import session_signals as ssignals
+
+    message = "You've hit your session limit · resets 11:10pm (Europe/Brussels)"
+    session_name = "k-restart-0001"
+    cwd = f"/p/.claude/worktrees/{session_name}"
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append(when)
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    await dispatch.handle_rate_limit_signal(cwd, message, source="transcript")
+    assert len(captured) == 1, "first detection arms the pause"
+
+    # Simulate the backend restart: the process-local registry is empty again,
+    # exactly as it is after `cockpit.sh restart` or a supervisor crash-restart.
+    ssignals.session_signals.clear(session_name)
+
+    await dispatch.handle_rate_limit_signal(cwd, message, source="transcript")
+    assert len(captured) == 1, (
+        f"the persisted signal must survive the registry reset; captured={captured!r}"
+    )
+
+    ssignals.session_signals.clear(session_name)
+
+
+@pytest.mark.asyncio
+async def test_expired_limit_message_does_not_arm_a_pause(monkeypatch):
+    """AC2 + the headline regression: the same limit message re-read *after*
+    its own reset must not set a pause at all — not the original deadline, and
+    certainly not one rolled a day forward.
+
+    This is the exact production incident, replayed: session
+    `k-update-readme-e85e` saw its deadline jump from 2026-07-28T05:20+02:00 to
+    2026-07-29T05:20+02:00 at 03:20:04Z — four seconds after the reset it was
+    waiting for."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.scheduling import session_signals as ssignals
+
+    message = "You've hit your session limit · resets 5:20am (Europe/Brussels)"
+    session_name = "k-expired-0001"
+    cwd = f"/p/.claude/worktrees/{session_name}"
+    ssignals.session_signals.clear(session_name)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append(when)
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    # The message was written a full day ago, so its 05:20 reset is long past.
+    observed_at = datetime.now(UTC) - timedelta(days=1)
+    await dispatch.handle_rate_limit_signal(
+        cwd, message, source="transcript", observed_at=observed_at,
+    )
+
+    assert captured == [], (
+        "a limit whose reset already passed must not arm a pause; "
+        f"captured={captured!r}"
+    )
+
+    ssignals.session_signals.clear(session_name)
+
+
+@pytest.mark.asyncio
+async def test_same_message_around_reset_does_not_push_the_deadline_forward(monkeypatch):
+    """AC4, with the clock actually crossing the reset moment.
+
+    This is the measured incident, replayed end to end. Detection 1 happens
+    before the reset and arms a deadline. Detection 2 is the *same* message,
+    read from the *same* unchanged transcript, at a wall-clock moment past
+    that deadline — with both dedupe layers wiped, so only the age guard is
+    left. The pause must not move forward. Before the fix this second call
+    produced the +24 u jump seen on session k-update-readme-e85e.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.rate_limit_signals import clear_handled_signal
+    from app.services.scheduling import session_signals as ssignals
+
+    session_name = "k-rollover-0001"
+    cwd = f"/p/.claude/worktrees/{session_name}"
+    ssignals.session_signals.clear(session_name)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    # The message announces a 05:20 UTC reset and was written at 03:20 UTC —
+    # the shape of the production incident, two hours before its own reset.
+    observed_at = datetime(2026, 7, 28, 3, 20, 0, tzinfo=UTC)
+    reset_at = datetime(2026, 7, 28, 5, 20, 0, tzinfo=UTC)
+    message = "You've hit your session limit \u00b7 resets 05:20 (UTC)"
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append(when)
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    # Control the wall clock `handle_rate_limit_signal` reads. Patched on the
+    # *consumer* module (dispatch), which is where the `datetime` name it calls
+    # is actually bound — see the test-doubles convention in CLAUDE.md.
+    class _Clock(datetime):
+        current = observed_at
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current if tz is None else cls.current.astimezone(tz)
+
+    monkeypatch.setattr(dispatch, "datetime", _Clock)
+
+    # Tick 1: four seconds after the limit was announced, two hours before the
+    # reset. The pause is armed at 05:20.
+    _Clock.current = observed_at + timedelta(seconds=4)
+    await dispatch.handle_rate_limit_signal(
+        cwd, message, source="transcript", observed_at=observed_at,
+    )
+    assert len(captured) == 1, "first detection arms the pause"
+    assert captured[0] == reset_at
+    first_deadline = captured[0]
+
+    # Wipe both dedupe layers: the restart-plus-pruned-row worst case.
+    ssignals.session_signals.clear(session_name)
+    async with KanbanSessionLocal() as s:
+        await clear_handled_signal(s, session_name)
+        await s.commit()
+
+    # Tick 2: four seconds AFTER the reset — the exact moment the production
+    # deadline jumped a day forward. Same message, same transcript timestamp.
+    _Clock.current = reset_at + timedelta(seconds=4)
+    await dispatch.handle_rate_limit_signal(
+        cwd, message, source="transcript", observed_at=observed_at,
+    )
+
+    assert len(captured) == 1, (
+        "re-detection past the reset must not arm another pause; "
+        f"captured={captured!r}"
+    )
+    assert all(d <= first_deadline for d in captured), (
+        f"the deadline must never move forward; captured={captured!r}"
+    )
+
+    ssignals.session_signals.clear(session_name)
+
+
+@pytest.mark.asyncio
+async def test_fresh_message_with_past_clock_time_still_rolls_over(monkeypatch):
+    """AC3: the day-rollover stays correct for a *fresh* message. A limit
+    reported at 23:00 saying "resets 1am" means 1am tomorrow, and that must
+    still arm a pause."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.scheduling import session_signals as ssignals
+
+    session_name = "k-rollfresh-0001"
+    cwd = f"/p/.claude/worktrees/{session_name}"
+    ssignals.session_signals.clear(session_name)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    now = datetime.now(UTC)
+    # One hour ago on the clock: without a rollover this would be in the past.
+    past_clock = now - timedelta(hours=1)
+    message = (
+        "You've hit your session limit · resets "
+        f"{past_clock.strftime('%H:%M')} (UTC)"
+    )
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append(when)
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    # No observed_at: a fresh detection, exactly like the Notification hook.
+    await dispatch.handle_rate_limit_signal(cwd, message, source="hook")
+
+    assert len(captured) == 1, "a fresh message must still arm a pause"
+    assert captured[0] > now, (
+        f"the rollover must land tomorrow, not in the past; got {captured[0]}"
+    )
+
+    ssignals.session_signals.clear(session_name)
+
+
+@pytest.mark.asyncio
+async def test_unparseable_message_deadline_is_anchored_to_the_message(monkeypatch):
+    """The MiniMax half of the bug: an unparseable message re-read hours later
+    must not push its `+ FALLBACK_PAUSE_HOURS` fallback hours further out. The
+    fallback is anchored to when the message was written, so an old one lands
+    in the past and the age guard drops it."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.scheduling import session_signals as ssignals
+    from app.services.scheduling.auto_resume import FALLBACK_PAUSE_HOURS
+
+    session_name = "k-minimax-0001"
+    cwd = f"/p/.claude/worktrees/{session_name}"
+    ssignals.session_signals.clear(session_name)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append(when)
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    message = "API Error: Request rejected (429) · Token Plan usage limit reached"
+    observed_at = datetime.now(UTC) - timedelta(hours=FALLBACK_PAUSE_HOURS + 1)
+
+    await dispatch.handle_rate_limit_signal(
+        cwd, message, source="transcript", observed_at=observed_at,
+    )
+
+    assert captured == [], (
+        "an unparseable limit older than the fallback window must not arm a "
+        f"pause; captured={captured!r}"
+    )
+
+    ssignals.session_signals.clear(session_name)
+
+
+@pytest.mark.asyncio
+async def test_tail_rate_limit_entry_returns_the_message_timestamp(tmp_path):
+    """The age guard needs to know when the limit was announced; the transcript
+    entry carries it."""
+    from datetime import UTC, datetime
+
+    path = tmp_path / "t.jsonl"
+    _write_transcript(path, [
+        _user("go"),
+        _limit_entry(
+            "You've hit your session limit · resets 11:10pm (Europe/Brussels)",
+            "2026-07-28T03:20:04.955Z",
+        ),
+    ])
+
+    found = dispatch._tail_rate_limit_entry(path)
+    assert found is not None
+    message, observed_at = found
+    assert "session limit" in message
+    assert observed_at == datetime(2026, 7, 28, 3, 20, 4, 955000, tzinfo=UTC)
+
+
+def test_tail_rate_limit_entry_tolerates_a_missing_timestamp(tmp_path):
+    """Older transcripts (and the tests above) carry no timestamp — that must
+    degrade to "unknown", not to a crash."""
+    path = tmp_path / "t.jsonl"
+    _write_transcript(path, [
+        _assistant_error("You've hit your session limit · resets 11:10pm (Europe/Brussels)"),
+    ])
+    found = dispatch._tail_rate_limit_entry(path)
+    assert found is not None
+    assert found[1] is None
+
+
+@pytest.mark.asyncio
+async def test_sweep_clears_the_persisted_signal_on_recovery(monkeypatch, tmp_path):
+    """The durable half of the recovery path: a session that recovered must
+    also lose its stored record, so the next genuine limit under that name is
+    handled as a fresh event even if it happens to carry identical wording."""
+    from app.kanban.rate_limit_signals import (
+        get_handled_signal,
+        record_handled_signal,
+    )
+    from app.services.scheduling import session_signals as ssignals
+
+    session_name = "k-persisted-recov"
+    message = "You've hit your session limit · resets 11:10pm (Europe/Brussels)"
+    repo, _projects_dir, transcript = _build_worktree_transcript(
+        tmp_path, session_name,
+        [
+            _assistant_error(message),
+            _user("continue"),
+            _assistant("Continuing where I left off."),
+        ],
+    )
+
+    ssignals.session_signals.clear(session_name)
+    monkeypatch.setattr(
+        session_recovery, "_resolve_transcript_file",
+        lambda project_path, name, **kw: (
+            transcript if name == session_name else None
+        ),
+    )
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    from datetime import UTC, datetime
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="persisted-recovery", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
+        )
+        await record_handled_signal(
+            s, session_name, message,
+            observed_at=datetime.now(UTC), pause_until=datetime.now(UTC),
+        )
+        await s.commit()
+        cards = await list_cards(s, PK)
+        assert await get_handled_signal(s, session_name) is not None
+
+    handled = await dispatch.detect_transcript_rate_limits(
+        cards=cards, project_path=str(repo),
+    )
+    assert handled == 0
+
+    async with KanbanSessionLocal() as s:
+        assert await get_handled_signal(s, session_name) is None, (
+            "the stored signal must be cleared once the session recovered"
+        )
 
     ssignals.session_signals.clear(session_name)

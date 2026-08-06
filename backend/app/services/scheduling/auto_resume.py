@@ -174,7 +174,9 @@ class AutoResumeService:
 
         return "other"
 
-    def parse_reset_time(self, message: str | None) -> tuple[datetime, str] | None:
+    def parse_reset_time(
+        self, message: str | None, *, now: datetime | None = None,
+    ) -> tuple[datetime, str] | None:
         """Parse reset time and timezone from notification message.
 
         Handles both wordings: the undated session-limit form ("resets 11:10pm
@@ -185,6 +187,14 @@ class AutoResumeService:
         past timestamp is the signal that the limit is over and dispatch may
         resume immediately. Only the undated form rolls a past clock time to
         tomorrow, because there the date is genuinely unknown.
+
+        ``now`` is the reference clock the undated form is resolved against,
+        defaulting to the wall clock. Callers that re-read an *old* message
+        (the transcript-tail sweep sees the same limit on every dispatch tick)
+        pass the moment the message was written, so the rollover answers "was
+        this reset later than the message" instead of "later than right now" --
+        without that, re-parsing a message after its own reset silently rolls
+        the deadline a full day forward. See kanban card ``e279a52b…``.
 
         Returns (datetime, timezone_name) or None if parsing fails.
         """
@@ -206,19 +216,19 @@ class AutoResumeService:
             return None
 
         # Parse time (12h or 24h format)
-        now = datetime.now(tz)
+        reference = datetime.now(tz) if now is None else now.astimezone(tz)
         try:
             if "am" in time_str.lower() or "pm" in time_str.lower():
                 # 12h format: "11:10pm" or "9pm"
                 format_string = "%I:%M%p" if ":" in time_str else "%I%p"
                 parsed = datetime.strptime(time_str.lower(), format_string)
-                reset_time = now.replace(
+                reset_time = reference.replace(
                     hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0
                 )
             else:
                 # 24h format: "23:10"
                 parsed = datetime.strptime(time_str, "%H:%M")
-                reset_time = now.replace(
+                reset_time = reference.replace(
                     hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0
                 )
         except ValueError:
@@ -236,7 +246,7 @@ class AutoResumeService:
             day = int(day_str)
             try:
                 reset_time = reset_time.replace(
-                    year=_resolve_year(month, day, now), month=month, day=day
+                    year=_resolve_year(month, day, reference), month=month, day=day
                 )
             except ValueError:
                 logger.warning(
@@ -248,8 +258,11 @@ class AutoResumeService:
             # the past means the limit already lifted -- report it as such.
             return reset_time, tz_name
 
-        # If reset time is in the past, it's tomorrow
-        if reset_time <= now:
+        # If the reset clock time already passed relative to the reference, the
+        # notification must mean tomorrow. Note this is relative to `reference`,
+        # not the wall clock: re-parsing an old message at "now" is what rolled
+        # a still-valid deadline a full day forward (kanban card e279a52b…).
+        if reset_time <= reference:
             reset_time += timedelta(days=1)
 
         return reset_time, tz_name
