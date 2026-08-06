@@ -88,7 +88,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 
 ## Volledige index (gegenereerd)
 
-> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 117 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
+> **Afgeleid uit de frontmatter — niet met de hand bewerken.** Regenereer met `scripts/generate-doc-index.py`; `scripts/generate-doc-index.py --check --strict` bewaakt de drift. Dekt **alle 120 docs** (elke `docs/cockpit/*.md`), gegroepeerd op `type` met een `status`-badge.
 
 ### Index (2)
 
@@ -151,7 +151,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Portfolio-migratie: bestaande projecten bij de kind-introductie](./portfolio-migration-plan.md) | 🟢 active |
 | [Sandcastle Integration Plan — Agent Cockpit](./sandcastle-integration-plan.md) | 🟢 active |
 
-### Decision (40)
+### Decision (41)
 
 | Document | Status |
 |---|---|
@@ -183,6 +183,7 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md) | 🔵 decided |
 | [Beslissing — één tijd-trigger: de klok maakt de kaart, de kaart is het werk](./scheduled-trigger-consolidatie-decision.md) | 🔵 decided |
 | [Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic](./schema-migrations-decision.md) | 🔵 decided |
+| [Code-scanning triage — dreigingsmodel, regelgroep-disposities, advanced setup](./security-scanning-decision.md) | 🔵 decided |
 | [Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)](./spec-driven-development-fase-0-decision.md) | 🔵 decided |
 | [Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR](./spike-claude-code-model-switching.md) | 🔵 decided |
 | [Spike: declaratieve multi-agent workflow-orchestratie — ADR](./spike-declarative-workflow-orchestration.md) | 🔵 decided |
@@ -236,6 +237,13 @@ Deze cockpit-documenten leggen een **richtingsbeslissing** vast; ze zijn canonie
 | [Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)](./subscription-verbruik-inzicht-analyse.md) | 🟢 active |
 | [Token-optimalisatie — analyse & aanbevelingen](./token-optimization-analysis.md) | 🟢 active |
 | [Card work-type → agent-routing — analyse & aanbevelingen](./work-type-routing-analysis.md) | 🟢 active |
+
+### (geen type) (2)
+
+| Document | Status |
+|---|---|
+| [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md) | — |
+| [ci-gate-decision.md](./ci-gate-decision.md) | — |
 
 <!-- END GENERATED DOC INDEX -->
 ## Regels
