@@ -1956,3 +1956,86 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(fullArea.contains(title)).toBe(false);
   });
 });
+
+// --- Full-area TabsList integrity (kanban-kaart 3356cecc…) -----------------
+// Pre-Done reviewer on c81fb67d… (commit 52e75c3e…) flagged the original
+// "every trigger has a matching panel" guard as vacuous: it queried
+// `data-value` / `value` on the rendered Radix TabsTriggers, which Radix
+// destructures out before spreading onto the DOM (see
+// @radix-ui/react-tabs/dist/index.mjs:103-115). The resulting `triggerValues`
+// array was `["", "", ...]` and the `if (!v) continue` branch ate every
+// iteration — the test passed identically on broken code.
+//
+// The fix the bug class needs is a non-vacuous invariant. Radix's real
+// DOM hooks are the trigger's `aria-controls` (the content id, derived
+// from the trigger's `value` via `makeContentId` at index.mjs:175) and the
+// content's matching `id` (index.mjs:175 itself). Radix's `Presence`
+// keeps inactive `TabsContent` elements in the DOM with `hidden=true`
+// and `data-state="inactive"` — the regression signal is therefore not
+// "panel count after click" (stays at N) but "does a tabpanel with this
+// id actually live in the SAME Tabs root". A trigger whose matching
+// `TabsContent` was never declared has an `aria-controls` value that
+// resolves to nothing inside the Tabs root it lives in — the assertion
+// below is what makes the contract falsifiable.
+//
+// We deliberately don't click triggers in this test: clicking any
+// non-Run trigger flips `isFullAreaMode` off (activeTab !== "run"),
+// which swaps the entire branch in CardDrawer.tsx (full-area Tabs →
+// default body), so the cached `fullArea` element goes stale. The
+// invariant we want to pin is structural — trigger/content pairing in
+// the same Tabs root — and that doesn't require a click.
+describe("CardDrawer full-area TabsList trigger/content integrity", () => {
+  it("every TabsTrigger advertised in the full-area TabsList has a matching TabsContent in the same Tabs root (kanban-kaart 3356cecc…)", () => {
+    // `claimed_by: "agent:<session>"` makes `runSession` truthy, which
+    // defaults `activeTab` to "run" and flips the body into full-area
+    // mode (CardDrawer.tsx). That's the only branch where the
+    // `card-drawer-full-area` element renders.
+    const agentCard: Card = { ...baseCard, claimed_by: "agent:sess-1" };
+    render(
+      <CardDrawerWithRouter
+        card={agentCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+
+    const fullArea = screen.getByTestId("card-drawer-full-area");
+
+    // Enumerate every TabsTrigger in the full-area TabsList. The default
+    // body's TabsList is a different element (only rendered outside
+    // full-area mode), so `card-drawer-full-area` is the right scope.
+    const triggers = Array.from(
+      fullArea.querySelectorAll<HTMLElement>('[role="tab"]'),
+    );
+
+    // Guard against the empty-trigger-list failure mode: a future
+    // refactor that strips the TabsList entirely would otherwise leave
+    // `triggers.length === 0` and the per-trigger loop below would
+    // vacuously pass.
+    expect(triggers.length).toBeGreaterThan(0);
+
+    // For each trigger, verify its `aria-controls` resolves to a
+    // tabpanel INSIDE the same Tabs root. This is the regression guard
+    // — the original bug was a "Deliverables" trigger in full-area mode
+    // with no matching TabsContent; the trigger advertised an id that
+    // resolved to nothing. Radix keeps inactive panels in the DOM with
+    // `hidden=true`, so this lookup works for both active and inactive
+    // panels.
+    for (const trigger of triggers) {
+      const contentId = trigger.getAttribute("aria-controls");
+      // Radix sets aria-controls on every TabsTrigger; an empty value
+      // would mean Radix couldn't derive the content id, which is
+      // exactly the bug class this guard exists to surface.
+      expect(contentId).toBeTruthy();
+
+      const matched = fullArea.querySelector<HTMLElement>(
+        `[role="tabpanel"]#${CSS.escape(contentId!)}`,
+      );
+      expect(
+        matched,
+        `trigger aria-controls="${contentId}" has no tabpanel#${contentId} in the full-area Tabs root — a trigger without a matching TabsContent in the same Tabs root is the bug class this guard exists to catch`,
+      ).toBeTruthy();
+    }
+  });
+});
