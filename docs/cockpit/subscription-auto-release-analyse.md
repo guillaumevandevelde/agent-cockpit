@@ -324,7 +324,9 @@ doorgehakt (kolom-default als impliciete eerste pool-entry), dus wat rest is
 configureren + verifiëren — geen ontwerpwerk meer.
 
 ✅ Geïmplementeerd (kaart `2bb37d97…`, 2026-08-04) — per-kolom tails geïnstalleerd op
-`git:github.com/guillaumevandevelde/agent-cockpit`:
+`git:github.com/guillaumevandevelde/agent-cockpit`. Effect: een limiet op de kop wijkt nu
+direct uit naar de staart in plaats van op de reset te wachten — behalve op `reviewer`, dat
+bewust blijft wachten:
 
 | Kolom | Head (impliciet, kolom-default) | Tail (spillover-target) | Gedrag op limiet |
 |---|---|---|---|

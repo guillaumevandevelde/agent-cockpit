@@ -118,10 +118,10 @@ for k, v in c.execute(\"select key, value from kanban_meta where key like 'subsc
 op de `/subscriptions`-pagina — die pagina toont alleen usage en credentials en bevat
 geen enkele pool-control. Pad: `frontend/src/features/kanban/KanbanPage.tsx:559` →
 `components/SubscriptionToolbarButton.tsx:84` →
-`components/SubscriptionPoolDialog.tsx`. De dialog heeft een kolom-`<Select>`
-(`data-testid="pool-scope-column"`, regel 529); bij een kolom-selectie toont hij
-`column.default_provider` als read-only kop-regel (`data-testid="pool-implicit-head"`,
-regel 580) plus de staart-entries eronder. Lege staat = "no pool configured — column
+`components/SubscriptionPoolDialog.tsx`. De dialog heeft een kolom-`<Select>` (zoek op
+`data-testid="pool-scope-column"`); bij een kolom-selectie toont hij
+`column.default_provider` als read-only kop-regel (`data-testid="pool-implicit-head"`)
+plus de staart-entries eronder. Lege staat = "no pool configured — column
 defaults apply".
 
 ### Wijzigen
@@ -242,7 +242,8 @@ Gemeten op de live board-configuratie (2026-08-06, `project_key`
 Een echte `spilling over`-logregel verschijnt op de kaart-activiteit-feed
 (`🔀 Rate-limit hit on '<provider>' — spilling over …`) zodra een bestaande sessie
 daadwerkelijk zijn limiet raakt; de dispatcher post hem via
-`move_limited_session_to_resume` (`backend/app/kanban/dispatch.py:6704-6709`). De
+`move_limited_session_to_resume` in `backend/app/kanban/dispatch.py` — zoek op de string
+`spilling over`, want regelnummers in dat bestand schuiven met elke merge. De
 regressietests `test_production_pool_tails_*` in
 `backend/tests/test_subscription_pool_dispatch.py` pinnen het end-to-end-pad inclusief
 die comment.
