@@ -119,6 +119,7 @@ HOLD_GATED = "gated"                          # operator set metadata["gated_on"
 HOLD_DANGLING_DEP = "dangling_dep"            # depends_on points at a deleted card
 HOLD_MISSING_PARENT = "missing_parent"        # parent_card_id points at a deleted card
 HOLD_AWAITING_PLAN_REF = "awaiting_plan_ref"  # child still owed a plan by its analyst
+HOLD_AWAITING_REVIEW = "awaiting_review"      # review-card sibling (metadata.reviewed_card_id) is still open
 HOLD_DEPENDENT = "dependent"                  # depends_on a live, not-yet-Done card
 HOLD_SCHEDULED = "scheduled"                  # scheduled_at names a future time
 
@@ -135,6 +136,7 @@ _CLEARED_BY = {
     HOLD_DANGLING_DEP: CLEARED_BY_HUMAN,
     HOLD_MISSING_PARENT: CLEARED_BY_HUMAN,
     HOLD_AWAITING_PLAN_REF: CLEARED_BY_ANALYST_RUN,
+    HOLD_AWAITING_REVIEW: CLEARED_BY_CARD,   # the review-card sibling reaches Done/Impediment
     HOLD_DEPENDENT: CLEARED_BY_CARD,
     HOLD_SCHEDULED: CLEARED_BY_CLOCK,
 }
@@ -202,10 +204,11 @@ def classify_hold(
     the gate everywhere (the legacy, phase-blind behaviour).
 
     Precedence, highest first: gated → dangling_dep → missing_parent →
-    awaiting_plan_ref → dependent → scheduled. Human-actionable and permanent
-    reasons outrank temporary self-healing ones, so the card reports the
-    blocker a human could actually act on; ``scheduled`` sits last because a
-    card that is *also* blocked on something else is not merely early.
+    awaiting_plan_ref → awaiting_review → dependent → scheduled.
+    Human-actionable and permanent reasons outrank temporary self-healing ones,
+    so the card reports the blocker a human could actually act on;
+    ``scheduled`` sits last because a card that is *also* blocked on something
+    else is not merely early.
     """
     # Operator-set business gate. Fail open on an empty string: both a missing
     # key and "" mean "no gate", matching dispatch._is_gated.
@@ -245,6 +248,21 @@ def classify_hold(
         if plan_ref_columns is None or column in plan_ref_columns:
             return Hold(HOLD_AWAITING_PLAN_REF, (parent_id,))
 
+    # Review-card sibling still open. ``request_review`` creates a sibling card
+    # with ``metadata.reviewed_card_id == <original.id>`` while leaving the
+    # original intact; while that sibling is on any non-terminal column
+    # (Backlog, To Resume, Awaiting Subtasks, or an agent column), the original
+    # must NOT be re-dispatched — its work is being triaged by the analyst and
+    # any spawn now would duplicate it (the review-card flow already filed
+    # concrete child cards for the actual fix work). The hold clears when the
+    # review-card reaches Done or Impediment; we don't synthesise the
+    # dependency in ``depends_on`` because the linkage is created upstream by
+    # ``request_review`` and the review-card lives in the same project, so
+    # ``cards_by_id`` already contains it. See kaart 572af2d6…
+    review_card_id = _open_review_card_id(card, cards_by_id)
+    if review_card_id is not None:
+        return Hold(HOLD_AWAITING_REVIEW, (review_card_id,))
+
     open_deps = tuple(
         d for d in deps
         if (parent := cards_by_id.get(d)) is not None
@@ -256,4 +274,43 @@ def classify_hold(
     if not is_due(card):
         return Hold(HOLD_SCHEDULED)
 
+    return None
+
+
+# Review-card terminal columns: ``Done`` is the analyst's normal close path;
+# ``Impediment`` covers the escalated/human-blocked cases (``report_impediment``
+# from the analyst run, or an operator moving the review-card to Impediment
+# directly). Both are terminal: the review's verdict is in either way, and the
+# original must be free to be re-evaluated / re-dispatched on its own merits.
+_REVIEW_TERMINAL_COLUMNS = frozenset({"Done", "Impediment"})
+
+
+def _open_review_card_id(card, cards_by_id: dict) -> str | None:
+    """Return the id of an open review-card sibling, or None.
+
+    A review-card sibling is any card Y in ``cards_by_id`` with
+    ``Y.meta.reviewed_card_id == card.id``. ``Y`` is "open" when it is not on
+    a terminal column (``Done``/``Impediment``); we don't gate on
+    ``Y.claimed_by`` because a claimed review-card is exactly the case that
+    needs the hold (a fresh analyst session is mid-review, and the original
+    must stay quiet).
+
+    Pure helper extracted so the rule is grep-able and testable in isolation.
+    The scan is O(n) over the project working set; projects run at single-
+    digit to low-double-digit card counts, so an n×n walk stays cheap.
+    """
+    target_id = getattr(card, "id", None)
+    if not target_id:
+        return None
+    for other_id, other in cards_by_id.items():
+        if other_id == target_id:
+            continue
+        other_meta = getattr(other, "meta", None) or {}
+        if not isinstance(other_meta, dict):
+            continue
+        if other_meta.get("reviewed_card_id") != target_id:
+            continue
+        if getattr(other, "column", None) in _REVIEW_TERMINAL_COLUMNS:
+            continue
+        return other_id
     return None
