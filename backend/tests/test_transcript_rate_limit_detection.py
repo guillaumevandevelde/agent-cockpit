@@ -1054,3 +1054,372 @@ async def test_sweep_clears_the_persisted_signal_on_recovery(monkeypatch, tmp_pa
         )
 
     ssignals.session_signals.clear(session_name)
+
+
+# ---- MiniMax-style unparseable messages: per-provider backoff (kaart b106def4…)
+#
+# The MiniMax "Token Plan usage limit reached" wording carries no parseable
+# reset time, so `parse_reset_time` returns None and the reactive path falls
+# back to a deadline. The legacy fallback is a fixed 5h — a blind guess that
+# is either too short (subscription recovers in 10 minutes) or too long
+# (waiting hours for nothing). The accepted design is a per-provider
+# exponential backoff: the first fresh limit uses a short initial window,
+# each subsequent fresh limit on the same provider doubles it up to a cap.
+#
+# These tests pin the contract at the `handle_rate_limit_signal` boundary
+# (the unit-level state machine is in `test_rate_limit_backoff.py`).
+
+
+def _patch_provider(monkeypatch, provider_name: str):
+    """Pin ``_provider_for_cwd`` to a known provider so the backoff path
+    picks the right per-provider slot, independent of the cwd-→-card
+    resolution that the production path walks."""
+    async def _stub(_cwd):
+        return provider_name
+    monkeypatch.setattr(dispatch, "_provider_for_cwd", _stub)
+
+
+MINIMAX_MESSAGE = (
+    "API Error: Request rejected (429) · Token Plan usage limit reached: "
+    "Upgrade your Token Plan or purchase Credits for more usage. (2056)"
+)
+
+
+@pytest.mark.asyncio
+async def test_unparseable_limit_uses_short_backoff_window(monkeypatch):
+    """AC1: an unparseable limit on a known provider pauses for a short
+    initial window (minutes, not hours) instead of the legacy 5h guess."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.rate_limit_backoff import BACKOFF_SEQUENCE
+    from app.services.scheduling import session_signals as ssignals
+
+    ssignals.session_signals.clear("k-backoff-init-0001")
+    _patch_provider(monkeypatch, "minimax")
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append((when, provider))
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    before = datetime.now(UTC)
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-init-0001",
+        MINIMAX_MESSAGE, source="transcript",
+    )
+    after = datetime.now(UTC)
+
+    assert len(captured) == 1
+    fire_at, provider = captured[0]
+    assert provider == "minimax"
+    initial = BACKOFF_SEQUENCE[0]
+    assert before + timedelta(seconds=initial) <= fire_at
+    assert fire_at <= after + timedelta(seconds=initial)
+
+    ssignals.session_signals.clear("k-backoff-init-0001")
+
+
+@pytest.mark.asyncio
+async def test_second_fresh_limit_on_same_provider_doubles_the_window(monkeypatch):
+    """AC2: a fresh second limit on the same provider uses a longer window
+    than the first. The doubling continues up to an explicit cap."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.kanban.rate_limit_backoff import BACKOFF_SEQUENCE
+    from app.services.scheduling import session_signals as ssignals
+
+    ssignals.session_signals.clear("k-backoff-2nd-0001")
+    _patch_provider(monkeypatch, "minimax")
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append((when, provider))
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    # First fresh limit — short window.
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-2nd-0001",
+        MINIMAX_MESSAGE, source="transcript",
+    )
+    assert len(captured) == 1
+    first_window = captured[-1][0] - datetime.now(UTC)
+
+    # Simulate recovery (R1's clear path runs after a successful retry) and
+    # then a *fresh* limit on the same provider. The fresh message is what
+    # passes the dedupe gate; the counter increments.
+    ssignals.session_signals.clear("k-backoff-2nd-0001")
+    async with KanbanSessionLocal() as s:
+        from app.kanban.rate_limit_signals import clear_handled_signal
+        await clear_handled_signal(s, "k-backoff-2nd-0001")
+        await s.commit()
+
+    # Second fresh limit — same wording but R1 was reset by the recovery,
+    # so this is treated as new and the backoff counter ticks.
+    before = datetime.now(UTC)
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-2nd-0001",
+        MINIMAX_MESSAGE, source="transcript",
+    )
+    after = datetime.now(UTC)
+
+    assert len(captured) == 2
+    second_fire_at, _ = captured[1]
+    expected = BACKOFF_SEQUENCE[1]
+    assert before + timedelta(seconds=expected) <= second_fire_at
+    assert second_fire_at <= after + timedelta(seconds=expected)
+    # And it really is longer than the first one.
+    assert (second_fire_at - before) > first_window
+
+    ssignals.session_signals.clear("k-backoff-2nd-0001")
+
+
+@pytest.mark.asyncio
+async def test_backoff_is_per_provider(monkeypatch):
+    """AC4 (per-provider): a burst on `minimax` must not bleed into
+    `anthropic`'s window — each provider has its own counter."""
+    from app.services.scheduling import session_signals as ssignals
+
+    for name in ("k-backoff-prov-a-0001", "k-backoff-prov-b-0001"):
+        ssignals.session_signals.clear(name)
+
+    # Provider resolution depends on the cwd: different cwd → different
+    # session name → different provider stub result. Use a single
+    # `monkeypatch.setattr` that dispatches per cwd.
+    def _stub_provider(cwd):
+        if "prov-a" in cwd:
+            return "minimax"
+        if "prov-b" in cwd:
+            return "anthropic"
+        return None
+    async def _stub(cwd):
+        return _stub_provider(cwd)
+    monkeypatch.setattr(dispatch, "_provider_for_cwd", _stub)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append((when, provider))
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    # First limit on minimax.
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-prov-a-0001",
+        MINIMAX_MESSAGE, source="transcript",
+    )
+    # First limit on anthropic.
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-prov-b-0001",
+        MINIMAX_MESSAGE, source="transcript",
+    )
+
+    assert len(captured) == 2
+    # Both providers get the initial short window — the second limit on
+    # `minimax` has not happened yet, so the per-provider counter for
+    # `minimax` is still at 1.
+    minimax_deadline = next(d for d, p in captured if p == "minimax")
+    anthropic_deadline = next(d for d, p in captured if p == "anthropic")
+    # Both deadlines were armed by the same call window; check the
+    # recorded state rather than comparing the timestamps.
+    from app.kanban.rate_limit_backoff import get_backoff
+    async with KanbanSessionLocal() as s:
+        assert (await get_backoff(s, "minimax")).attempt == 1
+        assert (await get_backoff(s, "anthropic")).attempt == 1
+    # And the deadlines were both at the initial window — i.e. equal.
+    assert abs((minimax_deadline - anthropic_deadline).total_seconds()) < 2
+
+    ssignals.session_signals.clear("k-backoff-prov-a-0001")
+    ssignals.session_signals.clear("k-backoff-prov-b-0001")
+
+
+@pytest.mark.asyncio
+async def test_parseable_message_does_not_use_backoff(monkeypatch):
+    """The backoff is a fallback for *unparseable* messages. A parseable
+    Anthropic-style message still uses its parsed reset time, and the
+    backoff counter for that provider is left alone."""
+    from app.kanban.rate_limit_backoff import get_backoff
+    from app.services.scheduling import session_signals as ssignals
+    from app.services.scheduling.auto_resume import auto_resume_service
+
+    ssignals.session_signals.clear("k-backoff-parsable-0001")
+    _patch_provider(monkeypatch, "anthropic")
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append((when, provider))
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    message = "You've hit your session limit · resets 11:10pm (Europe/Brussels)"
+    expected_reset, _tz = auto_resume_service.parse_reset_time(message)
+
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-parsable-0001",
+        message, source="transcript",
+    )
+
+    assert len(captured) == 1
+    fire_at, _provider = captured[0]
+    # The parsed reset time, not the backoff window.
+    assert abs((fire_at - expected_reset).total_seconds()) < 2
+    # And the backoff counter for this provider is unchanged.
+    async with KanbanSessionLocal() as s:
+        assert await get_backoff(s, "anthropic") is None
+
+    ssignals.session_signals.clear("k-backoff-parsable-0001")
+
+
+@pytest.mark.asyncio
+async def test_backoff_does_not_fight_r1_idempotency(monkeypatch):
+    """AC5 (composes with R1): a re-detection of the same message passes
+    through the R1 dedupe gate and is a no-op, so the backoff counter is
+    NOT incremented — only a genuinely fresh limit (different message or
+    cleared signal) ticks it."""
+    from app.kanban.rate_limit_backoff import get_backoff
+    from app.services.scheduling import session_signals as ssignals
+
+    ssignals.session_signals.clear("k-backoff-r1-0001")
+    _patch_provider(monkeypatch, "minimax")
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    captured = []
+    from app.kanban import dispatch_pause
+    real_set = dispatch_pause.set_paused_until
+
+    async def capture_set(s, when, *, provider=None):
+        captured.append((when, provider))
+        await real_set(s, when, provider=provider)
+
+    monkeypatch.setattr(dispatch_pause, "set_paused_until", capture_set)
+
+    # First call: fresh signal, full reaction, counter → 1.
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-r1-0001",
+        MINIMAX_MESSAGE, source="transcript",
+    )
+    assert len(captured) == 1
+    async with KanbanSessionLocal() as s:
+        assert (await get_backoff(s, "minimax")).attempt == 1
+
+    # Second call: SAME message, re-detected on the next tick. R1 dedupes
+    # it, so the backoff counter must NOT tick.
+    import asyncio
+    await asyncio.sleep(0.01)
+    await dispatch.handle_rate_limit_signal(
+        "/p/.claude/worktrees/k-backoff-r1-0001",
+        MINIMAX_MESSAGE, source="transcript",
+    )
+    assert len(captured) == 1, (
+        "R1 dedupe must keep the same in-transcript message from "
+        "re-arming the pause or re-incrementing the backoff"
+    )
+    async with KanbanSessionLocal() as s:
+        assert (await get_backoff(s, "minimax")).attempt == 1
+
+    ssignals.session_signals.clear("k-backoff-r1-0001")
+
+
+@pytest.mark.asyncio
+async def test_session_recovery_resets_backoff(monkeypatch, tmp_path):
+    """AC3: a successful retry is observed at the recovery path — the
+    session's transcript clears, and the next sweep runs the recovery
+    branch. That branch resets the backoff counter for the provider, so
+    the *next* genuinely fresh limit on that provider starts at the
+    initial short window again."""
+    from app.kanban.rate_limit_backoff import (
+        get_backoff,
+        record_backoff,
+    )
+    from app.services.scheduling import session_signals as ssignals
+
+    session_name = "k-backoff-recover-0001"
+    ssignals.session_signals.clear(session_name)
+
+    # Pre-arm the counter: a previous burst put the backoff at attempt=3.
+    async with KanbanSessionLocal() as s:
+        await record_backoff(s, "minimax")
+        await record_backoff(s, "minimax")
+        await record_backoff(s, "minimax")
+        await s.commit()
+    async with KanbanSessionLocal() as s:
+        assert (await get_backoff(s, "minimax")).attempt == 3
+
+    # Build a worktree transcript that has recovered: an old limit entry
+    # followed by ordinary activity. The sweep must take the recovery
+    # branch and reset the backoff.
+    repo, _projects_dir, transcript = _build_worktree_transcript(
+        tmp_path, session_name,
+        [
+            _assistant_error(MINIMAX_MESSAGE),
+            _user("continue"),
+            _assistant("Continuing where I left off."),
+        ],
+    )
+
+    monkeypatch.setattr(
+        session_recovery, "_resolve_transcript_file",
+        lambda project_path, name, **kw: (
+            transcript if name == session_name else None
+        ),
+    )
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+    monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
+    _patch_provider(monkeypatch, "minimax")
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="backoff-recover", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
+        )
+        await s.commit()
+        cards = await list_cards(s, PK)
+
+    handled = await dispatch.detect_transcript_rate_limits(
+        cards=cards, project_path=str(repo),
+    )
+    assert handled == 0, "recovered transcript must not fire a reaction"
+
+    # The recovery branch must have reset the backoff for `minimax`.
+    async with KanbanSessionLocal() as s:
+        assert await get_backoff(s, "minimax") is None, (
+            "session recovery is the success signal: the backoff counter "
+            "must be cleared so the next fresh limit starts at the initial "
+            "short window"
+        )
+
+    ssignals.session_signals.clear(session_name)
