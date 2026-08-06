@@ -1059,32 +1059,161 @@ async def card_has_children(session, card_id: str) -> bool:
 async def close_parent_if_all_children_done(session, parent_id: str) -> bool:
     """If `parent_id` is currently parked in `Awaiting Subtasks` and every
     card with `parent_card_id == parent_id` is now in `Done`, move the
-    parent to `Done` with a `**Summary:**` comment. Returns True iff the
-    parent was closed.
+    parent to `Done` and post a per-child roll-up comment. Returns True
+    iff the parent was closed.
 
     Only closes a parent that is actually parked — a parent still in an
     agent column (analysis in progress) or in `Impediment` is left alone.
     Callers walk the `parent_card_id` chain to handle nested decomposition
     (a closed parent may itself be someone's child).
+
+    The roll-up records the *gedane stappen* en *opgeleverd werk* — child
+    title, first sentence of each child's `done_summary`, and that
+    child's deliverable refs (kind + ref). That way the parent stays a
+    self-contained record of what the children produced, even after a
+    Clear-Done-sweep removes the children from the board (kaart
+    068845bd…; convention shape: `docs/cockpit/
+    communicatie-en-weergave-analyse.md` §2.1).
+
+    When the parent already carries its own `**Summary:** ...` comment
+    (the analyst's outcome-summary posted before the card was parked),
+    the roll-up is posted as a *separate, non-`Summary:` comment* so
+    `enrich_done_info`'s "most recent Summary wins" rule keeps the
+    parent's outcome leading on the Done-banner, the board snippet, and
+    the `**Original summary:**` field of any review card. The previous
+    fixed-placeholder `**Summary:**` posted a second, inhoudsloze
+    `Summary:` op — that is the bug this function fixes.
     """
     parent = await session.get(KanbanCard, parent_id)
     if parent is None or parent.column != "Awaiting Subtasks":
         return False
-    sibling_columns = (await session.execute(
-        select(KanbanCard.column).where(KanbanCard.parent_card_id == parent_id)
-    )).scalars().all()
-    if not sibling_columns or any(c != "Done" for c in sibling_columns):
+    siblings_stmt = (
+        select(KanbanCard)
+        .where(KanbanCard.parent_card_id == parent_id)
+        .options(selectinload(KanbanCard.deliverables))
+        .order_by(KanbanCard.created_at.asc())
+    )
+    children = (await session.execute(siblings_stmt)).scalars().all()
+    if not children or any(c.column != "Done" for c in children):
         return False
+
+    parent_prior_summary, _ = await enrich_done_info(session, parent_id)
+    child_summaries = {
+        c.id: await enrich_done_info(session, c.id) for c in children
+    }
+    rollup = _build_auto_close_rollup(
+        parent, parent_prior_summary, children, child_summaries)
+
     from app.kanban.operations import apply_operation
     await apply_operation(session, op_type="move", entity_type="card",
         project_key="", entity_id=parent_id, payload={"column": "Done"})
+    # Always post the roll-up as the new leading `**Summary:**`. When
+    # the parent already had its own prior Summary, that prior outcome
+    # is *embedded as the leading sentence* of the new Summary — the
+    # parent's content stays visible (it isn't replaced by an empty
+    # placeholder like the old fixed string), the per-child roll-up
+    # adds the gedane-stappen detail, and `enrich_done_info`'s "most
+    # recent Summary wins" rule surfaces a single, comprehensive
+    # summary on the Done-banner. The prior Summary comment is left in
+    # the activity feed intact so the analyst's original wording stays
+    # grep-able.
     await apply_operation(session, op_type="comment", entity_type="comment",
         project_key="", entity_id=parent_id,
-        payload={"text": (
-            "**Summary:** All subtasks reached Done — auto-closed from "
-            "Awaiting Subtasks."
-        )})
+        payload={"text": f"**Summary:** {rollup}"})
     return True
+
+
+# Markers + helpers used by `close_parent_if_all_children_done` to build
+# the roll-up. Kept private — the roll-up shape is this function's
+# concern, not a public API.
+_AUTO_CLOSE_ROLLUP_LEAD_WITHOUT_PRIOR_SUMMARY = (
+    "Alle kind-kaarten van \"{parent_title}\" zijn opgeleverd via deze "
+    "auto-close.\n\n"
+)
+_AUTO_CLOSE_ROLLUP_FOOTER = "\n\n_auto-closed from Awaiting Subtasks._"
+_AUTO_CLOSE_ROLLUP_FIRST_SENTENCE_MAX_CHARS = 240
+
+
+def _first_sentence(text: str, *, max_chars: int = _AUTO_CLOSE_ROLLUP_FIRST_SENTENCE_MAX_CHARS) -> str:
+    """Return the first sentence of `text`, capped at `max_chars`.
+
+    A sentence ends at the first `.`, `!` or `?` followed by whitespace
+    or end-of-string. Falls back to the whole `text` (truncated to
+    `max_chars`) when the input has no sentence terminator — the
+    roll-up must always have something to show, even for terse child
+    summaries like "klaar." with no further punctuation.
+    """
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return ""
+    for i, ch in enumerate(cleaned):
+        if ch in ".!?" and (i + 1 == len(cleaned) or cleaned[i + 1].isspace()):
+            sentence = cleaned[: i + 1].strip()
+            if sentence:
+                return sentence[:max_chars]
+    return cleaned[:max_chars]
+
+
+def _child_bullet_text(child, summary_text: str | None) -> str:
+    """Pick the most informative single-sentence description for a
+    child bullet. Prefer the child's `done_summary` (set by whoever
+    closed the child); fall back to its description, then its title.
+    The bullet always has *something* — never empty."""
+    summary = (summary_text or "").strip()
+    if summary:
+        return _first_sentence(summary)
+    desc = (child.description or "").strip()
+    if desc:
+        return _first_sentence(desc)
+    return (child.title or "").strip()
+
+
+def _format_deliverable_refs(child) -> str:
+    """Render a child's deliverables as `(kind ref, kind ref, …)`. Empty
+    string when the child has none — the bullet still surfaces the
+    child's title and first-sentence, just without the inline refs."""
+    refs = [
+        f"{d.kind} {d.ref}" for d in (child.deliverables or []) if d.ref
+    ]
+    return f" ({', '.join(refs)})" if refs else ""
+
+
+def _build_auto_close_rollup(parent, parent_prior_summary: str | None,
+                             children: list,
+                             child_summaries: dict[str, tuple[str | None, object]]) -> str:
+    """Compose the roll-up body. Leading productbetekenis + per-child
+    bullets + footer marker. Returned text does NOT include the
+    `**Summary:** ` prefix — the caller prepends it unconditionally.
+
+    Lead sentence:
+      * With parent prior Summary — the parent's prior outcome is the
+        leading one-sentence productbetekenis, *embedded verbatim* so
+        the analyst's wording stays on the Done-banner. The previous
+        fixed-placeholder bug replaced that outcome with an empty
+        machine-string; this design preserves it instead. The bullets
+        that follow add the per-child roll-up.
+      * Without parent prior Summary — the roll-up leads with a
+        synthetic productbetekenis statement ("Alle kind-kaarten van
+        X zijn opgeleverd via deze auto-close") that names the parent
+        so the reader knows which decomposition closed.
+    """
+    parent_title = (parent.title or "").strip() or "(zonder titel)"
+    if parent_prior_summary:
+        lead = parent_prior_summary.strip()
+        if not lead.endswith((".", "!", "?")):
+            lead += "."
+        lead += "\n\n"
+    else:
+        lead = _AUTO_CLOSE_ROLLUP_LEAD_WITHOUT_PRIOR_SUMMARY.format(
+            parent_title=parent_title)
+    bullets: list[str] = []
+    for child in children:
+        summary_text, _ = child_summaries.get(child.id, (None, None))
+        first = _child_bullet_text(child, summary_text)
+        refs = _format_deliverable_refs(child)
+        bullets.append(f"- **{child.title}** — {first}.{refs}")
+    body = lead + "\n".join(bullets) + _AUTO_CLOSE_ROLLUP_FOOTER
+    return body
 
 
 # Decision gates
