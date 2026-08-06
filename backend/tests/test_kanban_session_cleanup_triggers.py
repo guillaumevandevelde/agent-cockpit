@@ -78,7 +78,10 @@ async def test_move_to_impediment_via_mcp_fires_cleanup(monkeypatch):
     cid = card["id"]
     await m.claim_card(cid, "agent:k-test-1234")
 
-    await m.move_card(cid, "Impediment", summary="Stuck on auth setup.")
+    # `move_card(Impediment)` is gated (kaart b8e3ac8b… decision A); the
+    # actual machine path into Impediment is via report_impediment.
+    # The cleanup-on-Impediment contract is the same either way.
+    await m.report_impediment(cid, "Stuck on auth setup.")
     await _wait_for_cleanup(called)
 
     assert called == [(cid, "git:test/repo")], called

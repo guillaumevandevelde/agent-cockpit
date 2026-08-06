@@ -314,9 +314,33 @@ async def test_move_card_to_done_without_summary_is_rejected():
 
 @pytest.mark.asyncio
 async def test_move_card_to_impediment_without_summary_is_rejected():
+    """Reversed contract: move_card(Impediment) is rejected with
+    `use_report_impediment`, *not* `summary_required`, because the gate
+    fires before the summary check (kaart b8e3ac8b… decision A). The
+    takeaway is the same — the card never lands in Impediment — but the
+    error code steers the agent straight at report_impediment, which is
+    the only route that opens a KanbanGate and renders the 4-button
+    picker instead of an empty screen."""
     cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
     result = await m.move_card(cid, "Impediment")
-    assert result.get("error") == "summary_required"
+    assert result.get("error") == "use_report_impediment"
+    card = await m.get_card(cid)
+    assert card["column"] != "Impediment"
+
+
+@pytest.mark.asyncio
+async def test_move_card_to_impediment_with_summary_is_still_rejected():
+    """The new gate fires regardless of `summary` — even a perfectly
+    written summary on `move_card(column="Impediment")` is refused,
+    because the issue is the missing gate, not the missing prose. The
+    dedicated error message must point at report_impediment by name."""
+    cid = (await m.create_card("P", "t", "", confirm_new_project=True))["id"]
+    result = await m.move_card(cid, "Impediment", summary="I am stuck on a merge.")
+    assert result.get("error") == "use_report_impediment"
+    msg = result.get("message", "")
+    assert "report_impediment" in msg, (
+        f"message must name the tool to use instead, got: {msg!r}"
+    )
     card = await m.get_card(cid)
     assert card["column"] != "Impediment"
 
@@ -762,7 +786,9 @@ async def test_parent_stays_parked_while_one_child_impeded():
     await m.move_card(parent, "Done", summary="split into subtasks", outcome="decomposed")
 
     await m.move_card(child1, "Done", summary="child1 done")
-    await m.move_card(child2, "Impediment", summary="stuck, needs a human")
+    # `move_card(Impediment)` is gated (kaart b8e3ac8b… decision A); use
+    # report_impediment's free-text path to set up the same end state.
+    await m.report_impediment(child2, "stuck, needs a human")
 
     assert (await m.get_card(parent))["column"] == "Awaiting Subtasks"
 
