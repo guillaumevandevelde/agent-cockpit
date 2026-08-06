@@ -56,24 +56,13 @@ check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 # Usage:  pycheck "any(x['card_id']=='card-A' for x in d['shipped'])"
 #         pycheck "d['window']['since'].startswith('2026-07-20')"
 #
-# The python expression runs at module level — multi-line expressions are
-# allowed as long as the LAST statement is a boolean expression. The whole
-# expression is dedented so leading whitespace from the bash heredoc doesn't
-# break the first indented line. For triage, a print(d) on assertion failure
-# is left to the caller's preference — pycheck returns nonzero on any
-# exception, which is what the `check` wrapper needs.
-pycheck() {
-  local expr="$1"
-  echo "$out" | python3 -c "
-import ast, json, sys, textwrap
-d = json.loads(sys.stdin.read())
-source = textwrap.dedent('''$expr''')
-tree = ast.parse(source)
-if tree.body and isinstance(tree.body[-1], ast.Expr):
-    tree.body[-1] = ast.Assert(test=tree.body[-1].value, msg=None)
-exec(compile(ast.fix_missing_locations(tree), '<pycheck>', 'exec'))
-" 2>&1
-}
+# Implementation lives in scripts/lib/pycheck.sh (kaart 06863c73d1544b20bcc0208feb92bb50)
+# so other harnesses pick up the same Assert-wrap on bare expressions — the trap
+# that produced a silent `ok` on a False condition is exactly the bare-`exec`
+# tautology this helper replaces. Task 0 below validates that the sourced
+# helper still rejects false bare expressions.
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/lib/pycheck.sh"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
