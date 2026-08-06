@@ -9950,3 +9950,195 @@ async def test_manual_pause_gate_skips_provider_resolution_when_no_manual_pause(
             s, project_key=PK, project_path="/tmp/project", card=card,
             target_column="engineer",
         ) is False
+
+
+# ---- card 572af2d6: review-card hold --------------------------------------
+#
+# Bug: an original card moved back to Backlog while a review-card sibling
+# (metadata.reviewed_card_id == original.id) was still open got re-dispatched
+# within 98 seconds, spawning an Opus analysis session that duplicated the work
+# the review had already filed as child cards. Auto-dispatch read the
+# **Review requested:** comment but no signal reached its gates.
+#
+# Fix: while a card has an open review-card sibling, dispatch must hold it out
+# the same way ``awaiting_plan_ref`` holds child cards — visibly
+# (held_reason/held_blocker) and only auto-clearing when the review card reaches
+# a terminal column (Done/Impediment).
+
+
+async def _make_review_card(s, *, original_id, title="Review: original",
+                           column="Backlog", priority="high"):
+    """Create a sibling card pointing back at ``original_id`` via the
+    ``metadata.reviewed_card_id`` link that ``request_review`` plants.
+
+    Mirrors the service-level ``request_review`` shape (Backlog column,
+    work_type='analysis', priority='high') so the resulting hold is
+    exercised against the same board topology the production flow produces.
+    """
+    cid = await apply_operation(
+        s, op_type="create", entity_type="card", project_key=PK,
+        entity_id=None,
+        payload={"title": title, "column": column,
+                 "work_type": "analysis", "agent": "analyst",
+                 "priority": priority,
+                 "metadata": {"reviewed_card_id": original_id}},
+    )
+    await s.flush()
+    return cid
+
+
+@pytest.mark.asyncio
+async def test_next_card_skips_origin_with_open_review_card():
+    """Bug card 572af2d6 acceptance (1) — negative side:
+    ``_next_card`` must NOT pick an origin card that has an open review-card
+    sibling (metadata.reviewed_card_id == origin.id), even though the origin is
+    in Backlog and otherwise dispatchable.
+
+    Both cards have priority='high' so the priority sort is a no-op (stable
+    sort preserves input order); the only thing distinguishing them for
+    ``_next_card`` is therefore the new hold. Without the fix the origin wins
+    on input order and is dispatched — the exact bug 572af2d6 describes.
+    """
+    async with KanbanSessionLocal() as s:
+        origin = await _make_card(
+            s, title="reviewed original", column="Backlog", priority="high",
+        )
+        review = await _make_review_card(s, original_id=origin, priority="high")
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        origin_card = next(c for c in cards if c.id == origin)
+        review_card = next(c for c in cards if c.id == review)
+        # Input order: origin first. Without the hold, stable priority sort
+        # returns the origin; with the hold, origin is skipped and review wins.
+        picked = dispatch._next_card([origin_card, review_card])
+
+    assert picked is not None, (
+        "_next_card returned None — the review card should still be dispatchable "
+        "on its own merits even though the origin is held"
+    )
+    assert picked.id != origin, (
+        f"origin {origin} must be held while review {review} is open; "
+        f"_next_card returned {picked.id} (priority sort alone would have picked "
+        "the origin without the new hold — that's the bug)"
+    )
+    assert picked.id == review
+
+
+@pytest.mark.asyncio
+async def test_origin_with_review_card_moved_to_done_is_dispatched():
+    """Bug card 572af2d6 acceptance (1) — positive side:
+    once the review card reaches Done, the hold clears and the origin becomes
+    a normal Backlog card again. ``_next_card`` picks it up.
+
+    This is the half the bug card explicitly demands: a test that only asserts
+    'is not picked while held' is green whenever ``_next_card`` returns None
+    for ANY reason, so the positive side is what makes the test sharp.
+    """
+    async with KanbanSessionLocal() as s:
+        origin = await _make_card(s, title="reviewed original", column="Backlog")
+        review = await _make_review_card(s, original_id=origin)
+        await apply_operation(
+            s, op_type="move", entity_type="card", project_key="",
+            entity_id=review, payload={"column": "Done"},
+        )
+        await s.commit()
+
+    async with KanbanSessionLocal() as s:
+        cards = await list_cards(s, PK)
+        origin_card = next(c for c in cards if c.id == origin)
+        picked = dispatch._next_card([origin_card])
+
+    assert picked is not None, (
+        "origin must be picked after review card is Done; the positive side of "
+        "the hold test is what proves the gate actually clears (not just that "
+        "it fires)"
+    )
+    assert picked.id == origin
+
+
+@pytest.mark.asyncio
+async def test_origin_held_reason_records_open_review_card_id():
+    """Acceptance (2) — visibility: the hold must surface ``held_reason`` and
+    ``held_blocker`` on the origin so the board shows *why* it is sitting still
+    (silent holds were the trap that ``awaiting_plan_ref`` already walked
+    into). The blocker's value is the review card's id so a UI can deep-link
+    straight to the sibling.
+    """
+    async with KanbanSessionLocal() as s:
+        origin = await _make_card(s, title="reviewed original", column="Backlog")
+        review = await _make_review_card(s, original_id=origin)
+        await s.commit()
+        # Run the dispatch tick so _persist_holds stamps held_reason/held_blocker.
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p",
+            transport=RecordingTransport(),
+        )
+        await s.commit()
+        origin_card = await get_card(s, origin)
+
+    assert origin_card.held_reason == "awaiting_review", (
+        f"expected held_reason='awaiting_review', got {origin_card.held_reason!r}"
+    )
+    assert origin_card.held_blocker == [review], (
+        f"expected held_blocker=[{review}], got {origin_card.held_blocker!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_origin_spawned_after_review_card_done():
+    """End-to-end (acceptance 1+3): ``dispatch_project`` does not spawn the
+    origin card while its review sibling is open, and does spawn it once the
+    review card reaches Done — without a manual hold-clearing step.
+
+    The review card itself IS a normal dispatchable card (work_type='analysis',
+    priority='high'), so it gets spawned on the first tick — that's the
+    review-flow doing its job. The bug 572af2d6 describes is specifically the
+    ORIGIN being re-spawned while the review is in flight; this test pins
+    that down by asserting the spawn's card_id is the review card, not the
+    origin, on tick 1, and that tick 2 lands on the origin after the review
+    reaches Done.
+    """
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        origin = await _make_card(s, title="reviewed original", column="Backlog")
+        review = await _make_review_card(s, original_id=origin)
+        await s.commit()
+
+        # Tick 1: review is open in Backlog → origin must NOT be claimed.
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport,
+        )
+        await s.commit()
+        origin_card = await get_card(s, origin)
+    assert origin_card.column == "Backlog"
+    assert not origin_card.claimed_by, (
+        f"origin must NOT be claimed while review {review} is open"
+    )
+    # The review card is allowed to spawn — what's NOT allowed is the origin
+    # being picked while its review sibling is still running.
+    spawned_ids = [c["card_id"] for c in transport.calls]
+    assert origin not in spawned_ids, (
+        f"origin {origin} was spawned while review {review} was open: "
+        f"{transport.calls!r}"
+    )
+
+    # Tick 2: review moves to Done → origin becomes dispatchable.
+    transport2 = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await apply_operation(
+            s, op_type="move", entity_type="card", project_key="",
+            entity_id=review, payload={"column": "Done"},
+        )
+        await s.commit()
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path="/p", transport=transport2,
+        )
+        await s.commit()
+        origin_card = await get_card(s, origin)
+    spawned_ids_2 = [c["card_id"] for c in transport2.calls]
+    assert origin in spawned_ids_2, (
+        f"origin must be spawned after review Done; calls={transport2.calls!r}"
+    )
+    assert origin_card.claimed_by

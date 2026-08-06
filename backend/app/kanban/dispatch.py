@@ -34,6 +34,7 @@ from app.kanban import subscription_pool
 # helper (no DB / session state — see app.kanban.dep_resolver).
 from app.kanban.dep_resolver import (
     HOLD_AWAITING_PLAN_REF,
+    HOLD_AWAITING_REVIEW,
     HOLD_GATED,
     HOLD_MISSING_PARENT,
     HOLD_SCHEDULED,
@@ -6085,8 +6086,17 @@ def _is_gated(card) -> bool:
 # downstream, where it can surface a dangling dep to Impediment instead of
 # skipping it in silence. Filtering them here would swallow that signal — the
 # exact mistake this whole change exists to stop making.
+#
+# `awaiting_review` joins the selection set for the same reason
+# `awaiting_plan_ref` does: the origin card is parked behind a sibling whose
+# state hasn't reached a terminal column yet, so re-dispatching the origin now
+# would duplicate work the review-card flow has already filed (kaart
+# 572af2d6…). The hold clears the moment the review-card reaches Done or
+# Impediment — no human needed, no extra column, just one more entry in the
+# shared selection-hold vocabulary.
 _SELECTION_HOLDS = frozenset({
-    HOLD_GATED, HOLD_AWAITING_PLAN_REF, HOLD_MISSING_PARENT, HOLD_SCHEDULED,
+    HOLD_GATED, HOLD_AWAITING_PLAN_REF, HOLD_AWAITING_REVIEW,
+    HOLD_MISSING_PARENT, HOLD_SCHEDULED,
 })
 
 
