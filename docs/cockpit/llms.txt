@@ -85,6 +85,7 @@
 - [Per-kaart run-ledger — scope & ontwerp — beslissing](./run-ledger-decision.md): type=decision status=decided
 - [Beslissing — één tijd-trigger: de klok maakt de kaart, de kaart is het werk](./scheduled-trigger-consolidatie-decision.md): type=decision status=decided
 - [Beslissing: schema-migratiesysteem — `create_all` + handmatige renames vs. Alembic](./schema-migrations-decision.md): type=decision status=decided
+- [Code-scanning triage — dreigingsmodel, regelgroep-disposities, advanced setup](./security-scanning-decision.md): type=decision status=decided
 - [Spec-driven development — Fase 0 beslissing (consolidatie spec-boom)](./spec-driven-development-fase-0-decision.md): type=decision status=decided
 - [Spike: Claude Code model-switching (Anthropic ↔ MiniMax) — ADR](./spike-claude-code-model-switching.md): type=decision status=decided
 - [Spike: declaratieve multi-agent workflow-orchestratie — ADR](./spike-declarative-workflow-orchestration.md): type=decision status=decided
@@ -136,3 +137,8 @@
 - [Analyse — Inzicht in verbruik per subscription (inkantelen vs. Langfuse)](./subscription-verbruik-inzicht-analyse.md): type=analysis status=active
 - [Token-optimalisatie — analyse & aanbevelingen](./token-optimization-analysis.md): type=analysis status=active
 - [Card work-type → agent-routing — analyse & aanbevelingen](./work-type-routing-analysis.md): type=analysis status=active
+
+## (geen type)
+
+- [bash-test-ci-tiering-decision.md](./bash-test-ci-tiering-decision.md): type=unknown status=unknown
+- [ci-gate-decision.md](./ci-gate-decision.md): type=unknown status=unknown
