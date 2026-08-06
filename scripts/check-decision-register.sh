@@ -181,15 +181,51 @@ register_uitkomst_for() {
 
 # Extract the 8-char hex prefix from a doc's Kaart field. Empty when the
 # field has no hex (e.g. the "_zie doc — geen hex-id …" placeholder).
+#
+# Walks the input char-by-char, collecting the longest hex run (sequence of
+# `[0-9a-f]` chars). Returns the first 8 chars of the first hex run that is
+# at least 8 chars long; otherwise the longest hex run as a partial fallback
+# so `register_uitkomst_for` can detect "no real card id" via the
+# `length(hex) >= 8` guard inside `cell_prefix_matches`.
+#
+# The previous implementation stopped at the FIRST hex char and took 8 chars
+# from there. For a doc whose Kaart field has prose around the hex id (e.g.
+# `"Analyse - Analyse fase" (\`e95729bb…)`), the first hex char is `a` from
+# `analyse` — 8 chars from there yields `alyse - `, silently failing to match
+# the actual `e95729bb…` row and falling through to the first-link fallback
+# (false-positive Uitkomst:mismatch against the wrong register row). This is
+# the regression behind kanban-kaart e9181e43…: the earlier fix
+# (3c816f91, Kaart-match by 8-char prefix) only worked when the Kaart field
+# was a bare hex id; docs with prose around the hex id fell through to the
+# first-link fallback and got a false Uitkomst:mismatch against the wrong
+# row.
 kaart_prefix_for() {
   # $1 = Kaart field value (e.g. "3abcd501…", "3672c0730b1b4b7ea31a52c414d17729",
-  #     "1fafd87c19e54ef1aa48936e8759ce06", or "_zie doc — geen hex-id …")
+  #     "1fafd87c19e54ef1aa48936e8759ce06", "_zie doc — geen hex-id …", or
+  #     '"Analyse - Analyse fase" (`e95729bb…)`)
   printf '%s' "$1" | awk '
     {
       s = $0
-      while (length(s) > 0 && substr(s, 1, 1) !~ /[0-9a-f]/) s = substr(s, 2)
-      if (length(s) >= 8) print substr(s, 1, 8)
-      else if (length(s) > 0) print s
+      best_run = ""
+      cur_run = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c ~ /[0-9a-f]/) {
+          cur_run = cur_run c
+          # Early exit: once we have an 8-char hex run, the first 8 chars
+          # of that run are the answer; longer runs (the `…` truncation
+          # marker or a full 32-char hex id) collapse to the same prefix.
+          if (length(cur_run) == 8) {
+            print cur_run
+            exit
+          }
+        } else {
+          if (length(cur_run) > length(best_run)) best_run = cur_run
+          cur_run = ""
+        }
+      }
+      if (length(cur_run) > length(best_run)) best_run = cur_run
+      if (length(best_run) > 0) print best_run
     }
   '
 }
