@@ -155,6 +155,60 @@ class TestParseDatedResetTime:
         assert svc.parse_reset_time(msg) is None
 
 
+class TestParseResetTimeReferenceClock:
+    """``parse_reset_time`` resolves a date-less reset against a reference
+    clock, defaulting to "now". The transcript-tail sweep re-reads the *same*
+    limit message on every dispatch tick, so it passes the moment the message
+    was written instead — otherwise, once the original reset passed, the
+    "past clock time means tomorrow" rollover pushed the deadline a full day
+    forward at the exact moment the subscription came free. Measured on
+    session ``k-update-readme-e85e`` at 2026-07-28T03:20:04Z (kanban card
+    ``e279a52b…``).
+    """
+
+    def test_rollover_is_relative_to_the_reference_not_the_wall_clock(self):
+        svc = AutoResumeService()
+        tz = ZoneInfo("UTC")
+        # Message written at 03:20, announcing a 05:20 reset.
+        written_at = datetime(2026, 7, 28, 3, 20, tzinfo=tz)
+        msg = "You've hit your session limit · resets 05:20 (UTC)"
+
+        result = svc.parse_reset_time(msg, now=written_at)
+        assert result is not None
+        reset_time, _tz = result
+        # Same day, no rollover — 05:20 is still ahead of 03:20.
+        assert reset_time == datetime(2026, 7, 28, 5, 20, tzinfo=tz)
+
+    def test_reference_past_the_reset_reports_the_past_moment(self):
+        """Re-parsed with a reference *after* the reset, the answer is the
+        past moment — the caller's signal that the limit already lifted."""
+        svc = AutoResumeService()
+        tz = ZoneInfo("UTC")
+        read_at = datetime(2026, 7, 28, 3, 20, tzinfo=tz)
+        msg = "You've hit your session limit · resets 01:00 (UTC)"
+
+        result = svc.parse_reset_time(msg, now=read_at)
+        assert result is not None
+        reset_time, _tz = result
+        # 01:00 already passed at 03:20, so the undated form still rolls to
+        # tomorrow — the *caller* anchors `now` to the message to avoid that.
+        assert reset_time == datetime(2026, 7, 29, 1, 0, tzinfo=tz)
+
+    def test_default_reference_is_the_wall_clock(self):
+        """No ``now`` means "a fresh message, right now" — the hook path."""
+        svc = AutoResumeService()
+        tz = ZoneInfo("Europe/Brussels")
+        past_clock = datetime.now(tz) - timedelta(hours=1)
+        msg = (
+            "You've hit your session limit · resets "
+            f"{past_clock.strftime('%H:%M')} (Europe/Brussels)"
+        )
+        result = svc.parse_reset_time(msg)
+        assert result is not None
+        reset_time, _tz = result
+        assert reset_time > datetime.now(tz), "a fresh past clock time means tomorrow"
+
+
 class TestResolveYear:
     """The notification carries no year, so the month/day pair is resolved
     against the nearest occurrence -- otherwise a Dec 31 -> Jan 1 reset lands

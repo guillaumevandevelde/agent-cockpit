@@ -4824,7 +4824,7 @@ def _is_conversational_transcript_entry(entry: dict) -> bool:
     entries (system/summary/last-prompt/file-history-snapshot/attachment/...)
     that Claude Code interleaves into the same JSONL file but that carry no
     "the agent did something" signal. Only conversational entries count
-    towards "is there activity after the limit" in `_tail_rate_limit_message`
+    towards "is there activity after the limit" in `_tail_rate_limit_entry`
     -- a bookkeeping entry recorded right after the api-error must not be
     mistaken for the session having recovered on its own."""
     return entry.get("type") in ("assistant", "user") and isinstance(entry.get("message"), dict)
@@ -4868,9 +4868,29 @@ def _read_transcript_tail_entries(
     return entries
 
 
-def _tail_rate_limit_message(path: Path) -> str | None:
-    """Return the api-error text if the transcript's tail shows an
-    *unresolved* rate-limit hit, else None.
+def _transcript_entry_timestamp(entry: dict) -> datetime | None:
+    """The UTC time a transcript entry was written, when it carries one.
+
+    Claude Code stamps every JSONL entry with an ISO-8601 ``timestamp``
+    ("2026-07-28T03:20:04.955Z"). For a limit message that is the moment the
+    limit was *announced*, which is the only honest reference clock for
+    resolving a year-less/date-less reset time -- see
+    ``handle_rate_limit_signal``. Returns None for an entry without a
+    parseable timestamp; callers then fall back to the wall clock.
+    """
+    raw = entry.get("timestamp")
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _tail_rate_limit_entry(path: Path) -> tuple[str, datetime | None] | None:
+    """Return ``(api-error text, when it was written)`` if the transcript's
+    tail shows an *unresolved* rate-limit hit, else None.
 
     "Unresolved" means: scanning from the end, the most recent conversational
     (assistant/user) entry is an `isApiErrorMessage: true` entry whose text
@@ -4888,7 +4908,7 @@ def _tail_rate_limit_message(path: Path) -> str | None:
         if entry.get("isApiErrorMessage"):
             text = _transcript_entry_text(entry)
             if auto_resume_service.is_limit_notification(text):
-                return text
+                return text, _transcript_entry_timestamp(entry)
             return None
         return None  # most recent conversational turn is ordinary activity
     return None
@@ -4908,6 +4928,13 @@ def _transcript_reset_time(project_path: str | None, session_name: str) -> datet
     Returns None when there is no transcript, no unresolved limit in its tail,
     or a limit whose wording doesn't parse -- the caller keeps the guess for
     those.
+
+    The date-less wording is resolved against the moment the message was
+    written, not the wall clock, for the same reason the transcript-tail sweep
+    does it: a dead session's transcript is by definition old, and resolving
+    "resets 05:20" against *now* silently rolls it to tomorrow instead of
+    reporting the past moment that says "this limit already lifted"
+    (kanban card ``e279a52b…``).
     """
     if not project_path:
         return None
@@ -4917,15 +4944,16 @@ def _transcript_reset_time(project_path: str | None, session_name: str) -> datet
         path = _resolve_transcript_file(project_path, session_name)
         if path is None:
             return None
-        message = _tail_rate_limit_message(path)
+        found = _tail_rate_limit_entry(path)
     except Exception:
         # Never let a transcript hiccup block the reap -- the caller's
         # conservative fallback pause is always a valid answer.
         logger.exception("failed to read reset time from transcript for %s", session_name)
         return None
-    if message is None:
+    if found is None:
         return None
-    parsed = auto_resume_service.parse_reset_time(message)
+    message, observed_at = found
+    parsed = auto_resume_service.parse_reset_time(message, now=observed_at)
     if parsed is None:
         logger.info(
             "reaper: unparseable usage-limit message for %s, keeping the "
@@ -5373,7 +5401,9 @@ async def _pane_resume_fallback_to_kill(cwd: str) -> None:
         )
 
 
-async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bool:
+async def handle_rate_limit_signal(
+    cwd: str, message: str, *, source: str, observed_at: datetime | None = None,
+) -> bool:
     """Apply the standard rate-limit reaction for a kanban-dispatched session:
     record the structured signal, resolve/parse the reset time, pause the
     affected provider, and either nudge the still-alive tmux pane (pane-resume)
@@ -5388,14 +5418,33 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
     (e.g. "hook" vs "transcript"), so a later "why did this pause happen" read
     of the logs can tell the two channels apart.
 
-    **Idempotency:** when the same in-transcript message is re-detected on a
-    later tick (the limited session writes nothing new, so the tail keeps
-    matching), the function returns ``False`` without re-arming the pause
-    or re-running the move — see
-    ``session_signals.is_limit_message_processed`` and kanban card
-    ``e279a52b…`` for the production measurements (16 k firings for tens of
-    real events; +24 u rollover on parseable reset times at the reset
-    moment; +10 s/tick slide on unparseable ones).
+    ``observed_at`` is when the limit message was *written* -- the transcript
+    entry's own timestamp for the sweep, absent (i.e. "now") for the hook,
+    which by construction reports a limit as it happens. Everything about the
+    deadline is computed against it rather than against the wall clock, so
+    re-reading an hours-old message cannot produce a deadline hours further
+    out than the original one did.
+
+    **Idempotency, in two layers.** A rate-limited session writes nothing new,
+    so the same message stays at the transcript tail and is re-detected on
+    every dispatch tick (≈10 s). Re-arming on those re-detections is the bug
+    kanban card ``e279a52b…`` measured: 16 k firings for tens of real events,
+    a +24 u rollover on parseable reset times at the exact moment the limit
+    lifted, and a +10 s/tick slide on unparseable ones. Two gates prevent it:
+
+    1. ``session_signals.is_limit_message_processed`` -- a process-local
+       fast path that costs no DB round-trip on the hot tick;
+    2. ``rate_limit_signals.is_signal_handled`` -- the durable backstop in
+       ``KanbanMeta``. The in-memory registry is emptied by any backend
+       restart (supervisor crash-restart, ``cockpit.sh restart``,
+       ``uvicorn --reload``), and without a persisted record the first tick
+       after such a restart treated the old message as new and re-armed the
+       pause.
+
+    **Age guard.** Even past both gates, a message whose reset moment has
+    already come and gone must not arm a pause: the limit it describes is
+    over. The reaction itself still runs -- that path is what gets the
+    stranded session moving again -- only the pause is skipped.
 
     Returns True iff a kanban card was found and moved to "To Resume".
     """
@@ -5403,6 +5452,10 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
 
     from app.kanban.db import KanbanSessionLocal
     from app.kanban.dispatch_pause import set_paused_until
+    from app.kanban.rate_limit_signals import (
+        is_signal_handled,
+        record_handled_signal,
+    )
     from app.services.scheduling.auto_resume import (
         DEFAULT_RESUME_MESSAGE,
         FALLBACK_PAUSE_HOURS,
@@ -5413,23 +5466,40 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
         session_signals,
     )
 
-    # Idempotency gate: re-detecting the same in-transcript message on a later
-    # dispatch tick must NOT re-arm the pause. The structured signal is already
-    # recorded — re-running parse_reset_time / set_paused_until / move would
-    # either slide the fallback deadline forward (unparseable messages) or
-    # roll the reset +24u once the original parse's reset_time has passed
-    # (parseable messages). See kanban card e279a52b… for both measurements.
     name = session_name_for_dispatched_cwd(cwd)
     if name and session_signals.is_limit_message_processed(name, message or ""):
         logger.debug(
-            "rate-limit signal already handled for %s (source=%s); "
+            "rate-limit signal already handled for %s (source=%s, in-memory); "
             "skipping re-detection of the same in-transcript message",
             cwd, source,
         )
         return False
+    if name:
+        try:
+            async with KanbanSessionLocal() as ks:
+                already = await is_signal_handled(ks, name, message or "")
+        except Exception:
+            # A store hiccup must never swallow a real limit -- fall through
+            # to the full reaction, which is the safe direction (a redundant
+            # pause is recoverable, a missed one burns the subscription).
+            logger.exception("failed to read stored rate-limit signal for %s", cwd)
+            already = False
+        if already:
+            logger.debug(
+                "rate-limit signal already handled for %s (source=%s, persisted); "
+                "skipping re-detection across a backend restart",
+                cwd, source,
+            )
+            # Re-seed the in-memory fast path so the remaining ticks of this
+            # limit window stop paying for the DB round-trip.
+            session_signals.record_limit(cwd, message=message or "")
+            return False
+
+    now = datetime.now(UTC)
+    reference = observed_at or now
 
     session_signals.record_limit(cwd, message=message or "")
-    parsed = auto_resume_service.parse_reset_time(message)
+    parsed = auto_resume_service.parse_reset_time(message, now=reference)
     if parsed:
         pause_until, _tz_name = parsed
     else:
@@ -5438,11 +5508,23 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
         # wording). Fall back to a conservative fixed pause instead of
         # skipping it -- skipping just re-triggers the same spin-and-burn
         # loop the pause exists to prevent.
-        pause_until = datetime.now(UTC) + timedelta(hours=FALLBACK_PAUSE_HOURS)
+        pause_until = reference + timedelta(hours=FALLBACK_PAUSE_HOURS)
         logger.warning(
             "unrecognized usage-limit message format for %s (source=%s), falling "
             "back to a %sh dispatch pause: %r",
             cwd, source, FALLBACK_PAUSE_HOURS, message,
+        )
+
+    # Age guard: the reset this message announced has already passed, so the
+    # subscription is free again and arming a pause would lock it right back
+    # up. Recorded with `pause_until=None` so a later read can tell "expired,
+    # deliberately not paused" apart from "never seen".
+    expired = pause_until <= now
+    if expired:
+        logger.info(
+            "rate-limit signal for %s (source=%s) is already past its reset "
+            "(%s <= %s); not arming a pause",
+            cwd, source, pause_until.isoformat(), now.isoformat(),
         )
 
     try:
@@ -5453,7 +5535,14 @@ async def handle_rate_limit_signal(cwd: str, message: str, *, source: str) -> bo
 
     try:
         async with KanbanSessionLocal() as ks:
-            await set_paused_until(ks, pause_until, provider=provider)
+            if not expired:
+                await set_paused_until(ks, pause_until, provider=provider)
+            if name:
+                await record_handled_signal(
+                    ks, name, message or "",
+                    observed_at=reference,
+                    pause_until=None if expired else pause_until,
+                )
             await ks.commit()
     except Exception:
         logger.exception("failed to set dispatch pause for %s", cwd)
@@ -5536,10 +5625,17 @@ async def detect_transcript_rate_limits(
     parallel reaction path. Returns the number of cards for which a limit was
     detected and handled.
     """
+    from app.kanban.db import KanbanSessionLocal
+    from app.kanban.rate_limit_signals import (
+        clear_handled_signal,
+        prune_handled_signals,
+    )
     from app.kanban.schemas import COLUMNS
     from app.kanban.session_recovery import _resolve_transcript_file
+    from app.services.scheduling.session_signals import session_signals
 
     handled = 0
+    recovered: list[str] = []
     for card in cards:
         if card.column in COLUMNS:
             continue
@@ -5549,8 +5645,8 @@ async def detect_transcript_rate_limits(
         transcript = _resolve_transcript_file(project_path, name)
         if transcript is None:
             continue
-        message = _tail_rate_limit_message(transcript)
-        if message is None:
+        found = _tail_rate_limit_entry(transcript)
+        if found is None:
             # No active limit. If the card still carries pane-resume pending
             # metadata from a previous nudge that DID land (the session
             # recovered on its own), strip it so the next genuine limit cycle
@@ -5558,25 +5654,42 @@ async def detect_transcript_rate_limits(
             # stale one from a limit that's already in the past.
             if (card.meta or {}).get("pane_resume_pending"):
                 await _clear_pane_resume_metadata_for_card(card, project_path)
-            # Also clear the structured rate-limit signal — without this
+            # Also clear the rate-limit signal — both layers. Without this
             # `record_limit`'s first-write-wins would silently swallow the
             # next genuine limit (different message text) under the same
-            # session name, and the idempotency gate built on top of it
+            # session name, and the idempotency gates built on top of it
             # would keep matching the old message forever.
             # Kanban card e279a52b…, same fix as the handle_rate_limit_signal
-            # idempotency gate above.
-            if name is not None:
-                from app.services.scheduling.session_signals import session_signals
-                session_signals.clear_limit(name)
+            # idempotency gate above. The durable half is deferred to a single
+            # session at the end of the sweep rather than one per card.
+            session_signals.clear_limit(name)
+            recovered.append(name)
             continue
+        message, observed_at = found
         cwd = str(Path(project_path) / ".claude" / "worktrees" / name)
-        moved = await handle_rate_limit_signal(cwd, message, source="transcript")
+        moved = await handle_rate_limit_signal(
+            cwd, message, source="transcript", observed_at=observed_at,
+        )
         logger.info(
             "transcript-tail rate limit detected: session=%s card=%s "
             "transcript=%s classification=limit moved=%s",
             name, card.id, transcript, moved,
         )
         handled += 1
+
+    # Durable housekeeping, once per sweep: forget the signals of sessions that
+    # recovered, and garbage-collect rows whose limit message is long past.
+    # Session names are single-use, and the tmux kill path is a synchronous
+    # helper with no DB session of its own, so an age-based sweep here is what
+    # keeps the table from growing one dead row per rate-limited session.
+    try:
+        async with KanbanSessionLocal() as ks:
+            for name in recovered:
+                await clear_handled_signal(ks, name)
+            await prune_handled_signals(ks)
+            await ks.commit()
+    except Exception:
+        logger.exception("failed to housekeep stored rate-limit signals")
     return handled
 
 
