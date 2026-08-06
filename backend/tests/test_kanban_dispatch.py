@@ -2238,10 +2238,19 @@ async def test_orphaned_agent_column_card_redispatched_when_cap_has_room():
 
 
 @pytest.mark.asyncio
-async def test_orphaned_agent_column_card_waits_for_backlog_cards_first():
-    # When both a fresh Backlog card and a leftover orphan are available, the
-    # Backlog card is prioritised (it's new work); the orphan is dispatched
-    # afterwards, in the same tick when no per-column cap blocks it.
+async def test_orphaned_agent_column_card_is_dispatched_before_backlog_cards():
+    """With both a fresh Backlog card and a leftover orphan available and no cap
+    in the way, both are dispatched in one tick — the orphan first.
+
+    Reversed from the original Backlog-first assertion. That order treated a
+    Backlog card as higher-value "new work", which contradicted the To-Resume-
+    over-Backlog policy this dispatcher already adopted (see
+    `test_dispatch_prefers_to_resume_over_backlog`) and, on a capped column,
+    starved the orphan outright — see
+    `test_orphan_wins_its_own_capped_column_slot_over_backlog` and the
+    `_next_card` docstring. The tier order is now one principle: in-flight work
+    before new work.
+    """
     transport = RecordingTransport()
     async with KanbanSessionLocal() as s:
         orphan = await _make_card(s, title="orphaned", column="developer")
@@ -2253,12 +2262,66 @@ async def test_orphaned_agent_column_card_waits_for_backlog_cards_first():
         await s.commit()
         orphan_card = await get_card(s, orphan)
         waiting_card = await get_card(s, waiting)
-    assert waiting_card.claimed_by is not None   # Backlog card wins the priority
-    assert orphan_card.claimed_by is not None    # orphan also dispatched this tick
-    # Backlog card must be picked before the orphan in this tick.
+    assert orphan_card.claimed_by is not None    # orphan wins the priority
+    assert waiting_card.claimed_by is not None   # Backlog card also dispatched this tick
+    # Orphan must be picked before the Backlog card in this tick.
     assert len(transport.calls) == 2
-    assert "waiting" in transport.calls[0]["session_name"]
-    assert "orphaned" in transport.calls[1]["session_name"]
+    assert "orphaned" in transport.calls[0]["session_name"]
+    assert "waiting" in transport.calls[1]["session_name"]
+
+
+@pytest.mark.asyncio
+async def test_orphan_wins_its_own_capped_column_slot_over_backlog(project_with_agents):
+    """A capped column's free slot goes to the orphan already sitting in it, not
+    to a fresh Backlog card targeting that same column.
+
+    Regression for the starvation observed live on card d0531c12… (2026-08-06):
+    `_next_card` walks `_DISPATCH_COLUMNS` fully before it ever reaches the
+    orphan fallback, so with `max_sessions=1` a Backlog card claimed the single
+    engineer slot every tick and the orphan was skipped by the cap check
+    immediately afterwards. The orphan sat unclaimed in `engineer` for a full
+    day with `held_reason=None` — invisible, and re-starved on every tick
+    (twice within five minutes in the captured logs).
+
+    Only a *capped* column starves: the uncapped case dispatches both cards in
+    one tick, Backlog first, which
+    `test_orphaned_agent_column_card_waits_for_backlog_cards_first` pins.
+    """
+    transport = RecordingTransport()
+    async with KanbanSessionLocal() as s:
+        await service.create_column(s, project_key=PK, name="engineer",
+                                     default_agent="engineer", max_sessions=1)
+        orphan = await _make_card(s, title="orphaned", column="engineer")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=orphan, payload={"agent": "engineer"},
+        )
+        waiting = await _make_card(s, title="waiting", column="Backlog")
+        await apply_operation(
+            s, op_type="update", entity_type="card", project_key=PK,
+            entity_id=waiting, payload={"agent": "engineer"},
+        )
+        await s.commit()
+
+        await dispatch.dispatch_project(
+            s, project_key=PK, project_path=project_with_agents,
+            transport=transport,
+        )
+        await s.commit()
+        orphan_card = await get_card(s, orphan)
+        waiting_card = await get_card(s, waiting)
+
+    assert len(transport.calls) == 1, (
+        "cap=1 must yield exactly one spawn; got "
+        f"{[c['session_name'] for c in transport.calls]}"
+    )
+    assert "orphaned" in transport.calls[0]["session_name"], (
+        "the single engineer slot must go to the in-flight orphan, not to new "
+        f"Backlog work; spawned {transport.calls[0]['session_name']!r}"
+    )
+    assert orphan_card.claimed_by is not None
+    assert waiting_card.claimed_by is None   # Backlog card waits for the next tick
+    assert waiting_card.column == "Backlog"
 
 
 @pytest.mark.asyncio
