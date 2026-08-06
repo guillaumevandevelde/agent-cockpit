@@ -6137,7 +6137,34 @@ def _next_card(
     card whose parent was deleted is recognised as permanently orphaned rather
     than treated as merely waiting for a plan. Omitting it only costs
     resolution, never correctness.
+
+    **Tier order: in-flight work before new work.** Orphans (crashed in-flight)
+    come first, then ``_DISPATCH_COLUMNS`` — "To Resume" (parked in-flight),
+    then "Backlog" (new). One principle, applied twice: a card that already has
+    an agent column and a worktree is closer to Done than anything in Backlog,
+    so finishing it outranks starting something new.
+
+    Orphans used to be a *fallback* consulted only when To Resume + Backlog held
+    zero selectable cards, which made the fallback dead code on any board with a
+    non-empty Backlog — and actively starving on a column with a
+    ``max_sessions`` cap: every tick a Backlog card claimed the last slot, and
+    the cap check in ``dispatch_project`` then skipped the orphan that had been
+    waiting in that very column. Card d0531c12… sat unclaimed in ``engineer``
+    for a day with ``held_reason=None`` (invisible on the board), re-starved
+    twice within five minutes of the operator enabling auto-dispatch. Regression
+    test: ``test_orphan_wins_its_own_capped_column_slot_over_backlog``.
+
+    Backlog does not starve behind the orphan tier: an orphan leaves the tier as
+    soon as it is claimed, so the tier is empty on the next tick. A card whose
+    session keeps dying on arrival escalates to Impediment via
+    ``MAX_DISPATCH_FAILURES``, which bounds the pathological case. (The
+    not-dead-on-arrival branch of ``_release_dead_claim`` resets that counter,
+    so a long-running-then-dying card can retake the slot each tick — a known
+    gap, tracked separately from this ordering fix in kaart
+    ``22958d650d624e039bc9339cae1ed048``.)
     """
+    from app.kanban.schemas import COLUMNS
+
     cards = list(cards)
     cards_by_id = {c.id: c for c in cards}
 
@@ -6147,25 +6174,30 @@ def _next_card(
         hold = card_hold(c, cards_by_id, live_ids)
         return hold is None or hold.reason not in _SELECTION_HOLDS
 
-    for col in _DISPATCH_COLUMNS:
-        col_cards = [c for c in cards if c.column == col and selectable(c)]
-        if col_cards:
-            # list_cards is ordered by rank; stable-sort by priority on top of that
-            # so higher-priority cards jump the queue within the same column.
-            col_cards.sort(key=_priority_key, reverse=True)
-            return col_cards[0]
+    def best(candidates: list[KanbanCard]) -> KanbanCard | None:
+        if not candidates:
+            return None
+        # list_cards is ordered by rank; stable-sort by priority on top of that
+        # so higher-priority cards jump the queue within the same tier.
+        candidates.sort(key=_priority_key, reverse=True)
+        return candidates[0]
 
-    # Fall back to orphans: cards left unclaimed in an agent column, most commonly
-    # by reap_stale_claims releasing a dead session's claim without a resumable
-    # transcript to fall back on. Without this, an orphan is invisible to every
-    # later tick -- it sits in its agent column forever, cap slot unused, until a
-    # human notices and hits "redispatch" by hand (see kanban card "auto dispatch
-    # nakijken": auto-dispatch looked stuck even though it was enabled).
-    from app.kanban.schemas import COLUMNS
-    orphans = [c for c in cards if c.column not in COLUMNS and selectable(c)]
-    if orphans:
-        orphans.sort(key=_priority_key, reverse=True)
-        return orphans[0]
+    # Orphans: cards left unclaimed in an agent column, most commonly by
+    # reap_stale_claims releasing a dead session's claim without a resumable
+    # transcript to fall back on. Without this tier an orphan is invisible to
+    # every later tick -- it sits in its agent column forever, cap slot unused,
+    # until a human notices and hits "redispatch" by hand (see kanban card
+    # "auto dispatch nakijken": auto-dispatch looked stuck even though it was
+    # enabled).
+    orphan = best([c for c in cards if c.column not in COLUMNS and selectable(c)])
+    if orphan is not None:
+        return orphan
+
+    for col in _DISPATCH_COLUMNS:
+        col_card = best([c for c in cards if c.column == col and selectable(c)])
+        if col_card is not None:
+            return col_card
+
     return None
 
 
