@@ -27,6 +27,7 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -46,6 +47,37 @@ async def db():
     async with sm() as session:
         yield session
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _contain_restore_target(tmp_path, monkeypatch):
+    """Redirect the restore extraction target away from the operator's real
+    home directory. AUTOUSE ON PURPOSE — this is containment, not setup.
+
+    ``restore_service.restore_backup`` writes every archive member to
+    ``target_path / member`` where ``target_path = get_user_home()`` for
+    user-scope backups. Patching ``backup_service.kanban_db_path`` (as the
+    tests below do) only steers the *in-use guard*; it does NOT move the
+    write destination. So a test that drives the opt-in path to success
+    extracts its ``.claude-registry/kanban.db`` fixture member straight over
+    the developer's LIVE board — while still reporting green.
+
+    That is not hypothetical: it clobbered ``~/.claude-registry/kanban.db``
+    with the 20-byte payload ``restore-this-content`` twice (2026-08-05 and
+    2026-08-06), each time taking the board down with ``sqlite3.
+    OperationalError: disk I/O error`` until the WAL was replayed by hand.
+
+    ``get_user_home`` is bound into ``restore_service``'s namespace by a
+    module-level ``from app.utils.path_utils import ...``, so the patch must
+    target the CONSUMER — see the "patch where the consumer looks" rule in
+    CLAUDE.md / docs/cockpit/test-doubles-convention.md.
+    """
+    from app.services import restore_service as rs
+
+    sandbox_home = tmp_path / "sandbox-home"
+    sandbox_home.mkdir()
+    monkeypatch.setattr(rs, "get_user_home", lambda: sandbox_home)
+    return sandbox_home
 
 
 def _open_live_kanban_db(path: Path) -> sqlite3.Connection:
@@ -223,7 +255,7 @@ async def test_opt_in_kanban_restore_refused_while_backend_holds_db(
 
 
 async def test_opt_in_kanban_restore_proceeds_when_db_is_free(
-    db, tmp_path, monkeypatch,
+    db, tmp_path, monkeypatch, _contain_restore_target,
 ):
     """Negative control: when the kanban DB is not held open (no other
     connection), the opt-in restore MUST proceed and overwrite the
@@ -268,6 +300,21 @@ async def test_opt_in_kanban_restore_proceeds_when_db_is_free(
         f"got result={result!r}"
     )
     assert result.files_restored >= 1
+
+    # Pin WHERE the extraction landed, not just that it succeeded. This is
+    # the assertion that makes `_contain_restore_target` load-bearing rather
+    # than decorative: without the redirect this member is written to the
+    # real ``~/.claude-registry/kanban.db`` and the test still passes green.
+    # If someone drops the fixture, this fails instead of eating the board.
+    extracted = _contain_restore_target / ".claude-registry" / "kanban.db"
+    assert extracted.read_bytes() == b"restore-this-content", (
+        "the opt-in restore must extract the kanban entry into the redirected "
+        f"home; looked at {extracted}"
+    )
+    assert Path.home() not in extracted.parents, (
+        f"restore extracted into the operator's real home ({extracted}) — "
+        "the containment fixture is not doing its job"
+    )
 
 
 async def test_default_restore_skips_kanban_entry_unconditionally(
