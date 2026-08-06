@@ -351,6 +351,36 @@ check "fullhex → exit 0" '[ "$rc" -eq 0 ]'
 check "fullhex → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
 
 # ----------------------------------------------------------------------------
+echo "Task 20: --check-headers Kaart 8-char prefix is taken from a hex run, not the first hex char (regression: prose-around-hex Kaart fields)"
+# The doc's Kaart field has prose around the hex id: `"Analyse - Analyse fase"
+# (\`e95729bb…)`. The Kaart-prefix extractor must find the leading hex RUN (≥8
+# consecutive hex chars), NOT the first hex char — the latter returns 8 chars
+# of `analyse` prose (`alyse - `) and silently picks the wrong register row
+# via the first-link fallback. This is the regression behind kanban-kaart
+# e9181e43…: the previous fix (3c816f91, Kaart-match by 8-char prefix) only
+# worked when the Kaart field was a bare hex id; docs with prose around the
+# hex id fell through to the first-link fallback and got a false
+# Uitkomst:mismatch against the wrong row.
+prosekaart="$TMP/prosekaart"; mkdir -p "$prosekaart"
+{
+  echo '# reg'
+  echo
+  echo '| d | v | **Older row.** | [`a-decision.md`](./a-decision.md) | `5770d3db` |'
+  echo '| d | v | **Matching row.** | [`a-decision.md`](./a-decision.md) | `e95729bb…` |'
+} > "$prosekaart/decisions.md"
+cat > "$prosekaart/a-decision.md" <<'EOF'
+# Title
+**Datum:** 2026-07-14
+**Status:** besloten
+**Kaart:** "Analyse - Analyse fase" (`e95729bb…`)
+**Uitkomst:** **Matching row.**
+EOF
+out=$(DECISIONS_DIR="$prosekaart" bash "$SUT" --check-headers 2>&1); rc=$?
+check "prosekaart → exit 0" '[ "$rc" -eq 0 ]'
+check "prosekaart → exact clean-state OK line" 'echo "$out" | grep -qF "OK: every docs/cockpit/*-decision.md is linked from the decision register AND has a complete header."'
+check "prosekaart → NO WARNING line emitted" '! echo "$out" | grep -qE "WARNING:"'
+
+# ----------------------------------------------------------------------------
 echo ""
 echo "passed: $PASS, failed: $FAIL"
 [ "$FAIL" -eq 0 ]
