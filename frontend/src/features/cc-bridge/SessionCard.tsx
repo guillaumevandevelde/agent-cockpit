@@ -128,25 +128,6 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
           </div>
           {!editing && (
             <div className="flex items-center gap-1.5 shrink-0">
-              {session.card_id && onOpenCard && (
-                <button
-                  type="button"
-                  aria-label="View kanban card"
-                  className="h-5 w-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-primary transition-colors"
-                  onClick={(e) => {
-                    // The card root toggles the pane grid; without
-                    // stopPropagation the bridge would also attach this
-                    // pane the moment the operator clicks through to
-                    // the kanban board.
-                    e.stopPropagation()
-                    onOpenCard(session.card_id!)
-                  }}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  title="View kanban card"
-                >
-                  <KanbanSquare className="h-3 w-3" />
-                </button>
-              )}
               <button
                 type="button"
                 aria-label="Rename session"
@@ -203,6 +184,33 @@ export function SessionCard({ session, gridPosition, onClick, onKill, onRename, 
         >
           {instance ? `${instance.name} · ` : ''}tmux: {session.tmux_target}
         </p>
+        {session.card_id && onOpenCard && (
+          <button
+            type="button"
+            aria-label={`View kanban card: ${session.card_title || `#${session.card_id.slice(0, 8)}`}`}
+            className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground hover:text-primary transition-colors min-w-0 w-full text-left"
+            onClick={(e) => {
+              // The card root toggles the pane grid; without
+              // stopPropagation the bridge would also attach this pane
+              // the moment the operator clicks through to the board.
+              e.stopPropagation()
+              onOpenCard(session.card_id!)
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onOpenCard(session.card_id!)
+              }
+            }}
+            title={session.card_title || `Card ${session.card_id}`}
+          >
+            <KanbanSquare className="h-3 w-3 shrink-0" />
+            <span className="truncate font-medium">
+              {session.card_title || `#${session.card_id.slice(0, 8)}`}
+            </span>
+          </button>
+        )}
         {gitStatus?.is_git_repo && (
           <div
             className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground"

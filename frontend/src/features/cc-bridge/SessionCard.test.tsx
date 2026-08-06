@@ -83,20 +83,22 @@ describe('SessionCard CLI/vendor badge contract', () => {
     expect(secondary.getAttribute('title')).toBe('Subscription: MiniMax')
   })
 
-  it('renders the kanban-card link when the session carries a card_id, and clicking it does not toggle the pane', () => {
-    // The affordance is a kanban-card navigate button: when the backend
-    // enriched the session with a card_id, the user can jump from the
-    // bridge list straight to /kanban?card=<id>. The click must not also
-    // fire the card's primary `onClick` (which toggles the pane grid),
-    // so the handler chain stops propagation. See kanban-kaart
-    // cade1e9b919944258c442d273c1dcfd7.
+  it('renders the kanban-card affordance in the tile body when the session carries a card_id, and clicking it does not toggle the pane', () => {
+    // The affordance is a kanban-card navigate button in the body (next
+    // to the cwd/branch rows): when the backend enriched the session
+    // with a card_id + card_title, the user can read the title and
+    // jump from the bridge list straight to /kanban?card=<id> without
+    // hovering. The click must not also fire the card's primary
+    // `onClick` (which toggles the pane grid), so the handler chain
+    // stops propagation. See kanban-kaart 215cd8ea…
     const onOpenCard = vi.fn()
     render(
       <SessionCard
         session={{
           ...baseSession,
-          card_id: 'abc123',
+          card_id: 'abc123def456',
           card_project_key: 'git:github.com/example/repo',
+          card_title: 'Vindbaar maken van de kaart-knop op Agent-Bridge',
         }}
         gridPosition={null}
         onClick={() => {}}
@@ -105,11 +107,40 @@ describe('SessionCard CLI/vendor badge contract', () => {
         onOpenCard={onOpenCard}
       />,
     )
-    const link = screen.getByRole('button', { name: /view kanban card/i })
+    const link = screen.getByRole('button', { name: /view kanban card: vindbaar maken/i })
     expect(link).not.toBeNull()
+    // The card title is rendered as readable text, not just a generic
+    // icon — that's the whole point of the kanban card 215cd8ea… fix.
+    expect(link.textContent).toContain('Vindbaar maken van de kaart-knop op Agent-Bridge')
     link.click()
     expect(onOpenCard).toHaveBeenCalledTimes(1)
-    expect(onOpenCard).toHaveBeenCalledWith('abc123')
+    expect(onOpenCard).toHaveBeenCalledWith('abc123def456')
+  })
+
+  it('falls back to a shortened card id in the body affordance when card_title is empty', () => {
+    // The backend coerces the `default=""` on `KanbanCard.title` to "",
+    // but a kanban card whose title is genuinely blank should still
+    // surface an identifying affordance — the first 8 chars of the id
+    // are the next-best option.
+    const onOpenCard = vi.fn()
+    render(
+      <SessionCard
+        session={{
+          ...baseSession,
+          card_id: 'abc123def456',
+          card_project_key: 'git:github.com/example/repo',
+          card_title: '',
+        }}
+        gridPosition={null}
+        onClick={() => {}}
+        onKill={() => {}}
+        onRename={async () => {}}
+        onOpenCard={onOpenCard}
+      />,
+    )
+    const link = screen.getByRole('button', { name: /view kanban card: #abc123de/i })
+    expect(link).not.toBeNull()
+    expect(link.textContent).toContain('#abc123de')
   })
 
   it('omits the kanban-card link when the session has no card_id', () => {
