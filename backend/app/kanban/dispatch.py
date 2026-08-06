@@ -7104,7 +7104,7 @@ async def check_progress_liveness(
     action_seconds: int | None = None,
 ) -> set[str]:
     """Signal/release cards whose agent session has stopped making transcript
-    progress (kaart f0953a11…).
+    progress (kaart f0953a11…, fixed by kaart 01bde6e9… for the live-tmux gap).
 
     A second liveness source sitting alongside ``reap_stale_claims``'s
     pane-exists check. The pane check alone misses a session that hit its
@@ -7115,9 +7115,11 @@ async def check_progress_liveness(
     always wrong.
 
     For each ``agent:``-claimed card whose session is *not* in
-    ``live_sessions`` / ``sandcastle_live`` / ``headless_live`` (those
-    transports own their own liveness — never override them) and whose
-    transcript is resolvable:
+    ``sandcastle_live`` / ``headless_live`` / ``acp_live`` (those transports
+    own their own liveness — never override them) and whose transcript is
+    resolvable. Sessions that ARE in ``live_sessions`` (alive in tmux) are
+    *included* — exactly the subscription-limit case the pane check misses:
+    the pane persists but the transcript stops growing.
 
       - First observation: record the snapshot but do nothing — we don't
         know whether the agent is productive yet, so the first tick always
@@ -7189,12 +7191,15 @@ async def check_progress_liveness(
         name = _claimant_session(card)
         if name is None:
             continue
-        if name in live_sessions or name in sandcastle_live or name in headless_live or name in acp_live:
+        if name in sandcastle_live or name in headless_live or name in acp_live:
             # Those transports own liveness — see reap_stale_claims for the
             # same carve-out. Skipping is correct even if the transcript
             # happens to exist for a sandcastle/headless/acp session (it
             # won't normally — different cwd — but the carve-out is on the
-            # transport, not on the transcript).
+            # transport, not on the transcript). Tmux sessions in
+            # ``live_sessions`` are NOT carved out — that's exactly the
+            # subscription-limit case this check exists to catch (the pane
+            # persists while the transcript stops growing).
             continue
 
         transcript = _resolve_transcript_file(project_path, name)

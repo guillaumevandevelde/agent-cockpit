@@ -17,8 +17,13 @@ Failure modes the tests bound:
   - stalled past signal threshold: comment posted, claim NOT released.
   - stalled past action threshold: claim released, card moved to To Resume.
   - missing transcript (worktree but no jsonl): fail-open, no action.
-  - session in ``live_sessions``/``sandcastle_live``/``headless_live``: skipped
+  - session in ``sandcastle_live``/``headless_live``/``acp_live``: skipped
     — those transports own their own liveness sources.
+  - session in ``live_sessions`` (alive in tmux) with a STALLED transcript:
+    DOES trigger action. The pane check alone misses the subscription-limit
+    case (kaart 01bde6e9…) — a session that hit its limit keeps its tmux
+    pane alive while the transcript stops growing, so liveness must look
+    at transcript progress, not at pane existence.
   - transcript mtime advancing again resets both counters so the next stall
     starts fresh.
 
@@ -376,19 +381,29 @@ async def test_progress_liveness_missing_worktree_no_action(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_progress_liveness_skips_live_tmux_session(tmp_path, monkeypatch):
-    """A session still in tmux is alive — progress-liveness must NOT trigger
-    even if its transcript is quiet (agent may be reading, waiting for input,
-    or thinking without writing)."""
-    session_name = "k-live-0001"
+async def test_progress_liveness_live_tmux_with_stalled_transcript_triggers_signal(
+    tmp_path, monkeypatch,
+):
+    """A session still alive in tmux but whose transcript has stopped growing
+    is the exact case ``check_progress_liveness`` exists to catch — the
+    subscription-limit case (kaart 01bde6e9…). The pane check alone misses
+    it: a ``claude`` session that hit its limit keeps its tmux pane alive
+    while the transcript stops growing. ``live_sessions`` membership must
+    NOT carve the card out — only the actual *transports* that own their
+    own liveness (sandcastle, headless, acp) get that exemption."""
+    session_name = "k-live-stall-0001"
     now = 1_000_000.0
     repo, projects_dir, _ = _build_worktree_transcript(
-        tmp_path, session_name, initial_mtime=now - 600,
+        tmp_path, session_name, initial_mtime=now - 60,
     )
     _redirect_projects_dir(monkeypatch, projects_dir)
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
 
     async with KanbanSessionLocal() as s:
-        cid = await _make_card(s, title="live", column="engineer")
+        cid = await _make_card(s, title="live-stall-signal", column="engineer")
         await apply_operation(
             s, op_type="claim", entity_type="card", project_key=PK,
             entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
@@ -396,13 +411,102 @@ async def test_progress_liveness_skips_live_tmux_session(tmp_path, monkeypatch):
         await s.commit()
         cards = await list_cards(s, PK)
 
-    actions = await dispatch.check_progress_liveness(
+    # First tick: baseline observation (mtime was `now - 60`, observation_time
+    # is `now`; no growth yet, but signal threshold is measured from
+    # observation_time so we need a later tick to cross it).
+    actions_first = await dispatch.check_progress_liveness(
         s, project_key=PK, cards=cards, project_path=str(repo),
-        live_sessions={session_name}, sandcastle_live=set(), headless_live=set(),
+        live_sessions={session_name},  # pane alive — must NOT carve-out
+        sandcastle_live=set(), headless_live=set(),
+        now=now, signal_seconds=30, action_seconds=240,
+    )
+    await s.commit()
+    assert actions_first == set()
+
+    # Second tick: same mtime (no transcript growth), now - observation_time
+    # = 60s, signal threshold = 30s → signal should fire even though the
+    # session is still in ``live_sessions``.
+    actions_second = await dispatch.check_progress_liveness(
+        s, project_key=PK, cards=cards, project_path=str(repo),
+        live_sessions={session_name},
+        sandcastle_live=set(), headless_live=set(),
+        now=now + 60, signal_seconds=30, action_seconds=240,
+    )
+    await s.commit()
+    assert actions_second == {session_name}
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+        activity = await service.card_activity(s, cid)
+    # Card stays claimed — only signal threshold crossed, not action.
+    assert card.claimed_by == f"agent:{session_name}"
+    assert card.column == "engineer"
+    signal_comments = [
+        op.payload["text"] for op in activity
+        if op.op_type == "comment" and "stilstaand" in op.payload["text"].lower()
+    ]
+    assert signal_comments, (
+        "expected stilstaand comment even though session is alive in tmux"
+    )
+
+
+@pytest.mark.asyncio
+async def test_progress_liveness_live_tmux_with_stalled_transcript_releases_claim(
+    tmp_path, monkeypatch,
+):
+    """Past the action threshold a live-in-tmux session with a stalled
+    transcript moves to To Resume via the same ``_move_to_resume`` path
+    used for dead sessions — the resume pointer is written so the next
+    dispatch tick resumes the conversation in place. This is the vangnet
+    that fixes kaart 01bde6e9…: 0 firings → ~1 firing per stalled
+    subscription-limited session."""
+    session_name = "k-live-action-0001"
+    now = 1_000_000.0
+    repo, projects_dir, transcript = _build_worktree_transcript(
+        tmp_path, session_name, initial_mtime=now - 180,
+    )
+    _redirect_projects_dir(monkeypatch, projects_dir)
+    monkeypatch.setattr(dispatch, "_kill_agent_session", lambda name: None)
+    monkeypatch.setattr(dispatch, "safe_resolve_project_key", lambda path: PK)
+
+    import app.kanban.db as kdb
+    monkeypatch.setattr(kdb, "KanbanSessionLocal", KanbanSessionLocal)
+
+    async with KanbanSessionLocal() as s:
+        cid = await _make_card(s, title="live-stall-action", column="engineer")
+        await apply_operation(
+            s, op_type="claim", entity_type="card", project_key=PK,
+            entity_id=cid, payload={"claimed_by": f"agent:{session_name}"},
+        )
+        await s.commit()
+        cards = await list_cards(s, PK)
+
+    # First tick: baseline observation.
+    await dispatch.check_progress_liveness(
+        s, project_key=PK, cards=cards, project_path=str(repo),
+        live_sessions={session_name},  # pane alive — must NOT carve-out
+        sandcastle_live=set(), headless_live=set(),
         now=now, signal_seconds=30, action_seconds=120,
     )
     await s.commit()
-    assert actions == set()
+
+    # Second tick: action threshold crossed (180s > 120s).
+    actions = await dispatch.check_progress_liveness(
+        s, project_key=PK, cards=cards, project_path=str(repo),
+        live_sessions={session_name},
+        sandcastle_live=set(), headless_live=set(),
+        now=now + 180, signal_seconds=30, action_seconds=120,
+    )
+    await s.commit()
+    assert actions == {session_name}
+
+    async with KanbanSessionLocal() as s:
+        card = await get_card(s, cid)
+    # Moved to To Resume, claim released, resume pointer set.
+    assert card.column == "To Resume"
+    assert card.claimed_by is None
+    assert card.resume_session_id is not None
+    assert card.resume_project_folder is not None
 
 
 @pytest.mark.asyncio
