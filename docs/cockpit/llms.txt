@@ -23,6 +23,7 @@
 - [Kanban — known follow-ups (post-v1)](./kanban-followups.md): type=reference status=active
 - [Kanban model-override — card/column/persona model-precedentie](./kanban-model-override.md): type=reference status=active
 - [Multi-agent kanban — smoke-test cookbook](./multi-agent-kanban.md): type=reference status=active
+- [pkill / pgrep safety in dispatched sessions](./pkill-safety.md): type=reference status=active
 - [Portfolio-cap policy: waarde, scope, failure-mode](./portfolio-policy.md): type=reference status=active
 - [Product-inceptie: van gesprek naar spec + plan die een project seedt](./product-inceptie-pipeline.md): type=reference status=active
 - [Recipe-writing conventions — auto-recovery hoort in dezelfde if-tak](./recipe-writing-conventions.md): type=reference status=active
