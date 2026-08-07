@@ -208,6 +208,32 @@ function ResolveImpediment({
   const openGate = gates.find((g) => g.status === "open") ?? null;
   const hasChoiceRow = choiceButtons.length > 0;
 
+  // Kaart 504b4e8a… — "Vrije-tekst impediment-resolve laat de gate open".
+  // Without this guard, clicking Resolve with neither an option picked
+  // nor any text typed used to call the backend with `answer:
+  // undefined`, which stamped the free-text resolve sentinel onto the
+  // open gate and closed it with a placeholder answer — leaving the
+  // resumed agent with no real decision to act on. Three states,
+  // mirrored from the textarea's placeholder copy:
+  //
+  //   - `hasGateAnswer` (a prior answer was recorded): free text is
+  //     optional ("Optional: add extra context"). Resolve is always
+  //     enabled — the operator may genuinely have nothing to add.
+  //   - `hasChoiceRow` (open gate with options): either input channel
+  //     counts. Resolve is enabled when an option is picked OR the
+  //     textarea has non-whitespace text — matching the placeholder's
+  //     "leave a pick above unclicked and answer here instead".
+  //   - else (no options, no prior answer): the textarea is the only
+  //     input channel. Resolve is enabled only when the text is
+  //     non-whitespace — mirroring the backend's
+  //     `answer.trim() || undefined` so the guard matches what the
+  //     backend actually receives.
+  const trimmedAnswer = answer.trim();
+  const canResolve =
+    hasGateAnswer ||
+    (selectedOption !== null && hasChoiceRow) ||
+    trimmedAnswer !== "";
+
   const submit = async () => {
     if (submitting) return;
     setSubmitting(true);
@@ -355,7 +381,7 @@ function ResolveImpediment({
             <Button
               size="sm"
               onClick={submit}
-              disabled={submitting}
+              disabled={submitting || !canResolve}
               data-testid="resolve-impediment-submit"
             >
               {submitting ? "Resolving…" : "Resolve impediment"}
