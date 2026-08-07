@@ -70,6 +70,11 @@ const IMPEDIMENT_COLUMN = "Impediment";
 // "already requested" state instead of a fresh input.
 const REVIEW_REQUEST_PREFIX = "**Review requested:** ";
 
+// Mirror of backend `service._REVISIT_PREFIX`. The reopen path stamps
+// `**Revisit:**` on the audit-trail comment and the frontend scans the
+// polled activity for this prefix to render the "already reopened" state.
+const REOPEN_REQUEST_PREFIX = "**Revisit:** ";
+
 // "Completed on 10 July 2026 at 14:30" — explicit, locale-independent format
 // so a screenshot is reproducible across machines.
 function formatCompletedAt(iso: string): string {
@@ -383,13 +388,15 @@ function DoneSummaryBanner({ card }: { card: Card }) {
   );
 }
 
-// "Request review" control shown under the Done banner. Lets a human flag a
-// doubt on a completed card: the note is posted as a `**Review requested:**`
-// comment on this card and a new analysis card is spun up (backend). To avoid
-// piling up duplicate requests, if the polled `activity` already contains a
-// matching comment we render the note that was sent in a disabled state
-// instead of a fresh input.
-function RequestReviewControl({
+// Single feedback control inside the DoneActionsPanel toggle. Owns both
+// "Request review" (POST /cards/{id}/request-review → analyst-triage sibling)
+// and "Heropen met feedback" (POST /cards/{id}/reopen → engineer-hervatting
+// of the same card). One shared textarea feeds two submit buttons; the
+// audit-trail prefixes from the backend drive independent "already sent"
+// read-only banners per action so a prior review-request does not block a
+// reopen, and vice-versa. Endpoints + prefixes + dispatch injection are
+// untouched — only the UI collapsed.
+function FeedbackControl({
   card,
   activity,
   onChanged,
@@ -401,31 +408,20 @@ function RequestReviewControl({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const existing = activity.find(
+  const existingReview = activity.find(
     (e) =>
       e.op_type === "comment" &&
       typeof e.payload.text === "string" &&
       (e.payload.text as string).startsWith(REVIEW_REQUEST_PREFIX),
   );
+  const existingReopen = activity.find(
+    (e) =>
+      e.op_type === "comment" &&
+      typeof e.payload.text === "string" &&
+      (e.payload.text as string).startsWith(REOPEN_REQUEST_PREFIX),
+  );
 
-  if (existing) {
-    const sentNote = (existing.payload.text as string).slice(
-      REVIEW_REQUEST_PREFIX.length,
-    );
-    return (
-      <div
-        className="rounded-md border-2 border-amber-500/40 bg-amber-50 p-3 text-sm dark:bg-amber-950/30"
-        data-testid="review-requested-state"
-      >
-        <div className="mb-1 text-xs font-semibold uppercase text-amber-700 dark:text-amber-400">
-          Review requested
-        </div>
-        <div className="text-foreground whitespace-pre-wrap">{sentNote}</div>
-      </div>
-    );
-  }
-
-  const submit = async () => {
+  const submitReview = async () => {
     const trimmed = note.trim();
     if (!trimmed) return;
     setSubmitting(true);
@@ -441,62 +437,7 @@ function RequestReviewControl({
     }
   };
 
-  return (
-    <div
-      className="rounded-md border p-3 text-sm space-y-2"
-      data-testid="request-review-control"
-    >
-      <div className="text-xs font-semibold uppercase text-muted-foreground">
-        Request review
-      </div>
-      <Textarea
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        placeholder="Describe your doubt about this implementation…"
-        disabled={submitting}
-        data-testid="request-review-note"
-        // Compact in the sticky priority area so the body underneath keeps
-        // enough vertical room to show the Deliverables / TabsContent (kaart
-        // d4012bd1: Done-kaart body bottom-clipped). The default 80px min-h
-        // is fine for free-standing forms, but here two of them stack above a
-        // single-scroll body and consume half the 85vh modal.
-        rows={2}
-        className="min-h-[40px]"
-      />
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          onClick={submit}
-          disabled={submitting || !note.trim()}
-          data-testid="request-review-submit"
-        >
-          {submitting ? "Requesting…" : "Request review"}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-// "Heropen met feedback" control shown under the Done banner. Lets a human
-// post a rebuttal on a completed decision: the note is posted as a
-// `**Revisit:**` comment on this card and the *same* card is moved back
-// to Backlog (reopen) — distinct from RequestReviewControl which spawns
-// a sibling analysis card. The dispatcher then re-picks the card and
-// injects the rebuttal into the spawned session's prompt via the
-// `## REVISIT` section + a pointer to the prior decision's summary and
-// deliverables. Like the review control, the textarea + submit are the
-// only UI for this — the activity feed stays read-only.
-function ReopenControl({
-  card,
-  onChanged,
-}: {
-  card: Card;
-  onChanged: () => void;
-}) {
-  const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async () => {
+  const submitReopen = async () => {
     const trimmed = note.trim();
     if (!trimmed) return;
     setSubmitting(true);
@@ -515,53 +456,86 @@ function ReopenControl({
   return (
     <div
       className="rounded-md border p-3 text-sm space-y-2"
-      data-testid="reopen-control"
+      data-testid="feedback-control"
     >
-      <div className="text-xs font-semibold uppercase text-muted-foreground">
-        Heropen met feedback
-      </div>
+      {existingReview && (
+        <div
+          className="rounded-md border-2 border-amber-500/40 bg-amber-50 p-3 text-sm dark:bg-amber-950/30"
+          data-testid="review-requested-state"
+        >
+          <div className="mb-1 text-xs font-semibold uppercase text-amber-700 dark:text-amber-400">
+            Review requested
+          </div>
+          <div className="text-foreground whitespace-pre-wrap">
+            {(existingReview.payload.text as string).slice(
+              REVIEW_REQUEST_PREFIX.length,
+            )}
+          </div>
+        </div>
+      )}
+      {existingReopen && (
+        <div
+          className="rounded-md border-2 border-amber-500/40 bg-amber-50 p-3 text-sm dark:bg-amber-950/30"
+          data-testid="reopen-requested-state"
+        >
+          <div className="mb-1 text-xs font-semibold uppercase text-amber-700 dark:text-amber-400">
+            Heropend
+          </div>
+          <div className="text-foreground whitespace-pre-wrap">
+            {(existingReopen.payload.text as string).slice(
+              REOPEN_REQUEST_PREFIX.length,
+            )}
+          </div>
+        </div>
+      )}
       <Textarea
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="Weerleg deze beslissing — de kaart gaat terug naar Backlog en een nieuwe sessie pakt hem op met jouw tegengewicht in de prompt."
+        placeholder="Beschrijf je twijfel (review) of weerleg de beslissing (heropen) — dezelfde notitie voedt beide acties."
         disabled={submitting}
-        data-testid="reopen-note"
-        // Same compactness rationale as the request-review Textarea above
-        // (kaart d4012bd1). Both textareas live in the sticky priority area
-        // for Done cards; doubling them at the default 80px min-h is what
-        // pushed the body to the "scroll-past-Deliverables-to-see-anything"
-        // state captured in the screenshot.
-        rows={2}
-        className="min-h-[40px]"
+        data-testid="feedback-note"
+        rows={3}
+        className="min-h-[60px]"
       />
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          onClick={submit}
-          disabled={submitting || !note.trim()}
-          data-testid="reopen-submit"
-        >
-          {submitting ? "Heropenen…" : "Heropen met feedback"}
-        </Button>
+      <div className="flex flex-wrap justify-end gap-2">
+        {!existingReview && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={submitReview}
+            disabled={submitting || !note.trim()}
+            data-testid="feedback-submit-review"
+          >
+            {submitting ? "Requesting…" : "Vraag review aan"}
+          </Button>
+        )}
+        {!existingReopen && (
+          <Button
+            size="sm"
+            onClick={submitReopen}
+            disabled={submitting || !note.trim()}
+            data-testid="feedback-submit-reopen"
+          >
+            {submitting ? "Heropenen…" : "Heropen met feedback"}
+          </Button>
+        )}
       </div>
     </div>
   );
 }
 
-// Collapsed wrapper around the two rare-action controls on a Done card:
-// RequestReviewControl (spawns a sibling analysis card) and ReopenControl
-// (moves the *same* card back to Backlog with a rebuttal). Both used to
-// render unconditionally above the body, and the two textarea blocks
-// (each ~120px in the 85vh dialog) clipped the description / spec /
-// subtasks / tabs past the modal edge on long Done summaries (kanban-kaart
-// d4012bd1 "Done kaarten nog altijd niet goed leesbaar"). Per the
-// operator's decision: "Request review + Heropen inklappen tot één knop,
-// pas openen als je ze nodig hebt". The wrapper renders a single toggle
-// by default; clicking it reveals the two controls inline, each still
-// using its original testid so the existing submit / already-requested /
-// in-flight tests keep their hooks intact. The DoneSummaryBanner above
-// stays always visible — that's the operator's primary information about
-// what shipped; the controls are the rare path.
+// Collapsed wrapper around the rare feedback path on a Done card. The
+// toggle was added so the body of the drawer (description, spec, subtasks,
+// tabs) gets the full 85vh height back — kaart d4012bd1 "Done kaarten nog
+// altijd niet goed leesbaar". Per the operator's decision: "Request review
+// + Heropen inklappen tot één knop, pas openen als je ze nodig hebt".
+// When the operator opens it, FeedbackControl renders a single textarea
+// with two submit buttons — typing once feeds both actions, and the
+// backend audit-trail prefixes drive per-action "already sent" read-only
+// banners so a prior review-request does not block a reopen (and vice-versa).
+// The DoneSummaryBanner above stays always visible — that's the operator's
+// primary information about what shipped; the feedback path is the rare
+// branch.
 function DoneActionsPanel({
   card,
   activity,
@@ -594,12 +568,11 @@ function DoneActionsPanel({
           className="space-y-3 pt-1"
           data-testid="done-actions-panel-body"
         >
-          <RequestReviewControl
+          <FeedbackControl
             card={card}
             activity={activity}
             onChanged={onChanged}
           />
-          <ReopenControl card={card} onChanged={onChanged} />
         </div>
       )}
     </div>
