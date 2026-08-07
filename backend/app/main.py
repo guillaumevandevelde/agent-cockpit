@@ -45,6 +45,116 @@ async def ensure_scheduling_hooks_installed() -> None:
         logger.exception("failed to install scheduling hooks at startup")
 
 
+async def _recover_and_start_dispatch() -> None:
+    """Resume interrupted sessions, adopt live runs, then arm the dispatch tick.
+
+    Runs as a background task rather than inline in ``lifespan`` — see the
+    ``_startup_task`` handoff there for why. The *relative* order of the four
+    steps below is load-bearing and must not be rearranged:
+
+      1. ``recover_interrupted_sessions`` — must precede step 4 so the reaper's
+         first tick can't release (and orphan) the claims it is resuming, and
+         must precede step 3 because ``reset_autodispatch_for_boot`` forces
+         every project's autodispatch flag off; recovery reads that same
+         enabled-set (``list_autodispatch_projects``) and would become a silent
+         no-op if the reset ran first.
+      2. headless + ACP adoption — same reaper-ordering constraint as step 1,
+         applied to the second and third liveness sources.
+      3. ``reset_autodispatch_for_boot`` — before the tick is scheduled.
+      4. ``schedule_kanban_dispatch`` — the reaper/dispatcher goes live here.
+
+    Every step is individually best-effort: one failure must not stop the
+    later steps, or a transient recovery error would leave the dispatch tick
+    permanently unarmed.
+    """
+    # 1. Resume agent sessions interrupted by a host/backend restart.
+    from app.kanban.session_recovery import recover_interrupted_sessions
+    from app.services.scheduling.scheduler import scheduler_service
+    try:
+        await recover_interrupted_sessions()
+    except Exception:
+        logger.exception("session recovery failed at startup")
+    # 2. Adopt still-running headless transport runs from their durable pidfiles
+    # (kaart a450df1a…). MUST run before the dispatch scheduler/reaper so the
+    # reaper's first tick sees adopted runs as alive — otherwise every live
+    # headless run would look dead, the reaper would release the claims, and
+    # the dispatcher would re-spawn into the same worktree (the same ordering
+    # session_recovery above uses, applied to the third liveness source).
+    from app.kanban.dispatch import _registered_project_paths
+    from app.kanban.headless_runner import (
+        adopt_headless_runs,
+        start_headless_tailer,
+    )
+    paths: list[str] = []
+    try:
+        paths = await _registered_project_paths()
+        # BUG FIX (kaart a450df1a…, sigh): ``_registered_project_paths``
+        # returns ``list[str]`` (it does ``return list(rows)`` over a
+        # scalar column), so ``paths.values()`` raised ``AttributeError`` and
+        # the bare ``except Exception`` swallowed it — every backend start
+        # adopted zero runs, the reaper's first tick then released every
+        # live headless claim, and the dispatcher re-spawned into the same
+        # worktree (the three-bullet failure mode the impediment review
+        # called out). The function already iterates ``project_paths``
+        # directly, so we just pass the list through.
+        adopted_records = adopt_headless_runs(paths)
+        if adopted_records:
+            logger.info(
+                "adopted %d live headless run(s) after restart",
+                len(adopted_records),
+            )
+            # Spawn a tailer task per adopted record. The tailer reads
+            # the on-disk JSONL log from the persisted last_read_offset
+            # so events that arrived between the previous parent's death
+            # and this restart land in the dispatch state machine
+            # (rate_limit → set_paused_until especially — see the
+            # parent-card analysis for why losing those pauses was
+            # a real failure mode). The task holds a strong reference
+            # via ``_headless_start_tasks`` so it can't be GC'd.
+            for rec in adopted_records:
+                start_headless_tailer(rec)
+    except Exception:
+        logger.exception("headless adoption failed at startup")
+    # ACP subprocess adoption (kaart f647a44e…): mirrors the headless
+    # adoption path — durable ``.cockpit-acp.json`` pidfiles are
+    # OS-verified and re-attached to the in-memory registry so the
+    # reaper's first tick doesn't release-and-redispatch ACP claims.
+    # The transport's reader-loop is launched lazily on the next ACP
+    # dispatch (a fresh run re-establishes its own consumer task), so
+    # we only need to (a) populate the cache and (b) re-reserve the
+    # session_registry slot — no tailer is spawned for adopted runs.
+    try:
+        from app.kanban.acp_transport import adopt_acp_runs
+        adopted_acp = adopt_acp_runs(paths)
+        if adopted_acp:
+            logger.info(
+                "adopted %d live acp run(s) after restart",
+                len(adopted_acp),
+            )
+    except Exception:
+        logger.exception("acp adoption failed at startup")
+    # 3. Force every project's autodispatch flag off before the tick is
+    # scheduled below. The flag is persisted (KanbanMeta, device-local) and
+    # survives restarts, so without this a project left toggled on would start
+    # having cards auto-claimed/spawned on the very next tick after any backend
+    # restart -- auto-dispatch must always start from an explicit opt-in.
+    # Exception: a `uvicorn --reload` hot reload is the same running server, not
+    # a restart, and force-disabling there made the factory disable itself every
+    # time an agent merged a backend change (see reset_autodispatch_for_boot).
+    try:
+        from app.kanban import dispatch as kanban_dispatch
+        from app.kanban.db import KanbanSessionLocal
+        async with KanbanSessionLocal() as ks:
+            await kanban_dispatch.reset_autodispatch_for_boot(ks)
+            await ks.commit()
+    except Exception:
+        logger.exception("autodispatch boot reset failed at startup")
+    # 4. Start kanban auto-dispatch polling.
+    scheduler_service.schedule_kanban_dispatch(
+        interval_seconds=settings.kanban_dispatch_interval_seconds
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -104,93 +214,45 @@ async def lifespan(app: FastAPI):
     from app.models.scheduled_message import ScheduledMessage
     from app.services.scheduling.scheduler import scheduler_service
     scheduler_service.start()
-    # Resume agent sessions interrupted by a host/backend restart. Runs before the
-    # dispatch scheduler so the reaper can't release (and orphan) their claims first.
-    from app.kanban.session_recovery import recover_interrupted_sessions
-    try:
-        await recover_interrupted_sessions()
-    except Exception:
-        logger.exception("session recovery failed at startup")
-    # Adopt still-running headless transport runs from their durable pidfiles
-    # (kaart a450df1a…). MUST run before the dispatch scheduler/reaper so the
-    # reaper's first tick sees adopted runs as alive — otherwise every live
-    # headless run would look dead, the reaper would release the claims, and
-    # the dispatcher would re-spawn into the same worktree (the same ordering
-    # session_recovery above uses, applied to the third liveness source).
-    from app.kanban.dispatch import _registered_project_paths
-    from app.kanban.headless_runner import (
-        adopt_headless_runs,
-        start_headless_tailer,
-    )
-    try:
-        paths = await _registered_project_paths()
-        # BUG FIX (kaart a450df1a…, sigh): ``_registered_project_paths``
-        # returns ``list[str]`` (it does ``return list(rows)`` over a
-        # scalar column), so ``paths.values()`` raised ``AttributeError`` and
-        # the bare ``except Exception`` swallowed it — every backend start
-        # adopted zero runs, the reaper's first tick then released every
-        # live headless claim, and the dispatcher re-spawned into the same
-        # worktree (the three-bullet failure mode the impediment review
-        # called out). The function already iterates ``project_paths``
-        # directly, so we just pass the list through.
-        adopted_records = adopt_headless_runs(paths)
-        if adopted_records:
-            logger.info(
-                "adopted %d live headless run(s) after restart",
-                len(adopted_records),
-            )
-            # Spawn a tailer task per adopted record. The tailer reads
-            # the on-disk JSONL log from the persisted last_read_offset
-            # so events that arrived between the previous parent's death
-            # and this restart land in the dispatch state machine
-            # (rate_limit → set_paused_until especially — see the
-            # parent-card analysis for why losing those pauses was
-            # a real failure mode). The task holds a strong reference
-            # via ``_headless_start_tasks`` so it can't be GC'd.
-            for rec in adopted_records:
-                start_headless_tailer(rec)
-    except Exception:
-        logger.exception("headless adoption failed at startup")
-    # ACP subprocess adoption (kaart f647a44e…): mirrors the headless
-    # adoption path — durable ``.cockpit-acp.json`` pidfiles are
-    # OS-verified and re-attached to the in-memory registry so the
-    # reaper's first tick doesn't release-and-redispatch ACP claims.
-    # The transport's reader-loop is launched lazily on the next ACP
-    # dispatch (a fresh run re-establishes its own consumer task), so
-    # we only need to (a) populate the cache and (b) re-reserve the
-    # session_registry slot — no tailer is spawned for adopted runs.
-    try:
-        from app.kanban.acp_transport import adopt_acp_runs
-        adopted_acp = adopt_acp_runs(paths)
-        if adopted_acp:
-            logger.info(
-                "adopted %d live acp run(s) after restart",
-                len(adopted_acp),
-            )
-    except Exception:
-        logger.exception("acp adoption failed at startup")
+    # Session recovery + run adoption + the dispatch tick run in a BACKGROUND
+    # task, never inline here. Recovery re-dispatches one real agent session per
+    # interrupted card, and a single resume spawn was measured at ~37s — so with
+    # two or more stale claims the lifespan never reached `yield`, uvicorn never
+    # began accepting on :8000, and `cockpit.sh`'s health watchdog (30s grace +
+    # 3x10s = 50s budget) SIGKILLed the process at 51s. The next boot found the
+    # same claims and died identically: 12 consecutive restarts, a permanent 502
+    # from the frontend proxy, and a fresh set of agent spawns burned each cycle.
+    # Readiness must never be gated on work whose duration scales with board
+    # state. `_recover_and_start_dispatch` documents the internal ordering it
+    # still guarantees (recovery and adoption both precede the reaper's first
+    # tick, exactly as when this ran inline).
+    _startup_task = asyncio.create_task(_recover_and_start_dispatch())
+    # Strong reference: a bare create_task is only weakly held by the event loop
+    # and may be garbage-collected mid-flight.
+    app.state.startup_task = _startup_task
+
+    def _log_startup_task_result(task: asyncio.Task) -> None:
+        # Without this the task's exception is only surfaced at GC time as an
+        # unretrieved-exception warning — and a crash here means the dispatch
+        # tick was never armed, which is exactly the failure a reader needs
+        # to see in the log.
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("startup recovery task failed", exc_info=exc)
+
+    _startup_task.add_done_callback(_log_startup_task_result)
     # Install the Notification/Stop/UserPromptSubmit/SessionStart hooks that feed
     # the usage-limit auto-resume pipeline. These used to require a manual click
     # on the Scheduled Messages page, which meant the whole pipeline stayed dead
     # code on any machine where nobody happened to visit that page first.
     await ensure_scheduling_hooks_installed()
-    # Force every project's autodispatch flag off before the tick is scheduled
-    # below. The flag is persisted (KanbanMeta, device-local) and survives
-    # restarts, so without this a project left toggled on would start having
-    # cards auto-claimed/spawned on the very next tick after any backend
-    # restart -- auto-dispatch must always start from an explicit opt-in.
-    # Exception: a `uvicorn --reload` hot reload is the same running server, not
-    # a restart, and force-disabling there made the factory disable itself every
-    # time an agent merged a backend change (see reset_autodispatch_for_boot).
-    from app.kanban import dispatch as kanban_dispatch
-    from app.kanban.db import KanbanSessionLocal
-    async with KanbanSessionLocal() as ks:
-        await kanban_dispatch.reset_autodispatch_for_boot(ks)
-        await ks.commit()
-    # Start kanban auto-dispatch polling
-    scheduler_service.schedule_kanban_dispatch(
-        interval_seconds=settings.kanban_dispatch_interval_seconds
-    )
+    # NOTE: the autodispatch boot-reset and `schedule_kanban_dispatch` used to
+    # sit here. Both moved into `_recover_and_start_dispatch` above so they keep
+    # running *after* session recovery — the reset force-disables every
+    # project's autodispatch flag, which is the same flag recovery reads, so
+    # running it first would silently turn recovery into a no-op.
     # Signal (never block) product-projects whose Backlog has stalled — posts a
     # [portfolio-stale] comment, no Impediment move. See kanban/stale_detection.py.
     scheduler_service.schedule_stale_detection(
@@ -212,7 +274,17 @@ async def lifespan(app: FastAPI):
         if auto.enabled:
             scheduler_service.schedule_auto_backup(auto.time_of_day, auto.timezone)
     yield
-    # Shutdown: Cleanup
+    # Shutdown: Cleanup. Cancel the recovery/adoption task first — on a fast
+    # restart (or a `uvicorn --reload` hot reload) it can still be mid-spawn,
+    # and leaving it running would race the scheduler teardown below.
+    if not _startup_task.done():
+        _startup_task.cancel()
+        try:
+            await _startup_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("startup recovery task failed during shutdown")
     scheduler_service.shutdown()
     await close_all_relays()
 

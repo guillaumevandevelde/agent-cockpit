@@ -418,6 +418,60 @@ async def test_recover_project_survives_redispatch_failure():
 
 
 @pytest.mark.asyncio
+async def test_recover_project_commits_each_card_before_the_next_spawn():
+    """Each resume must be durable before the next spawn starts.
+
+    Spawning a session is a tmux side effect that no DB rollback can undo. So
+    when the loop committed only after *every* card, a mid-loop death left the
+    spawned sessions running while their claims vanished -- and the next boot
+    re-read the identical stale claim and spawned yet another session for the
+    same card.
+
+    That is not hypothetical: on 2026-08-07 the health watchdog SIGKILLed the
+    backend at 51s while recovery (~37s per resume) was on its second card, 14
+    times in a row, leaking 9 live OpenCode sessions into one worktree. All 14
+    boots logged the same stale session name -- proof no claim ever committed.
+
+    Non-tautological: the assertion reads through a SECOND session, which sees
+    committed rows only. That is exactly what the next boot's fresh process
+    sees.
+    """
+    order: list[str] = []
+    visible_to_a_fresh_process: dict[str, str | None] = {}
+
+    async def fake_redispatch(session, *, card_id, project_path, caller_source=None):
+        order.append(card_id)
+        if len(order) == 2:
+            async with KanbanSessionLocal() as other:
+                prior = await get_card(other, order[0])
+                visible_to_a_fresh_process["resume_session_id"] = (
+                    prior.resume_session_id
+                )
+        return {"card_id": card_id, "session_name": f"k-new-{len(order)}"}
+
+    async with KanbanSessionLocal() as s:
+        a = await _make_card(s, title="wip a", column="engineer")
+        await _claim(s, a, "agent:k-dead-000a")
+        b = await _make_card(s, title="wip b", column="engineer")
+        await _claim(s, b, "agent:k-dead-000b")
+        await s.commit()
+        recovered = await recovery.recover_project(
+            s, project_key=PK, project_path="/p", live_sessions=set(),
+            resolve=lambda p, n, **kwargs: (f"sess-{n}", None),
+            redispatch=fake_redispatch,
+        )
+        await s.commit()
+
+    assert len(recovered) == 2
+    assert len(order) == 2, "both cards must be recovered for this test to mean anything"
+    assert visible_to_a_fresh_process["resume_session_id"] == f"sess-{'k-dead-000a' if order[0] == a else 'k-dead-000b'}", (
+        "the first card's resume must already be committed when the second "
+        "card's session is spawned -- otherwise a kill in between leaks the "
+        "first session and re-spawns it on the next boot"
+    )
+
+
+@pytest.mark.asyncio
 async def test_recover_project_retains_claim_for_live_session_despite_mcp_disconnect():
     """AC4 regression for [self-improve] 4ed4edb9 (MCP-disconnect → claim-release).
 
