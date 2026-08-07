@@ -76,6 +76,25 @@ TEST_TARGET="$1"
 shift
 EXTRA_ARGS=("$@")
 
+# Eager reject for frontend test paths. `run-single-test.sh` is a pytest
+# wrapper — a `.ts`/`.tsx` argument would otherwise hit the file-existence
+# check and print a misleading "test file not found" against pytest,
+# leaving the author to reverse-engineer the right invocation. The
+# matching vitest recipe lives in the CLAUDE.md `# Test`-blok.
+#
+# Guard: only the FILE path's extension counts. `tests/test_x.py::[a-z]`
+# still works (pytest's `::func` / `[params]` syntax is untouched). We
+# also accept the bare stem (`.ts`) so the check fires on
+# `frontend/src/foo.ts` as well, not just `.tsx`.
+case "$TEST_TARGET" in
+    *.ts|*.tsx)
+        echo "error: '$TEST_TARGET' looks like a frontend test path; run-single-test.sh is a pytest wrapper." >&2
+        echo "  Use vitest directly instead (the local binary, not \`npx\`):" >&2
+        echo "    ( cd frontend && ./node_modules/.bin/vitest run $TEST_TARGET )" >&2
+        exit 2
+        ;;
+esac
+
 # Venv resolution -----------------------------------------------------------
 if [ -n "${PYTEST_CMD:-}" ]; then
     :   # PYTEST_CMD override (used by scripts/test_run_single_test.sh)
