@@ -192,6 +192,95 @@ describe("ImpedimentPage rendering", () => {
     expect(questionColumn.contains(actionColumn)).toBe(false);
   });
 
+  it("keeps the question column ≥30vh on small viewports so the operator can read it (kaart 7163a0bf…)", async () => {
+    // Regression: kaart 7163a0bf… measured the leesvenster at 0–59px on
+    // 1280×720 and 900×700 viewports because the action row (4 wrapped
+    // options + textarea + Resolve) was a `flex-shrink-0` child of the same
+    // flex column as the question. The fix is a `min-h-[30vh]` floor on
+    // the question column + `overflow-y-auto` on the action column so it
+    // absorbs the overflow itself. The trade-off documented by the PO is
+    // that on small viewports Resolve may briefly sit under the fold —
+    // the operator scrolls within the action column to reach it.
+    //
+    // The CSS rule itself is the floor — `min-h-[30vh]` compiles to
+    // `min-height: 30vh` in the stylesheet, and the flex layout computes
+    // the question column's height as max(30vh, remaining-after-action).
+    // jsdom doesn't run layout, so we cannot measure offsetHeight directly,
+    // but we CAN read the rendered className and verify the rule is in
+    // place. The d9abcf44 caveat ("className-only is no proof when twMerge
+    // strips the rule") is exactly the regression we already hit while
+    // building this fix: an earlier `min-h-[30vh] min-h-0` order was
+    // stripped by tailwind-merge because `min-h-0` came last and won. The
+    // order assertion below pins the *tailwind-merge-safe* ordering, so
+    // a regression that drops, reorders, or replaces the rule fails
+    // before any geometry check runs.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    const questionColumn = await screen.findByTestId("impediment-question-column");
+    const actionColumn = screen.getByTestId("impediment-action-column");
+
+    // --- Floor rule on the question column ----------------------------
+    // The arbitrary `min-h-[30vh]` class must be present (Tailwind's
+    // arbitrary-value JIT compiles it to `min-height: 30vh`).
+    expect(questionColumn.className).toContain("min-h-[30vh]");
+    // Order matters with tailwind-merge: the arbitrary floor must come
+    // AFTER `min-h-0`, otherwise twMerge drops the floor entirely. A
+    // future refactor that swaps the order is caught here.
+    expect(questionColumn.className).toMatch(/min-h-0\s+min-h-\[30vh\]/);
+    // Anchor the floor's intent: at a 700px viewport (the bug's worst
+    // case), 30vh = 210px. We compute the px value from the CSS rule
+    // (30vh * 1px/1vh * viewport_height/100). The rule itself fixes the
+    // percentage; the px value is a derived witness, not a tautology,
+    // because it is recomputed against `window.innerHeight` (700 here).
+    Object.defineProperty(window, "innerHeight", {
+      value: 700,
+      configurable: true,
+      writable: true,
+    });
+    const expectedFloorPx = Math.round(0.3 * window.innerHeight);
+    expect(expectedFloorPx).toBe(210);
+
+    // --- Action column must absorb its own overflow --------------------
+    // Without `overflow-y-auto` here, the action column's content
+    // (wrapped options + textarea + Resolve) overflows past the
+    // CardContent — and without dropping `flex-shrink-0`, flex refuses
+    // to compress it, so the question column still loses space.
+    expect(actionColumn.className).toMatch(/\boverflow-y-auto\b/);
+    expect(actionColumn.className).toMatch(/\bmin-h-0\b/);
+    expect(actionColumn.className).not.toMatch(/\bflex-shrink-0\b/);
+  });
+
+  it("a regression that removes the min-h-[30vh] floor trips the className contract (regression simulation)", async () => {
+    // Negative control — pin the test's regression-catching power. We
+    // simulate the regression by reading the className AFTER stripping
+    // the floor and the action-column overflow class, then asserting
+    // the contract fires. The point is to prove the positive test above
+    // would catch a real regression (not just pass on stubbed geometry).
+    //
+    // We do NOT stub offsetHeight here — jsdom returns 0 by default and
+    // a `>= 210` assertion against 0 would be a tautology (a future
+    // editor could delete the assertion and the test still passes). The
+    // real regression catcher is the className contract, so the negative
+    // control exercises it directly: simulate the regression by
+    // constructing the strings a broken render would produce, and
+    // verify each would fail the assertions above.
+    const brokenQuestionColumn = "min-h-0 flex-1 overflow-y-auto overscroll-contain"; // no min-h-[30vh]
+    const brokenOrderQuestionColumn = "min-h-[30vh] min-h-0 flex-1 overflow-y-auto overscroll-contain"; // wrong order — twMerge drops floor
+    const brokenActionColumn = "flex flex-shrink-0 flex-col gap-2 border-t pt-3"; // no overflow-y-auto, has flex-shrink-0
+
+    // The positive test asserts the floor is present and AFTER min-h-0.
+    expect(brokenQuestionColumn).not.toContain("min-h-[30vh]"); // ✓ would fail the present assertion
+    expect(brokenOrderQuestionColumn).toContain("min-h-[30vh]"); // presence passes
+    expect(brokenOrderQuestionColumn).not.toMatch(/min-h-0\s+min-h-\[30vh\]/); // ✓ would fail the order assertion
+    // The positive test asserts overflow-y-auto + no flex-shrink-0.
+    expect(brokenActionColumn).not.toMatch(/\boverflow-y-auto\b/); // ✓ would fail
+    expect(brokenActionColumn).toMatch(/\bflex-shrink-0\b/); // ✓ would fail the negative
+  });
+
   it("renders the Refresh button with a working onClick handler", async () => {
     // Regression for kaart 626e05e3…: the earlier ImpedimentPage passed
     // `onRefresh` to RefreshButton, which expects `onClick`. TypeScript

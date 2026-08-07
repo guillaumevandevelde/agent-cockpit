@@ -265,9 +265,18 @@ function ResolveImpediment({
             clip with `overflow-y-auto` instead of pushing the action row
             below the viewport. `min-h-0` is the load-bearing flex-child rule
             (without it, `overflow-y-auto` doesn't constrain the child's
-            height inside a `flex-col` parent). */}
+            height inside a `flex-col` parent). `min-h-[30vh]` floors the
+            question at ~30% of the viewport so the operator can always read
+            a long agent question — without it the action row's wrapped
+            options + textarea + Resolve button compress the leesvenster to
+            0–60px on 1280×720 and below (kaart 7163a0bf…). The trade-off
+            is that on very small viewports the Resolve button may briefly
+            sit under the fold; the operator scrolls within the action
+            column itself to reach it (the PO picked this over an
+            always-visible Resolve because reading the question is the
+            blocking step). */}
         <div
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+          className="min-h-0 min-h-[30vh] flex-1 overflow-y-auto overscroll-contain"
           data-testid="impediment-question-column"
         >
           {questionText ? (
@@ -286,12 +295,18 @@ function ResolveImpediment({
             </p>
           )}
         </div>
-        {/* Sticky action row (chosen option A). Anchored at the bottom of the
-            card body with `flex-shrink-0` and a top border — visible on every
-            viewport regardless of question length, so the operator can always
-            decide without first scrolling the question into view. */}
+        {/* Sticky action row (chosen option A, with min-h floor — kaart
+            7163a0bf…). Anchored at the bottom of the card body with a top
+            border; on tall viewports it stays at its natural height and
+            never scrolls. On small viewports the question column's
+            `min-h-[30vh]` floor pins the leesvenster above; this column
+            lets flex compress it (no `flex-shrink-0`) and absorbs the rest
+            via its own scrollbar — the operator scrolls within the action
+            column to reach Resolve. The trade-off explicitly accepted by
+            the PO: Resolve is no longer guaranteed to be in view on small
+            viewports, but the question always is. */}
         <div
-          className="flex flex-shrink-0 flex-col gap-2 border-t pt-3"
+          className="flex flex-col gap-2 border-t pt-3 overflow-y-auto min-h-0"
           data-testid="impediment-action-column"
         >
           {hasChoiceRow && (
