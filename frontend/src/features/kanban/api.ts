@@ -396,8 +396,8 @@ export const kanbanApi = {
       body: JSON.stringify({ project_key: projectKey, column }),
     }),
 
-  getAutodispatch: (projectKey: string): Promise<{ enabled: boolean }> =>
-    apiClient<{ enabled: boolean }>(
+  getAutodispatch: (projectKey: string): Promise<AutodispatchStatus> =>
+    apiClient<AutodispatchStatus>(
       `${BASE}/autodispatch?project_key=${encodeURIComponent(projectKey)}`
     ),
 
@@ -621,3 +621,13 @@ export const kanbanApi = {
 // Backwards-compatible re-export for callers that imported the free function
 // before it moved onto `kanbanApi`. Mirrors the new shape exactly.
 export const addPlanAttachment = kanbanApi.addPlanAttachment;
+
+// `disabled_by_boot_at` + `disabled_by_boot_reason` are populated when the
+// startup policy force-disabled this project's auto-dispatch (supervisor
+// restart, crash recovery, cockpit.sh restart, …). Without them the only
+// signal was a backend WARNING — see kanban card a559cdfacde64e6184b900c2ac568a4c.
+export interface AutodispatchStatus {
+  enabled: boolean;
+  disabled_by_boot_at?: string;
+  disabled_by_boot_reason?: "real_backend_start" | "reloader_changed";
+}

@@ -1,6 +1,7 @@
 # backend/tests/test_kanban_dispatch.py
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -185,6 +186,91 @@ def test_reload_parent_identity_is_none_outside_a_uvicorn_reloader():
     # pytest's parent is not `uvicorn --reload`, so the real probe must decline
     # and let the caller fall back to the force-off default.
     assert dispatch._reload_parent_identity() is None
+
+
+# ---- startup policy: visibility for the UI --------------------------------
+#
+# A real backend start force-disables auto-dispatch board-wide. Without an
+# explicit UI signal, the symptom reads as "the dispatcher is hanging" — the
+# kind of false-attribution that ate 18 minutes on 2026-08-03 (44 cards idle,
+# silent for 18 minutes after the merge that triggered the restart). The
+# WARNING in logs/ is the only trace. These tests pin the per-project
+# visibility marker so the UI can show "force-disabled by backend start at
+# <ts>" inline on the toggle component.
+
+
+@pytest.mark.asyncio
+async def test_reset_autodispatch_for_boot_records_boot_disabled_marker_on_real_start(monkeypatch):
+    _fake_identity(monkeypatch, None)
+    other_pk = "git:example.com/me/other-repo"
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_autodispatch(s, PK, True)
+        await dispatch.set_autodispatch(s, other_pk, True)
+        await s.commit()
+
+        assert await dispatch.reset_autodispatch_for_boot(s) is False
+        await s.commit()
+
+        for pk in (PK, other_pk):
+            marker = await dispatch.get_boot_disabled_marker(s, pk)
+            assert marker is not None, f"missing marker for {pk}"
+            at, reason = marker
+            assert isinstance(at, datetime)
+            assert reason == "real_backend_start"
+
+
+@pytest.mark.asyncio
+async def test_reset_autodispatch_for_boot_does_not_record_marker_on_hot_reload(monkeypatch):
+    _fake_identity(monkeypatch, "2020:11800")
+    async with KanbanSessionLocal() as s:
+        # First boot under the reloader is still a real start (no prior marker)
+        await dispatch.set_autodispatch(s, PK, True)
+        assert await dispatch.reset_autodispatch_for_boot(s) is False
+        await s.commit()
+
+        # Operator opts in, hot reload — same reloader. NO marker must land.
+        await dispatch.set_autodispatch(s, PK, True)
+        await s.commit()
+        assert await dispatch.reset_autodispatch_for_boot(s) is True
+        await s.commit()
+
+        assert await dispatch.get_boot_disabled_marker(s, PK) is None
+
+
+@pytest.mark.asyncio
+async def test_reset_autodispatch_for_boot_clears_marker_when_operator_opts_in(monkeypatch):
+    _fake_identity(monkeypatch, None)
+    async with KanbanSessionLocal() as s:
+        await dispatch.set_autodispatch(s, PK, True)
+        await dispatch.reset_autodispatch_for_boot(s)
+        await s.commit()
+        assert await dispatch.get_boot_disabled_marker(s, PK) is not None
+
+        await dispatch.set_autodispatch(s, PK, True)
+        await s.commit()
+
+        assert await dispatch.get_boot_disabled_marker(s, PK) is None
+
+
+@pytest.mark.asyncio
+async def test_reset_autodispatch_for_boot_uses_reloader_changed_reason(monkeypatch):
+    """When the reloader identity changes between boots, the marker still
+    records ``reloader_changed`` (not ``real_backend_start``) — both are
+    legitimate policy-driven force-offs, but the UI hint can show different
+    copy and the audit trail benefits from the distinction."""
+    async with KanbanSessionLocal() as s:
+        _fake_identity(monkeypatch, "2020:11800")
+        await dispatch.reset_autodispatch_for_boot(s)
+        await dispatch.set_autodispatch(s, PK, True)
+        await s.commit()
+
+        _fake_identity(monkeypatch, "33877:122753")
+        await dispatch.reset_autodispatch_for_boot(s)
+        await s.commit()
+
+        marker = await dispatch.get_boot_disabled_marker(s, PK)
+        assert marker is not None
+        assert marker[1] == "reloader_changed"
 
 
 # ---- prompt ----------------------------------------------------------------
