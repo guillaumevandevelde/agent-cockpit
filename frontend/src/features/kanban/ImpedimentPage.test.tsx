@@ -502,3 +502,111 @@ describe("ImpedimentPage resolve flow", () => {
     });
   });
 });
+
+// Kaart 504b4e8a… ("Vrije-tekst impediment-resolve laat de gate open"): when
+// a card has an open gate with options, clicking Resolve without picking an
+// option AND without typing any text used to call the backend with
+// `answer: undefined`, which stamped the free-text resolve sentinel onto the
+// gate and closed it with a placeholder answer — leaving the resumed agent
+// with no real decision to act on. The fix is a UI-side guard: the Resolve
+// button is disabled until the operator has either picked an option or typed
+// some text. Three states the guard must cover, one assertion per state.
+describe("ImpedimentPage Resolve button — empty submit guard (kaart 504b4e8a…)", () => {
+  it("disables Resolve when an open gate has options but nothing is picked and no text is typed", async () => {
+    // The exact symptom: open gate with 4 options, neither option nor text
+    // supplied. Backend would have been called with `answer: undefined`
+    // and the sentinel stamped onto the gate.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    const submit = (await screen.findByTestId("resolve-impediment-submit")) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+  });
+
+  it("disables Resolve when no open gate exists and the textarea is empty", async () => {
+    // No gate to answer, no options to pick — text is the only input
+    // channel, so an empty textarea must keep Resolve disabled.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    const submit = (await screen.findByTestId("resolve-impediment-submit")) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+  });
+
+  it("enables Resolve when an option is picked (text may remain empty)", async () => {
+    // Pick alone is enough — the textarea placeholder explicitly says
+    // "leave a pick above unclicked and answer here instead", so either
+    // input channel counts.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    fireEvent.click(screen.getByRole("button", { name: /sneller live/i }));
+    const submit = screen.getByTestId("resolve-impediment-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+  });
+
+  it("enables Resolve when free text is typed (no pick required)", async () => {
+    // Symmetric to the option-pick case: free text substitutes for a pick
+    // when both are available.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    const textarea = screen.getByTestId("resolve-impediment-answer") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Kies A en hou B in de achterzak" } });
+    expect(textarea.value).toBe("Kies A en hou B in de achterzak");
+    const submit = screen.getByTestId("resolve-impediment-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+  });
+
+  it("treats whitespace-only text as empty (whitespace does not count as input)", async () => {
+    // Edge case the textarea's `value` state could let through: spaces,
+    // tabs, newlines. The backend's `resolveImpediment` receives `answer`
+    // after `answer.trim() || undefined`, so whitespace-only is already
+    // backend-equivalent to empty. Mirror that on the front-end so the
+    // guard matches what the backend actually sees.
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([openGate]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    await screen.findByRole("heading", { name: /tokensaver integreren/i });
+    const textarea = screen.getByTestId("resolve-impediment-answer") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "   \n  \t  " } });
+    expect(textarea.value).toBe("   \n  \t  ");
+    const submit = screen.getByTestId("resolve-impediment-submit") as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+  });
+
+  it("enables Resolve when the gate is already answered (free text is then optional)", async () => {
+    // When `hasGateAnswer` is true, the textarea placeholder says
+    // "Optional: add extra context" — the gate has been closed, the
+    // resume picks up the prior answer, and a Resolve without new text
+    // is a legitimate operation (e.g. the operator wants to add nothing
+    // and just send the card back to Backlog).
+    (kanbanApi.getCard as ReturnType<typeof vi.fn>).mockImplementation(getCardMock());
+    (kanbanApi.listGates as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { ...openGate, status: "answered" },
+    ]);
+    (kanbanApi.activity as ReturnType<typeof vi.fn>).mockResolvedValue(impedimentActivity);
+
+    renderPage("card-imp-1");
+
+    const submit = (await screen.findByTestId("resolve-impediment-submit")) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+  });
+});
