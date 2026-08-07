@@ -127,6 +127,57 @@ for checking the frontend yourself first.
 If a frontend check fails: fix the issue, re-run, and only ship once green.
 Never ship a known-red frontend check.
 
+## 2b. Visible UI affordance: one browser count
+
+Endpoint-tests en component-tests bewijzen samen niet dat ze
+verbonden zijn. Kaart `d444b2d0…` (agent-bridge → kanban-kaart-navigatie)
+is twee rondes als "af" geshipt met groene tests terwijl de knop nul
+keer in de app rendere: `/sessions` had het `card_id`-veld dat de
+frontend-test voedde, maar de tegels kwamen uit `/teams` zonder
+enrichment. Twee groene tests, twee blinde vlekken, en het enige dat
+het had gevonden is één regel Playwright in de draaiende app.
+
+**Wanneer dit geldt.** De kaart voegt een **nieuwe zichtbare
+UI-affordance** toe: een knop, link, indicator, paneel, dialoog,
+route, of een element dat op het scherm verschijnt wanneer het er
+eerder niet was. **Niet** voor: backend-only kaarten, docs-kaarten,
+refactors, API-wijzigingen zonder UI-vertaling, test-coverage, of
+bug-fixes die niets nieuws tonen. Een bestaand element aanpassen
+(kleur, label, hover-state) is geen nieuwe affordance en valt buiten
+deze gate. Bij twijfel: als er vóór de diff géén DOM-element was op
+pad X en erna wel, telt het.
+
+**Wat je doet.** Eén telling of screenshot die bewijst dat de
+affordance in de draaiende app aanwezig is:
+
+```js
+const { chromium } = require('@playwright/test')
+const browser = await chromium.launch()
+const page = await browser.newPage()
+await page.goto('http://localhost:5173/<route>')
+const n = await page.locator('<jouw-affordance-selector>').count()
+// Verwacht ≥ 1; 0 = de feature bestaat niet in de UI
+await browser.close()
+```
+
+Drie regels Playwright tegen de al-draaiende dev-stack zijn genoeg —
+`./scripts/cockpit.sh start` of `./scripts/dev.sh` levert
+`http://localhost:5173` en Chromium zit al in de tree (zie
+`frontend/package.json` → `@playwright/test`). Weigert
+`./scripts/cockpit.sh start` omdat een andere sessie de poorten
+8000/5173 vasthoudt, volg dan
+[`docs/cockpit/isolated-component-preview.md`](../cockpit/isolated-component-preview.md)
+om de component in een scratch Vite op een vrije poort te mounten en
+dáár de telling te doen — geen wachttijd, geen gedeelde data.
+`<jouw-affordance-selector>` is een concrete `getByRole` / `getByLabel`
+/ `getByTestId` van de affordance die de kaart belooft; `count()` ≥
+1 is de canonieke assertion. Een screenshot naar
+`/tmp/<kaart-id>-<kind>.png` is een geldige evidence als de
+affordance geen getalsvorm heeft (een banner is tekst, geen
+affordance — `getByText(...)` is geen selector die telt). Sla de
+`count()`-uitslag of het pad op in je `**Summary:**`-comment zodat
+de reviewer 'm ziet.
+
 ## 3. Commit your work
 
 Make sure every change is committed to the current branch:
