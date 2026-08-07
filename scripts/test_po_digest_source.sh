@@ -53,8 +53,8 @@ check(){ if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 # `python3 -c "..."` pattern (the inside-quote `\"` escape interacts poorly
 # with multi-line python code passed through `eval`).
 #
-# Usage:  pycheck "any(x['card_id']=='card-A' for x in d['shipped'])"
-#         pycheck "d['window']['since'].startswith('2026-07-20')"
+# Usage:  echo "$out" | pycheck "any(x['card_id']=='card-A' for x in d['shipped'])"
+#         echo "$out" | pycheck "d['window']['since'].startswith('2026-07-20')"
 #
 # Implementation lives in scripts/lib/pycheck.sh (kaart 06863c73d1544b20bcc0208feb92bb50)
 # so other harnesses pick up the same Assert-wrap on bare expressions — the trap
@@ -144,7 +144,7 @@ run_collector() {
 # ----------------------------------------------------------------------------
 echo "Task 0: pycheck rejects false bare expressions"
 out='{"ok":false}'
-if pycheck 'd["ok"]' >/dev/null 2>&1; then
+if echo '{"ok":false}' | pycheck 'd["ok"]' >/dev/null 2>&1; then
   bad "pycheck → false expression fails"
 else
   ok "pycheck → false expression fails"
@@ -171,10 +171,10 @@ op "$db1" "op-boundary-summary" "card-boundary" "comment" '{"text":"**Summary:**
 out=$(run_collector "$db1" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
 check "shipped → exit 0"           '[ "$?" -eq 0 ]'
 check "shipped → valid JSON"       'echo "$out" | python3 -c "import json,sys; json.loads(sys.stdin.read())"'
-check "shipped → has card-A"       'pycheck "any(x[\"card_id\"]==\"card-A\" for x in d[\"shipped\"])"'
-check "shipped → includes exact since-boundary" 'pycheck "assert any(x[\"card_id\"]==\"card-boundary\" for x in d[\"shipped\"]), d[\"shipped\"]"'
-check "shipped → title from create-op" 'pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-A\")[\"title\"]==\"Card A title\""'
-check "shipped → summary text"     'pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-A\")[\"summary\"]==\"shipped A.\""'
+check "shipped → has card-A"       'echo "$out" | pycheck "any(x[\"card_id\"]==\"card-A\" for x in d[\"shipped\"])"'
+check "shipped → includes exact since-boundary" 'echo "$out" | pycheck "assert any(x[\"card_id\"]==\"card-boundary\" for x in d[\"shipped\"]), d[\"shipped\"]"'
+check "shipped → title from create-op" 'echo "$out" | pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-A\")[\"title\"]==\"Card A title\""'
+check "shipped → summary text"     'echo "$out" | pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-A\")[\"summary\"]==\"shipped A.\""'
 
 # ----------------------------------------------------------------------------
 echo "Task 3: a DELETED card (no kanban_cards row) still surfaces via the create-op"
@@ -184,8 +184,8 @@ op "$db2" "op3" "card-B" "create" '{"title":"Card B title (deleted later)"}' "20
 op "$db2" "op4" "card-B" "comment" '{"text":"**Summary:** shipped B."}' "2026-07-25 11:00:00.000000"
 out=$(run_collector "$db2" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
 check "deleted card → exit 0"        '[ "$?" -eq 0 ]'
-check "deleted card → survives in shipped" 'pycheck "any(x[\"card_id\"]==\"card-B\" for x in d[\"shipped\"])"'
-check "deleted card → title from create-op" 'pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-B\")[\"title\"]==\"Card B title (deleted later)\""'
+check "deleted card → survives in shipped" 'echo "$out" | pycheck "any(x[\"card_id\"]==\"card-B\" for x in d[\"shipped\"])"'
+check "deleted card → title from create-op" 'echo "$out" | pycheck "next(x for x in d[\"shipped\"] if x[\"card_id\"]==\"card-B\")[\"title\"]==\"Card B title (deleted later)\""'
 
 # ----------------------------------------------------------------------------
 echo "Task 4: window fallback when --since is omitted — no prior week file, since = now - 7d"
@@ -197,7 +197,7 @@ op "$db3" "op6" "card-C" "comment" '{"text":"**Summary:** recent."}' "$RECENT_TS
 # Empty PO_DIGEST_DIR so the fallback path is "no prior file".
 out=$(PO_DIGEST_DIR="$TMP/empty" python3 "$SUT" --kanban-db "$db3" --project-key "pk" --until "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>&1)
 check "fresh window → exit 0"    '[ "$?" -eq 0 ]'
-check "fresh window → card in shipped" 'pycheck "any(x[\"card_id\"]==\"card-C\" for x in d[\"shipped\"])"'
+check "fresh window → card in shipped" 'echo "$out" | pycheck "any(x[\"card_id\"]==\"card-C\" for x in d[\"shipped\"])"'
 check "fresh window → window.since is ~7d ago" 'echo "$out" | python3 -c "
 import json,sys,datetime
 d=json.loads(sys.stdin.read())
@@ -232,9 +232,9 @@ op "$db4" "op9" "card-E" "create" '{"title":"Card E"}' "2026-07-10 10:00:00.0000
 op "$db4" "op10" "card-E" "comment" '{"text":"**Summary:** too old."}' "2026-07-10 11:00:00.000000"
 out=$(PO_DIGEST_DIR="$TMP/po-digest" python3 "$SUT" --kanban-db "$db4" --project-key "pk" --until "2026-07-26T00:00:00Z" 2>&1)
 check "prior-file → exit 0"       '[ "$?" -eq 0 ]'
-check "prior-file → since = prior.until" 'pycheck "d[\"window\"][\"since\"].startswith(\"2026-07-20\")"'
-check "prior-file → card-D in shipped" 'pycheck "any(x[\"card_id\"]==\"card-D\" for x in d[\"shipped\"])"'
-check "prior-file → card-E NOT in shipped" 'pycheck "not any(x[\"card_id\"]==\"card-E\" for x in d[\"shipped\"])"'
+check "prior-file → since = prior.until" 'echo "$out" | pycheck "d[\"window\"][\"since\"].startswith(\"2026-07-20\")"'
+check "prior-file → card-D in shipped" 'echo "$out" | pycheck "any(x[\"card_id\"]==\"card-D\" for x in d[\"shipped\"])"'
+check "prior-file → card-E NOT in shipped" 'echo "$out" | pycheck "not any(x[\"card_id\"]==\"card-E\" for x in d[\"shipped\"])"'
 
 # ----------------------------------------------------------------------------
 echo "Task 6: decisions dedupe — same +| line in two commits → exactly one entry"
@@ -268,7 +268,7 @@ WINDOW_SINCE="2026-07-20T00:00:00Z"
 WINDOW_UNTIL="2026-07-26T00:00:00Z"
 out=$(python3 "$SUT" --repo-root "$REPO6" --project-key "pk" --since "$WINDOW_SINCE" --until "$WINDOW_UNTIL" 2>&1)
 check "decisions dedupe → exit 0" '[ "$?" -eq 0 ]'
-check "decisions dedupe → exactly 1 row for our line" 'pycheck "
+check "decisions dedupe → exactly 1 row for our line" 'echo "$out" | pycheck "
 matches=[x for x in d[\"decisions\"] if \"Same question\" in x.get(\"row\",\"\")]
 assert len(matches)==1, (len(matches), d[\"decisions\"][:5])
 assert \"GO\" in matches[0][\"row\"], matches[0]
@@ -298,11 +298,11 @@ unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
 cd "$REPO_ROOT"
 out=$(python3 "$SUT" --repo-root "$REPO7" --project-key "pk" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
 check "course_changes → exit 0" 'echo "$out" | python3 -c "import json,sys; json.loads(sys.stdin.read())"'
-check "course_changes → reversal row surfaced" 'pycheck "
+check "course_changes → reversal row surfaced" 'echo "$out" | pycheck "
 matches=[x for x in d[\"course_changes\"] if \"herzien\" in x.get(\"row\",\"\")]
 assert any(\"id2\" in m[\"row\"] for m in matches), (matches, d[\"course_changes\"])
 "'
-check "course_changes → reversal row NOT under decisions" 'pycheck "
+check "course_changes → reversal row NOT under decisions" 'echo "$out" | pycheck "
 assert not [x for x in d[\"decisions\"] if \"herzien\" in x.get(\"row\",\"\")], d[\"decisions\"]
 "'
 # Outcome and reopen paths use the exact since-boundary in backend-native storage form.
@@ -311,11 +311,11 @@ op "$db7" "opoc1" "card-X" "create" '{"title":"Card X"}' "2026-07-20 00:00:00.00
 op "$db7" "opoc2" "card-X" "comment" '{"text":"**Outcome:** not_feasible — explained."}' "2026-07-20 00:00:00.000000"
 op "$db7" "opreopen" "card-R" "reopen" '{}' "2026-07-20 00:00:00.000000"
 out=$(python3 "$SUT" --kanban-db "$db7" --repo-root "$REPO7" --project-key "pk" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
-check "course_changes → exact-boundary not_feasible Outcome surfaced" 'pycheck "
+check "course_changes → exact-boundary not_feasible Outcome surfaced" 'echo "$out" | pycheck "
 matches=[x for x in d[\"course_changes\"] if x.get(\"kind\")==\"outcome_not_feasible\" and x[\"card_id\"]==\"card-X\"]
 assert matches, d[\"course_changes\"]
 "'
-check "course_changes → exact-boundary reopen surfaced" 'pycheck "
+check "course_changes → exact-boundary reopen surfaced" 'echo "$out" | pycheck "
 matches=[x for x in d[\"course_changes\"] if x.get(\"kind\")==\"reopen\" and x[\"card_id\"]==\"card-R\"]
 assert matches, d[\"course_changes\"]
 "'
@@ -327,8 +327,8 @@ echo "Task 8: waiting backend-down — does NOT crash, waiting is empty, errors.
 out=$(BACKEND_BASE_URL="http://127.0.0.1:1" python3 "$SUT" --project-key "pk" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1); rc=$?
 check "backend-down → exit 0"  '[ "$rc" -eq 0 ]'
 check "backend-down → valid JSON" 'echo "$out" | python3 -c "import json,sys; json.loads(sys.stdin.read())"'
-check "backend-down → waiting is empty" 'pycheck "d[\"waiting\"]==[]"'
-check "backend-down → errors.waiting surfaces" 'pycheck "isinstance(d.get(\"errors\",{}).get(\"waiting\"),str) and d[\"errors\"][\"waiting\"]"'
+check "backend-down → waiting is empty" 'echo "$out" | pycheck "d[\"waiting\"]==[]"'
+check "backend-down → errors.waiting surfaces" 'echo "$out" | pycheck "isinstance(d.get(\"errors\",{}).get(\"waiting\"),str) and d[\"errors\"][\"waiting\"]"'
 
 # ----------------------------------------------------------------------------
 echo "Task 9: waiting backend-up — stub HTTP server returns a WachtrijResponse"
@@ -368,7 +368,7 @@ done
 if [ -n "$PORT" ] && [ "$PORT" != "0" ]; then
   out=$(BACKEND_BASE_URL="http://127.0.0.1:$PORT" python3 "$SUT" --project-key "pk" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1); rc=$?
   check "backend-up → exit 0"  '[ "$rc" -eq 0 ]'
-  check "backend-up → waiting.surfaces wacht-1" 'pycheck "any(x[\"card_id\"]==\"wacht-1\" for x in d[\"waiting\"])"'
+  check "backend-up → waiting.surfaces wacht-1" 'echo "$out" | pycheck "any(x[\"card_id\"]==\"wacht-1\" for x in d[\"waiting\"])"'
   kill "$STUB_PID" 2>/dev/null || true
   wait "$STUB_PID" 2>/dev/null || true
 else
@@ -381,13 +381,13 @@ db10="$TMP/t10.db"; seed_db "$db10"
 out=$(run_collector "$db10" --since 2026-07-20T00:00:00Z --until 2026-07-26T00:00:00Z 2>&1)
 check "shape → exit 0"  '[ "$?" -eq 0 ]'
 check "shape → valid JSON" 'echo "$out" | python3 -c "import json,sys; json.loads(sys.stdin.read())"'
-check "shape → top-level keys are exactly the contract" 'pycheck "
+check "shape → top-level keys are exactly the contract" 'echo "$out" | pycheck "
 assert set(d.keys())=={\"shipped\",\"decisions\",\"waiting\",\"course_changes\",\"window\"}, set(d.keys())
 "'
-check "shape → window has since + until" 'pycheck "
+check "shape → window has since + until" 'echo "$out" | pycheck "
 assert {\"since\",\"until\"}.issubset(set(d[\"window\"].keys())), d[\"window\"]
 "'
-check "shape → empty sections are lists, not null" 'pycheck "
+check "shape → empty sections are lists, not null" 'echo "$out" | pycheck "
 for k in (\"shipped\",\"decisions\",\"waiting\",\"course_changes\"):
     assert isinstance(d[k],list), (k, d[k])
 "'

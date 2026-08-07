@@ -18,7 +18,7 @@
 # What this file provides
 # -----------------------
 #   pycheck <python-expression>
-#       Reads JSON from stdin (bound to `d`), evaluates the expression as the
+#       Reads JSON from stdin (bound to `d`). Evaluates the expression as the
 #       last statement of a multi-statement module. If the last statement is a
 #       bare expression, it is Assert-wrapped; explicit `assert …, ctx` lines
 #       pass through unchanged (the wrap is conditional on ast.Expr only).
@@ -37,13 +37,13 @@
 
 pycheck() {
     local expr="$1"
-    # Feed `$out` from the caller's scope via here-string so the harness-side
-    # `out=$(...); pycheck "..."` pattern keeps working without an explicit
-    # pipe. The contract: caller assigns the SUT's JSON to `$out` in scope
-    # before calling `pycheck` (the conventional variable name across
-    # scripts/test_*.sh harnesses). Tests in scripts/test_pycheck_lib.sh
-    # follow the same contract — see the explicit `out=...` assignments at
-    # the top of each contract.
+    # Read the JSON the caller pipes in via stdin. The caller is responsible
+    # for piping — the helper does NOT read a `$out` variable from scope
+    # (earlier revisions did, but that made the helper a no-op sink for any
+    # caller that piped different data than it had assigned to `$out`; the
+    # helper's name said "I assert", its docstring said "Reads JSON from
+    # stdin", and its body said "trust `$out`" — three different contracts).
+    # The single contract now: whatever you pipe in is what gets asserted.
     python3 -c "
 import ast, json, sys, textwrap
 d = json.loads(sys.stdin.read())
@@ -52,5 +52,5 @@ tree = ast.parse(source)
 if tree.body and isinstance(tree.body[-1], ast.Expr):
     tree.body[-1] = ast.Assert(test=tree.body[-1].value, msg=None)
 exec(compile(ast.fix_missing_locations(tree), '<pycheck>', 'exec'))
-" <<<"$out"
+"
 }
