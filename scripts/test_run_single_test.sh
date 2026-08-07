@@ -349,5 +349,47 @@ check "missing-file error references the file path (no ::func suffix)" \
 
 # ----------------------------------------------------------------------------
 echo
+echo "Task 13: frontend test path (.ts/.tsx) eager-rejects with vitest pointer"
+# run-single-test.sh is a pytest wrapper. A `.tsx` (or `.ts`) argument used
+# to fall through to the file-existence check and print a confusing
+# "test file not found" against pytest, leaving the author to reverse-
+# engineer the right invocation. The fix exits 2 with a copy-pasteable
+# vitest command (kaart 90e105d2…). The fake pytest below records "should
+# not have run" so we can also assert the rejection fires BEFORE pytest
+# is resolved.
+cat > "$TMP/fake_pytest_should_not_run_either" <<'EOF'
+#!/usr/bin/env bash
+echo "FAIL: script should have rejected before any pytest invocation" >&2
+exit 42
+EOF
+chmod +x "$TMP/fake_pytest_should_not_run_either"
+
+run_sut PYTEST_CMD="$TMP/fake_pytest_should_not_run_either" -- frontend/src/foo.test.tsx
+check ".tsx → exit 2 (misuse, not 'tests failed')" '[ "$rc" -eq 2 ]'
+check ".tsx → points at run-single-test.sh as a pytest wrapper" \
+    'echo "$out" | grep -qE "pytest wrapper"'
+check ".tsx → points at the local vitest binary (not \`npx\`)" \
+    'echo "$out" | grep -qE "\./node_modules/\.bin/vitest"'
+check ".tsx → command is copy-pasteable and includes the original path" \
+    'echo "$out" | grep -qE "vitest run frontend/src/foo\.test\.tsx"'
+check ".tsx → pytest was NOT invoked (rejection fires before venv resolution)" \
+    '! echo "$out" | grep -qE "should have rejected before any pytest"'
+
+run_sut PYTEST_CMD="$TMP/fake_pytest_should_not_run_either" -- frontend/src/foo.ts
+check ".ts (no x) → also rejects with exit 2" '[ "$rc" -eq 2 ]'
+check ".ts → same vitest pointer" \
+    'echo "$out" | grep -qE "vitest run frontend/src/foo\.ts"'
+
+# Regression guard: a `.py` target must STILL pass through to pytest
+# untouched. The eager-reject only fires on `.ts`/`.tsx`, so the existing
+# file::func machinery (Task 12) keeps working.
+run_sut PYTEST_CMD="$TMP/fake_pytest_pass" -- "tests/test_ship_recipe_drift.py::test_x"
+check "regression: .py file::func still reaches pytest after the new check" \
+    '[ "$rc" -eq 0 ]'
+check "regression: .py still surfaces the fake-pytest output" \
+    'echo "$out" | grep -qE "test_y PASSED"'
+
+# ----------------------------------------------------------------------------
+echo
 echo "Total: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

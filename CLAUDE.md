@@ -107,6 +107,13 @@ bash scripts/run-single-test.sh tests/test_x.py                  # whole file
 bash scripts/run-single-test.sh tests/test_x.py::test_y          # one test
 bash scripts/run-single-test.sh tests/test_x.py -k "param_id"    # pytest -k filter
 
+# Single frontend test (vitest). Local binary, not `npx` — `npx` is blocked by
+# the malicious-package-scan hook on this box. The `( cd frontend && ... )`
+# subshell keeps the cwd-trap at bay (zie Werkomgeving in worktree §3).
+( cd frontend && ./node_modules/.bin/vitest run src/path/to/X.test.tsx )
+( cd frontend && ./node_modules/.bin/vitest run )                # hele frontend-suite (~10s)
+# `scripts/run-single-test.sh foo.test.tsx` weigert met een pointer naar deze vorm.
+
 # Docs / decision register
 ./scripts/check-decision-register.sh          # Flag any docs/cockpit/*-decision.md missing from decisions.md (advisory; --strict = exit 1)
 ./scripts/check-doc-frontmatter.sh            # Flag docs/cockpit/*.md zonder OKF-frontmatter of met onbekende type/status (advisory; --strict = exit 1)
