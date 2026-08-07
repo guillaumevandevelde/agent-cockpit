@@ -87,7 +87,7 @@ set -e
 # capture, and the header removal preserves that ordering.
 BASELINE_NO_META="$(mktemp)"
 trap 'rm -f "$CURRENT" "$BASELINE_NO_META"' EXIT
-grep -v '^# ' "$BASELINE" > "$BASELINE_NO_META"
+grep -v '^# ' "$BASELINE" > "$BASELINE_NO_META" || true
 
 # Set arithmetic: |pre-existing ∩ current|, |current \ pre-existing|,
 # |pre-existing \ current|. Use comm -12 (intersection), -23 (current-only),
@@ -102,7 +102,7 @@ new_count=$(printf '%s\n' "$new_list" | grep -c . || true)
 # was captured N hours ago on origin/master@SHA, which has since moved M
 # commits". A "0 NEW" line without this context is exactly the ambiguity
 # that burned kaart ae9648c2… (kanban card 53af2e23…).
-body_count=$(grep -cv '^# ' "$BASELINE")
+body_count=$(grep -cv '^# ' "$BASELINE" || true)
 meta_captured_at=$(grep -m1 '^# captured-at: ' "$BASELINE" 2>/dev/null \
     | sed -E 's/^# captured-at:[[:space:]]+//' || true)
 meta_baseline_sha=$(grep -m1 '^# baseline-sha: ' "$BASELINE" 2>/dev/null \
