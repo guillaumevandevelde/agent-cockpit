@@ -1681,9 +1681,17 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     // The body itself is the scroll container.
     expect(body.className).toMatch(/\boverflow-auto\b/);
 
+    // Two scroll-class elements: the body, plus the sticky priority area
+    // shell above it (kaart d4012bd1…). For a Backlog card that shell is
+    // empty — it renders 0px tall and paints no scrollbar — but it carries
+    // the class unconditionally, which is what bounds it once a gate panel
+    // or Done banner lands in it.
     const scrollables = scrollableElementsInDialog();
-    expect(scrollables).toHaveLength(1);
-    expect(scrollables[0]).toBe(body);
+    expect(scrollables).toHaveLength(2);
+    expect(scrollables).toContain(body);
+    expect(scrollables).toContain(
+      screen.getByTestId("card-drawer-priority-area"),
+    );
 
     // Header (the title) is a sibling of the body, not a descendant.
     const title = screen.getByRole("heading", { name: "Test card" });
@@ -1733,14 +1741,19 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(summaryScroll.className).toMatch(/\bflex-1\b/);
     expect(summaryScroll.className).toMatch(/\bmin-h-0\b/);
 
-    // Two scroll-class elements now: the body and the banner's content
-    // scroll area. Anything more means a regression introduced a
-    // nested scrollbar the user has to chase (see CardRunTab /
-    // CardLedgerTab history in this file's commit log).
+    // Three scroll-class elements now: the body, the banner's content
+    // scroll area, and the sticky priority-area shell that bounds the
+    // banner + actions panel together (kaart d4012bd1…). Anything more
+    // means a regression introduced a nested scrollbar the user has to
+    // chase (see CardRunTab / CardLedgerTab history in this file's
+    // commit log).
     const scrollables = scrollableElementsInDialog();
-    expect(scrollables).toHaveLength(2);
+    expect(scrollables).toHaveLength(3);
     expect(scrollables).toContain(body);
     expect(scrollables).toContain(summaryScroll);
+    expect(scrollables).toContain(
+      screen.getByTestId("card-drawer-priority-area"),
+    );
 
     // The title still sits outside the body — header hierarchy is intact.
     const title = screen.getByRole("heading", { name: "Test card" });
@@ -1876,6 +1889,46 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(body.clientHeight).toBeGreaterThan(0);
   });
 
+  it("Done card with the actions panel expanded: the sticky priority area owns a height cap + overflow, so the two textareas can't push the body off the modal", async () => {
+    // Measured in a real browser at 1280×720 with a long summary and the
+    // "Review of heropen" panel expanded — BEFORE this cap: body = 0px and
+    // the "Heropen met feedback" submit sat 113px *below* the modal edge
+    // with no scrollbar anywhere (the card's "onderste deel niet langer
+    // leesbaar"). AFTER: priority area 360px (50vh) with scrollHeight 662
+    // → its own scrollbar, body 148px, submit reachable by scrolling the
+    // area. The banner's own 40vh cap does not cover this case: the
+    // unbounded growth came from the sibling panel, not the banner.
+    const doneCard: Card = {
+      ...baseCard,
+      column: "Done",
+      done_summary: "Shipped.",
+      completed_at: "2026-07-10T12:00:00Z",
+    };
+    render(
+      <CardDrawerWithRouter
+        card={doneCard}
+        projectPath="/proj"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />,
+    );
+    await expandDoneActions();
+
+    const area = screen.getByTestId("card-drawer-priority-area");
+    expect(area.className).toMatch(/max-h-\[50vh\]/);
+    expect(area.className).toMatch(/\boverflow-y-auto\b/);
+
+    // Both the banner and the expanded controls sit inside that cap —
+    // capping only one of the two is what left the gap.
+    expect(area.contains(screen.getByTestId("done-summary-banner"))).toBe(true);
+    expect(area.contains(screen.getByTestId("reopen-submit"))).toBe(true);
+
+    // The body stays a sibling: it keeps its own flex-1 share instead of
+    // being nested inside the capped area.
+    const body = screen.getByTestId("card-drawer-body");
+    expect(area.contains(body)).toBe(false);
+  });
+
   // Negative control: pin the test's own logic. If a future editor
   // simplifies the geometry assertion to a tautology (e.g. compares
   // mocked-to-equal values), the negative case below fails first and
@@ -1946,11 +1999,17 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(fullArea.className).toMatch(/\bflex\b/);
     expect(fullArea.className).toMatch(/\bflex-col\b/);
 
-    // Zero scroll-class elements in the dialog when the widget owns
-    // scrolling — the body's overflow-hidden, the xterm container's
-    // overflow-hidden, and the xterm.js internal scrollbar all live
-    // outside the `overflow-*-(auto|scroll)` selector.
-    expect(scrollableElementsInDialog()).toHaveLength(0);
+    // Only the (empty) sticky priority-area shell carries a scroll class
+    // when the widget owns scrolling — the body's overflow-hidden, the
+    // xterm container's overflow-hidden, and the xterm.js internal
+    // scrollbar all live outside the `overflow-*-(auto|scroll)` selector.
+    // The shell renders 0px tall for a card with no gates/Done banner, so
+    // it paints no scrollbar (kaart d4012bd1…).
+    const scrollables = scrollableElementsInDialog();
+    expect(scrollables).toHaveLength(1);
+    expect(scrollables[0]).toBe(
+      screen.getByTestId("card-drawer-priority-area"),
+    );
 
     const title = screen.getByRole("heading", { name: "Test card" });
     expect(fullArea.contains(title)).toBe(false);

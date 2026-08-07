@@ -1292,8 +1292,25 @@ export function CardDrawer({
         {/* Sticky priority area: action-required content always visible
             above the body, even when the body is in full-area mode (Run
             tab). Decisions + Done summary are never hidden behind a
-            widget. */}
-        <div className="shrink-0 space-y-3">
+            widget.
+
+            Height cap (kaart d4012bd1…): this area is `shrink-0`, so
+            whatever it contains is subtracted from the body's `flex-1`
+            before the body gets anything. Capping only the Done banner
+            (40vh) was not enough — expanding the "Review of heropen"
+            panel adds ~320px of textareas, and on a 1280×720 viewport
+            that measured body = 0px with the Heropen submit button
+            113px *below* the modal edge and no scrollbar anywhere: the
+            exact symptom this card reports. `max-h-[50vh]` +
+            `overflow-y-auto` bounds the whole area instead of each
+            child: the collapsed state (banner ≤ 40vh + the 42px toggle)
+            still fits without a scrollbar, and the rare expanded state
+            scrolls inside this area instead of pushing the body off the
+            modal. */}
+        <div
+          className="max-h-[50vh] shrink-0 space-y-3 overflow-y-auto"
+          data-testid="card-drawer-priority-area"
+        >
           {openGates
             // On the Impediment column the open-gate choice row is absorbed
             // into `ImpedimentPage.tsx` (kaart 626e05e3… moved the resolve
