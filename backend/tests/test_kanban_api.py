@@ -63,6 +63,212 @@ async def test_rest_move_card_to_impediment_is_rejected():
         assert card["column"] != "Impediment"
 
 
+# --- REST /cards/{id}/move shares the summary/outcome gate with MCP -------
+#
+# Bug (kanban card efbb82e6…): the REST mirror of `mcp_server.move_card` did
+# no gate at all — a `POST /move` to `Done` without a summary landed silently,
+# and the dispatch fallback-instructie in dispatch.py told agents to "follow
+# with a `comment` carrying your summary" precisely because the REST move had
+# no `summary` field. The fix is one shared gate in `service.py` that both
+# callers translate to their own wire shape (dict vs HTTPException 422).
+# These tests pin the REST half of that contract. The MCP half stays in
+# `tests/test_kanban_mcp.py`; that file already covers the surface and the
+# refactor must not regress any of those cases.
+
+@pytest.mark.asyncio
+async def test_rest_move_card_to_impediment_without_summary_returns_use_report_impediment():
+    """A REST move to Impediment WITHOUT a summary returns
+    ``use_report_impediment`` (NOT ``summary_required``), mirroring the
+    existing MCP contract (kaart b8e3ac8b… decision A): the Impediment
+    gate fires before the summary check, and only ``report_impediment``
+    may park a card there. This test pins the precedence explicitly so a
+    future reviewer can't misread the AC ("Done of Impediment zonder
+    samenvatting → summary_required") as applying to Impediment too —
+    the AC says "same shape as MCP", and MCP returns
+    ``use_report_impediment`` regardless of summary."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "T", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        # No `summary` field at all.
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Impediment"})
+        assert r.status_code == 422, r.text
+        body = r.json()
+        assert body.get("error") == "use_report_impediment", (
+            f"Impediment-without-summary must return use_report_impediment, "
+            f"got {body!r}"
+        )
+        assert "report_impediment" in body.get("message", "")
+
+        # Same error code when a summary IS supplied — the Impediment
+        # gate fires first, ignoring summary (kaart b8e3ac8b… decision A).
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Impediment", "summary": "I am stuck."})
+        assert r.status_code == 422, r.text
+        assert r.json().get("error") == "use_report_impediment"
+
+
+@pytest.mark.asyncio
+async def test_rest_move_card_to_done_without_summary_is_rejected():
+    """`POST /move` to Done without `summary` returns 422 `summary_required`,
+    mirrors the MCP error code, and the card stays put."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "T", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Done"})
+        assert r.status_code == 422, r.text
+        # Error code surface matches MCP — clients see the same shape
+        # on the wire (top-level ``error`` key, not nested under
+        # ``detail``).
+        body = r.json()
+        err = body.get("error")
+        msg = body.get("message", "")
+        assert err == "summary_required", (
+            f"422 body must carry top-level error='summary_required', "
+            f"got {body!r}"
+        )
+        assert "summary" in msg.lower(), (
+            f"message must mention summary, got: {msg!r}"
+        )
+        # Card must stay put.
+        r2 = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
+        card = next(c for c in r2.json()["items"] if c["id"] == cid)
+        assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_rest_move_card_to_done_with_blank_summary_is_rejected():
+    """Blank/whitespace-only summary counts as missing (matches MCP)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "T", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Done", "summary": "   \n  "})
+        assert r.status_code == 422, r.text
+        body = r.json()
+        assert body.get("error") == "summary_required", body
+
+
+@pytest.mark.asyncio
+async def test_rest_move_card_to_done_with_summary_is_allowed_and_posts_comment():
+    """Happy path: a Done move with `summary` lands the card in Done AND
+    posts a `**Summary:** …` comment to the activity feed. Without the
+    comment, the gate fires but the board stays empty — same shape of
+    useless card the original bug described."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "T", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Done",
+                  "summary": "Implemented the REST summary gate."})
+        assert r.status_code == 200, r.text
+        assert r.json()["column"] == "Done"
+
+        # The **Summary:** comment must have landed.
+        r2 = await ac.get(f"/api/v1/kanban/cards/{cid}/activity")
+        assert r2.status_code == 200, r2.text
+        ops = r2.json()
+        comment_ops = [o for o in ops if o["op_type"] == "comment"]
+        assert any(
+            "Implemented the REST summary gate." in (o["payload"].get("text") or "")
+            and "**Summary:**" in (o["payload"].get("text") or "")
+            for o in comment_ops
+        ), f"Expected a **Summary:** comment, got ops: {ops!r}"
+
+
+@pytest.mark.asyncio
+async def test_rest_move_card_to_other_columns_does_not_require_summary():
+    """Non-terminal moves (Backlog→Doing, etc.) keep working without
+    `summary` — the gate fires only on Done/Impediment."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "T", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Doing"})
+        assert r.status_code == 200, r.text
+        assert r.json()["column"] == "Doing"
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "To Resume"})
+        assert r.status_code == 200, r.text
+        assert r.json()["column"] == "To Resume"
+
+
+@pytest.mark.asyncio
+async def test_rest_move_analysis_card_to_done_without_outcome_is_rejected():
+    """Analysis cards (work_type='analysis') moving to Done without an
+    explicit `outcome` from the closed enum are refused with the same
+    `outcome_required` error as MCP. The card stays put."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "Analyse",
+                  "work_type": "analysis", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Done", "summary": "analysis done"})
+        assert r.status_code == 422, r.text
+        body = r.json()
+        err = body.get("error")
+        msg = body.get("message", "")
+        assert err == "outcome_required", (
+            f"expected outcome_required, got {r.json()!r}"
+        )
+        # Same three-way help as MCP — agent can self-correct.
+        for value in ("decomposed", "not_feasible", "no_action_needed"):
+            assert value in msg, (
+                f"{value} missing from message: {msg!r}"
+            )
+        r2 = await ac.get("/api/v1/kanban/cards", params={"project_key": "P"})
+        card = next(c for c in r2.json()["items"] if c["id"] == cid)
+        assert card["column"] != "Done"
+
+
+@pytest.mark.asyncio
+async def test_rest_move_analysis_card_to_done_with_invalid_outcome_is_rejected():
+    """`outcome` not in the closed enum → 422 `invalid_outcome` with the
+    allowed list surfaced, mirroring MCP."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/api/v1/kanban/cards",
+            json={"project_key": "P", "title": "Analyse",
+                  "work_type": "analysis", "confirm_new_project": True})
+        cid = r.json()["id"]
+
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+            json={"column": "Done", "summary": "x", "outcome": "bogus"})
+        assert r.status_code == 422, r.text
+        body = r.json()
+        err = body.get("error")
+        allowed = body.get("allowed")
+        assert err == "invalid_outcome", (
+            f"expected invalid_outcome, got {r.json()!r}"
+        )
+        assert allowed is not None, "invalid_outcome must carry allowed list"
+        for value in ("decomposed", "not_feasible",
+                      "no_action_needed", "filed_standalone"):
+            assert value in allowed, (
+                f"allowed list missing {value}: {allowed!r}"
+            )
+
+
 @pytest.mark.asyncio
 async def test_reorder_cards_sets_rank_order():
     transport = ASGITransport(app=app)

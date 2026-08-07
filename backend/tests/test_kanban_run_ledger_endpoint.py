@@ -173,10 +173,12 @@ async def test_run_ledger_full_chain(tmp_path):
                           json={"kind": "pr", "ref": "https://github.com/o/r/pull/1"})
         assert r.status_code == 200, r.text
 
-        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move", json={"column": "Done"})
-        assert r.status_code == 200, r.text
-        r = await ac.post(f"/api/v1/kanban/cards/{cid}/comment",
-                          json={"text": "**Summary:** shipped the thing"})
+        # Kaart efbb82e6… — the REST /move shares the gate with MCP;
+        # a Done move needs `summary` or it's refused with 422. Pass
+        # the summary inline so the gate accepts the move.
+        r = await ac.post(f"/api/v1/kanban/cards/{cid}/move",
+                          json={"column": "Done",
+                                "summary": "shipped the thing"})
         assert r.status_code == 200, r.text
 
         r = await ac.get(f"/api/v1/kanban/cards/{cid}/run-ledger")
