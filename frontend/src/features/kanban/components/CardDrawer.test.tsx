@@ -1863,7 +1863,7 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(body.clientHeight).toBeGreaterThan(0);
   });
 
-  it("Done card with the actions panel expanded: the sticky priority area owns a height cap + overflow, so the two textareas can't push the body off the modal", async () => {
+  it("Done card with the actions panel expanded: the sticky priority area owns a height cap + overflow, so the feedback form can't push the body off the modal", async () => {
     // Measured in a real browser at 1280×720 with a long summary and the
     // "Review of heropen" panel expanded — BEFORE this cap: body = 0px and
     // the "Heropen met feedback" submit sat 113px *below* the modal edge
@@ -1892,10 +1892,10 @@ describe("CardDrawer scroll contract — single scrollable body", () => {
     expect(area.className).toMatch(/max-h-\[50vh\]/);
     expect(area.className).toMatch(/\boverflow-y-auto\b/);
 
-    // Both the banner and the expanded controls sit inside that cap —
+    // Both the banner and the expanded feedback form sit inside that cap —
     // capping only one of the two is what left the gap.
     expect(area.contains(screen.getByTestId("done-summary-banner"))).toBe(true);
-    expect(area.contains(screen.getByTestId("reopen-submit"))).toBe(true);
+    expect(area.contains(screen.getByTestId("feedback-submit-reopen"))).toBe(true);
 
     // The body stays a sibling: it keeps its own flex-1 share instead of
     // being nested inside the capped area.
