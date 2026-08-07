@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 
 from app.config import settings
@@ -899,34 +899,38 @@ def _project_key_from_card(s, card) -> str:
 
 @router.post("/cards/{cid}/move", response_model=CardResponse)
 async def move_card(cid: str, payload: MoveRequest):
-    # Routing-to-Impediment gate (kaart b8e3ac8b… decision A). Same
-    # reason as `mcp_server.move_card`: a raw REST move into Impediment
-    # skips the KanbanGate and leaves the 0-button screen. The MCP
-    # fallback-instructie in dispatch.py pointed at this endpoint when
-    # the MCP handshake was broken, so closing the route here is what
-    # keeps the product owner's invariant alive even on a degraded
-    # dispatch path. The MCP `report_impediment` tool is the only way
-    # in; this REST endpoint mirrors that policy. `report_impediment`
-    # has no REST equivalent on purpose — the gate machinery is
-    # designed to be machine-driven, and the only machine path is via
-    # MCP.
-    if payload.column == "Impediment":
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "REST /cards/{id}/move cannot park a card in `Impediment` "
-                "— that route skips the KanbanGate and leaves the "
-                "Impediment screen with 0 choice buttons. Use the MCP "
-                "tool `report_impediment(card_id, question, options=...)` "
-                "instead; pass 4 options for a structured 4-button "
-                "picker, or omit `options` for a free-text question."
-            ),
-        )
+    # Routing-to-Impediment gate (kaart b8e3ac8b… decision A) lives in
+    # the shared gate below; the only thing special-cased here is the
+    # wire translation. The MCP fallback-instructie in dispatch.py
+    # points at this endpoint when the MCP handshake is broken, so
+    # closing the route here is what keeps the product owner's
+    # invariant alive even on a degraded dispatch path.
 
     async with KanbanSessionLocal() as s:
         card = await service.get_card(s, cid)
         if card is None:
             raise HTTPException(404, "card not found")
+
+        # Shared gate (kaart efbb82e6…). Same logic the MCP tool runs,
+        # same error codes (``summary_required`` / ``outcome_required`` /
+        # ``invalid_outcome`` / ``no_children`` / ``no_filed_cards`` /
+        # ``use_report_impediment``) AND the same wire shape on refusal:
+        # ``{"error": code, "message": ..., "allowed": [...]}`` at the
+        # top level — not nested under ``{"detail": ...}``. The MCP
+        # fallback-instructie told agents to expect ``{"error":
+        # "summary_required"}`` literally; matching that means returning
+        # a ``JSONResponse`` directly instead of ``HTTPException(detail=
+        # {...})``, which would otherwise wrap the dict under
+        # ``detail``. Tests assert the top-level ``error`` key.
+        try:
+            cleaned_summary, cleaned_outcome = await service.enforce_move_gate(
+                s, card, payload.column, payload.summary, payload.outcome
+            )
+        except service.MoveGateRejected as e:
+            body: dict = {"error": e.error_code, "message": e.message}
+            if e.allowed is not None:
+                body["allowed"] = e.allowed
+            return JSONResponse(status_code=422, content=body)
 
         # Auto-assign agent from column default if card has no explicit agent
         if card.agent is None:
@@ -939,7 +943,25 @@ async def move_card(cid: str, payload: MoveRequest):
                     payload={"agent": default_agent})
 
         await apply_operation(s, op_type="move", entity_type="card",
-            project_key="", entity_id=cid, payload=payload.model_dump())
+            project_key="", entity_id=cid,
+            payload={"column": payload.column,
+                     "rank": payload.rank})
+        # Post the side-effects the gate guaranteed would land —
+        # otherwise the gate fires but the board still shows an empty
+        # Done card. Same helpers the MCP move_card uses; no logic
+        # duplicated. ``payload.column`` is the *intended* column —
+        # the REST handler doesn't redirect (no parent-parking /
+        # reviewer routing), but the helper's intent-based contract
+        # keeps the call site uniform with MCP.
+        await service.apply_move_summary_comment(
+            s, cid, payload.column, cleaned_summary
+        )
+        if payload.column == "Done" and cleaned_outcome is not None \
+                and service.is_analyst_leaf_spike(card):
+            await service.apply_outcome_side_effects(
+                s, card, cleaned_outcome, cleaned_summary
+            )
+
         await s.commit()
         return await _reload(s, cid)
 

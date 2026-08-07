@@ -395,55 +395,12 @@ async def claim_card(card_id: str, claimed_by: str) -> dict:
         return await _card_dict(s, await service.get_card(s, card_id))
 
 
-# Landing a card here without a word of what happened makes the board useless as a
-# record: Done just says "it's done", Impediment just says "it's stuck". Requiring
-# `summary` on move_card into either one guarantees every card that reaches a
-# terminal column carries a human-readable account of the work, regardless of which
-# coding agent/provider drove the session — enforced once here rather than per-agent
-# prompt text that could be skipped. report_impediment already gets this for free
-# (its mandatory `question` arg is posted the same way), so this only closes the gap
-# for the Done path and for a raw move_card("Impediment", ...) bypassing that tool.
-_SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary"}
-
-# Analysis cards (`work_type == "analysis"` or `agent == "analyst"`) are the
-# highest-discipline consumer of the Done state: their value is downstream
-# work (subtask cards, a NO-GO, or a judgement that no follow-up is needed),
-# not "did the analyst session end". A summary alone is the wrong witness
-# surface for that — three previous rounds of prompt-level instructions were
-# ignored because no machine path verified them (decision doc §1). This
-# gate closes that gap. The closed enum maps exactly the three legitimate
-# exits of the user's request (`analysis-outcome-contract-decision.md` §2):
-#
-#   decomposed      — child cards were created; verified against the DB
-#                     (≥1 row with parent_card_id == card.id). The children
-#                     ARE the artefact; no extra label is set.
-#   not_feasible    — "we should not build this"; rationale lives in summary.
-#                     Sets the canonical label `not-feasible`.
-#   no_action_needed — "this is a decision/steering artefact; no cards".
-#                     Sets the canonical label `no-action-needed`.
-#
-# The fourth exit — "input needed" — is `report_impediment`, not a Done
-# move; the gate intentionally doesn't try to model it (decision §5
-# "waarom no_action_needed geen achterdeur is").
-_OUTCOMES = frozenset({
-    "decomposed",        # child cards exist (parent_card_id == card.id); uses parent-parking
-    "not_feasible",      # canonical label `not-feasible`; conclude "do not build"
-    "no_action_needed",  # canonical label `no-action-needed`; decision/steering artefact
-    "filed_standalone",  # trigger-card filed N Backlog kaarten WITHOUT parentage
-                          # (recurring-cadence-proposal.md §4); verified against
-                          # metadata.filed_card_ids (analysis-outcome-contract-decision.md §9)
-})
-
-# Label keys for the path-labelling outcomes. Keep them lowercase kebab,
-# matching the project's existing free-form label vocabulary. See
-# `docs/cockpit/kanban-conventions.md` §2 for the comment-prefix contract.
-# `filed_standalone` is intentionally absent — it's a *card-relationship*
-# outcome, not an outcome taxonomy, so it gets no extra label. The
-# `**Outcome:** …` activity-feed comment is its only neerslag (decision §9).
-_OUTCOME_LABELS = {
-    "not_feasible": "not-feasible",
-    "no_action_needed": "no-action-needed",
-}
+# The summary/outcome gate lives in ``service.enforce_move_gate`` (kaart
+# efbb82e6…) so both this MCP tool and its REST mirror share the same
+# validation + error contract. The MCP call here is a thin wrapper that
+# translates the exception into the JSON-RPC dict shape. The constants
+# ``SUMMARY_REQUIRED_COLUMNS`` / ``OUTCOMES`` / ``OUTCOME_LABELS`` now
+# live alongside the gate in ``app.kanban.service``.
 
 
 @mcp.tool()
@@ -520,194 +477,31 @@ async def move_card(card_id: str, column: str,
             logger.debug("move_card: %s not found", card_id)
             return {"error": _NOT_FOUND, "card_id": card_id}
 
-        # Routing-to-Impediment gate (kaart b8e3ac8b… decision A). Fires
-        # BEFORE `summary_required` so the agent sees the actionable
-        # error code even when they supplied a summary — the issue is
-        # the missing gate, not the missing prose. The error message
-        # names `report_impediment` so the agent doesn't have to read
-        # the docs to find the right tool.
-        if column == "Impediment":
-            logger.info(
-                "move_card: %s rejected — column='Impediment' is "
-                "report_impediment's job, not move_card's", card_id)
-            return {
-                "error": "use_report_impediment",
-                "message": (
-                    "`move_card` cannot park a card in `Impediment` — "
-                    "that route skips the KanbanGate and leaves the "
-                    "Impediment screen with 0 choice buttons. Use "
-                    "`report_impediment(card_id, question, options=...)` "
-                    "instead; pass 4 options for a structured 4-button "
-                    "picker, or omit `options` for a free-text question. "
-                    "Either way a human sees the question and the card "
-                    "stays gateable."
-                ),
-            }
+        # Shared gate (kaart efbb82e6…). The same validation runs on the
+        # REST mirror of this tool — ``enforce_move_gate`` is the single
+        # source of truth so the two callers can't drift. On refusal we
+        # translate the exception back to the MCP wire shape
+        # (``{"error": code, "message": …, "allowed": [...]}``); on
+        # success we get back the cleaned inputs the rest of this
+        # function already needs.
+        try:
+            cleaned_summary, cleaned_outcome = await service.enforce_move_gate(
+                s, card, column, summary, outcome
+            )
+        except service.MoveGateRejected as e:
+            logger.info("move_card: %s rejected — %s", card_id, e.error_code)
+            out: dict = {"error": e.error_code, "message": e.message}
+            if e.allowed is not None:
+                out["allowed"] = e.allowed
+            return out
+        summary = cleaned_summary
+        outcome = cleaned_outcome
 
-        label = _SUMMARY_REQUIRED_COLUMNS.get(column)
-        summary = (summary or "").strip()
-        if label and not summary:
-            return {
-                "error": "summary_required",
-                "message": (
-                    f'Add a `summary` describing the work done before moving to "{column}" '
-                    "— it's posted to the card's activity feed."
-                ),
-            }
-
-        # Analysis-outcome gate: only fires on Done + analyst routing. Both
-        # checks are explicit so a future "move analysis card to Doing"
-        # path can stay free. Non-analysis cards and non-Done moves fall
-        # through unchanged — full backwards compatibility for every
-        # existing caller (decision doc §5).
-        is_analysis_done = (
-            column == "Done" and service.is_analyst_leaf_spike(card)
-        )
-        outcome_clean = (outcome or "").strip() or None
-        if is_analysis_done:
-            if outcome_clean is None:
-                return {
-                    "error": "outcome_required",
-                    "message": (
-                        "An analysis card (work_type='analysis' or agent='analyst') "
-                        "moving to Done must declare an explicit outcome. Pick one of "
-                        "the four values from the closed enum: `decomposed` (the "
-                        "analysis produced ≥1 child follow-up cards with "
-                        "`parent_card_id` set), `not_feasible` (the analysis concludes: "
-                        "do not build this), `no_action_needed` (decision/steering "
-                        "artefact only, no subtasks), or `filed_standalone` (a "
-                        "recurring-cadance trigger that filed ≥1 Backlog cards without "
-                        "parentage — verified against `metadata.filed_card_ids`). The "
-                        "chosen value lands as a `**Outcome:** …` comment in the "
-                        "activity feed; `not_feasible` and `no_action_needed` also "
-                        "append a canonical label. For an unresolved product fork "
-                        "instead, use `report_impediment`."
-                    ),
-                }
-            if outcome_clean not in _OUTCOMES:
-                return {
-                    "error": "invalid_outcome",
-                    "allowed": sorted(_OUTCOMES),
-                    "message": (
-                        f"`outcome` must be one of {sorted(_OUTCOMES)}; "
-                        f"got {outcome_clean!r}."
-                    ),
-                }
-            # `decomposed` is verified, not trusted. A claim without any
-            # child cards is refused — this is the anti-lie check that
-            # makes the honest path also the easy one (decision §5).
-            if outcome_clean == "decomposed":
-                child_count = (await s.execute(
-                    select(func.count())
-                    .select_from(KanbanCard)
-                    .where(KanbanCard.parent_card_id == card_id)
-                )).scalar_one()
-                if not child_count:
-                    return {
-                        "error": "no_children",
-                        "message": (
-                            "`outcome='decomposed'` requires the analysis card "
-                            "to have ≥1 child follow-up card "
-                            "(`parent_card_id == card.id`); found 0. Create the "
-                            "subtask cards via `create_card(parent_card_id=…)` "
-                            "first, then retry the move. If the analysis truly "
-                            "produced no follow-up work, pick "
-                            "`no_action_needed` instead (and justify in "
-                            "`summary`). For a cadence trigger that filed "
-                            "Standalone Backlog cards (no parentage on purpose), "
-                            "pick `filed_standalone` and seed "
-                            "`metadata.filed_card_ids` first."
-                        ),
-                    }
-            # `filed_standalone` is the cadence-trigger companion of
-            # `decomposed`: same intent (this run produced follow-up cards),
-            # different *card-relationship* — the new cards deliberately do
-            # NOT carry `parent_card_id` because they have to outlive the
-            # trigger (recurring-cadence-proposal.md §4.3 /
-            # analysis-outcome-contract-decision.md §9). Verification reads
-            # `card.meta["filed_card_ids"]`, requires ≥1 entry, and confirms
-            # every id resolves to a card in the same project. The check is
-            # DB-sterk (no FK, but the id must exist) — same shape as
-            # `no_children`, same refusal UX.
-            elif outcome_clean == "filed_standalone":
-                # `card.meta` is a free-form JSON bag; tolerate either a plain
-                # Python list (in-process) or a stringified JSON column value
-                # (depending on how the column was loaded). Empty bag/missing
-                # key → empty list.
-                filed_ids_raw = (card.meta or {}).get("filed_card_ids")
-                if isinstance(filed_ids_raw, str):
-                    try:
-                        filed_ids = json.loads(filed_ids_raw)
-                    except (ValueError, TypeError):
-                        filed_ids = None
-                else:
-                    filed_ids = filed_ids_raw
-                if not isinstance(filed_ids, list) or not filed_ids:
-                    return {
-                        "error": "no_filed_cards",
-                        "message": (
-                            "`outcome='filed_standalone'` requires the analysis "
-                            "card to declare ≥1 id in "
-                            "`metadata.filed_card_ids`. The cadence run must "
-                            "record the ids it filed (e.g. by appending to "
-                            "`card.metadata['filed_card_ids']` after each "
-                            "`create_card` call) before the Done-move — same "
-                            "shape as `metadata.filed_card_ids=[\"<id>\", …]`. "
-                            "If the run truly produced no follow-up cards, "
-                            "pick `no_action_needed` instead (and justify in "
-                            "`summary`)."
-                        ),
-                    }
-                # Every declared id must resolve to a real card in the same
-                # project — defends against typos in metadata while keeping
-                # the verification cheap (no FK, no parent_card_id).
-                # Coerce + dedupe defensive (the field is operator-controlled
-                # via the op-log; a stray duplicate should not blow up the
-                # verification but also should not slip past silently).
-                cleaned_ids = []
-                seen = set()
-                for x in filed_ids:
-                    if not isinstance(x, str) or not x:
-                        continue
-                    if x in seen:
-                        continue
-                    seen.add(x)
-                    cleaned_ids.append(x)
-                if not cleaned_ids:
-                    return {
-                        "error": "no_filed_cards",
-                        "message": (
-                            "`metadata.filed_card_ids` contained no non-empty "
-                            "string ids — refusing to record a `filed_standalone` "
-                            "with nothing filed. Pick `no_action_needed` instead, "
-                            "or record real ids."
-                        ),
-                    }
-                # Same-project check is implicit (`kanban_cards.project_key`
-                # is the only key we have); a card from a different project
-                # would still match the id, so scope the query to the
-                # analysis card's project.
-                rows = (await s.execute(
-                    select(KanbanCard.id)
-                    .where(
-                        KanbanCard.id.in_(cleaned_ids),
-                        KanbanCard.project_key == card.project_key,
-                    )
-                )).scalars().all()
-                resolved = set(rows)
-                missing = [i for i in cleaned_ids if i not in resolved]
-                if missing:
-                    return {
-                        "error": "no_filed_cards",
-                        "message": (
-                            f"`outcome='filed_standalone'` references "
-                            f"{len(missing)} id(s) not found in the card's "
-                            f"project_key (`{card.project_key}`): "
-                            f"{missing[:5]}{'…' if len(missing) > 5 else ''}. "
-                            f"Either correct `metadata.filed_card_ids` or pick "
-                            f"`no_action_needed` instead."
-                        ),
-                    }
+        # ``summary`` and ``outcome`` were reassigned to the cleaned values
+        # returned by ``enforce_move_gate`` earlier in this function. The
+        # routing-to-Impediment gate (kaart b8e3ac8b… decision A) is also
+        # enforced upstream and cannot reach here — so no second check is
+        # needed.
 
         # Parent-parking (docs/cockpit/analyse-levenscyclus-decision.md §3):
         # a Done move for a card with ≥1 child doesn't actually leave the
@@ -755,29 +549,30 @@ async def move_card(card_id: str, column: str,
 
         await apply_operation(s, op_type="move", entity_type="card",
             project_key="", entity_id=card_id, payload={"column": final_column})
-        if label:
-            await apply_operation(s, op_type="comment", entity_type="comment",
-                project_key="", entity_id=card_id,
-                payload={"text": f"**{label}:** {summary}"})
-        # Outcome side-effects only apply on the analyst-Done path. We
-        # materialise labels + comment BEFORE commit so a partial state
-        # (label set, card not moved, or vice versa) can never land on
-        # disk.
-        if is_analysis_done and outcome_clean is not None:
-            outcome_label = _OUTCOME_LABELS.get(outcome_clean)
-            if outcome_label:
-                # Append-not-overwrite: existing labels survive. The op-log
-                # path's `_materialize` is a full-write on `labels`, so the
-                # merge happens here, not inside `apply_operation`.
-                existing = list(card.labels or [])
-                if outcome_label not in existing:
-                    existing.append(outcome_label)
-                await apply_operation(s, op_type="update", entity_type="card",
-                    project_key="", entity_id=card_id,
-                    payload={"labels": existing})
-            await apply_operation(s, op_type="comment", entity_type="comment",
-                project_key="", entity_id=card_id,
-                payload={"text": f"**Outcome:** {outcome_clean} — {summary}"})
+        # Shared side-effects (kaart efbb82e6…). ``apply_move_summary_comment``
+        # only fires when the destination column requires one (Done). The
+        # outcome helper does its own label-append + ``**Outcome:**`` comment
+        # — same place the REST mirror now uses. Materialising BEFORE commit
+        # is intentional: a partial state (label set, card not moved, or vice
+        # versa) cannot land on disk.
+        #
+        # Note: the Summary comment + outcome side-effects fire based on
+        # ``column == "Done"`` (the operator's intent), not ``final_column``
+        # — a parent card with children still parks in Awaiting Subtasks but
+        # the **Outcome:** comment lands too, so the activity feed captures
+        # the analyst's intent regardless of where the card actually ended
+        # up. This matches the pre-refactor behaviour and the existing test
+        # ``test_move_analysis_card_to_done_decomposed_with_children_is_allowed``.
+        is_analysis_done = (
+            column == "Done" and service.is_analyst_leaf_spike(card)
+        )
+        await service.apply_move_summary_comment(
+            s, card_id, column, summary
+        )
+        if is_analysis_done and outcome is not None:
+            await service.apply_outcome_side_effects(
+                s, card, outcome, summary
+            )
 
         if gated_to_review:
             await apply_operation(s, op_type="comment", entity_type="comment",

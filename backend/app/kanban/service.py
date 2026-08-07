@@ -1,4 +1,5 @@
 """Read-side queries over the materialized state + op-log activity feed."""
+import json
 import uuid
 from datetime import UTC, datetime
 
@@ -1441,6 +1442,359 @@ async def latest_gate_answer(session, card_id: str) -> str | None:
     if gate is None:
         return None
     return gate.answer
+
+
+# Shared move_card gate (kaart efbb82e6…)
+#
+# The summary-required + outcome gate used to live only in
+# ``mcp_server.move_card``. The REST mirror
+# (``POST /api/v1/kanban/cards/{cid}/move``) ran the move unconditionally —
+# exactly the gap that turned ``02dc82db…``'s review into "nutteloos". The
+# dispatch fallback-instructie in dispatch.py told agents to compensate with a
+# separate ``comment`` carrying the summary; that worked on cooperative agents
+# and failed silently on every other path. The fix is one gate that both
+# callers route through, with the same error codes on both wires.
+#
+# Lives here (not in mcp_server.py or router.py) because the gate is the
+# single source of truth — importing it from either caller would recreate the
+# drift the bug is named after. Constants stay alongside the gate so the
+# closed enum and label keys can't drift either.
+
+# Landing a card here without a word of what happened makes the board useless
+# as a record: Done just says "it's done", Impediment just says "it's stuck".
+# Requiring ``summary`` on move_card into either one guarantees every card
+# that reaches a terminal column carries a human-readable account of the
+# work, regardless of which coding agent/provider drove the session.
+# ``report_impediment`` already gets this for free (its mandatory ``question``
+# arg is posted the same way), so this only closes the gap for the Done path
+# and for a raw ``move_card("Impediment", ...)`` bypassing that tool.
+SUMMARY_REQUIRED_COLUMNS = {"Done": "Summary"}
+
+# Analysis cards (``work_type == "analysis"`` or ``agent == "analyst"``) are
+# the highest-discipline consumer of the Done state. A summary alone is the
+# wrong witness surface for that — three rounds of prompt-level instructions
+# were ignored because no machine path verified them. This gate closes that
+# gap. The closed enum maps the four legitimate exits:
+#
+#   decomposed      — child cards were created; verified against the DB
+#                     (≥1 row with parent_card_id == card.id).
+#   not_feasible    — "we should not build this"; sets label ``not-feasible``.
+#   no_action_needed — "decision/steering artefact only, no subtasks"; sets
+#                     label ``no-action-needed``.
+#   filed_standalone — cadence-trigger filed ≥1 standalone Backlog cards
+#                     (no parent_card_id by design); verified against
+#                     ``metadata.filed_card_ids``. See
+#                     ``analysis-outcome-contract-decision.md`` §9.
+OUTCOMES = frozenset({
+    "decomposed",
+    "not_feasible",
+    "no_action_needed",
+    "filed_standalone",
+})
+
+# Label keys for the path-labelling outcomes. Lowercase kebab, matching the
+# project's free-form label vocabulary. ``filed_standalone`` is intentionally
+# absent — it's a *card-relationship* outcome, not an outcome taxonomy, so
+# the ``**Outcome:** …`` activity-feed comment is its only neerslag.
+OUTCOME_LABELS = {
+    "not_feasible": "not-feasible",
+    "no_action_needed": "no-action-needed",
+}
+
+
+class MoveGateRejected(Exception):
+    """Raised by ``enforce_move_gate`` when the move must be refused.
+
+    The REST handler maps this to ``HTTPException(422, detail=...)``; the MCP
+    handler maps it to a JSON dict with the same ``error`` key. The wire
+    shapes diverge, the meaning is identical — clients can rely on the
+    ``error_code`` regardless of which port they used.
+    """
+
+    def __init__(self, error_code: str, message: str,
+                 allowed: list[str] | None = None):
+        self.error_code = error_code
+        self.message = message
+        self.allowed = allowed
+        super().__init__(message)
+
+
+async def enforce_move_gate(
+    session,
+    card,
+    column: str,
+    summary: str | None,
+    outcome: str | None,
+) -> tuple[str, str | None]:
+    """Run all move_card pre-checks; return the cleaned inputs to use.
+
+    On refusal, raises :class:`MoveGateRejected` with one of:
+
+    - ``use_report_impediment`` — column is ``"Impediment"``. Mirror of the
+      MCP gate (kaart b8e3ac8b… decision A); only ``report_impediment`` may
+      park a card there, because the routing has to open a KanbanGate.
+    - ``summary_required`` — terminal column without a non-blank summary.
+    - ``outcome_required`` — analysis card moving to Done without an
+      explicit outcome.
+    - ``invalid_outcome`` — outcome not in :data:`OUTCOMES`. Carries the
+      allowed list on the exception so the caller can surface it.
+    - ``no_children`` — ``outcome='decomposed'`` without ≥1 child card.
+    - ``no_filed_cards`` — ``outcome='filed_standalone'`` without a valid
+      ``metadata.filed_card_ids`` entry.
+
+    On success, returns ``(cleaned_summary, cleaned_outcome)``. ``summary``
+    is stripped (so ``"  hello  "`` counts as ``"hello"``); ``outcome`` is
+    stripped or normalized to ``None`` for the empty case.
+
+    The caller is responsible for the actual move + any post-acceptance
+    side-effects (``apply_move_summary_comment``, ``apply_outcome_side_effects``
+    below). Splitting gate from side-effects lets the MCP caller keep its
+    parent-parking + reviewer routing decisions local without duplicating
+    validation.
+    """
+    # Routing-to-Impediment gate (kaart b8e3ac8b… decision A). Fires
+    # BEFORE ``summary_required`` so an agent that supplied both still sees
+    # the actionable error code — the issue is the missing gate, not the
+    # missing prose. The message names ``report_impediment`` so the agent
+    # doesn't have to read the docs to find the right tool.
+    if column == "Impediment":
+        raise MoveGateRejected(
+            "use_report_impediment",
+            (
+                "`move_card` cannot park a card in `Impediment` — that "
+                "route skips the KanbanGate and leaves the Impediment "
+                "screen with 0 choice buttons. Use "
+                "`report_impediment(card_id, question, options=...)` "
+                "instead; pass 4 options for a structured 4-button picker, "
+                "or omit `options` for a free-text question. Either way a "
+                "human sees the question and the card stays gateable."
+            ),
+        )
+
+    label = SUMMARY_REQUIRED_COLUMNS.get(column)
+    cleaned_summary = (summary or "").strip()
+    if label and not cleaned_summary:
+        raise MoveGateRejected(
+            "summary_required",
+            (
+                f'Add a `summary` describing the work done before moving to '
+                f'"{column}" — it\'s posted to the card\'s activity feed.'
+            ),
+        )
+
+    # Analysis-outcome gate: only fires on Done + analyst routing. Both
+    # checks are explicit so a future "move analysis card to Doing" path can
+    # stay free. Non-analysis cards and non-Done moves fall through
+    # unchanged — full backwards compatibility for every existing caller
+    # (decision doc §5).
+    is_analysis_done = column == "Done" and is_analyst_leaf_spike(card)
+    cleaned_outcome = (outcome or "").strip() or None
+    if is_analysis_done:
+        if cleaned_outcome is None:
+            raise MoveGateRejected(
+                "outcome_required",
+                (
+                    "An analysis card (work_type='analysis' or "
+                    "agent='analyst') moving to Done must declare an explicit "
+                    "outcome. Pick one of the four values from the closed "
+                    "enum: `decomposed` (the analysis produced ≥1 child "
+                    "follow-up cards with `parent_card_id` set), "
+                    "`not_feasible` (the analysis concludes: do not build "
+                    "this), `no_action_needed` (decision/steering artefact "
+                    "only, no subtasks), or `filed_standalone` (a "
+                    "recurring-cadence trigger that filed ≥1 Backlog cards "
+                    "without parentage — verified against "
+                    "`metadata.filed_card_ids`). The chosen value lands as "
+                    "a `**Outcome:** …` comment in the activity feed; "
+                    "`not_feasible` and `no_action_needed` also append a "
+                    "canonical label. For an unresolved product fork "
+                    "instead, use `report_impediment`."
+                ),
+            )
+        if cleaned_outcome not in OUTCOMES:
+            raise MoveGateRejected(
+                "invalid_outcome",
+                (
+                    f"`outcome` must be one of {sorted(OUTCOMES)}; "
+                    f"got {cleaned_outcome!r}."
+                ),
+                allowed=sorted(OUTCOMES),
+            )
+        # ``decomposed`` is verified, not trusted. A claim without any
+        # child cards is refused — this is the anti-lie check that makes
+        # the honest path also the easy one (decision §5).
+        if cleaned_outcome == "decomposed":
+            child_count = (await session.execute(
+                select(func.count())
+                .select_from(KanbanCard)
+                .where(KanbanCard.parent_card_id == card.id)
+            )).scalar_one()
+            if not child_count:
+                raise MoveGateRejected(
+                    "no_children",
+                    (
+                        "`outcome='decomposed'` requires the analysis card "
+                        "to have ≥1 child follow-up card "
+                        "(`parent_card_id == card.id`); found 0. Create the "
+                        "subtask cards via `create_card(parent_card_id=…)` "
+                        "first, then retry the move. If the analysis truly "
+                        "produced no follow-up work, pick `no_action_needed` "
+                        "instead (and justify in `summary`). For a cadence "
+                        "trigger that filed Standalone Backlog cards (no "
+                        "parentage on purpose), pick `filed_standalone` and "
+                        "seed `metadata.filed_card_ids` first."
+                    ),
+                )
+        elif cleaned_outcome == "filed_standalone":
+            # ``card.meta`` is a free-form JSON bag; tolerate either a plain
+            # Python list (in-process) or a stringified JSON column value
+            # (depending on how the column was loaded). Empty bag/missing
+            # key → empty list.
+            filed_ids_raw = (card.meta or {}).get("filed_card_ids")
+            if isinstance(filed_ids_raw, str):
+                try:
+                    filed_ids = json.loads(filed_ids_raw)
+                except (ValueError, TypeError):
+                    filed_ids = None
+            else:
+                filed_ids = filed_ids_raw
+            if not isinstance(filed_ids, list) or not filed_ids:
+                raise MoveGateRejected(
+                    "no_filed_cards",
+                    (
+                        "`outcome='filed_standalone'` requires the analysis "
+                        "card to declare ≥1 id in "
+                        "`metadata.filed_card_ids`. The cadence run must "
+                        "record the ids it filed (e.g. by appending to "
+                        "`card.metadata['filed_card_ids']` after each "
+                        "`create_card` call) before the Done-move — same "
+                        "shape as `metadata.filed_card_ids=[\"<id>\", …]`. "
+                        "If the run truly produced no follow-up cards, "
+                        "pick `no_action_needed` instead (and justify in "
+                        "`summary`)."
+                    ),
+                )
+            # Every declared id must resolve to a real card in the same
+            # project — defends against typos in metadata while keeping the
+            # verification cheap (no FK, no parent_card_id). Coerce + dedupe
+            # defensive (the field is operator-controlled via the op-log; a
+            # stray duplicate should not blow up the verification but also
+            # should not slip past silently).
+            cleaned_ids = []
+            seen: set[str] = set()
+            for x in filed_ids:
+                if not isinstance(x, str) or not x:
+                    continue
+                if x in seen:
+                    continue
+                seen.add(x)
+                cleaned_ids.append(x)
+            if not cleaned_ids:
+                raise MoveGateRejected(
+                    "no_filed_cards",
+                    (
+                        "`metadata.filed_card_ids` contained no non-empty "
+                        "string ids — refusing to record a "
+                        "`filed_standalone` with nothing filed. Pick "
+                        "`no_action_needed` instead, or record real ids."
+                    ),
+                )
+            # Same-project check is implicit (``kanban_cards.project_key``
+            # is the only key we have); a card from a different project
+            # would still match the id, so scope the query to the analysis
+            # card's project.
+            rows = (await session.execute(
+                select(KanbanCard.id)
+                .where(
+                    KanbanCard.id.in_(cleaned_ids),
+                    KanbanCard.project_key == card.project_key,
+                )
+            )).scalars().all()
+            resolved = set(rows)
+            missing = [i for i in cleaned_ids if i not in resolved]
+            if missing:
+                raise MoveGateRejected(
+                    "no_filed_cards",
+                    (
+                        f"`outcome='filed_standalone'` references "
+                        f"{len(missing)} id(s) not found in the card's "
+                        f"project_key (`{card.project_key}`): "
+                        f"{missing[:5]}{'…' if len(missing) > 5 else ''}. "
+                        f"Either correct `metadata.filed_card_ids` or pick "
+                        f"`no_action_needed` instead."
+                    ),
+                )
+
+    return cleaned_summary, cleaned_outcome
+
+
+async def apply_move_summary_comment(
+    session, card_id: str, intended_column: str, summary: str,
+    actual_column: str | None = None,
+) -> None:
+    """Post a ``**Summary:** <summary>`` comment when the caller intended to
+    move into a column that requires one.
+
+    ``intended_column`` is the column the caller asked for (e.g. ``"Done"``)
+    — the gate uses this to decide whether ``summary`` is required, and we
+    use the same value to decide whether to post the comment. Passing the
+    intent rather than the final landing spot is deliberate: the MCP
+    caller can redirect to ``Awaiting Subtasks`` (parent-parking) or
+    ``reviewer`` (reviewer-gate) but the activity feed still needs the
+    human-readable account of what was done.
+
+    ``actual_column`` is kept for callers that need the post-redirect value
+    in the future; current callers pass ``None`` because the comment text
+    only references the intended column via its label key.
+
+    Mirrors the MCP side-effect that the gate was originally guarding —
+    both callers (MCP and REST) compose this after a passing
+    :func:`enforce_move_gate`, so a card can't move into a terminal column
+    without either (a) the comment or (b) the gate firing. A blank/empty
+    summary here is a programming error: the gate would have refused the
+    move before this point. Guard against it anyway so a caller bypass
+    doesn't silently strand a Done card without a summary.
+    """
+    label = SUMMARY_REQUIRED_COLUMNS.get(intended_column)
+    if not label:
+        return
+    text = (summary or "").strip()
+    if not text:
+        return
+    from app.kanban.operations import apply_operation
+    await apply_operation(session, op_type="comment", entity_type="comment",
+        project_key="", entity_id=card_id,
+        payload={"text": f"**{label}:** {text}"})
+
+
+async def apply_outcome_side_effects(
+    session, card, outcome: str | None, summary: str
+) -> None:
+    """Apply outcome-driven side-effects (label append + ``**Outcome:**``
+    comment) for an analysis card's Done move.
+
+    Caller MUST have routed through :func:`enforce_move_gate` first — this
+    function trusts the outcome is non-None, in :data:`OUTCOMES`, and that
+    the relevant verification (``no_children`` / ``no_filed_cards``) has
+    already passed. No-op when ``outcome is None``.
+    """
+    if outcome is None:
+        return
+    from app.kanban.operations import apply_operation
+    outcome_label = OUTCOME_LABELS.get(outcome)
+    if outcome_label:
+        # Append-not-overwrite: existing labels survive. The op-log path's
+        # ``_materialize`` is a full-write on ``labels``, so the merge
+        # happens here, not inside ``apply_operation``.
+        existing = list(card.labels or [])
+        if outcome_label not in existing:
+            existing.append(outcome_label)
+            await apply_operation(session, op_type="update", entity_type="card",
+                project_key="", entity_id=card.id,
+                payload={"labels": existing})
+    await apply_operation(session, op_type="comment", entity_type="comment",
+        project_key="", entity_id=card.id,
+        payload={"text": f"**Outcome:** {outcome} — {summary}"})
 
 
 # Work-type → persona mapping (per-project)

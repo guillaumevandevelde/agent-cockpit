@@ -410,6 +410,17 @@ class CardUpdate(BaseModel):
 class MoveRequest(BaseModel):
     column: str
     rank: str | None = None
+    # Summary/outcome gate (kaart efbb82e6…): the REST mirror of
+    # ``mcp_server.move_card`` used to accept only ``column``/``rank``, which
+    # left the gate unenforced on the dispatch-fallback path. Both fields are
+    # optional on the wire (non-terminal moves don't need them) but the
+    # handler translates a missing-on-terminal move into a 422 carrying the
+    # same ``summary_required`` / ``outcome_required`` / ``invalid_outcome``
+    # / ``no_children`` / ``no_filed_cards`` error codes the MCP tool
+    # already returns. The shared logic lives in
+    # ``service.enforce_move_gate``.
+    summary: str | None = None
+    outcome: str | None = None
 
 
 class ReorderRequest(BaseModel):

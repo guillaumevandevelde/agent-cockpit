@@ -60,12 +60,14 @@ async def test_export_returns_all_card_fields_with_comments_and_deliverables(tmp
         c_resp = await ac.post(f"/api/v1/kanban/cards/{parent_id}/comment",
             json={"text": "first comment on parent"})
         assert c_resp.status_code == 200, c_resp.text
+        # Kaart efbb82e6… — REST /move now enforces the summary gate;
+        # pass the summary inline so the move lands in Done. The
+        # **Summary:** comment is posted by the handler itself; no
+        # separate /comment call needed.
         s_resp = await ac.post(f"/api/v1/kanban/cards/{parent_id}/move",
-            json={"column": "Done"})
+            json={"column": "Done",
+                  "summary": "shipped feature X"})
         assert s_resp.status_code == 200, s_resp.text
-        sum_resp = await ac.post(f"/api/v1/kanban/cards/{parent_id}/comment",
-            json={"text": "**Summary:** shipped feature X"})
-        assert sum_resp.status_code == 200, sum_resp.text
 
         # Child card that depends on the parent. Created under a different
         # rank so the parent/child relationship is unambiguous.
