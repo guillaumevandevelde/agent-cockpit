@@ -515,9 +515,9 @@ export const kanbanApi = {
   // Resolve an Impediment card without supplying an answer: the backend picks
   // up any structured `report_impediment(options=[...])` gate answer via
   // service.latest_gate_answer and forwards it alongside the question to the
-  // new agent's prompt. (When a free-text answer is supplied via the upstream
-  // `ResolveImpedimentControl` textarea, the `answer?: string` overload is
-  // used.)
+  // new agent's prompt. (When a free-text answer is supplied via the
+  // `ImpedimentPage` textarea — the resolve flow moved off the drawer in
+  // kaart 626e05e3… — the `answer?: string` overload is used.)
   resolveImpediment: (id: string, projectPath: string, answer?: string): Promise<Card> =>
     apiClient<Card>(`${BASE}/cards/${id}/resolve-impediment`, {
       method: "POST",

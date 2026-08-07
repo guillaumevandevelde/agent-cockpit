@@ -757,8 +757,8 @@ function CardPreviewControl({
 //      "impediment kaart niet leesbaar, kan niet scrollen").
 //   2. The 55vh split-layout cap was a workaround for the modal's height
 //      limit; a dedicated page lets the question live in a proper scrollable
-//      column with no height ceiling while the action surface still anchors
-//      on the right.
+//      column with no height ceiling while the action surface anchors at
+//      the bottom of that column.
 //
 // The drawer therefore no longer hosts the resolve flow. The Impediment
 // branch in the sticky priority area below renders a small pointer to the
@@ -1212,11 +1212,13 @@ export function CardDrawer({
   // The button is enabled as soon as the card is in Impediment: the legacy
   // free-text path has no gate to wait for, and the structured path is
   // dispatchable the moment the human picks an option (their choice is what
-  // gets forwarded, not the unresolved question). The actual button lives in
-  // <ResolveImpedimentControl> below — it calls `kanbanApi.resolveImpediment`
-  // directly (with the optional textarea answer) so the two paths share one
-  // codepath. (kaart 4279448c: merge the "impediment resolved" + "decision
-  // human answered needed" flows into a single control.)
+  // gets forwarded, not the unresolved question). The actual button lives
+  // in `ImpedimentPage.tsx` (kaart 626e05e3… moved the resolve flow off the
+  // drawer entirely; this comment predates that move) — it calls
+  // `kanbanApi.resolveImpediment` directly with the optional textarea
+  // answer so the two paths share one codepath. (kaart 4279448c: merge the
+  // "impediment resolved" + "decision human answered needed" flows into a
+  // single control.)
 
   const isClaimedByAgent = card.claimed_by?.startsWith("agent:");
   const isClaimedByHuman = card.claimed_by && !isClaimedByAgent;
@@ -1294,10 +1296,12 @@ export function CardDrawer({
         <div className="shrink-0 space-y-3">
           {openGates
             // On the Impediment column the open-gate choice row is absorbed
-            // into <ResolveImpedimentControl> below — never render the
-            // separate "Decision needed — pick one to unblock" panel for
-            // those cards, that was the "twee panelen boven elkaar" the
-            // Revisit note called out (kaart 4279448c revisit).
+            // into `ImpedimentPage.tsx` (kaart 626e05e3… moved the resolve
+            // flow off the drawer entirely; this filter predates that move)
+            // — never render the separate "Decision needed — pick one to
+            // unblock" panel for those cards, that was the "twee panelen
+            // boven elkaar" the Revisit note called out (kaart 4279448c
+            // revisit).
             .filter(() => card.column !== IMPEDIMENT_COLUMN)
             .map((gate) => (
               <div
