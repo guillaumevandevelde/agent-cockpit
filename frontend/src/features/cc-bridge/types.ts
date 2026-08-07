@@ -24,6 +24,10 @@ export interface AgentSession {
   /** Project key the card above lives on; needed so the deep-link can pick
    *  the right kanban board. Mirrors the kanban-card API's `project_key`. */
   card_project_key?: string
+  /** Card title surfaced as the body affordance (kanban card 215cd8ea…).
+   *  Always a string when present — the backend coerces the `default=""`
+   *  on `KanbanCard.title` to `""` so the React side never null-checks. */
+  card_title?: string
 }
 
 export type CCSession = AgentSession

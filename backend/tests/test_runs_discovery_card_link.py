@@ -23,6 +23,7 @@ async def _seed_card(
     cwd: str | None = None,
     dispatch_project_folder: str | None = None,
     dispatch_session_id: str | None = None,
+    title: str = "T",
 ) -> str:
     """Create a kanban card and optionally stamp the dispatch breadcrumbs."""
     async with KanbanSessionLocal() as s:
@@ -32,7 +33,7 @@ async def _seed_card(
             entity_type="card",
             project_key=project_key,
             entity_id=None,
-            payload={"title": "T", "description": "", "column": column},
+            payload={"title": title, "description": "", "column": column},
         )
         if dispatch_project_folder is not None or dispatch_session_id is not None:
             card = await s.get(KanbanCard, cid)
@@ -61,6 +62,7 @@ async def test_enrich_attaches_card_id_when_dispatch_project_folder_matches_cwd(
         column="engineer",
         dispatch_project_folder=folder,
         dispatch_session_id="session-uuid-1",
+        title="",
     )
 
     from app.services.runs.discovery import enrich_sessions_with_cards
@@ -86,6 +88,86 @@ async def test_enrich_attaches_card_id_when_dispatch_project_folder_matches_cwd(
 
     assert sessions[0]["card_id"] == card_id
     assert sessions[0]["card_project_key"] == "git:github.com/example/repo"
+
+
+async def test_enrich_attaches_card_title_for_body_affordance():
+    """The frontend surfaces the card title in the tile body so the
+    operator can answer 'which board ticket is this' without clicking.
+    Without this field the body affordance falls back to a generic icon
+    (kanban card 215cd8ea…)."""
+    await _reset()
+    cwd = "/home/dev/projects/foo/.claude/worktrees/k-foo-1234"
+    folder = convert_path_to_folder_name(cwd)
+    card_id = await _seed_card(
+        project_key="git:github.com/example/repo",
+        column="engineer",
+        dispatch_project_folder=folder,
+        title="Vindbaar maken van de kaart-knop op Agent-Bridge",
+    )
+
+    from app.services.runs.discovery import enrich_sessions_with_cards
+
+    sessions = [
+        {
+            "cli": "claude-code",
+            "cli_display_name": "Claude Code",
+            "provider": "anthropic",
+            "provider_display_name": "Anthropic",
+            "tmux_target": "k-foo-1234:0.0",
+            "session_name": "k-foo-1234",
+            "window_name": "0",
+            "pane_id": "%0",
+            "cwd": cwd,
+            "pid": "12345",
+            "status": "active",
+        }
+    ]
+
+    async with KanbanSessionLocal() as s:
+        await enrich_sessions_with_cards(sessions, s)
+
+    assert sessions[0]["card_title"] == "Vindbaar maken van de kaart-knop op Agent-Bridge"
+    # Sanity: the link fields are still there.
+    assert sessions[0]["card_id"] == card_id
+
+
+async def test_enrich_card_title_falls_back_to_empty_string_when_unset():
+    """A card whose `title` is the empty string (the ORM default) still
+    gets a string in the dict — never `None` — so the React tile can
+    safely read `session.card_title` without a nullish check."""
+    await _reset()
+    cwd = "/home/dev/projects/foo/.claude/worktrees/k-foo-1234"
+    folder = convert_path_to_folder_name(cwd)
+    await _seed_card(
+        project_key="git:github.com/example/repo",
+        column="engineer",
+        dispatch_project_folder=folder,
+        title="",
+    )
+
+    from app.services.runs.discovery import enrich_sessions_with_cards
+
+    sessions = [
+        {
+            "cli": "claude-code",
+            "cli_display_name": "Claude Code",
+            "provider": "anthropic",
+            "provider_display_name": "Anthropic",
+            "tmux_target": "k-foo-1234:0.0",
+            "session_name": "k-foo-1234",
+            "window_name": "0",
+            "pane_id": "%0",
+            "cwd": cwd,
+            "pid": "12345",
+            "status": "active",
+        }
+    ]
+
+    async with KanbanSessionLocal() as s:
+        await enrich_sessions_with_cards(sessions, s)
+
+    assert sessions[0]["card_title"] == ""
+    assert isinstance(sessions[0]["card_title"], str)
 
 
 async def test_agent_bridge_sessions_response_includes_matching_card(monkeypatch):
@@ -424,3 +506,4 @@ async def test_legacy_cc_bridge_sessions_route_does_not_enrich(monkeypatch):
         "cade1e9b919944258c442d273c1dcfd7)"
     )
     assert "card_project_key" not in session
+    assert "card_title" not in session

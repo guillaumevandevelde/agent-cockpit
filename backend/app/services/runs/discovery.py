@@ -156,15 +156,15 @@ async def enrich_sessions_with_cards(
         return
 
     result = await kanban_session.execute(
-        select(KanbanCard.id, KanbanCard.project_key, KanbanCard.dispatch_project_folder)
+        select(KanbanCard.id, KanbanCard.project_key, KanbanCard.dispatch_project_folder, KanbanCard.title)
         .where(KanbanCard.dispatch_project_folder.in_(folders))
         .order_by(KanbanCard.created_at.desc())
     )
-    folder_to_card: dict[str, tuple[str, str]] = {}
-    for card_id, project_key, folder in result.all():
+    folder_to_card: dict[str, tuple[str, str, str]] = {}
+    for card_id, project_key, folder, title in result.all():
         # First row per folder wins; the SQL ORDER BY puts newest first.
         if folder not in folder_to_card:
-            folder_to_card[folder] = (card_id, project_key)
+            folder_to_card[folder] = (card_id, project_key, title)
 
     for s in sessions:
         cwd = s.get("cwd")
@@ -174,5 +174,10 @@ async def enrich_sessions_with_cards(
         match = folder_to_card.get(folder)
         if match is None:
             continue
-        s["card_id"], s["card_project_key"] = match
+        card_id, project_key, title = match
+        s["card_id"] = card_id
+        s["card_project_key"] = project_key
+        # KanbanCard.title defaults to ""; coerce to "" so the React tile
+        # never sees `None` when reading `session.card_title`.
+        s["card_title"] = title or ""
 
