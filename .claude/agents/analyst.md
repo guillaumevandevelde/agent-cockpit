@@ -378,6 +378,14 @@ een mens twijfel aantekent op een `Done`-kaart (via `request_review`). De
 beschrijving bevat de twijfel + de oorspronkelijke Done-summary + de
 deliverable-refs (branch/PR), dus je hebt de context zonder extra lookups.
 
+**`get_card` op een verwijderde doelkaart is géén dood spoor.** `orphan_children_on_delete`
+(`backend/app/kanban/service.py:302-304`) ruimt Done-kaarten op als routine-end-of-life,
+dus een review-kaart kan zomaar naar een niet-meer-bestaand `reviewed_card_id` wijzen. De
+append-only op-log `kanban_ops` (zie CLAUDE.md §-Gotchas, *"kanban_ops overleeft deletes"*)
+bewaart dan nog wel de `create`/`claim`/`move`/`comment`-bewerkingen met payload — vaak
+het enige bewijs voor *hoe* de kaart is afgesloten (bv. of de Done-move een `summary`
+droeg). Pak dat op vóór je oordeelt, anders baseer je 'm op een onvolledig beeld.
+
 Toets de twijfel tegen de werkelijke code (checkout de branch/PR uit de refs) en beslis:
 
 - **Ongegrond** — de implementatie klopt: sluit de review-kaart met
