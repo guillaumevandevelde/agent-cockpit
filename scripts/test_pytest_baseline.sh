@@ -554,6 +554,127 @@ check "compare notes when baseline lacks metadata (legacy file)" \
     'echo "$out" | grep -qiE "no baseline-sha|legacy|pre-metadata|unknown.*sha|baseline.*no.*sha"'
 
 # ----------------------------------------------------------------------------
+echo
+echo "Task 13: zero-failure baseline — clean suite must NOT read as a regression (card 53af2e23… revisit)"
+# Regression guard for the same card's second iteration: when origin/master is
+# already fully green, the baseline file is a metadata-header-only artifact
+# (3 `# `-lines, zero body). Pre-fix, both `grep -v '^# '` (line 90) and
+# `grep -cv '^# '` (line 105) returned exit 1 because they matched nothing,
+# and `set -euo pipefail` killed the script with NO output — the same
+# silent-failure shape that `pytest-attr` reads as "you have NEW failures,
+# go fix them". This task locks BOTH paths:
+#   - a modern header-only baseline (the shape pytest-baseline.sh writes today
+#     against a green origin/master)
+#   - a legacy 0-byte baseline (the shape older installations may still have)
+# Both must exit 0 and print "baseline: 0 pre-existing failures".
+clean_state="$TMPDIR/clean_state"
+mkdir -p "$clean_state"
+cat > "$clean_state/pytest-baseline.txt" <<'EOF'
+# pytest-baseline: 0 pre-existing failures
+# captured-at: 2026-08-07T00:00:00Z
+# baseline-sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+EOF
+
+# Fake pytest that emits zero failures (clean suite).
+cat > "$TMPDIR/fake_pytest_clean" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$TMPDIR/fake_pytest_clean"
+
+ec=$(PYTEST_BASELINE_PATH="$clean_state/pytest-baseline.txt" \
+     PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" \
+     PYTEST_FAKE_WORKTREE=1 \
+     bash "$SCRIPT_DIR/pytest-compare.sh" >/dev/null 2>&1 || echo "$?")
+# Capture exit code unconditionally: `cmd || echo "$?"` only emits a value on
+# nonzero exit, so a clean success leaves $ec empty and grep -qE "^0$" misses.
+# Run plain, then read $? — same shape as Task 2's "missing baseline" check.
+PYTEST_BASELINE_PATH="$clean_state/pytest-baseline.txt" \
+  PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" \
+  PYTEST_FAKE_WORKTREE=1 \
+  bash "$SCRIPT_DIR/pytest-compare.sh" >/dev/null 2>&1
+ec_clean_header=$?
+check "header-only baseline + clean suite → exit 0 (not silent 1)" \
+    '[ "$ec_clean_header" = "0" ]'
+
+out=$(PYTEST_BASELINE_PATH="$clean_state/pytest-baseline.txt" \
+      PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" \
+      PYTEST_FAKE_WORKTREE=1 \
+      bash "$SCRIPT_DIR/pytest-compare.sh" 2>&1 || true)
+check "header-only baseline prints 'baseline: 0 pre-existing failures'" \
+    'echo "$out" | grep -qE "baseline: 0 pre-existing failures"'
+check "header-only baseline + clean suite prints the attribution block" \
+    'echo "$out" | grep -qE "pytest failure attribution"'
+check "header-only baseline + clean suite → pre-existing count = 0" \
+    'echo "$out" | grep -qE "pre-existing.*not your fault.*: 0"'
+check "header-only baseline + clean suite does NOT print a NEW section" \
+    '! echo "$out" | grep -qE "NEW.*needs fix"'
+
+# Legacy 0-byte baseline: the empty-file shape older installations still
+# carry. Pre-fix, the same `grep -v '^# '` produced an empty output file
+# (fine) but with exit 1 → `set -e` killed the run. The legacy fallback
+# branch on line 113-114 (no baseline-sha) also kicked in, so the operator
+# saw "legacy file, re-run --regen" — and then exited 1 anyway.
+legacy_clean="$TMPDIR/legacy_clean"
+mkdir -p "$legacy_clean"
+: > "$legacy_clean/pytest-baseline.txt"
+
+PYTEST_BASELINE_PATH="$legacy_clean/pytest-baseline.txt" \
+  PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" \
+  PYTEST_FAKE_WORKTREE=1 \
+  bash "$SCRIPT_DIR/pytest-compare.sh" >/dev/null 2>&1
+ec_legacy_clean=$?
+check "legacy 0-byte baseline + clean suite → exit 0 (not silent 1)" \
+    '[ "$ec_legacy_clean" = "0" ]'
+
+out=$(PYTEST_BASELINE_PATH="$legacy_clean/pytest-baseline.txt" \
+      PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" \
+      PYTEST_FAKE_WORKTREE=1 \
+      bash "$SCRIPT_DIR/pytest-compare.sh" 2>&1 || true)
+check "legacy 0-byte baseline prints 'baseline: 0 pre-existing failures'" \
+    'echo "$out" | grep -qE "baseline: 0 pre-existing failures"'
+check "legacy 0-byte baseline still notes the missing metadata header" \
+    'echo "$out" | grep -qE "no baseline-sha"'
+check "legacy 0-byte baseline + clean suite → pre-existing count = 0" \
+    'echo "$out" | grep -qE "pre-existing.*not your fault.*: 0"'
+
+# Negative control: prove the test would have caught the regression. Both
+# greps MUST have `|| true` (line 90 + line 105) — strip them with sed and
+# re-run; the script must fail with exit 1 + empty output. If this assertion
+# ever stops failing-when-stripped, the test no longer guards the original
+# bug and must be re-examined.
+# The two post-fix lines each carry a unique anchor (`> "$BASELINE_NO_META"`
+# for line 90, `"$BASELINE" || true)` for line 105) so a sed pass that
+# targets ONLY those anchors stays scoped — the script's other `|| true`
+# sites (comm fallbacks on lines 96-98, grep -m1 fallbacks on 106-109) are
+# left alone, which is exactly what we want for an isolated regression
+# repro of THIS fix.
+broken_compare="$TMPDIR/pytest-compare-broken.sh"
+# Use `#` as the s-command delimiter: the patterns contain `|` (in `|| true`)
+# and `/` (none here, but it would also collide), and `#` appears in none of
+# the literals. Single-quoted so shell interpolation is irrelevant; `\$` is
+# the BRE escape for a literal `$` (otherwise BRE reads it as the end-of-line
+# anchor and refuses to match the post-fix text).
+sed -e 's#> "\$BASELINE_NO_META" || true$#> "$BASELINE_NO_META"#' \
+    -e 's#"\$BASELINE" || true)#"$BASELINE")#' \
+    "$SCRIPT_DIR/pytest-compare.sh" > "$broken_compare"
+chmod +x "$broken_compare"
+PYTEST_BASELINE_PATH="$clean_state/pytest-baseline.txt" \
+  PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" \
+  PYTEST_FAKE_WORKTREE=1 \
+  bash "$broken_compare" >/dev/null 2>&1
+ec_broken=$?
+check "stripped-fix regression control: stripped script fails (exit 1) on clean baseline" \
+    '[ "$ec_broken" = "1" ]'
+broken_out=$(PYTEST_BASELINE_PATH="$clean_state/pytest-baseline.txt" \
+             PYTEST_CMD="$TMPDIR/fake_pytest_clean" PYTEST_CWD="$TMPDIR" \
+             PYTEST_FAKE_WORKTREE=1 \
+             bash "$broken_compare" 2>&1 || true)
+check "stripped-fix regression control: stripped script produces empty output" \
+    '! echo "$broken_out" | grep -qE "baseline context"'
+rm "$broken_compare"
+
+# ----------------------------------------------------------------------------
 mv "$TMPDIR" /tmp/_pytest_baseline_test_artifacts >/dev/null 2>&1 || true
 echo
 echo "Total: $PASS passed, $FAIL failed"
