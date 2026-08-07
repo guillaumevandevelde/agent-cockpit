@@ -358,6 +358,7 @@ app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 # .mcp.json at <base_url>/kanban-mcp/sse, where base_url is derived per-request
 # (or PUBLIC_BASE_URL when set) — see app/api/v1/kanban/router.py::enable.
 from app.kanban.mcp_server import mcp as kanban_mcp  # noqa: E402
+from app.kanban.mcp_transport import build_session_aware_sse_app  # noqa: E402
 
 # Do NOT pass mount_path here. The SSE transport already prepends the ASGI
 # scope's root_path (the "/kanban-mcp" supplied by app.mount) to the advertised
@@ -367,7 +368,17 @@ from app.kanban.mcp_server import mcp as kanban_mcp  # noqa: E402
 # (Older mcp releases lacked the root_path prefixing, which is why mount_path was
 # once needed; the dependency upgrade silently made it a doubling bug.)
 # Regression-guarded by tests/test_kanban_mcp_mount.py.
-app.mount("/kanban-mcp", kanban_mcp.sse_app())
+#
+# Use the session-aware wrapper (not the bare ``kanban_mcp.sse_app()``) so an
+# MCP tool call with an unknown session_id — exactly what happens when an
+# in-flight agent's session outlives a ``uvicorn --reload`` — returns a
+# structured 410 Gone with ``error: session_not_found`` instead of the default
+# 404 plain text. The plain-text 404 surfaces to the agent as ``MCP error
+# -32602: Invalid request parameters`` (misleading — the params are fine, the
+# *session* is gone); the 410 body tells the agent to reconnect the SSE stream.
+# See kanban kaart ``ae19ced1d18646609739cfbb8ff694dd`` and
+# ``docs/cockpit/kanban-mcp-session-410-decision.md``.
+app.mount("/kanban-mcp", build_session_aware_sse_app(kanban_mcp))
 
 
 @app.get("/health")
