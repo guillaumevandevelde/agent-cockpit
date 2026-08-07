@@ -90,6 +90,11 @@ async def recover_project(
     the resume session id/folder, then re-dispatch (which selects the resume transport).
     Per-card failures are logged and skipped so one bad card can't block the rest.
 
+    Commits per recovered card rather than leaving it all to the caller — each
+    spawn is a non-transactional tmux side effect, so its claim must be durable
+    before the next spawn begins (see the commit site below). The caller still
+    commits at the end to cover the nothing-recovered path.
+
     ``redispatch_card`` deliberately bypasses per-project limits for its normal
     (single-card, human-triggered) use, so this loop must enforce a safety bound
     itself. Without it, a project that accumulated many dead claims (e.g. via
@@ -159,6 +164,21 @@ async def recover_project(
         if result is not None:
             recovered.append(result)
             budget -= 1
+            # Make this resume durable BEFORE spawning the next one. Spawning
+            # is a tmux side effect that no rollback can undo, so a death
+            # anywhere later in this loop would otherwise leave the session
+            # running while its claim disappears -- and the next boot, reading
+            # the identical stale claim, would spawn a *second* session for the
+            # same card, forever. That is the 2026-08-07 restart storm: the
+            # health watchdog SIGKILLed the backend at 51s while recovery
+            # (~37s per resume) was still on its second card, 14 times, leaking
+            # 9 live OpenCode sessions into one worktree. Committing per card
+            # makes recovery monotonic: work already done is never repeated.
+            # Safe to commit mid-loop because both the production and test
+            # session factories set ``expire_on_commit=False``, so the `cards`
+            # list stays usable (an expiring session would trigger a lazy
+            # refresh here and raise MissingGreenlet under asyncio).
+            await session.commit()
             logger.info(
                 "resumed interrupted session for card %s (session %s -> %s)",
                 card.id, session_id, result.get("session_name"),
