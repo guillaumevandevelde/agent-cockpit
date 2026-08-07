@@ -307,7 +307,20 @@ async def orphan_children_on_delete(session, card_id: str) -> list[str]:
     dep path does, and returns the child to ordinary dispatch: its own
     description carries the acceptance criteria, and no plan attachment is ever
     coming. The audit comment records what was lost.
+
+    Since :class:`~app.kanban.models.KanbanDeliverable` rows are not part of the
+    card-table cascade, the same repair also drops any ``kind='plan_ref'``
+    deliverable on the child whose ``ref.parent_card_id`` is the deleted parent.
+    Leaving those rows in place turns every routine end-of-life sweep into a
+    permanent ``dangling_parent`` hit in
+    :mod:`scripts.sweep_dangling_plan_refs`, eroding the signal we built the
+    sweeper for. A child may carry multiple plan_refs (e.g. after a later
+    analyst run re-adopted it); only the one pointing at *this* parent is
+    removed, and rows whose ``ref`` is missing or points elsewhere stay put.
     """
+    from sqlalchemy import delete
+
+    from app.kanban.models import KanbanDeliverable
     from app.kanban.operations import apply_operation
 
     card = await session.get(KanbanCard, card_id)
@@ -317,13 +330,34 @@ async def orphan_children_on_delete(session, card_id: str) -> list[str]:
         select(KanbanCard).where(KanbanCard.parent_card_id == card_id)
     )).scalars().all()
 
+    # Collect the ids of plan_ref rows to drop BEFORE mutating the children —
+    # the audit-comment text below cites the count so the operator can audit
+    # the cleanup without a separate query.
     updated: list[str] = []
+    plan_refs_dropped = 0
     for child in children:
+        result = await session.execute(
+            delete(KanbanDeliverable)
+            .where(KanbanDeliverable.card_id == child.id)
+            .where(KanbanDeliverable.kind == "plan_ref")
+            .where(KanbanDeliverable.ref.like(f'%"{card_id}"%'))
+        )
+        child_dropped = result.rowcount or 0
+        plan_refs_dropped += child_dropped
+
         await apply_operation(
             session, op_type="update", entity_type="card",
             project_key="", entity_id=child.id,
             payload={"parent_card_id": None},
         )
+        cleanup_note = ""
+        if child_dropped:
+            cleanup_note = (
+                f" The dangling plan_ref deliverable that pointed at this "
+                f"parent has also been removed ({child_dropped} row"
+                f"{'s' if child_dropped != 1 else ''}) so the next sweep no "
+                f"longer reports it as a false positive."
+            )
         await apply_operation(
             session, op_type="comment", entity_type="comment",
             project_key="", entity_id=child.id,
@@ -333,7 +367,7 @@ async def orphan_children_on_delete(session, card_id: str) -> list[str]:
                 f"parent_card_id has been cleared. Any plan attachment it would "
                 f"have provided is gone; leaving the link in place would hold "
                 f"this card out of dispatch forever, waiting on an analyst run "
-                f"that no longer exists."
+                f"that no longer exists.{cleanup_note}"
             )},
         )
         updated.append(child.id)
