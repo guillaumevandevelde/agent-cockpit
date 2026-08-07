@@ -1464,8 +1464,17 @@ async def project_key(project_path: str = Query(...)):
 async def get_autodispatch(project_key: str = Query(...)):
     from app.kanban import dispatch
     async with KanbanSessionLocal() as s:
-        return {"project_key": project_key,
-                "enabled": await dispatch.is_autodispatch_enabled(s, project_key)}
+        marker = await dispatch.get_boot_disabled_marker(s, project_key)
+        payload: dict = {"project_key": project_key,
+                         "enabled": await dispatch.is_autodispatch_enabled(s, project_key)}
+        if marker is not None:
+            at, reason = marker
+            # ISO 8601 with a `Z` suffix so JS Date / Date.parse handle it
+            # without locale dance; mirrors the convention in
+            # `docs/cockpit/kanban-conventions.md` §5 for backend timestamps.
+            payload["disabled_by_boot_at"] = at.strftime("%Y-%m-%dT%H:%M:%SZ")
+            payload["disabled_by_boot_reason"] = reason
+        return payload
 
 
 @router.post("/autodispatch")

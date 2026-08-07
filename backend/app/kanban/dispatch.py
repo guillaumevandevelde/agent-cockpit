@@ -301,6 +301,15 @@ DEFAULT_SHIP_MODE = "pull-request"
 TRANSPORT_PREFIX = "transport:"
 TRANSPORTS = ("worktree", "sandcastle", "headless", "acp")
 DEFAULT_TRANSPORT = "worktree"
+# Per-project marker that records "auto-dispatch was force-disabled here by a
+# real backend start". Stored as JSON in ``KanbanMeta`` so the UI can show the
+# timestamp inline on the toggle component — without this, the WARNING in
+# logs/ is the only trace and the symptom reads as "the dispatcher hangs"
+# (18 min idle on 2026-08-03). Cleared when the operator opts the project
+# back in via :func:`set_autodispatch`. Distinct prefix so
+# :func:`list_autodispatch_projects` / :func:`disable_all_autodispatch` keep
+# their simple ``value == "1"`` semantics.
+BOOT_DISABLED_PREFIX = "autodispatch_boot_disabled:"
 # A card whose session dies within seconds of being dispatched, this many times in a
 # row with no successful run in between, is flagged to Impediment instead of being
 # retried again — see _release_dead_claim. Without this, a card with a persistently
@@ -347,6 +356,12 @@ async def set_autodispatch(session, project_key: str, enabled: bool) -> None:
         session.add(row)
     else:
         row.value = "1" if enabled else "0"
+    if enabled:
+        # Operator opted the project back in — the boot-disabled signal is no
+        # longer relevant; clear it so the toggle goes back to a clean "on"
+        # state instead of clinging to a year-old "force-disabled by backend
+        # start at <ts>" hint.
+        await clear_boot_disabled_marker(session, project_key)
     await session.flush()
     await _record_audit(
         session,
@@ -354,6 +369,66 @@ async def set_autodispatch(session, project_key: str, enabled: bool) -> None:
         project_key=project_key,
         payload_ref={"enabled": enabled},
     )
+
+
+# ---- boot-disabled visibility marker (per-project) -------------------------
+
+
+async def set_boot_disabled_marker(
+    session, project_keys: Iterable[str], *, reason: str, at: datetime | None = None,
+) -> None:
+    """Record that the startup policy force-disabled auto-dispatch for each project.
+
+    Distinct from the ``autodispatch:<key>`` row the policy already flips:
+    ``set_autodispatch`` and friends read that row with a strict
+    ``value == "1"`` check, so we keep that contract intact and use a separate
+    key for the audit/visibility signal. Called from
+    :func:`reset_autodispatch_for_boot` *after* :func:`disable_all_autodispatch`
+    so the marker never lies about a project whose flag was already off.
+    """
+    if at is None:
+        at = datetime.now(UTC)
+    payload = json.dumps({"at": at.isoformat(), "reason": reason},
+                         separators=(",", ":"))
+    for project_key in project_keys:
+        key = BOOT_DISABLED_PREFIX + project_key
+        row = await session.get(KanbanMeta, key)
+        if row is None:
+            session.add(KanbanMeta(key=key, value=payload))
+        else:
+            row.value = payload
+    await session.flush()
+
+
+async def clear_boot_disabled_marker(session, project_key: str) -> None:
+    """Drop the boot-disabled marker for a single project. Idempotent."""
+    row = await session.get(KanbanMeta, BOOT_DISABLED_PREFIX + project_key)
+    if row is not None:
+        await session.delete(row)
+
+
+async def get_boot_disabled_marker(
+    session, project_key: str,
+) -> tuple[datetime, str] | None:
+    """Return ``(at, reason)`` if a boot-disabled marker exists for the project.
+
+    ``at`` is the UTC datetime of the policy flip; ``reason`` is one of
+    ``"real_backend_start"`` (no uvicorn reloader parent — supervisor restart,
+    crash recovery, ``cockpit.sh restart``, …) or ``"reloader_changed"``
+    (uvicorn reloader identity changed since last boot, treated as a real
+    restart for policy purposes). Returns ``None`` when no marker is set.
+    """
+    row = await session.get(KanbanMeta, BOOT_DISABLED_PREFIX + project_key)
+    if row is None:
+        return None
+    try:
+        data = json.loads(row.value)
+        at = datetime.fromisoformat(data["at"])
+    except (json.JSONDecodeError, KeyError, ValueError):
+        # Garbage row — treat as no marker so a corrupt value can't lock the
+        # UI into a permanent "force-disabled" hint.
+        return None
+    return at, str(data.get("reason", "real_backend_start"))
 
 
 async def list_autodispatch_projects(session) -> list[str]:
@@ -467,6 +542,12 @@ async def reset_autodispatch_for_boot(session) -> bool:
             "re-enable from the board to resume dispatching",
             len(enabled), ", ".join(sorted(enabled)),
         )
+        # Per-project visibility marker so the toggle component can show
+        # "force-disabled by backend start at <ts>" inline. The reason is
+        # meaningful for the UI copy (a fresh uvicorn vs a reloader that
+        # changed) and the audit trail.
+        reason = "reloader_changed" if row is not None else "real_backend_start"
+        await set_boot_disabled_marker(session, enabled, reason=reason)
     if identity is None:
         if row is not None:
             await session.delete(row)
