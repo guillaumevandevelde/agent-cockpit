@@ -181,6 +181,43 @@ def _isolate_usage_service_projects_dir(tmp_path_factory, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def restore_home(tmp_path_factory, monkeypatch):
+    """Pin the restore-extraction root to a per-test tmp dir.
+
+    ``restore_service`` extracts every non-project archive member to
+    ``target_path / member`` with ``target_path = get_user_home()``
+    (``restore_service.py:328`` + ``:407``). On this box that is the *real*
+    home, so a restore test whose archive carries a
+    ``.claude-registry/kanban.db`` member overwrites the **live kanban
+    board** — and stays green while doing it, because nothing in the test
+    looks at where the bytes landed.
+
+    That is not hypothetical: it clobbered the live board with the 20-byte
+    fixture payload ``restore-this-content`` twice (2026-08-06, and again on
+    2026-08-07 at 17:58 + 18:06), each time crash-looping the backend on
+    ``sqlite3.DatabaseError: database disk image is malformed`` and taking
+    the whole board UI down with it.
+
+    Patching ``backup_service.kanban_db_path`` (what
+    ``test_restore_refuse_kanban_running.py`` did) is *not* containment: that
+    only steers the in-use **guard**, never the write destination. This
+    fixture steers the destination itself.
+
+    Patched consumer-side (``app.services.restore_service``) per
+    ``docs/cockpit/test-doubles-convention.md`` rule 1 — ``restore_service``
+    does ``from app.utils.path_utils import get_user_home`` at import time,
+    so patching ``app.utils.path_utils`` would be a silent no-op.
+
+    Yields the contained root so a restore test can assert *where* the
+    extraction landed — the assertion is what keeps this containment from
+    silently disappearing again.
+    """
+    home = tmp_path_factory.mktemp("restore_home")
+    monkeypatch.setattr("app.services.restore_service.get_user_home", lambda: home)
+    yield home
+
+
 @pytest_asyncio.fixture(autouse=True, scope="session")
 async def _patch_app_database():
     """Swap every ``AsyncSessionLocal`` / ``engine`` reference to the test
