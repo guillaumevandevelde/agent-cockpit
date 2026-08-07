@@ -223,12 +223,17 @@ async def test_opt_in_kanban_restore_refused_while_backend_holds_db(
 
 
 async def test_opt_in_kanban_restore_proceeds_when_db_is_free(
-    db, tmp_path, monkeypatch,
+    db, tmp_path, monkeypatch, restore_home,
 ):
     """Negative control: when the kanban DB is not held open (no other
     connection), the opt-in restore MUST proceed and overwrite the
     primary file. The guard must not block legitimate restore-then-
     restart workflows where the operator already stopped the cockpit.
+
+    Takes ``restore_home`` explicitly (it is autouse anyway) so the
+    containment is visible at the call site: this test writes a real
+    ``.claude-registry/kanban.db`` member, and without that fixture the
+    bytes land on the **live board**. See the closing assertion.
     """
     live_db = tmp_path / "kanban.db"
     _make_free_kanban_db(live_db)
@@ -268,6 +273,22 @@ async def test_opt_in_kanban_restore_proceeds_when_db_is_free(
         f"got result={result!r}"
     )
     assert result.files_restored >= 1
+
+    # Containment, not decoration. The extraction destination is
+    # `get_user_home() / member` — patching `backup_service.kanban_db_path`
+    # above only steers the in-use *guard*. Assert the bytes actually landed
+    # inside the sandboxed home so this can never silently revert to
+    # overwriting the live board (2026-08-06 + 2026-08-07 incidents).
+    extracted = restore_home / ".claude-registry" / "kanban.db"
+    assert extracted.read_bytes() == b"restore-this-content", (
+        "restore extraction did not land in the contained home — the "
+        "`restore_home` fixture is not steering `get_user_home`, which means "
+        "this test is overwriting the real ~/.claude-registry/kanban.db"
+    )
+    assert not str(extracted).startswith(str(Path.home())), (
+        f"restore extraction root is inside the real home ({Path.home()}); "
+        "the containment fixture is not in effect"
+    )
 
 
 async def test_default_restore_skips_kanban_entry_unconditionally(
