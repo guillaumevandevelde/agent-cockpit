@@ -130,6 +130,16 @@ op wijzen.
 
 ### 4.2 De recursie — hoe de keten blijft lopen
 
+✅ **Vervangen (kaart 15cd4ba9…).** De chain-of-one-shots hieronder is weg: de recursie
+zit nu in een **server-side cron-trigger** (`/api/v1/recurring-triggers`,
+`cron_expr="0 9 * * 1"` + `0 8 * * 1`, `Europe/Brussels`) die elke maandag zelf
+een verse Backlog-kaart aanmaakt. De `market-research`-skill en de `po-digest`-skill
+hebben geen Step 7 meer; de gedispatchte sessie hoeft geen opvolger meer te maken.
+Bron, meting en keuze: [`sched-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md) §3 en §5.2.
+
+De historische tekst hieronder blijft staan als archief van het afgewogen
+keten-ontwerp — het mechanisme is weg, de overweging niet.
+
 De **`market-research`-skill** zelf heeft nu **Step 7** (zie
 `.claude/skills/market-research/SKILL.md` regel ~169, in dezelfde commit-cyclus
 als dit voorstel). De **laatste stap van elke run** is een opvolger-kaart

@@ -292,4 +292,6 @@ verdient een eigen ready-state in plaats van `ready`.
 | 3 | Injectie-route uitfaseren; hook-/auto-resume-endpoints veiligstellen | na 1 |
 | 4 | `scheduled` krijgt een eigen ready-state op het bord | — |
 
+✅ Vervolgkaart 2 geïmplementeerd (kaart `15cd4ba9…`): twee `recurring_triggers` (market-research `0 9 * * 1`, po-digest `0 8 * * 1`, beide Europe/Brussels); Step 7 verwijderd uit `market-research`- en `po-digest`-skill; stranded kaarten `d5b363dd…` (gedeblokkeerd, in dispatch) en `d2f3a10d…` (Done, no-action-needed).
+
 Zie de kind-kaarten van `0767c57a…` voor de acceptance criteria.
