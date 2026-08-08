@@ -14,16 +14,18 @@ status: decided
 **Uitkomst in één alinea.** **NO-GO op "integreren als geheel"; conditionele GO op
 "ernaast draaien", maar dan als één nieuwe, opt-in provider-entry achter de
 bestaande `provider_env.py`-naad — niet als default en niet met
-subscription-OAuth.** De vraag "is 9router matuurder dan onze provider-laag?"
-berust op een categoriefout: 9router is een **inference-router** (routeert per
-*request*), Cockpit's provider-laag is een **spawn-configurator** (kiest per
-*sessie*, vóór het proces start). Ze concurreren niet — ze zitten op
-verschillende lagen. Wat 9router wél biedt en Cockpit mist is
-**format-translatie**, en dát is precies wat toegang tot gratis/goedkope
-non-Anthropic backends ontsluit voor de `claude`-CLI. De prijs is een
-credential-honeypot, prompt-mutatie op de agent-hot-path, en een
-ToS-/ban-risico dat exact het Anthropic-abonnement raakt waar álle dispatch op
-draait. Vandaar: smalle naad, opt-in, API-key-tier only.
+subscription-OAuth.**
+
+De vraag "is 9router matuurder dan onze provider-laag?" berust op een
+categoriefout. 9router is een **inference-router**: het routeert per *request*.
+Cockpit's provider-laag is een **spawn-configurator**: het kiest per *sessie*,
+vóór het proces start. Ze concurreren niet — ze zitten op verschillende lagen.
+
+Wat 9router wél biedt en Cockpit mist is **format-translatie**. Dát is precies
+wat toegang tot gratis/goedkope non-Anthropic backends ontsluit voor de
+`claude`-CLI. De prijs is een credential-honeypot, prompt-mutatie op de
+agent-hot-path, en een ToS-/ban-risico dat het Anthropic-abonnement raakt
+waar álle dispatch op draait. Vandaar: smalle naad, opt-in, API-key-tier only.
 
 ---
 
@@ -149,11 +151,11 @@ terug op de laatste entry. Dat is functioneel *hetzelfde idee* als 9router's
 drie-traps-fallback — alleen een laag hoger en één moment eerder.
 
 Het verschil dat er operationeel toe doet: **Cockpit kan niet mid-sessie
-failoveren.** Loopt de `claude`-sessie op 40% van een kaart tegen een limiet, dan
-sterft die sessie, blijft de `agent:`-claim hangen, ziet de reaper de dode claim,
-en volgt release + re-dispatch — met verlies van kaartcontext en werk. Precies
-het faalpad dat CLAUDE.md's gotchas beschrijven. 9router zou dat transparant
-binnen dezelfde sessie opvangen.
+failoveren.** Loopt de `claude`-sessie op 40% van een kaart tegen een limiet,
+dan sterft die sessie. De `agent:`-claim blijft hangen, de reaper ziet de dode
+claim, en er volgt release + re-dispatch — met verlies van kaartcontext en
+werk. Precies het faalpad dat CLAUDE.md's gotchas beschrijven. 9router zou dat
+transparant binnen dezelfde sessie opvangen.
 
 **Dat is de enige echte, unieke opbrengst.** Niet "meer providers" (die kunnen
 ook via `provider_env.py`), maar *continuïteit binnen een lopende agent-sessie* —
@@ -251,15 +253,18 @@ Afgewezen, om vier onafhankelijke redenen die elk op zich al volstaan:
   eerste kaart, en de rest hangt eraan.
 
 **Het serieuze alternatief, eerlijk benoemd: LiteLLM.** Het exposeert eveneens een
-Anthropic-native `/v1/messages` waar `ANTHROPIC_BASE_URL` op kan wijzen, routeert
-naar OpenAI/Gemini/Vertex/Bedrock/Azure, is Python (past bij deze backend), en is
-ouder en institutioneel steviger dan een repo van 6,5 maand. Wat het **niet**
-heeft is 9router's OAuth-gebaseerde gratis-tiers — en dat is precies de tier die
-§2.2 afwijst. **Voor de scope die wij overhouden (API-key-tier) zijn ze
-functioneel inwisselbaar, en dan wint LiteLLM op maturiteit.** Daarom is de
-provider-entry in §9 opzettelijk generiek gehouden (een
+Anthropic-native `/v1/messages` waar `ANTHROPIC_BASE_URL` op kan wijzen. Het
+routeert naar OpenAI/Gemini/Vertex/Bedrock/Azure, is Python (past bij deze
+backend), en is ouder en institutioneel steviger dan een repo van 6,5 maand.
+
+Wat het **niet** heeft is 9router's OAuth-gebaseerde gratis-tiers — en dat is
+precies de tier die §2.2 afwijst. **Voor de scope die wij overhouden
+(API-key-tier) zijn ze functioneel inwisselbaar, en dan wint LiteLLM op
+maturiteit.**
+
+Daarom is de provider-entry in §9 opzettelijk generiek gehouden (een
 "OpenAI/Anthropic-compatibel endpoint"-provider) en is er een aparte
-vergelijkings-kaart: 9router en LiteLLM zijn dan twee configuraties van dezelfde
+vergelijkings-kaart. 9router en LiteLLM zijn dan twee configuraties van dezelfde
 naad, geen twee verbouwingen. Wie 9router's gratis-tiers per se wil, kiest
 bewust het ToS-risico — dat is een mensbeslissing, geen agent-beslissing.
 
@@ -337,38 +342,44 @@ Vijf kind-kaarten, gefaseerd zodat het meetwerk vóór het bouwwerk komt.
 | K7 | UI mist `endpoint_name`-picker voor pool-entries en column_overrides met `PROVIDER_COMPATIBLE` | ✅ Geïmplementeerd (kaart `d628054b261442c98892c7b7b17251b9` — `endpoint_name: string \| null` toegevoegd aan `ColumnOverride` + `PoolEntry`; `anthropic-compatible` aan `PROVIDERS`/`PROVIDER_LABELS`; `SubscriptionPoolDialog` + `CardEditDialog` tonen een endpoint-selector enkel voor compatible-entries, met auto-pick van de eerste endpoint bij switch naar compatible en clearing bij switch weg; lege-lijst hint linkt naar de nieuwe `/endpoints`-pagina — `features/endpoints/{EndpointsPage,EndpointDialog}.tsx` met upsert/delete CRUD via bestaande `/platforms/endpoints` REST; 4 nieuwe EndpointsPage-tests + 8 nieuwe dialog-tests) |
 
 **K1 resultaat (eerste counterbalanced meting, N=2 per trial):**
-`input_tokens` daalt in beide trials (gem. ~45%); `output_tokens` daalt in beide
-trials (gem. ~72%, Caveman-prelude werkt); `cache_read_input_tokens` is
-**volgorde-gedomineerd** op N=2 (Anthropic's sessie-warme prompt-cache maskeert
-het saver-effect) — de oorspronkelijke −42,4% `cache_read`-headline was
-order-confounded en is **ongeldig** verklaard. Volledige tabel, ruwe artifacts,
-en onzekerheids-markers rond `cache_read` vs abonnementsquotum in
+`input_tokens` daalt in beide trials (gem. ~45%); `output_tokens` daalt in
+beide trials (gem. ~72%, Caveman-prelude werkt). `cache_read_input_tokens` is
+**volgorde-gedomineerd** op N=2 (Anthropic's sessie-warme prompt-cache
+maskeert het saver-effect). De oorspronkelijke −42,4% `cache_read`-headline
+was order-confounded en is **ongeldig** verklaard.
+
+Volledige tabel, ruwe artifacts, en onzekerheids-markers rond `cache_read` vs
+abonnementsquotum in
 [`token-saver-meet-harnas.md`](./token-saver-meet-harnas.md).
 
 **K3 resultaat (kaart `333af652…`):** Een nieuwe provider toevoegen is een
 configuratie-rij, geen code-edit. `endpoints.py` (KanbanMeta-backed) houdt
 `{name, base_url, model, credential_name?}` per project, met
-`_validate_name`/`_validate_base_url`/`_validate_model` op de
+`_validate_name` / `_validate_base_url` / `_validate_model` op de
 serialisatie-grens. `provider_env.build_provider_env` heeft een
-`PROVIDER_COMPATIBLE`-tak die `ANTHROPIC_BASE_URL` / `ANTHROPIC_MODEL` /
+`PROVIDER_COMPATIBLE`-tak die `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` en
 `ANTHROPIC_AUTH_TOKEN` altijd-explicit zet (geen conditioneel lek vanuit
-ambient env). `resolve_compatible_endpoint` (gedeeld door REST-spawn én
-auto-dispatch) resolvet de credential uit de **project-scoped SecretStore**
-(legacy MiniMax-key uit `Settings` blijft als escape-hatch); een niet-
-geconfigureerde credential geeft een schone `ValueError` die de REST
-handler naar 400 vertaalt en de dispatcher door
-`MAX_DISPATCH_FAILURES` loodst. `_ALLOWED_POOL_PROVIDERS` accepteert de
-nieuwe provider. De frontend `NewSessionDialog` leest endpoints uit
-`GET /platforms/endpoints` i.p.v. het hardcoded union-type. Per-project
-resolutie op `POST /sessions` honoreert dezelfde `project_key`-query-param
-als de list/upsert/delete-endpoints (kaart `333af652…` blocker 2). De
-credential-setup-link in de dialoog is vervangen door een accurate
-verwijzing naar `POST /api/v1/secrets` (de Subscriptions-pagina heeft
-geen endpoint-UI; een dedicated UI is een vervolgkaart). Kaart
-`d628054b261442c98892c7b7b17251b9` (zie rij **K7** in §9) heeft die dedicated
-UI alsnog geleverd op `/endpoints`, met CRUD via dezelfde `/platforms/endpoints`
-REST; de `SubscriptionPoolDialog` + `CardEditDialog` plukken `endpoint_name`
-nu uit die lijst in plaats van een handmatige string.
+ambient env).
+
+`resolve_compatible_endpoint` (gedeeld door REST-spawn én auto-dispatch)
+resolvet de credential uit de **project-scoped SecretStore** (legacy
+MiniMax-key uit `Settings` blijft als escape-hatch). Een niet-geconfigureerde
+credential geeft een schone `ValueError` die de REST-handler naar 400
+vertaalt en de dispatcher door `MAX_DISPATCH_FAILURES` loodst.
+`_ALLOWED_POOL_PROVIDERS` accepteert de nieuwe provider.
+
+De frontend `NewSessionDialog` leest endpoints uit `GET /platforms/endpoints`
+i.p.v. het hardcoded union-type. Per-project resolutie op `POST /sessions`
+honoreert dezelfde `project_key`-query-param als de list/upsert/delete-
+endpoints (kaart `333af652…` blocker 2). De credential-setup-link in de
+dialoog is vervangen door een accurate verwijzing naar `POST /api/v1/secrets`
+(de Subscriptions-pagina heeft geen endpoint-UI; een dedicated UI is een
+vervolgkaart).
+
+Kaart `d628054b261442c98892c7b7b17251b9` (zie rij **K7** in §9) heeft die
+dedicated UI alsnog geleverd op `/endpoints`, met CRUD via dezelfde
+`/platforms/endpoints` REST. De `SubscriptionPoolDialog` + `CardEditDialog`
+plukken `endpoint_name` nu uit die lijst in plaats van een handmatige string.
 
 K2 hangt aan K1 omdat de meetuitslag de vergelijking voedt. K3 hangt aan K2 omdat
 de spike bepaalt *welk* endpoint de entry krijgt. K4 en K5 hangen beide aan K3
@@ -411,10 +422,12 @@ Deze beslissing is niet "nooit". Heropen bij een van deze triggers:
 De conditionele GO uit §6 blijft staan, maar de **backend-keuze valt op LiteLLM in
 plaats van 9router**. Dat is geen nieuwe afweging — §6 benoemde het alternatief al
 letterlijk ("voor de scope die wij overhouden zijn ze functioneel inwisselbaar, en
-dan wint LiteLLM op maturiteit"). De herziening voert die zin uit: de API-key-tier is
-alles wat overblijft na §2.2, en binnen die scope is er geen eigenschap van 9router
-die de keuze nog kan kantelen — wél drie van LiteLLM (Python, institutioneel steviger,
-geen default-aan prompt-mutatie; die laatste is inmiddels gemeten, zie §11.2).
+dan wint LiteLLM op maturiteit"). De herziening voert die zin uit.
+
+De API-key-tier is alles wat overblijft na §2.2. Binnen die scope is er geen
+eigenschap van 9router die de keuze nog kan kantelen. Wél drie van LiteLLM
+(Python, institutioneel steviger, geen default-aan prompt-mutatie; die laatste
+is inmiddels gemeten, zie §11.2).
 
 **Lifecycle, faalgedrag en de scope van het kritieke pad zijn géén onderdeel van deze
 sectie** — die zijn apart beslist in
@@ -424,7 +437,7 @@ sectie** — die zijn apart beslist in
 ### 11.2 Operationele voorwaarde — hardening-check
 
 De sidecar-GO op een LiteLLM-proxy (§6, vormgelijk aan de MiniMax-tak) staat
-of valt met vijf hardnekkige eigenschappen van die proxy: hij mag de prompt
+of valt met vijf hardnekkige eigenschappen van die proxy. Hij mag de prompt
 niet muteren, geen telemetry/callbacks naar buiten sturen, alleen op loopback
 luisteren, credentials in `os.environ/VAR` of een `credential_list` zetten
 (geen plaintext), en `master_key`-auth afdwingen. Een check die **één** daarvan
@@ -472,13 +485,15 @@ publieke `litellm_settings`-referentietabel met als beschrijving "System
 health monitoring", maar heeft **0 hits** in de hele
 `BerriAI/litellm`-repository (`gh search code 'service_callbacks'
 --repo BerriAI/litellm` retourneert een lege resultaatset). Geen enkele
-loader leest de sleutel. De eerdere §11-doc noemde hem als onderdeel van
-de flag-lijst — dat was een documentation-artifact, geen runtime-waarheid.
-De check noemt hem nu niet meer in de PASS-message, niet in de telemetry-FAIL,
-en niet in de callback-detectie; een operator die `service_callbacks: ["sentry"]`
-toevoegt aan zijn config omdat de docs dat suggereren, krijgt niet langer
-een FAIL die hem op een dwaalspoor zet. De `fix:`-note onder een
-prompt-mutation-FAIL legt kort uit waarom de sleutel ontbreekt.
+loader leest de sleutel.
+
+De eerdere §11-doc noemde hem als onderdeel van de flag-lijst — dat was een
+documentation-artifact, geen runtime-waarheid. De check noemt hem nu niet meer
+in de PASS-message, niet in de telemetry-FAIL, en niet in de callback-detectie.
+Een operator die `service_callbacks: ["sentry"]` toevoegt aan zijn config
+omdat de docs dat suggereren, krijgt niet langer een FAIL die hem op een
+dwaalspoor zet. De `fix:`-note onder een prompt-mutation-FAIL legt kort uit
+waarom de sleutel ontbreekt.
 
 **Overige flag-namen.** De resterende vlag-namen
 (`success_callback`, `failure_callback`, `callbacks`, `guardrails`,
@@ -526,21 +541,28 @@ echte 401, maar wel dezelfde klasse van "niet wat je verwacht"-fout.
 
 ✅ **Gemeten (kaart `bbfcb365…`, 2026-07-27)** — de pilot heeft gedraaid tegen
 LiteLLM `1.93.0`; volledige uitkomst in
-[`litellm-pilot-meting.md`](./litellm-pilot-meting.md). Kort: de check gaf
-`exit 0` op alle vijf eigenschappen tegen een echte proxy, tool-use overleeft de
-format-translatie (Read + Edit + Bash end-to-end), en een mid-sessie
-rate-limit werd door de fallback opgevangen zonder dat de sessie omviel — de
-heropen-trigger uit §11.6 is dus **niet** getriggerd en de sidecar-route gaat
-door. Drie correcties op de aannames van dit doc volgen wél uit de meting:
-(a) `cache_read` is via de proxy structureel **0**, wat ~14× meer belastbare
-input per beurt kost dan een warme Anthropic-cache — de sidecar bespaart geen
-tokens, de businesscase moet volledig uit het lagere tarief komen;
+[`litellm-pilot-meting.md`](./litellm-pilot-meting.md).
+
+Kort: de check gaf `exit 0` op alle vijf eigenschappen tegen een echte proxy.
+Tool-use overleeft de format-translatie (Read + Edit + Bash end-to-end). Een
+mid-sessie rate-limit werd door de fallback opgevangen zonder dat de sessie
+omviel — de heropen-trigger uit §11.6 is dus **niet** getriggerd en de
+sidecar-route gaat door.
+
+Drie correcties op de aannames van dit doc volgen wél uit de meting:
+
+(a) `cache_read` is via de proxy structureel **0**. Dat kost ~14× meer
+belastbare input per beurt dan een warme Anthropic-cache. De sidecar bespaart
+geen tokens; de businesscase moet volledig uit het lagere tarief komen.
+
 (b) `pip install 'litellm[proxy]'` alleen laat elke auth-afwijzing als HTTP 500
-verschijnen (crash in LiteLLM's eigen exception-handler bij een ontbrekende
-`prisma`), waardoor deze §11.2-check FAIL't op een correct geconfigureerde proxy —
-`prisma` hoort in de install-set; (c) de `openai/`-prefix routeert naar de
-OpenAI **Responses API**, die Groq/Cerebras/NIM niet implementeren — de
-provider-entry moet de prefix expliciet configureerbaar maken.
+verschijnen — crash in LiteLLM's eigen exception-handler bij een ontbrekende
+`prisma`. Daardoor FAIL't deze §11.2-check op een correct geconfigureerde
+proxy. `prisma` hoort in de install-set.
+
+(c) De `openai/`-prefix routeert naar de OpenAI **Responses API**, die
+Groq/Cerebras/NIM niet implementeren. De provider-entry moet de prefix
+expliciet configureerbaar maken.
 
 ### 11.3 Twee inzet-modi, en de breedte-eis
 
@@ -602,10 +624,11 @@ een "§12/V6" van dit document. Die sectie heeft nooit bestaan.)*
 tool-use, meerdere beurten, streaming — dan valt de route terug op
 Anthropic-native-only en vervalt de sidecar-GO.
 
-**Status: niet getriggerd.** De pilot (`bbfcb365…`) heeft tool-use end-to-end over de
-proxy gedraaid (Read + Edit + Bash, `is_error: false`, bestand op schijf werkelijk
-gewijzigd), prompt-integriteit byte-exact gemeten, en een mid-sessie rate-limit door
-de fallback laten opvangen zonder dat de sessie omviel. De sidecar-route gaat door.
+**Status: niet getriggerd.** De pilot (`bbfcb365…`) heeft tool-use end-to-end over
+de proxy gedraaid (Read + Edit + Bash, `is_error: false`, bestand op schijf
+werkelijk gewijzigd). Prompt-integriteit is byte-exact gemeten. Een mid-sessie
+rate-limit is door de fallback opgevangen zonder dat de sessie omviel. De
+sidecar-route gaat door.
 
 Wat de meting wél veranderde is de *rechtvaardiging*, niet de richting: `cache_read`
 is via de proxy structureel 0, dus de sidecar bespaart geen tokens en elke
