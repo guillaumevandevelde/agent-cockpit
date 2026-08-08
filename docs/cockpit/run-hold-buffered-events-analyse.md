@@ -123,9 +123,10 @@ blast radius is echter klein en zelf-begrenzend: `_spawn_times` en
 verdwijnen de verwachting én het signaal samen en ontstaat er geen vals-stuck
 sessie. Er blijft een smal venster (backend bereikbaar-maar-traag, hook-POST
 verloopt op de 1s-cap) waarin een sessie na `STUCK_SESSION_TIMEOUT_S=120` als
-stuck wordt gelezen — maar `reap_stale_claims` grijpt alleen in als de pane
-óók een rate-limit-patroon matcht, dus een gemiste hook alleen kost niets. Te
-speculatief voor een kaart; hier genoteerd voor als het ooit wél bijt.
+stuck wordt gelezen. Maar `reap_stale_claims` grijpt alleen in als de pane
+óók een rate-limit-patroon matcht, dus een gemiste hook alleen kost niets.
+
+Te speculatief voor een kaart; hier genoteerd voor als het ooit wél bijt.
 
 ### 3.2 Waar het gat echt zit: het headless-transport
 
@@ -133,7 +134,7 @@ speculatief voor een kaart; hier genoteerd voor als het ooit wél bijt.
 `start_new_session=True`, dus het `claude`-proces zit in de procesboom van
 uvicorn. Drie gevolgen, alle drie in `backend/app/kanban/headless_runner.py`:
 
-1. **Eigendom is fataal gekoppeld.** `kill_tree` reapt het kind mee; en zelfs bij
+1. **Eigendom is fataal gekoppeld.** `kill_tree` ruimt het kind mee op; en zelfs bij
    een kale uvicorn-crash sluit de stdout-pipe waardoor het kind op zijn
    volgende write een `EPIPE`/`SIGPIPE` krijgt.
 2. **Liveness is in-memory.** `_headless_processes` is een module-dict
@@ -172,10 +173,13 @@ finally:
 Het subprocess wordt **niet** getermineerd. De volledige keten:
 
 > Claude emit een event-type dat wij niet mappen (bv. een `system`-subtype
-> buiten `init`, of een nieuw type na een CLI-update) → `ValidationError` →
-> registry-entry weg, slot vrij, **proces leeft door** → `live_headless_sessions()`
-> meldt de sessie dood → `reap_stale_claims` verplaatst de kaart naar *To Resume*
-> of geeft de claim vrij → her-dispatch → **twee agents in dezelfde worktree op
+> buiten `init`, of een nieuw type na een CLI-update). Dat geeft een
+> `ValidationError`. De registry-entry verdwijnt, het slot komt vrij, en
+> **het proces leeft door**.
+>
+> `live_headless_sessions()` meldt de sessie dood. `reap_stale_claims`
+> verplaatst de kaart naar *To Resume* of geeft de claim vrij. Dat leidt
+> tot her-dispatch. En dus tot **twee agents in dezelfde worktree op
 > dezelfde branch**.
 
 De exception verdwijnt bovendien vrijwel geruisloos: de task-`done_callback` is
@@ -187,10 +191,13 @@ terwijl de sessie leeft), maar met een andere root cause: daar is de liveness-br
 te gevoelig, hier is hij te vergeetachtig. Beide horen apart gefixt.
 
 ✅ **Geïmplementeerd (kaart `d373be64…`)** — aanpassingen in `backend/app/kanban/headless_runner.py`:
-(1) een `pydantic.ValidationError` plus `KeyError`/`TypeError`/`AttributeError`/`ValueError` rond `parse_structured_event(map_stream_event(payload))` in `_consume_stream` wordt gelogd met de originele payload erin en `continue`t — een onbekend event-type of een misvormd payload doodt de run niet meer, exact zoals de bestaande non-JSON-regel-tolerantie;
-(2) `run_headless` en `_consume_stream` termineren het subproces in hun `finally`-blok (SIGTERM + 2s-grace + SIGKILL-fallback) **vóór** ze de registry leeghalen en het slot vrijgeven, zodat élke exit-pad de subprocess dood achterlaat en er geen "dood-gemeld-maar-nog-levend"-venster ontstaat waar de reaper op kan re-dispatchen;
+(1) een `pydantic.ValidationError` plus `KeyError`/`TypeError`/`AttributeError`/`ValueError` rond `parse_structured_event(map_stream_event(payload))` in `_consume_stream` wordt gelogd met de originele payload erin en `continue`t. Een onbekend event-type of een misvormd payload doodt de run niet meer, exact zoals de bestaande non-JSON-regel-tolerantie.
+
+(2) `run_headless` en `_consume_stream` termineren het subproces in hun `finally`-blok (SIGTERM + 2s-grace + SIGKILL-fallback) **vóór** ze de registry leeghalen en het slot vrijgeven. Zo laat élke exit-pad de subprocess dood achter en ontstaat er geen "dood-gemeld-maar-nog-levend"-venster waar de reaper op kan re-dispatchen.
+
 (3) het `done_callback` logt nu uitzonderingen in plaats van ze stil te laten vallen.
-Regressietests in `backend/tests/test_headless_transport.py`: één voor de tolerantie van één onbekend event, één voor het KeyError-pad (misvormd payload), één voor het terminatie-gedrag op een onverwachte exception, één voor de SIGKILL-fallback tegen een SIGTERM-negérend kind, en één voor de zichtbare logging via het nieuwe `_headless_task_done_callback`.
+
+Regressietests in `backend/tests/test_headless_transport.py`: één voor de tolerantie van één onbekend event, één voor het KeyError-pad (misvormd payload), één voor het terminatie-gedrag op een onverwachte exception, één voor de SIGKILL-fallback tegen een SIGTERM-negérend kind. En één voor de zichtbare logging via het nieuwe `_headless_task_done_callback`.
 
 ---
 
@@ -217,10 +224,11 @@ zelf blijft ongewijzigd en correct.
 ### 5.2 Grace-window (AC 3)
 
 **Vervalt met het patroon.** Er is geen toestand waarin een run wacht op een
-reattach: na de fix van §6.2 is een headless run ofwel levend (en dan wordt hij
-bij startup geadopteerd, vóór de dispatch-scheduler draait — dezelfde ordening die
-`session_recovery` al gebruikt), ofwel dood (en dan geldt het bestaande
-resume-pad). Een timer daartussen zou een verzonnen toestand bewaken.
+reattach. Na de fix van §6.2 is een headless run ofwel levend — en dan
+wordt hij bij startup geadopteerd, vóór de dispatch-scheduler draait
+(dezelfde ordening die `session_recovery` al gebruikt) — ofwel dood, en
+dan geldt het bestaande resume-pad. Een timer daartussen zou een
+verzonnen toestand bewaken.
 
 Wat er wél voor terugkomt is een **ordenings**-eis, geen duur: adoptie van
 levende headless runs moet in de startup-lifespan vóór de reaper plaatsvinden.
@@ -248,11 +256,11 @@ find . -path "*worktrees*" -name "*.jsonl" -printf "%s\n" | sort -n \
 ```
 
 **Voorstel: 16 MB per run, met afkap aan de kop (oudste events eerst weg).** Dat
-is ~2× de grootste run die we ooit hebben gehad en ~14× de p90, dus in de praktijk
-kapt hij nooit af; hij bestaat om een pathologische loop te begrenzen, niet om
-normaal verkeer te knippen. Bij 50 gelijktijdige runs is de bovengrens 800 MB
-op schijf — acceptabel voor een lokaal platform, en de logs worden bij
-worktree-gc mee opgeruimd.
+is ~2× de grootste run die we ooit hebben gehad en ~14× de p90, dus in de
+praktijk kapt hij nooit af. Hij bestaat om een pathologische loop te
+begrenzen, niet om normaal verkeer te knippen. Bij 50 gelijktijdige runs is
+de bovengrens 800 MB op schijf — acceptabel voor een lokaal platform, en de
+logs worden bij worktree-gc mee opgeruimd.
 
 **Eén expliciete kwalificatie op deze meting:** transcripts zijn een *proxy* voor
 stream-json-output, niet hetzelfde formaat. Ze beschrijven dezelfde conversatie
@@ -276,10 +284,10 @@ mogelijkheid.
 
 ### 6.2 Headless run overleeft een backend-herstart niet
 De constructieve vertaling van Lemma's §4.1: eigendom loskoppelen
-(`start_new_session=True`), liveness afleidbaar maken uit een durabele bron in
-plaats van een module-dict, en het event-verkeer naar een on-disk log schrijven
-dat bij adoptie hervat kan worden. Gated op adoptie van het headless-transport —
-vandaag staat het project op `worktree`.
+(`start_new_session=True`), liveness afleidbaar maken uit een durabele bron
+in plaats van een module-dict. En het event-verkeer naar een on-disk log
+schrijven dat bij adoptie hervat kan worden. Gated op adoptie van het
+headless-transport — vandaag staat het project op `worktree`.
 
 ### Bewust géén kaart
 - **Het hold-window / `_HeldRun`-patroon zelf** — §2: er is geen tussentoestand
@@ -287,8 +295,8 @@ vandaag staat het project op `worktree`.
 - **Gebufferde hook-events voor het tmux-pad** — §3.1: het venster is smal en
   zelf-begrenzend; te speculatief.
 - **Ping/pong-heartbeat** — Lemma heeft die nodig omdat een websocket stil kan
-  sterven. `tmux ls` en `proc.returncode` liegen niet en hebben geen heartbeat
-  nodig.
+  sterven. `tmux ls` en `proc.returncode` liegen niet en hebben geen
+  heartbeat nodig.
 
 ---
 
@@ -305,10 +313,10 @@ AGPL-delen (`lemma-backend/`, `lemma-frontend/`) zijn hier niet geraadpleegd.
 ## 8. Bewust buiten scope
 
 - **Geen runtime-meting van het headless-transport.** Het is opt-in en op dit
-  project uitgeschakeld; de uitspraken in §3.2 en §4 zijn afgeleid uit de code
-  (`headless_runner.py`, `dispatch.py`, `scripts/cockpit.sh`), niet uit
-  observatie van een draaiende headless run. §6.1 vraagt daarom expliciet om een
-  regressietest die de faalmodus aantoont vóór de fix.
+  project uitgeschakeld. De uitspraken in §3.2 en §4 zijn afgeleid uit de
+  code (`headless_runner.py`, `dispatch.py`, `scripts/cockpit.sh`), niet uit
+  observatie van een draaiende headless run. §6.1 vraagt daarom expliciet
+  om een regressietest die de faalmodus aantoont vóór de fix.
 - **Geen kosten-/besparings-claim.** De enige getallen in dit doc zijn de
   gemeten transcript-groottes van §5.3, met reproductie-commando; er is geen
   token-, geld- of latency-schatting.
