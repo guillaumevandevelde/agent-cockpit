@@ -50,11 +50,30 @@ def _recoverable(card, live_sessions: set[str]) -> bool:
 
 
 def _resolve_transcript_file(
-    project_path: str, session_name: str, *, projects_dir: Path | None = None,
+    project_path: str, session_name: str, *,
+    cli_id: str = "claude-code",
+    projects_dir: Path | None = None,
 ) -> Path | None:
-    """Find the most recently modified Claude transcript for an agent session."""
+    """Find the transcript for an agent session, routed by CLI.
+
+    Mirrors ``_resolve_resume_target`` (kaart 2b195e59…): the transcript
+    resolution is now per-CLI, with a log when the CLI is unknown or
+    doesn't expose a transcript store. Reaper-side callers use the
+    ``None``-return as the "no signal" branch — i.e. suppress the
+    pane-substring-scan fallback rather than fire it (kaart 55fa66d1…:
+    a Codex/OpenCode/MiMo/Copilot session whose pane happens to
+    mention '429' must not get reaped mid-productivity just because we
+    can't tell the transcript is empty).
+    """
     worktree = Path(project_path) / ".claude" / "worktrees" / session_name
-    cli = get_agentic_cli("claude-code")
+    try:
+        cli = get_agentic_cli(cli_id)
+    except ValueError:
+        logger.warning("transcript resolution requested for unknown cli=%s", cli_id)
+        return None
+    if not cli.supports_transcript_resolution:
+        logger.info("transcript resolution unsupported for cli=%s", cli_id)
+        return None
     return cli.resolve_transcript_file(worktree, data_dir=projects_dir)
 
 

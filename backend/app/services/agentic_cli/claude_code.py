@@ -26,6 +26,7 @@ class ClaudeCodeCli(AgenticCli):
     display_name = "Claude Code"
     binary_name = "claude"
     supports_resume_resolution = True
+    supports_transcript_resolution = True
 
     def resolve_transcript_file(
         self,

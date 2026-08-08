@@ -4879,21 +4879,56 @@ def _find_rate_limit_match(pane_content: str) -> str | None:
     return None
 
 
-def _session_has_transcript(project_path: str | None, session_name: str) -> bool:
-    """True if the worktree for `session_name` has a Claude transcript file
-    on disk with content.
+def _session_has_transcript(
+    project_path: str | None, session_name: str, *, cli_id: str = "claude-code",
+) -> bool | None:
+    """Tri-state: does the worktree for `session_name` have a transcript on disk?
 
     Used by the reaper's pane-scan branch (card 3a8f27a4…): the pane
     substring-scan should only fire when no transcript exists yet, since a
     session with a productive transcript is the transcript-tail
-    detector's territory. Any unreadable / missing transcript counts as
-    'no transcript' so the scan still fires for the classic 429-on-first-
-    spawn case (`claude` died before writing anything)."""
+    detector's territory.
+
+    The return value carries the three states the reaper needs to tell
+    "no transcript" apart from "no signal" — the latter is the
+    pre-fix false-positive class for non-Claude CLIs (kaart 55fa66d1…):
+    before the per-CLI routing, the resolver always asked Claude for a
+    transcript on a Codex/OpenCode/MiMo/Copilot worktree, always got None,
+    and the reaper read that as "no transcript yet — fire the pane scan"
+    even on a productive mid-session agent whose pane happened to mention
+    '429' from a curl probe.
+
+    - ``True``  — a transcript file exists and has content; the
+      transcript-tail detector owns mid-session limits, skip the pane scan.
+    - ``False`` — we asked the right CLI, it confirmed the file is absent;
+      safe to run the pane scan (the classic 429-on-first-spawn case).
+    - ``None``  — the CLI is unknown or doesn't expose a transcript
+      store; the pane scan is suppressed because we have no authoritative
+      mid-session source for this lane.
+
+    Any transient resolver / stat hiccup fails open to False so a
+    429-on-first-spawn for Claude is never stranded behind a flaky
+    resolver."""
     if not project_path:
         return False
     try:
+        # The unknown/unsupported CLI branches must be decided here
+        # (not inferred from the resolver's None-return) because the
+        # resolver also returns None for the legitimate "Claude, no
+        # worktree / no transcript yet" case — collapsing those would
+        # re-introduce the very false-positive this tri-state exists
+        # to prevent.
+        from app.services.agentic_cli import get_agentic_cli
+        try:
+            cli = get_agentic_cli(cli_id)
+        except ValueError:
+            logger.warning("transcript check requested for unknown cli=%s", cli_id)
+            return None
+        if not cli.supports_transcript_resolution:
+            logger.info("transcript check unsupported for cli=%s", cli_id)
+            return None
         from app.kanban.session_recovery import _resolve_transcript_file
-        path = _resolve_transcript_file(project_path, session_name)
+        path = _resolve_transcript_file(project_path, session_name, cli_id=cli_id)
     except Exception:
         # Fail open: a transient resolver hiccup must never block the
         # pane scan. Better to risk one false positive than to silently
@@ -7716,12 +7751,15 @@ async def reap_stale_claims(
                 # transcript exists (and has content) the transcript-tail
                 # detector owns mid-session limit handling; running the
                 # pane scan on top of it is the false-positive path.
-                if _session_has_transcript(project_path, name):
-                    # Drop through to the alive-skip branch — the session
-                    # is just slow (or its limit, if any, will be caught
-                    # by `detect_transcript_rate_limits` on the next tick).
-                    pass
-                else:
+                # Tri-state gate (kaart 55fa66d1…): `True` = transcript
+                # exists, drop through. `False` = resolver confirmed no
+                # transcript, fire the pane scan (classic 429-on-first-
+                # spawn). `None` = no signal (unknown / unsupported CLI),
+                # suppress the scan rather than fire it on a productive
+                # non-Claude session whose pane happens to mention '429'.
+                if _session_has_transcript(
+                    project_path, name, cli_id=_effective_resume_cli_id(card),
+                ) is False:
                     needle = _find_rate_limit_match(pane) or "?"
                     await _cleanup_stuck_session(
                         session, card=card, project_key=project_key,
@@ -7731,6 +7769,10 @@ async def reap_stale_claims(
                     )
                     reaped += 1
                     continue
+                # True (transcript exists) or None (no signal) → drop
+                # through to the alive-skip branch — the session is just
+                # slow (or its limit, if any, will be caught by
+                # `detect_transcript_rate_limits` on the next tick).
 
         if name in live_sessions or name in sandcastle_live or name in headless_live or name in acp_live:
             continue

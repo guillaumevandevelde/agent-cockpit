@@ -173,6 +173,14 @@ class AgenticCli(ABC):
     binary_name: str
     version_args: tuple[str, ...] = ("--version",)
     supports_resume_resolution: bool = False
+    # True when this CLI exposes a per-worktree transcript file the dispatch
+    # reaper can use as a "mid-session detector owns the limit" signal. Only
+    # Claude Code does today; the rest of the lanes return None and let the
+    # reaper fall through to its alive-skip branch (no false-positive pane
+    # substring-scan). Mirrors ``supports_resume_resolution`` — a future CLI
+    # that ships a session store we can glob for just sets the flag and
+    # overrides ``resolve_transcript_file``.
+    supports_transcript_resolution: bool = False
 
     def resolve_resume_target(
         self,
@@ -181,6 +189,22 @@ class AgenticCli(ABC):
         data_dir: Path | None = None,
     ) -> ResumeTarget | None:
         """Find this CLI's session for ``worktree_path`` when supported."""
+        return None
+
+    def resolve_transcript_file(
+        self,
+        worktree_path: Path,
+        *,
+        data_dir: Path | None = None,
+    ) -> Path | None:
+        """Return the worktree's transcript file path when supported, else None.
+
+        Lifted onto the base class for symmetry with ``resolve_resume_target``
+        so per-CLI routing in the reaper can read the same shape from every
+        adapter without special-casing Claude. The default returns None —
+        the reaper treats "no transcript signal" as "skip the pane scan
+        fallback" rather than as a green light to fire it.
+        """
         return None
 
     def resolve_directory(self, options: SpawnCommandOptions) -> str:
