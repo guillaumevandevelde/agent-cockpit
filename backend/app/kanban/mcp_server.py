@@ -1389,7 +1389,10 @@ async def create_project_from_interview(
       5. Write LICENSE + ``docs/specs/<date>-<slug>-design.md`` +
          ``docs/plans/<date>-<slug>-plan.md``; capture in one first commit.
       6. `ProjectService.add_project(name, target_path)`.
-      7. `KanbanMeta:autodispatch:<new_project_key>` = enabled.
+      7. `KanbanMeta:autodispatch:<new_project_key>` =
+         `policy.autodispatch_default` (default off — security-default-deny;
+         the route has no human-in-the-loop, so the caller must opt in via
+         an explicit policy if they want a born-running dispatcher).
       8. Create the first kanban card in the new project's Backlog (title +
          description from the payload; ``metadata[spec_doc]`` set).
 
