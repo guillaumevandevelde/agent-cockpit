@@ -37,7 +37,7 @@ async def test_tools_call_returns_clean_tool_output_not_tuple_repr():
 
         r = await client.post("/api/v1/mcp-server", headers=headers, json={
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "list_scheduled_messages", "arguments": {}},
+            "params": {"name": "list_sessions", "arguments": {}},
         })
         assert r.status_code == 200
         body = r.json()
@@ -47,5 +47,3 @@ async def test_tools_call_returns_clean_tool_output_not_tuple_repr():
         text = content[0]["text"]
         assert "TextContent(" not in text, "content block leaked FastMCP's internal repr instead of the tool's output"
         assert "{'result':" not in text, "content block leaked the structured-result dict repr"
-        parsed = json.loads(text)
-        assert "items" in parsed and "total" in parsed

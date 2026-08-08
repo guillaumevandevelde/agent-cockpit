@@ -1,35 +1,25 @@
-import asyncio
-from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
-
+"""Tests for the shared SchedulerService used by kanban-dispatch, recurring
+triggers, stale detection, and the auto-backup job. The once/cron
+scheduled-message jobs were retired with the scheduled-messages feature
+(see docs/cockpit/scheduled-trigger-consolidatie-decision.md §5.2) — they
+lived here too.
+"""
 import pytest
 
 from app.services.scheduling.scheduler import SchedulerService
 
 
-@pytest.mark.asyncio
-async def test_once_job_fires_and_calls_delivery():
+def test_recurring_trigger_schedule_and_remove():
+    """``schedule_recurring_trigger`` is the canonical "cron -> kanban card"
+    job. Without ``start()`` ``add_job`` still stores the entry — we exercise
+    add/remove here and leave end-to-end firing to the live boot path."""
     svc = SchedulerService()
-    svc.start()
-    fired = asyncio.Event()
-
-    async def fake_run(message_id):
-        fired.set()
-
-    with patch.object(svc, "_run_delivery", side_effect=fake_run):
-        fire_at = (datetime.now(UTC) + timedelta(seconds=0.3)).isoformat()
-        svc.schedule_once(message_id=1, fire_at_iso=fire_at)
-        await asyncio.wait_for(fired.wait(), timeout=3)
-    svc.shutdown()
-
-
-def test_cron_schedule_and_remove():
-    # No start() needed: add_job stores the job even when the scheduler is idle.
-    svc = SchedulerService()
-    svc.schedule_cron(message_id=2, cron_expr="0 9 * * 1-5", tz="Europe/Brussels")
-    assert svc.has_job(2) is True
-    svc.remove(2)
-    assert svc.has_job(2) is False
+    svc.schedule_recurring_trigger(
+        trigger_id=2, cron_expr="0 9 * * 1-5", tz="Europe/Brussels",
+    )
+    assert svc.has_recurring_trigger(2) is True
+    svc.remove_recurring_trigger(2)
+    assert svc.has_recurring_trigger(2) is False
 
 
 def test_auto_backup_schedule_and_remove():

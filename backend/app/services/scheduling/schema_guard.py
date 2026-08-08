@@ -9,29 +9,11 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
-_NEW_COLUMNS = {
-    "target_kind": "VARCHAR(16) DEFAULT 'project'",
-    "target_session_id": "VARCHAR(128)",
-    "project_folder": "VARCHAR(255)",
-    "session_preview": "TEXT",
-    "sandcastle_config_id": "INTEGER",
-}
 
 
 _NEW_BACKUP_COLUMNS = {
     "is_automatic": "BOOLEAN DEFAULT 0 NOT NULL",
 }
-
-
-async def ensure_scheduled_message_columns(engine: AsyncEngine) -> None:
-    async with engine.begin() as conn:
-        result = await conn.exec_driver_sql("PRAGMA table_info(scheduled_messages)")
-        existing = {row[1] for row in result.fetchall()}
-        for column, ddl in _NEW_COLUMNS.items():
-            if column not in existing:
-                await conn.exec_driver_sql(
-                    f"ALTER TABLE scheduled_messages ADD COLUMN {column} {ddl}"
-                )
 
 
 async def ensure_backup_columns(engine: AsyncEngine) -> None:
@@ -58,7 +40,6 @@ async def ensure_model_columns(engine: AsyncEngine) -> None:
     import app.models.database  # noqa: F401
     import app.models.mcp_token  # noqa: F401
     import app.models.sandcastle  # noqa: F401
-    import app.models.scheduled_message  # noqa: F401
     import app.models.security_profile  # noqa: F401
     from app.database import Base
 

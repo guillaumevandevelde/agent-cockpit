@@ -1,8 +1,18 @@
 ---
 title: "Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan"
 type: plan
-status: active
+status: superseded
 ---
+
+> **Statusbanner — superseded 2026-08-08.**
+> Het "scheduled messages"-pad (tmux-injectie via APScheduler) is
+> teruggetrokken. De tijd-trigger wordt voortaan gedragen door
+> `/api/v1/recurring-triggers` (cron → `create_card`), en de gedeelde
+> sessie-substraat (idle/presence/auto-resume) staat onder
+> `/api/v1/session-hooks`. Bron en meting:
+> [`scheduled-trigger-consolidatie-decision.md`](./scheduled-trigger-consolidatie-decision.md).
+> Dit plan blijft staan voor de historische context, maar wordt niet
+> verder uitgevoerd.
 
 # Agent Cockpit — Fase 2: Scheduled Messages — Implementation Plan
 

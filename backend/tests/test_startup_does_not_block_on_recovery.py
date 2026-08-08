@@ -59,11 +59,8 @@ def neutralised_startup(monkeypatch):
         def schedule_stale_detection(self, interval_minutes=30):
             calls.append("schedule_stale_detection")
 
-        def schedule_once(self, *a, **kw):
-            calls.append("schedule_once")
-
-        def schedule_cron(self, *a, **kw):
-            calls.append("schedule_cron")
+        def schedule_recurring_trigger(self, *a, **kw):
+            calls.append("schedule_recurring_trigger")
 
         def schedule_auto_backup(self, *a, **kw):
             calls.append("schedule_auto_backup")

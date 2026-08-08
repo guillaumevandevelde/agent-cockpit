@@ -30,7 +30,7 @@ def test_install_writes_all_scheduling_hooks(tmp_path, monkeypatch):
     assert set(written["hooks"]) == ALL_EVENTS
     for event in ALL_EVENTS:
         commands = [h["command"] for g in written["hooks"][event] for h in g["hooks"]]
-        assert any("scheduled-messages/hook-event" in c for c in commands)
+        assert any("session-hooks/hook-event" in c for c in commands)
 
 
 def test_install_preserves_unrelated_settings_and_hooks(tmp_path, monkeypatch):
@@ -53,7 +53,7 @@ def test_install_preserves_unrelated_settings_and_hooks(tmp_path, monkeypatch):
         h["command"] for g in written["hooks"]["SessionStart"] for h in g["hooks"]
     ]
     assert "/some/other/cache-heal.mjs" in session_start_commands
-    assert any("scheduled-messages/hook-event" in c for c in session_start_commands)
+    assert any("session-hooks/hook-event" in c for c in session_start_commands)
 
 
 def test_install_is_idempotent(tmp_path, monkeypatch):
@@ -77,7 +77,7 @@ def test_status_reflects_partial_install(tmp_path, monkeypatch):
             "Notification": [
                 {"hooks": [{
                     "type": "command",
-                    "command": "curl -s -X POST http://localhost:8000/api/v1/scheduled-messages/hook-event",
+                    "command": "curl -s -X POST http://localhost:8000/api/v1/session-hooks/hook-event",
                 }]}
             ]
         }
@@ -99,7 +99,7 @@ def test_install_only_adds_missing_events(tmp_path, monkeypatch):
             "Notification": [
                 {"hooks": [{
                     "type": "command",
-                    "command": "curl -s -X POST http://localhost:8000/api/v1/scheduled-messages/hook-event",
+                    "command": "curl -s -X POST http://localhost:8000/api/v1/session-hooks/hook-event",
                 }]}
             ]
         }
@@ -151,7 +151,7 @@ def test_status_reports_stale_when_command_diverges_from_renderer(tmp_path, monk
                         "'{event:$ev, session_id:.session_id, cwd:.cwd, "
                         "tmux_pane:env.TMUX_PANE, message:.message}' "
                         "| curl -s -X POST -H 'Content-Type: application/json' "
-                        "-d @- http://localhost:8000/api/v1/scheduled-messages/hook-event"
+                        "-d @- http://localhost:8000/api/v1/session-hooks/hook-event"
                         " >/dev/null 2>&1 || true"
                     ),
                 }]}
@@ -190,7 +190,7 @@ def test_install_returns_actual_post_install_status(tmp_path, monkeypatch):
         "hooks": {
             event: [{"hooks": [{
                 "type": "command",
-                "command": "curl -s -X POST http://localhost:8000/api/v1/scheduled-messages/hook-event",
+                "command": "curl -s -X POST http://localhost:8000/api/v1/session-hooks/hook-event",
             }]}]
             for event in ALL_EVENTS
         }
@@ -205,3 +205,51 @@ def test_install_returns_actual_post_install_status(tmp_path, monkeypatch):
     for event in ALL_EVENTS:
         assert len(written["hooks"][event]) == 1
         assert written["hooks"][event][0]["hooks"][0]["command"].startswith("curl -s -X POST")
+
+
+def test_install_rewrites_legacy_scheduled_messages_url_in_place(tmp_path, monkeypatch):
+    """The hook URL moved from /api/v1/scheduled-messages/hook-event to
+    /api/v1/session-hooks/hook-event when the scheduled-messages feature
+    was retired. A pre-existing settings.json whose hooks still point at
+    the legacy path must be migrated silently by install_missing_hooks —
+    otherwise the rename would look like a working, never-firing hook
+    (the ``|| true`` sentinel swallows the 404).
+
+    We seed the Notification event with the exact legacy command shape so
+    the byte-match against the renderer holds after the URL is rewritten;
+    the per-event shape difference (Notification has ``message`` and
+    ``notification_type``; the others don't) is the reason this test only
+    walks one event — the URL rewrite itself is per-entry and identical
+    for every shape."""
+    settings_file = tmp_path / "settings.json"
+    # The renderer uses ``json.dumps(event)`` which double-quotes the
+    # event name; the legacy command on disk used the same shape, so the
+    # URL is the only thing that differs after the rewrite.
+    legacy_command = (
+        'jq -c --arg ev "Notification" '
+        "'{event:$ev, session_id:.session_id, cwd:.cwd, "
+        "tmux_pane:env.TMUX_PANE, message:.message, notification_type:.notification_type}' "
+        "| curl -s -X POST -H 'Content-Type: application/json' -d @- "
+        "http://localhost:8000/api/v1/scheduled-messages/hook-event "
+        ">/dev/null 2>&1 || true"
+    )
+    settings_file.write_text(json.dumps({
+        "hooks": {
+            "Notification": [
+                {"hooks": [{"type": "command", "command": legacy_command}]}
+            ],
+        }
+    }))
+    _patch_settings_file(monkeypatch, settings_file)
+
+    status = hook_installer.install_missing_hooks()
+
+    # Migrated event now matches the rendered command byte-for-byte; the
+    # other events never had a hook entry, so they stay "missing" (this
+    # rewrite path is per-entry — install_missing_hooks only adds
+    # genuinely-missing events; the others are not part of this test).
+    assert status["Notification"] == "installed"
+    written = json.loads(settings_file.read_text())
+    command = written["hooks"]["Notification"][0]["hooks"][0]["command"]
+    assert "scheduled-messages/hook-event" not in command
+    assert "session-hooks/hook-event" in command

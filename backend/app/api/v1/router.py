@@ -35,7 +35,7 @@ from .recurring_triggers.router import router as recurring_triggers_router
 from .run_activity import router as run_activity_router
 from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
-from .scheduled_messages.router import router as scheduled_messages_router
+from .session_hooks.router import router as session_hooks_router
 from .secrets import router as secrets_router
 from .security import router as security_router
 from .sessions import router as sessions_router
@@ -90,7 +90,7 @@ router.include_router(providers_router, tags=["Providers"])
 router.include_router(subscriptions_router)
 router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
-router.include_router(scheduled_messages_router)
+router.include_router(session_hooks_router)
 router.include_router(webhooks_router)
 router.include_router(recurring_triggers_router)
 router.include_router(security_router)

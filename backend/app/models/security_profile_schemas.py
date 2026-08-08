@@ -1,8 +1,7 @@
 """Pydantic schemas for the `ProjectSecurityProfile` REST contract.
 
 Mirrors the on-the-wire shape of `/api/v1/security/profiles/...`. Lives next
-to the ORM model as a sibling module to match the `scheduled_message` /
-`scheduled_message_schemas` split — keeps Pydantic-only types out of the
+to the ORM model as a sibling module to keep Pydantic-only types out of the
 ORM file so SQLAlchemy imports stay slim.
 """
 from __future__ import annotations

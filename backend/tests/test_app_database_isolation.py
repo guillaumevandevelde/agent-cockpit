@@ -95,7 +95,7 @@ async def test_app_database_reset_clears_rows_between_tests():
 
     Kanban uses ``KanbanBase.metadata``; app.database uses the wider
     ``Base.metadata`` (the device-local ``claude_registry.db`` Base), which
-    includes agent_mail / projects / mcp_tokens / sandcastle / scheduled /
+    includes agent_mail / projects / mcp_tokens / sandcastle /
     security_audit / etc. The drop_all+create_all pass exercises every one.
     """
     from app.database import AsyncSessionLocal
@@ -138,7 +138,7 @@ async def test_app_database_tables_cover_all_models_after_eager_import():
     tables = set(Base.metadata.tables.keys())
 
     expected_core_tables = {
-        "projects", "backups", "mcp_access_tokens", "scheduled_messages",
+        "projects", "backups", "mcp_access_tokens",
         "mail_team_members", "mail_messages", "mail_agent_sessions",
     }
     missing = expected_core_tables - tables

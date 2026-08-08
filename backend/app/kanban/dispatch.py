@@ -5597,7 +5597,7 @@ async def handle_rate_limit_signal(
     `move_limited_session_to_resume`.
 
     Shared by the Notification-hook handler
-    (`scheduled_messages.router.hook_event`) and the transcript-tail sweep
+    (`session_hooks.router.hook_event`) and the transcript-tail sweep
     (`detect_transcript_rate_limits`) so a rate limit reaches exactly the same
     reaction regardless of which channel noticed it first -- no second,
     parallel reaction path. `source` is only used for logging/observability

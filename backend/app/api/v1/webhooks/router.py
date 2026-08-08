@@ -1,9 +1,14 @@
 """Inbound webhook endpoints for event-triggered automations.
 
-Extends the scheduled-messages layer (timer/cron) with an *event* trigger:
-an external event (e.g. a GitHub PR being opened) creates a kanban Backlog
+External events (e.g. a GitHub PR being opened) create a kanban Backlog
 card, which the existing auto-dispatcher then claims and spawns. See
 ``app.services.webhook_triggers`` for the event→action mapping.
+
+This was originally phrased as an extension of the scheduled-messages
+layer; that feature (tmux injection) was retired — see
+``docs/cockpit/scheduled-trigger-consolidatie-decision.md`` §5.2. The
+recurring-triggers feature covers the time-based half of the
+"external→kaart" pattern.
 """
 from fastapi import APIRouter, Header, Request
 

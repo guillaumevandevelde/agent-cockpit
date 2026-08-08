@@ -317,18 +317,15 @@ class AutoResumeService:
         project_folder: str | None,
     ) -> None:
         """Execute the auto-resume: spawn session and inject message."""
-        from app.services.scheduling.delivery import DeliveryEngine
-        from app.services.scheduling.session_resolver import resolve_target
+        from app.services.scheduling.session_resolver import resolve_target, spawn_for
+        from app.services.scheduling.tmux_inject import send_text, wait_for_pane_ready
 
         logger.info("Executing auto-resume for %s", cwd)
-
-        engine = DeliveryEngine()
 
         # Check if there's already a live session
         target = resolve_target(cwd)
         if target is not None:
             # Session exists, just inject the continuation message
-            from app.services.scheduling.tmux_inject import send_text
             ok = send_text(target, message)
             if ok:
                 logger.info("Auto-resume: injected continuation into existing session %s", target)
@@ -338,21 +335,18 @@ class AutoResumeService:
 
         # No live session, spawn a new one
         try:
-            result = await engine.deliver(
-                project_dir=cwd,
-                message=message,
-                permission_mode="acceptEdits",
-                on_missing_session="spawn",
-                when_busy="send_now",
-                timeout_s=60,
-                target_kind="session" if session_id else "project",
-                target_session_id=session_id,
-                project_folder=project_folder,
-            )
-            if result.outcome == "success":
+            target = spawn_for(cwd, "acceptEdits")
+            # A freshly spawned claude needs a few seconds to render its TUI;
+            # wait for the pane to actually be ready before injecting (else
+            # keystrokes vanish).
+            if not await wait_for_pane_ready(target, timeout_s=30.0):
+                logger.warning("Auto-resume: spawned session %s never became ready", target)
+                return
+            ok = send_text(target, message)
+            if ok:
                 logger.info("Auto-resume: spawned and injected for %s", cwd)
             else:
-                logger.warning("Auto-resume: delivery failed for %s: %s", cwd, result.error)
+                logger.warning("Auto-resume: send-keys failed for %s", cwd)
         except Exception as e:
             logger.exception("Auto-resume failed for %s: %s", cwd, e)
 

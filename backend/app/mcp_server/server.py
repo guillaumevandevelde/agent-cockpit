@@ -7,7 +7,7 @@ mcp = FastMCP(
     "agent-cockpit",
     instructions=(
         "Agent Cockpit management server. Provides read access to "
-        "agent sessions, scheduled messages, MCP server configs, "
+        "agent sessions, recurring triggers, MCP server configs, "
         "projects, and merged configuration settings."
     ),
 )
