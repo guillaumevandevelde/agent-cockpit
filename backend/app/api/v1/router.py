@@ -31,6 +31,7 @@ from .portfolio import router as portfolio_router
 from .presence import router as presence_router
 from .projects import router as projects_router
 from .providers import router as providers_router
+from .recurring_triggers.router import router as recurring_triggers_router
 from .run_activity import router as run_activity_router
 from .runs.router import router as runs_router
 from .sandcastle.router import router as sandcastle_router
@@ -91,6 +92,7 @@ router.include_router(codex_config_router, tags=["Codex Config"])
 router.include_router(status_router, tags=["Status"])
 router.include_router(scheduled_messages_router)
 router.include_router(webhooks_router)
+router.include_router(recurring_triggers_router)
 router.include_router(security_router)
 router.include_router(kanban_router)
 router.include_router(run_activity_router)

@@ -10,6 +10,7 @@ from app.models.host import *  # noqa: F401,F403
 from app.models.mcp_token import *  # noqa: F401,F403
 from app.models.run_instance import *  # noqa: F401,F403
 from app.models.sandcastle import *  # noqa: F401,F403
+from app.models.recurring_trigger import *  # noqa: F401,F403
 from app.models.scheduled_message import *  # noqa: F401,F403
 from app.models.security_audit import *  # noqa: F401,F403
 from app.models.security_profile import *  # noqa: F401,F403

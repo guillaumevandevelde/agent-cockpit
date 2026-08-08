@@ -13,10 +13,15 @@ logger = logging.getLogger(__name__)
 _KANBAN_DISPATCH_JOB_ID = "kanban-dispatch"
 _STALE_DETECTION_JOB_ID = "portfolio-stale-detection"
 _AUTO_BACKUP_JOB_ID = "auto-backup"
+_RECURRING_TRIGGER_JOB_PREFIX = "recurring-trigger-"
 
 
 def _job_id(message_id: int) -> str:
     return f"sched-msg-{message_id}"
+
+
+def _recurring_trigger_job_id(trigger_id: int) -> str:
+    return f"{_RECURRING_TRIGGER_JOB_PREFIX}{trigger_id}"
 
 
 class SchedulerService:
@@ -102,6 +107,42 @@ class SchedulerService:
         job = self._sched.get_job(_AUTO_BACKUP_JOB_ID)
         if job:
             job.remove()
+
+    # --- recurring-trigger (cron → kanban card) jobs ---
+
+    def has_recurring_trigger(self, trigger_id: int) -> bool:
+        return self._sched.get_job(_recurring_trigger_job_id(trigger_id)) is not None
+
+    def remove_recurring_trigger(self, trigger_id: int) -> None:
+        job = self._sched.get_job(_recurring_trigger_job_id(trigger_id))
+        if job:
+            job.remove()
+
+    def schedule_recurring_trigger(
+        self, trigger_id: int, cron_expr: str, tz: str,
+    ) -> None:
+        """Register a cron job whose callback fires the trigger.
+
+        ``misfire_grace_time=3600`` is APScheduler's safety net within a
+        running process; it does NOT survive process death. The
+        process-death case (the gemiste maandag of 2026-08-03) is handled
+        by ``services.recurring_triggers.run_boot_inhaal`` instead.
+        """
+        self._sched.add_job(
+            self._run_recurring_trigger,
+            trigger=CronTrigger.from_crontab(cron_expr, timezone=ZoneInfo(tz)),
+            args=[trigger_id],
+            id=_recurring_trigger_job_id(trigger_id),
+            replace_existing=True,
+            misfire_grace_time=3600, coalesce=True, max_instances=1,
+        )
+
+    async def _run_recurring_trigger(self, trigger_id: int) -> None:
+        from app.services.recurring_triggers import fire_trigger_by_id
+        try:
+            await fire_trigger_by_id(trigger_id)
+        except Exception:
+            logger.exception("recurring trigger %s failed", trigger_id)
 
     def schedule_auto_backup(self, time_of_day: str, tz: str) -> None:
         """Schedule a daily automatic backup at HH:MM in the given timezone."""

@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 import app.models.agent_mail  # noqa: F401  (register tables for create_all)
 import app.models.host  # noqa: F401  (register tables for create_all)
 import app.models.mcp_token  # noqa: F401  (register tables for create_all)
+import app.models.recurring_trigger  # noqa: F401  (register tables for create_all)
 import app.models.run_instance  # noqa: F401  (register tables for create_all)
 import app.models.sandcastle  # noqa: F401  (register tables for create_all)
 import app.models.scheduled_message  # noqa: F401  (register tables for create_all)
@@ -273,6 +274,24 @@ async def lifespan(app: FastAPI):
         auto = await get_or_create_settings(s)
         if auto.enabled:
             scheduler_service.schedule_auto_backup(auto.time_of_day, auto.timezone)
+    # Register cron jobs for every enabled recurring trigger, and cover any
+    # occurrence that passed while the backend was down. The two halves are
+    # independent — APScheduler only sees future ticks, the inhaal sweep
+    # handles the past. See docs/cockpit/scheduled-trigger-consolidatie-decision.md §3.2.
+    from app.models.recurring_trigger import RecurringTrigger
+    from app.services.recurring_triggers import run_boot_inhaal
+    async with AsyncSessionLocal() as s:
+        triggers = (await s.execute(
+            select(RecurringTrigger).where(RecurringTrigger.enabled == True)  # noqa: E712
+        )).scalars().all()
+        for t in triggers:
+            scheduler_service.schedule_recurring_trigger(
+                t.id, t.cron_expr, t.timezone,
+            )
+    try:
+        await run_boot_inhaal()
+    except Exception:
+        logger.exception("recurring-trigger boot inhaal failed")
     yield
     # Shutdown: Cleanup. Cancel the recovery/adoption task first — on a fast
     # restart (or a `uvicorn --reload` hot reload) it can still be mid-spawn,
