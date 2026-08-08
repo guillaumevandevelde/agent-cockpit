@@ -1,6 +1,6 @@
 ---
 name: po-digest
-description: Use when producing the recurring weekly product-owner digest from the deterministic collector output, including the canonical week file, board notification, and successor trigger.
+description: Use when producing the recurring weekly product-owner digest from the deterministic collector output, including the canonical week file and board notification. The next run is fired by the cron recurring trigger, not by this skill.
 ---
 
 # PO-digest
@@ -109,20 +109,9 @@ Verplaats de host-trigger pas naar Done nadat commit en push geslaagd zijn. De `
 
 Dupliceer niet het hele digest-blok in de summary.
 
-## Step 6 — schedule de opvolger (chain-of-one-shots)
-
-Doe dit alleen wanneer de hostbeschrijving Step 7 activeert. Maak de opvolger **onvoorwaardelijk**, ook bij een lege week, als laatste bordactie vóór Done:
-
-1. Bereken de eerstvolgende maandag 08:00 in `Europe/Brussels`, verankerd op `host.scheduled_at + 7 dagen` en naar maandag 08:00 gesnapt. Veranker niet op `nu + 7 dagen`; een late dispatch zou dan een week overslaan.
-2. Maak een Backlog-kaart met dezelfde titel, description, project-key, `parent_card_id`, `work_type=analysis`, agent/model en labels als de host.
-3. De description blijft een verbatim kopie, inclusief de Step-7-instructie.
-4. `create_card` heeft geen `scheduled_at`-parameter. PATCH direct daarna `/api/v1/kanban/cards/<id>` met `{"scheduled_at":"<ISO met Brussels-offset>"}` en verifieer dat de response dezelfde waarde teruggeeft.
-5. Als de opvolger niet correct gescheduled kan worden, ga niet naar Done: meld een impediment. Een unscheduled Backlog-kaart is onmiddellijk dispatchable en kan de keten binnen seconden opnieuw afvuren.
-
 ## Quick reference
 
 ```text
 resolve project → collect JSON → redact four capped sections → write week file
-→ prepend README index → commit + push → create scheduled successor
-→ Done-summary: four lines + canonical path
+→ prepend README index → commit + push → Done-summary: four lines + canonical path
 ```
