@@ -18,6 +18,11 @@ export interface CardMeta {
   // Drives the "(held 5d)" suffix in the badge tooltip — the one signal that
   // separates a healthy temporary wait from a dead one.
   heldSince?: string;
+  // The card's future `scheduled_at` (ISO). Populated only for
+  // `readyState === "scheduled"` so the badge tooltip can name the instant
+  // the wait clears — without it, the operator only sees the state and
+  // has to hunt the date chip down on the card. (kanban card 8b54be53…)
+  scheduledAt?: string;
 }
 
 // Per-parent subtask rollup (done/total counts among cards whose
@@ -215,6 +220,7 @@ export function Column({
                 missingDepIds={meta?.missingDepIds}
                 gatedOn={meta?.gatedOn}
                 heldSince={meta?.heldSince}
+                scheduledAt={meta?.scheduledAt}
                 subtasks={subtaskCounts?.get(c.id)}
                 projectPath={projectPath}
               />

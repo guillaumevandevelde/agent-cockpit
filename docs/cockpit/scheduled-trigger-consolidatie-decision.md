@@ -269,6 +269,13 @@ Met §5.2 verdwijnt de hoofdmoot van dat probleem vanzelf — cadanskaarten best
 dan pas op hun eigen ochtend. De handmatige "niet vóór T"-vorm blijft bestaan en
 verdient een eigen ready-state in plaats van `ready`.
 
+✅ Geïmplementeerd (kaart 8b54be53…): `ReadyStateBadge` heeft een eigen `scheduled`
+-state (amber, label "Scheduled"), tooltip "Scheduled for {localized time} —
+held until then, not dispatched." De ⌛-chip blijft als at-a-glance tijdstip; de
+badge draagt de toestandsnaam. `KanbanPage.tsx` forwardt `held_reason` verbatim;
+`cardMeta.scheduledAt` wordt doorgegeven aan de badge zodat de tooltip het
+geplande tijdstip noemt.
+
 ---
 
 ## 6. Wat dit vervangt

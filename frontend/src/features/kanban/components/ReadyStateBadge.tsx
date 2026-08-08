@@ -22,7 +22,14 @@ export type ReadyState =
   // `awaiting_plan_ref` (which it used to masquerade as) because the wait is
   // permanent: the analyst run that owed this card its plan died with the
   // parent, so no amount of patience resolves it.
-  | "missing_parent";
+  | "missing_parent"
+  // Card carries a future `scheduled_at` and the dispatcher is holding it
+  // (`dep_resolver.py:154-172`). The wait is temporary and self-resolving
+  // — distinct from `dependent` (live sibling) and `awaiting_plan_ref`
+  // (analyst pending) because the resolution point is a wall-clock instant,
+  // not a sibling state change. The badge used to read "Ready" here,
+  // contradicting the date chip on the same card (kanban card 8b54be53…).
+  | "scheduled";
 
 const STATE_LABEL: Record<ReadyState, string> = {
   ready: "Ready",
@@ -34,6 +41,7 @@ const STATE_LABEL: Record<ReadyState, string> = {
   awaiting_plan_ref: "Awaiting plan",
   gated: "Gated",
   missing_parent: "Orphaned",
+  scheduled: "Scheduled",
 };
 
 const STATE_CLASS: Record<ReadyState, string> = {
@@ -56,6 +64,10 @@ const STATE_CLASS: Record<ReadyState, string> = {
   // Permanent and human-actionable, like `missing_dep` — the parent has to be
   // restored or the link cleared.
   missing_parent: "bg-red-100 text-red-800 border-red-200",
+  // Temporary, self-resolving on the wall clock — same "amber" tier as
+  // `dependent` / `awaiting_plan_ref`. Sits between dependent (waits on a
+  // sibling) and ready (no wait): the wait clears on its own at `scheduled_at`.
+  scheduled: "bg-amber-100 text-amber-800 border-amber-200",
 };
 
 /**
@@ -106,12 +118,18 @@ export function ReadyStateBadge({
   missingDepIds,
   gatedOn,
   heldSince,
+  scheduledAt,
 }: {
   state: ReadyState;
   blockerTitles?: string[];
   missingDepIds?: string[];
   gatedOn?: string;
   heldSince?: string | null;
+  // For the `scheduled` state: the wall-clock instant the card becomes
+  // dispatch-eligible. Surface in the tooltip so the operator sees both
+  // the state ("Scheduled") and WHEN it resolves, without having to find
+  // the date chip elsewhere on the card.
+  scheduledAt?: string | null;
 }) {
   const label = STATE_LABEL[state];
   const variantClass = STATE_CLASS[state];
@@ -138,7 +156,11 @@ export function ReadyStateBadge({
                 `Waiting on the analyst's plan_ref deliverable${
                   named ? ` from "${named}"` : ""
                 } — resolves once add_plan_attachment runs.`
-              : state === "ready"
+              : state === "scheduled"
+                ? scheduledAt
+                  ? `Scheduled for ${new Date(scheduledAt).toLocaleString()} — held until then, not dispatched.`
+                  : "Scheduled — held until the scheduled time, not dispatched."
+                : state === "ready"
                 ? "No open dependencies"
                 : state === "in_progress"
                   ? "Claimed by an agent session"
