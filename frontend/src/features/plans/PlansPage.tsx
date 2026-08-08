@@ -40,7 +40,7 @@ const EMPTY_IMPLEMENTED_BY: CorrelatedCardItem[] = []
  * Inner links live inside CLICKABLE_CARD rows — they MUST call
  * ``stopPropagation()`` on their ``onClick`` so a chip click doesn't
  * also trigger the outer card's row-navigation. Convention from
- * ``HostsPage`` / ``ScheduledMessagesPage``.
+ * ``HostsPage`` / ``MCPServersPage``.
  *
  * Each section has its own empty/loading/error state — independent
  * failures aren't possible today (one fetch, two sections) but the

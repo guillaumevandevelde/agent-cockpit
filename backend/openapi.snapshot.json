@@ -3295,22 +3295,6 @@
         "title": "BuildImageRequest",
         "type": "object"
       },
-      "BulkDeleteRequest": {
-        "properties": {
-          "ids": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Ids",
-            "type": "array"
-          }
-        },
-        "required": [
-          "ids"
-        ],
-        "title": "BulkDeleteRequest",
-        "type": "object"
-      },
       "BulkResumeItem": {
         "properties": {
           "project_folder": {
@@ -6185,97 +6169,6 @@
         "title": "DeliverableResponse",
         "type": "object"
       },
-      "DeliveryAttemptResponse": {
-        "properties": {
-          "action": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Action"
-          },
-          "delivered_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Delivered At"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "fired_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fired At"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "outcome": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcome"
-          },
-          "resolved_session": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved Session"
-          },
-          "wait_duration_s": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Wait Duration S"
-          }
-        },
-        "required": [
-          "id",
-          "fired_at"
-        ],
-        "title": "DeliveryAttemptResponse",
-        "type": "object"
-      },
       "DependencyInstallRequest": {
         "description": "Request to install dependencies from a backup.",
         "properties": {
@@ -7739,13 +7632,6 @@
             "type": "string"
           },
           "event": {
-            "enum": [
-              "UserPromptSubmit",
-              "Stop",
-              "Notification",
-              "SessionStart",
-              "SessionEnd"
-            ],
             "title": "Event",
             "type": "string"
           },
@@ -13434,6 +13320,295 @@
         "title": "RawFileContent",
         "type": "object"
       },
+      "RecurringTriggerCreate": {
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "cron_expr": {
+            "title": "Cron Expr",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          },
+          "timezone": {
+            "default": "Europe/Brussels",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "analysis",
+                  "feature",
+                  "bug",
+                  "chore"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
+          }
+        },
+        "required": [
+          "project_key",
+          "cron_expr",
+          "title"
+        ],
+        "title": "RecurringTriggerCreate",
+        "type": "object"
+      },
+      "RecurringTriggerResponse": {
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "cron_expr": {
+            "title": "Cron Expr",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "last_fired_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Fired At"
+          },
+          "project_key": {
+            "title": "Project Key",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
+          }
+        },
+        "required": [
+          "id",
+          "project_key",
+          "cron_expr",
+          "timezone",
+          "enabled",
+          "title",
+          "description",
+          "work_type",
+          "agent",
+          "labels",
+          "last_fired_at"
+        ],
+        "title": "RecurringTriggerResponse",
+        "type": "object"
+      },
+      "RecurringTriggerUpdate": {
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "cron_expr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expr"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "analysis",
+                  "feature",
+                  "bug",
+                  "chore"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
+          }
+        },
+        "title": "RecurringTriggerUpdate",
+        "type": "object"
+      },
       "RedispatchRequest": {
         "properties": {
           "agent": {
@@ -14985,383 +15160,6 @@
           "path"
         ],
         "title": "SaveMemoryResponse",
-        "type": "object"
-      },
-      "ScheduledMessageCreate": {
-        "properties": {
-          "cron_expr": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cron Expr"
-          },
-          "fire_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fire At"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "on_missing_session": {
-            "default": "spawn",
-            "enum": [
-              "spawn",
-              "skip"
-            ],
-            "title": "On Missing Session",
-            "type": "string"
-          },
-          "permission_mode": {
-            "default": "acceptEdits",
-            "enum": [
-              "default",
-              "acceptEdits",
-              "bypass"
-            ],
-            "title": "Permission Mode",
-            "type": "string"
-          },
-          "project_folder": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Project Folder"
-          },
-          "sandcastle_config_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sandcastle Config Id"
-          },
-          "session_preview": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Session Preview"
-          },
-          "target_kind": {
-            "default": "project",
-            "enum": [
-              "project",
-              "session",
-              "sandcastle"
-            ],
-            "title": "Target Kind",
-            "type": "string"
-          },
-          "target_project": {
-            "title": "Target Project",
-            "type": "string"
-          },
-          "target_session_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Session Id"
-          },
-          "timezone": {
-            "default": "Europe/Brussels",
-            "title": "Timezone",
-            "type": "string"
-          },
-          "trigger_type": {
-            "enum": [
-              "once",
-              "cron"
-            ],
-            "title": "Trigger Type",
-            "type": "string"
-          },
-          "when_busy": {
-            "default": "wait_until_idle",
-            "enum": [
-              "wait_until_idle",
-              "send_now"
-            ],
-            "title": "When Busy",
-            "type": "string"
-          }
-        },
-        "required": [
-          "target_project",
-          "message",
-          "trigger_type"
-        ],
-        "title": "ScheduledMessageCreate",
-        "type": "object"
-      },
-      "ScheduledMessageResponse": {
-        "properties": {
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "cron_expr": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cron Expr"
-          },
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "fire_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fire At"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "last_fired_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Fired At"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "permission_mode": {
-            "enum": [
-              "default",
-              "acceptEdits",
-              "bypass"
-            ],
-            "title": "Permission Mode",
-            "type": "string"
-          },
-          "project_folder": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Project Folder"
-          },
-          "sandcastle_config_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sandcastle Config Id"
-          },
-          "session_preview": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Session Preview"
-          },
-          "status": {
-            "enum": [
-              "scheduled",
-              "pending_delivery",
-              "delivered",
-              "failed",
-              "cancelled"
-            ],
-            "title": "Status",
-            "type": "string"
-          },
-          "target_kind": {
-            "default": "project",
-            "enum": [
-              "project",
-              "session",
-              "sandcastle"
-            ],
-            "title": "Target Kind",
-            "type": "string"
-          },
-          "target_project": {
-            "title": "Target Project",
-            "type": "string"
-          },
-          "target_session_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Session Id"
-          },
-          "timezone": {
-            "title": "Timezone",
-            "type": "string"
-          },
-          "trigger_type": {
-            "enum": [
-              "once",
-              "cron"
-            ],
-            "title": "Trigger Type",
-            "type": "string"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
-          }
-        },
-        "required": [
-          "id",
-          "target_project",
-          "message",
-          "trigger_type",
-          "timezone",
-          "permission_mode",
-          "enabled",
-          "status",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "ScheduledMessageResponse",
-        "type": "object"
-      },
-      "ScheduledMessageUpdate": {
-        "properties": {
-          "cron_expr": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cron Expr"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
-          "fire_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fire At"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message"
-          },
-          "permission_mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "default",
-                  "acceptEdits",
-                  "bypass"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Permission Mode"
-          }
-        },
-        "title": "ScheduledMessageUpdate",
         "type": "object"
       },
       "ScopeConfigDetail": {
@@ -18829,23 +18627,6 @@
     }
   },
   "paths": {
-    "/": {
-      "get": {
-        "description": "Root endpoint fallback when frontend is not built.",
-        "operationId": "root__get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Root"
-      }
-    },
     "/api/v1/agent-activity/live": {
       "get": {
         "description": "Return currently running CLI runs with optional pane preview.",
@@ -33507,6 +33288,158 @@
         ]
       }
     },
+    "/api/v1/recurring-triggers": {
+      "get": {
+        "operationId": "list_all_api_v1_recurring_triggers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List All Api V1 Recurring Triggers Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List All",
+        "tags": [
+          "Recurring Triggers"
+        ]
+      },
+      "post": {
+        "operationId": "create_api_v1_recurring_triggers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecurringTriggerCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringTriggerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create",
+        "tags": [
+          "Recurring Triggers"
+        ]
+      }
+    },
+    "/api/v1/recurring-triggers/{tid}": {
+      "delete": {
+        "operationId": "delete_api_v1_recurring_triggers__tid__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "title": "Tid",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete",
+        "tags": [
+          "Recurring Triggers"
+        ]
+      },
+      "patch": {
+        "operationId": "update_api_v1_recurring_triggers__tid__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tid",
+            "required": true,
+            "schema": {
+              "title": "Tid",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecurringTriggerUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringTriggerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update",
+        "tags": [
+          "Recurring Triggers"
+        ]
+      }
+    },
     "/api/v1/runs/app": {
       "get": {
         "description": "List runs for one project, newest first.",
@@ -34544,468 +34477,6 @@
         ]
       }
     },
-    "/api/v1/scheduled-messages": {
-      "get": {
-        "operationId": "list_all_api_v1_scheduled_messages_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List All",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      },
-      "post": {
-        "operationId": "create_api_v1_scheduled_messages_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduledMessageCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduledMessageResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/auto-resume/{cwd}": {
-      "delete": {
-        "description": "Cancel a pending auto-resume for a project.",
-        "operationId": "cancel_auto_resume_api_v1_scheduled_messages_auto_resume__cwd__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cwd",
-            "required": true,
-            "schema": {
-              "title": "Cwd",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Cancel Auto Resume",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      },
-      "get": {
-        "description": "Check if auto-resume is enabled for a project.",
-        "operationId": "get_auto_resume_api_v1_scheduled_messages_auto_resume__cwd__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cwd",
-            "required": true,
-            "schema": {
-              "title": "Cwd",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Auto Resume",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      },
-      "post": {
-        "description": "Enable or disable auto-resume for a project.",
-        "operationId": "set_auto_resume_api_v1_scheduled_messages_auto_resume__cwd__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "cwd",
-            "required": true,
-            "schema": {
-              "title": "Cwd",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "enabled",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Enabled",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set Auto Resume",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/bulk-delete": {
-      "post": {
-        "description": "Delete an arbitrary set of messages (any status) by id.",
-        "operationId": "bulk_delete_api_v1_scheduled_messages_bulk_delete_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BulkDeleteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Bulk Delete",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/history": {
-      "delete": {
-        "description": "Delete all messages in terminal states (delivered, failed, cancelled).",
-        "operationId": "delete_history_api_v1_scheduled_messages_history_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Delete History",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/hook-event": {
-      "post": {
-        "operationId": "hook_event_api_v1_scheduled_messages_hook_event_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/HookEvent"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Hook Event",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/hooks-install": {
-      "post": {
-        "description": "Additively install any missing scheduling hooks in ~/.claude/settings.json.\n\nReinstalling the event for which the entry was ``stale`` is the\nexpected flow: ``install_missing_hooks`` only appends missing events, so\nto clear a ``stale`` status the client should first drop the affected\nevent from ``~/.claude/settings.json`` (or use the equivalent admin\nhelper) and then call this endpoint.",
-        "operationId": "hooks_install_api_v1_scheduled_messages_hooks_install_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Hooks Install",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/hooks-status": {
-      "get": {
-        "description": "Per-event install status for the CC hooks that feed this pipeline.\n\nEach event is one of ``missing`` (no entry), ``stale`` (an entry exists\nbut its command differs from what the current renderer emits), or\n``installed`` (exact match). Without them, ``/hook-event`` above is never\ncalled, so limit detection and auto-resume are silently dead \u2014 see\ndocs/cockpit/analyse-sessie-limieten-claude-code.md.\n\nThe aggregate ``installed`` flag is only true when every event is\n``installed``; ``stale`` events are listed under ``stale`` so the\nfrontend/installer can offer a \"reinstall\" action.",
-        "operationId": "hooks_status_api_v1_scheduled_messages_hooks_status_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Hooks Status",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/{mid}": {
-      "delete": {
-        "operationId": "delete_api_v1_scheduled_messages__mid__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "mid",
-            "required": true,
-            "schema": {
-              "title": "Mid",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      },
-      "patch": {
-        "operationId": "update_api_v1_scheduled_messages__mid__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "mid",
-            "required": true,
-            "schema": {
-              "title": "Mid",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ScheduledMessageUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ScheduledMessageResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
-    "/api/v1/scheduled-messages/{mid}/attempts": {
-      "get": {
-        "operationId": "attempts_api_v1_scheduled_messages__mid__attempts_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "mid",
-            "required": true,
-            "schema": {
-              "title": "Mid",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/DeliveryAttemptResponse"
-                  },
-                  "title": "Response Attempts Api V1 Scheduled Messages  Mid  Attempts Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Attempts",
-        "tags": [
-          "Scheduled Messages"
-        ]
-      }
-    },
     "/api/v1/secrets": {
       "get": {
         "description": "List the names of all secrets for ``project_key``.\n\nNo secret values are returned by this endpoint; use ``GET\n/{project_key}/{name}`` to read one. The ``project_key`` is a\nquery parameter (not a path segment) because keys legitimately\ncontain ``/`` and the PUT/GET/DELETE routes greedily match across\nslashes \u2014 see the module docstring.",
@@ -35557,6 +35028,214 @@
         "summary": "Put Profile",
         "tags": [
           "Security"
+        ]
+      }
+    },
+    "/api/v1/session-hooks/auto-resume/{cwd}": {
+      "delete": {
+        "description": "Cancel a pending auto-resume for a project.",
+        "operationId": "cancel_auto_resume_api_v1_session_hooks_auto_resume__cwd__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cwd",
+            "required": true,
+            "schema": {
+              "title": "Cwd",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Auto Resume",
+        "tags": [
+          "Session Hooks"
+        ]
+      },
+      "get": {
+        "description": "Check if auto-resume is enabled for a project.",
+        "operationId": "get_auto_resume_api_v1_session_hooks_auto_resume__cwd__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cwd",
+            "required": true,
+            "schema": {
+              "title": "Cwd",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Auto Resume",
+        "tags": [
+          "Session Hooks"
+        ]
+      },
+      "post": {
+        "description": "Enable or disable auto-resume for a project.",
+        "operationId": "set_auto_resume_api_v1_session_hooks_auto_resume__cwd__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cwd",
+            "required": true,
+            "schema": {
+              "title": "Cwd",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Enabled",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Auto Resume",
+        "tags": [
+          "Session Hooks"
+        ]
+      }
+    },
+    "/api/v1/session-hooks/hook-event": {
+      "post": {
+        "operationId": "hook_event_api_v1_session_hooks_hook_event_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HookEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hook Event",
+        "tags": [
+          "Session Hooks"
+        ]
+      }
+    },
+    "/api/v1/session-hooks/hooks-install": {
+      "post": {
+        "description": "Additively install any missing session-hooks in ~/.claude/settings.json.\n\nReinstalling the event for which the entry was ``stale`` is the\nexpected flow: ``install_missing_hooks`` only appends missing events, so\nto clear a ``stale`` status the client should first drop the affected\nevent from ``~/.claude/settings.json`` (or use the equivalent admin\nhelper) and then call this endpoint.",
+        "operationId": "hooks_install_api_v1_session_hooks_hooks_install_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Hooks Install",
+        "tags": [
+          "Session Hooks"
+        ]
+      }
+    },
+    "/api/v1/session-hooks/hooks-status": {
+      "get": {
+        "description": "Per-event install status for the CC hooks that feed this pipeline.\n\nEach event is one of ``missing`` (no entry), ``stale`` (an entry exists\nbut its command differs from what the current renderer emits), or\n``installed`` (exact match). Without them, ``/hook-event`` above is never\ncalled, so limit detection and auto-resume are silently dead.\n\nThe aggregate ``installed`` flag is only true when every event is\n``installed``; ``stale`` events are listed under ``stale`` so the\nfrontend/installer can offer a \"reinstall\" action.",
+        "operationId": "hooks_status_api_v1_session_hooks_hooks_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Hooks Status",
+        "tags": [
+          "Session Hooks"
         ]
       }
     },
