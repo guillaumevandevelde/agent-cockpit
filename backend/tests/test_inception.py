@@ -412,6 +412,49 @@ async def test_spec_and_plan_land_in_repo_and_are_committed(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_default_policy_leaves_autodispatch_off(tmp_path: Path):
+    """AC: with no explicit ``policy`` argument the interview route inherits
+    ``COCKPIT_DEFAULT_POLICY``, whose ``autodispatch_default`` is False
+    (security-default-deny — see ``bootstrap_policy.py`` §1.1). The freshly
+    birthed project's KanbanMeta autodispatch flag must therefore be off.
+
+    Pin guard against a future policy-flip that *also* edits the
+    ``mcp_server.create_project_from_interview`` docstring step 7 (which
+    historically claimed "= enabled" while the code did the opposite — a
+    self-contradicting docstring that produced ACs in card b9e6365a's
+    downstream that contradicted the implementation).
+    """
+    from app.services.bootstrap_policy import COCKPIT_DEFAULT_POLICY
+    from app.services.inception_service import InceptionService
+
+    # Belt-and-braces: prove the default policy itself is off, so this test
+    # is unambiguous if someone changes COCKPIT_DEFAULT_POLICY in isolation.
+    assert COCKPIT_DEFAULT_POLICY.autodispatch_default is False
+
+    target = tmp_path / "myapp"
+
+    async with KanbanSessionLocal() as ks:
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as app_db:
+            svc = InceptionService(ks, app_db)
+            result = await svc.create_project_from_interview(
+                project_name="MyApp", target_path=str(target),
+                title="MyApp", description="desc",
+                spec_md="# Spec\nbody", plan_md="# Plan\nbody",
+                # no policy arg — inherits COCKPIT_DEFAULT_POLICY
+            )
+
+    async with KanbanSessionLocal() as s:
+        enabled = await dispatch.is_autodispatch_enabled(
+            s, result["new_project_key"]
+        )
+    assert enabled is False, (
+        f"interview route with default policy must leave autodispatch off; "
+        f"got enabled={enabled} for {result['new_project_key']!r}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_first_card_carries_spec_doc_metadata(tmp_path: Path):
     """AC #4: first card gets ``metadata[SPEC_DOC_META_KEY]`` =
     repo-relative path to the design doc, and the title/description come
