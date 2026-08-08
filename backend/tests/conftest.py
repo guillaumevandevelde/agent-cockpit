@@ -69,9 +69,19 @@ def _isolate_git_env():
 @pytest_asyncio.fixture(autouse=True)
 async def _reset_test_db():
     """Drop and recreate all kanban tables before each test."""
-    from tests.kanban_test_db import reset_test_tables
+    from tests.kanban_test_db import reset_test_tables, dispose_test_engine
     await reset_test_tables()
     yield
+    # Engine dispose on teardown. pytest-asyncio closes the test's event loop
+    # immediately after the fixture's post-yield runs. aiosqlite connections
+    # whose ``_connection_worker_thread`` is still mid-delivery at that
+    # boundary raise ``RuntimeError: Event loop is closed`` from
+    # ``call_soon_threadsafe``, which pytest's threadexception hook surfaces
+    # as ``PytestUnhandledThreadExceptionWarning`` on whichever test happens
+    # to run next (kanban-kaart 5554de60...). The cleanup path lives in
+    # ``tests/kanban_test_db.dispose_test_engine`` so the regression test in
+    # ``test_kanban_test_db_no_thread_leak`` can exercise it directly.
+    await dispose_test_engine()
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -83,10 +93,16 @@ async def _reset_app_database_tables():
     scheduled / agent_mail / security_audit / ... rows so prior tests can't
     leak into the current one. The drop_all + create_all pass is fast enough
     that even tests that don't touch the DB pay only milliseconds.
+
+    The teardown mirrors ``_reset_test_db`` — see the comment there for why
+    explicit ``engine.dispose()`` is required to keep aiosqlite
+    ``_connection_worker_thread`` instances from outliving the pytest-asyncio
+    loop swap (kanban-kaart 5554de60...).
     """
     from tests.app_database_test_db import reset_test_tables
     await reset_test_tables()
     yield
+    await _app_db_test_engine.dispose()
 
 
 @pytest.fixture(autouse=True)
