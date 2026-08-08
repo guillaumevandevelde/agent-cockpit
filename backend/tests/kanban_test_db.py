@@ -90,3 +90,31 @@ async def reset_test_tables():
     async with test_engine.begin() as conn:
         await conn.run_sync(KanbanBase.metadata.drop_all)
         await conn.run_sync(KanbanBase.metadata.create_all)
+
+
+async def dispose_test_engine() -> None:
+    """Invalidate the kanban test engine's pool and reclaim any orphan
+    ``_connection_worker_thread`` instances while the calling test's
+    event loop is still live.
+
+    pytest-asyncio gives every test its own event loop and tears it down
+    immediately after the autouse-fixture post-yield runs. an aiosqlite
+    connection whose ``_connection_worker_thread`` still has a pending
+    query result at that boundary raises ``RuntimeError: Event loop is
+    closed`` from ``call_soon_threadsafe``, which pytest's threadexception
+    hook surfaces as ``PytestUnhandledThreadExceptionWarning`` on whichever
+    test runs next (kanban-kaart 5554de60…).
+
+    ``test_engine.dispose()`` invalidates the (NullPool) pool so any
+    connections that a test body abandoned (via a cyclic reference) are
+    terminated; their worker threads then process ``_STOP_RUNNING_SENTINEL``
+    on the *current* loop and exit cleanly instead of crossing the loop
+    boundary with a still-bound future. Explicit ``gc.collect(1)`` is
+    deliberately NOT called here -- it forces SQLAlchemy to terminate
+    unreleased connections and raises ``SAWarning`` even when no leak
+    exists, which masks the real signal under noise. The next test's
+    ``reset_test_tables`` does its own gen-1 collection, which is enough
+    to break the AsyncSession reference cycle that otherwise pins the
+    aiosqlite Connection alive.
+    """
+    await test_engine.dispose()
