@@ -18,14 +18,16 @@ status: active
 >
 > **Verhouding tot de `[synthese]`-kaart in Todo** (*"Consolideer het
 > antwoord: hoe geschikt is Cockpit als app-bouwplatform en wat is
-> nodig"*): die kaart synthetiseert de vier facet-analyses (A inceptie /
+> nodig"*). Die kaart synthetiseert de vier facet-analyses (A inceptie /
 > B bootstrap / C portfolio / D veilig-bouwen) *binnen* het
-> app-bouwplatform-doel. **Deze** doc is een niveau breder: ze weegt die
-> app-bouwtrack af tegen de rest van het platform (CI-fundament,
-> zelfverbeter-schuld, substraat-robuustheid) én tegen de buitenwereld,
-> en levert één geordende prioriteitsstack. Waar ze elkaar raken wint de
-> synthese-kaart voor de *interne* facetvolgorde; deze doc positioneert
-> die volgorde binnen het geheel.
+> app-bouwplatform-doel.
+>
+> **Deze** doc is een niveau breder: ze weegt die app-bouwtrack af tegen
+> de rest van het platform (CI-fundament, zelfverbeter-schuld,
+> substraat-robuustheid) én tegen de buitenwereld. En levert één geordende
+> prioriteitsstack. Waar ze elkaar raken wint de synthese-kaart voor de
+> *interne* facetvolgorde; deze doc positioneert die volgorde binnen het
+> geheel.
 
 ## 1. Bevinding in één alinea (TL;DR)
 
@@ -33,20 +35,26 @@ Het platform is **technisch volwassen en breed** — kanban-autodispatch,
 multi-agent decompositie, Agent Mail, worktree-isolatie, Sandcastle en
 scheduled-messages draaien of zijn code-compleet. Het zwaartepunt van het
 werk dat *nog* nodig is, ligt niet in méér losse features maar in **drie
-dingen op rij**: (P0) het **fundament weer groen krijgen** — CI staat uit
-door GitHub-billing én er is bewust géén lokale push-gate, dus er is op dit
-moment *geen enkel* kwaliteitsvangnet; (P1) de **"andere-applicaties"-track
-end-to-end sluiten** als één dunne verticale slice (inceptie → bootstrap →
-één echte externe app op het bord) i.p.v. de facetten los verder te
-verbreden; en (P2) **veilig-bouwen (facet D) vóór** we een gebouwde,
-mogelijk niet-vertrouwde app daadwerkelijk laten *draaien* (RunService /
-Preview-URL) — de buitenwereld leverde in 2026 concrete bewijslast (het
-Cline-token-exfil-incident, "Docker is niet genoeg") dat die volgorde niet
-optioneel is. Daarboven zweeft één **strategisch risico** dat de economie
-van het hele platform raakt: Anthropic's **april-2026-beleid** dat
-Pro/Max-abonnementen loskoppelt van *continue, geautomatiseerde* agent-vraag.
-Dat maakt het `CLAUDE.md`-kernprincipe "agent-onafhankelijk" van een nette
-belofte tot een **operationele hedge** die actief onderhouden moet worden.
+dingen op rij**.
+
+(P0) het **fundament weer groen krijgen** — CI staat uit door GitHub-billing én
+er is bewust géén lokale push-gate, dus er is op dit moment *geen enkel*
+kwaliteitsvangnet.
+
+(P1) de **"andere-applicaties"-track end-to-end sluiten** als één dunne
+verticale slice (inceptie → bootstrap → één echte externe app op het bord)
+i.p.v. de facetten los verder te verbreden.
+
+(P2) **veilig-bouwen (facet D) vóór** we een gebouwde, mogelijk niet-vertrouwde
+app daadwerkelijk laten *draaien* (RunService / Preview-URL) — de
+buitenwereld leverde in 2026 concrete bewijslast (het Cline-token-exfil-
+incident, "Docker is niet genoeg") dat die volgorde niet optioneel is.
+
+Daarboven zweeft één **strategisch risico** dat de economie van het hele
+platform raakt: Anthropic's **april-2026-beleid** dat Pro/Max-abonnementen
+loskoppelt van *continue, geautomatiseerde* agent-vraag. Dat maakt het
+`CLAUDE.md`-kernprincipe "agent-onafhankelijk" van een nette belofte tot
+een **operationele hedge** die actief onderhouden moet worden.
 
 ## 2. Waar staat de applicatie vandaag (geverifieerd)
 
@@ -91,15 +99,19 @@ is* → *wat het voor Cockpit betekent*.
    deels hersteld, maar programmatisch gebruik loopt nu via een **vast,
    niet-doorrollend maandkrediet**, niet de algemene abonnementspool. De
    expliciete rationale: *"subscriptions were never designed for the kind
-   of continuous, automated demand these tools generate."*
+   of continuous, automated demand these tools generate."*. Dat is letterlijk
+   de reden van Anthropic voor het beleid.
    → **Voor Cockpit het belangrijkste externe signaal.** Cockpit spawnt de
    *officiële* Claude Code CLI (de first-party harnas, niet OpenClaw), dus
    het valt vandaag waarschijnlijk binnen de lijnen. Maar autodispatch
    genereert precies het *continue, geautomatiseerde* verbruik dat het
-   beleid target. Twee gevolgen: (a) "agent-onafhankelijk" moet een
-   **werkende hedge** zijn, geen slogan — de `agentic_cli`-capability-matrix
-   en een tweede provider die daadwerkelijk een kaart kan afronden verdienen
-   prioriteit; (b) de economie van "N parallelle sessies op één Max-abo"
+   beleid target. Twee gevolgen:
+
+   (a) "agent-onafhankelijk" moet een **werkende hedge** zijn, geen slogan
+   — de `agentic_cli`-capability-matrix en een tweede provider die
+   daadwerkelijk een kaart kan afronden verdienen prioriteit.
+
+   (b) de economie van "N parallelle sessies op één Max-abo"
    moet expliciet bewaakt worden (dit voedt de portfolio-cap uit facet C).
 
 2. **GitHub Spec Kit** (`github/spec-kit`, ~111k⭐, MIT, agent-agnostisch,
@@ -125,7 +137,8 @@ is* → *wat het voor Cockpit betekent*.
 4. **Container Use (Dagger)** + de bredere **sandbox-2026-consensus**. Container
    Use geeft elke agent een eigen container-sandbox + git-worktree — bijna
    1:1 Cockpit's Sandcastle + worktree-model. Bredere consensus: *"Docker is
-   niet genoeg"* voor niet-vertrouwde code (gedeelde kernel); productie wil
+   niet genoeg"* voor niet-vertrouwde code. De gedeelde kernel is het
+   probleem. Productie wil micro-VMs.
    microVMs (Firecracker/Kata) of gVisor.
    → Directe input voor **facet D + Sandcastle-hardening**: de huidige
    Docker-sandbox is prima voor *eigen* code, maar zodra Cockpit een
@@ -135,8 +148,8 @@ is* → *wat het voor Cockpit betekent*.
    isolatie-as, niet als premature herbouw.
 
 5. **Cline-incident (feb 2026)** — een VS Code-extensie met 5M+ users werd via
-   een prompt-injection-keten gecompromitteerd die npm-release-tokens
-   exfiltreerde en een kwaadaardig pakket publiceerde.
+   een prompt-injection-keten gecompromitteerd. Die keten exfiltreerde
+   npm-release-tokens en publiceerde een kwaadaardig pakket.
    → **Concrete bewijslast voor de facet-D-volgorde.** Precies het scenario
    dat `SecretStore` + `Security-audit-log` + per-project env-injectie moeten
    afdekken. Dit verschuift facet-D van "goed idee" naar "voorwaarde vóór we
@@ -269,10 +282,11 @@ provider-correctheids-bugs, zoals eerder gedaan.
 
 > Cockpit heeft geen tekort aan features maar aan **afronding op de juiste
 > volgorde**. Bouw eerst het fundament groen (P0: CI-billing + go/no-go —
-> mens-werk, maar blokkerend want er is nu géén kwaliteitsgate). Bewijs
-> daarna de eersteklas "andere-applicaties"-doelstelling **end-to-end met
-> één echte externe app** (P1) i.p.v. de facetten verder los te verbreden.
-> Laat **veilig-bouwen (facet D) landen vóór** je een gebouwde app
+> mens-werk, maar blokkerend want er is nu géén kwaliteitsgate).
+>
+> Bewijs daarna de eersteklas "andere-applicaties"-doelstelling **end-to-end
+> met één echte externe app** (P1) i.p.v. de facetten verder los te
+> verbreden. Laat **veilig-bouwen (facet D) landen vóór** je een gebouwde app
 > daadwerkelijk draait of exposeert (P2) — de buitenwereld (Cline-exfil,
 > "Docker-is-niet-genoeg") maakt die volgorde dwingend. Houd
 > **agent-onafhankelijkheid als werkende hedge** levend (P3) omdat
