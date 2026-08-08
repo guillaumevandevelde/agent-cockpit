@@ -43,11 +43,13 @@ daar zitten de drie vervolgkaarten.
 4. **Het echte gat is het spiegelbeeld:** de grens die we wél hebben, is onbruikbaar
    onder autonome dispatch. Een afgedwongen permission-prompt heeft **geen
    antwoordkanaal** — `--permission-prompt-tool` komt in de hele codebase niet voor.
-   **Gemeten (§2.5):** de prompt verschijnt binnen 30 s en de sessie blokkeert
-   permanent — `reap_stale_claims` grijpt níet in (de pane leeft en heeft zijn
-   `SessionStart`-hook al gestuurd), dus er is geen lus en geen symptoom, alleen een
-   claim die blijft staan. Op déze host engageert de grens bovendien helemaal niet:
-   `~/.claude/settings.json` zet host-breed `defaultMode: bypassPermissions`.
+**Gemeten (§2.5):** de prompt verschijnt binnen 30 s en de sessie blokkeert
+permanent. `reap_stale_claims` grijpt níet in (de pane leeft en heeft zijn
+`SessionStart`-hook al gestuurd). Dus er is geen lus en geen symptoom,
+alleen een claim die blijft staan.
+
+Op déze host engageert de grens bovendien helemaal niet:
+`~/.claude/settings.json` zet host-breed `defaultMode: bypassPermissions`.
 5. **Bij ons draait die grens vandaag alleen niet omdat twee override-rijen hem
    tegenhouden** (§2.3). Deze repo staat als `product-staging` in zijn
    security-profiel; alleen `skip_permissions=1` + `transport=worktree` in
@@ -59,12 +61,14 @@ daar zitten de drie vervolgkaarten.
 ## 1. De vraag in één paragraaf
 
 De kaart vraagt of we Lemma's fijnmazige approval-model moeten overnemen: de agent
-herhaalt in `request_approval` exact de tool + args die hij wil draaien, en bij
-goedkeuring draait diezelfde tool onder een context waaruit de agent-identiteit is
-gestript — dus met de autoriteit van de *gebruiker*. De kaart erkent zelf de
-voorwaarde: wij dispatchen met `--dangerously-skip-permissions`, dus er zou eerst een
-autorisatiegrens ingevoerd moeten worden. Acceptance criterion 1 vraagt expliciet om
-die afweging, met `not_feasible` als legitieme uitkomst.
+herhaalt in `request_approval` exact de tool + args die hij wil draaien. Bij
+goedkeuring draait diezelfde tool onder een context waaruit de agent-identiteit
+is gestript — dus met de autoriteit van de *gebruiker*.
+
+De kaart erkent zelf de voorwaarde: wij dispatchen met
+`--dangerously-skip-permissions`, dus er zou eerst een autorisatiegrens
+ingevoerd moeten worden. Acceptance criterion 1 vraagt expliciet om die
+afweging, met `not_feasible` als legitieme uitkomst.
 
 Het antwoord is genuanceerder dan ja/nee, want de premisse dat er géén grens is, is
 onjuist — en de grens die er is, blijkt kapot op een manier die de kaart niet vermoedde.
@@ -200,9 +204,11 @@ $ grep -rn "permission-prompt-tool\|permission_prompt_tool" --include="*.py" .
 ```
 
 **Er is geen enkele code die een permissievraag kan beantwoorden.** De veilige default
-voor product-projecten is daarmee niet-functioneel onder autonome dispatch — niet langer
-"waarschijnlijk", maar gemeten (§2.5): engageert de grens, dan blokkeert de sessie
-permanent; engageert hij niet (deze host), dan beschermt hij niets.
+voor product-projecten is daarmee niet-functioneel onder autonome dispatch. Niet
+langer "waarschijnlijk", maar gemeten (§2.5).
+
+Engageert de grens, dan blokkeert de sessie permanent. Engageert hij niet
+(deze host), dan beschermt hij niets.
 
 > **Gemeten (2026-07-22, kaart `ea532412…`).** De keten hierboven is uitgevoerd op twee
 > wegwerp-product-projecten. Uitkomst: de grens **engageert vandaag helemaal niet** —
@@ -234,11 +240,14 @@ Het verschil tussen de twee is één bestand:
 
 Probe A's `claude`-proces draait **zonder** `--dangerously-skip-permissions`
 (`/proc/<pid>/cmdline`: `claude --strict-mcp-config --mcp-config <wt>/.mcp.json --model
-haiku <prompt>`), precies zoals `skip_permissions=False` belooft. Toch meldt de statusbalk
-van de pane `⏵⏵ bypass permissions on (shift+tab to cycle)` en voert de agent zijn eerste
-`Write` **zonder enige prompt** uit: dispatch op `08:13:31Z`, en de eerste waarneming op
-`08:13:56Z` (t+25 s) toont de `Write` al voltooid (`● Write(…/result.txt)` → `⎿ Wrote 1
-line`) én een volgend shell-commando al lopend. Geen enkele goedkeuringsvraag onderweg.
+haiku <prompt>`), precies zoals `skip_permissions=False` belooft. Toch
+meldt de statusbalk van de pane `⏵⏵ bypass permissions on (shift+tab to
+cycle)` en voert de agent zijn eerste `Write` **zonder enige prompt** uit.
+
+Dispatch op `08:13:31Z`, en de eerste waarneming op `08:13:56Z` (t+25 s)
+toont de `Write` al voltooid (`● Write(…/result.txt)` → `⎿ Wrote 1 line`) én
+een volgend shell-commando al lopend. Geen enkele goedkeuringsvraag
+onderweg.
 
 De CLI-vlag is dus niet de enige knop: `permissions.defaultMode` in het **user-level**
 `~/.claude/settings.json` zet dezelfde bypass, en die staat op deze host aan. Het
@@ -521,15 +530,16 @@ Vier paden, met het vereiste gedrag:
    30 min `{"error": "timeout"}` en laat de gate open. Voor een permissievraag is dat
    het verkeerde eindpunt: er moet een beslissing terug. Het moet **fail-closed** naar
    `deny` met een expliciete "niemand heeft binnen X geantwoord"-reden, zodat pad 2
-   geldt en de run doorloopt in plaats van te stallen. De timeout hoort korter dan
-   30 min, want een stilstaande sessie houdt een worktree en een claim vast.
+   geldt en de run doorloopt in plaats van te blijven hangen. De timeout hoort
+   korter dan 30 min, want een stilstaande sessie houdt een worktree en een
+   claim vast.
 4. **Goedgekeurde actie faalt.** Geen speciale afhandeling nodig — zie §3.3. Claude Code
    voert de tool zelf uit, dus een fout is een gewoon `tool_result` met een fout in de
    run. De crash-modus die Lemma moest dichttimmeren bestaat bij ons niet, omdat we hun
    task-splitsing niet overnemen.
 
 Alle vier de paden delen één invariant, en die is het echte acceptatiecriterium:
-**geen enkel permissiepad mag een sessie doen stallen of sterven.** Vandaag faalt dat
+**geen enkel permissiepad mag een sessie doen blijven hangen of sterven.** Vandaag faalt dat
 op pad 3 (er is geen antwoordkanaal, dus alles is een oneindige timeout) en dat is wat
 kaart §6.1/§6.2 repareert.
 
@@ -544,8 +554,8 @@ Aangemaakt in deze sessie als kind-kaarten van `38d32e94…`. Onafhankelijk van 
 De conclusie in §2.4 is afgeleid, niet gemeten. Eén gecontroleerde dispatch van een
 wegwerp-product-project met het profiel-default (`skip_permissions=False`,
 `transport=sandcastle`) legt vast wat er feitelijk gebeurt bij de eerste `ask`-tool:
-stalt de pane, faalt de spawn, of gaat het door. Bewust een meting vóór een fix — als
-het gedrag anders is dan afgeleid, verandert dat de scope van §6.2.
+blijft de pane hangen, faalt de spawn, of gaat het door. Bewust een meting vóór een fix
+— als het gedrag anders is dan afgeleid, verandert dat de scope van §6.2.
 
 ✅ Uitgevoerd (kaart `ea532412…`, 2026-07-22) — resultaat in **§2.5**. Drie afwijkingen
 t.o.v. de afleiding, waarvan twee de scope van §6.2 raken: (a) op deze host engageert de
